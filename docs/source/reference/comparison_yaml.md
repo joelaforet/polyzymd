@@ -198,7 +198,7 @@ Each entry in `pairs`:
 | `protein_selection` | string | `"protein"` | MDAnalysis selection for protein atoms |
 | `cutoff` | float | `4.5` | Contact distance cutoff in Angstroms |
 | `grouping` | string | `"aa_class"` | Residue grouping: `"aa_class"`, `"secondary_structure"`, or `"none"` |
-| `compute_residence_times` | bool | `true` | Whether to compute contact residence times |
+| `compute_residence_times` | bool | `true` | Whether to compute aggregate residence-time summaries and plots. When `false`, per-replicate contact events are still stored and the cache identity changes. |
 | `compute_binding_preference` | bool | `false` | **Experimental.** Enable enrichment by residue group |
 | `surface_exposure_threshold` | float | `0.2` | Relative SASA cutoff defining "surface exposed" (for binding preference) |
 | `enzyme_pdb_for_sasa` | path | `null` | Path to enzyme PDB for standalone SASA computation (relative to `comparison.yaml`) |

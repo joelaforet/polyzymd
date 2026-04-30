@@ -117,6 +117,11 @@ Then run:
 polyzymd compare run contacts -f comparison.yaml
 ```
 
+Set `compute_residence_times: false` when you only need contact fractions or
+downstream contacts-derived analyses. This skips aggregate residence-time
+summaries and residence-time plots, but still stores per-replicate contact
+events. Changing the setting creates a distinct contacts cache identity.
+
 ### Analyze one polymer type only
 
 ```yaml
@@ -196,8 +201,9 @@ After running, these partitions are used in partition-level contacts plots.
 polyzymd compare plot-all -f comparison.yaml
 ```
 
-You will get contact-fraction and residence-time profiles plus grouped bar
-plots for AA classes and (if configured) user partitions.
+You will get contact-fraction profiles and grouped bar plots for AA classes and
+(if configured) user partitions. Residence-time profiles are generated only
+when `compute_residence_times` is enabled and residence-time data exists.
 
 For the full list of plot outputs and plot settings, see
 {doc}`../reference/analysis_contacts_reference`.

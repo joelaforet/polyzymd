@@ -213,14 +213,27 @@ class TestSettings:
 
         assert contacts_settings_fingerprint(unfiltered) != contacts_settings_fingerprint(filtered)
 
-    def test_contacts_domain_fingerprint_excludes_residence_time_toggle(self):
+    def test_contacts_domain_fingerprint_changes_with_residence_time_toggle(self):
         from polyzymd.analyses.contacts import ContactsSettings
         from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
 
         enabled = ContactsSettings(compute_residence_times=True)
         disabled = ContactsSettings(compute_residence_times=False)
 
-        assert contacts_settings_fingerprint(enabled) == contacts_settings_fingerprint(disabled)
+        assert contacts_settings_fingerprint(enabled) != contacts_settings_fingerprint(disabled)
+
+    def test_contacts_domain_candidates_include_legacy_only_when_residence_times_enabled(self):
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint_candidates
+
+        enabled = ContactsSettings(compute_residence_times=True)
+        disabled = ContactsSettings(compute_residence_times=False)
+
+        enabled_candidates = contacts_settings_fingerprint_candidates(enabled)
+        disabled_candidates = contacts_settings_fingerprint_candidates(disabled)
+
+        assert len(enabled_candidates) > 1
+        assert len(disabled_candidates) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -841,6 +854,47 @@ class TestRunReplicate:
             with pytest.raises(RuntimeError, match="should recompute"):
                 analysis.run_replicate(ctx, 1)
 
+    def test_disabled_residence_times_rejects_fingerprintless_legacy_cache(self):
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.contacts._results import ContactResult
+
+        settings = ContactsSettings(compute_residence_times=False)
+        legacy = ContactResult(
+            replicate=1,
+            residue_contacts=[],
+            n_frames=10,
+            timestep_ps=10.0,
+            criteria_label="any_atom_4.5A",
+            criteria_cutoff=4.5,
+            selection_string="protein : chainID C",
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            metadata={"grouping": "aa_class"},
+        )
+
+        assert not ContactsAnalysis._cache_matches_contacts_settings(legacy, settings)
+
+    def test_enabled_residence_times_accepts_fingerprintless_legacy_cache(self):
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.contacts._results import ContactResult
+
+        settings = ContactsSettings(compute_residence_times=True)
+        legacy = ContactResult(
+            replicate=1,
+            residue_contacts=[],
+            n_frames=10,
+            timestep_ps=10.0,
+            criteria_label="any_atom_4.5A",
+            criteria_cutoff=4.5,
+            selection_string="protein : chainID C",
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            metadata={"grouping": "aa_class"},
+        )
+
+        assert ContactsAnalysis._cache_matches_contacts_settings(legacy, settings)
+        assert legacy.metadata["compute_residence_times"] is True
+
 
 class TestParallelContactAnalyzerResidueIdentity:
     """Ensure residue identity preserves chain-separated duplicate resid values."""
@@ -1152,8 +1206,44 @@ class TestAggregate:
             result = analysis.aggregate(ctx, mock_results)
 
         mock_fn.assert_called_once()
+        assert mock_fn.call_args.kwargs["compute_residence_times"] is True
         assert result is mock_agg
+        assert mock_agg.metadata["compute_residence_times"] is True
+        assert mock_agg.metadata["residence_times_computed"] is True
+        assert mock_agg.metadata["settings_fingerprint_domain"] == "contacts-v2"
         mock_agg.save.assert_called_once()
+
+    def test_aggregate_passes_disabled_residence_time_setting(self, tmp_path):
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings(compute_residence_times=False)
+        mock_sim_config = _make_hashable_sim_config(tmp_path)
+        cond = Condition(
+            label="test",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1, 2),
+            sim_config=mock_sim_config,
+        )
+        ctx = AggregateContext(
+            condition=cond,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="10ns",
+            settings=settings,
+        )
+        mock_agg = _make_mock_agg_result(n_replicates=2)
+
+        with patch(
+            "polyzymd.analyses.contacts._aggregator.aggregate_contact_results",
+            return_value=mock_agg,
+        ) as mock_fn:
+            analysis.aggregate(ctx, [_make_mock_contact_result(1), _make_mock_contact_result(2)])
+
+        assert mock_fn.call_args.kwargs["compute_residence_times"] is False
+        assert mock_agg.metadata["compute_residence_times"] is False
+        assert mock_agg.metadata["residence_times_computed"] is False
 
     def test_aggregate_rejects_replicate_id_mismatch(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition
@@ -1371,6 +1461,66 @@ class TestAggregate:
 class TestAggregatePolymerTypeCoverage:
     """Regression tests for polymer-type per-replicate aggregation."""
 
+    @staticmethod
+    def _make_residence_time_results():
+        """Create minimal contact results with PEG events in two replicates."""
+
+        from polyzymd.analyses.contacts._results import (
+            ContactEvent,
+            ContactResult,
+            PolymerSegmentContacts,
+            ResidueContactData,
+        )
+
+        return [
+            ContactResult(
+                residue_contacts=[
+                    ResidueContactData(
+                        protein_resid=1,
+                        protein_resname="ALA",
+                        protein_group="nonpolar",
+                        segment_contacts=[
+                            PolymerSegmentContacts(
+                                polymer_resname="PEG",
+                                polymer_resid=1,
+                                polymer_chain_idx=0,
+                                events=[ContactEvent(start_frame=0, duration=5)],
+                            )
+                        ],
+                        statistical_inefficiency=1.0,
+                        n_effective=10.0,
+                    )
+                ],
+                n_frames=10,
+                criteria_label="distance",
+                criteria_cutoff=4.5,
+                replicate=1,
+            ),
+            ContactResult(
+                residue_contacts=[
+                    ResidueContactData(
+                        protein_resid=1,
+                        protein_resname="ALA",
+                        protein_group="nonpolar",
+                        segment_contacts=[
+                            PolymerSegmentContacts(
+                                polymer_resname="PEG",
+                                polymer_resid=1,
+                                polymer_chain_idx=0,
+                                events=[ContactEvent(start_frame=0, duration=3)],
+                            )
+                        ],
+                        statistical_inefficiency=1.0,
+                        n_effective=10.0,
+                    )
+                ],
+                n_frames=10,
+                criteria_label="distance",
+                criteria_cutoff=4.5,
+                replicate=2,
+            ),
+        ]
+
     def test_includes_zero_contact_replicates_in_polymer_type_vectors(self):
         from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
         from polyzymd.analyses.contacts._results import (
@@ -1505,6 +1655,32 @@ class TestAggregatePolymerTypeCoverage:
         assert residue.residence_time_by_polymer_type_per_replicate["PEG"] == [5.0]
         assert residue.residence_time_by_polymer_type_replicates["PEG"] == [1]
         assert ContactsAnalysis()._cache_matches_replicates(aggregated, (1, 2))
+
+    def test_residence_time_summaries_are_computed_by_default(self):
+        from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
+
+        aggregated = aggregate_contact_results(self._make_residence_time_results())
+        residue = aggregated.residue_stats[0]
+
+        assert aggregated.residence_time_by_polymer_type["PEG"][0] == pytest.approx(4.0)
+        assert aggregated.residence_time_by_polymer_type_replicates["PEG"] == [1, 2]
+        assert residue.residence_time_by_polymer_type["PEG"][0] == pytest.approx(4.0)
+        assert residue.residence_time_by_polymer_type_replicates["PEG"] == [1, 2]
+
+    def test_residence_time_summaries_empty_when_disabled(self):
+        from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
+
+        aggregated = aggregate_contact_results(
+            self._make_residence_time_results(),
+            compute_residence_times=False,
+        )
+        residue = aggregated.residue_stats[0]
+
+        assert aggregated.residence_time_by_polymer_type == {}
+        assert aggregated.residence_time_by_polymer_type_replicates == {}
+        assert residue.residence_time_by_polymer_type == {}
+        assert residue.residence_time_by_polymer_type_per_replicate == {}
+        assert residue.residence_time_by_polymer_type_replicates == {}
 
     def test_sparse_residence_time_mismatched_identity_is_rejected(self):
         from polyzymd.analyses.contacts import ContactsAnalysis
@@ -2561,6 +2737,47 @@ class TestPlot:
         # Verify PlotSettings was passed as 4th positional arg to each function
         for name, mock_fn in mocks.items():
             assert mock_fn.call_args[0][3] is ps, f"{name} did not receive PlotSettings as 4th arg"
+
+    def test_plot_skips_residence_time_plotters_when_disabled(self, tmp_path):
+        from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.config.comparison import PlotSettings
+
+        analysis = ContactsAnalysis()
+        condition = Condition(
+            label="A",
+            config_path=Path("/tmp/a/config.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = PlotContext(
+            conditions=[condition],
+            analysis_dirs={"A": tmp_path / "A" / "contacts"},
+            results_dir=tmp_path / "results",
+            output_dir=tmp_path / "plots",
+            settings=ContactsSettings(compute_residence_times=False),
+            plot_settings=PlotSettings(),
+        )
+        residence_plotters = {
+            "_plot_residence_time_profile",
+            "_plot_rt_by_aa_class_bars",
+            "_plot_rt_by_partition_bars",
+        }
+
+        patches = {
+            fn: patch(f"polyzymd.analyses.contacts.{fn}", return_value=[]) for fn in _PLOT_FUNCTIONS
+        }
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        try:
+            analysis.plot(ctx)
+        finally:
+            for patcher in patches.values():
+                patcher.stop()
+
+        for name in residence_plotters:
+            assert not mocks[name].called
+        for name in set(_PLOT_FUNCTIONS) - residence_plotters:
+            assert mocks[name].called
 
     def test_plot_accepts_successful_replicate_subset_aggregate(self, tmp_path):
         """Plot validation should accept aggregates with successful replicate subsets."""

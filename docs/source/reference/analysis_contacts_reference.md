@@ -16,7 +16,14 @@ Contacts plugin settings live under `plugins.contacts` in `comparison.yaml`.
 | `cutoff` | `float` | `4.5` | Contact distance cutoff in Angstroms |
 | `polymer_types` | `list[str] \| None` | `null` | Optional polymer residue-name filter |
 | `grouping` | `str` | `"aa_class"` | Protein grouping mode: `aa_class`, `secondary_structure`, or `none` |
-| `compute_residence_times` | `bool` | `true` | Compute residence-time statistics |
+| `compute_residence_times` | `bool` | `true` | Compute aggregate residence-time summaries and plots |
+
+Set `compute_residence_times: false` to skip aggregate residence-time summaries
+and residence-time plotters. Per-replicate contact events remain stored because
+they are the compressed representation used for contact fractions and
+contacts-derived analyses. The setting participates in contacts cache identity;
+older caches without this identity are accepted only for the default `true`
+setting when their other metadata is valid.
 
 ### Binding preference and partition fields
 

@@ -46,6 +46,7 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
 from polyzymd.analyses.contacts._identity import (
+    CONTACTS_SETTINGS_FINGERPRINT_DOMAIN,
     contacts_settings_fingerprint,
     contacts_settings_fingerprint_candidates,
     effective_polymer_selection,
@@ -319,6 +320,42 @@ class ContactsAnalysis(Analysis):
         return output_dir / f"contacts_{eq_str}_{cut_str}_s{settings_fp}_rep{replicate}.json"
 
     @staticmethod
+    def _replicate_sidecar_candidates(
+        output_dir: Path,
+        settings: BaseModel,
+        equilibration: str,
+        replicate: int,
+    ) -> tuple[Path, ...]:
+        """Build accepted per-replicate contacts side-output paths.
+
+        Parameters
+        ----------
+        output_dir : Path
+            Directory containing per-replicate contacts outputs.
+        settings : BaseModel
+            Active contacts settings.
+        equilibration : str
+            Requested analysis equilibration window.
+        replicate : int
+            Requested replicate ID.
+
+        Returns
+        -------
+        tuple[Path, ...]
+            Current sidecar path followed by legacy compatibility candidates.
+        """
+
+        from polyzymd.analyses.shared.loader import parse_time_string
+
+        eq_value, eq_unit = parse_time_string(equilibration)
+        eq_str = f"eq{eq_value:g}{eq_unit}"
+        cut_str = f"cut{settings.cutoff:.1f}"
+        return tuple(
+            output_dir / f"contacts_{eq_str}_{cut_str}_s{settings_fp}_rep{replicate}.json"
+            for settings_fp in contacts_settings_fingerprint_candidates(settings)
+        )
+
+    @staticmethod
     def _aggregated_sidecar_path(
         output_dir: Path,
         settings: BaseModel,
@@ -337,6 +374,44 @@ class ContactsAnalysis(Analysis):
         settings_fp = contacts_settings_fingerprint(settings)
         return (
             output_dir / f"contacts_aggregated_{eq_str}_{cut_str}_s{settings_fp}_{rep_token}.json"
+        )
+
+    @staticmethod
+    def _aggregated_sidecar_candidates(
+        output_dir: Path,
+        settings: BaseModel,
+        equilibration: str,
+        replicates: Sequence[int],
+    ) -> tuple[Path, ...]:
+        """Build accepted aggregated contacts side-output paths.
+
+        Parameters
+        ----------
+        output_dir : Path
+            Directory containing aggregated contacts outputs.
+        settings : BaseModel
+            Active contacts settings.
+        equilibration : str
+            Requested analysis equilibration window.
+        replicates : Sequence[int]
+            Requested replicate IDs.
+
+        Returns
+        -------
+        tuple[Path, ...]
+            Current sidecar path followed by legacy compatibility candidates.
+        """
+
+        from polyzymd.analyses.shared.loader import parse_time_string
+        from polyzymd.analyses.shared.paths import format_replicate_cache_token
+
+        rep_token = format_replicate_cache_token(replicates)
+        eq_value, eq_unit = parse_time_string(equilibration)
+        eq_str = f"eq{eq_value:g}{eq_unit}"
+        cut_str = f"cut{settings.cutoff:.1f}"
+        return tuple(
+            output_dir / f"contacts_aggregated_{eq_str}_{cut_str}_s{settings_fp}_{rep_token}.json"
+            for settings_fp in contacts_settings_fingerprint_candidates(settings)
         )
 
     @staticmethod
@@ -540,6 +615,129 @@ class ContactsAnalysis(Analysis):
             and str(grouping).strip() == str(settings.grouping).strip()
         )
 
+    @staticmethod
+    def _coerce_optional_bool(value: Any) -> bool | None:
+        """Coerce common metadata values to booleans.
+
+        Parameters
+        ----------
+        value : Any
+            Metadata value to normalize.
+
+        Returns
+        -------
+        bool or None
+            Boolean value, or ``None`` when the input is missing or ambiguous.
+        """
+
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "y"}:
+                return True
+            if normalized in {"false", "0", "no", "n"}:
+                return False
+        if isinstance(value, int):
+            if value == 1:
+                return True
+            if value == 0:
+                return False
+        return None
+
+    @classmethod
+    def _cache_matches_residence_time_setting(
+        cls,
+        result: Any,
+        settings: BaseModel,
+        *,
+        allow_missing: bool,
+        source: Path | None = None,
+    ) -> bool:
+        """Return whether a cache proves the active residence-time setting.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded contacts artifact.
+        settings : BaseModel
+            Active contacts settings.
+        allow_missing : bool
+            Whether legacy artifacts without RT identity markers may be accepted.
+        source : Path or None, optional
+            Cache source path used for diagnostics.
+
+        Returns
+        -------
+        bool
+            ``True`` when RT metadata and aggregate content match the request.
+        """
+
+        expected = bool(getattr(settings, "compute_residence_times", True))
+        metadata = getattr(result, "metadata", None)
+        metadata = metadata if isinstance(metadata, dict) else {}
+        source_suffix = f" at {source}" if source is not None else ""
+
+        compute_marker = cls._coerce_optional_bool(
+            getattr(result, "compute_residence_times", metadata.get("compute_residence_times"))
+        )
+        computed_marker = cls._coerce_optional_bool(
+            getattr(result, "residence_times_computed", metadata.get("residence_times_computed"))
+        )
+        markers = [marker for marker in (compute_marker, computed_marker) if marker is not None]
+        if markers:
+            if any(marker != expected for marker in markers):
+                logger.warning(
+                    "contacts: ignoring cache with residence-time setting mismatch%s",
+                    source_suffix,
+                )
+                return False
+        elif not allow_missing:
+            logger.warning(
+                "contacts: ignoring cache without residence-time setting proof%s",
+                source_suffix,
+            )
+            return False
+
+        if not expected and cls._cache_has_residence_time_summaries(result):
+            logger.warning(
+                "contacts: ignoring cache with residence-time summaries while disabled%s",
+                source_suffix,
+            )
+            return False
+
+        return True
+
+    @staticmethod
+    def _cache_has_residence_time_summaries(result: Any) -> bool:
+        """Return whether an aggregate artifact contains RT summary maps.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded contacts artifact.
+
+        Returns
+        -------
+        bool
+            ``True`` when global or per-residue residence-time maps are non-empty.
+        """
+
+        if getattr(result, "residence_time_by_polymer_type", None):
+            return True
+        if getattr(result, "residence_time_by_polymer_type_replicates", None):
+            return True
+        for residue in getattr(result, "residue_stats", []) or []:
+            if getattr(residue, "residence_time_by_polymer_type", None):
+                return True
+            if getattr(residue, "residence_time_by_polymer_type_per_replicate", None):
+                return True
+            if getattr(residue, "residence_time_by_polymer_type_replicates", None):
+                return True
+        return False
+
     @classmethod
     def _attach_contacts_identity_metadata(cls, result: Any, settings: BaseModel) -> None:
         """Attach current contacts identity metadata to a cache result.
@@ -556,11 +754,14 @@ class ContactsAnalysis(Analysis):
 
         metadata = dict(getattr(result, "metadata", {}) or {})
         contact_settings_fp = contacts_settings_fingerprint(settings)
+        compute_residence_times = bool(getattr(settings, "compute_residence_times", True))
         effective_selection = cls._effective_polymer_selection(settings)
         metadata["settings_fingerprint"] = contact_settings_fp
         metadata["contacts_settings_fingerprint"] = contact_settings_fp
         metadata["legacy_full_settings_fingerprint"] = settings_fingerprint(settings)
-        metadata["settings_fingerprint_domain"] = "contacts-v1"
+        metadata["settings_fingerprint_domain"] = CONTACTS_SETTINGS_FINGERPRINT_DOMAIN
+        metadata["compute_residence_times"] = compute_residence_times
+        metadata["residence_times_computed"] = compute_residence_times
         metadata["protein_selection"] = str(settings.protein_selection).strip()
         metadata["polymer_selection"] = str(settings.polymer_selection).strip()
         metadata["effective_polymer_selection"] = effective_selection
@@ -602,6 +803,13 @@ class ContactsAnalysis(Analysis):
         stored_fingerprint = ContactsAnalysis._embedded_contacts_settings_fingerprint(result)
         if stored_fingerprint is None:
             if ContactsAnalysis._cache_has_contacts_identity_proof(result, settings):
+                if not ContactsAnalysis._cache_matches_residence_time_setting(
+                    result,
+                    settings,
+                    allow_missing=bool(getattr(settings, "compute_residence_times", True)),
+                    source=source,
+                ):
+                    return False
                 ContactsAnalysis._attach_contacts_identity_metadata(result, settings)
                 return True
             logger.warning(
@@ -613,6 +821,16 @@ class ContactsAnalysis(Analysis):
 
         candidates = contacts_settings_fingerprint_candidates(settings)
         if str(stored_fingerprint) in candidates:
+            allow_missing = bool(getattr(settings, "compute_residence_times", True)) or str(
+                stored_fingerprint
+            ) == contacts_settings_fingerprint(settings)
+            if not ContactsAnalysis._cache_matches_residence_time_setting(
+                result,
+                settings,
+                allow_missing=allow_missing,
+                source=source,
+            ):
+                return False
             return True
 
         logger.warning(
@@ -1033,7 +1251,9 @@ class ContactsAnalysis(Analysis):
         """
 
         candidates = [
-            self._aggregated_sidecar_path(aggregated_dir, settings, equilibration, replicates),
+            *self._aggregated_sidecar_candidates(
+                aggregated_dir, settings, equilibration, replicates
+            ),
             self.aggregate_result_path(aggregated_dir),
         ]
         saw_json = aggregated_dir.exists() and any(aggregated_dir.glob("*.json"))
@@ -1093,23 +1313,29 @@ class ContactsAnalysis(Analysis):
             ctx.equilibration,
             replicate,
         )
-        cached = self._check_cache(
-            ContactResult,
-            result_file,
-            recompute=ctx.recompute,
-            sim_config=ctx.sim_config,
-            settings=None,
-        )
-        if (
-            cached is not None
-            and self._cache_matches_window(cached, ctx.equilibration)
-            and self._cache_matches_replicate_id(cached, replicate, source=result_file)
-            and self._cache_matches_contacts_settings(cached, ctx.settings, source=result_file)
+        for candidate in self._replicate_sidecar_candidates(
+            ctx.output_dir,
+            ctx.settings,
+            ctx.equilibration,
+            replicate,
         ):
-            if ctx.result_path is not None and not ctx.result_path.exists():
-                self._attach_contacts_identity_metadata(cached, ctx.settings)
-                self.save_result(cached, ctx.result_path)
-            return cached
+            cached = self._check_cache(
+                ContactResult,
+                candidate,
+                recompute=ctx.recompute,
+                sim_config=ctx.sim_config,
+                settings=None,
+            )
+            if (
+                cached is not None
+                and self._cache_matches_window(cached, ctx.equilibration)
+                and self._cache_matches_replicate_id(cached, replicate, source=candidate)
+                and self._cache_matches_contacts_settings(cached, ctx.settings, source=candidate)
+            ):
+                if ctx.result_path is not None and not ctx.result_path.exists():
+                    self._attach_contacts_identity_metadata(cached, ctx.settings)
+                    self.save_result(cached, ctx.result_path)
+                return cached
 
         if ctx.result_path is not None:
             cached = self._check_cache(
@@ -1147,6 +1373,7 @@ class ContactsAnalysis(Analysis):
             ) from e
 
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
+        self._attach_contacts_identity_metadata(result, ctx.settings)
         result.save(result_file)
         if ctx.result_path is not None:
             self.save_result(result, ctx.result_path)
@@ -1232,10 +1459,13 @@ class ContactsAnalysis(Analysis):
 
         metadata = dict(getattr(result, "metadata", {}) or {})
         contact_settings_fp = contacts_settings_fingerprint(ctx.settings)
+        compute_residence_times = bool(ctx.settings.compute_residence_times)
         metadata["settings_fingerprint"] = contact_settings_fp
         metadata["contacts_settings_fingerprint"] = contact_settings_fp
         metadata["legacy_full_settings_fingerprint"] = settings_fingerprint(ctx.settings)
-        metadata["settings_fingerprint_domain"] = "contacts-v1"
+        metadata["settings_fingerprint_domain"] = CONTACTS_SETTINGS_FINGERPRINT_DOMAIN
+        metadata["compute_residence_times"] = compute_residence_times
+        metadata["residence_times_computed"] = compute_residence_times
         metadata["protein_selection"] = ctx.settings.protein_selection
         metadata["polymer_selection"] = ctx.settings.polymer_selection
         metadata["effective_polymer_selection"] = polymer_selection
@@ -1285,25 +1515,31 @@ class ContactsAnalysis(Analysis):
             ctx.replicates,
         )
         recompute = getattr(ctx, "recompute", False)
-        cached = self._check_cache(
-            AggregatedContactResult,
-            agg_file,
-            recompute=recompute,
-            sim_config=ctx.condition.sim_config,
-            settings=None,
-        )
-        if cached is not None and self._cache_matches_context(
-            cached,
-            settings=ctx.settings,
-            equilibration=ctx.equilibration,
-            sim_config=ctx.condition.sim_config,
-            replicates=ctx.replicates,
-            source=agg_file,
+        for candidate in self._aggregated_sidecar_candidates(
+            ctx.output_dir,
+            ctx.settings,
+            ctx.equilibration,
+            ctx.replicates,
         ):
-            if ctx.result_path is not None and not ctx.result_path.exists():
-                self._attach_contacts_identity_metadata(cached, ctx.settings)
-                self.save_result(cached, ctx.result_path)
-            return cached
+            cached = self._check_cache(
+                AggregatedContactResult,
+                candidate,
+                recompute=recompute,
+                sim_config=ctx.condition.sim_config,
+                settings=None,
+            )
+            if cached is not None and self._cache_matches_context(
+                cached,
+                settings=ctx.settings,
+                equilibration=ctx.equilibration,
+                sim_config=ctx.condition.sim_config,
+                replicates=ctx.replicates,
+                source=candidate,
+            ):
+                if ctx.result_path is not None and not ctx.result_path.exists():
+                    self._attach_contacts_identity_metadata(cached, ctx.settings)
+                    self.save_result(cached, ctx.result_path)
+                return cached
 
         if ctx.result_path is not None:
             cached = self._check_cache(
@@ -1328,7 +1564,10 @@ class ContactsAnalysis(Analysis):
 
         aligned_results = self._align_replicate_results(results, ctx.replicates)
         logger.info(f"  Aggregating {len(aligned_results)} replicates...")
-        agg_result = aggregate_contact_results(aligned_results)
+        agg_result = aggregate_contact_results(
+            aligned_results,
+            compute_residence_times=ctx.settings.compute_residence_times,
+        )
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         agg_result.config_hash = compute_config_hash(ctx.condition.sim_config)
@@ -1340,10 +1579,13 @@ class ContactsAnalysis(Analysis):
         agg_result.selection_string = f"{ctx.settings.protein_selection} : {polymer_selection}"
         metadata = dict(getattr(agg_result, "metadata", {}) or {})
         contact_settings_fp = contacts_settings_fingerprint(ctx.settings)
+        compute_residence_times = bool(ctx.settings.compute_residence_times)
         metadata["settings_fingerprint"] = contact_settings_fp
         metadata["contacts_settings_fingerprint"] = contact_settings_fp
         metadata["legacy_full_settings_fingerprint"] = settings_fingerprint(ctx.settings)
-        metadata["settings_fingerprint_domain"] = "contacts-v1"
+        metadata["settings_fingerprint_domain"] = CONTACTS_SETTINGS_FINGERPRINT_DOMAIN
+        metadata["compute_residence_times"] = compute_residence_times
+        metadata["residence_times_computed"] = compute_residence_times
         metadata["replicates"] = list(ctx.replicates)
         metadata["protein_selection"] = ctx.settings.protein_selection
         metadata["polymer_selection"] = ctx.settings.polymer_selection
@@ -1507,6 +1749,7 @@ class ContactsAnalysis(Analysis):
                 mean_contact_fraction=agg_result.mean_contact_fraction,
                 mean_contact_fraction_sem=agg_result.mean_contact_fraction_sem,
                 residence_time_by_polymer_type=agg_result.residence_time_by_polymer_type,
+                compute_residence_times=settings.compute_residence_times,
             )
             summaries.append(summary)
 
@@ -1552,6 +1795,7 @@ class ContactsAnalysis(Analysis):
             protein_selection=settings.protein_selection,
             cutoff=settings.cutoff,
             contact_criteria="distance",
+            compute_residence_times=settings.compute_residence_times,
             fdr_alpha=settings.fdr_alpha,
             min_effect_size=settings.min_effect_size,
             top_residues=settings.top_residues,
@@ -1629,20 +1873,23 @@ class ContactsAnalysis(Analysis):
         # Resolve plot settings
         plot_settings = ctx.plot_settings
 
-        # All 11 plotting functions
+        # Residence-time plots are skipped when summaries are disabled
         plot_functions = [
             _plot_contact_fraction_profile,
-            _plot_residence_time_profile,
             _plot_cf_by_aa_class_bars,
             _plot_cf_by_partition_bars,
-            _plot_rt_by_aa_class_bars,
-            _plot_rt_by_partition_bars,
             _plot_user_partition_bars,
             _plot_system_coverage_bars,
             _plot_system_coverage_heatmap,
             _plot_binding_preference_bars,
             _plot_binding_preference_heatmap,
         ]
+        if ctx.settings.compute_residence_times:
+            plot_functions[1:1] = [
+                _plot_residence_time_profile,
+                _plot_rt_by_aa_class_bars,
+                _plot_rt_by_partition_bars,
+            ]
 
         for plot_fn in plot_functions:
             try:
@@ -2261,7 +2508,6 @@ class ContactsAnalysis(Analysis):
         )
 
         settings = ctx.settings
-        contacts_settings_fp = contacts_settings_fingerprint(settings)
         bp_settings_fp = binding_preference_settings_fingerprint(settings)
         compute_enabled = getattr(settings, "compute_binding_preference", False)
         recompute = ctx.recompute
@@ -2274,12 +2520,18 @@ class ContactsAnalysis(Analysis):
         for cond, data in condition_data:
             try:
                 analysis_dir = ctx.analysis_dirs[cond.label]
-                contact_results_by_replicate = find_contact_results_for_replicates(
-                    analysis_dir,
-                    cond.replicates,
-                    settings_fp=contacts_settings_fp,
-                    equilibration=ctx.equilibration,
-                )
+                contact_results_by_replicate: dict[int, Path] = {}
+                contacts_settings_fp = contacts_settings_fingerprint(settings)
+                for candidate_fp in contacts_settings_fingerprint_candidates(settings):
+                    contact_results_by_replicate = find_contact_results_for_replicates(
+                        analysis_dir,
+                        cond.replicates,
+                        settings_fp=candidate_fp,
+                        equilibration=ctx.equilibration,
+                    )
+                    if contact_results_by_replicate:
+                        contacts_settings_fp = candidate_fp
+                        break
 
                 # Try cached first
                 if not recompute:

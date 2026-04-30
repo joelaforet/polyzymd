@@ -76,7 +76,7 @@ below.
 | `cutoff` | `float` | `4.5` | Contact cutoff distance in Å |
 | `polymer_types` | `list[str] \| null` | `null` | Optional polymer residue-name filter |
 | `grouping` | `str` | `"aa_class"` | Grouping mode: `aa_class`, `secondary_structure`, or `none` |
-| `compute_residence_times` | `bool` | `true` | Compute residence-time statistics |
+| `compute_residence_times` | `bool` | `true` | Compute aggregate residence-time summaries and plots; per-replicate contact events remain stored when disabled |
 | `compute_binding_preference` | `bool` | `false` | Enable binding-preference enrichment sub-analysis |
 | `surface_exposure_threshold` | `float` | `0.2` | Relative SASA threshold for surface-exposed residues |
 | `enzyme_pdb_for_sasa` | `str \| null` | `null` | Optional PDB path for SASA calculations |

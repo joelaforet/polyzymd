@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+CONTACTS_SETTINGS_FINGERPRINT_DOMAIN = "contacts-v2"
+
 
 def contacts_settings_fingerprint(settings: BaseModel) -> str:
     """Compute the contacts-domain settings fingerprint.
@@ -60,6 +62,7 @@ def contacts_identity_payload(settings: BaseModel) -> dict[str, Any]:
         ),
         "cutoff": float(getattr(settings, "cutoff", 4.5)),
         "grouping": _normalized_text(getattr(settings, "grouping", "aa_class")),
+        "compute_residence_times": bool(getattr(settings, "compute_residence_times", True)),
     }
 
 
@@ -74,17 +77,18 @@ def contacts_settings_fingerprint_candidates(settings: BaseModel) -> tuple[str, 
     Returns
     -------
     tuple[str, ...]
-        Contacts-domain fingerprint followed by the legacy full-settings
-        fingerprint when it differs.
+        Current contacts-domain fingerprint. When residence times are enabled,
+        legacy fingerprints that predate the residence-time identity flag are
+        appended for compatibility.
     """
 
     current = contacts_settings_fingerprint(settings)
     candidates = [current]
+    if not bool(getattr(settings, "compute_residence_times", True)):
+        return tuple(candidates)
 
     legacy_payload = dict(contacts_identity_payload(settings))
-    legacy_payload["compute_residence_times"] = bool(
-        getattr(settings, "compute_residence_times", True)
-    )
+    legacy_payload.pop("compute_residence_times", None)
     legacy = hashlib.sha256(json.dumps(legacy_payload, sort_keys=True).encode("utf-8")).hexdigest()[
         :8
     ]

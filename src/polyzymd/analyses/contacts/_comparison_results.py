@@ -203,6 +203,8 @@ class ContactsConditionSummary(BaseModel):
         Mean +/- SEM residence time in frames for each polymer type.
         Keys are polymer residue names (e.g., "SBM", "EGM").
         Values are (mean, sem) tuples.
+    compute_residence_times : bool
+        Whether aggregate residence-time summaries were requested.
     """
 
     label: str
@@ -214,6 +216,7 @@ class ContactsConditionSummary(BaseModel):
     mean_contact_fraction: float
     mean_contact_fraction_sem: float
     residence_time_by_polymer_type: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    compute_residence_times: bool = True
 
 
 class ContactsPairwiseComparison(BaseModel):
@@ -296,6 +299,8 @@ class ContactsComparisonResult(BaseModel):
         Contact cutoff distance in Angstroms
     contact_criteria : str
         Contact criteria used
+    compute_residence_times : bool
+        Whether aggregate residence-time summaries and plots were requested.
     fdr_alpha : float
         FDR alpha used for Benjamini-Hochberg correction
     min_effect_size : float
@@ -331,6 +336,7 @@ class ContactsComparisonResult(BaseModel):
     protein_selection: str
     cutoff: float
     contact_criteria: str
+    compute_residence_times: bool = True
     fdr_alpha: float = 0.05
     min_effect_size: float = 0.0
     top_residues: int = 0

@@ -857,6 +857,7 @@ def compute_mad(values: list[float], scale: float = 1.4826) -> tuple[float, floa
 def aggregate_contact_results(
     results: list[ContactResult],
     use_median: bool = False,
+    compute_residence_times: bool = True,
 ) -> AggregatedContactResult:
     """Aggregate multiple ContactResults into summary statistics.
 
@@ -868,6 +869,10 @@ def aggregate_contact_results(
     use_median : bool
         If True, use median +/- MAD instead of mean +/- SEM.
         Default False (use mean +/- SEM).
+    compute_residence_times : bool
+        If True, compute aggregate residence-time summaries from contact
+        events. If False, leave residence-time summary maps empty while keeping
+        contact events available in per-replicate results.
 
     Returns
     -------
@@ -949,15 +954,15 @@ def aggregate_contact_results(
             type_fracs = rc_rep.contacts_by_polymer_type(r.n_frames)
             type_fracs_per_rep.append(type_fracs)
 
-            # Per-residue residence time by polymer type
-            rt_stats = rc_rep.residence_time_by_polymer_type()
-            for ptype, stats in rt_stats.items():
-                if stats["n_events"] > 0:
-                    if ptype not in rt_by_polymer_type_per_rep:
-                        rt_by_polymer_type_per_rep[ptype] = []
-                        rt_by_polymer_type_replicates[ptype] = []
-                    rt_by_polymer_type_per_rep[ptype].append(stats["mean_frames"])
-                    rt_by_polymer_type_replicates[ptype].append(replicate_id)
+            if compute_residence_times:
+                rt_stats = rc_rep.residence_time_by_polymer_type()
+                for ptype, stats in rt_stats.items():
+                    if stats["n_events"] > 0:
+                        if ptype not in rt_by_polymer_type_per_rep:
+                            rt_by_polymer_type_per_rep[ptype] = []
+                            rt_by_polymer_type_replicates[ptype] = []
+                        rt_by_polymer_type_per_rep[ptype].append(stats["mean_frames"])
+                        rt_by_polymer_type_replicates[ptype].append(replicate_id)
 
         all_polymer_types = sorted(
             {
@@ -1033,16 +1038,17 @@ def aggregate_contact_results(
     # residence_time_summary() now returns {polymer_type: {stats...}}
     residence_time_by_polymer_type_per_rep: dict[str, list[float]] = {}
     residence_time_by_polymer_type_replicates: dict[str, list[int]] = {}
-    for i, r in enumerate(results):
-        replicate_id = int(r.replicate) if r.replicate is not None else i + 1
-        summary: dict[str, dict[str, float]] = r.residence_time_summary()
-        for ptype, stats in summary.items():
-            if stats["total_events"] > 0:
-                if ptype not in residence_time_by_polymer_type_per_rep:
-                    residence_time_by_polymer_type_per_rep[ptype] = []
-                    residence_time_by_polymer_type_replicates[ptype] = []
-                residence_time_by_polymer_type_per_rep[ptype].append(stats["mean_frames"])
-                residence_time_by_polymer_type_replicates[ptype].append(replicate_id)
+    if compute_residence_times:
+        for i, r in enumerate(results):
+            replicate_id = int(r.replicate) if r.replicate is not None else i + 1
+            summary: dict[str, dict[str, float]] = r.residence_time_summary()
+            for ptype, stats in summary.items():
+                if stats["total_events"] > 0:
+                    if ptype not in residence_time_by_polymer_type_per_rep:
+                        residence_time_by_polymer_type_per_rep[ptype] = []
+                        residence_time_by_polymer_type_replicates[ptype] = []
+                    residence_time_by_polymer_type_per_rep[ptype].append(stats["mean_frames"])
+                    residence_time_by_polymer_type_replicates[ptype].append(replicate_id)
 
     # Aggregate to mean +/- SEM per polymer type
     residence_time_by_polymer_type: dict[str, tuple[float, float]] = {}
