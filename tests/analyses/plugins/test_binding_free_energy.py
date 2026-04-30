@@ -4,7 +4,7 @@ Coverage:
 - Discovery (registered by name and alias)
 - Class attributes (name, Settings, aliases, dependencies, min_replicates)
 - Settings validation (units, threshold, k_b)
-- compute_replicate / aggregate (no-op)
+- run_replicate / aggregate (no-op)
 - filter_conditions (keeps all)
 - compare (full override with temperature-aware pairwise)
 - pairwise comparisons (cross-temperature suppression)
@@ -305,16 +305,16 @@ class TestBindingPreferenceCacheIdentity:
 
 
 # ===========================================================================
-# compute_replicate / aggregate (no-op)
+# run_replicate / aggregate (no-op)
 # ===========================================================================
 
 
 class TestNoOp:
-    def test_compute_replicate_returns_none(self):
+    def test_run_replicate_returns_none(self):
         """Compare-only plugins must no-op compute stage by returning ``None``.
 
         BindingFreeEnergyAnalysis sets ``has_compute_stage = False``, so the
-        inherited Analysis.compute_replicate contract is to return ``None``.
+        inherited Analysis.run_replicate contract is to return ``None``.
         """
         from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.binding_free_energy import (
@@ -339,7 +339,7 @@ class TestNoOp:
             recompute=False,
             settings=BFESettings(),
         )
-        assert analysis.compute_replicate(ctx, 1) is None
+        assert analysis.run_replicate(ctx, 1) is None
 
     def test_aggregate_returns_none(self):
         """Compare-only plugins must no-op aggregate stage by returning ``None``.

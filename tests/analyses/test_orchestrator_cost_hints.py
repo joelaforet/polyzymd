@@ -24,7 +24,7 @@ class _DefaultHintAnalysis(Analysis):
     Settings: ClassVar[type] = _HintSettings
     min_replicates: ClassVar[int] = 1
 
-    def compute_replicate(self, ctx, replicate: int) -> dict[str, Any]:
+    def run_replicate(self, ctx, replicate: int) -> dict[str, Any]:
         return {"value": float(replicate)}
 
     def aggregate(self, ctx, results) -> dict[str, Any]:

@@ -49,7 +49,7 @@ class _AtomGroup:
 class TestHydrogenBondsGromacsSmoke:
     """Smoke test for hydrogen bonds with GROMACS trajectory layout."""
 
-    def test_compute_replicate_with_gromacs_engine(self, tmp_path: Path) -> None:
+    def test_run_replicate_with_gromacs_engine(self, tmp_path: Path) -> None:
         """Run hydrogen-bonds compute on a real GROMACS-style run directory.
 
         Parameters

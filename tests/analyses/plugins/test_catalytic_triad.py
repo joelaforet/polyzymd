@@ -1,7 +1,7 @@
 """Tests for the catalytic triad analysis plugin.
 
 Tests the CatalyticTriadAnalysis class: discovery, aliases, settings,
-compute_replicate, aggregate, extract_metrics, AggregatedResultClass,
+run_replicate, aggregate, extract_metrics, AggregatedResultClass,
 _settings_to_config, _make_aggregated_filename, plot delegation, and the
 full lifecycle via the orchestrator.
 
@@ -268,7 +268,7 @@ class TestCatalyticTriadSettings:
 
 
 # ============================================================================
-# Test: compute_replicate
+# Test: run_replicate
 # ============================================================================
 
 
@@ -320,10 +320,10 @@ def _make_mock_distance_result(n_pairs: int = 2, n_frames: int = 1000):
     return mock_result
 
 
-class TestComputeReplicate:
+class TestRunReplicate:
     """Test catalytic-triad runner seam behavior."""
 
-    def test_compute_replicate_delegates_to_runner_seam(
+    def test_run_replicate_delegates_to_runner_seam(
         self,
         triad_analysis,
         condition,
@@ -355,7 +355,7 @@ class TestComputeReplicate:
             f"triad_LipA_triad_eq10ns_s{settings_fingerprint(default_settings)}.json"
         )
 
-    def test_compute_replicate_cache_filename_changes_when_settings_change(
+    def test_run_replicate_cache_filename_changes_when_settings_change(
         self,
         triad_analysis,
         condition,
@@ -1316,7 +1316,7 @@ class TestTriadLifecycle:
         tmp_path,
         default_settings,
     ):
-        """Test compute_replicate -> aggregate via run_analysis()."""
+        """Test run_replicate -> aggregate via run_analysis()."""
         from polyzymd.analyses.orchestrator import run_analysis
 
         # Mock TrajectoryLoader for the runner seam

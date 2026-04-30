@@ -4,10 +4,10 @@ Combines per-frame SASA (MDTraj shrake_rupley) with polymer-protein contact data
 to classify residues, detect chaperone events, compute enrichment, and statistically
 compare conditions.
 
-This is a **comparator-only** analysis: the real work happens in ``compare()``.
-``compute_replicate()`` and ``aggregate()`` return ``None`` because the exposure
-pipeline needs both SASA and contacts simultaneously — the per-replicate computation
-is orchestrated within ``compare()`` directly.
+This is a **compare-only** analysis with ``has_compute_stage = False`` and
+``has_aggregate_stage = False``. The exposure pipeline needs both SASA and
+contacts simultaneously, so per-replicate work is orchestrated within
+``compare()`` directly.
 
 Plugin contract
 ---------------
@@ -139,9 +139,9 @@ class ExposureAnalysis(Analysis):
     - Polymer-protein contact data (from contacts analysis)
     - Residue classification (stably buried / transient / stably exposed)
 
-    This is a **comparator-only** plugin: ``compute_replicate()`` and
-    ``aggregate()`` return ``None``. All computation is orchestrated
-    within ``compare()``.
+    This is a **compare-only** plugin with ``has_compute_stage = False`` and
+    ``has_aggregate_stage = False``. All computation is orchestrated within
+    ``compare()``.
 
     Class Attributes
     ----------------

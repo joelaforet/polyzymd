@@ -6,9 +6,11 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+
 from polyzymd.analyses.base import ReplicateContext
 from polyzymd.analyses.rg import RgAnalysis, RgRunSettings, RgSettings
-from polyzymd.analyses.rg._results import RgRunResult
+from polyzymd.analyses.rg._runner import RgRunPayload
 from polyzymd.engines.gromacs import GromacsEngine
 from tests._support.gromacs_smoke import (
     create_gromacs_layout,
@@ -22,7 +24,7 @@ from tests._support.gromacs_smoke import (
 class TestRgGromacsSmoke:
     """Smoke test for Rg with GROMACS trajectory layout."""
 
-    def test_compute_replicate_with_gromacs_engine(self, tmp_path: Path) -> None:
+    def test_run_replicate_with_gromacs_engine(self, tmp_path: Path) -> None:
         """Run Rg compute on a real GROMACS-style run directory.
 
         Parameters
@@ -42,27 +44,31 @@ class TestRgGromacsSmoke:
         fake_mda = install_fake_mdanalysis()
         fake_mda.Universe = MagicMock(return_value=make_mock_universe(n_frames=150, n_atoms=20))
 
-        run_result = RgRunResult(
-            config_hash="smoke123",
-            polyzymd_version="1.3.0-test",
-            replicate=1,
-            equilibration_time=0.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
+        run_payload = RgRunPayload(
             run_label="protein_rg",
             selection="protein and name CA",
+            calculation_mode="selection",
+            fragment_weighting=None,
+            rg_values=np.asarray([14.0, 15.0, 16.0], dtype=np.float64),
+            frames=np.asarray([0, 1, 2], dtype=np.int64),
+            time_ns=np.asarray([0.0, 0.01, 0.02], dtype=np.float64),
             mean_rg=15.0,
             std_rg=0.5,
             median_rg=15.0,
             min_rg=14.0,
             max_rg=16.0,
             final_rg=15.2,
-            n_frames_total=150,
-            n_frames_used=150,
-            npz_path=str(tmp_path / "analysis" / "run_1" / "rg_smoke.npz"),
+            sem_rg=None,
+            correlation_time=None,
+            correlation_time_unit=None,
+            n_independent_frames=None,
+            statistical_inefficiency=None,
+            autocorrelation_warning=None,
         )
 
         original_resolve = GromacsEngine.resolve_trajectory_layout
+        output_dir = tmp_path / "analysis" / "run_1"
+        output_dir.mkdir(parents=True)
         with (
             patch.dict(sys.modules, {"MDAnalysis": fake_mda}),
             patch.object(
@@ -72,7 +78,7 @@ class TestRgGromacsSmoke:
                 wraps=original_resolve,
             ) as resolve_spy,
             patch("polyzymd.analyses.rg.compute_config_hash", return_value="smoke123"),
-            patch("polyzymd.analyses.rg.RgAnalysis._compute_single_run", return_value=run_result),
+            patch("polyzymd.analyses.rg._runner.compute_rg_run", return_value=run_payload),
             patch(
                 "polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.3.0-test"
             ),
@@ -81,7 +87,7 @@ class TestRgGromacsSmoke:
                 condition=condition,
                 replicate=1,
                 sim_config=config,
-                output_dir=tmp_path / "analysis" / "run_1",
+                output_dir=output_dir,
                 equilibration="0ns",
                 recompute=True,
                 settings=settings,

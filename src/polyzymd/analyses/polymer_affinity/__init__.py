@@ -27,8 +27,8 @@ Sign convention
     S > 0  →  net unfavorable (avoidance dominates)
     S = 0  →  contacts match the surface-availability reference
 
-This is a **comparator-only** analysis: ``compute_replicate()`` and
-``aggregate()`` return ``None``.  All computation is orchestrated within
+This is a **compare-only** analysis with ``has_compute_stage = False`` and
+``has_aggregate_stage = False``. All computation is orchestrated within
 ``compare()`` which loads cached binding preference data from the contacts
 analysis layer.
 
@@ -160,9 +160,9 @@ class PolymerAffinityAnalysis(Analysis):
     The total score is summed across all polymer types and protein groups.
     More negative = stronger net polymer-protein affinity.
 
-    This is a **comparator-only** plugin: ``compute_replicate()`` and
-    ``aggregate()`` return ``None``.  The full pipeline is orchestrated
-    within ``compare()``.
+    This is a **compare-only** plugin with ``has_compute_stage = False`` and
+    ``has_aggregate_stage = False``. The full pipeline is orchestrated within
+    ``compare()``.
 
     Statistical comparisons use per-replicate total scores and are only
     computed between conditions at the same simulation temperature.

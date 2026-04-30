@@ -1,7 +1,7 @@
 """Tests for the secondary structure analysis plugin.
 
 Tests the SecondaryStructureAnalysis class: discovery, aliases, settings,
-compute_replicate, aggregate, extract_metrics, AggregatedResultClass,
+run_replicate, aggregate, extract_metrics, AggregatedResultClass,
 _make_aggregated_filename, plot delegation, and the full lifecycle via
 the orchestrator.
 
@@ -189,12 +189,12 @@ class TestSettings:
 
 
 # ============================================================================
-# compute_replicate tests
+# run_replicate tests
 # ============================================================================
 
 
-class TestComputeReplicate:
-    """Test compute_replicate delegates DSSP computation to the runner path."""
+class TestRunReplicate:
+    """Test run_replicate delegates DSSP computation to the runner path."""
 
     @staticmethod
     def _configure_mock_universe(mock_loader, n_frames: int) -> None:
@@ -250,7 +250,7 @@ class TestComputeReplicate:
         condition,
         tmp_path,
     ):
-        """compute_replicate should perform DSSP computation through a runner."""
+        """run_replicate should perform DSSP computation through a runner."""
         mock_loader_inst = MagicMock()
         MockLoader.return_value = mock_loader_inst
 
@@ -324,7 +324,7 @@ class TestComputeReplicate:
         condition,
         tmp_path,
     ):
-        """compute_replicate should use the custom chain_id for chain selection."""
+        """run_replicate should use the custom chain_id for chain selection."""
         mock_loader_inst = MagicMock()
         MockLoader.return_value = mock_loader_inst
 
@@ -1115,7 +1115,7 @@ class TestChainSelectionValidation:
                 topology_file=Path("/fake/top.pdb"),
             )
             mock_loader.get_timestep.return_value = 10.0
-            TestComputeReplicate._configure_mock_universe(mock_loader, n_frames=100)
+            TestRunReplicate._configure_mock_universe(mock_loader, n_frames=100)
 
             condition = Condition(
                 label="Test",
@@ -1169,7 +1169,7 @@ class TestEquilibrationValidation:
                 topology_file=Path("/fake/top.pdb"),
             )
             mock_loader.get_timestep.return_value = 10.0
-            TestComputeReplicate._configure_mock_universe(mock_loader, n_frames=15)
+            TestRunReplicate._configure_mock_universe(mock_loader, n_frames=15)
 
             condition = Condition(
                 label="Test",

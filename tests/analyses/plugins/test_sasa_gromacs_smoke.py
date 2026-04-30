@@ -24,7 +24,7 @@ from tests._support.gromacs_smoke import (
 class TestSASAGromacsSmoke:
     """Smoke test for SASA with GROMACS trajectory layout."""
 
-    def test_compute_replicate_with_gromacs_engine(self, tmp_path: Path) -> None:
+    def test_run_replicate_with_gromacs_engine(self, tmp_path: Path) -> None:
         """Run SASA compute on a real GROMACS-style run directory.
 
         Parameters
@@ -85,6 +85,6 @@ class TestSASAGromacsSmoke:
             )
             result = analysis.run_replicate(ctx, replicate=1)
 
-        assert resolve_spy.call_count >= 3
+        assert resolve_spy.call_count >= 2
         assert result.replicate == 1
         assert result.trajectory_files == [str(tmp_path / "run_1" / "gromacs" / "prod.xtc")]

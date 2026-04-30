@@ -4,7 +4,7 @@ Coverage:
 - Discovery (registered by name)
 - Class attributes (name, Settings, aliases, dependencies, min_replicates)
 - Settings validation
-- compute_replicate / aggregate (no-op)
+- run_replicate / aggregate (no-op)
 - filter_conditions (polymer detection)
 - compare (full override with dual rankings)
 - pairwise comparisons
@@ -151,13 +151,13 @@ class TestSettings:
 
 
 # ===========================================================================
-# compute_replicate / aggregate (no-op)
+# run_replicate / aggregate (no-op)
 # ===========================================================================
 
 
 class TestNoOp:
-    def test_compute_replicate_returns_none(self):
-        """compute_replicate is a no-op for compare-only exposure analysis.
+    def test_run_replicate_returns_none(self):
+        """run_replicate is a no-op for compare-only exposure analysis.
 
         Exposure sets ``has_compute_stage = False``, so the base Analysis
         implementation returns ``None`` instead of requiring per-replicate
@@ -183,7 +183,7 @@ class TestNoOp:
             recompute=False,
             settings=ExposureSettings(),
         )
-        assert analysis.compute_replicate(ctx, 1) is None
+        assert analysis.run_replicate(ctx, 1) is None
 
     def test_aggregate_returns_none(self):
         """aggregate is a no-op because exposure is comparator-only.

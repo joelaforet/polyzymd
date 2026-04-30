@@ -22,8 +22,8 @@ from tests._support.gromacs_smoke import (
 class TestContactsGromacsSmoke:
     """Smoke tests for contacts GROMACS path handling."""
 
-    def test_compute_replicate_uses_gromacs_layout(self, tmp_path: Path) -> None:
-        """compute_replicate resolves flat GROMACS topology and trajectory."""
+    def test_run_replicate_uses_gromacs_layout(self, tmp_path: Path) -> None:
+        """run_replicate resolves flat GROMACS topology and trajectory."""
         config = make_gromacs_config(tmp_path)
         create_gromacs_layout(tmp_path / "run_1")
 
@@ -66,7 +66,7 @@ class TestContactsGromacsSmoke:
         assert resolve_spy.call_count >= 1
         topo_arg, traj_arg = fake_mda.Universe.call_args.args
         assert topo_arg.endswith("run_1/gromacs/solvated_system.pdb")
-        assert traj_arg == [str(tmp_path / "run_1" / "gromacs" / "prod.xtc")]
+        assert traj_arg == str(tmp_path / "run_1" / "gromacs" / "prod.xtc")
 
     def test_find_topology_resolves_gromacs_pdb(self, tmp_path: Path) -> None:
         """find_topology(working_dir) resolves GROMACS PDB via engine."""

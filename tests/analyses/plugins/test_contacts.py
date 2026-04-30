@@ -1,6 +1,6 @@
 """Tests for the contacts analysis plugin.
 
-Covers discovery, settings, compute_replicate, aggregate, compare (full override),
+Covers discovery, settings, run_replicate, aggregate, compare (full override),
 filter_conditions, binding preference sub-pipeline, plot delegation,
 AggregatedResultClass, and per-replicate metric helpers.
 """
@@ -224,7 +224,7 @@ class TestSettings:
 
 
 # ---------------------------------------------------------------------------
-# compute_replicate
+# run_replicate
 # ---------------------------------------------------------------------------
 
 
@@ -271,8 +271,8 @@ def _make_mdanalysis_exception_modules() -> dict[str, ModuleType]:
     }
 
 
-class TestComputeReplicate:
-    """compute_replicate delegates to ParallelContactAnalyzer."""
+class TestRunReplicate:
+    """run_replicate delegates to ParallelContactAnalyzer."""
 
     def test_delegates_to_analyzer(self, tmp_path):
         from polyzymd.analyses.base import Condition, ReplicateContext
@@ -2887,7 +2887,7 @@ class TestLifecycle:
         from polyzymd.analyses.contacts import ContactsAnalysis
 
         analysis = ContactsAnalysis()
-        assert callable(analysis.compute_replicate)
+        assert callable(analysis.run_replicate)
         assert callable(analysis.aggregate)
         assert callable(analysis.compare)
         assert callable(analysis.plot)

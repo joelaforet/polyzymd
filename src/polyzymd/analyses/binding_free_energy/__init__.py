@@ -5,8 +5,8 @@ energies via:
 
     ΔG_sel = -k_B·T · ln(contact_share / expected_share)
 
-This is a **compare-only** analysis: ``compute_replicate()`` and
-``aggregate()`` return ``None``.  All computation is orchestrated within
+This is a **compare-only** analysis with ``has_compute_stage = False`` and
+``has_aggregate_stage = False``. All computation is orchestrated within
 ``compare()`` which delegates to private helpers for enrichment → ΔG
 conversion, pairwise comparison, and result assembly.
 
@@ -162,9 +162,9 @@ class BindingFreeEnergyAnalysis(Analysis):
 
         ΔG_sel = -k_B·T · ln(contact_share / expected_share)
 
-    This is a **comparator-only** plugin: ``compute_replicate()`` and
-    ``aggregate()`` return ``None``.  The full pipeline is orchestrated
-    within ``compare()`` using the mixin's ``_load_or_compute()`` pattern.
+    This is a **compare-only** plugin with ``has_compute_stage = False`` and
+    ``has_aggregate_stage = False``. The full pipeline is orchestrated within
+    ``compare()`` using the mixin's ``_load_or_compute()`` pattern.
 
     Temperature-aware: cross-temperature pairwise statistics are suppressed.
 

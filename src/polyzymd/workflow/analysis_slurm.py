@@ -6,11 +6,11 @@ This module provides a shared DAG submission layer for analysis plugins:
 - one aggregate worker per condition
 - one finalizer worker per analysis comparison
 
-The DAG parallelizes at the `compute_replicate()` boundary, with one SLURM job
-per (condition, replicate) pair. This boundary is the plugin API's atomic unit.
-Sub-replicate parallelism (for example, per-run work inside SASA-style
-calculations) is intentionally handled inside each plugin's
-`compute_replicate()` implementation. Plugins can use internal
+The DAG parallelizes at the `run_replicate()` boundary, with one SLURM job per
+(condition, replicate) pair. This per-replicate worker is the plugin API's
+atomic unit. Sub-replicate parallelism (for example, per-run work inside
+SASA-style calculations) is intentionally handled inside each plugin's
+canonical replicate execution path. Plugins can use internal
 threading/multiprocessing for that finer-grained work when needed.
 """
 

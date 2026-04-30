@@ -26,8 +26,8 @@ from tests._support.gromacs_smoke import (
 class TestPolymerBridgingGromacsSmoke:
     """Smoke tests for polymer-bridging GROMACS path handling."""
 
-    def test_compute_replicate_with_mocked_contacts(self, tmp_path: Path) -> None:
-        """compute_replicate accepts mocked frame contacts on GROMACS config."""
+    def test_run_replicate_with_mocked_contacts(self, tmp_path: Path) -> None:
+        """run_replicate accepts mocked frame contacts on GROMACS config."""
         config = make_gromacs_config(tmp_path)
         create_gromacs_layout(tmp_path / "run_1")
         condition = make_condition(tmp_path, config, replicates=(1,))
@@ -44,11 +44,15 @@ class TestPolymerBridgingGromacsSmoke:
             recompute=True,
             settings=settings,
         )
+        fake_mda = install_fake_mdanalysis()
+        fake_mda.Universe = MagicMock(return_value=make_mock_universe(n_frames=10, n_atoms=20))
 
-        with patch.object(
-            analysis,
-            "_compute_frame_contacts",
-            return_value=([{1, 2}, {1}], 10, 10.0),
+        with (
+            patch.dict(sys.modules, {"MDAnalysis": fake_mda}),
+            patch(
+                "polyzymd.analyses.polymer_bridging._runner.compute_observations_for_universe",
+                return_value=[({1, 2}, {}), ({1}, {})],
+            ),
         ):
             result = analysis.run_replicate(ctx, replicate=1)
 

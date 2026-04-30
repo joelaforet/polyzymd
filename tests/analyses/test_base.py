@@ -70,7 +70,7 @@ class ToyAnalysis(Analysis):
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
         return ToyResult(value=replicate * 1.5, replicate=replicate)
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[ToyResult]) -> ToyAggregatedResult:
@@ -135,7 +135,7 @@ class TestAnalysisABC:
             class BadAnalysis(Analysis):
                 Settings = ToySettings
 
-                def compute_replicate(self, ctx, replicate):
+                def run_replicate(self, ctx, replicate):
                     pass
 
                 def aggregate(self, ctx, results):
@@ -148,7 +148,7 @@ class TestAnalysisABC:
             class BadAnalysis(Analysis):
                 name = "bad"
 
-                def compute_replicate(self, ctx, replicate):
+                def run_replicate(self, ctx, replicate):
                     pass
 
                 def aggregate(self, ctx, results):
@@ -171,7 +171,7 @@ class TestAnalysisABC:
 
         with pytest.raises(
             TypeError,
-            match=r"must implement run_replicate\(\), legacy compute_replicate\(\), or both "
+            match=r"must implement run_replicate\(\) or both "
             r"build_runner\(\) and "
             r"summarize_replicate\(\)",
         ):
@@ -207,8 +207,8 @@ class TestAnalysisABC:
         plugin = RunReplicateAnalysis()
         assert plugin.name == "run_replicate_only"
 
-    def test_run_replicate_delegates_legacy_compute(self, toy_analysis, toy_condition) -> None:
-        """Base run_replicate should preserve legacy compute overrides."""
+    def test_run_replicate_uses_canonical_override(self, toy_analysis, toy_condition) -> None:
+        """run_replicate should use the canonical plugin override."""
         ctx = ReplicateContext(
             condition=toy_condition,
             replicate=2,
@@ -241,6 +241,110 @@ class TestAnalysisABC:
                 def aggregate(self, ctx, results):
                     return {"dummy": True}
 
+    def test_run_replicate_delegates_to_runner_contract(self, toy_condition) -> None:
+        """Base run_replicate should execute runner-backed plugins."""
+
+        class FakeTrajectory:
+            """Minimal trajectory with a frame count."""
+
+            def __len__(self) -> int:
+                """Return the fake frame count."""
+
+                return 5
+
+        class FakeUniverse:
+            """Minimal universe exposing a trajectory."""
+
+            trajectory = FakeTrajectory()
+
+        class FakeLoader:
+            """Loader seam used by the runner path."""
+
+            def __init__(self, sim_config: object) -> None:
+                """Store the provided simulation configuration."""
+
+                self.sim_config = sim_config
+
+            def load_universe(self, replicate: int) -> FakeUniverse:
+                """Return a fake universe for the requested replicate."""
+
+                assert replicate == 2
+                return FakeUniverse()
+
+        class FakeWindow:
+            """Trajectory window with runner keyword arguments."""
+
+            warning_message = None
+
+            def run_kwargs(self) -> dict[str, int]:
+                """Return fake runner keyword arguments."""
+
+                return {"start": 1, "stop": 4, "step": 1}
+
+        class FakeRunner:
+            """Runner object compatible with the framework seam."""
+
+            def __init__(self) -> None:
+                """Initialize empty results."""
+
+                self.results: dict[str, int] = {}
+
+            def run(self, **kwargs: int) -> "FakeRunner":
+                """Record runner keyword arguments and return self."""
+
+                self.results = kwargs
+                return self
+
+        class RunnerBackedAnalysis(Analysis):
+            """Analysis that uses the runner-backed replicate seam."""
+
+            name: ClassVar[str] = "runner_backed"
+            Settings: ClassVar[type] = ToySettings
+
+            def _trajectory_loader_factory(self) -> type[FakeLoader]:
+                """Return the fake loader class."""
+
+                return FakeLoader
+
+            def get_trajectory_window(self, ctx, replicate, loader, universe) -> FakeWindow:
+                """Return a fake window for the runner call."""
+
+                del ctx, replicate, loader, universe
+                return FakeWindow()
+
+            def build_runner(self, ctx, replicate, universe, window) -> FakeRunner:
+                """Build the fake runner."""
+
+                del ctx, replicate, universe, window
+                return FakeRunner()
+
+            def summarize_replicate(self, ctx, replicate, runner, window) -> dict[str, int]:
+                """Summarize the fake runner results."""
+
+                del ctx, window
+                return {"replicate": replicate, "start": runner.results["start"]}
+
+            def aggregate(self, ctx, results):
+                """Return a simple aggregate result."""
+
+                del ctx, results
+                return {"dummy": True}
+
+        ctx = ReplicateContext(
+            condition=toy_condition,
+            replicate=2,
+            sim_config=toy_condition.sim_config,
+            output_dir=Path("/tmp/run_2"),
+            equilibration="10ns",
+            recompute=False,
+            settings=ToySettings(),
+        )
+
+        assert RunnerBackedAnalysis().run_replicate(ctx, replicate=2) == {
+            "replicate": 2,
+            "start": 1,
+        }
+
     def test_compare_only_subclass_can_disable_compute_stage(self) -> None:
         """Compare-only plugins should remain valid with compute disabled."""
 
@@ -253,6 +357,24 @@ class TestAnalysisABC:
         plugin = CompareOnlyAnalysis()
         assert plugin.has_compute_stage is False
         assert plugin.has_aggregate_stage is False
+
+    def test_concrete_subclass_rejects_compute_replicate_override(self) -> None:
+        """Legacy compute_replicate overrides should fail validation."""
+
+        with pytest.raises(
+            TypeError,
+            match=r"overrides deprecated compute_replicate\(\).*Implement run_replicate\(\)",
+        ):
+
+            class LegacyComputeAnalysis(Analysis):
+                name: ClassVar[str] = "legacy_compute"
+                Settings: ClassVar[type] = ToySettings
+
+                def compute_replicate(self, ctx, replicate):
+                    return {"value": replicate}
+
+                def aggregate(self, ctx, results):
+                    return {"dummy": True}
 
     def test_concrete_subclass_valid(self, toy_analysis):
         """ToyAnalysis should instantiate without error."""
@@ -311,7 +433,7 @@ class TestAnalysisABC:
                 cpus_per_task=4,
             )
 
-            def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+            def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
                 return {"value": float(replicate)}
 
             def aggregate(
@@ -434,7 +556,7 @@ class TestDefaultCompareContract:
             name: ClassVar[str] = "empty_metrics"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -473,7 +595,7 @@ class TestDefaultCompareContract:
             name: ClassVar[str] = "bad_type"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -518,7 +640,7 @@ class TestDefaultCompareContract:
             name: ClassVar[str] = "bad_value"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):

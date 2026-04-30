@@ -580,12 +580,12 @@ def test_compute_single_run_zero_atoms_raises(
         )
 
 
-def test_compute_replicate_raises_before_writing_partial_results(
+def test_run_replicate_raises_before_writing_partial_results(
     condition: Condition,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """compute_replicate should fail before writing partial outputs for missing runs."""
+    """run_replicate should fail before writing partial outputs for missing runs."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=[RgRunSettings(label="polymer_blob_rg", selection="resname SBM")])
     output_dir = tmp_path / "run_1"
@@ -623,10 +623,10 @@ def test_settings_cache_tag_changes_with_settings() -> None:
     assert tag_a != tag_b
 
 
-def test_compute_replicate_cache_includes_settings_tag(
+def test_run_replicate_cache_includes_settings_tag(
     condition: Condition, tmp_path: Path, monkeypatch
 ) -> None:
-    """compute_replicate cache filename should include settings fingerprint tag."""
+    """run_replicate cache filename should include settings fingerprint tag."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein and name CA")])
     ctx = make_replicate_context(

@@ -302,10 +302,10 @@ def test_settings_cache_tag_changes_with_settings() -> None:
     assert tag_a != tag_b
 
 
-def test_compute_replicate_cache_filename_includes_settings_tag(
+def test_run_replicate_cache_filename_includes_settings_tag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """compute_replicate should include settings tag in cache filename."""
+    """run_replicate should include settings tag in cache filename."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=[RMSDRunSettings(label="run_a")])
     sim_config = MagicMock()
@@ -425,12 +425,12 @@ def test_summarize_replicate_writes_npz_sidecar(
     assert result.run_results[0].npz_path == str(expected_npz)
 
 
-def test_compute_replicate_raises_before_writing_partial_results(
+def test_run_replicate_raises_before_writing_partial_results(
     condition: Condition,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """compute_replicate should fail before writing partial outputs for invalid runs."""
+    """run_replicate should fail before writing partial outputs for invalid runs."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(
         runs=[

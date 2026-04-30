@@ -4,7 +4,7 @@ Coverage:
 - Discovery (registered by name and alias)
 - Class attributes (name, Settings, aliases, dependencies, min_replicates)
 - Settings validation (threshold range, defaults)
-- compute_replicate / aggregate (no-op)
+- run_replicate / aggregate (no-op)
 - filter_conditions (excludes no-polymer)
 - compare (full override with temperature-aware pairwise)
 - affinity score computation helpers
@@ -196,13 +196,13 @@ class TestSettings:
 
 
 # ===========================================================================
-# compute_replicate / aggregate (no-op)
+# run_replicate / aggregate (no-op)
 # ===========================================================================
 
 
 class TestNoOp:
-    def test_compute_replicate_returns_none(self):
-        """Compare-only plugins must no-op compute_replicate by contract."""
+    def test_run_replicate_returns_none(self):
+        """Compare-only plugins must no-op run_replicate by contract."""
         from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.polymer_affinity import (
             PolymerAffinityAnalysis,
@@ -226,7 +226,7 @@ class TestNoOp:
             recompute=False,
             settings=PolymerAffinitySettings(),
         )
-        assert analysis.compute_replicate(ctx, 1) is None
+        assert analysis.run_replicate(ctx, 1) is None
 
     def test_aggregate_returns_none(self):
         """Compare-only plugins must no-op aggregate by contract."""

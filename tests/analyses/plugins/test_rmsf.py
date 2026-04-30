@@ -1,6 +1,6 @@
 """Tests for the RMSF analysis plugin.
 
-Tests the RMSFAnalysis class: discovery, settings, compute_replicate,
+Tests the RMSFAnalysis class: discovery, settings, run_replicate,
 aggregate, extract_metrics, AggregatedResultClass, inlined plotting,
 and the full lifecycle via the orchestrator.
 
@@ -215,12 +215,12 @@ class TestRMSFSettings:
 
 
 # ============================================================================
-# Test: compute_replicate
+# Test: run_replicate
 # ============================================================================
 
 
-class TestComputeReplicate:
-    """Test RMSFAnalysis.compute_replicate performs inline RMSF computation."""
+class TestRunReplicate:
+    """Test RMSFAnalysis.run_replicate performs inline RMSF computation."""
 
     def _make_mock_universe(self, n_frames: int = 200, n_atoms: int = 5):
         """Create a mock MDAnalysis Universe for RMSF tests."""
@@ -279,7 +279,7 @@ class TestComputeReplicate:
         condition,
         tmp_path,
     ):
-        """Test that compute_replicate performs RMSF calculation inline."""
+        """Test that run_replicate performs RMSF calculation inline."""
         import numpy as np
 
         # Setup mock loader
@@ -454,7 +454,7 @@ class TestComputeReplicate:
         assert result.selection_string == "protein and name CA"
 
     def test_uses_settings_sensitive_cache_filename(self, rmsf_analysis, condition, tmp_path):
-        """compute_replicate should key caches by equilibration and settings fingerprint."""
+        """run_replicate should key caches by equilibration and settings fingerprint."""
         settings = RMSFSettings(selection="backbone")
         ctx = ReplicateContext(
             condition=condition,
@@ -478,8 +478,8 @@ class TestComputeReplicate:
         assert cache_path.name == f"rmsf_eq0ns_{expected_tag}.json"
 
 
-class TestComputeReplicateNegativePaths:
-    """Test RMSFAnalysis.compute_replicate error and failure paths."""
+class TestRunReplicateNegativePaths:
+    """Test RMSFAnalysis.run_replicate error and failure paths."""
 
     @staticmethod
     def _make_nonempty_mock_universe(n_frames: int = 100, n_atoms: int = 5) -> MagicMock:
@@ -1385,7 +1385,7 @@ class TestRMSFLifecycle:
         condition,
         tmp_path,
     ):
-        """Test compute_replicate -> aggregate via run_analysis()."""
+        """Test run_replicate -> aggregate via run_analysis()."""
         import numpy as np
 
         from polyzymd.analyses.orchestrator import run_analysis

@@ -75,7 +75,6 @@ class TestRMSFGromacsSmoke:
                 wraps=original_resolve,
             ) as resolve_spy,
             patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0),
-            patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, "")),
             patch("polyzymd.analyses.shared.config_hash.validate_config_hash"),
             patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="smoke123"),
             patch("polyzymd.analyses.rmsf._compute_rmsf", side_effect=rmsf_values),

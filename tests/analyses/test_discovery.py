@@ -24,7 +24,7 @@ class ToyAnalysis(Analysis):
     name: ClassVar[str] = "toy"
     Settings: ClassVar[type] = ToySettings
 
-    def compute_replicate(self, ctx, replicate):
+    def run_replicate(self, ctx, replicate):
         return {"replicate": replicate}
 
     def aggregate(self, ctx, results):
@@ -99,7 +99,7 @@ class TestDiscovery:
             name: ClassVar[str] = "fake_good"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -159,7 +159,7 @@ class TestDiscoveryRobustness:
             name: ClassVar[str] = "fake_plugin"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):

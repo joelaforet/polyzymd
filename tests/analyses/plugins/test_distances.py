@@ -1,6 +1,6 @@
 """Tests for the distances analysis plugin.
 
-Covers discovery, settings, compute_replicate, aggregate, compare (full override),
+Covers discovery, settings, run_replicate, aggregate, compare (full override),
 plot delegation, AggregatedResultClass, _make_aggregated_filename, and lifecycle.
 """
 
@@ -200,7 +200,7 @@ class TestSettings:
 
 
 # ---------------------------------------------------------------------------
-# compute_replicate
+# run_replicate
 # ---------------------------------------------------------------------------
 
 
@@ -308,8 +308,8 @@ def _make_distance_cache_result(
     )
 
 
-class TestComputeReplicate:
-    """compute_replicate delegates to the runner seam."""
+class TestRunReplicate:
+    """run_replicate delegates to the runner seam."""
 
     def test_delegates_to_runner_seam_and_saves_result(self, tmp_path):
         from polyzymd.analyses import base as analyses_base

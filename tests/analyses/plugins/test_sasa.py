@@ -338,8 +338,8 @@ def test_sasa_settings_validation() -> None:
         SASARunSettings(label="protein", target_selection="chainid A", stride=0)
 
 
-def test_compute_replicate_delegates_to_runner_seam(tmp_path: Path) -> None:
-    """compute_replicate should delegate to the shared runner seam."""
+def test_run_replicate_delegates_to_runner_seam(tmp_path: Path) -> None:
+    """run_replicate should delegate to the shared runner seam."""
     from polyzymd.analyses.base import Analysis as AnalysisBase
 
     analysis = SASAAnalysis()
@@ -600,8 +600,8 @@ def test_summarize_replicate_preserves_artifact_paths(tmp_path: Path) -> None:
     assert result.n_frames_used == 30
 
 
-def test_compute_replicate_zero_atom_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """compute_replicate should handle zero-atom runs without crashing."""
+def test_run_replicate_zero_atom_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """run_replicate should handle zero-atom runs without crashing."""
     analysis = SASAAnalysis()
     condition = _make_condition("cond")
     settings = SASASettings(runs=[SASARunSettings(label="polymer", target_selection="chainid C")])
@@ -1117,7 +1117,7 @@ def test_normalized_control_rows_compute_percent_delta(tmp_path: Path) -> None:
     assert [row.percent_delta for row in rows] == pytest.approx([-50.0, -20.0])
 
 
-def test_normalized_control_rows_compute_replicate_deltas(tmp_path: Path) -> None:
+def test_normalized_control_rows_run_replicate_deltas(tmp_path: Path) -> None:
     """Normalized-control rows should preserve per-replicate percent changes."""
 
     comparison = _make_sasa_comparison_result(
@@ -1326,10 +1326,8 @@ def test_timeseries_loader_uses_raw_npz_path_contract(tmp_path: Path) -> None:
     assert matrix.shape == (1, 3)
 
 
-def test_compute_replicate_stores_raw_paths(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """compute_replicate should populate raw NPZ and metadata paths in run results."""
+def test_run_replicate_stores_raw_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """run_replicate should populate raw NPZ and metadata paths in run results."""
     analysis = SASAAnalysis()
     condition = _make_condition("cond")
     settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
@@ -1395,10 +1393,10 @@ def test_compute_replicate_stores_raw_paths(
     assert run_result.metadata_path == run_result.raw_metadata_path
 
 
-def test_compute_replicate_passes_chunk_and_stride(
+def test_run_replicate_passes_chunk_and_stride(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """compute_replicate should pass chunk_size and stride to shared helper."""
+    """run_replicate should pass chunk_size and stride to shared helper."""
     analysis = SASAAnalysis()
     condition = _make_condition("cond")
     settings = SASASettings(

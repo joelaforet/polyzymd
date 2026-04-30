@@ -936,7 +936,7 @@ class TestRealDataSanity:
         A mismatch here (e.g., 1-indexed vs 0-indexed) would silently drop
         contacts.
         """
-        sasa_resids = set(int(r) for r in real_sasa.resids)
+        sasa_resids = {int(r) for r in real_sasa.resids}
         contact_resids = {rc.protein_resid for rc in real_contacts.residue_contacts}
 
         # The intersection must be non-empty (most protein residues should match)

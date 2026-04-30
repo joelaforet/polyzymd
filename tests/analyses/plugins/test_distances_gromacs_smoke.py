@@ -6,14 +6,15 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+
 from polyzymd.analyses.base import ReplicateContext
 from polyzymd.analyses.distances import (
-    DistanceCalculator,
     DistancePairSettings,
     DistancesAnalysis,
     DistancesSettings,
 )
-from polyzymd.analyses.distances._results import DistancePairResult
+from polyzymd.analyses.distances._runner import DistancePairPayload, DistancesRunnerPayload
 from polyzymd.engines.gromacs import GromacsEngine
 from tests._support.gromacs_smoke import (
     create_gromacs_layout,
@@ -27,7 +28,7 @@ from tests._support.gromacs_smoke import (
 class TestDistancesGromacsSmoke:
     """Smoke test for distances with GROMACS layout resolution."""
 
-    def test_compute_replicate_with_gromacs_engine(self, tmp_path: Path) -> None:
+    def test_run_replicate_with_gromacs_engine(self, tmp_path: Path) -> None:
         """Run distances compute on a real GROMACS-style run directory.
 
         Parameters
@@ -55,26 +56,38 @@ class TestDistancesGromacsSmoke:
         fake_mda = install_fake_mdanalysis()
         fake_mda.Universe = MagicMock(return_value=make_mock_universe(n_frames=120, n_atoms=12))
 
-        pair_result = DistancePairResult(
-            config_hash="smoke123",
-            polyzymd_version="1.3.0-test",
-            replicate=None,
-            equilibration_time=0.0,
-            equilibration_unit="ns",
-            selection_string="resid 77 and name OG : resid 156 and name NE2",
-            pair_label="resid77_OG-resid156_NE2",
-            selection1="resid 77 and name OG",
-            selection2="resid 156 and name NE2",
-            distances=[3.2, 3.1, 3.3, 3.4],
-            mean_distance=3.25,
-            std_distance=0.11,
-            median_distance=3.25,
-            min_distance=3.1,
-            max_distance=3.4,
-            threshold=3.5,
-            fraction_below_threshold=1.0,
+        distance_payload = DistancesRunnerPayload(
             n_frames_total=120,
-            n_frames_used=120,
+            n_frames_used=4,
+            pair_payloads=[
+                DistancePairPayload(
+                    pair_label="resid77_OG-resid156_NE2",
+                    selection1="resid 77 and name OG",
+                    selection2="resid 156 and name NE2",
+                    distances=np.asarray([3.2, 3.1, 3.3, 3.4], dtype=np.float64),
+                    mean_distance=3.25,
+                    std_distance=0.11,
+                    median_distance=3.25,
+                    min_distance=3.1,
+                    max_distance=3.4,
+                    sem_distance=None,
+                    correlation_time=None,
+                    correlation_time_unit=None,
+                    n_independent_frames=None,
+                    statistical_inefficiency=None,
+                    autocorrelation_warning=None,
+                    threshold=3.5,
+                    fraction_below_threshold=1.0,
+                    histogram_edges=np.asarray([3.0, 3.5], dtype=np.float64),
+                    histogram_counts=np.asarray([4], dtype=np.int64),
+                    kde_x=None,
+                    kde_y=None,
+                    kde_peak=None,
+                    kde_bandwidth=None,
+                    n_frames_total=120,
+                    n_frames_used=4,
+                )
+            ],
         )
 
         original_resolve = GromacsEngine.resolve_trajectory_layout
@@ -89,7 +102,10 @@ class TestDistancesGromacsSmoke:
             patch(
                 "polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="smoke123"
             ),
-            patch.object(DistanceCalculator, "_compute_pair", return_value=pair_result),
+            patch(
+                "polyzymd.analyses.distances._runner.compute_distance_payloads",
+                return_value=distance_payload,
+            ),
             patch(
                 "polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.3.0-test"
             ),

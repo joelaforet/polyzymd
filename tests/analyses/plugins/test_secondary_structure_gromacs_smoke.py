@@ -27,7 +27,7 @@ from tests._support.gromacs_smoke import (
 class TestSecondaryStructureGromacsSmoke:
     """Smoke test for secondary structure with GROMACS layout resolution."""
 
-    def test_compute_replicate_with_gromacs_engine(self, tmp_path: Path) -> None:
+    def test_run_replicate_with_gromacs_engine(self, tmp_path: Path) -> None:
         """Run secondary-structure compute on a GROMACS-style run directory.
 
         Parameters

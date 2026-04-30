@@ -10,7 +10,7 @@ import pytest
 
 from polyzymd.analyses import get_analysis, list_analyses
 
-# All plugins that return typed Pydantic models from compute_replicate
+# All plugins that return typed Pydantic models from run_replicate
 # and need ReplicateResultClass set for disk round-trip deserialization
 TYPED_REPLICATE_PLUGINS = {
     "rmsf": "RMSFResult",
@@ -48,9 +48,9 @@ class TestReplicateResultClassContract:
         cls = get_analysis(plugin_name)
         result_cls = cls.ReplicateResultClass
         assert result_cls is not None
-        assert hasattr(result_cls, "model_validate_json") or hasattr(result_cls, "load"), (
-            f"{plugin_name}.ReplicateResultClass must have model_validate_json() or load()"
-        )
+        assert hasattr(result_cls, "model_validate_json") or hasattr(
+            result_cls, "load"
+        ), f"{plugin_name}.ReplicateResultClass must have model_validate_json() or load()"
 
     def test_all_compute_stage_plugins_covered(self):
         """Sanity check for compute-stage plugin coverage."""

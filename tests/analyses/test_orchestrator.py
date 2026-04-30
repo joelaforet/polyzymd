@@ -45,7 +45,7 @@ class _ParallelAnalysis(Analysis):
     Settings: ClassVar[type] = _ParallelSettings
     min_replicates: ClassVar[int] = 1
 
-    def compute_replicate(self, ctx, replicate: int) -> dict[str, Any]:
+    def run_replicate(self, ctx, replicate: int) -> dict[str, Any]:
         return {"value": float(replicate) * float(ctx.settings.factor), "replicate": replicate}
 
     def aggregate(self, ctx, results) -> dict[str, Any]:
@@ -107,7 +107,7 @@ class ToyAnalysis(Analysis):
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
         return ToyResult(value=replicate * 1.5, replicate=replicate)
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[ToyResult]) -> ToyAggregatedResult:
@@ -129,7 +129,7 @@ class ToyDependentAnalysis(Analysis):
     Settings: ClassVar[type] = ToySettings
     dependencies: ClassVar[tuple[str, ...]] = ("toy",)
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
         return ToyResult(value=replicate * 2.0, replicate=replicate)
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[ToyResult]) -> ToyAggregatedResult:
@@ -317,12 +317,6 @@ class TestOrchestrator:
                 self.called_replicates.append(replicate)
                 return ToyResult(value=float(replicate), replicate=replicate)
 
-            def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
-                """Fail if the compatibility hook is invoked by the orchestrator."""
-
-                del ctx, replicate
-                raise AssertionError("Legacy compute hook should not be called")
-
             def aggregate(self, ctx, results):
                 """Return a simple aggregate result."""
 
@@ -366,7 +360,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 if replicate == 2:
                     raise FileNotFoundError("Trajectory not found")
                 return ToyResult(value=float(replicate), replicate=replicate)
@@ -404,7 +398,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 if replicate == 2:
                     raise ReplicateSkippedError("No trajectory data found for replicate 2")
                 return ToyResult(value=float(replicate), replicate=replicate)
@@ -437,7 +431,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 2
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 raise FileNotFoundError("Missing trajectory")
 
             def aggregate(self, ctx, results):
@@ -460,7 +454,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 raise ReplicateSkippedError(f"No trajectory data found for replicate {replicate}")
 
             def aggregate(self, ctx, results):
@@ -484,7 +478,7 @@ class TestOrchestrator:
             name: ClassVar[str] = "exploding"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 raise RuntimeError("boom")
 
             def aggregate(self, ctx, results):
@@ -507,7 +501,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return ["not", "valid"]
 
             def aggregate(self, ctx, results):
@@ -530,7 +524,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -568,7 +562,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("circ_b",)
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 pass
 
             def aggregate(self, ctx, results):
@@ -579,7 +573,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("circ_a",)
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 pass
 
             def aggregate(self, ctx, results):
@@ -597,7 +591,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ()
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -608,7 +602,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("a",)
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -634,7 +628,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ()
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -645,7 +639,7 @@ class TestOrchestrator:
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("contacts",)
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -714,7 +708,7 @@ class TestContractEnforcement:
             name: ClassVar[str] = "none_compute"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return None
 
             def aggregate(self, ctx, results):
@@ -750,7 +744,7 @@ class TestContractEnforcement:
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 raise PluginContractError("contract boom")
 
             def aggregate(self, ctx, results):
@@ -780,7 +774,7 @@ class TestContractEnforcement:
             Settings: ClassVar[type] = _ParallelSettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 return None
 
             def aggregate(self, ctx, results):
@@ -816,7 +810,7 @@ class TestContractEnforcement:
             Settings: ClassVar[type] = _ParallelSettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 del replicate
                 processed_labels.append(ctx.condition.label)
                 if ctx.condition.label == "A":

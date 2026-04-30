@@ -32,6 +32,9 @@ class TestExposureGromacsSmoke:
         contact_json.write_text("{}")
 
         fake_contact_result = MagicMock()
+        fake_contact_result.replicate = 1
+        fake_contact_result.equilibration_time = 0.0
+        fake_contact_result.equilibration_unit = "ns"
         fake_sasa_result = MagicMock()
         fake_dynamics_result = MagicMock()
         fake_enrichment_result = MagicMock()
@@ -61,6 +64,7 @@ class TestExposureGromacsSmoke:
                 settings=ExposureSettings(),
                 exposure_analysis_dir=exposure_dir,
                 contacts_analysis_dir=contacts_dir,
+                contacts_settings_fp=None,
                 recompute=True,
                 equilibration="0ns",
             )

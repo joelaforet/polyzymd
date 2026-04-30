@@ -381,7 +381,7 @@ class PolymerBridgingAnalysis(Analysis):
 
     This plugin computes per-fragment, per-frame polymer bridging metrics
     directly from MD trajectories. It implements the full Analysis lifecycle:
-    ``compute_replicate`` → ``aggregate`` → ``compare`` → ``plot`` → ``format``.
+    ``run_replicate`` → ``aggregate`` → ``compare`` → ``plot`` → ``format``.
 
     **Status:** Experimental. Chemistry-aware outputs are labeled
     ``polymer_bridging_chemistry`` in the experimental feature system.

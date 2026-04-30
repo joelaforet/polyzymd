@@ -455,7 +455,7 @@ def test_aggregated_result_loads_legacy_payload_without_valency_replicates() -> 
 
 
 class TestLifecycle:
-    def test_compute_replicate_uses_runner_seam(self, tmp_path):
+    def test_run_replicate_uses_runner_seam(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
         condition = Condition(
             label="Cond",
@@ -510,7 +510,7 @@ class TestLifecycle:
         assert ctx.result_path.exists()
         assert list(ctx.output_dir.glob("polymer_bridging_*.json"))
 
-    def test_compute_replicate_uses_cached_result_when_available(self, tmp_path):
+    def test_run_replicate_uses_cached_result_when_available(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
         settings = PolymerBridgingSettings()
         condition = Condition(
@@ -554,7 +554,7 @@ class TestLifecycle:
 
         assert loaded == cached
 
-    def test_compute_replicate_prefers_sidecar_over_canonical_cache(self, tmp_path):
+    def test_run_replicate_prefers_sidecar_over_canonical_cache(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
         settings = PolymerBridgingSettings()
         condition = Condition(
@@ -597,7 +597,7 @@ class TestLifecycle:
 
         assert loaded.mean_contacts_per_contacting_oligomer == pytest.approx(1.5)
 
-    def test_compute_replicate_rejects_missing_fingerprint_sidecar(self, tmp_path):
+    def test_run_replicate_rejects_missing_fingerprint_sidecar(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
         settings = PolymerBridgingSettings()
         condition = Condition(
@@ -628,7 +628,7 @@ class TestLifecycle:
                     1,
                 )
 
-    def test_compute_replicate_rejects_and_does_not_copy_missing_fingerprint_canonical(
+    def test_run_replicate_rejects_and_does_not_copy_missing_fingerprint_canonical(
         self,
         tmp_path,
     ):
@@ -666,7 +666,7 @@ class TestLifecycle:
 
         assert not sidecar_path.exists()
 
-    def test_compute_replicate_ignores_window_mismatched_cache(self, tmp_path):
+    def test_run_replicate_ignores_window_mismatched_cache(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
         settings = PolymerBridgingSettings()
         condition = Condition(
@@ -705,7 +705,7 @@ class TestLifecycle:
         assert loaded is fresh
         mock_compute.assert_called_once()
 
-    def test_compute_replicate_ignores_replicate_id_mismatched_cache(self, tmp_path):
+    def test_run_replicate_ignores_replicate_id_mismatched_cache(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
         settings = PolymerBridgingSettings()
         condition = Condition(

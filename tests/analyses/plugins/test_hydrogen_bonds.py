@@ -454,8 +454,8 @@ def test_residue_ref_label() -> None:
     assert residue.label == "SER123:A"
 
 
-def test_compute_replicate_basic(tmp_path: Path) -> None:
-    """compute_replicate should return populated summary metrics."""
+def test_run_replicate_basic(tmp_path: Path) -> None:
+    """run_replicate should return populated summary metrics."""
 
     instances: list[MockHydrogenBondAnalysis] = []
 
@@ -538,7 +538,7 @@ def test_compute_replicate_basic(tmp_path: Path) -> None:
     assert instances[0].run_args["start"] == 0
 
 
-def test_compute_replicate_warns_once_for_default_groups_and_summaries(
+def test_run_replicate_warns_once_for_default_groups_and_summaries(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Default groups/summaries should emit one warning per analysis run."""
@@ -609,10 +609,8 @@ def test_compute_replicate_warns_once_for_default_groups_and_summaries(
     assert caplog.text.count("No explicit groups/summaries in YAML config — using defaults") == 1
 
 
-def test_compute_replicate_empty_selection(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """compute_replicate should handle empty groups with zeroed summaries."""
+def test_run_replicate_empty_selection(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """run_replicate should handle empty groups with zeroed summaries."""
 
     class MockHydrogenBondAnalysis:
         def __init__(self, **kwargs) -> None:
@@ -668,7 +666,7 @@ def test_compute_replicate_empty_selection(
     assert "No atoms selected for any summary" in caplog.text
 
 
-def test_compute_replicate_skips_only_empty_summary_and_keeps_other_summaries(
+def test_run_replicate_skips_only_empty_summary_and_keeps_other_summaries(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Empty-group summaries should be skipped without failing other summaries."""
@@ -748,7 +746,7 @@ def test_compute_replicate_skips_only_empty_summary_and_keeps_other_summaries(
     assert "condition='No Polymer (Control)' replicate=1" in caplog.text
 
 
-def test_compute_replicate_empty_group_raises_by_default(tmp_path: Path) -> None:
+def test_run_replicate_empty_group_raises_by_default(tmp_path: Path) -> None:
     """Empty group selections should raise when strict mode is enabled."""
 
     class MockHydrogenBondAnalysis:
@@ -796,8 +794,8 @@ def test_compute_replicate_empty_group_raises_by_default(tmp_path: Path) -> None
             analysis.run_replicate(ctx, 1)
 
 
-def test_compute_replicate_cache_hit(tmp_path: Path) -> None:
-    """compute_replicate should return cached result when available."""
+def test_run_replicate_cache_hit(tmp_path: Path) -> None:
+    """run_replicate should return cached result when available."""
     condition = Condition(
         label="test",
         config_path=Path("/tmp/config.yaml"),
@@ -1294,7 +1292,7 @@ def test_aggregate_composition() -> None:
 
 
 def test_composition_not_configured(tmp_path: Path) -> None:
-    """compute_replicate should emit no composition entries when unset."""
+    """run_replicate should emit no composition entries when unset."""
 
     class MockHydrogenBondAnalysis:
         def __init__(self, **kwargs) -> None:
@@ -2680,7 +2678,7 @@ def test_undirected_pair_result_roundtrip(tmp_path: Path) -> None:
 
 
 def test_compute_no_hbonds_found(tmp_path: Path) -> None:
-    """compute_replicate should return zero summaries when no events are found."""
+    """run_replicate should return zero summaries when no events are found."""
 
     class MockHydrogenBondAnalysis:
         def __init__(self, **kwargs) -> None:
@@ -3420,7 +3418,7 @@ def test_unique_pairs_metric_and_aggregation(tmp_path: Path) -> None:
 
 
 def test_replicate_does_not_truncate_pairs_before_aggregation(tmp_path: Path) -> None:
-    """compute_replicate should keep all pairs and defer top_n truncation."""
+    """run_replicate should keep all pairs and defer top_n truncation."""
 
     class MockHydrogenBondAnalysis:
         def __init__(self, **kwargs) -> None:
@@ -3619,8 +3617,8 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
     assert "Hydrogen Bond Analysis" in formatted
 
 
-def test_compute_replicate_hydrogens_sel_explicit(tmp_path: Path) -> None:
-    """compute_replicate should pass explicit element H selection, not None."""
+def test_run_replicate_hydrogens_sel_explicit(tmp_path: Path) -> None:
+    """run_replicate should pass explicit element H selection, not None."""
 
     captured_kwargs: list[dict] = []
 
