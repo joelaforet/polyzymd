@@ -171,9 +171,9 @@ class TestAnalysisABC:
 
         with pytest.raises(
             TypeError,
-            match=r"must implement run_replicate\(\) or both "
-            r"build_runner\(\) and "
-            r"summarize_replicate\(\)",
+            match=r"public plugins must implement both build_runner\(\) and "
+            r"summarize_replicate\(\).*direct run_replicate\(\) overrides are "
+            r"advanced/internal only",
         ):
 
             class BadComputeContractAnalysis(Analysis):
@@ -363,7 +363,7 @@ class TestAnalysisABC:
 
         with pytest.raises(
             TypeError,
-            match=r"overrides deprecated compute_replicate\(\).*Implement run_replicate\(\)",
+            match=r"overrides deprecated compute_replicate\(\).*build_runner\(\).*summarize_replicate\(\)",
         ):
 
             class LegacyComputeAnalysis(Analysis):

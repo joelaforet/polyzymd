@@ -236,6 +236,18 @@ After a successful run, expect files like these:
 ```text
 polymer_stability_study/
 ├── comparison.yaml
+├── analysis/
+│   ├── no_polymer/
+│   │   └── rmsf/
+│   │       ├── run_1/
+│   │       │   └── result.json
+│   │       ├── run_2/
+│   │       │   └── result.json
+│   │       └── aggregated/
+│   │           └── result.json
+│   └── 100_sbma/
+│       └── rmsf/
+│           └── ...
 ├── comparison/
 │   ├── rmsf/
 │   │   └── result.json

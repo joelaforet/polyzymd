@@ -10,14 +10,14 @@ read an output file, you know what happened and where to look.
 Every analysis in PolyzyMD follows the same four-stage pipeline:
 
 ```text
-compute_replicate  →  aggregate  →  compare  →  plot
+replicate stage  →  aggregate  →  compare  →  plot
 ```
 
 Here is what each stage does:
 
 | Stage | Scope | What it produces |
 |-------|-------|------------------|
-| **compute_replicate** | One replicate of one condition | Raw per-replicate result (e.g., RMSF values for each residue) |
+| **replicate stage** | One replicate of one condition | Raw per-replicate result (e.g., RMSF values for each residue) |
 | **aggregate** | All replicates of one condition | Means, standard errors, and distributions across replicates |
 | **compare** | All conditions together | Statistical tests, effect sizes, and rankings |
 | **plot** | All conditions together | Figures saved as PNG files |
@@ -104,9 +104,9 @@ producing an independent trajectory.
 
 The pipeline processes data in this order:
 
-1. **Per-replicate**: `compute_replicate` runs once for each replicate of each
-   condition. If you have 2 conditions with 3 replicates each, that's 6
-   compute calls.
+1. **Per-replicate**: the runner-backed replicate stage runs once for each
+   replicate of each condition. If you have 2 conditions with 3 replicates
+   each, that is 6 replicate-stage calls.
 2. **Per-condition**: `aggregate` runs once per condition, combining the
    replicate results. That's 2 aggregate calls.
 3. **Cross-condition**: `compare` and `plot` each run once, looking at all

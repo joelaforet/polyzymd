@@ -10,7 +10,7 @@ Use {doc}`extending_analyses` as the main contributor guide.
 
 ## What to Implement
 
-- `compute_replicate()` for per-replicate work
+- `build_runner()` and `summarize_replicate()` for per-replicate work
 - `aggregate()` for per-condition summaries
 - `compare()` when the default scalar comparison path is not enough
 - `format()` if you want custom CLI output

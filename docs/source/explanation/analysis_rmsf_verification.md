@@ -31,12 +31,13 @@ $$
 
 ## Source Code
 
-The RMSF and RMSD calculations now live in the RMSF plugin class:
+The RMSF and RMSD calculations now live in the RMSF plugin package:
 
-- **RMSF + RMSD workflow:** `RMSFAnalysis.compute_replicate()` in
-  `src/polyzymd/analyses/rmsf/__init__.py`.
-  The method performs the same two-pass RMSF logic and internal RMSD
-  timeseries calculation for autocorrelation analysis.
+- **RMSF + RMSD workflow:** `RMSFAnalysis.build_runner()` and
+  `RMSFAnalysis.summarize_replicate()` in
+  `src/polyzymd/analyses/rmsf/__init__.py`, with trajectory-native logic in the
+  runner path. The implementation performs the same two-pass RMSF logic and
+  internal RMSD timeseries calculation for autocorrelation analysis.
 
 The implementation is plain NumPy with no MDAnalysis analysis class
 dependencies.

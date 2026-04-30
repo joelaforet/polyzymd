@@ -11,6 +11,11 @@ plugins:
 
 Use this as a lookup table for field names, types, defaults, and meanings.
 
+FDR thresholds for comparison workflows are configured through top-level
+`defaults.fdr_alpha` in `comparison.yaml` where supported, not through
+plugin-local settings unless a plugin explicitly lists its own `fdr_alpha` field
+below.
+
 ## `rmsf`
 
 | Key | Type | Default | Description |
@@ -50,7 +55,6 @@ Use this as a lookup table for field names, types, defaults, and meanings.
 | `alignment_selection` | `str` | `"protein and name CA"` | Selection for alignment |
 | `alignment_mode` | `str` | `"centroid"` | Alignment reference mode: `centroid`, `average`, or `frame` |
 | `alignment_frame` | `int \| null` | `null` | Frame index (1-indexed) when `alignment_mode: frame` |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
 
 `DistancePairSettings` entries in `pairs`:
 
@@ -97,10 +101,9 @@ Use this as a lookup table for field names, types, defaults, and meanings.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `runs` | `list[SASARunSettings]` | `[]` (must be non-empty) | SASA runs to compute |
-| `probe_radius_nm` | `float` | `0.14` | Shrake-Rupley probe radius (nm) |
-| `n_sphere_points` | `int` | `960` | Shrake-Rupley sphere point count |
+| `probe_radius_nm` | `float` | `0.14` | MDTraj Shrake-Rupley probe radius (nm) |
+| `n_sphere_points` | `int` | `960` | MDTraj Shrake-Rupley sphere point count |
 | `chunk_size` | `int` | `100` | Frames per chunk for SASA computation |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
 
 `SASARunSettings` entries in `runs`:
 
@@ -136,6 +139,10 @@ Use this as a lookup table for field names, types, defaults, and meanings.
 
 Exactly one of `between` or `within` must be set for each summary.
 
+Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` with hydrogens
+selected as `(<group union>) and element H`; explicit hydrogens and reliable
+element metadata are required for meaningful counts.
+
 `HydrogenBondCompositionSettings`:
 
 | Key | Type | Default | Description |
@@ -156,7 +163,6 @@ Exactly one of `between` or `within` must be set for each summary.
 | `n_sphere_points` | `int` | `960` | Sphere points for Shrake-Rupley SASA |
 | `protein_chain` | `str` | `"A"` | Protein chain letter |
 | `polymer_resnames` | `list[str] \| null` | `null` | Optional polymer residue-name subset |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
 
 ## `binding_free_energy`
 
@@ -192,7 +198,6 @@ Exactly one of `between` or `within` must be set for each summary.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `runs` | `list[RgRunSettings]` | `[]` (must be non-empty) | Named Rg runs to compute |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
 
 `RgRunSettings` entries in `runs`:
 
@@ -210,7 +215,6 @@ Exactly one of `between` or `within` must be set for each summary.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `runs` | `list[RMSDRunSettings]` | `[]` (must be non-empty) | Named RMSD runs to compute |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
 
 `RMSDRunSettings` entries in `runs`:
 

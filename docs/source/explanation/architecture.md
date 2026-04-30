@@ -82,11 +82,10 @@ trajectory-level work and ensemble-level work:
 
 To add a new analysis, create a package in `analyses/<name>/` that subclasses
 `Analysis`, or use `polyzymd new-analysis <name>` to scaffold one automatically.
-Contributors choose the lifecycle mode that matches the analysis:
+The public contributor path is runner-backed:
 
-- override `compute_replicate()` for legacy compute plugins
 - implement `build_runner(...)` and `summarize_replicate(...)` for
-  trajectory-native, runner-backed plugins
+  trajectory-native replicate work
 - set `has_compute_stage = False` for compare-only plugins
 - implement `aggregate()` only when `has_aggregate_stage = True`
 
@@ -153,9 +152,8 @@ scaffold the package structure automatically.
 ### Separation between per-condition and cross-condition work
 
 The unified `analyses/` lifecycle still handles both scopes in one plugin
-contract, but the per-condition stage is now mode-dependent. A plugin may:
+contract. Public plugins either:
 
-- override `compute_replicate()` directly
 - use the runner-backed path with `build_runner(...)` and
   `summarize_replicate(...)`
 - skip compute entirely with `has_compute_stage = False`

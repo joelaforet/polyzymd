@@ -28,8 +28,10 @@ If you have not run a basic analysis yet, complete {doc}`first_analysis` first.
 
 ## How the SASA Plugin Works
 
-The SASA plugin computes Solvent Accessible Surface Area using the
-Shrake-Rupley algorithm via MDAnalysis. It reports per-frame total SASA and
+The SASA plugin computes Solvent Accessible Surface Area with MDTraj's
+`shrake_rupley` implementation. PolyzyMD uses MDAnalysis to load trajectories
+and resolve selections, then passes selected coordinates to MDTraj for the
+Shrake-Rupley calculation. The plugin reports per-frame total SASA and
 per-residue SASA profiles.
 
 The key feature is the **multi-run model**. Instead of computing one number,
@@ -167,10 +169,10 @@ pixi run -e build polyzymd compare run sasa \
     -f comparison.yaml
 ```
 
-This runs the full pipeline sequentially: `compute_replicate` for every
-replicate, `aggregate` for every condition, then `compare` and `plot`. Expect
-this to take several minutes per replicate depending on trajectory length and
-system size.
+This runs the full pipeline sequentially: the runner-backed replicate stage for
+every replicate, `aggregate` for every condition, then `compare` and `plot`.
+Expect this to take several minutes per replicate depending on trajectory length
+and system size.
 
 :::{note}
 SASA computation is CPU-intensive and memory-intensive because the

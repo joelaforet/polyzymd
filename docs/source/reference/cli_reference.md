@@ -670,6 +670,32 @@ Example configs: polyzymd/templates/examples/
 
 ---
 
+## polyzymd new-analysis
+
+Scaffold a runner-backed analysis plugin and matching tests.
+
+```bash
+polyzymd new-analysis NAME [OPTIONS]
+
+Options:
+  --class-name TEXT                 PascalCase class prefix
+  --style [dict|pydantic]           Result-container style [default: dict]
+  --project-root DIRECTORY          Repository root
+  --force                           Overwrite existing files
+  --dry-run                         Print paths without writing files
+```
+
+The generated plugin implements `build_runner()`, `summarize_replicate()`,
+`aggregate()`, `extract_metrics()`, and `plot()`. The base class handles the
+per-replicate dispatch.
+
+```bash
+polyzymd new-analysis solvent_shell
+pixi run -e build pytest tests/analyses/plugins/test_solvent_shell.py -v
+```
+
+---
+
 ## polyzymd compare
 
 Compare analysis results across multiple simulation conditions with statistical testing.
@@ -852,9 +878,9 @@ polyzymd compare plot-all -a rmsf
 
 ### polyzymd compare submit
 
-Submit replicate-level SLURM analysis DAG for one plugin. Each replicate is
-computed as an independent SLURM job, followed by per-condition aggregation
-jobs and a final comparison + plotting job.
+Submit a replicate-level SLURM analysis DAG for one plugin. Each replicate runs
+as an independent SLURM job, followed by per-condition aggregation jobs and a
+final comparison + plotting job.
 
 Before submission, this command runs a dependency preflight check: if the
 target plugin declares `dependencies`, required upstream comparison results must
@@ -899,6 +925,16 @@ polyzymd compare submit rmsf --job-arrays --partition aa100
 
 # Rely on plugin memory hints and cluster default partition
 polyzymd compare submit secondary_structure --qos normal
+
+# Blanca condo nodes at CU Boulder
+module load slurm/blanca
+polyzymd compare submit sasa \
+    -f comparison.yaml \
+    --partition blanca-shirts \
+    --account blanca-shirts \
+    --qos blanca-shirts \
+    --mem 8G \
+    --time 02:00:00
 ```
 
 ### polyzymd compare submit-all

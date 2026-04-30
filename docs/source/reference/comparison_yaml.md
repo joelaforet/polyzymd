@@ -25,6 +25,24 @@ For CLI commands that consume this file, see
 {doc}`analysis_comparison_reference`. For directory layout and data
 expectations, see {doc}`data_requirements`.
 
+Typical local workflow:
+
+```bash
+pixi run -e build polyzymd compare validate -f comparison.yaml
+pixi run -e build polyzymd compare run rmsf -f comparison.yaml
+pixi run -e build polyzymd compare plot-all -f comparison.yaml
+```
+
+Typical SLURM workflow:
+
+```bash
+pixi run -e build polyzymd compare submit sasa -f comparison.yaml --dry-run
+pixi run -e build polyzymd compare submit sasa -f comparison.yaml --partition <part>
+pixi run -e build polyzymd compare status sasa -f comparison.yaml
+pixi run -e build polyzymd compare finalize sasa -f comparison.yaml
+pixi run -e build polyzymd compare plot-all -f comparison.yaml
+```
+
 ---
 
 ## Minimal Working Example
@@ -119,8 +137,8 @@ defaults.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `runs` | list | **(required)** | List of SASA run definitions (see sub-fields) |
-| `probe_radius_nm` | float | `0.14` | SASA probe radius in nanometers |
-| `n_sphere_points` | int | `960` | Number of sphere points for Shrake-Rupley SASA |
+| `probe_radius_nm` | float | `0.14` | MDTraj Shrake-Rupley probe radius in nanometers |
+| `n_sphere_points` | int | `960` | Number of sphere points for MDTraj Shrake-Rupley SASA |
 | `chunk_size` | int | `100` | Frames per chunk for memory management |
 
 Each entry in `runs`:
@@ -243,7 +261,7 @@ Each entry in `runs`:
 | `angle_cutoff` | float | `150` | H-bond angle cutoff in degrees |
 | `update_selections` | bool | `true` | Update atom selections every frame |
 | `top_n_pairs` | int | `15` | Number of top residue pairs to report |
-| `allow_empty_groups` | bool | `false` | Allow empty group selections: `true` = warn and skip summaries when a group matches no atoms; `false` = raise error |
+| `allow_empty_groups` | bool | `true` | Allow empty group selections: `true` = warn and skip summaries when a group matches no atoms; `false` = raise error |
 | `allow_overlapping_composition` | bool | `false` | Whether overlapping composition partitions are allowed |
 | `composition` | mapping | `null` | Composition analysis settings |
 | `timestep_ps` | float | `null` | Override trajectory timestep in picoseconds for time-axis plots |
@@ -257,6 +275,10 @@ Each summary entry in `summaries` has:
 | `within` | `group_name` | exactly one of `between` / `within` | Intra-group H-bonds |
 
 For mapping-form input, keys are treated as `name` values.
+
+Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` with hydrogens
+selected as `(<group union>) and element H`; topologies need explicit hydrogens
+and usable element metadata.
 
 `composition` sub-fields:
 

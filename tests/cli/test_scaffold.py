@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -16,6 +16,8 @@ from polyzymd.cli.scaffold import (
     validate_class_name,
     validate_name,
 )
+
+FakeSimulationConfig = SimpleNamespace
 
 # ---------------------------------------------------------------------------
 # Unit tests — validate_name
@@ -120,11 +122,15 @@ class TestGenerateScaffold:
         init = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell" / "__init__.py"
         text = init.read_text()
 
-        # Dict-style: class exists, has name, Settings, lifecycle methods
+        # Dict-style: class exists, has name, Settings, runner-backed lifecycle methods
         assert "class SolventShellAnalysis(Analysis):" in text
+        assert "class SolventShellReplicateRunner:" in text
         assert 'name: ClassVar[str] = "solvent_shell"' in text
         assert "class Settings(BaseModel):" in text
-        assert "def run_replicate(" in text
+        assert "def build_runner(" in text
+        assert "def summarize_replicate(" in text
+        assert "def run_replicate(" not in text
+        assert "def compute_replicate(" not in text
         assert "def aggregate(" in text
         assert "def extract_metrics(" in text
         assert "def plot(self, ctx: PlotContext)" in text
@@ -156,10 +162,11 @@ class TestGenerateScaffold:
         text = tf.read_text()
 
         assert "class TestDiscovery:" in text
-        assert "class TestRunReplicate:" in text
+        assert "class TestRunnerBackedReplicate:" in text
         assert "class TestAggregate:" in text
         assert "class TestExtractMetrics:" in text
         assert "class TestPlot:" in text
+        assert "test_run_replicate_uses_base_runner_dispatch" in text
 
     def test_custom_class_name(self, tmp_path: Path):
         (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
@@ -239,9 +246,14 @@ class TestGenerateScaffoldPydantic:
 
         assert "class SolventShellAnalysis(Analysis):" in text
         assert 'name: ClassVar[str] = "solvent_shell"' in text
+        assert "ReplicateResultClass: ClassVar[type] = SolventShellReplicateResult" in text
         assert "AggregatedResultClass: ClassVar[type] = SolventShellAggregatedResult" in text
+        assert "class SolventShellReplicateRunner:" in text
         assert "class Settings(BaseModel):" in text
-        assert "def run_replicate(" in text
+        assert "def build_runner(" in text
+        assert "def summarize_replicate(" in text
+        assert "def run_replicate(" not in text
+        assert "def compute_replicate(" not in text
         assert "def aggregate(" in text
         assert "def extract_metrics(" in text
         assert "def plot(self, ctx: PlotContext)" in text
@@ -268,10 +280,11 @@ class TestGenerateScaffoldPydantic:
         text = tf.read_text()
 
         assert "class TestDiscovery:" in text
-        assert "class TestRunReplicate:" in text
+        assert "class TestRunnerBackedReplicate:" in text
         assert "class TestAggregate:" in text
         assert "class TestExtractMetrics:" in text
         assert "class TestPlot:" in text
+        assert "test_run_replicate_uses_base_runner_dispatch" in text
         # Pydantic test imports the typed result models
         assert "SolventShellReplicateResult" in text
         assert "SolventShellAggregatedResult" in text
@@ -378,6 +391,36 @@ class TestGeneratedCodeQuality:
 class TestGeneratedPluginEndToEnd:
     """End-to-end checks for scaffolded plugin discovery and lifecycle."""
 
+    class FakeTrajectory:
+        """Minimal trajectory with a length for runner dispatch tests."""
+
+        def __len__(self) -> int:
+            return 5
+
+    class FakeUniverse:
+        """Minimal Universe exposing a trajectory."""
+
+        def __init__(self) -> None:
+            self.trajectory = TestGeneratedPluginEndToEnd.FakeTrajectory()
+
+    class FakeWindow:
+        """Minimal trajectory window for base runner dispatch."""
+
+        warning_message: str | None = None
+
+        def run_kwargs(self) -> dict[str, int | None]:
+            return {"start": 1, "stop": 5, "step": 2}
+
+    class FakeLoader:
+        """Minimal loader that returns a fake Universe."""
+
+        def __init__(self, sim_config):
+            self.sim_config = sim_config
+
+        def load_universe(self, replicate: int):
+            self.replicate = replicate
+            return TestGeneratedPluginEndToEnd.FakeUniverse()
+
     def test_dict_scaffold_is_discoverable_and_comparable(
         self,
         tmp_path: Path,
@@ -415,12 +458,14 @@ class TestGeneratedPluginEndToEnd:
             analysis_cls = get_analysis(plugin_name)
             analysis = analysis_cls()
             settings = analysis_cls.Settings()
+            assert "compute_replicate" not in analysis_cls.__dict__
+            assert "run_replicate" not in analysis_cls.__dict__
 
             condition = Condition(
                 label="Scaffold Condition",
                 config_path=tmp_path / "config.yaml",
                 replicates=(1, 2),
-                sim_config=MagicMock(),
+                sim_config=FakeSimulationConfig(name="scaffold_condition"),
             )
 
             rep_ctx = ReplicateContext(
@@ -432,9 +477,16 @@ class TestGeneratedPluginEndToEnd:
                 recompute=True,
                 settings=settings,
             )
+            monkeypatch.setattr(analysis, "_trajectory_loader_factory", lambda: self.FakeLoader)
+            monkeypatch.setattr(
+                analysis,
+                "get_trajectory_window",
+                lambda *args: self.FakeWindow(),
+            )
             replicate_result = analysis.run_replicate(rep_ctx, replicate=1)
             assert isinstance(replicate_result, dict)
-            assert replicate_result["value"] == pytest.approx(1.0)
+            assert replicate_result["value"] == pytest.approx(2.0)
+            assert replicate_result["n_frames"] == 2
 
             agg_ctx = AggregateContext(
                 condition=condition,
@@ -446,12 +498,13 @@ class TestGeneratedPluginEndToEnd:
             aggregated = analysis.aggregate(
                 agg_ctx,
                 results=[
-                    {"value": 1.0, "replicate": 1},
-                    {"value": 3.0, "replicate": 2},
+                    {"value": 1.0, "replicate": 1, "n_frames": 4},
+                    {"value": 3.0, "replicate": 2, "n_frames": 4},
                 ],
             )
             assert isinstance(aggregated, dict)
             assert aggregated["mean_value"] == pytest.approx(2.0)
+            assert aggregated["n_replicates"] == 2
 
             metrics = analysis.extract_metrics(aggregated)
             assert "value" in metrics

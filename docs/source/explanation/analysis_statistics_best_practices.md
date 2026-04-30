@@ -119,8 +119,8 @@ don't provide as much *independent* information.
 
 $$\text{SEM} = \frac{\sigma}{\sqrt{N_{\text{eff}}}} = \frac{\sigma}{\sqrt{N/g}}$$
 
-This is exactly what PolyzyMD's distances plugin does internally in
-`compute_replicate()`:
+This is the treatment used by runner-backed first-moment analyses such as
+distances:
 
 ```python
 # From analyses/distances/__init__.py (DistanceCalculator internals)
@@ -172,8 +172,8 @@ frame_indices = get_independent_indices(
 
 ### Distance analysis
 
-The distances plugin computes distances for **all frames** in
-`compute_replicate()` and uses autocorrelation to correct the uncertainty:
+The distances plugin computes distances for **all analyzed frames** and uses
+autocorrelation to correct the uncertainty:
 
 ```python
 # Compute distances for every frame
@@ -194,8 +194,8 @@ our actual uncertainty.
 
 ### RMSF analysis
 
-The RMSF plugin **subsamples** to independent frames in `compute_replicate()`
-before computing fluctuations:
+The RMSF plugin **subsamples** to independent frames in its runner-backed
+replicate stage before computing fluctuations:
 
 ```python
 # Compute RMSD timeseries for ACF

@@ -3133,14 +3133,14 @@ def new_analysis(
     force: bool,
     dry_run: bool,
 ) -> None:
-    """Scaffold a new analysis plugin.
+    """Scaffold a runner-backed analysis plugin.
 
     NAME is the snake_case plugin name (e.g. 'solvent_shell').
 
     Creates:
 
     \b
-      src/polyzymd/analyses/<NAME>/__init__.py    — plugin class
+      src/polyzymd/analyses/<NAME>/__init__.py    — runner-backed plugin class
       tests/analyses/plugins/test_<NAME>.py       — smoke tests
 
     Styles:

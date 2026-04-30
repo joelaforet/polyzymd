@@ -86,6 +86,18 @@ These match the standard MDAnalysis `HydrogenBondAnalysis` defaults. The
 distance is measured between the heavy-atom donor and the acceptor (not the
 hydrogen). The angle is measured at the hydrogen: D–H···A.
 
+:::{admonition} Topology and hydrogen caveats
+:class: important
+
+The plugin passes your configured group union to MDAnalysis as the donor and
+acceptor selection, and uses `(<group union>) and element H` for hydrogens. This
+means your topology must contain explicit hydrogen atoms and usable element
+metadata for hydrogen selection. Topologies without hydrogens, with missing or
+incorrect element records, or with coarse-grained beads will undercount or
+return no H-bonds. The current public settings do not expose separate donor,
+hydrogen, and acceptor selection strings.
+:::
+
 ### Groups
 
 ```yaml
@@ -324,8 +336,8 @@ plugins:
 pixi run -e build polyzymd compare run hydrogen_bonds
 ```
 
-This runs the full pipeline: `compute_replicate` for every replicate,
-`aggregate` for every condition, then `compare` and `plot`.
+This runs the full pipeline: the runner-backed replicate stage for every
+replicate, `aggregate` for every condition, then `compare` and `plot`.
 
 ### HPC execution
 

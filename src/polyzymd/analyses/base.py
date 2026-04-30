@@ -14,14 +14,18 @@ How to Add a New Analysis
 
 Valid lifecycle modes
 ---------------------
-When ``has_compute_stage = True``, choose one per-replicate path:
+Public contributor plugins with ``has_compute_stage = True`` should use the
+runner-backed per-replicate path:
 
-- Canonical plugins override ``run_replicate(ctx, replicate)``
 - Runner-backed plugins implement ``build_runner()`` and
   ``summarize_replicate()``; MDAnalysis owns per-trajectory iteration there,
   while PolyzyMD owns caching, ensemble aggregation, and comparison workflow
 - Compare-only plugins disable compute entirely with
   ``has_compute_stage = False``
+
+``run_replicate(ctx, replicate)`` is the canonical framework entry point used by
+the orchestrator. It is kept overridable for internal and advanced plugins, but
+new contributor-facing plugins should not override it.
 
 ``aggregate(ctx, results)`` is required only when
 ``has_aggregate_stage = True``
@@ -853,14 +857,29 @@ class Analysis(ABC):
 
     Examples
     --------
-    **Simple plugin** using the default comparison pipeline (t-tests,
-    ANOVA, ranking).  Implement ``extract_metrics()`` — the framework
-    deserializes aggregated results automatically via ``json.loads()``::
+    **Simple runner-backed plugin** using the default comparison pipeline
+    (t-tests, ANOVA, ranking). Implement ``build_runner()``,
+    ``summarize_replicate()``, and ``extract_metrics()`` — the framework
+    dispatches the runner and deserializes aggregated results automatically via
+    ``json.loads()``::
 
         from polyzymd.analyses.base import (
             AggregateContext, Analysis, MetricValue, ReplicateContext,
         )
         from pydantic import BaseModel
+
+        class RgRunner:
+            def __init__(self, universe, settings):
+                self.universe = universe
+                self.settings = settings
+                self.results = {}
+
+            def run(self, start, stop, step=1):
+                import numpy as np
+                # Use the provided universe and frame window
+                ...
+                self.results = {"mean_rg": float(np.mean(rg_values))}
+                return self
 
         class RgAnalysis(Analysis):
             name = "rg"
@@ -868,12 +887,14 @@ class Analysis(ABC):
             class Settings(BaseModel):
                 selection: str = "protein and name CA"
 
-            def run_replicate(self, ctx, replicate):
-                import MDAnalysis as mda
-                import numpy as np
-                # Use ctx.sim_config, ctx.settings — never load configs yourself
-                ...
-                return {"mean_rg": float(np.mean(rg_values)), "replicate": replicate}
+            def build_runner(self, ctx, replicate, universe, window):
+                # Use ctx.settings and the provided universe; never load configs yourself
+                del replicate, window
+                return RgRunner(universe, ctx.settings)
+
+            def summarize_replicate(self, ctx, replicate, runner, window):
+                del ctx, window
+                return {"mean_rg": runner.results["mean_rg"], "replicate": replicate}
 
             def aggregate(self, ctx, results):
                 import numpy as np
@@ -939,9 +960,9 @@ class Analysis(ABC):
         """Run analysis for a single replicate.
 
         This is the canonical internal framework entry point for
-        per-replicate execution. Plugin code should override this method or
-        use the runner-backed ``build_runner()`` + ``summarize_replicate()``
-        seam.
+        per-replicate execution. Public contributor plugins should keep this
+        method inherited and use the runner-backed ``build_runner()`` +
+        ``summarize_replicate()`` seam.
 
         Parameters
         ----------
@@ -959,7 +980,7 @@ class Analysis(ABC):
         Notes
         -----
         The base implementation dispatches only to the runner seam. Direct
-        per-replicate plugins should override this method.
+        per-replicate overrides are reserved for internal or advanced plugins.
         """
 
         if not type(self).has_compute_stage:
@@ -992,14 +1013,16 @@ class Analysis(ABC):
         Notes
         -----
         This hook remains only to provide a clear migration error for direct
-        calls. Plugin subclasses should implement :meth:`run_replicate` for a
-        direct path or implement :meth:`build_runner` and
-        :meth:`summarize_replicate` for the runner-backed path.
+        calls. Public contributor plugins should implement :meth:`build_runner`
+        and :meth:`summarize_replicate`. Direct :meth:`run_replicate` overrides
+        are reserved for advanced or internal plugins that need custom cache,
+        sidecar, or dispatch behavior.
         """
         del ctx, replicate
         raise NotImplementedError(
             f"{type(self).__name__}.compute_replicate() is no longer supported. "
-            "Implement run_replicate() or build_runner() + summarize_replicate() instead."
+            "Public plugins should implement build_runner() + summarize_replicate(); "
+            "direct run_replicate() overrides are advanced/internal only."
         )
 
     def _run_replicate_default(
@@ -1010,8 +1033,8 @@ class Analysis(ABC):
         """Run the default per-replicate dispatch path.
 
         The default path supports compute-disabled plugins and runner-backed
-        plugins. Direct per-replicate plugins should override
-        :meth:`run_replicate`.
+        plugins. Direct per-replicate overrides of :meth:`run_replicate` are
+        reserved for internal or advanced plugins.
 
         Parameters
         ----------
@@ -1032,9 +1055,9 @@ class Analysis(ABC):
         if result is not _RUNNER_NOT_CONFIGURED:
             return result
         raise NotImplementedError(
-            f"{type(self).__name__} must implement run_replicate() "
-            "or build_runner() + summarize_replicate() "
-            "or set has_compute_stage = False."
+            f"{type(self).__name__} public plugins must implement "
+            "build_runner() + summarize_replicate() or set has_compute_stage = False; "
+            "direct run_replicate() overrides are advanced/internal only."
         )
 
     def aggregate(
@@ -1478,7 +1501,8 @@ class Analysis(ABC):
         if runner is None:
             raise PluginContractError(
                 f"{type(self).__name__}.build_runner() returned None. "
-                "Implement run_replicate() for the direct path or return a runner."
+                "Return a runner from build_runner(); direct run_replicate() overrides are "
+                "advanced/internal only."
             )
         run_method = getattr(runner, "run", None)
         if not callable(run_method):
@@ -1840,7 +1864,8 @@ class Analysis(ABC):
         if overrides_compute_replicate:
             raise TypeError(
                 f"Analysis subclass {cls.__name__} overrides deprecated compute_replicate(). "
-                "Implement run_replicate() or both build_runner() and summarize_replicate() instead."
+                "Public plugins should implement both build_runner() and summarize_replicate(); "
+                "direct run_replicate() overrides are advanced/internal only."
             )
 
         if cls.has_compute_stage and not uses_run_replicate:
@@ -1851,9 +1876,9 @@ class Analysis(ABC):
                 )
             if not uses_runner_build:
                 raise TypeError(
-                    f"Analysis subclass {cls.__name__} must implement run_replicate() "
-                    "or both build_runner() and summarize_replicate() when "
-                    "has_compute_stage=True."
+                    f"Analysis subclass {cls.__name__} public plugins must implement both "
+                    "build_runner() and summarize_replicate() when has_compute_stage=True; "
+                    "direct run_replicate() overrides are advanced/internal only."
                 )
 
     def __repr__(self) -> str:

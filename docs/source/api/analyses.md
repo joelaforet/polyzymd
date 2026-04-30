@@ -30,7 +30,7 @@ adding new analysis types to PolyzyMD.
 
 ### Context Objects
 
-- `ReplicateContext` — passed to `compute_replicate()`
+- `ReplicateContext` — passed to runner-backed replicate hooks
 - `AggregateContext` — passed to `aggregate()`
 - `ComparisonContext` — passed to `compare()`
 - `PlotContext` — passed to `plot()`

@@ -46,10 +46,10 @@ directed acyclic graph (DAG) of SLURM jobs:
                 └─────────────────────┘
 ```
 
-**Replicate jobs** each run `compute_replicate()` for one (condition, replicate)
-pair. **Aggregate jobs** wait for all replicates of their condition to finish,
-then run `aggregate()`. The **finalize job** waits for all aggregate jobs, then
-runs the cross-condition comparison and generates plots.
+**Replicate jobs** each run the runner-backed replicate stage for one
+(condition, replicate) pair. **Aggregate jobs** wait for all replicates of their
+condition to finish, then run `aggregate()`. The **finalize job** waits for all
+aggregate jobs, then runs the cross-condition comparison and generates plots.
 
 Each job includes automatic retry logic. If a worker exits with a non-zero
 code, it requeues itself up to `--max-retries` times (default: 3) before
@@ -148,7 +148,7 @@ plugins:
         context_selection: "protein"
       - label: "protein_with_polymer"
         target_selection: "protein"
-        context_selection: "protein or chainid C"
+        context_selection: "protein or chainID C"
     probe_radius_nm: 0.14
     n_sphere_points: 960
 
@@ -510,8 +510,10 @@ For `--mem`, `--time`, and `--cpus-per-task`, submission precedence is:
 2. plugin `slurm_resource_hint`
 3. system default
 
-Current memory hints:
+Current plugin resource hints:
 
+- `sasa`: `8G`, `02:00:00`
+- `exposure`: `16G`
 - `secondary_structure`: `16G`
 - `hydrogen_bonds`: `16G`
 
@@ -562,15 +564,15 @@ Use environment modules to select which cluster's SLURM scheduler you target:
 
 ```bash
 # Target Blanca (PI-owned condo nodes)
-ml slurm/blanca
+module load slurm/blanca
 
 # Target Alpine (shared campus resource)
-ml slurm/alpine
+module load slurm/alpine
 ```
 
-Run the appropriate `ml slurm/<cluster>` command **before** any `polyzymd`
-submission command. The module swap updates `sbatch`, `squeue`, and other
-SLURM utilities to point at the selected cluster.
+Run the appropriate `module load slurm/<cluster>` command **before** any
+`polyzymd` submission command. The module swap updates `sbatch`, `squeue`, and
+other SLURM utilities to point at the selected cluster.
 
 ### Required SLURM flags
 
@@ -593,7 +595,7 @@ Alpine. Add `--partition=blanca-<group>` and resubmit.
 ### Example: submit all analyses on Alpine
 
 ```bash
-ml slurm/alpine
+module load slurm/alpine
 
 pixi run -e build polyzymd compare submit-all \
     -f comparison.yaml \
@@ -608,7 +610,7 @@ On Blanca, the partition, account, and QoS are typically the same value —
 your PI's condo allocation name:
 
 ```bash
-ml slurm/blanca
+module load slurm/blanca
 
 pixi run -e build polyzymd compare submit-all \
     -f comparison.yaml \

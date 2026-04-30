@@ -176,10 +176,16 @@ docs, and generated figures.
 
 ## Output Locations
 
-- comparison JSON files are written to `comparison/<analysis>/result.json`
-- figures are written under the configured `plot_settings.output_dir`
-- default project scaffolds create a `figures/` directory next to
-  `comparison.yaml`
+- per-replicate cache files are written under
+  `analysis/<condition>/<analysis>/run_<replicate>/`
+- per-condition aggregate files are written under
+  `analysis/<condition>/<analysis>/aggregated/`
+- cross-condition comparison JSON files are written to
+  `comparison/<analysis>/result.json`
+- figures are written under the configured `plot_settings.output_dir`, usually
+  `figures/<analysis>/`
+- default project scaffolds create `analysis/`, `comparison/`, and `figures/`
+  directories next to `comparison.yaml`
 
 Typical comparison cache paths:
 
