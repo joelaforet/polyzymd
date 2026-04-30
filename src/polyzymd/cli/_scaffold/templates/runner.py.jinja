@@ -1,0 +1,54 @@
+"""Trajectory runner for the {{ spec.name }} analysis."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+class {{ spec.class_name }}ReplicateRunner:
+    """Small trajectory runner for one {{ spec.name }} replicate.
+
+    Parameters
+    ----------
+    universe : Any
+        Loaded MDAnalysis Universe for the replicate.
+    settings : Any
+        Analysis settings resolved from ``comparison.yaml``.
+    """
+
+    def __init__(self, universe: Any, settings: Any) -> None:
+        self.universe = universe
+        self.settings = settings
+        self.results: dict[str, Any] = {}
+
+    def run(
+        self,
+        start: int,
+        stop: int | None,
+        step: int = 1,
+    ) -> "{{ spec.class_name }}ReplicateRunner":
+        """Execute the placeholder trajectory loop.
+
+        Parameters
+        ----------
+        start : int
+            First frame index to include.
+        stop : int or None
+            Stop frame index. If ``None``, use the trajectory length.
+        step : int, optional
+            Frame stride, by default 1.
+
+        Returns
+        -------
+        {{ spec.class_name }}ReplicateRunner
+            This runner with ``results`` populated.
+        """
+        n_total = len(self.universe.trajectory)
+        stop_frame = n_total if stop is None else min(stop, n_total)
+        n_frames = len(range(start, stop_frame, step))
+        self.results = {
+            "value": float(n_frames),
+            "n_frames": n_frames,
+            "example_parameter": self.settings.example_parameter,
+        }
+        return self

@@ -15,8 +15,14 @@ pixi run -e build polyzymd new-analysis solvent_shell
 pixi run -e build pytest tests/analyses/plugins/test_solvent_shell.py -v
 ```
 
-The generated plugin lives in `src/polyzymd/analyses/<name>/__init__.py`. It is
-discovered automatically by `pkgutil`; no registry edits are needed.
+The generated plugin is a small package under `src/polyzymd/analyses/<name>/`:
+
+- `__init__.py` contains the `Analysis` facade and lifecycle wiring
+- `_runner.py` contains the trajectory runner
+- `_results.py` is added for `--style pydantic` result models
+
+The package is discovered automatically by `pkgutil`; no registry edits are
+needed.
 
 Choose the result-container style with `--style`:
 
@@ -26,7 +32,8 @@ pixi run -e build polyzymd new-analysis solvent_shell --style pydantic
 ```
 
 Both styles use the same lifecycle. The style only changes whether replicate
-and aggregated results are plain dicts or Pydantic models.
+and aggregated results are plain dicts or Pydantic models stored in
+`_results.py`.
 
 ## The public lifecycle
 
@@ -141,9 +148,10 @@ base dispatch path.
 
 ## Pydantic result models
 
-For more structured output, use `--style pydantic`. The generated class sets
-`ReplicateResultClass` and `AggregatedResultClass` so framework serialization
-and deserialization use your Pydantic models.
+For more structured output, use `--style pydantic`. The scaffold writes result
+models to `_results.py` and re-exports them from the package facade. The
+generated class sets `ReplicateResultClass` and `AggregatedResultClass` so
+framework serialization and deserialization use your Pydantic models.
 
 Avoid manually documenting Pydantic fields in class docstrings; Sphinx renders
 field documentation automatically.
@@ -152,8 +160,9 @@ field documentation automatically.
 
 The base dispatch creates a `TrajectoryLoader` from `ctx.sim_config` and calls
 `loader.load_universe(replicate)`. Heavy dependencies such as MDAnalysis,
-OpenMM, OpenFF, ParmEd, and PDBFixer must be imported lazily inside methods or
-runner modules.
+OpenMM, OpenFF, ParmEd, and PDBFixer must be imported lazily inside functions
+or methods, including functions and methods defined in `_runner.py`. Do not
+import these packages at module level in any plugin module.
 
 Selection strings are passed to MDAnalysis `Universe.select_atoms()` unless a
 plugin explicitly documents a plugin-specific wrapper such as `com(...)` for

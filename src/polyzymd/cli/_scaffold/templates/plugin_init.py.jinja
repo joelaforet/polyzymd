@@ -1,0 +1,350 @@
+"""{{ spec.title }} analysis plugin.
+
+{% if spec.uses_pydantic_results %}
+Uses typed Pydantic result models for validation and IDE autocomplete. The
+facade re-exports result models from ``_results.py`` so package-level imports
+remain convenient.
+{% else %}
+Uses plain dicts for result containers. This is the simplest starting point.
+Migrate to Pydantic result models later if you need typed attribute access or
+validation.
+{% endif %}
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any, ClassVar, Sequence
+
+from pydantic import BaseModel, Field
+
+from polyzymd.analyses.base import (
+    AggregateContext,
+    Analysis,
+    ComparisonResult,
+    MetricValue,
+    PlotContext,
+    ReplicateContext,
+)
+from polyzymd.analyses.stats import format_scalar_comparison
+
+{% if spec.uses_pydantic_results %}
+from ._results import (
+    {{ spec.class_name }}AggregatedResult,
+    {{ spec.class_name }}ReplicateResult,
+)
+{% endif %}
+from ._runner import {{ spec.class_name }}ReplicateRunner
+
+logger = logging.getLogger(__name__)
+
+
+class {{ spec.class_name }}Analysis(Analysis):
+    """{{ spec.title }} analysis facade.
+
+    Implements lifecycle wiring for runner construction, replicate
+    summarization, cross-replicate aggregation, scalar comparison, formatting,
+    and plotting.
+    """
+
+    name: ClassVar[str] = "{{ spec.name }}"
+{% if spec.uses_pydantic_results %}
+    ReplicateResultClass: ClassVar[type] = {{ spec.class_name }}ReplicateResult
+    AggregatedResultClass: ClassVar[type] = {{ spec.class_name }}AggregatedResult
+{% endif %}
+
+    class Settings(BaseModel):
+        """Settings for the {{ spec.name }} analysis.
+
+        Add analysis-specific fields here. These are resolved from the
+        ``comparison.yaml`` plugins section.
+        """
+
+        example_parameter: str = Field(
+            default="dummy",
+            description="Replace with real settings for your analysis.",
+        )
+
+    def build_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        universe: Any,
+        window: Any,
+    ) -> {{ spec.class_name }}ReplicateRunner:
+        """Build the trajectory runner for one replicate.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        universe : Any
+            Loaded MDAnalysis Universe for the replicate.
+        window : Any
+            Resolved trajectory window.
+
+        Returns
+        -------
+        {{ spec.class_name }}ReplicateRunner
+            Runner consumed by the base ``run_replicate()`` dispatch.
+        """
+        del replicate, window
+        return {{ spec.class_name }}ReplicateRunner(universe=universe, settings=ctx.settings)
+
+    def summarize_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        runner: Any,
+        window: Any,
+{% if spec.uses_pydantic_results %}
+    ) -> {{ spec.class_name }}ReplicateResult:
+{% else %}
+    ) -> dict[str, Any]:
+{% endif %}
+        """Convert an executed runner into a replicate result.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        runner : Any
+            Executed runner with a ``results`` attribute.
+        window : Any
+            Resolved trajectory window used for the run.
+
+        Returns
+        -------
+{% if spec.uses_pydantic_results %}
+        {{ spec.class_name }}ReplicateResult
+            Per-replicate typed result for aggregation.
+{% else %}
+        dict[str, Any]
+            Per-replicate result for aggregation.
+{% endif %}
+        """
+        del ctx, window
+{% if spec.uses_pydantic_results %}
+        return {{ spec.class_name }}ReplicateResult(
+            replicate=replicate,
+            value=float(runner.results["value"]),
+            n_frames=int(runner.results["n_frames"]),
+            example_parameter=str(runner.results["example_parameter"]),
+        )
+{% else %}
+        return {
+            "replicate": replicate,
+            "value": float(runner.results["value"]),
+            "n_frames": int(runner.results["n_frames"]),
+            "example_parameter": str(runner.results["example_parameter"]),
+        }
+{% endif %}
+
+    def aggregate(
+        self,
+        ctx: AggregateContext,
+        results: Sequence[Any],
+{% if spec.uses_pydantic_results %}
+    ) -> {{ spec.class_name }}AggregatedResult:
+{% else %}
+    ) -> dict[str, Any]:
+{% endif %}
+        """Aggregate replicate results for one condition.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregate context.
+        results : Sequence[Any]
+            Per-replicate results returned by ``summarize_replicate()``.
+
+        Returns
+        -------
+{% if spec.uses_pydantic_results %}
+        {{ spec.class_name }}AggregatedResult
+            Aggregated result model for the condition.
+{% else %}
+        dict[str, Any]
+            Aggregated result mapping for the condition.
+{% endif %}
+        """
+        del ctx
+{% if spec.uses_pydantic_results %}
+        values = [
+            float(result.value if hasattr(result, "value") else result["value"])
+            for result in results
+        ]
+{% else %}
+        values = [float(result["value"]) for result in results]
+{% endif %}
+        n = len(values)
+        if n == 0:
+            raise ValueError("aggregate() received no results — cannot compute statistics.")
+        mean = sum(values) / n
+        sem = 0.0
+        if n > 1:
+            variance = sum((value - mean) ** 2 for value in values) / (n - 1)
+            sem = (variance**0.5) / (n**0.5)
+{% if spec.uses_pydantic_results %}
+        return {{ spec.class_name }}AggregatedResult(
+            mean_value=mean,
+            sem_value=sem,
+            replicate_values=values,
+            n_replicates=n,
+        )
+{% else %}
+        return {
+            "mean_value": mean,
+            "sem_value": sem,
+            "replicate_values": values,
+            "n_replicates": n,
+        }
+{% endif %}
+
+    def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
+        """Expose scalar metrics for the default comparison pipeline.
+
+        Parameters
+        ----------
+        summary : Any
+            Aggregated result loaded by the default comparison workflow.
+
+        Returns
+        -------
+        dict[str, MetricValue]
+            Scalar metrics to compare across conditions.
+        """
+{% if spec.uses_pydantic_results %}
+        mean_value = float(summary.mean_value)
+        sem_value = float(summary.sem_value)
+        replicate_values = [float(value) for value in summary.replicate_values]
+{% else %}
+        mean_value = float(summary["mean_value"])
+        sem_value = float(summary["sem_value"])
+        replicate_values = [float(value) for value in summary["replicate_values"]]
+{% endif %}
+        return {
+            "value": MetricValue(
+                name="value",
+                mean=mean_value,
+                sem=sem_value,
+                replicate_values=replicate_values,
+                higher_is_better=True,
+                direction_labels=("decreased", "unchanged", "increased"),
+            )
+        }
+
+    def format(self, result: Any, output_format: str = "text") -> str:
+        """Format comparison result for CLI display.
+
+        Parameters
+        ----------
+        result : Any
+            Comparison result returned by ``compare()``.
+        output_format : str, optional
+            Output format requested by the CLI, by default ``"text"``.
+
+        Returns
+        -------
+        str
+            Formatted comparison result.
+        """
+        if isinstance(result, ComparisonResult):
+            return format_scalar_comparison(
+                result,
+                title="{{ spec.title }} Comparison",
+                metric_label="Mean Value",
+                metric_unit="",
+                metric_key="value",
+                output_format=output_format,
+                higher_is_better=True,
+            )
+        return super().format(result, output_format)
+
+    def plot(self, ctx: PlotContext) -> list[Path]:
+        """Generate comparison figures.
+
+        Parameters
+        ----------
+        ctx : PlotContext
+            Framework-provided plotting context.
+
+        Returns
+        -------
+        list[Path]
+            Generated figure paths.
+        """
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        from polyzymd.analyses.shared import (
+            apply_axis_style,
+            get_colors,
+            get_output_path,
+            save_figure,
+        )
+
+        data, labels = self._build_plot_data(ctx)
+        if not labels:
+            return []
+
+        means: list[float] = []
+        sems: list[float] = []
+        valid_labels: list[str] = []
+        for label in labels:
+            if label not in data or label == "__meta__":
+                continue
+            agg_dir = data[label]["aggregated_dir"]
+            summary = self._load_aggregated_result(agg_dir)
+            if summary is None:
+                continue
+{% if spec.uses_pydantic_results %}
+            means.append(float(summary.mean_value))
+            sems.append(float(summary.sem_value))
+{% else %}
+            means.append(float(summary["mean_value"]))
+            sems.append(float(summary["sem_value"]))
+{% endif %}
+            valid_labels.append(label)
+
+        if not valid_labels:
+            return []
+
+        plot_settings = ctx.plot_settings
+        colors = get_colors(len(valid_labels), plot_settings)
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.bar(valid_labels, means, yerr=sems, capsize=5, color=colors[: len(valid_labels)])
+        apply_axis_style(
+            ax,
+            plot_settings,
+            title="{{ spec.title }} Comparison",
+            ylabel="Value",
+        )
+
+        output_path = get_output_path(
+            ctx.output_dir,
+            "{{ spec.name }}_comparison",
+            plot_settings,
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        save_figure(fig, output_path, plot_settings)
+        return [output_path]
+
+
+{% if spec.uses_pydantic_results %}
+__all__ = [
+    "{{ spec.class_name }}AggregatedResult",
+    "{{ spec.class_name }}Analysis",
+    "{{ spec.class_name }}ReplicateResult",
+]
+{% else %}
+__all__ = ["{{ spec.class_name }}Analysis"]
+{% endif %}

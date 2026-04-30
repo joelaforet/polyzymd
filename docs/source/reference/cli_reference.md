@@ -685,9 +685,11 @@ Options:
   --dry-run                         Print paths without writing files
 ```
 
-The generated plugin implements `build_runner()`, `summarize_replicate()`,
-`aggregate()`, `extract_metrics()`, and `plot()`. The base class handles the
-per-replicate dispatch.
+The generated plugin package contains an `__init__.py` analysis facade and a
+`_runner.py` trajectory runner. With `--style pydantic`, it also includes
+`_results.py` result models re-exported from the facade. The facade implements
+`build_runner()`, `summarize_replicate()`, `aggregate()`, `extract_metrics()`,
+and `plot()`. The base class handles the per-replicate dispatch.
 
 ```bash
 polyzymd new-analysis solvent_shell

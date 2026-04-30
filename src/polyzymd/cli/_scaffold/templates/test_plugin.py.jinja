@@ -1,0 +1,335 @@
+"""Tests for the {{ spec.name }} analysis plugin ({{ spec.style }} style)."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from polyzymd.analyses.base import (
+    AggregateContext,
+    Condition,
+    MetricValue,
+    PlotContext,
+    ReplicateContext,
+)
+from polyzymd.analyses.discovery import clear_cache, get_analysis
+{% if spec.uses_pydantic_results %}
+from polyzymd.analyses.{{ spec.name }} import (
+    {{ spec.class_name }}AggregatedResult,
+    {{ spec.class_name }}Analysis,
+    {{ spec.class_name }}ReplicateResult,
+)
+{% endif %}
+from polyzymd.analyses.{{ spec.name }}._runner import (
+    {{ spec.class_name }}ReplicateRunner,
+)
+from polyzymd.analyses.shared import PlotSettings
+
+FakeSimulationConfig = SimpleNamespace
+
+
+@pytest.fixture
+def analysis():
+{% if spec.uses_pydantic_results %}
+    return {{ spec.class_name }}Analysis()
+{% else %}
+    cls = get_analysis("{{ spec.name }}")
+    return cls()
+{% endif %}
+
+
+@pytest.fixture
+def settings():
+{% if spec.uses_pydantic_results %}
+    return {{ spec.class_name }}Analysis.Settings()
+{% else %}
+    cls = get_analysis("{{ spec.name }}")
+    return cls.Settings()
+{% endif %}
+
+
+@pytest.fixture
+def plot_settings() -> PlotSettings:
+    return PlotSettings()
+
+
+@pytest.fixture
+def condition(tmp_path: Path) -> Condition:
+    return Condition(
+        label="Condition A",
+        config_path=tmp_path / "config.yaml",
+        replicates=(1, 2),
+        sim_config=FakeSimulationConfig(name="condition_a"),
+    )
+
+
+class FakeTrajectory:
+    """Minimal trajectory with a length for runner tests."""
+
+    def __len__(self) -> int:
+        return 5
+
+
+class FakeUniverse:
+    """Minimal Universe exposing a trajectory."""
+
+    trajectory = FakeTrajectory()
+
+
+class FakeWindow:
+    """Minimal trajectory window used by the base runner dispatch."""
+
+    warning_message: str | None = None
+
+    def run_kwargs(self) -> dict[str, int | None]:
+        return {"start": 1, "stop": 5, "step": 2}
+
+
+class FakeLoader:
+    """Minimal loader used to avoid trajectory files in tests."""
+
+    def __init__(self, sim_config):
+        self.sim_config = sim_config
+
+    def load_universe(self, replicate: int) -> FakeUniverse:
+        self.replicate = replicate
+        return FakeUniverse()
+
+
+class TestDiscovery:
+    """Discovery and class-level behavior."""
+
+    def test_discoverable_by_name(self):
+        clear_cache()
+{% if spec.uses_pydantic_results %}
+        assert get_analysis("{{ spec.name }}") is {{ spec.class_name }}Analysis
+{% else %}
+        analysis_cls = get_analysis("{{ spec.name }}")
+        assert analysis_cls.name == "{{ spec.name }}"
+{% endif %}
+
+    def test_settings_type(self):
+{% if spec.uses_pydantic_results %}
+        assert hasattr({{ spec.class_name }}Analysis, "Settings")
+{% else %}
+        analysis_cls = get_analysis("{{ spec.name }}")
+        assert hasattr(analysis_cls, "Settings")
+{% endif %}
+
+
+class TestRunnerBackedReplicate:
+    """Runner-backed replicate stage behavior."""
+
+    def test_build_runner_smoke(self, analysis, settings, condition, tmp_path):
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="0ns",
+            recompute=True,
+            settings=settings,
+        )
+        runner = analysis.build_runner(ctx, 1, FakeUniverse(), FakeWindow())
+
+        assert isinstance(runner, {{ spec.class_name }}ReplicateRunner)
+        assert runner.settings is settings
+        assert runner.results == {}
+
+    def test_summarize_replicate_returns_result(self, analysis, settings, condition, tmp_path):
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="0ns",
+            recompute=True,
+            settings=settings,
+        )
+        runner = analysis.build_runner(ctx, 1, FakeUniverse(), FakeWindow()).run(
+            start=1,
+            stop=5,
+            step=2,
+        )
+        result = analysis.summarize_replicate(ctx, 1, runner, FakeWindow())
+
+{% if spec.uses_pydantic_results %}
+        assert isinstance(result, {{ spec.class_name }}ReplicateResult)
+        assert result.replicate == 1
+        assert result.value == pytest.approx(2.0)
+        assert result.n_frames == 2
+        assert result.example_parameter == "dummy"
+{% else %}
+        assert isinstance(result, dict)
+        assert result["replicate"] == 1
+        assert result["value"] == pytest.approx(2.0)
+        assert result["n_frames"] == 2
+        assert result["example_parameter"] == "dummy"
+{% endif %}
+
+    def test_run_replicate_uses_base_runner_dispatch(
+        self,
+        analysis,
+        settings,
+        condition,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="0ns",
+            recompute=True,
+            settings=settings,
+        )
+        monkeypatch.setattr(analysis, "_trajectory_loader_factory", lambda: FakeLoader)
+        monkeypatch.setattr(analysis, "get_trajectory_window", lambda *args: FakeWindow())
+
+        result = analysis.run_replicate(ctx, 1)
+
+{% if spec.uses_pydantic_results %}
+        assert isinstance(result, {{ spec.class_name }}ReplicateResult)
+        assert result.value == pytest.approx(2.0)
+        assert result.n_frames == 2
+{% else %}
+        assert isinstance(result, dict)
+        assert result["value"] == pytest.approx(2.0)
+        assert result["n_frames"] == 2
+{% endif %}
+
+
+class TestAggregate:
+    """Aggregate stage behavior."""
+
+    def test_aggregate_two_replicates(self, analysis, settings, condition, tmp_path):
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="0ns",
+            settings=settings,
+        )
+{% if spec.uses_pydantic_results %}
+        results = [
+            {{ spec.class_name }}ReplicateResult(replicate=1, value=1.0, n_frames=4),
+            {{ spec.class_name }}ReplicateResult(replicate=2, value=3.0, n_frames=4),
+        ]
+{% else %}
+        results = [
+            {"value": 1.0, "replicate": 1},
+            {"value": 3.0, "replicate": 2},
+        ]
+{% endif %}
+        summary = analysis.aggregate(ctx, results)
+
+{% if spec.uses_pydantic_results %}
+        assert isinstance(summary, {{ spec.class_name }}AggregatedResult)
+        assert summary.mean_value == pytest.approx(2.0)
+        assert summary.replicate_values == [1.0, 3.0]
+        assert summary.n_replicates == 2
+{% else %}
+        assert isinstance(summary, dict)
+        assert summary["mean_value"] == pytest.approx(2.0)
+        assert summary["replicate_values"] == [1.0, 3.0]
+        assert summary["n_replicates"] == 2
+{% endif %}
+
+
+class TestExtractMetrics:
+    """Default scalar comparison metric extraction."""
+
+    def test_returns_metric_value(self, analysis):
+{% if spec.uses_pydantic_results %}
+        summary = {{ spec.class_name }}AggregatedResult(
+            mean_value=2.0,
+            sem_value=0.5,
+            replicate_values=[1.0, 3.0],
+            n_replicates=2,
+        )
+{% else %}
+        summary = {
+            "mean_value": 2.0,
+            "sem_value": 0.5,
+            "replicate_values": [1.0, 3.0],
+        }
+{% endif %}
+        metrics = analysis.extract_metrics(summary)
+
+        assert "value" in metrics
+        assert isinstance(metrics["value"], MetricValue)
+        assert metrics["value"].mean == pytest.approx(2.0)
+        assert metrics["value"].sem == pytest.approx(0.5)
+
+
+class TestPlot:
+    """Plotting behavior."""
+
+    def test_plot_produces_figure(self, analysis, settings, plot_settings, tmp_path):
+        conditions = []
+        analysis_dirs = {}
+
+        for label, mean, sem in [("Cond_A", 2.0, 0.3), ("Cond_B", 4.0, 0.5)]:
+            cond = Condition(
+                label=label,
+                config_path=tmp_path / "config.yaml",
+                replicates=(1, 2),
+                sim_config=FakeSimulationConfig(name=label),
+            )
+            conditions.append(cond)
+
+            agg_dir = tmp_path / label / "{{ spec.name }}" / "aggregated"
+            agg_dir.mkdir(parents=True)
+            (agg_dir / "result.json").write_text(
+                json.dumps(
+                    {
+                        "mean_value": mean,
+                        "sem_value": sem,
+                        "replicate_values": [mean - 0.1, mean + 0.1],
+                        "n_replicates": 2,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            analysis_dirs[label] = tmp_path / label / "{{ spec.name }}"
+
+        ctx = PlotContext(
+            conditions=conditions,
+            analysis_dirs=analysis_dirs,
+            output_dir=tmp_path / "figures",
+            results_dir=tmp_path / "results",
+            settings=settings,
+            plot_settings=plot_settings,
+        )
+
+        paths = analysis.plot(ctx)
+
+        assert len(paths) == 1
+        assert paths[0].exists()
+        assert paths[0].suffix == ".png"
+
+    def test_plot_returns_empty_when_no_data(self, analysis, settings, plot_settings, tmp_path):
+        cond = Condition(
+            label="Empty",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1,),
+            sim_config=FakeSimulationConfig(name="empty"),
+        )
+        analysis_dirs = {"Empty": tmp_path / "Empty" / "{{ spec.name }}"}
+        (tmp_path / "Empty" / "{{ spec.name }}" / "aggregated").mkdir(parents=True)
+
+        ctx = PlotContext(
+            conditions=[cond],
+            analysis_dirs=analysis_dirs,
+            output_dir=tmp_path / "figures",
+            results_dir=tmp_path / "results",
+            settings=settings,
+            plot_settings=plot_settings,
+        )
+
+        paths = analysis.plot(ctx)
+        assert paths == []

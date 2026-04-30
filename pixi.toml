@@ -60,6 +60,7 @@ numpy               = "1.26.*"       # pinned: OpenMM ABI-sensitive
 pydantic            = ">=2.5"
 pyyaml              = ">=6.0"
 click               = ">=8.1"
+jinja2              = ">=3.1"
 packaging           = ">=23.0"       # conditional import in polyzymd
 
 # OpenFF stack — solver resolves compatible set

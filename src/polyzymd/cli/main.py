@@ -3140,7 +3140,9 @@ def new_analysis(
     Creates:
 
     \b
-      src/polyzymd/analyses/<NAME>/__init__.py    — runner-backed plugin class
+      src/polyzymd/analyses/<NAME>/__init__.py    — analysis facade
+      src/polyzymd/analyses/<NAME>/_runner.py     — trajectory runner
+      src/polyzymd/analyses/<NAME>/_results.py    — pydantic result models (--style pydantic)
       tests/analyses/plugins/test_<NAME>.py       — smoke tests
 
     Styles:
