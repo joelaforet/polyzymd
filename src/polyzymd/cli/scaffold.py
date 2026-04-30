@@ -556,10 +556,6 @@ class TestDiscovery:
 
 
 class TestRunnerBackedReplicate:
-    def test_source_does_not_override_compute_replicate(self):
-        cls = get_analysis("{name}")
-        assert "compute_replicate" not in cls.__dict__
-
     def test_build_runner_smoke(self, analysis, settings, condition, tmp_path):
         ctx = ReplicateContext(
             condition=condition,
@@ -1207,9 +1203,6 @@ class TestDiscovery:
 
 
 class TestRunnerBackedReplicate:
-    def test_source_does_not_override_compute_replicate(self):
-        assert "compute_replicate" not in {cls}Analysis.__dict__
-
     def test_build_runner_smoke(self, analysis, settings, condition, tmp_path):
         ctx = ReplicateContext(
             condition=condition,

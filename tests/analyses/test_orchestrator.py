@@ -502,10 +502,10 @@ class TestOrchestrator:
         toy_settings,
         tmp_path,
     ):
-        """run_replicate_once should call run_replicate, not compute_replicate."""
+        """run_replicate_once should call the canonical entry point."""
 
         class CanonicalRunAnalysis(Analysis):
-            """Analysis that fails if the legacy compute hook is called."""
+            """Analysis that tracks canonical entry point calls."""
 
             name: ClassVar[str] = "canonical_run"
             Settings: ClassVar[type] = ToySettings

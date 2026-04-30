@@ -6,11 +6,11 @@ specialized subagents instead of implementing directly.
 - `@architect` — Architecture planning and design (gpt-5.5, read-only)
 - `@implementer` — Code implementation (gpt-5.3-codex, full tools)
 - `@reviewer` — Adversarial code review (gpt-5.5, read-only)
-- `@tester` — Test execution and reporting (opus-4.6, bash only)
-- `@docs-writer` — Documentation content (opus-4.6, edit access)
-- `@docs-curator` — Documentation structure/IA (opus-4.6, read-only)
+- `@tester` — Test execution and reporting (gpt-5.5, bash only)
+- `@docs-writer` — Documentation content (gpt-5.5, edit access)
+- `@docs-curator` — Documentation structure/IA (gpt-5.5, read-only)
 - `@docs-tester` — Tutorial friction testing (gemini-3-flash, bash only)
-- `@devops` — CI/CD and environment management (opus-4.6, full tools)
+- `@devops` — CI/CD and environment management (gpt-5.5, full tools)
 - `@scientific-analyst` — MD simulation domain expertise (gpt-5.3-codex, read+bash)
 
 ## Session Start

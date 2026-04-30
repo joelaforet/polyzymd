@@ -30,12 +30,11 @@ src/polyzymd/
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner |
 
 New analysis types are added as **packages in `analyses/<name>/`**. All existing
-plugins are packages (no single-file plugins exist). New plugins can compute
-directly in `compute_replicate()` or use `build_runner()` +
-`summarize_replicate()` for MDAnalysis-first trajectory iteration. For
-runner-backed plugins, keep PolyzyMD lifecycle orchestration in the plugin
-package and isolate MDAnalysis trajectory logic in a dedicated runner module
-such as `_runner.py`.
+plugins are packages (no single-file plugins exist). New compute-stage plugins
+use `build_runner()` + `summarize_replicate()` for MDAnalysis-first trajectory
+iteration. Keep PolyzyMD lifecycle orchestration in the plugin package and
+isolate MDAnalysis trajectory logic in a dedicated runner module such as
+`_runner.py`.
 
 ## Chain Convention (Critical)
 
@@ -120,7 +119,6 @@ class AnalysisConfig(BaseModel):
 1. Run `polyzymd new-analysis <name>` to scaffold the plugin, OR create `src/polyzymd/analyses/<name>/` manually
 2. Subclass `Analysis` with `name` and `Settings`
 3. Choose the lifecycle mode:
-   - Legacy compute plugin: implement `compute_replicate()` when `has_compute_stage=True`
    - Runner-backed plugin: implement `build_runner()` + `summarize_replicate()` when `has_compute_stage=True`; MDAnalysis owns per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow
    - Compare-only plugin: set `has_compute_stage=False`
 4. Implement `aggregate()` only when `has_aggregate_stage=True`

@@ -98,7 +98,7 @@ in `src/polyzymd/analyses/<name>/` and subclass `Analysis`:
 Key rules:
 
 - **Required class variables**: `name` (str) and `Settings` (Pydantic BaseModel)
-- **Lifecycle contract**: when `has_compute_stage=True`, use legacy `compute_replicate(ctx, replicate)` or runner-backed `build_runner()` + `summarize_replicate()`; the runner path keeps MDAnalysis-first per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow. For compare-only plugins, set `has_compute_stage=False`. `aggregate(ctx, results)` is required only when `has_aggregate_stage=True`
+- **Lifecycle contract**: when `has_compute_stage=True`, use runner-backed `build_runner()` + `summarize_replicate()`; this keeps MDAnalysis-first per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow. For compare-only plugins, set `has_compute_stage=False`. `aggregate(ctx, results)` is required only when `has_aggregate_stage=True`
 - **Optional overrides**: `compare()`, `plot()`, `format()`, `extract_metrics()`, `filter_conditions()`
 - **Default compare path**: Implement `extract_metrics()` — the framework loads results automatically (via `AggregatedResultClass` or `json.loads()`) and does t-tests, ANOVA, ranking
 - **Custom compare path**: Override `compare()` entirely for multi-metric or entry-table analyses
@@ -138,14 +138,14 @@ When writing a new analysis plugin, **study existing implementations first**:
 **Anti-pattern to avoid:**
 ```python
 # WRONG: Inventing custom data passing, bypassing the context
-def compute_replicate(self, ctx, replicate):
+def build_runner(self, ctx, replicate, universe, window):
     config = SimulationConfig.from_yaml(self.custom_config_path)  # Don't do this!
 ```
 
 **Correct pattern:**
 ```python
 # RIGHT: Use the framework-provided context
-def compute_replicate(self, ctx, replicate):
+def build_runner(self, ctx, replicate, universe, window):
     sim_config = ctx.sim_config  # Already loaded by framework
     settings = ctx.settings       # Your Settings model, resolved from YAML
 ```
@@ -154,7 +154,6 @@ def compute_replicate(self, ctx, replicate):
 
 | Method | When Called | Input | Output |
 |--------|-----------|-------|--------|
-| `compute_replicate()` | Once per replicate per condition on the legacy compute path | `ReplicateContext` + replicate int | Pydantic model or dict |
 | `build_runner()` + `summarize_replicate()` | Once per replicate per condition on the runner-backed compute path; MDAnalysis owns per-trajectory iteration there while PolyzyMD owns ensemble workflow | `ReplicateContext` + replicate int | Runner + summarized replicate result |
 | `aggregate()` | Once per condition after all replicates, only when `has_aggregate_stage=True` | `AggregateContext` + list of replicate results | Aggregated model or dict |
 | `extract_metrics()` | During default `compare()` | Aggregated result | `dict[str, MetricValue]` |

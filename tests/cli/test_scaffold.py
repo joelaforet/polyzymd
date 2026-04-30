@@ -130,7 +130,6 @@ class TestGenerateScaffold:
         assert "def build_runner(" in text
         assert "def summarize_replicate(" in text
         assert "def run_replicate(" not in text
-        assert "def compute_replicate(" not in text
         assert "def aggregate(" in text
         assert "def extract_metrics(" in text
         assert "def plot(self, ctx: PlotContext)" in text
@@ -253,7 +252,6 @@ class TestGenerateScaffoldPydantic:
         assert "def build_runner(" in text
         assert "def summarize_replicate(" in text
         assert "def run_replicate(" not in text
-        assert "def compute_replicate(" not in text
         assert "def aggregate(" in text
         assert "def extract_metrics(" in text
         assert "def plot(self, ctx: PlotContext)" in text
@@ -458,7 +456,6 @@ class TestGeneratedPluginEndToEnd:
             analysis_cls = get_analysis(plugin_name)
             analysis = analysis_cls()
             settings = analysis_cls.Settings()
-            assert "compute_replicate" not in analysis_cls.__dict__
             assert "run_replicate" not in analysis_cls.__dict__
 
             condition = Condition(

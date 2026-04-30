@@ -995,44 +995,6 @@ class Analysis(ABC):
             return None
         return self._run_replicate_default(ctx, replicate)
 
-    def compute_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-    ) -> Any:
-        """Deprecated legacy per-replicate hook.
-
-        Framework code calls :meth:`run_replicate`. Subclasses must not
-        override this method; class validation fails fast when they do.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided context (paths, config, settings).
-        replicate : int
-            1-indexed replicate number.
-
-        Returns
-        -------
-        Any
-            This method does not return. It raises an error that directs plugin
-            authors to the supported per-replicate entry points.
-
-        Notes
-        -----
-        This hook remains only to provide a clear migration error for direct
-        calls. Public contributor plugins should implement :meth:`build_runner`
-        and :meth:`summarize_replicate`. Direct :meth:`run_replicate` overrides
-        are reserved for advanced or internal plugins that need custom cache,
-        sidecar, or dispatch behavior.
-        """
-        del ctx, replicate
-        raise NotImplementedError(
-            f"{type(self).__name__}.compute_replicate() is no longer supported. "
-            "Public plugins should implement build_runner() + summarize_replicate(); "
-            "direct run_replicate() overrides are advanced/internal only."
-        )
-
     def _run_replicate_default(
         self,
         ctx: ReplicateContext,
@@ -1865,16 +1827,8 @@ class Analysis(ABC):
             )
 
         uses_run_replicate = cls.run_replicate is not Analysis.run_replicate
-        overrides_compute_replicate = cls.compute_replicate is not Analysis.compute_replicate
         uses_runner_build = cls.build_runner is not Analysis.build_runner
         uses_runner_summary = cls.summarize_replicate is not Analysis.summarize_replicate
-
-        if overrides_compute_replicate:
-            raise TypeError(
-                f"Analysis subclass {cls.__name__} overrides deprecated compute_replicate(). "
-                "Public plugins should implement both build_runner() and summarize_replicate(); "
-                "direct run_replicate() overrides are advanced/internal only."
-            )
 
         if cls.has_compute_stage and not uses_run_replicate:
             if uses_runner_build != uses_runner_summary:

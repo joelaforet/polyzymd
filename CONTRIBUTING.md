@@ -59,8 +59,8 @@ Commit messages use imperative mood with a 50-character subject line:
 ```
 Add radius of gyration analysis plugin
 
-Implement compute_replicate using TrajectoryLoader for trajectory
-handling. Aggregate with SEM across replicates. Wire into default
+Implement build_runner and summarize_replicate using TrajectoryLoader for
+trajectory handling. Aggregate with SEM across replicates. Wire into default
 scalar comparison path via extract_metrics.
 
 Closes #42
@@ -91,11 +91,9 @@ to core code**.
    - `name` — unique lowercase string identifier
    - `Settings` — Pydantic v2 `BaseModel` with sensible defaults
    - Choose the lifecycle mode that matches your plugin:
-     - **Legacy compute plugin**: override `compute_replicate(ctx, replicate)` when
-       `has_compute_stage=True`
-     - **Runner-backed plugin**: implement `build_runner()` +
-       `summarize_replicate()` when `has_compute_stage=True`
-     - **Compare-only / no-compute plugin**: set `has_compute_stage=False`
+      - **Runner-backed plugin**: implement `build_runner()` +
+        `summarize_replicate()` when `has_compute_stage=True`
+      - **Compare-only / no-compute plugin**: set `has_compute_stage=False`
    - Implement `aggregate(ctx, results)` only when `has_aggregate_stage=True`
 
 5. **Choose your comparison path**:
@@ -109,8 +107,7 @@ to core code**.
    pattern of existing plugin tests. The standard test structure covers:
    - Discovery and class attributes
    - Settings validation
-   - `compute_replicate` with mocked trajectories for legacy compute plugins, or
-     `build_runner()` + `summarize_replicate()` for runner-backed plugins
+   - `build_runner()` + `summarize_replicate()` for runner-backed plugins
    - `aggregate` with sample data when `has_aggregate_stage=True`
    - `extract_metrics` (if applicable)
    - Plot generation
@@ -147,7 +144,6 @@ to core code**.
 - [ ] `name` class variable set (lowercase, unique)
 - [ ] `Settings` inner class with default values for all fields
 - [ ] Lifecycle mode chosen and implemented correctly:
-  - `compute_replicate` for legacy compute plugins, or
   - `build_runner()` + `summarize_replicate()` for runner-backed plugins, or
   - `has_compute_stage=False` for compare-only / no-compute plugins
 - [ ] `aggregate` implemented when `has_aggregate_stage=True`

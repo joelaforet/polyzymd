@@ -183,6 +183,27 @@ class TestAnalysisABC:
                 def aggregate(self, ctx, results):
                     return {"dummy": True}
 
+    def test_legacy_compute_replicate_hook_is_not_supported(self) -> None:
+        """Legacy compute_replicate-only plugins should not satisfy the contract."""
+
+        assert not hasattr(Analysis, "compute_replicate")
+
+        with pytest.raises(
+            TypeError,
+            match=r"public plugins must implement both build_runner\(\) and "
+            r"summarize_replicate\(\)",
+        ):
+
+            class LegacyComputeOnlyAnalysis(Analysis):
+                name: ClassVar[str] = "legacy_compute_only"
+                Settings: ClassVar[type] = ToySettings
+
+                def compute_replicate(self, ctx, replicate):
+                    return {"replicate": replicate}
+
+                def aggregate(self, ctx, results):
+                    return {"dummy": True}
+
     def test_concrete_subclass_can_use_run_replicate(self) -> None:
         """Concrete plugins can implement the canonical replicate entry point."""
 
@@ -357,24 +378,6 @@ class TestAnalysisABC:
         plugin = CompareOnlyAnalysis()
         assert plugin.has_compute_stage is False
         assert plugin.has_aggregate_stage is False
-
-    def test_concrete_subclass_rejects_compute_replicate_override(self) -> None:
-        """Legacy compute_replicate overrides should fail validation."""
-
-        with pytest.raises(
-            TypeError,
-            match=r"overrides deprecated compute_replicate\(\).*build_runner\(\).*summarize_replicate\(\)",
-        ):
-
-            class LegacyComputeAnalysis(Analysis):
-                name: ClassVar[str] = "legacy_compute"
-                Settings: ClassVar[type] = ToySettings
-
-                def compute_replicate(self, ctx, replicate):
-                    return {"value": replicate}
-
-                def aggregate(self, ctx, results):
-                    return {"dummy": True}
 
     def test_concrete_subclass_valid(self, toy_analysis):
         """ToyAnalysis should instantiate without error."""

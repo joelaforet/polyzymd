@@ -109,7 +109,9 @@ When adding a new analysis plugin in `analyses/`, write tests that cover:
 1. **Discovery**: Plugin is found by `list_analyses()` and `get_analysis()`
 2. **Class variables**: `name` and `Settings` are set correctly
 3. **Settings validation**: Pydantic model validates/rejects correctly
-4. **compute_replicate()**: Returns expected structure (mock TrajectoryLoader / MDAnalysis)
+4. **Runner-backed replicate stage**: `build_runner()` constructs the runner,
+   `summarize_replicate()` returns the expected structure, and base
+   `run_replicate()` dispatch works with fake loader/window objects
 5. **aggregate()**: Combines replicate results correctly (no mocks needed)
 6. **extract_metrics()**: Returns correct `MetricValue` instances (if using default compare)
 7. **_deserialize_result()**: Loads JSON back correctly (if using default compare)
@@ -154,34 +156,38 @@ class TestMyPluginDiscovery:
         assert settings.selection == "protein and name CA"
 
 
-class TestMyPluginCompute:
-    """Test compute_replicate with mocked trajectories."""
+class TestMyPluginReplicateStage:
+    """Test the runner-backed replicate stage with small fakes."""
 
-    @patch("polyzymd.analyses.my_analysis.TrajectoryLoader")
-    def test_computes_metric(self, MockLoader, tmp_path):
+    class FakeTrajectory:
+        def __len__(self) -> int:
+            return 50
+
+    class FakeUniverse:
+        trajectory = FakeTrajectory()
+
+    class FakeWindow:
+        warning_message = None
+
+        def run_kwargs(self) -> dict[str, int | None]:
+            return {"start": 0, "stop": 50, "step": 1}
+
+    class FakeLoader:
+        def __init__(self, sim_config):
+            self.sim_config = sim_config
+
+        def load_universe(self, replicate: int):
+            return TestMyPluginReplicateStage.FakeUniverse()
+
+    def test_base_run_replicate_dispatch(self, monkeypatch, tmp_path):
         cls = get_analysis("my_analysis")
         analysis = cls()
         settings = cls.Settings()
-
-        # Mock TrajectoryLoader and Universe
-        mock_loader = MagicMock()
-        MockLoader.return_value = mock_loader
-        mock_universe = MagicMock()
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=100)
-        mock_universe.select_atoms.return_value = mock_atoms
-        mock_trajectory = MagicMock()
-        mock_trajectory.__len__ = MagicMock(return_value=50)
-        mock_trajectory.__getitem__ = MagicMock(return_value=range(50))
-        mock_universe.trajectory = mock_trajectory
-        mock_loader.load_universe.return_value = mock_universe
-        mock_loader.get_timestep.return_value = 10.0
-
         condition = Condition(
             label="Test",
             config_path=Path("/fake/config.yaml"),
             replicates=(1,),
-            sim_config=MagicMock(),
+            sim_config=object(),
         )
         ctx = ReplicateContext(
             condition=condition,
@@ -192,8 +198,10 @@ class TestMyPluginCompute:
             recompute=True,
             settings=settings,
         )
+        monkeypatch.setattr(analysis, "_trajectory_loader_factory", lambda: self.FakeLoader)
+        monkeypatch.setattr(analysis, "get_trajectory_window", lambda *args: self.FakeWindow())
 
-        result = analysis.compute_replicate(ctx, replicate=1)
+        result = analysis.run_replicate(ctx, replicate=1)
         assert isinstance(result, dict)
 
 

@@ -151,7 +151,7 @@ Use MyST roles for cross-referencing:
 | Class | Location | Role |
 |-------|----------|------|
 | `Analysis` | `analyses/base.py` | Plugin base class |
-| `ReplicateContext` | `analyses/base.py` | Context for compute_replicate |
+| `ReplicateContext` | `analyses/base.py` | Context for runner-backed replicate execution |
 | `AggregateContext` | `analyses/base.py` | Context for aggregate |
 | `ComparisonContext` | `analyses/base.py` | Context for compare |
 | `PlotContext` | `analyses/base.py` | Context for plot |
