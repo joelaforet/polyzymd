@@ -42,9 +42,131 @@ class _Settings(BaseModel):
     threshold: float = 1.0
 
 
+class _ToyRunner:
+    """Minimal runner used to satisfy the analysis compute-stage contract."""
+
+    def __init__(self, replicate: int) -> None:
+        """Initialize an empty result container for one replicate.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate identifier associated with this runner.
+        """
+
+        self.replicate = replicate
+        self.results: dict[str, Any] = {}
+
+    def run(self, start: int, stop: int, step: int = 1) -> "_ToyRunner":
+        """Record the requested frame window and return the executed runner.
+
+        Parameters
+        ----------
+        start : int
+            Inclusive start frame.
+        stop : int
+            Exclusive stop frame.
+        step : int, optional
+            Frame stride, by default 1.
+
+        Returns
+        -------
+        _ToyRunner
+            Runner with populated ``results``.
+        """
+
+        self.results = {
+            "replicate": self.replicate,
+            "start": start,
+            "stop": stop,
+            "step": step,
+        }
+        return self
+
+
 class _ToyAnalysis(Analysis):
+    """Runner-backed toy analysis used by SLURM manifest tests."""
+
     name: ClassVar[str] = "toy_slurm"
     Settings: ClassVar[type] = _Settings
+
+    def build_runner(self, ctx: Any, replicate: int, universe: Any, window: Any) -> _ToyRunner:
+        """Build a minimal runner for the requested replicate.
+
+        Parameters
+        ----------
+        ctx : Any
+            Framework-provided replicate context.
+        replicate : int
+            Replicate identifier.
+        universe : Any
+            Loaded trajectory universe.
+        window : Any
+            Resolved trajectory window.
+
+        Returns
+        -------
+        _ToyRunner
+            Minimal runner exposing ``run()`` and ``results``.
+        """
+
+        del ctx, universe, window
+        return _ToyRunner(replicate)
+
+    def summarize_replicate(
+        self,
+        ctx: Any,
+        replicate: int,
+        runner: _ToyRunner,
+        window: Any,
+    ) -> dict[str, Any]:
+        """Convert runner output into a serializable replicate result.
+
+        Parameters
+        ----------
+        ctx : Any
+            Framework-provided replicate context.
+        replicate : int
+            Replicate identifier.
+        runner : _ToyRunner
+            Executed runner with populated results.
+        window : Any
+            Resolved trajectory window.
+
+        Returns
+        -------
+        dict[str, Any]
+            Serialized replicate summary.
+        """
+
+        del window
+        return {
+            "replicate": replicate,
+            "threshold": ctx.settings.threshold,
+            "runner_results": runner.results,
+        }
+
+    def aggregate(self, ctx: Any, results: list[Any]) -> dict[str, Any]:
+        """Aggregate toy replicate results for full-stage workflow tests.
+
+        Parameters
+        ----------
+        ctx : Any
+            Framework-provided aggregate context.
+        results : list[Any]
+            Replicate summaries.
+
+        Returns
+        -------
+        dict[str, Any]
+            Minimal aggregate summary.
+        """
+
+        del ctx
+        return {
+            "n_replicates": len(results),
+            "replicates": [result["replicate"] for result in results],
+        }
 
 
 class _CompareOnlyAnalysis(Analysis):

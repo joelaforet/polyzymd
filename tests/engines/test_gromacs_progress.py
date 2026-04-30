@@ -14,8 +14,7 @@ from polyzymd.simulation.progress import load_progress
 def test_parse_gromacs_log_extracts_steps_and_completion(tmp_path: Path) -> None:
     """Log parser should extract nsteps, latest step, and finished state."""
     log_path = tmp_path / "prod.log"
-    log_path.write_text(
-        """
+    log_path.write_text("""
 nsteps                   = 500000
 
            Step           Time
@@ -24,8 +23,7 @@ nsteps                   = 500000
          500000       1000.000
 
 Finished mdrun
-"""
-    )
+""")
 
     parsed = _parse_gromacs_log(log_path)
     assert parsed["nsteps_requested"] == 500000
@@ -38,13 +36,11 @@ def test_scan_gromacs_progress_reads_eq_and_prod(tmp_path: Path) -> None:
     """Scanner should detect completed equilibration and production state."""
     (tmp_path / "eq_01.gro").write_text("eq1")
     (tmp_path / "eq_02.gro").write_text("eq2")
-    (tmp_path / "prod.log").write_text(
-        """
+    (tmp_path / "prod.log").write_text("""
 nsteps = 100000
  Step Time
  50000 100.0
-"""
-    )
+""")
 
     progress = scan_gromacs_progress(
         working_dir=tmp_path,
@@ -63,13 +59,11 @@ nsteps = 100000
 
 def test_update_gromacs_progress_creates_progress_json(tmp_path: Path) -> None:
     """Updater should create and then update progress.json records."""
-    (tmp_path / "prod.log").write_text(
-        """
+    (tmp_path / "prod.log").write_text("""
 nsteps = 100000
  Step Time
  25000 50.0
-"""
-    )
+""")
 
     first = update_gromacs_progress(
         working_dir=tmp_path,
@@ -79,14 +73,12 @@ nsteps = 100000
     )
     assert first.total_steps_completed == 25000
 
-    (tmp_path / "prod.log").write_text(
-        """
+    (tmp_path / "prod.log").write_text("""
 nsteps = 100000
  Step Time
  100000 200.0
 Finished mdrun
-"""
-    )
+""")
 
     second = update_gromacs_progress(
         working_dir=tmp_path,

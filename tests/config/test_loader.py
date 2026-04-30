@@ -3,7 +3,6 @@
 from pathlib import Path
 
 
-
 class TestSaveConfigYamlDumper:
     """save_config uses a local Dumper subclass, not the global yaml.Dumper."""
 

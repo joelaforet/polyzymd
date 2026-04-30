@@ -15,7 +15,6 @@ import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
 from polyzymd.simulation.signals import (
     EXIT_CODE_INTERRUPTED,
     GracefulExit,

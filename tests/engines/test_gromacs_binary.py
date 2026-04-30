@@ -8,7 +8,6 @@ import pytest
 
 from polyzymd.engines.gromacs.binary import is_mpi_binary, resolve_gromacs_binary
 
-
 # ── is_mpi_binary ──────────────────────────────────────────────────
 
 
