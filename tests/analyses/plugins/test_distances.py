@@ -410,6 +410,75 @@ class TestRunReplicate:
 
         assert isinstance(runner, DistancesReplicateRunner)
 
+    def test_compute_distance_payloads_uses_effective_timestep_for_autocorrelation(
+        self, monkeypatch
+    ):
+        """Distance autocorrelation should use raw timestep multiplied by frame stride."""
+        from types import SimpleNamespace
+
+        import numpy as np
+
+        from polyzymd.analyses.distances import _runner as runner_module
+        from polyzymd.analyses.distances._runner import compute_distance_payloads
+
+        captured: dict[str, float] = {}
+
+        class _FakeDistanceAnalysis:
+            def __init__(self, **kwargs):
+                self.results = SimpleNamespace(distance_arrays=[])
+
+            def run(self, *, start: int, stop: int, step: int):
+                del start, stop, step
+                self.results.distance_arrays = [np.linspace(1.0, 2.0, 20, dtype=np.float64)]
+                return self
+
+        monkeypatch.setattr(
+            runner_module, "_get_distance_analysis_base_cls", lambda: _FakeDistanceAnalysis
+        )
+        monkeypatch.setattr(
+            runner_module,
+            "_resolve_distance_pairs",
+            lambda **kwargs: [
+                SimpleNamespace(
+                    pair_label="P1",
+                    selection1="sel_a",
+                    selection2="sel_b",
+                    threshold=None,
+                )
+            ],
+        )
+
+        def _fake_estimate_correlation_time(_series, **kwargs):
+            captured["timestep"] = kwargs["timestep"]
+            return SimpleNamespace(
+                tau=1.0,
+                tau_unit="ps",
+                n_independent=20,
+                statistical_inefficiency=1.0,
+                warning=None,
+            )
+
+        monkeypatch.setattr(
+            "polyzymd.analyses.shared.autocorrelation.estimate_correlation_time",
+            _fake_estimate_correlation_time,
+        )
+        universe = MagicMock(trajectory=list(range(30)))
+
+        compute_distance_payloads(
+            universe=universe,
+            pairs=[("sel_a", "sel_b")],
+            thresholds=[None],
+            start=0,
+            stop=30,
+            step=3,
+            timestep_ps=10.0,
+            use_pbc=False,
+            alignment=SimpleNamespace(enabled=False),
+            pair_label_func=lambda _selection_a, _selection_b: "P1",
+        )
+
+        assert captured["timestep"] == pytest.approx(30.0)
+
     def test_summarize_replicate_preserves_legacy_schema(self, tmp_path):
         import numpy as np
 

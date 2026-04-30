@@ -171,7 +171,18 @@ class RgRunResult(BaseAnalysisResult):
 
     # Time array metadata (for plotting)
     time_unit: str = Field(default="ns", description="Unit of time axis")
-    timestep_ps: float | None = Field(default=None, description="Timestep between frames in ps")
+    timestep_ps: float | None = Field(
+        default=None,
+        description="Effective spacing between analyzed Rg samples in ps",
+    )
+    raw_timestep_ps: float | None = Field(
+        default=None,
+        description="Raw trajectory frame spacing in ps before frame stride is applied",
+    )
+    frame_stride: int | None = Field(
+        default=None,
+        description="Frame stride applied when sampling this Rg run",
+    )
 
     def summary(self) -> str:
         """Return human-readable summary."""

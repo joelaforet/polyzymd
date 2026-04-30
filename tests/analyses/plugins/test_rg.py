@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,6 +28,7 @@ from polyzymd.analyses.rg._results import (
     RgRunAggregatedResult,
     RgRunResult,
 )
+from polyzymd.analyses.rg._runner import RgRunnerPayload, RgRunPayload, compute_rg_run
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.config.comparison import PlotSettings
 from tests._support.analysis_testkit import (
@@ -621,6 +623,124 @@ def test_settings_cache_tag_changes_with_settings() -> None:
     tag_b = analysis._make_settings_cache_tag(settings_b)
 
     assert tag_a != tag_b
+
+
+def test_compute_rg_run_uses_effective_timestep_for_autocorrelation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rg autocorrelation should use raw timestep multiplied by frame stride."""
+    import numpy as np
+
+    from polyzymd.analyses.rg import _runner as runner_module
+
+    captured: dict[str, float] = {}
+    atom_group = MagicMock()
+    atom_group.__len__.return_value = 5
+    universe = MagicMock()
+    universe.select_atoms.return_value = atom_group
+    monkeypatch.setattr(
+        runner_module,
+        "_run_selection_rg_analysis",
+        lambda **kwargs: np.linspace(10.0, 12.0, 20, dtype=np.float64),
+    )
+
+    def _fake_estimate_correlation_time(_series, **kwargs):
+        captured["timestep"] = kwargs["timestep"]
+        return SimpleNamespace(
+            tau=1.0,
+            tau_unit="ps",
+            n_independent=20,
+            statistical_inefficiency=1.0,
+            warning=None,
+        )
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.autocorrelation.estimate_correlation_time",
+        _fake_estimate_correlation_time,
+    )
+
+    payload = compute_rg_run(
+        universe=universe,
+        run=RgRunSettings(label="protein_rg", selection="protein"),
+        replicate=1,
+        start=0,
+        stop=60,
+        step=3,
+        timestep_ps=10.0,
+    )
+
+    assert captured["timestep"] == pytest.approx(30.0)
+    assert payload.time_ns[1] == pytest.approx(0.03)
+    assert payload.raw_timestep_ps == pytest.approx(10.0)
+    assert payload.frame_stride == 3
+    assert payload.effective_timestep_ps == pytest.approx(30.0)
+
+
+def test_summarize_replicate_writes_timing_metadata_sidecar(
+    condition: Condition,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rg summarize should persist raw, stride, and effective timestep metadata."""
+    import numpy as np
+
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
+    ctx = make_replicate_context(
+        condition=condition,
+        replicate=1,
+        output_dir=tmp_path / "run_1",
+        settings=settings,
+        equilibration="10ns",
+    )
+    ctx.output_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("polyzymd.analyses.rg.compute_config_hash", lambda _sim_config: "hash123")
+    monkeypatch.setattr(
+        "polyzymd.analyses._results_base.get_polyzymd_version",
+        lambda: "1.2.1",
+    )
+    payload = RgRunPayload(
+        run_label="protein_rg",
+        selection="protein",
+        calculation_mode="selection",
+        fragment_weighting=None,
+        rg_values=np.asarray([10.0, 11.0], dtype=np.float64),
+        frames=np.asarray([1000, 1003], dtype=np.int64),
+        time_ns=np.asarray([10.0, 10.03], dtype=np.float64),
+        raw_timestep_ps=10.0,
+        frame_stride=3,
+        effective_timestep_ps=30.0,
+        mean_rg=10.5,
+        std_rg=0.5,
+        median_rg=10.5,
+        min_rg=10.0,
+        max_rg=11.0,
+        final_rg=11.0,
+        sem_rg=0.25,
+        correlation_time=30.0,
+        correlation_time_unit="ps",
+        n_independent_frames=2,
+        statistical_inefficiency=1.0,
+        autocorrelation_warning=None,
+    )
+    runner = MagicMock(results=RgRunnerPayload(n_frames_total=1200, run_payloads=[payload]))
+    window = SimpleNamespace(
+        n_frames_selected=200,
+        timestep_ps=10.0,
+        trajectory_files=(Path("/fake/traj.dcd"),),
+    )
+
+    result = analysis.summarize_replicate(ctx, 1, runner, window)
+
+    run_result = result.run_results[0]
+    assert run_result.timestep_ps == pytest.approx(30.0)
+    assert run_result.raw_timestep_ps == pytest.approx(10.0)
+    assert run_result.frame_stride == 3
+    assert run_result.npz_path is not None
+    with np.load(run_result.npz_path) as sidecar:
+        assert float(sidecar["raw_timestep_ps"]) == pytest.approx(10.0)
+        assert int(sidecar["frame_stride"]) == 3
+        assert float(sidecar["effective_timestep_ps"]) == pytest.approx(30.0)
 
 
 def test_run_replicate_cache_includes_settings_tag(

@@ -6,6 +6,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -389,18 +390,18 @@ def test_runner_tracks_stride_aware_frame_counts(tmp_path: Path) -> None:
     """Runner payload counts should reflect actual sampled frames."""
     from polyzymd.analyses.shared.sasa import SASAComputationResult
 
-    universe = MagicMock(trajectory=list(range(12)))
+    universe = MagicMock(trajectory=list(range(40)))
     runs = [
         SASARunSettings(label="every_other", target_selection="chainid A", stride=2),
         SASARunSettings(label="every_fourth", target_selection="chainid A", stride=4),
     ]
     raw_results = {
         "every_other": SASAComputationResult(
-            atom_sasa_a2=np.ones((6, 1), dtype=np.float64),
-            residue_sasa_a2=np.ones((6, 1), dtype=np.float64),
-            total_sasa_a2=np.asarray([10, 11, 12, 13, 14, 15], dtype=np.float64),
-            frames=np.asarray([0, 2, 4, 6, 8, 10], dtype=np.int64),
-            time_ns=np.asarray([0.0, 0.02, 0.04, 0.06, 0.08, 0.10], dtype=np.float64),
+            atom_sasa_a2=np.ones((20, 1), dtype=np.float64),
+            residue_sasa_a2=np.ones((20, 1), dtype=np.float64),
+            total_sasa_a2=np.linspace(10.0, 29.0, 20, dtype=np.float64),
+            frames=np.arange(0, 40, 2, dtype=np.int64),
+            time_ns=np.arange(0, 40, 2, dtype=np.float64) * 0.01,
             target_atom_indices=np.asarray([0], dtype=np.int64),
             context_atom_indices=np.asarray([0], dtype=np.int64),
             residue_keys=["A:1:ALA"],
@@ -409,11 +410,11 @@ def test_runner_tracks_stride_aware_frame_counts(tmp_path: Path) -> None:
             residue_resnames=["ALA"],
         ),
         "every_fourth": SASAComputationResult(
-            atom_sasa_a2=np.ones((3, 1), dtype=np.float64),
-            residue_sasa_a2=np.ones((3, 1), dtype=np.float64),
-            total_sasa_a2=np.asarray([10, 12, 14], dtype=np.float64),
-            frames=np.asarray([0, 4, 8], dtype=np.int64),
-            time_ns=np.asarray([0.0, 0.04, 0.08], dtype=np.float64),
+            atom_sasa_a2=np.ones((10, 1), dtype=np.float64),
+            residue_sasa_a2=np.ones((10, 1), dtype=np.float64),
+            total_sasa_a2=np.linspace(10.0, 19.0, 10, dtype=np.float64),
+            frames=np.arange(0, 40, 4, dtype=np.int64),
+            time_ns=np.arange(0, 40, 4, dtype=np.float64) * 0.01,
             target_atom_indices=np.asarray([0], dtype=np.int64),
             context_atom_indices=np.asarray([0], dtype=np.int64),
             residue_keys=["A:1:ALA"],
@@ -426,6 +427,24 @@ def test_runner_tracks_stride_aware_frame_counts(tmp_path: Path) -> None:
     def _fake_compute_sasa(_universe, *, run_label: str, **kwargs):  # noqa: ARG001
         return raw_results[run_label]
 
+    captured_autocorrelation: dict[str, float] = {}
+    captured_artifacts: dict[str, float | int] = {}
+
+    def _fake_save_sasa_artifacts(**kwargs):
+        captured_artifacts["raw_timestep_ps"] = kwargs["raw_timestep_ps"]
+        captured_artifacts["frame_stride"] = kwargs["frame_stride"]
+        captured_artifacts["effective_timestep_ps"] = kwargs["effective_timestep_ps"]
+
+    def _fake_estimate_correlation_time(_series, **kwargs):
+        captured_autocorrelation["timestep"] = kwargs["timestep"]
+        return SimpleNamespace(
+            tau=1.0,
+            tau_unit="ps",
+            n_independent=6,
+            statistical_inefficiency=1.0,
+            warning=None,
+        )
+
     runner = SASAReplicateRunner(
         universe=universe,
         runs=runs,
@@ -437,17 +456,26 @@ def test_runner_tracks_stride_aware_frame_counts(tmp_path: Path) -> None:
         equilibration="0ns",
         trajectory_files=(Path("/fake/traj.dcd"),),
         compute_sasa_func=_fake_compute_sasa,
-        save_sasa_artifacts_func=lambda **kwargs: None,
-        estimate_correlation_time_func=lambda *args, **kwargs: None,
+        save_sasa_artifacts_func=_fake_save_sasa_artifacts,
+        estimate_correlation_time_func=_fake_estimate_correlation_time,
         run_cache_token_func=lambda **kwargs: kwargs["label"],
     )
 
-    runner.run(start=0, stop=12)
+    runner.run(start=0, stop=40)
 
-    assert runner.results.n_frames_total == 12
-    assert runner.results.n_frames_used == 6
-    assert [payload.n_frames_used for payload in runner.results.run_payloads] == [6, 3]
-    assert all(payload.n_frames_total == 12 for payload in runner.results.run_payloads)
+    assert runner.results.n_frames_total == 40
+    assert runner.results.n_frames_used == 20
+    assert [payload.n_frames_used for payload in runner.results.run_payloads] == [20, 10]
+    assert all(payload.n_frames_total == 40 for payload in runner.results.run_payloads)
+    assert runner.results.run_payloads[0].timestep_ps == pytest.approx(20.0)
+    assert runner.results.run_payloads[0].raw_timestep_ps == pytest.approx(10.0)
+    assert runner.results.run_payloads[0].frame_stride == 2
+    assert captured_autocorrelation["timestep"] == pytest.approx(20.0)
+    assert captured_artifacts == {
+        "raw_timestep_ps": 10.0,
+        "frame_stride": 4,
+        "effective_timestep_ps": 40.0,
+    }
 
 
 def test_runner_falls_back_to_naive_sem_on_expected_autocorrelation_failure(
@@ -581,7 +609,9 @@ def test_summarize_replicate_preserves_artifact_paths(tmp_path: Path) -> None:
                     npz_path=str(tmp_path / "run_1" / "sasa_token.npz"),
                     metadata_path=str(tmp_path / "run_1" / "sasa_token.json"),
                     time_unit="ns",
-                    timestep_ps=10.0,
+                    timestep_ps=30.0,
+                    raw_timestep_ps=10.0,
+                    frame_stride=3,
                 )
             ],
         )
@@ -594,6 +624,9 @@ def test_summarize_replicate_preserves_artifact_paths(tmp_path: Path) -> None:
     assert run_result.raw_metadata_path is not None
     assert run_result.npz_path == run_result.raw_npz_path
     assert run_result.metadata_path == run_result.raw_metadata_path
+    assert run_result.timestep_ps == pytest.approx(30.0)
+    assert run_result.raw_timestep_ps == pytest.approx(10.0)
+    assert run_result.frame_stride == 3
     assert run_result.n_frames_total == 100
     assert run_result.n_frames_used == 30
     assert result.n_frames_total == 100

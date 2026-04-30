@@ -36,6 +36,8 @@ class HydrogenBondRunnerResult:
 
     selection_string: str
     timestep_ps: float
+    raw_timestep_ps: float | None
+    frame_stride: int | None
     summaries: list[HydrogenBondReplicateSummary]
     composition_entries: list[CompositionEntry]
 
@@ -76,6 +78,8 @@ class HydrogenBondReplicateRunner:
         self.results = HydrogenBondRunnerResult(
             selection_string="",
             timestep_ps=float(timestep_ps),
+            raw_timestep_ps=float(timestep_ps),
+            frame_stride=1,
             summaries=[],
             composition_entries=[],
         )
@@ -108,6 +112,7 @@ class HydrogenBondReplicateRunner:
         n_total_frames = len(universe.trajectory)
         frame_indices = list(range(start, stop, step))
         n_frames = len(frame_indices)
+        effective_timestep_ps = self._timestep_ps * float(step)
 
         if n_total_frames == 0:
             raise ValueError("Trajectory contains zero frames")
@@ -160,7 +165,9 @@ class HydrogenBondReplicateRunner:
                 )
             self.results = HydrogenBondRunnerResult(
                 selection_string=union_sel,
-                timestep_ps=self._timestep_ps,
+                timestep_ps=effective_timestep_ps,
+                raw_timestep_ps=self._timestep_ps,
+                frame_stride=step,
                 summaries=[summary_results_by_name[s.name] for s in settings.summaries],
                 composition_entries=[],
             )
@@ -208,7 +215,9 @@ class HydrogenBondReplicateRunner:
 
         self.results = HydrogenBondRunnerResult(
             selection_string=union_sel,
-            timestep_ps=self._timestep_ps,
+            timestep_ps=effective_timestep_ps,
+            raw_timestep_ps=self._timestep_ps,
+            frame_stride=step,
             summaries=[summary_results_by_name[s.name] for s in settings.summaries],
             composition_entries=composition_entries,
         )

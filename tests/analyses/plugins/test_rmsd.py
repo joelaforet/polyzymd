@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,7 +31,7 @@ from polyzymd.analyses.rmsd._results import (
     RMSDRunAggregatedResult,
     RMSDRunResult,
 )
-from polyzymd.analyses.rmsd._runner import RMSDRunnerPayload, RMSDRunPayload
+from polyzymd.analyses.rmsd._runner import RMSDRunnerPayload, RMSDRunPayload, compute_rmsd_run
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.config.comparison import PlotSettings
 from tests._support.analysis_testkit import (
@@ -396,6 +398,9 @@ def test_summarize_replicate_writes_npz_sidecar(
         rmsd_values=np.asarray([1.0, 1.2], dtype=np.float64),
         frames=np.asarray([1000, 1001], dtype=np.int64),
         time_ns=np.asarray([10.0, 10.01], dtype=np.float64),
+        raw_timestep_ps=10.0,
+        frame_stride=3,
+        effective_timestep_ps=30.0,
         mean_rmsd=1.1,
         std_rmsd=0.1,
         median_rmsd=1.1,
@@ -423,6 +428,105 @@ def test_summarize_replicate_writes_npz_sidecar(
     expected_npz = ctx.output_dir / f"rmsd_protein_backbone_eq10ns_{expected_tag}_timeseries.npz"
     assert expected_npz.exists()
     assert result.run_results[0].npz_path == str(expected_npz)
+    assert result.run_results[0].timestep_ps == pytest.approx(30.0)
+    assert result.run_results[0].raw_timestep_ps == pytest.approx(10.0)
+    assert result.run_results[0].frame_stride == 3
+    with np.load(expected_npz) as payload:
+        assert float(payload["raw_timestep_ps"]) == pytest.approx(10.0)
+        assert int(payload["frame_stride"]) == 3
+        assert float(payload["effective_timestep_ps"]) == pytest.approx(30.0)
+
+
+def test_compute_rmsd_run_uses_effective_timestep_for_autocorrelation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RMSD autocorrelation should use raw timestep multiplied by frame stride."""
+    import numpy as np
+
+    from polyzymd.analyses.rmsd import _runner as runner_module
+
+    captured: dict[str, float] = {}
+
+    class _FakeRMSD:
+        def __init__(self, *args, **kwargs) -> None:
+            self.results = SimpleNamespace(rmsd=np.empty((0, 3), dtype=np.float64))
+
+        def run(self, *, start: int, stop: int, step: int):
+            del start, stop, step
+            self.results.rmsd = np.column_stack(
+                [
+                    np.arange(20, dtype=np.float64),
+                    np.zeros(20, dtype=np.float64),
+                    np.linspace(1.0, 2.0, 20, dtype=np.float64),
+                ]
+            )
+            return self
+
+    fake_mdanalysis = types.ModuleType("MDAnalysis")
+    fake_mdanalysis.__path__ = []
+    fake_analysis_module = types.ModuleType("MDAnalysis.analysis")
+    fake_analysis_module.__path__ = []
+    fake_rms_module = types.ModuleType("MDAnalysis.analysis.rms")
+    fake_rms_module.RMSD = _FakeRMSD
+    fake_analysis_module.rms = fake_rms_module
+    fake_mdanalysis.analysis = fake_analysis_module
+    monkeypatch.setitem(sys.modules, "MDAnalysis", fake_mdanalysis)
+    monkeypatch.setitem(sys.modules, "MDAnalysis.analysis", fake_analysis_module)
+    monkeypatch.setitem(sys.modules, "MDAnalysis.analysis.rms", fake_rms_module)
+    monkeypatch.setattr(runner_module, "align_trajectory", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(
+        runner_module,
+        "_build_reference_structure",
+        lambda **kwargs: (MagicMock(), MagicMock()),
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.convergence.find_convergence_time",
+        lambda *args, **kwargs: SimpleNamespace(
+            window_start_times_ns=[],
+            window_mean_values=[],
+            slope_times_ns=[],
+            slopes=[],
+            converged=False,
+            assessable=False,
+            convergence_time_ns=None,
+            message="not assessed",
+        ),
+    )
+
+    def _fake_estimate_correlation_time(_series, **kwargs):
+        captured["timestep"] = kwargs["timestep"]
+        return SimpleNamespace(
+            tau=1.0,
+            tau_unit="ps",
+            n_independent=20,
+            statistical_inefficiency=1.0,
+            warning=None,
+        )
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.autocorrelation.estimate_correlation_time",
+        _fake_estimate_correlation_time,
+    )
+
+    atom_group = MagicMock()
+    atom_group.__len__.return_value = 5
+    universe = MagicMock()
+    universe.select_atoms.return_value = atom_group
+
+    payload = compute_rmsd_run(
+        universe=universe,
+        run=RMSDRunSettings(label="protein_backbone"),
+        start=0,
+        stop=60,
+        step=3,
+        timestep_ps=10.0,
+    )
+
+    assert captured["timestep"] == pytest.approx(30.0)
+    assert payload.time_ns[1] == pytest.approx(0.03)
+    assert payload.raw_timestep_ps == pytest.approx(10.0)
+    assert payload.frame_stride == 3
+    assert payload.effective_timestep_ps == pytest.approx(30.0)
 
 
 def test_run_replicate_raises_before_writing_partial_results(

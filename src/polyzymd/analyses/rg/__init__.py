@@ -778,6 +778,12 @@ class RgAnalysis(Analysis):
                 "rg_values": payload.rg_values,
                 "time_ns": payload.time_ns,
                 "frames": payload.frames,
+                "raw_timestep_ps": np.asarray(payload.raw_timestep_ps, dtype=np.float64),
+                "frame_stride": np.asarray(payload.frame_stride, dtype=np.int64),
+                "effective_timestep_ps": np.asarray(
+                    payload.effective_timestep_ps,
+                    dtype=np.float64,
+                ),
             }
             if payload.fragment_rg_values is not None:
                 npz_data["fragment_rg_values"] = payload.fragment_rg_values
@@ -815,7 +821,9 @@ class RgAnalysis(Analysis):
                     n_frames_used=window.n_frames_selected,
                     npz_path=str(npz_path),
                     time_unit="ns",
-                    timestep_ps=window.timestep_ps,
+                    timestep_ps=payload.effective_timestep_ps,
+                    raw_timestep_ps=payload.raw_timestep_ps,
+                    frame_stride=payload.frame_stride,
                     **payload.frag_metadata,
                 )
             )

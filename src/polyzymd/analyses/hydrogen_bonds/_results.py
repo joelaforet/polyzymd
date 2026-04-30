@@ -99,7 +99,18 @@ class HydrogenBondResult(BaseAnalysisResult):
         default=None,
         description="Short fingerprint of hydrogen-bond settings for cache validation",
     )
-    timestep_ps: float | None = None
+    timestep_ps: float | None = Field(
+        default=None,
+        description="Effective spacing between analyzed hydrogen-bond samples in ps",
+    )
+    raw_timestep_ps: float | None = Field(
+        default=None,
+        description="Raw trajectory frame spacing in ps before frame stride is applied",
+    )
+    frame_stride: int | None = Field(
+        default=None,
+        description="Frame stride applied when sampling hydrogen-bond frames",
+    )
     summaries: list[HydrogenBondReplicateSummary]
     composition_entries: list[CompositionEntry] = Field(default_factory=list)
 
@@ -195,7 +206,18 @@ class HydrogenBondAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         default=None,
         description="Short fingerprint of hydrogen-bond settings for cache validation",
     )
-    timestep_ps: float | None = None
+    timestep_ps: float | None = Field(
+        default=None,
+        description="Effective spacing between analyzed hydrogen-bond samples in ps",
+    )
+    raw_timestep_ps: float | None = Field(
+        default=None,
+        description="Raw trajectory frame spacing in ps before frame stride is applied",
+    )
+    frame_stride: int | None = Field(
+        default=None,
+        description="Frame stride applied when sampling hydrogen-bond frames",
+    )
     replicates: list[int]
     n_replicates: int
     summaries: list[HydrogenBondAggregatedSummary]

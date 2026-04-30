@@ -30,6 +30,9 @@ class RgRunPayload:
     rg_values: NDArray[np.float64]
     frames: NDArray[np.int64]
     time_ns: NDArray[np.float64]
+    raw_timestep_ps: float
+    frame_stride: int
+    effective_timestep_ps: float
     mean_rg: float
     std_rg: float
     median_rg: float
@@ -237,6 +240,7 @@ def compute_rg_run(
         fragment_rg_values = None
 
     time_ns = (frame_indices.astype(np.float64) * timestep_ps) / 1000.0
+    effective_timestep_ps = float(timestep_ps) * float(step)
 
     mean_rg = float(np.mean(rg_values))
     std_rg = float(np.std(rg_values, ddof=0))
@@ -255,7 +259,7 @@ def compute_rg_run(
     if len(rg_values) >= 20:
         tau_result = estimate_correlation_time(
             rg_values,
-            timestep=timestep_ps,
+            timestep=effective_timestep_ps,
             timestep_unit="ps",
             method="integration",
             n_frames=len(rg_values),
@@ -278,6 +282,9 @@ def compute_rg_run(
         rg_values=rg_values,
         frames=frame_indices,
         time_ns=time_ns,
+        raw_timestep_ps=float(timestep_ps),
+        frame_stride=int(step),
+        effective_timestep_ps=effective_timestep_ps,
         mean_rg=mean_rg,
         std_rg=std_rg,
         median_rg=median_rg,

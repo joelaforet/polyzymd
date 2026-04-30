@@ -272,6 +272,7 @@ def compute_distance_payloads(
         use_pbc=use_pbc,
     ).run(start=start, stop=stop, step=step)
 
+    effective_timestep_ps = float(timestep_ps) * float(step)
     pair_payloads = [
         _summarize_distance_series(
             distances=np.asarray(distances, dtype=np.float64),
@@ -279,7 +280,7 @@ def compute_distance_payloads(
             selection1=resolved_pair.selection1,
             selection2=resolved_pair.selection2,
             threshold=resolved_pair.threshold,
-            timestep_ps=timestep_ps,
+            timestep_ps=effective_timestep_ps,
             n_frames_total=len(universe.trajectory),
         )
         for resolved_pair, distances in zip(

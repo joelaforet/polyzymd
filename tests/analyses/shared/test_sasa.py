@@ -790,6 +790,26 @@ class TestBuildSASAArtifactMetadata:
         assert isinstance(metadata["compatibility_hash"], str)
         assert len(metadata["compatibility_hash"]) == 16
 
+    def test_contains_timestep_metadata_when_provided(self) -> None:
+        """Metadata should distinguish raw, stride, and effective sample spacing."""
+        result = _make_sasa_result()
+        metadata = build_sasa_artifact_metadata(
+            result,
+            run_label="run_1",
+            target_selection="chainid A",
+            context_selection="all",
+            probe_radius_nm=0.14,
+            n_sphere_points=960,
+            equilibration="10ns",
+            raw_timestep_ps=10.0,
+            frame_stride=3,
+            effective_timestep_ps=30.0,
+        )
+
+        assert metadata["raw_timestep_ps"] == pytest.approx(10.0)
+        assert metadata["frame_stride"] == 3
+        assert metadata["effective_timestep_ps"] == pytest.approx(30.0)
+
 
 class TestCheckSASAArtifactCompatibility:
     def _versioned_metadata(self) -> dict[str, object]:

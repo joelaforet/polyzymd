@@ -319,6 +319,8 @@ class SASAAnalysis(Analysis):
                 metadata_path=run_payload.metadata_path,
                 time_unit=run_payload.time_unit,
                 timestep_ps=run_payload.timestep_ps,
+                raw_timestep_ps=run_payload.raw_timestep_ps,
+                frame_stride=run_payload.frame_stride,
             )
             for run_payload in payload.run_payloads
         ]

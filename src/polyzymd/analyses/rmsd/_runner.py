@@ -47,6 +47,12 @@ class RMSDRunPayload:
         Absolute frame indices analyzed.
     time_ns : NDArray[np.float64]
         Time axis in nanoseconds.
+    raw_timestep_ps : float
+        Raw trajectory frame spacing in ps before stride is applied.
+    frame_stride : int
+        Frame stride applied when sampling this run.
+    effective_timestep_ps : float
+        Effective spacing between analyzed samples in ps.
     mean_rmsd : float
         Mean RMSD over analyzed frames.
     std_rmsd : float
@@ -84,6 +90,9 @@ class RMSDRunPayload:
     rmsd_values: NDArray[np.float64]
     frames: NDArray[np.int64]
     time_ns: NDArray[np.float64]
+    raw_timestep_ps: float
+    frame_stride: int
+    effective_timestep_ps: float
     mean_rmsd: float
     std_rmsd: float
     median_rmsd: float
@@ -274,6 +283,7 @@ def compute_rmsd_run(
     rmsd_values = np.asarray(rmsd_analysis.results.rmsd[:, 2], dtype=np.float64)
     frames = np.arange(start, stop, step, dtype=np.int64)
     time_ns = (frames.astype(np.float64) * timestep_ps) / 1000.0
+    effective_timestep_ps = float(timestep_ps) * float(step)
 
     mean_rmsd = float(np.mean(rmsd_values))
     std_rmsd = float(np.std(rmsd_values, ddof=0))
@@ -292,7 +302,7 @@ def compute_rmsd_run(
     if len(rmsd_values) >= 20:
         tau_result = estimate_correlation_time(
             rmsd_values,
-            timestep=timestep_ps,
+            timestep=effective_timestep_ps,
             timestep_unit="ps",
             method="integration",
             n_frames=len(rmsd_values),
@@ -324,6 +334,9 @@ def compute_rmsd_run(
         rmsd_values=rmsd_values,
         frames=frames,
         time_ns=time_ns,
+        raw_timestep_ps=float(timestep_ps),
+        frame_stride=int(step),
+        effective_timestep_ps=effective_timestep_ps,
         mean_rmsd=mean_rmsd,
         std_rmsd=std_rmsd,
         median_rmsd=median_rmsd,

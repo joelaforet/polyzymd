@@ -42,6 +42,7 @@ from polyzymd.analyses.hydrogen_bonds._results import (
     ResidueRef,
     UndirectedResiduePairResult,
 )
+from polyzymd.analyses.hydrogen_bonds._runner import HydrogenBondReplicateRunner
 from polyzymd.analyses.stats import (
     default_scalar_comparison,
     format_pct,
@@ -295,6 +296,99 @@ def test_get_trajectory_window_uses_timestep_override(tmp_path: Path) -> None:
 
     assert window.start == 20
     assert window.timestep_ps == pytest.approx(50.0)
+
+
+def test_runner_records_effective_timestep_metadata() -> None:
+    """Hydrogen-bond runner should record raw timestep, stride, and effective spacing."""
+
+    class MockHydrogenBondAnalysis:
+        def __init__(self, **kwargs) -> None:
+            self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
+
+        def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
+            del start, stop, step, verbose
+            self.results.hbonds = np.empty((0, 6), dtype=float)
+
+    universe = MagicMock()
+    universe.trajectory = [object()] * 9
+    universe.atoms = _MockAtomCollection(
+        {
+            0: _MockAtom(0, "A", 10, "SER", 0),
+            1: _MockAtom(1, "C", 100, "OEG", 1),
+        }
+    )
+    selections = {
+        "chainid A": _MockAtomGroup([0]),
+        "chainid C": _MockAtomGroup([1]),
+    }
+    universe.select_atoms.side_effect = lambda selection, updating: selections[selection]
+    runner = HydrogenBondReplicateRunner(
+        universe=universe,
+        settings=HydrogenBondSettings(),
+        condition_label="test",
+        replicate=1,
+        timestep_ps=10.0,
+    )
+
+    with patch.dict(sys.modules, _make_mdanalysis_module(MockHydrogenBondAnalysis)):
+        runner.run(start=0, stop=9, step=3)
+
+    assert runner.results.timestep_ps == pytest.approx(30.0)
+    assert runner.results.raw_timestep_ps == pytest.approx(10.0)
+    assert runner.results.frame_stride == 3
+
+
+def test_summarize_replicate_propagates_timing_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hydrogen-bond summarize should preserve runner timing metadata."""
+    analysis = HydrogenBondsAnalysis()
+    condition = Condition(
+        label="test",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1,),
+        sim_config=MagicMock(),
+    )
+    settings = HydrogenBondSettings()
+    ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="10ns",
+        recompute=True,
+        settings=settings,
+    )
+    summary = HydrogenBondReplicateSummary(
+        name="protein_polymer",
+        mode="between",
+        group_names=["protein", "polymer"],
+        n_frames_used=3,
+        mean_hbonds_per_frame=0.0,
+        fraction_frames_with_any_hbond=0.0,
+        counts_per_frame=[0, 0, 0],
+    )
+    runner = MagicMock(
+        results=types.SimpleNamespace(
+            selection_string="(chainid A) or (chainid C)",
+            timestep_ps=30.0,
+            raw_timestep_ps=10.0,
+            frame_stride=3,
+            summaries=[summary],
+            composition_entries=[],
+        )
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.hydrogen_bonds.compute_config_hash",
+        lambda _sim_config: "hash123",
+    )
+
+    result = analysis.summarize_replicate(ctx, 1, runner, MagicMock())
+
+    assert result.timestep_ps == pytest.approx(30.0)
+    assert result.raw_timestep_ps == pytest.approx(10.0)
+    assert result.frame_stride == 3
 
 
 def test_angle_cutoff_validation() -> None:
@@ -1467,6 +1561,24 @@ def test_aggregate_basic(tmp_path: Path) -> None:
     )
     assert ctx.result_path is not None
     assert ctx.result_path.exists()
+
+
+def test_aggregate_propagates_timing_metadata(tmp_path: Path) -> None:
+    """Hydrogen-bond aggregate should preserve replicate timing metadata."""
+    analysis = HydrogenBondsAnalysis()
+    ctx = _make_aggregate_context(tmp_path, replicates=(1, 2))
+    results = [
+        _make_replicate_result(rep, 1.0 + rep, 0.2).model_copy(
+            update={"timestep_ps": 30.0, "raw_timestep_ps": 10.0, "frame_stride": 3}
+        )
+        for rep in (1, 2)
+    ]
+
+    aggregated = analysis.aggregate(ctx, results)
+
+    assert aggregated.timestep_ps == pytest.approx(30.0)
+    assert aggregated.raw_timestep_ps == pytest.approx(10.0)
+    assert aggregated.frame_stride == 3
 
 
 def test_aggregate_pair_merging(tmp_path: Path) -> None:

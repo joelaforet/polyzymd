@@ -351,6 +351,9 @@ def save_sasa_artifacts(
     probe_radius_nm: float,
     n_sphere_points: int,
     equilibration: str,
+    raw_timestep_ps: float | None = None,
+    frame_stride: int | None = None,
+    effective_timestep_ps: float | None = None,
 ) -> None:
     """Save raw SASA arrays plus JSON sidecar metadata.
 
@@ -374,6 +377,12 @@ def save_sasa_artifacts(
         Number of sphere points.
     equilibration : str
         Equilibration string.
+    raw_timestep_ps : float | None, optional
+        Raw trajectory frame spacing in ps before stride is applied.
+    frame_stride : int | None, optional
+        Frame stride used to sample this artifact.
+    effective_timestep_ps : float | None, optional
+        Effective spacing between analyzed samples in ps.
     """
     npz_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -401,6 +410,9 @@ def save_sasa_artifacts(
         probe_radius_nm=probe_radius_nm,
         n_sphere_points=n_sphere_points,
         equilibration=equilibration,
+        raw_timestep_ps=raw_timestep_ps,
+        frame_stride=frame_stride,
+        effective_timestep_ps=effective_timestep_ps,
     )
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
@@ -695,6 +707,9 @@ def build_sasa_artifact_metadata(
     probe_radius_nm: float,
     n_sphere_points: int,
     equilibration: str,
+    raw_timestep_ps: float | None = None,
+    frame_stride: int | None = None,
+    effective_timestep_ps: float | None = None,
 ) -> dict[str, Any]:
     """Build flat SASA artifact metadata with schema versioning fields.
 
@@ -714,6 +729,12 @@ def build_sasa_artifact_metadata(
         Number of Shrake-Rupley sphere points.
     equilibration : str
         Equilibration descriptor.
+    raw_timestep_ps : float | None, optional
+        Raw trajectory frame spacing in ps before stride is applied.
+    frame_stride : int | None, optional
+        Frame stride used to sample this artifact.
+    effective_timestep_ps : float | None, optional
+        Effective spacing between analyzed samples in ps.
 
     Returns
     -------
@@ -728,7 +749,7 @@ def build_sasa_artifact_metadata(
         n_sphere_points=n_sphere_points,
         equilibration=equilibration,
     )
-    return {
+    metadata = {
         "run_label": run_label,
         "target_selection": target_selection,
         "context_selection": context_selection,
@@ -752,6 +773,13 @@ def build_sasa_artifact_metadata(
         "sasa_mode": contract.mode,
         "compatibility_hash": contract.compatibility_hash,
     }
+    if raw_timestep_ps is not None:
+        metadata["raw_timestep_ps"] = float(raw_timestep_ps)
+    if frame_stride is not None:
+        metadata["frame_stride"] = int(frame_stride)
+    if effective_timestep_ps is not None:
+        metadata["effective_timestep_ps"] = float(effective_timestep_ps)
+    return metadata
 
 
 def check_sasa_artifact_compatibility(

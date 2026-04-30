@@ -43,6 +43,8 @@ class SASARunPayload:
     metadata_path: str
     time_unit: str
     timestep_ps: float
+    raw_timestep_ps: float | None
+    frame_stride: int | None
 
 
 @dataclass(frozen=True)
@@ -180,6 +182,7 @@ class SASAReplicateRunner:
                 chunk_size=self._chunk_size,
                 stride=run.stride,
             )
+            effective_timestep_ps = self._timestep_ps * float(run.stride)
 
             self._save_sasa_artifacts(
                 npz_path=npz_path,
@@ -191,6 +194,9 @@ class SASAReplicateRunner:
                 probe_radius_nm=self._probe_radius_nm,
                 n_sphere_points=self._n_sphere_points,
                 equilibration=self._equilibration,
+                raw_timestep_ps=self._timestep_ps,
+                frame_stride=run.stride,
+                effective_timestep_ps=effective_timestep_ps,
             )
 
             sampled_frame_indices.update(int(frame) for frame in np.asarray(raw.frames).tolist())
@@ -201,7 +207,8 @@ class SASAReplicateRunner:
                     run_label=run.label,
                     target_selection=run.target_selection,
                     context_selection=context_selection,
-                    timestep_ps=self._timestep_ps,
+                    raw_timestep_ps=self._timestep_ps,
+                    frame_stride=run.stride,
                     n_frames_total=n_frames_total,
                     raw_npz_path=npz_path,
                     raw_metadata_path=metadata_path,
@@ -226,7 +233,8 @@ def _summarize_sasa_run(
     run_label: str,
     target_selection: str,
     context_selection: str,
-    timestep_ps: float,
+    raw_timestep_ps: float,
+    frame_stride: int,
     n_frames_total: int,
     raw_npz_path: Path,
     raw_metadata_path: Path,
@@ -238,6 +246,7 @@ def _summarize_sasa_run(
     n_frames_used = int(np.asarray(raw.frames, dtype=np.int64).size)
     finite_total = total[np.isfinite(total)]
     zero_atom = raw.target_atom_indices.size == 0 or raw.context_atom_indices.size == 0
+    effective_timestep_ps = float(raw_timestep_ps) * float(frame_stride)
     if zero_atom:
         LOGGER.warning(
             "Run '%s' selection matched zero atoms; recording NaN SASA metrics",
@@ -269,7 +278,7 @@ def _summarize_sasa_run(
         try:
             tau = estimate_correlation_time_func(
                 finite_total,
-                timestep=timestep_ps,
+                timestep=effective_timestep_ps,
                 timestep_unit="ps",
                 method="integration",
                 n_frames=len(finite_total),
@@ -315,5 +324,7 @@ def _summarize_sasa_run(
         npz_path=npz_path_str,
         metadata_path=metadata_path_str,
         time_unit="ns",
-        timestep_ps=timestep_ps,
+        timestep_ps=effective_timestep_ps,
+        raw_timestep_ps=raw_timestep_ps,
+        frame_stride=frame_stride,
     )
