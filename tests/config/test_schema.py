@@ -145,6 +145,14 @@ class TestConfigValidation:
         assert config.temperature == 300.0
         assert config.pressure == 1.0  # Default pressure
 
+    def test_ion_config_defaults_to_neutralization_without_salt(self):
+        """IonConfig should neutralize without adding bulk salt by default."""
+        from polyzymd.config.schema import IonConfig
+
+        config = IonConfig()
+        assert config.neutralize is True
+        assert config.nacl_concentration == 0.0
+
 
 class TestCoSolventVolumeValidation:
     """Test co-solvent volume fraction / concentration validation."""

@@ -536,7 +536,7 @@ class IonConfig(BaseModel):
     """
 
     neutralize: bool = Field(True, description="Neutralize system charge")
-    nacl_concentration: float = Field(0.1, ge=0.0, description="NaCl conc. (mol/L)")
+    nacl_concentration: float = Field(0.0, ge=0.0, description="NaCl conc. (mol/L)")
     kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L)")
     mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L)")
 

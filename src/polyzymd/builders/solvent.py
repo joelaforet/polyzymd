@@ -149,7 +149,7 @@ class SolventComposition:
 
     water_model: WaterModelType = "tip3p"
     co_solvents: List[CoSolvent] = field(default_factory=list)
-    nacl_concentration: float = 0.1  # mol/L
+    nacl_concentration: float = 0.0  # mol/L
     kcl_concentration: float = 0.0
     mgcl2_concentration: float = 0.0
     neutralize: bool = True
