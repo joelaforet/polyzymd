@@ -23,6 +23,15 @@ Before starting, make sure you have:
 If you have not run a simulation yet, complete
 {doc}`quickstart` first.
 
+```{important}
+**Resource requirements:** `polyzymd compare init`, `validate`, `status`, and
+`--help` are lightweight. Commands that load trajectories, such as
+`polyzymd compare run` and `run-all`, can require substantial RAM, CPU/GPU time,
+and scratch I/O. On shared HPC systems, run them inside an allocated job or
+interactive compute session, not on a login node. If an analysis is killed or
+runs out of memory, request more resources or use `polyzymd compare submit`.
+```
+
 ## Step 1: Create a Comparison Project
 
 From the directory where you keep your simulation projects, run:

@@ -37,6 +37,16 @@ bonds. Experimental workflows are linked at the end, but they are not part of
 the main tutorial path.
 ```
 
+```{important}
+**Resource requirements:** Workspace setup and validation commands are
+lightweight. Commands that load trajectories, such as `polyzymd compare run`,
+`run-all`, and plotting over large cached results, can require substantial RAM,
+CPU/GPU time, and scratch I/O. On shared HPC systems, run them inside an
+allocated job or interactive compute session, not on a login node. If a command
+is killed or runs out of memory, request more resources or use
+`polyzymd compare submit`.
+```
+
 ## The Study We Will Analyze
 
 We will assume a project laid out like this:

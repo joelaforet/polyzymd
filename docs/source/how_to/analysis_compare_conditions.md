@@ -34,6 +34,17 @@ pixi shell -e build
 Alternatively, prefix each command with `pixi run -e build`.
 :::
 
+:::{admonition} Resource requirements
+:class: important
+
+Validation, status, and help commands are lightweight. `polyzymd compare run`,
+`run-all`, and plotting over large cached results may load trajectories and can
+require substantial RAM, CPU/GPU time, and scratch I/O. On shared HPC systems,
+run these commands inside an allocated job or interactive compute session, not
+on a login node. If a command is killed or runs out of memory, request more
+resources or use `polyzymd compare submit`.
+:::
+
 ## Before You Start
 
 Make sure each condition already has:

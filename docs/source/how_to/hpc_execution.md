@@ -23,6 +23,16 @@ You need:
 If you have not yet created a `comparison.yaml`, start with
 {doc}`analysis_compare_conditions`.
 
+:::{admonition} Use compute resources, not login nodes
+:class: important
+
+Trajectory-analysis jobs can require substantial RAM, CPU/GPU time, and scratch
+I/O. On shared HPC systems, run `polyzymd compare submit` from a place where it
+can submit jobs to compute nodes, and reserve interactive `polyzymd compare run`
+for an allocated compute session or suitably provisioned workstation. Do not run
+heavy analysis commands directly on a login node.
+:::
+
 ## What the DAG Looks Like
 
 When you run `polyzymd compare submit`, the framework generates and submits a

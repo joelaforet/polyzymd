@@ -20,6 +20,16 @@ sure PolyzyMD can build the system.
 By the end, you will have a working project directory and a validated
 `config.yaml` that is ready for local building or HPC submission.
 
+```{important}
+**Resource requirements:** Lightweight commands such as `polyzymd init`,
+`validate`, `status`, and `--help` are safe to run interactively. System builds,
+simulations, and trajectory analyses can require substantial RAM, CPU/GPU time,
+and scratch I/O. On shared HPC systems, run heavy commands inside an allocated
+job or interactive compute session, not on a login node. If a tutorial command
+is killed or runs out of memory, request more resources or use the SLURM
+workflow.
+```
+
 ## Step 1: Create a new project scaffold
 
 From the PolyzyMD repository root, run:
