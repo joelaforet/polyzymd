@@ -1700,15 +1700,29 @@ class ContactsAnalysis(Analysis):
         condition_data: list[tuple[Condition, dict[str, Any]]] = []
         for cond in ctx.conditions:
             agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
-            agg_result = self._load_validated_aggregated_result(
-                agg_dir,
+            agg_result = ctx.aggregated_results.get(cond.label)
+            if agg_result is not None and not self._cache_matches_context(
+                agg_result,
                 settings=settings,
                 equilibration=ctx.equilibration,
-                replicates=cond.replicates,
                 sim_config=cond.sim_config,
-                recompute=ctx.recompute,
+                replicates=cond.replicates,
                 allow_replicate_subset=True,
-            )
+            ):
+                logger.warning(f"Invalid in-memory aggregate for '{cond.label}' — reloading.")
+                agg_result = None
+
+            if agg_result is None:
+                # Comparison consumes finalize outputs even when recompute was requested
+                agg_result = self._load_validated_aggregated_result(
+                    agg_dir,
+                    settings=settings,
+                    equilibration=ctx.equilibration,
+                    replicates=cond.replicates,
+                    sim_config=cond.sim_config,
+                    recompute=False,
+                    allow_replicate_subset=True,
+                )
             if agg_result is None:
                 logger.warning(f"No aggregated result for '{cond.label}' — skipping.")
                 continue

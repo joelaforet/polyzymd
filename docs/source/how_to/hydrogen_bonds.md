@@ -179,7 +179,7 @@ overlap, the plugin raises an error by default. Set
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `update_selections` | bool | `true` | Re-evaluate atom selections each frame. Required for coordinate-dependent selections like `around`. For purely structural selections (`chainid`, `resname`), this adds overhead without changing results. |
+| `update_selections` | bool | `true` | Re-evaluate simple atom-group selections each frame. Coordinate-dependent group selections such as `around`, `sphzone`, and `cyzone` are not supported when this is `true`; use static groups or separate preprocessed groups instead. |
 | `top_n_pairs` | int | `15` | Number of top residue pairs to report per summary |
 | `allow_empty_groups` | bool | `true` | If `true` (default), warn and skip summaries when a referenced group selection matches no atoms. Set `false` for strict validation (raise `ValueError`). |
 | `allow_overlapping_composition` | bool | `false` | If `false`, overlapping composition partitions raise an error. Set `true` to allow overlap with warnings. |
@@ -191,9 +191,15 @@ explicitly in YAML with the same keys/selections.
 :::{admonition} Technical Detail
 :class: note
 
-`update_selections: true` makes MDAnalysis re-evaluate atom selections every
-frame, which is important for coordinate-dependent selections such as
-`around`, `sphzone`, and `cyzone`.
+`update_selections: true` makes MDAnalysis re-evaluate simple atom-group
+selections every frame. This is appropriate for structural selections such as
+`protein`, `chainid`, `resname`, and `resid`.
+
+Coordinate-dependent group selections such as `around`, `sphzone`, and `cyzone`
+are rejected by source validation when `update_selections: true` because the
+plugin resolves group membership for donor/acceptor post-classification from
+initial frame index sets. Use static groups, or create separate preprocessed
+groups before running the analysis.
 
 However, the plugin resolves group membership used for donor/acceptor
 pair-classification once at the start from the initial frame index sets. This
@@ -206,11 +212,10 @@ consistent summary definitions across frames.
 :class: note
 
 If all your groups use structural selections (`chainid`, `resname`, `resid`,
-`protein`), setting `update_selections: false` is safe and faster. Only set
-it to `true` when you use coordinate-dependent keywords like `around`,
-`sphzone`, or `cyzone`. Note that even with `update_selections: true`, group
-membership for post-classification is evaluated once — this is exact for
-structural selections and an approximation for coordinate-dependent ones.
+`protein`), setting `update_selections: false` is safe and faster. Keep
+coordinate-dependent selections out of `groups` when `update_selections: true`;
+use static groups or separate preprocessed groups for distance-based
+membership.
 :::
 
 ## Common Recipes

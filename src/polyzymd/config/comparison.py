@@ -993,7 +993,7 @@ plugins:
   # EXPERIMENTAL: Exposure Dynamics Analysis (chaperone-like polymer activity)
   # Requires contacts analysis to be run first for each condition.
   # Definitions and interpretation may change after the presentation release.
-  # Run: polyzymd compare exposure
+  # Run: polyzymd compare run exposure
   #
   # exposure:
   #   exposure_threshold: 0.20     # fraction SASA defining 'exposed' residue
@@ -1011,7 +1011,7 @@ plugins:
   # Requires contacts analysis with compute_binding_preference: true to be run first.
   # Converts binding preference probabilities into ΔG_sel = -k_B·T·ln(contact_share / expected_share).
   # Definitions and interpretation may change after the presentation release.
-  # Run: polyzymd compare binding-free-energy
+  # Run: polyzymd compare run binding_free_energy
   #
   # binding_free_energy:
   #   units: kT                    # energy units: kT (default), kcal/mol, or kJ/mol
@@ -1022,7 +1022,7 @@ plugins:
   # Requires contacts analysis with compute_binding_preference: true.
   # Computes S = Σ N_pg × ΔG_sel_pg for each polymer composition.
   # Definitions and interpretation may change after the presentation release.
-  # Run: polyzymd compare polymer-affinity
+  # Run: polyzymd compare run polymer_affinity
   #
   # polymer_affinity:
   #   surface_exposure_threshold: 0.2
@@ -1038,7 +1038,7 @@ plugins:
 # Plot Settings (HOW to visualize - figure customization)
 # ============================================================================
 # Controls plot generation for all analyses. Per-analysis sections override
-# defaults. Run `polyzymd compare plot` to generate all configured plots.
+# defaults. Run `polyzymd compare plot-all` to generate all configured plots.
 
 plot_settings:
   output_dir: "figures/"         # relative to this file

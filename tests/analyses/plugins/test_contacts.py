@@ -1170,6 +1170,63 @@ def _make_mock_agg_result(n_replicates: int = 3, n_residues: int = 5):
     return mock
 
 
+def _make_valid_agg_result(settings, n_replicates: int = 2, n_residues: int = 2):
+    """Create a valid aggregated contacts result for compare regression tests.
+
+    Parameters
+    ----------
+    settings : ContactsSettings
+        Contacts settings used to stamp cache identity metadata.
+    n_replicates : int, optional
+        Number of replicate vectors to include, by default 2.
+    n_residues : int, optional
+        Number of residue summary rows to include, by default 2.
+
+    Returns
+    -------
+    AggregatedContactResult
+        Aggregate result with window, replicate, and settings metadata.
+    """
+    from polyzymd.analyses.contacts._aggregator import (
+        AggregatedContactResult,
+        AggregatedResidueStats,
+    )
+    from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+
+    residue_stats = []
+    for residue_index in range(n_residues):
+        fractions = [0.25 + 0.05 * residue_index + 0.05 * rep for rep in range(n_replicates)]
+        residue_stats.append(
+            AggregatedResidueStats(
+                protein_resid=residue_index + 1,
+                protein_resname="ALA",
+                contact_fraction_mean=sum(fractions) / len(fractions),
+                contact_fraction_sem=0.01,
+                contact_fraction_per_replicate=fractions,
+            )
+        )
+
+    return AggregatedContactResult(
+        n_replicates=n_replicates,
+        replicates=list(range(1, n_replicates + 1)),
+        residue_stats=residue_stats,
+        total_frames_per_replicate=[10] * n_replicates,
+        criteria_cutoff=float(settings.cutoff),
+        coverage_mean=1.0,
+        coverage_sem=0.0,
+        mean_contact_fraction=0.325,
+        mean_contact_fraction_sem=0.01,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        metadata={
+            "settings_fingerprint": contacts_settings_fingerprint(settings),
+            "compute_residence_times": bool(settings.compute_residence_times),
+            "residence_times_computed": bool(settings.compute_residence_times),
+            "replicates": list(range(1, n_replicates + 1)),
+        },
+    )
+
+
 class TestAggregate:
     """aggregate delegates to aggregate_contact_results."""
 
@@ -2201,6 +2258,80 @@ class TestCompare:
         assert result is not None
         assert len(result.conditions) == 1
         assert result.pairwise_comparisons == []
+
+    def test_compare_uses_aggregated_results_when_recompute_true(self, tmp_path):
+        """Finalize should consume in-memory aggregates even with recompute enabled."""
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings()
+        condition = Condition(
+            label="Finalized",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        analysis_dir = tmp_path / "Finalized" / "contacts"
+        analysis_dir.mkdir(parents=True)
+        aggregate = _make_valid_agg_result(settings)
+        ctx = ComparisonContext(
+            name="test",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"Finalized": analysis_dir},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=settings,
+            aggregated_results={"Finalized": aggregate},
+            recompute=True,
+        )
+
+        with (
+            patch.object(analysis, "_load_validated_aggregated_result") as load_mock,
+            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
+        ):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        assert result.conditions[0].label == "Finalized"
+        load_mock.assert_not_called()
+
+    def test_compare_loads_existing_aggregate_when_recompute_true(self, tmp_path):
+        """Comparison-stage reads should not suppress valid aggregate JSON files."""
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings()
+        condition = Condition(
+            label="Cached",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        analysis_dir = tmp_path / "Cached" / "contacts"
+        agg_dir = analysis_dir / "aggregated"
+        agg_dir.mkdir(parents=True)
+        _make_valid_agg_result(settings).save(agg_dir / "result.json")
+        ctx = ComparisonContext(
+            name="test",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"Cached": analysis_dir},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=settings,
+            recompute=True,
+        )
+
+        with patch.object(analysis, "_load_or_compute_binding_preference", return_value=None):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        assert result.conditions[0].label == "Cached"
 
     def test_compare_excluded_conditions_recorded(self, tmp_path):
         from polyzymd.analyses.base import ComparisonContext, Condition
