@@ -104,6 +104,32 @@ def _check_compute_result(result: Any, method: str, analysis_name: str) -> None:
     _check_result_type(result, method, analysis_name)
 
 
+def _remove_stale_directory(path: Path) -> None:
+    """Remove an analysis-owned directory before forced recomputation.
+
+    Parameters
+    ----------
+    path : Path
+        Directory path owned by the current analysis.
+    """
+    if path.is_dir():
+        shutil.rmtree(path)
+
+
+def _remove_stale_path(path: Path) -> None:
+    """Remove an analysis-owned file or directory before forced recomputation.
+
+    Parameters
+    ----------
+    path : Path
+        Path owned by the current analysis.
+    """
+    if path.is_file() or path.is_symlink():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
 def run_replicate_once(
     analysis: Analysis,
     condition: Condition,
@@ -180,6 +206,7 @@ def aggregate_condition_from_disk(
     equilibration: str,
     output_dir: Path,
     replicates: Sequence[int],
+    recompute: bool = False,
 ) -> Any:
     """Aggregate one condition by loading replicate results from disk.
 
@@ -197,6 +224,8 @@ def aggregate_condition_from_disk(
         Analysis output directory for the condition.
     replicates : Sequence[int]
         Replicate numbers to load.
+    recompute : bool, optional
+        Force regeneration of aggregate outputs.
 
     Returns
     -------
@@ -231,6 +260,8 @@ def aggregate_condition_from_disk(
         )
 
     agg_dir = output_dir / "aggregated"
+    if recompute:
+        _remove_stale_directory(agg_dir)
     agg_dir.mkdir(parents=True, exist_ok=True)
     agg_result_path = analysis.aggregate_result_path(agg_dir)
     agg_ctx = AggregateContext(
@@ -239,6 +270,7 @@ def aggregate_condition_from_disk(
         output_dir=agg_dir,
         equilibration=equilibration,
         settings=settings,
+        recompute=recompute,
         result_path=agg_result_path,
     )
     try:
@@ -359,6 +391,8 @@ def run_analysis(
 
     # Aggregate successful replicates
     agg_dir = output_dir / "aggregated"
+    if recompute:
+        _remove_stale_directory(agg_dir)
     agg_dir.mkdir(parents=True, exist_ok=True)
     agg_result_path = analysis.aggregate_result_path(agg_dir)
 
@@ -368,6 +402,7 @@ def run_analysis(
         output_dir=agg_dir,
         equilibration=equilibration,
         settings=settings,
+        recompute=recompute,
         result_path=agg_result_path,
     )
 
@@ -587,6 +622,7 @@ def finalize_comparison_from_disk(
     effective_control: str | None,
     prepared_state: dict[str, Any] | None = None,
     allow_partial: bool = False,
+    recompute: bool = False,
 ) -> dict[str, Any]:
     """Run compare and plot using already-aggregated condition results.
 
@@ -611,6 +647,8 @@ def finalize_comparison_from_disk(
     allow_partial : bool, optional
         If ``True``, proceed with dropped conditions. If ``False``, fail when
         any configured condition lacks aggregated results.
+    recompute : bool, optional
+        Force regeneration of comparison and plot outputs.
 
     Returns
     -------
@@ -735,6 +773,8 @@ def finalize_comparison_from_disk(
 
     results_dir.mkdir(parents=True, exist_ok=True)
     comparison_result_path = analysis.comparison_result_path(results_dir)
+    if recompute and (comparison_result_path.is_file() or comparison_result_path.is_symlink()):
+        comparison_result_path.unlink()
     comp_ctx = ComparisonContext(
         name=config.name,
         conditions=conditions,
@@ -744,7 +784,7 @@ def finalize_comparison_from_disk(
         results_dir=results_dir,
         equilibration=resolved_equilibration,
         settings=settings,
-        recompute=False,
+        recompute=recompute,
         fdr_alpha=getattr(config.defaults, "fdr_alpha", 0.05),
         ttest_method=getattr(config.defaults, "ttest_method", "student"),
         posthoc_method=getattr(config.defaults, "posthoc_method", "ttest_bh"),
@@ -779,6 +819,8 @@ def finalize_comparison_from_disk(
 
         raw_plot_settings = PlotSettings()
 
+    if recompute:
+        _remove_stale_path(figures_dir)
     figures_dir.mkdir(parents=True, exist_ok=True)
     plot_ctx = PlotContext(
         conditions=conditions,
@@ -787,6 +829,7 @@ def finalize_comparison_from_disk(
         output_dir=figures_dir,
         settings=settings,
         plot_settings=raw_plot_settings,
+        recompute=recompute,
         comparison_path=comparison_result_path if comparison_result is not None else None,
         control_label=resolved_control,
         equilibration=resolved_equilibration,
@@ -1059,6 +1102,7 @@ def run_comparison(
         settings=settings,
         effective_control=effective_control,
         prepared_state=prepared_state,
+        recompute=recompute,
     )
 
     return {

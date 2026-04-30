@@ -482,6 +482,39 @@ class TestContextObjects:
         assert ctx.equilibration == "10ns"
         assert ctx.settings.threshold == 2.0
 
+    def test_aggregate_context_preserves_positional_api(self, toy_condition, toy_settings):
+        """Old positional aggregate context construction should remain valid."""
+        result_path = Path("/tmp/aggregated/result.json")
+
+        ctx = AggregateContext(
+            toy_condition,
+            (1, 2),
+            Path("/tmp/aggregated"),
+            "10ns",
+            toy_settings,
+            result_path,
+        )
+
+        assert ctx.condition is toy_condition
+        assert ctx.replicates == (1, 2)
+        assert ctx.output_dir == Path("/tmp/aggregated")
+        assert ctx.equilibration == "10ns"
+        assert ctx.settings is toy_settings
+        assert ctx.result_path == result_path
+        assert ctx.recompute is False
+
+        recompute_ctx = AggregateContext(
+            toy_condition,
+            (1, 2),
+            Path("/tmp/aggregated"),
+            "10ns",
+            toy_settings,
+            result_path,
+            recompute=True,
+        )
+        assert recompute_ctx.result_path == result_path
+        assert recompute_ctx.recompute is True
+
     def test_comparison_context_effective_control(self, toy_condition):
         cond2 = Condition(
             label="Control",
@@ -518,6 +551,112 @@ class TestContextObjects:
             result_path=Path("/tmp/result.json"),
         )
         assert ctx.effective_control is None
+
+    def test_comparison_context_preserves_positional_api(self, toy_condition):
+        """Old positional comparison context construction should remain valid."""
+        result_path = Path("/tmp/results/result.json")
+        failed_conditions = [toy_condition]
+        aggregated_results = {"Test Condition": {"ok": True}}
+
+        ctx = ComparisonContext(
+            "Test Project",
+            [toy_condition],
+            [],
+            None,
+            {"Test Condition": Path("/tmp/analysis/toy")},
+            Path("/tmp/results"),
+            "10ns",
+            ToySettings(),
+            0.1,
+            "welch",
+            "tukey_hsd",
+            result_path,
+            failed_conditions,
+            aggregated_results,
+        )
+
+        assert ctx.name == "Test Project"
+        assert ctx.conditions == [toy_condition]
+        assert ctx.excluded_conditions == []
+        assert ctx.control_label is None
+        assert ctx.analysis_dirs == {"Test Condition": Path("/tmp/analysis/toy")}
+        assert ctx.results_dir == Path("/tmp/results")
+        assert ctx.equilibration == "10ns"
+        assert isinstance(ctx.settings, ToySettings)
+        assert ctx.fdr_alpha == 0.1
+        assert ctx.ttest_method == "welch"
+        assert ctx.posthoc_method == "tukey_hsd"
+        assert ctx.result_path == result_path
+        assert ctx.failed_conditions == failed_conditions
+        assert ctx.aggregated_results == aggregated_results
+        assert ctx.recompute is False
+
+        recompute_ctx = ComparisonContext(
+            "Test Project",
+            [toy_condition],
+            [],
+            None,
+            {"Test Condition": Path("/tmp/analysis/toy")},
+            Path("/tmp/results"),
+            "10ns",
+            ToySettings(),
+            0.1,
+            "welch",
+            "tukey_hsd",
+            result_path,
+            failed_conditions,
+            aggregated_results,
+            recompute=True,
+        )
+        assert recompute_ctx.fdr_alpha == 0.1
+        assert recompute_ctx.aggregated_results == aggregated_results
+        assert recompute_ctx.recompute is True
+
+    def test_plot_context_preserves_positional_api(self, toy_condition):
+        """Old positional plot context construction should remain valid."""
+        from polyzymd.config.comparison import PlotSettings
+
+        plot_settings = PlotSettings()
+        comparison_path = Path("/tmp/results/result.json")
+
+        ctx = PlotContext(
+            [toy_condition],
+            {"Test Condition": Path("/tmp/analysis/toy")},
+            Path("/tmp/results"),
+            Path("/tmp/figures/toy"),
+            ToySettings(),
+            plot_settings,
+            comparison_path,
+            "Test Condition",
+            "10ns",
+        )
+
+        assert ctx.conditions == [toy_condition]
+        assert ctx.analysis_dirs == {"Test Condition": Path("/tmp/analysis/toy")}
+        assert ctx.results_dir == Path("/tmp/results")
+        assert ctx.output_dir == Path("/tmp/figures/toy")
+        assert isinstance(ctx.settings, ToySettings)
+        assert ctx.plot_settings is plot_settings
+        assert ctx.comparison_path == comparison_path
+        assert ctx.control_label == "Test Condition"
+        assert ctx.equilibration == "10ns"
+        assert ctx.recompute is False
+
+        recompute_ctx = PlotContext(
+            [toy_condition],
+            {"Test Condition": Path("/tmp/analysis/toy")},
+            Path("/tmp/results"),
+            Path("/tmp/figures/toy"),
+            ToySettings(),
+            plot_settings,
+            comparison_path,
+            "Test Condition",
+            "10ns",
+            recompute=True,
+        )
+        assert recompute_ctx.comparison_path == comparison_path
+        assert recompute_ctx.equilibration == "10ns"
+        assert recompute_ctx.recompute is True
 
     def test_metric_value_defaults(self):
         mv = MetricValue(name="test", mean=1.0, sem=0.1, replicate_values=[0.9, 1.1])

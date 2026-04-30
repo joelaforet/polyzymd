@@ -213,6 +213,9 @@ class AggregateContext:
         Canonical cache path for the aggregated result.  May be
         ``None`` if the plugin is invoked outside the normal orchestrator
         pipeline.
+    recompute : bool
+        If ``True``, ignore cached aggregate outputs and rebuild downstream
+        aggregate artifacts.
     """
 
     condition: Condition
@@ -221,6 +224,7 @@ class AggregateContext:
     equilibration: str
     settings: BaseModel
     result_path: Path | None = None
+    recompute: bool = False
 
 
 @dataclass(frozen=True)
@@ -265,14 +269,14 @@ class ComparisonContext:
         Post-hoc testing method for default scalar pairwise tests.
         ``"ttest_bh"`` applies pairwise t-tests with BH correction and
         ``"tukey_hsd"`` applies Tukey HSD across all groups.
-    recompute : bool
-        Whether to force recomputation.
     result_path : Path | None
         Canonical cache path for the comparison result.
     aggregated_results : dict[str, Any]
         Mapping ``condition_label -> aggregated result`` for conditions
         that succeeded.  Plugins can use this instead of re-loading
         from disk.
+    recompute : bool
+        Whether to force recomputation.
     """
 
     name: str
@@ -283,13 +287,13 @@ class ComparisonContext:
     results_dir: Path
     equilibration: str
     settings: BaseModel
-    recompute: bool
     fdr_alpha: float = 0.05
     ttest_method: str = "student"
     posthoc_method: str = "ttest_bh"
     result_path: Path | None = None
     failed_conditions: list[Condition] = field(default_factory=list)
     aggregated_results: dict[str, Any] = field(default_factory=dict)
+    recompute: bool = False
 
     @property
     def effective_control(self) -> str | None:
@@ -336,6 +340,9 @@ class PlotContext:
     equilibration : str
         Equilibration time string used for equilibration-aware cache
         filenames in plot helpers.
+    recompute : bool
+        If ``True``, ignore cached plot outputs and regenerate analysis-owned
+        figures.
 
     Notes
     -----
@@ -360,6 +367,7 @@ class PlotContext:
     comparison_path: Path | None = None
     control_label: str | None = None
     equilibration: str = "0ns"
+    recompute: bool = False
 
     def __post_init__(self) -> None:
         """Ensure plot settings is always materialized for plugins."""

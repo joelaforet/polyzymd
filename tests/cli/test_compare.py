@@ -421,21 +421,28 @@ def test_finalize_command_loads_aggregated_and_runs(monkeypatch, tmp_path: Path)
         },
     )
     monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
+    captured: dict[str, Any] = {}
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator._resolve_settings",
         lambda plugin, config: SimpleNamespace(),
     )
+
+    def _capture_finalize(**kwargs):
+        captured.update(kwargs)
+        return {"comparison_path": tmp_path / "comparison" / "toy" / "result.json"}
+
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.finalize_comparison_from_disk",
-        lambda **kwargs: {"comparison_path": tmp_path / "comparison" / "toy" / "result.json"},
+        _capture_finalize,
     )
 
     result = runner.invoke(
         compare,
-        ["finalize", "toy", "-f", str(tmp_path / "comparison.yaml")],
+        ["finalize", "toy", "-f", str(tmp_path / "comparison.yaml"), "--recompute"],
     )
     assert result.exit_code == 0
     assert "Saved result:" in result.output
+    assert captured["recompute"] is True
 
 
 def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
@@ -457,7 +464,7 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
         analysis_name="toy",
         comparison_yaml=str(tmp_path / "comparison.yaml"),
         equilibration="10ns",
-        recompute=False,
+        recompute=True,
         settings_snapshot={"threshold": 1.0},
         condition_specs=[
             SimpleNamespace(
@@ -469,6 +476,7 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
     )
     condition = SimpleNamespace(label="A", replicates=(1,))
     called = {"rep": 0, "agg": 0, "fin": 0}
+    captured_recompute: dict[str, bool] = {}
 
     monkeypatch.setattr(
         "polyzymd.workflow.analysis_slurm.AnalysisJobManifest.load", lambda path: manifest
@@ -498,15 +506,29 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.run_replicate_once",
-        lambda *args, **kwargs: called.__setitem__("rep", called["rep"] + 1) or {"ok": True},
+        lambda *args, **kwargs: called.__setitem__("rep", called["rep"] + 1)
+        or captured_recompute.__setitem__("rep", args[-1])
+        or {"ok": True},
     )
+
+    def _capture_aggregate(*args, **kwargs):
+        called["agg"] += 1
+        captured_recompute["agg"] = kwargs["recompute"]
+        return {"ok": True}
+
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.aggregate_condition_from_disk",
-        lambda *args, **kwargs: called.__setitem__("agg", called["agg"] + 1) or {"ok": True},
+        _capture_aggregate,
     )
+
+    def _capture_finalize(**kwargs):
+        called["fin"] += 1
+        captured_recompute["fin"] = kwargs["recompute"]
+        return {}
+
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.finalize_comparison_from_disk",
-        lambda **kwargs: called.__setitem__("fin", called["fin"] + 1) or {},
+        _capture_finalize,
     )
 
     rep_res = runner.invoke(
@@ -540,6 +562,7 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
     assert agg_res.exit_code == 0
     assert fin_res.exit_code == 0
     assert called == {"rep": 1, "agg": 1, "fin": 1}
+    assert captured_recompute == {"rep": True, "agg": True, "fin": True}
 
 
 def test_finalize_with_missing_conditions(monkeypatch, tmp_path: Path) -> None:
@@ -699,6 +722,7 @@ def test_worker_finalize_finalize_only_skips_aggregated_loading(
     assert captured["analysis_dirs"] == {
         "Cond A": tmp_path / "analysis" / "Cond A" / "exposure",
     }
+    assert captured["recompute"] is False
 
 
 def test_manifest_config_drift_detection(monkeypatch, tmp_path: Path) -> None:

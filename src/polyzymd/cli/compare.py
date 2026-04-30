@@ -1433,7 +1433,7 @@ def analysis_hpc_status(analysis: str, config_file: Path, reconcile: bool, as_js
     default="comparison.yaml",
     help="Path to comparison.yaml config file.",
 )
-@click.option("--recompute", is_flag=True, help="Retained for CLI compatibility.")
+@click.option("--recompute", is_flag=True, help="Regenerate comparison and plot outputs.")
 @click.option(
     "--allow-partial",
     is_flag=True,
@@ -1446,7 +1446,6 @@ def finalize_analysis_hpc(
     allow_partial: bool,
 ):
     """Run comparison + plotting from aggregated on-disk results."""
-    del recompute
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import (
         finalize_comparison_from_disk,
@@ -1529,6 +1528,7 @@ def finalize_analysis_hpc(
         settings=settings,
         effective_control=effective_control,
         allow_partial=allow_partial,
+        recompute=recompute,
     )
     click.echo(f"Saved result: {result['comparison_path']}")
 
@@ -1578,7 +1578,7 @@ def worker_replicate(
         equilibration,
         run_dir,
         replicate,
-        manifest.recompute,
+        getattr(manifest, "recompute", False),
     )
     if result is None:
         raise click.ClickException("Replicate computation produced no result")
@@ -1618,6 +1618,7 @@ def worker_aggregate(manifest_path: Path, condition_index: int):
         equilibration,
         cond_dir,
         tuple(spec.replicate for spec in cond_spec.replicate_specs),
+        recompute=getattr(manifest, "recompute", False),
     )
 
 
@@ -1713,4 +1714,5 @@ def worker_finalize(manifest_path: Path):
         settings=settings,
         effective_control=effective_control,
         allow_partial=allow_partial,
+        recompute=getattr(manifest, "recompute", False),
     )

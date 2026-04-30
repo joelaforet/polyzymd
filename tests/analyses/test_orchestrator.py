@@ -262,6 +262,41 @@ def test_run_analysis_and_helper_path_equivalence(tmp_path: Path) -> None:
     assert seq["n_replicates"] == helper["n_replicates"]
 
 
+def test_aggregate_from_disk_recompute_removes_stale_aggregate_dir(tmp_path: Path) -> None:
+    """aggregate_condition_from_disk should clean aggregate sidecars on recompute."""
+
+    class _AggregateCleanupAnalysis(_ParallelAnalysis):
+        name: ClassVar[str] = "aggregate_cleanup_toy"
+
+        def aggregate(self, ctx, results) -> dict[str, Any]:
+            assert ctx.recompute is True
+            assert not (ctx.output_dir / "stale_sidecar.txt").exists()
+            return super().aggregate(ctx, results)
+
+    analysis = _AggregateCleanupAnalysis()
+    condition = Condition("A", tmp_path / "a.yaml", (1, 2), SimpleNamespace())
+    settings = _ParallelSettings(factor=1.0)
+    output_dir = tmp_path / "analysis" / "A" / analysis.name
+
+    run_replicate_once(analysis, condition, settings, "10ns", output_dir / "run_1", 1, False)
+    run_replicate_once(analysis, condition, settings, "10ns", output_dir / "run_2", 2, False)
+    stale_sidecar = output_dir / "aggregated" / "stale_sidecar.txt"
+    stale_sidecar.parent.mkdir(parents=True, exist_ok=True)
+    stale_sidecar.write_text("stale")
+
+    aggregate_condition_from_disk(
+        analysis,
+        condition,
+        settings,
+        "10ns",
+        output_dir,
+        replicates=(1, 2),
+        recompute=True,
+    )
+
+    assert not stale_sidecar.exists()
+
+
 def test_run_comparison_still_works_after_refactor(monkeypatch, tmp_path: Path) -> None:
     """run_comparison should still produce aggregated and comparison output."""
     analysis = _ParallelAnalysis()
@@ -285,6 +320,78 @@ def test_run_comparison_still_works_after_refactor(monkeypatch, tmp_path: Path) 
     assert "B" in result["aggregated"]
     assert result["comparison"] is not None
     assert result["comparison_path"].exists()
+
+
+def test_run_comparison_recompute_contexts_and_cleanup(monkeypatch, tmp_path: Path) -> None:
+    """run_comparison should propagate recompute and clean stale owned outputs."""
+
+    class _RecomputeCleanupAnalysis(_ParallelAnalysis):
+        name: ClassVar[str] = "recompute_cleanup_toy"
+
+        def __init__(self) -> None:
+            self.aggregate_recompute: list[bool] = []
+            self.compare_recompute: bool | None = None
+            self.plot_recompute: bool | None = None
+
+        def aggregate(self, ctx, results) -> dict[str, Any]:
+            self.aggregate_recompute.append(ctx.recompute)
+            assert not (ctx.output_dir / "stale_sidecar.txt").exists()
+            return super().aggregate(ctx, results)
+
+        def compare(self, ctx) -> dict[str, Any]:
+            self.compare_recompute = ctx.recompute
+            assert ctx.result_path is not None
+            assert not ctx.result_path.exists()
+            return {"ok": True}
+
+        def plot(self, ctx) -> list[Path]:
+            self.plot_recompute = ctx.recompute
+            assert not (ctx.output_dir / "stale_plot.png").exists()
+            assert (ctx.output_dir.parent / "unrelated" / "keep.txt").exists()
+            out = ctx.output_dir / "new_plot.png"
+            out.write_text("new")
+            return [out]
+
+    analysis = _RecomputeCleanupAnalysis()
+    config = _make_config(tmp_path)
+
+    def _from_cond(cond_cfg):
+        return Condition(
+            cond_cfg.label, cond_cfg.config, tuple(cond_cfg.replicates), SimpleNamespace()
+        )
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator.Condition.from_condition_config", _from_cond
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator._resolve_settings",
+        lambda analysis, config: _ParallelSettings(),
+    )
+
+    for label in ("A", "B"):
+        stale_sidecar = (
+            tmp_path / "analysis" / label / analysis.name / "aggregated" / "stale_sidecar.txt"
+        )
+        stale_sidecar.parent.mkdir(parents=True, exist_ok=True)
+        stale_sidecar.write_text("stale")
+    stale_result = tmp_path / "comparison" / analysis.name / "result.json"
+    stale_result.parent.mkdir(parents=True, exist_ok=True)
+    stale_result.write_text('{"stale": true}')
+    stale_plot = tmp_path / "figures" / analysis.name / "stale_plot.png"
+    stale_plot.parent.mkdir(parents=True, exist_ok=True)
+    stale_plot.write_text("stale")
+    unrelated = tmp_path / "figures" / "unrelated" / "keep.txt"
+    unrelated.parent.mkdir(parents=True, exist_ok=True)
+    unrelated.write_text("keep")
+
+    result = run_comparison(analysis, config, recompute=True, equilibration="10ns")
+
+    assert result["comparison"] == {"ok": True}
+    assert analysis.aggregate_recompute == [True, True]
+    assert analysis.compare_recompute is True
+    assert analysis.plot_recompute is True
+    assert not stale_plot.exists()
+    assert unrelated.exists()
 
 
 class TestOrchestrator:
