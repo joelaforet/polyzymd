@@ -316,11 +316,17 @@ class TrajectoryLoader:
 
         if not working_dir.exists():
             available = self._find_available_replicates()
-            available_str = ", ".join(str(r) for r in available) if available else "none found"
             raise FileNotFoundError(
-                f"Working directory not found: {working_dir}\n"
-                f"Has replicate {replicate} been simulated?\n"
-                f"Available replicates: {available_str}"
+                self._format_missing_data_message(
+                    "Working directory not found",
+                    working_dir=working_dir,
+                    replicate=replicate,
+                    available_replicates=available,
+                    action=(
+                        "Run or complete the simulation for this replicate, or verify "
+                        "the config output/scratch paths before rerunning analysis."
+                    ),
+                )
             )
 
         # Delegate file discovery to the simulation engine
@@ -329,7 +335,19 @@ class TrajectoryLoader:
         if layout.topology_path is None:
             raise FileNotFoundError(f"No topology file found in {working_dir}")
         if not layout.trajectory_paths:
-            raise FileNotFoundError(f"No production trajectory files found in {working_dir}")
+            available = self._find_available_replicates()
+            raise FileNotFoundError(
+                self._format_missing_data_message(
+                    "No production trajectory files found",
+                    working_dir=working_dir,
+                    replicate=replicate,
+                    available_replicates=available,
+                    action=(
+                        "Run or complete the production simulation for this replicate, "
+                        "then rerun analysis. Use --recompute only after trajectory files exist."
+                    ),
+                )
+            )
 
         return TrajectoryInfo(
             topology_file=layout.topology_path,
@@ -494,7 +512,13 @@ class TrajectoryLoader:
         list[int]
             Sorted list of replicate numbers that have simulation directories
         """
-        scratch_dir = self.config.output.effective_scratch_directory
+        discovered = self._discover_replicates_from_config()
+        if discovered:
+            return discovered
+
+        scratch_dir = self._get_scratch_directory()
+        if scratch_dir is None:
+            return []
         if not scratch_dir.exists():
             return []
 
@@ -508,6 +532,105 @@ class TrajectoryLoader:
                 except (IndexError, ValueError):
                     continue
         return sorted(replicates)
+
+    def _discover_replicates_from_config(self) -> list[int]:
+        """Discover replicate directories through SimulationConfig when available.
+
+        Returns
+        -------
+        list[int]
+            Sorted replicate numbers discovered by the config helper, or an
+            empty list when unavailable.
+        """
+        discover = getattr(self.config, "discover_replicate_dirs", None)
+        if not callable(discover):
+            return []
+        try:
+            replicate_dirs = discover()
+        except (AttributeError, TypeError, OSError, ValueError):
+            return []
+
+        replicates: list[int] = []
+        for item in replicate_dirs:
+            if isinstance(item, tuple) and item:
+                try:
+                    replicates.append(int(item[0]))
+                    continue
+                except (TypeError, ValueError):
+                    item = item[-1]
+            try:
+                path = Path(item)
+            except TypeError:
+                continue
+            match = re.search(r"run_?(\d+)$", path.name)
+            if match:
+                replicates.append(int(match.group(1)))
+        return sorted(set(replicates))
+
+    def _get_scratch_directory(self) -> Path | None:
+        """Return configured scratch directory when it can be resolved.
+
+        Returns
+        -------
+        Path or None
+            Effective scratch directory, or ``None`` when config metadata is
+            incomplete.
+        """
+        try:
+            scratch_dir = self.config.output.effective_scratch_directory
+        except AttributeError:
+            return None
+        if scratch_dir is None:
+            return None
+        try:
+            return Path(scratch_dir)
+        except TypeError:
+            return None
+
+    def _format_missing_data_message(
+        self,
+        headline: str,
+        *,
+        working_dir: Path,
+        replicate: int,
+        available_replicates: Sequence[int],
+        action: str,
+    ) -> str:
+        """Build a user-facing message for missing replicate trajectory data.
+
+        Parameters
+        ----------
+        headline : str
+            Stable leading message used by existing tests.
+        working_dir : Path
+            Expected working directory for the replicate.
+        replicate : int
+            Requested replicate number.
+        available_replicates : sequence of int
+            Replicates discovered on disk.
+        action : str
+            Actionable hint for the user.
+
+        Returns
+        -------
+        str
+            Multi-line diagnostic message.
+        """
+        scratch_dir = self._get_scratch_directory()
+        available = (
+            ", ".join(str(rep) for rep in available_replicates)
+            if available_replicates
+            else "none found"
+        )
+        scratch_text = str(scratch_dir) if scratch_dir is not None else "not configured"
+        return (
+            f"{headline}: {working_dir}\n"
+            f"Replicate: {replicate}\n"
+            f"Expected working directory: {working_dir}\n"
+            f"Scratch directory: {scratch_text}\n"
+            f"Available replicates: {available}\n"
+            f"Action: {action}"
+        )
 
     def find_topology(self, working_dir: Path) -> Path:
         """Find topology file in working directory.
@@ -561,7 +684,19 @@ class TrajectoryLoader:
         """
         layout = self._resolve_layout(working_dir, replicate=None)
         if not layout.trajectory_paths:
-            raise FileNotFoundError(f"No production trajectory files found in {working_dir}")
+            replicate = self._infer_replicate(working_dir)
+            raise FileNotFoundError(
+                self._format_missing_data_message(
+                    "No production trajectory files found",
+                    working_dir=working_dir,
+                    replicate=replicate,
+                    available_replicates=self._find_available_replicates(),
+                    action=(
+                        "Run or complete the production simulation for this replicate, "
+                        "then rerun analysis. Use --recompute only after trajectory files exist."
+                    ),
+                )
+            )
         return layout.trajectory_paths
 
 

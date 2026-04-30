@@ -362,10 +362,17 @@ class TestErrorPaths:
 
     def test_missing_working_directory(self, tmp_path):
         config = _make_openmm_config(tmp_path)
+        (tmp_path / "run_1").mkdir()
         loader = TrajectoryLoader(config)
 
-        with pytest.raises(FileNotFoundError, match="Working directory not found"):
+        with pytest.raises(FileNotFoundError, match="Working directory not found") as exc_info:
             loader.get_trajectory_info(replicate=99)
+        message = str(exc_info.value)
+        assert "Replicate: 99" in message
+        assert f"Expected working directory: {tmp_path / 'run_99'}" in message
+        assert f"Scratch directory: {tmp_path}" in message
+        assert "Available replicates: 1" in message
+        assert "Action:" in message
 
     def test_no_topology_in_get_trajectory_info(self, tmp_path):
         run_dir = tmp_path / "run_1"
@@ -390,8 +397,15 @@ class TestErrorPaths:
         config = _make_openmm_config(tmp_path)
         loader = TrajectoryLoader(config)
 
-        with pytest.raises(FileNotFoundError, match="No production trajectory files found"):
+        with pytest.raises(
+            FileNotFoundError,
+            match="No production trajectory files found",
+        ) as exc_info:
             loader.get_trajectory_info(replicate=1)
+        message = str(exc_info.value)
+        assert "Replicate: 1" in message
+        assert f"Expected working directory: {run_dir}" in message
+        assert "Action:" in message
 
     def test_find_trajectories_raises_on_empty_dir(self, tmp_path):
         run_dir = tmp_path / "run_1"

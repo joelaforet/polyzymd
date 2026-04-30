@@ -18,6 +18,7 @@ import click
 import yaml
 from pydantic import ValidationError
 
+from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.cli._compare_utils import (
     common_compare_options,
     load_comparison_config,
@@ -53,6 +54,54 @@ def _resolve_hpc_dir(config: ComparisonConfig, analysis_name: str) -> Path:
     if source is None:
         return Path("comparison") / analysis_name / "_hpc"
     return source.parent / "comparison" / analysis_name / "_hpc"
+
+
+def _contract_error_analysis_name(exc: PluginContractError, fallback: str) -> str:
+    """Infer the analysis name from a plugin contract error message.
+
+    Parameters
+    ----------
+    exc : PluginContractError
+        Contract exception raised by the analysis framework.
+    fallback : str
+        Analysis name to use when the message cannot be parsed.
+
+    Returns
+    -------
+    str
+        Best-effort analysis name for user-facing diagnostics.
+    """
+    message = str(exc)
+    if "." in message:
+        candidate = message.split(".", 1)[0].strip()
+        if candidate:
+            return candidate
+    return fallback
+
+
+def _plugin_contract_click_exception(
+    analysis_name: str,
+    exc: PluginContractError,
+) -> click.ClickException:
+    """Build a user-facing ClickException for plugin contract failures.
+
+    Parameters
+    ----------
+    analysis_name : str
+        Name of the analysis plugin that violated the framework contract.
+    exc : PluginContractError
+        Original contract exception.
+
+    Returns
+    -------
+    click.ClickException
+        Click exception with an actionable diagnostic.
+    """
+    return click.ClickException(
+        f"Plugin contract error in analysis '{analysis_name}': {exc}\n"
+        "This is likely a PolyzyMD/plugin bug, not missing trajectory data. "
+        "Please report it with the command and configuration used."
+    )
 
 
 def _resolve_submit_resources_with_hints(
@@ -570,6 +619,8 @@ def run_comparison(
             analysis, config, recompute=recompute, equilibration=equilibration
         )
         result = pipeline_result["comparison"]
+    except PluginContractError as e:
+        raise _plugin_contract_click_exception(analysis_cls.name, e) from e
     except (FileNotFoundError, ValueError, OSError) as e:
         raise click.ClickException(f"Error during comparison: {e}") from e
     except Exception as e:
@@ -879,12 +930,16 @@ def run_all(
     click.echo()
 
     # --- Run all analyses in dependency order --------------------------------
-    all_results = run_all_comparisons(
-        config,
-        analysis_names=None,  # run all enabled
-        recompute=recompute,
-        equilibration=equilibration,
-    )
+    try:
+        all_results = run_all_comparisons(
+            config,
+            analysis_names=None,  # run all enabled
+            recompute=recompute,
+            equilibration=equilibration,
+        )
+    except PluginContractError as e:
+        analysis_name = _contract_error_analysis_name(e, "run-all")
+        raise _plugin_contract_click_exception(analysis_name, e) from e
 
     # Categorize results for summary
     succeeded: list[str] = []
@@ -1479,28 +1534,49 @@ def finalize_analysis_hpc(
     analysis_root = prepared["analysis_root"]
     analysis_dirs: dict[str, Path] = {}
     aggregated_results: dict[str, object] = {}
+    expects_aggregated_results = bool(getattr(plugin, "has_compute_stage", True))
+    if not getattr(plugin, "has_aggregate_stage", True):
+        expects_aggregated_results = False
+
     for condition in valid_conditions:
         cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
-        aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
-        if aggregated is not None:
-            analysis_dirs[condition.label] = cond_dir
-            aggregated_results[condition.label] = aggregated
+        analysis_dirs[condition.label] = cond_dir
+        if expects_aggregated_results:
+            aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
+            if aggregated is not None:
+                aggregated_results[condition.label] = aggregated
 
-    missing_conditions = [
-        condition.label
-        for condition in valid_conditions
-        if condition.label not in aggregated_results
-    ]
+    missing_conditions: list[str] = []
+    if expects_aggregated_results:
+        missing_conditions = [
+            condition.label
+            for condition in valid_conditions
+            if condition.label not in aggregated_results
+        ]
+
     if missing_conditions:
+        expected_paths = []
+        for condition in valid_conditions:
+            if condition.label in missing_conditions:
+                cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
+                aggregate_result_path = getattr(plugin, "aggregate_result_path", None)
+                if callable(aggregate_result_path):
+                    expected_path = aggregate_result_path(cond_dir / "aggregated")
+                else:
+                    expected_path = cond_dir / "aggregated" / "result.json"
+                expected_paths.append(str(expected_path))
         click.echo(
             "Warning: missing aggregated results for condition(s): "
-            f"{', '.join(missing_conditions)}",
+            f"{', '.join(missing_conditions)}\n"
+            "Expected aggregate result path(s): "
+            f"{', '.join(expected_paths)}",
             err=True,
         )
         if not allow_partial:
             raise click.ClickException(
                 "Finalize aborted due to missing aggregated results. "
-                "Re-run failed jobs or pass --allow-partial to continue."
+                "Re-run failed aggregate jobs or pass --allow-partial to continue "
+                "(--allow-partial (CLI) / allow_partial=True (API))."
             )
 
     effective_control = (
@@ -1518,18 +1594,21 @@ def finalize_analysis_hpc(
 
     config_for_finalize = config.model_copy(deep=True)
     config_for_finalize.defaults.equilibration_time = equilibration
-    result = finalize_comparison_from_disk(
-        analysis=plugin,
-        config=config_for_finalize,
-        analysis_dirs=analysis_dirs,
-        aggregated_results=aggregated_results,
-        results_dir=results_dir,
-        figures_dir=figures_dir,
-        settings=settings,
-        effective_control=effective_control,
-        allow_partial=allow_partial,
-        recompute=recompute,
-    )
+    try:
+        result = finalize_comparison_from_disk(
+            analysis=plugin,
+            config=config_for_finalize,
+            analysis_dirs=analysis_dirs,
+            aggregated_results=aggregated_results,
+            results_dir=results_dir,
+            figures_dir=figures_dir,
+            settings=settings,
+            effective_control=effective_control,
+            allow_partial=allow_partial,
+            recompute=recompute,
+        )
+    except PluginContractError as e:
+        raise _plugin_contract_click_exception(plugin.name, e) from e
     click.echo(f"Saved result: {result['comparison_path']}")
 
 

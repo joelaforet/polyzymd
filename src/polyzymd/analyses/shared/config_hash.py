@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
 
 SETTINGS_FINGERPRINT_PATTERN = re.compile(r"_s(?P<fp>[0-9a-f]{8})(?:_|\.)")
+_WARNED_CONFIG_HASH_MISMATCHES: set[tuple[str, str]] = set()
 
 
 def compute_config_hash(config: "SimulationConfig") -> str:
@@ -255,7 +256,10 @@ def validate_settings_fingerprint(
                 else "rejecting cache without strict validation"
             )
             warnings.warn(
-                "Cached analysis result is missing settings fingerprint" f"{source_text}; {action}",
+                "Cached analysis result is missing settings fingerprint"
+                f"{source_text}; {action}. This legacy cache cannot prove it matches "
+                "the current analysis settings. Use --recompute or clear the analysis cache "
+                "if settings changed.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -266,7 +270,9 @@ def validate_settings_fingerprint(
             warnings.warn(
                 "Cached settings fingerprint mismatch detected"
                 f"{source_text}: stored={stored_fingerprint}, current={current_fingerprint}. "
-                "Recomputing analysis result for current settings.",
+                "Cached result is stale for the current analysis settings and will be "
+                "ignored/recomputed when possible. Use --recompute or clear the analysis cache "
+                "to refresh all derived files.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -312,17 +318,19 @@ def validate_config_hash(
     current_hash = compute_config_hash(current_config)
 
     if stored_hash != current_hash:
-        if warn:
+        warning_key = (stored_hash, current_hash)
+        if warn and warning_key not in _WARNED_CONFIG_HASH_MISMATCHES:
+            _WARNED_CONFIG_HASH_MISMATCHES.add(warning_key)
             warning_msg = (
-                "\n"
-                "=" * 70 + "\n"
+                "\n" + "=" * 70 + "\n"
                 "WARNING: CONFIG HASH MISMATCH DETECTED\n"
                 "=" * 70 + "\n"
                 f"Stored hash:  {stored_hash}\n"
                 f"Current hash: {current_hash}\n"
                 "\n"
                 "This indicates the config.yaml has changed since these results\n"
-                "were computed. Cached results may be INVALID.\n"
+                "were computed. Cached results may be INVALID; stale cache\n"
+                "entries are ignored and recomputed when possible.\n"
                 "\n"
                 "If you intentionally changed the config, you should:\n"
                 "  1. Create a new project directory with 'polyzymd init'\n"
@@ -330,6 +338,7 @@ def validate_config_hash(
                 "  3. Re-run analysis on the new trajectories\n"
                 "\n"
                 "To recompute analysis with current config, use --recompute flag.\n"
+                "If warnings persist, clear the analysis cache/output directory.\n"
                 "=" * 70
             )
             warnings.warn(warning_msg, UserWarning, stacklevel=2)

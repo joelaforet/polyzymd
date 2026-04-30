@@ -27,6 +27,7 @@ from polyzymd.analyses.exceptions import (
 from polyzymd.analyses.orchestrator import (
     _validate_dependencies,
     aggregate_condition_from_disk,
+    finalize_comparison_from_disk,
     order_analyses_for_execution,
     prepare_comparison_run,
     run_analysis,
@@ -297,6 +298,35 @@ def test_aggregate_from_disk_recompute_removes_stale_aggregate_dir(tmp_path: Pat
     assert not stale_sidecar.exists()
 
 
+def test_aggregate_from_disk_missing_replicates_reports_expected_paths(tmp_path: Path) -> None:
+    """Missing replicate outputs should report expected run_N/result.json paths."""
+
+    class _NeedsTwoReplicates(_ParallelAnalysis):
+        name: ClassVar[str] = "needs_two_replicates"
+        min_replicates: ClassVar[int] = 2
+
+    analysis = _NeedsTwoReplicates()
+    condition = Condition("A", tmp_path / "a.yaml", (1, 2), SimpleNamespace())
+    settings = _ParallelSettings(factor=1.0)
+    output_dir = tmp_path / "analysis" / "A" / analysis.name
+
+    run_replicate_once(analysis, condition, settings, "10ns", output_dir / "run_1", 1, False)
+
+    with pytest.raises(ValueError, match=r"replicate result\(s\) on disk") as exc_info:
+        aggregate_condition_from_disk(
+            analysis,
+            condition,
+            settings,
+            "10ns",
+            output_dir,
+            replicates=(1, 2),
+        )
+
+    message = str(exc_info.value)
+    assert str(output_dir / "run_2" / "result.json") in message
+    assert "Expected missing replicate output path" in message
+
+
 def test_run_comparison_still_works_after_refactor(monkeypatch, tmp_path: Path) -> None:
     """run_comparison should still produce aggregated and comparison output."""
     analysis = _ParallelAnalysis()
@@ -392,6 +422,75 @@ def test_run_comparison_recompute_contexts_and_cleanup(monkeypatch, tmp_path: Pa
     assert analysis.plot_recompute is True
     assert not stale_plot.exists()
     assert unrelated.exists()
+
+
+def test_finalize_missing_aggregates_reports_expected_paths(tmp_path: Path) -> None:
+    """Finalize errors should include aggregate paths and partial-finalize hints."""
+    analysis = _ParallelAnalysis()
+    condition_a = Condition("A", tmp_path / "a.yaml", (1,), SimpleNamespace())
+    condition_b = Condition("B", tmp_path / "b.yaml", (1,), SimpleNamespace())
+    config = _make_config(tmp_path)
+    analysis_root = tmp_path / "analysis"
+    analysis_dirs = {"A": analysis_root / "A" / analysis.name}
+    prepared_state = {
+        "all_conditions": [condition_a, condition_b],
+        "valid_conditions": [condition_a, condition_b],
+        "excluded_conditions": [],
+        "condition_by_label": {"A": condition_a, "B": condition_b},
+        "settings": _ParallelSettings(),
+        "equilibration": "10ns",
+        "analysis_root": analysis_root,
+    }
+
+    with pytest.raises(ValueError, match="missing aggregated results") as exc_info:
+        finalize_comparison_from_disk(
+            analysis=analysis,
+            config=config,
+            analysis_dirs=analysis_dirs,
+            aggregated_results={"A": {"ok": True}},
+            results_dir=tmp_path / "comparison" / analysis.name,
+            figures_dir=tmp_path / "figures" / analysis.name,
+            settings=_ParallelSettings(),
+            effective_control=None,
+            prepared_state=prepared_state,
+            allow_partial=False,
+        )
+
+    message = str(exc_info.value)
+    assert str(analysis_root / "B" / analysis.name / "aggregated" / "result.json") in message
+    assert "--allow-partial (CLI) / allow_partial=True (API)" in message
+
+
+def test_finalize_all_conditions_dropped_mentions_aggregate_jobs(tmp_path: Path) -> None:
+    """Dropping every condition should explain that aggregate files were absent."""
+    analysis = _ParallelAnalysis()
+    condition_a = Condition("A", tmp_path / "a.yaml", (1,), SimpleNamespace())
+    config = _make_config(tmp_path)
+    prepared_state = {
+        "all_conditions": [condition_a],
+        "valid_conditions": [condition_a],
+        "excluded_conditions": [],
+        "condition_by_label": {"A": condition_a},
+        "settings": _ParallelSettings(),
+        "equilibration": "10ns",
+        "analysis_root": tmp_path / "analysis",
+    }
+
+    with pytest.raises(ValueError, match="no aggregate files were found") as exc_info:
+        finalize_comparison_from_disk(
+            analysis=analysis,
+            config=config,
+            analysis_dirs={},
+            aggregated_results={},
+            results_dir=tmp_path / "comparison" / analysis.name,
+            figures_dir=tmp_path / "figures" / analysis.name,
+            settings=_ParallelSettings(),
+            effective_control=None,
+            prepared_state=prepared_state,
+            allow_partial=True,
+        )
+
+    assert "Re-run aggregate jobs" in str(exc_info.value)
 
 
 class TestOrchestrator:

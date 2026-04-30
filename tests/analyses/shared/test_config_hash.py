@@ -8,9 +8,11 @@ import pytest
 from pydantic import BaseModel
 
 from polyzymd.analyses.shared.config_hash import (
+    _WARNED_CONFIG_HASH_MISMATCHES,
     compute_cache_identity,
     extract_settings_fingerprint_from_path,
     settings_fingerprint,
+    validate_config_hash,
     validate_settings_fingerprint,
 )
 
@@ -118,6 +120,30 @@ class TestCacheIdentity:
         """Helper should reject calls without settings identity input."""
         with pytest.raises(ValueError, match="Provide either settings or settings_fp"):
             compute_cache_identity(config_hash="abc123")
+
+
+class TestConfigHashValidation:
+    """Tests for config hash mismatch diagnostics."""
+
+    def test_config_hash_mismatch_warns_once_for_same_pair(self, monkeypatch):
+        """Repeated mismatch checks should not spam identical warnings."""
+        _WARNED_CONFIG_HASH_MISMATCHES.clear()
+        config = object()
+        monkeypatch.setattr(
+            "polyzymd.analyses.shared.config_hash.compute_config_hash",
+            lambda current_config: "currenthash",
+        )
+
+        with pytest.warns(UserWarning, match="CONFIG HASH MISMATCH") as warnings_record:
+            first = validate_config_hash("storedhash", config)
+            second = validate_config_hash("storedhash", config)
+
+        assert first is False
+        assert second is False
+        assert len(warnings_record) == 1
+        assert "--recompute" in str(warnings_record[0].message)
+        assert "clear the analysis cache" in str(warnings_record[0].message)
+        _WARNED_CONFIG_HASH_MISMATCHES.clear()
 
 
 class TestSettingsFingerprintValidation:

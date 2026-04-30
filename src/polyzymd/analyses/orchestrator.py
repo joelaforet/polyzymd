@@ -130,6 +130,94 @@ def _remove_stale_path(path: Path) -> None:
         shutil.rmtree(path)
 
 
+def _format_failure_reasons(failure_reasons: Sequence[str], *, limit: int = 3) -> str:
+    """Format the first few failure reasons for user-facing diagnostics.
+
+    Parameters
+    ----------
+    failure_reasons : sequence of str
+        Collected failure descriptions.
+    limit : int, optional
+        Maximum number of reasons to include, by default 3.
+
+    Returns
+    -------
+    str
+        Multi-line diagnostic suffix, or an empty string when no reasons exist.
+    """
+    if not failure_reasons:
+        return ""
+    shown = list(failure_reasons[:limit])
+    remaining = len(failure_reasons) - len(shown)
+    lines = [" Failure reasons:"]
+    lines.extend(f"  - {reason}" for reason in shown)
+    if remaining > 0:
+        lines.append(f"  - ... {remaining} more failure(s) omitted")
+    return "\n" + "\n".join(lines)
+
+
+def _expected_aggregate_path(
+    analysis: Analysis,
+    condition: Condition,
+    analysis_dirs: dict[str, Path],
+    analysis_root: Path | None,
+) -> Path | None:
+    """Return the expected aggregate result path for a condition.
+
+    Parameters
+    ----------
+    analysis : Analysis
+        Analysis plugin instance.
+    condition : Condition
+        Condition whose aggregate result path is needed.
+    analysis_dirs : dict[str, Path]
+        Known condition analysis directories.
+    analysis_root : Path or None
+        Root analysis directory for deriving missing condition paths.
+
+    Returns
+    -------
+    Path or None
+        Expected ``aggregated/result.json`` path when derivable.
+    """
+    cond_dir = analysis_dirs.get(condition.label)
+    if cond_dir is None and analysis_root is not None:
+        from polyzymd.analyses.shared.paths import sanitize_label
+
+        cond_dir = analysis_root / sanitize_label(condition.label) / analysis.name
+    if cond_dir is None:
+        return None
+    return analysis.aggregate_result_path(cond_dir / "aggregated")
+
+
+def _format_expected_paths(entries: Sequence[tuple[str, Path | None]], *, limit: int = 5) -> str:
+    """Format labels and expected result paths for diagnostics.
+
+    Parameters
+    ----------
+    entries : sequence of tuple[str, Path or None]
+        Condition labels with expected paths.
+    limit : int, optional
+        Maximum number of entries to include, by default 5.
+
+    Returns
+    -------
+    str
+        Multi-line expected path block.
+    """
+    if not entries:
+        return ""
+    shown = list(entries[:limit])
+    remaining = len(entries) - len(shown)
+    lines = ["Expected paths:"]
+    for label, path in shown:
+        path_text = str(path) if path is not None else "unknown"
+        lines.append(f"  - {label}: {path_text}")
+    if remaining > 0:
+        lines.append(f"  - ... {remaining} more path(s) omitted")
+    return "\n" + "\n".join(lines)
+
+
 def run_replicate_once(
     analysis: Analysis,
     condition: Condition,
@@ -239,24 +327,36 @@ def aggregate_condition_from_disk(
     """
     loaded_results: list[Any] = []
     successful_reps: list[int] = []
+    missing_paths: list[Path] = []
     for rep in replicates:
         rep_dir = output_dir / f"run_{rep}"
         result = analysis._load_replicate_result(rep_dir)
         if result is None:
+            expected_path = analysis.replicate_result_path(rep_dir)
+            missing_paths.append(expected_path)
             logger.warning(
-                "%s: missing replicate result for '%s' rep %d",
+                "%s: missing replicate result for '%s' rep %d at %s",
                 analysis.name,
                 condition.label,
                 rep,
+                expected_path,
             )
             continue
         loaded_results.append(result)
         successful_reps.append(rep)
 
     if len(loaded_results) < analysis.min_replicates:
+        expected_text = ""
+        if missing_paths:
+            expected_text = " Expected missing replicate output path(s): " + ", ".join(
+                str(path) for path in missing_paths[:5]
+            )
+            if len(missing_paths) > 5:
+                expected_text += f", ... {len(missing_paths) - 5} more"
         raise ValueError(
             f"{analysis.name}: condition '{condition.label}' has {len(loaded_results)} "
             f"replicate result(s) on disk, need at least {analysis.min_replicates}."
+            f"{expected_text}"
         )
 
     agg_dir = output_dir / "aggregated"
@@ -346,6 +446,7 @@ def run_analysis(
     results: list[Any] = []
     successful: list[int] = []
     failed: list[int] = []
+    failure_reasons: list[str] = []
     for rep in condition.replicates:
         rep_dir = output_dir / f"run_{rep}"
         try:
@@ -363,9 +464,11 @@ def run_analysis(
         except (FileNotFoundError, OSError) as e:
             logger.warning("  Skipping %s rep %d: data not found — %s", condition.label, rep, e)
             failed.append(rep)
+            failure_reasons.append(f"replicate {rep}: {type(e).__name__}: {e}")
         except ReplicateSkippedError as e:
             logger.warning("  Skipping %s rep %d: %s", condition.label, rep, e)
             failed.append(rep)
+            failure_reasons.append(f"replicate {rep}: {e}")
         except ReplicateError:
             raise
 
@@ -373,6 +476,7 @@ def run_analysis(
         raise ValueError(
             f"{analysis.name}: condition '{condition.label}' has {len(results)} successful "
             f"replicates, need at least {analysis.min_replicates}.  Failed: {failed}"
+            f"{_format_failure_reasons(failure_reasons)}"
         )
 
     if failed:
@@ -669,6 +773,7 @@ def finalize_comparison_from_disk(
     condition_by_label = prepared_state["condition_by_label"]
     resolved_equilibration = prepared_state["equilibration"]
     settings = prepared_state["settings"]
+    analysis_root = prepared_state.get("analysis_root")
 
     valid_analysis_dirs: dict[str, Path] = {}
     valid_aggregated_results: dict[str, Any] = {}
@@ -683,7 +788,9 @@ def finalize_comparison_from_disk(
             agg_path = analysis.aggregate_result_path(agg_dir)
             if agg_result is None and not agg_path.exists():
                 logger.warning(
-                    "%s: missing aggregated result for '%s' at %s",
+                    "%s: missing aggregated result for '%s' at %s. "
+                    "Use --allow-partial (CLI) / allow_partial=True (API) to continue "
+                    "with available conditions.",
                     analysis.name,
                     label,
                     agg_path,
@@ -694,11 +801,15 @@ def finalize_comparison_from_disk(
         if agg_result is None and analysis.has_aggregate_stage:
             agg_result = analysis._load_aggregated_result(cond_dir / "aggregated")
             if agg_result is None:
+                agg_path = analysis.aggregate_result_path(cond_dir / "aggregated")
                 logger.warning(
-                    "%s: failed to load aggregated result for '%s' from %s",
+                    "%s: failed to load aggregated result for '%s' from %s. "
+                    "Expected %s. Use --allow-partial (CLI) / allow_partial=True (API) "
+                    "to continue with available conditions.",
                     analysis.name,
                     label,
                     cond_dir / "aggregated",
+                    agg_path,
                 )
                 failed_conditions.append(condition)
                 continue
@@ -710,15 +821,39 @@ def finalize_comparison_from_disk(
     successful_labels = set(valid_analysis_dirs.keys())
     dropped_conditions = [c for c in valid_conditions if c.label not in successful_labels]
     if dropped_conditions:
+        expected_entries = [
+            (
+                condition.label,
+                _expected_aggregate_path(analysis, condition, analysis_dirs, analysis_root),
+            )
+            for condition in dropped_conditions
+        ]
+        logger.warning(
+            "%s: no aggregated result registered for condition(s) %s.%s "
+            "Use --allow-partial (CLI) / allow_partial=True (API) to continue "
+            "with available conditions.",
+            analysis.name,
+            [condition.label for condition in dropped_conditions],
+            _format_expected_paths(expected_entries),
+        )
         failed_conditions.extend(
             [condition for condition in dropped_conditions if condition not in failed_conditions]
         )
 
     if failed_conditions and not allow_partial:
+        expected_entries = [
+            (
+                condition.label,
+                _expected_aggregate_path(analysis, condition, analysis_dirs, analysis_root),
+            )
+            for condition in failed_conditions
+        ]
         raise ValueError(
             f"{analysis.name}: missing aggregated results for condition(s): "
-            f"{[c.label for c in failed_conditions]}. "
-            "Re-run failed condition jobs or pass allow_partial=True to continue."
+            f"{[c.label for c in failed_conditions]}."
+            f"{_format_expected_paths(expected_entries)}\n"
+            "Re-run failed condition aggregate jobs or use --allow-partial (CLI) / "
+            "allow_partial=True (API) to continue with available conditions."
         )
 
     if failed_conditions and allow_partial:
@@ -732,7 +867,11 @@ def finalize_comparison_from_disk(
     excluded_conditions = [c for c in all_conditions if c.label not in valid_analysis_dirs]
 
     if len(conditions) < 1:
-        raise ValueError(f"{analysis.name}: no successful conditions remain after finalize.")
+        raise ValueError(
+            f"{analysis.name}: no successful conditions remain after finalize; no aggregate "
+            "files were found for the finalized condition set. Re-run aggregate jobs before "
+            "finalizing."
+        )
 
     condition_labels = {condition.label for condition in conditions}
     resolved_control = config.control if config.control is not None else effective_control

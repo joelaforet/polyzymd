@@ -12,6 +12,7 @@ import pytest
 from click.testing import CliRunner
 from pydantic import BaseModel
 
+from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.cli.compare import compare
 from polyzymd.config.comparison import PlotSettings
 from polyzymd.workflow.analysis_slurm import (
@@ -443,6 +444,121 @@ def test_finalize_command_loads_aggregated_and_runs(monkeypatch, tmp_path: Path)
     assert result.exit_code == 0
     assert "Saved result:" in result.output
     assert captured["recompute"] is True
+
+
+def test_run_reports_plugin_contract_error(monkeypatch, tmp_path: Path) -> None:
+    """compare run should label plugin contract errors as plugin bugs."""
+    runner = CliRunner()
+
+    class _Analysis:
+        name = "toy"
+
+        def format(self, result, output_format="text"):
+            return "formatted"
+
+    config = SimpleNamespace(
+        name="contract_project",
+        conditions=[SimpleNamespace(label="A")],
+        defaults=SimpleNamespace(equilibration_time="10ns"),
+    )
+
+    monkeypatch.setattr("polyzymd.cli.compare.load_comparison_config", lambda path: config)
+    monkeypatch.setattr("polyzymd.cli.compare.validate_and_report", lambda config: None)
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis",
+        lambda name: _Analysis,
+    )
+
+    def _raise_contract(*args, **kwargs):
+        raise PluginContractError("toy.run_replicate() returned None")
+
+    monkeypatch.setattr("polyzymd.analyses.orchestrator.run_comparison", _raise_contract)
+
+    result = runner.invoke(compare, ["run", "toy", "-f", str(tmp_path / "comparison.yaml")])
+
+    assert result.exit_code != 0
+    assert "Plugin contract error in analysis 'toy'" in result.output
+    assert "likely a PolyzyMD/plugin bug, not missing trajectory data" in result.output
+
+
+def test_finalize_compare_only_plugin_skips_aggregated_precheck(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Public finalize should not require aggregates for compare-only plugins."""
+    runner = CliRunner()
+
+    class _CompareOnlyAnalysis:
+        name = "exposure"
+        has_compute_stage = False
+        has_aggregate_stage = False
+
+        def _load_aggregated_result(self, path):
+            del path
+            raise AssertionError("Compare-only finalize should not load aggregated results")
+
+        def figures_output_dir(self, base):
+            return Path(base) / "exposure"
+
+    condition_a = SimpleNamespace(label="A")
+    condition_b = SimpleNamespace(label="B")
+    config = SimpleNamespace(
+        source_path=tmp_path / "comparison.yaml",
+        control=None,
+        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
+        defaults=SimpleNamespace(equilibration_time="10ns"),
+        model_copy=lambda deep=True: SimpleNamespace(
+            source_path=tmp_path / "comparison.yaml",
+            control=None,
+            plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
+            defaults=SimpleNamespace(equilibration_time="10ns"),
+        ),
+    )
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
+        lambda path: config,
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis",
+        lambda name: lambda: _CompareOnlyAnalysis(),
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator.prepare_comparison_run",
+        lambda plugin, config, equilibration: {
+            "all_conditions": [condition_a, condition_b],
+            "valid_conditions": [condition_a, condition_b],
+            "excluded_conditions": [],
+            "condition_by_label": {"A": condition_a, "B": condition_b},
+            "settings": SimpleNamespace(),
+            "equilibration": "10ns",
+            "analysis_root": tmp_path / "analysis",
+        },
+    )
+    monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
+    captured: dict[str, Any] = {}
+
+    def _capture_finalize(**kwargs):
+        captured.update(kwargs)
+        return {"comparison_path": tmp_path / "comparison" / "exposure" / "result.json"}
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator.finalize_comparison_from_disk",
+        _capture_finalize,
+    )
+
+    result = runner.invoke(
+        compare,
+        ["finalize", "exposure", "-f", str(tmp_path / "comparison.yaml")],
+    )
+
+    assert result.exit_code == 0
+    assert captured["aggregated_results"] == {}
+    assert captured["analysis_dirs"] == {
+        "A": tmp_path / "analysis" / "A" / "exposure",
+        "B": tmp_path / "analysis" / "B" / "exposure",
+    }
+    assert "missing aggregated results" not in result.output
 
 
 def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
