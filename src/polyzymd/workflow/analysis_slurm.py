@@ -36,6 +36,7 @@ from polyzymd.analyses.base import Analysis
 from polyzymd.analyses.orchestrator import prepare_comparison_run
 from polyzymd.analyses.shared.paths import sanitize_label
 from polyzymd.config.comparison import ComparisonConfig
+from polyzymd.utils.templates import render_package_template
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +44,11 @@ _MEM_PATTERN = re.compile(r"^\d+(?:[KMGT]B?)$", flags=re.IGNORECASE)
 _TIME_PATTERN = re.compile(r"^(?:\d+-)?\d{1,3}:\d{2}:\d{2}$")
 _SLURM_JOB_ID_PATTERN = re.compile(r"^\d+(?:_\d+)?$")
 _SBATCH_PARSE_FAILURE_MARKER = "SBATCH_PARSE_FAILURE"
+_WORKFLOW_TEMPLATE_PACKAGE = "polyzymd.workflow"
+_ANALYSIS_REPLICATE_TEMPLATE = "analysis_replicate_worker.sh.jinja"
+_ANALYSIS_AGGREGATE_TEMPLATE = "analysis_aggregate_worker.sh.jinja"
+_ANALYSIS_FINALIZE_TEMPLATE = "analysis_finalize_worker.sh.jinja"
+_ANALYSIS_ARRAY_TEMPLATE = "analysis_array_worker.sh.jinja"
 
 
 class AnalysisSlurmResources(BaseModel):
@@ -240,7 +246,24 @@ def _sanitize_slurm_value(value: str, field_name: str) -> str:
         raise ValueError(f"Unsafe SLURM value for '{field_name}': exceeds 128 characters")
     if any(ch.isspace() for ch in value):
         raise ValueError(f"Unsafe SLURM value for '{field_name}': whitespace is not allowed")
-    if any(token in value for token in ("\n", "\r", ";", "`", "$(", "${", "|", "<", ">")):
+    if any(
+        token in value
+        for token in (
+            "\n",
+            "\r",
+            ";",
+            "`",
+            "$(",
+            "${",
+            "$",
+            "\\",
+            "'",
+            '"',
+            "|",
+            "<",
+            ">",
+        )
+    ):
         raise ValueError(
             f"Unsafe SLURM value for '{field_name}': contains disallowed shell characters"
         )
@@ -279,7 +302,7 @@ def _sanitize_path_for_script(path: Path) -> str:
             f"{path_str!r}. Please rename the path to remove control characters"
         )
 
-    disallowed_tokens = ("'", '"', "`", "$(", "${", "|", "<", ">", ";")
+    disallowed_tokens = ("'", '"', "`", "$(", "${", "$", "\\", "|", "<", ">", ";")
     for token in disallowed_tokens:
         if token in path_str:
             display_token = token.encode("unicode_escape").decode("ascii")
@@ -299,6 +322,24 @@ def _pixi_run_prefix(resources: AnalysisSlurmResources) -> str:
         if detected is not None:
             pixi = detected
     return f'"{pixi}" run -e build'
+
+
+def _render_analysis_template(template_name: str, context: dict[str, Any]) -> str:
+    """Render an analysis SLURM worker script template.
+
+    Parameters
+    ----------
+    template_name : str
+        Package-resource template filename.
+    context : dict[str, Any]
+        Pre-sanitized template variables.
+
+    Returns
+    -------
+    str
+        Rendered SLURM worker script.
+    """
+    return render_package_template(_WORKFLOW_TEMPLATE_PACKAGE, template_name, context)
 
 
 def _condition_specs_from_conditions(conditions: list[Any]) -> list[ConditionTaskSpec]:
@@ -587,28 +628,30 @@ def generate_replicate_script(
     )
     error_expr = "'worker exit code ' + str($EXIT_CODE)"
 
-    script = (
-        f"{header}\n\n"
-        "set -u\n\n"
-        f'STATUS_FILE="{status_path_str}"\n'
-        f'MANIFEST="{manifest_path_str}"\n'
-        f"MAX_RETRIES={resources.max_retries}\n"
-        f'ATTEMPT=$({_status_attempt_python(status_path, resources)} 2>/dev/null || echo "0")\n'
-        "ATTEMPT=$((ATTEMPT + 1))\n"
-        f"{_status_update_python(status_path, 'running', resources)}\n"
-        f"{worker_cmd}\n"
-        "EXIT_CODE=$?\n"
-        "if [ $EXIT_CODE -ne 0 ]; then\n"
-        "    if [ $ATTEMPT -lt $MAX_RETRIES ]; then\n"
-        f"        {_status_update_python(status_path, 'retrying', resources, error_expr)}\n"
-        "        scontrol requeue $SLURM_JOB_ID\n"
-        "        exit 0\n"
-        "    fi\n"
-        f"    {_status_update_python(status_path, 'failed', resources, error_expr)}\n"
-        "    exit $EXIT_CODE\n"
-        "fi\n"
-        f"{_status_update_python(status_path, 'succeeded', resources)}\n"
-        "exit 0\n"
+    script = _render_analysis_template(
+        _ANALYSIS_REPLICATE_TEMPLATE,
+        {
+            "header": header,
+            "status_file": status_path_str,
+            "manifest": manifest_path_str,
+            "max_retries": resources.max_retries,
+            "status_attempt_cmd": _status_attempt_python(status_path, resources),
+            "status_running_cmd": _status_update_python(status_path, "running", resources),
+            "worker_cmd": worker_cmd,
+            "status_retrying_cmd": _status_update_python(
+                status_path,
+                "retrying",
+                resources,
+                error_expr,
+            ),
+            "status_failed_cmd": _status_update_python(
+                status_path,
+                "failed",
+                resources,
+                error_expr,
+            ),
+            "status_succeeded_cmd": _status_update_python(status_path, "succeeded", resources),
+        },
     )
 
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -639,27 +682,29 @@ def generate_aggregate_script(
     )
     error_expr = "'worker exit code ' + str($EXIT_CODE)"
 
-    script = (
-        f"{header}\n\n"
-        "set -u\n\n"
-        f'STATUS_FILE="{status_path_str}"\n'
-        f"MAX_RETRIES={resources.max_retries}\n"
-        f'ATTEMPT=$({_status_attempt_python(status_path, resources)} 2>/dev/null || echo "0")\n'
-        "ATTEMPT=$((ATTEMPT + 1))\n"
-        f"{_status_update_python(status_path, 'running', resources)}\n"
-        f"{worker_cmd}\n"
-        "EXIT_CODE=$?\n"
-        "if [ $EXIT_CODE -ne 0 ]; then\n"
-        "    if [ $ATTEMPT -lt $MAX_RETRIES ]; then\n"
-        f"        {_status_update_python(status_path, 'retrying', resources, error_expr)}\n"
-        "        scontrol requeue $SLURM_JOB_ID\n"
-        "        exit 0\n"
-        "    fi\n"
-        f"    {_status_update_python(status_path, 'failed', resources, error_expr)}\n"
-        "    exit $EXIT_CODE\n"
-        "fi\n"
-        f"{_status_update_python(status_path, 'succeeded', resources)}\n"
-        "exit 0\n"
+    script = _render_analysis_template(
+        _ANALYSIS_AGGREGATE_TEMPLATE,
+        {
+            "header": header,
+            "status_file": status_path_str,
+            "max_retries": resources.max_retries,
+            "status_attempt_cmd": _status_attempt_python(status_path, resources),
+            "status_running_cmd": _status_update_python(status_path, "running", resources),
+            "worker_cmd": worker_cmd,
+            "status_retrying_cmd": _status_update_python(
+                status_path,
+                "retrying",
+                resources,
+                error_expr,
+            ),
+            "status_failed_cmd": _status_update_python(
+                status_path,
+                "failed",
+                resources,
+                error_expr,
+            ),
+            "status_succeeded_cmd": _status_update_python(status_path, "succeeded", resources),
+        },
     )
 
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -728,7 +773,7 @@ def generate_array_script(
     header = _slurm_header(resources, f"pzmd_ra_{cond_spec.condition_slug}", log_path)
     array_spec = _array_spec(replicates)
 
-    case_branches: list[str] = []
+    case_branches: list[dict[str, str | int]] = []
     for replicate in sorted(set(replicates)):
         status_path = _rep_status_path(hpc_dir, cond_spec.condition_slug, replicate)
         error_expr = "'worker exit code ' + str($EXIT_CODE)"
@@ -738,41 +783,40 @@ def generate_array_script(
             f"--condition-index {cond_spec.condition_index} "
             "--replicate $REP"
         )
-        branch = (
-            f"{replicate})\n"
-            f'    ATTEMPT=$({_status_attempt_python(status_path, resources)} 2>/dev/null || echo "0")\n'
-            "    ATTEMPT=$((ATTEMPT + 1))\n"
-            f"    {_status_update_python(status_path, 'running', resources)}\n"
-            f"    {worker_cmd}\n"
-            "    EXIT_CODE=$?\n"
-            "    if [ $EXIT_CODE -ne 0 ]; then\n"
-            "        if [ $ATTEMPT -lt $MAX_RETRIES ]; then\n"
-            f"            {_status_update_python(status_path, 'retrying', resources, error_expr)}\n"
-            "            scontrol requeue ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}\n"
-            "            exit 0\n"
-            "        fi\n"
-            f"        {_status_update_python(status_path, 'failed', resources, error_expr)}\n"
-            "        exit $EXIT_CODE\n"
-            "    fi\n"
-            f"    {_status_update_python(status_path, 'succeeded', resources)}\n"
-            "    ;;\n"
+        case_branches.append(
+            {
+                "replicate": replicate,
+                "status_attempt_cmd": _status_attempt_python(status_path, resources),
+                "status_running_cmd": _status_update_python(status_path, "running", resources),
+                "worker_cmd": worker_cmd,
+                "status_retrying_cmd": _status_update_python(
+                    status_path,
+                    "retrying",
+                    resources,
+                    error_expr,
+                ),
+                "status_failed_cmd": _status_update_python(
+                    status_path,
+                    "failed",
+                    resources,
+                    error_expr,
+                ),
+                "status_succeeded_cmd": _status_update_python(
+                    status_path,
+                    "succeeded",
+                    resources,
+                ),
+            }
         )
-        case_branches.append(branch)
 
-    script = (
-        f"{header}\n"
-        f"#SBATCH --array={array_spec}\n\n"
-        "set -u\n\n"
-        f"MAX_RETRIES={resources.max_retries}\n"
-        "REP=$SLURM_ARRAY_TASK_ID\n\n"
-        'case "$REP" in\n'
-        + "".join(case_branches)
-        + "*)\n"
-        + '    echo "Unknown array task id: $REP" >&2\n'
-        + "    exit 2\n"
-        + "    ;;\n"
-        + "esac\n\n"
-        + "exit 0\n"
+    script = _render_analysis_template(
+        _ANALYSIS_ARRAY_TEMPLATE,
+        {
+            "header": header,
+            "array_spec": array_spec,
+            "max_retries": resources.max_retries,
+            "case_branches": case_branches,
+        },
     )
 
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -802,27 +846,29 @@ def generate_finalize_script(
     )
     error_expr = "'worker exit code ' + str($EXIT_CODE)"
 
-    script = (
-        f"{header}\n\n"
-        "set -u\n\n"
-        f'STATUS_FILE="{status_path_str}"\n'
-        f"MAX_RETRIES={resources.max_retries}\n"
-        f'ATTEMPT=$({_status_attempt_python(status_path, resources)} 2>/dev/null || echo "0")\n'
-        "ATTEMPT=$((ATTEMPT + 1))\n"
-        f"{_status_update_python(status_path, 'running', resources)}\n"
-        f"{worker_cmd}\n"
-        "EXIT_CODE=$?\n"
-        "if [ $EXIT_CODE -ne 0 ]; then\n"
-        "    if [ $ATTEMPT -lt $MAX_RETRIES ]; then\n"
-        f"        {_status_update_python(status_path, 'retrying', resources, error_expr)}\n"
-        "        scontrol requeue $SLURM_JOB_ID\n"
-        "        exit 0\n"
-        "    fi\n"
-        f"    {_status_update_python(status_path, 'failed', resources, error_expr)}\n"
-        "    exit $EXIT_CODE\n"
-        "fi\n"
-        f"{_status_update_python(status_path, 'succeeded', resources)}\n"
-        "exit 0\n"
+    script = _render_analysis_template(
+        _ANALYSIS_FINALIZE_TEMPLATE,
+        {
+            "header": header,
+            "status_file": status_path_str,
+            "max_retries": resources.max_retries,
+            "status_attempt_cmd": _status_attempt_python(status_path, resources),
+            "status_running_cmd": _status_update_python(status_path, "running", resources),
+            "worker_cmd": worker_cmd,
+            "status_retrying_cmd": _status_update_python(
+                status_path,
+                "retrying",
+                resources,
+                error_expr,
+            ),
+            "status_failed_cmd": _status_update_python(
+                status_path,
+                "failed",
+                resources,
+                error_expr,
+            ),
+            "status_succeeded_cmd": _status_update_python(status_path, "succeeded", resources),
+        },
     )
 
     script_path.parent.mkdir(parents=True, exist_ok=True)

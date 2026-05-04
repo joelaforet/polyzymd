@@ -251,6 +251,18 @@ def _make_manifest_two_conditions(tmp_path: Path) -> AnalysisJobManifest:
     )
 
 
+def _assert_no_unresolved_jinja_markers(script_text: str) -> None:
+    """Assert that rendered script content contains no Jinja syntax.
+
+    Parameters
+    ----------
+    script_text : str
+        Rendered script content to inspect.
+    """
+    for marker in ("{{", "}}", "{%", "%}"):
+        assert marker not in script_text
+
+
 def test_build_manifest_serialization(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Manifest should be built and round-trip serialized."""
     analysis = _ToyAnalysis()
@@ -309,10 +321,35 @@ def test_script_generation_contains_worker_commands(tmp_path: Path) -> None:
     assert "worker-replicate" in rep_text
     assert "scontrol requeue" in rep_text
     assert "run -e build python -c" in rep_text
+    for state in ("running", "retrying", "failed", "succeeded"):
+        assert f"'{state}'" in rep_text
     assert "python3 -c" not in rep_text
 
     assert "worker-aggregate" in agg_script.read_text()
     assert "worker-finalize" in fin_script.read_text()
+
+
+def test_generated_worker_scripts_have_no_unresolved_jinja_markers(tmp_path: Path) -> None:
+    """Generated analysis scripts should be fully rendered from templates."""
+    manifest = _make_manifest(tmp_path)
+    resources = AnalysisSlurmResources(max_retries=3)
+    hpc_dir = tmp_path / "comparison" / "toy_slurm" / "_hpc"
+    cond_spec = manifest.condition_specs[0]
+
+    scripts = [
+        generate_replicate_script(
+            manifest,
+            cond_spec.replicate_specs[0],
+            resources,
+            hpc_dir,
+        ),
+        generate_aggregate_script(manifest, cond_spec, resources, hpc_dir),
+        generate_finalize_script(manifest, resources, hpc_dir),
+        generate_array_script(cond_spec, manifest, resources, [1, 2], hpc_dir),
+    ]
+
+    for script in scripts:
+        _assert_no_unresolved_jinja_markers(script.read_text())
 
 
 def test_slurm_header_omits_partition_when_unset(tmp_path: Path) -> None:
@@ -364,6 +401,20 @@ def test_generate_array_script_requeues_only_failing_task(tmp_path: Path) -> Non
 
     assert "scontrol requeue ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}" in text
     assert "scontrol requeue $SLURM_ARRAY_JOB_ID" not in text
+
+
+def test_generate_array_script_preserves_slurm_retry_key_literal(tmp_path: Path) -> None:
+    """Array templates should keep the SLURM retry key as a shell literal."""
+    manifest = _make_manifest(tmp_path)
+    resources = AnalysisSlurmResources(max_retries=3)
+    hpc_dir = tmp_path / "comparison" / "toy_slurm" / "_hpc"
+    cond_spec = manifest.condition_specs[0]
+
+    script = generate_array_script(cond_spec, manifest, resources, [1, 2], hpc_dir)
+    text = script.read_text()
+
+    assert "${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}" in text
+    _assert_no_unresolved_jinja_markers(text)
 
 
 def test_generate_array_script_uses_condition_index_dispatch(tmp_path: Path) -> None:
@@ -1004,6 +1055,10 @@ def test_sanitize_slurm_rejects_shell_metacharacters() -> None:
         "aa100|cat",
         "normal; rm -rf /",
         "${HOME}",
+        "$HOME",
+        "bad\\value",
+        "bad'value",
+        'bad"value',
         "normal < /etc/passwd",
         "normal > /tmp/evil",
     ):
@@ -1059,6 +1114,9 @@ def test_sanitize_path_for_script_rejects_null_byte() -> None:
         Path("/home/user/bad\npath/analysis"),
         Path("/home/user/bad`path/analysis"),
         Path("/home/user/bad$(path)/analysis"),
+        Path("/home/user/bad${path}/analysis"),
+        Path("/home/user/bad$path/analysis"),
+        Path("/home/user/bad\\path/analysis"),
         Path("/home/user/bad|path/analysis"),
     ],
 )
