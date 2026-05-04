@@ -181,12 +181,12 @@ class TestSettings:
 
     def test_settings_fingerprint_changes_with_cutoff(self):
         from polyzymd.analyses.contacts import ContactsSettings
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
 
         low = ContactsSettings(cutoff=4.0)
         high = ContactsSettings(cutoff=4.5)
 
-        assert settings_fingerprint(low) != settings_fingerprint(high)
+        assert contacts_settings_fingerprint(low) != contacts_settings_fingerprint(high)
 
     def test_contacts_domain_fingerprint_excludes_binding_preference_fields(self):
         from polyzymd.analyses.contacts import ContactsSettings
@@ -551,8 +551,8 @@ class TestRunReplicate:
     def test_canonical_cache_miss_when_cutoff_changes(self, tmp_path):
         from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
         from polyzymd.analyses.contacts._results import ContactResult
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
         analysis = ContactsAnalysis()
         old_settings = ContactsSettings(cutoff=4.0)
@@ -572,7 +572,7 @@ class TestRunReplicate:
             timestep_ps=10.0,
             criteria_label="any_atom_4.0A",
             criteria_cutoff=4.0,
-            metadata={"settings_fingerprint": settings_fingerprint(old_settings)},
+            metadata={"settings_fingerprint": contacts_settings_fingerprint(old_settings)},
         ).save(canonical)
         ctx = ReplicateContext(
             condition=condition,
@@ -658,8 +658,8 @@ class TestRunReplicate:
     def test_canonical_cache_miss_when_equilibration_changes(self, tmp_path):
         from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
         from polyzymd.analyses.contacts._results import ContactResult
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
         analysis = ContactsAnalysis()
         settings = ContactsSettings()
@@ -680,7 +680,7 @@ class TestRunReplicate:
             criteria_cutoff=4.5,
             equilibration_time=0.0,
             equilibration_unit="ns",
-            metadata={"settings_fingerprint": settings_fingerprint(settings)},
+            metadata={"settings_fingerprint": contacts_settings_fingerprint(settings)},
         ).save(canonical)
         ctx = ReplicateContext(
             condition=condition,
@@ -1998,6 +1998,29 @@ class TestFilterConditions:
         result = analysis.filter_conditions([cond])
         assert len(result) == 1  # Included because of error (fail-open)
 
+    def test_missing_topology_includes_condition(self, tmp_path):
+        """Conditions are fail-open when no replicate topology can be inspected."""
+        from polyzymd.analyses.base import Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis
+
+        analysis = ContactsAnalysis()
+        run_dir = tmp_path / "run_1"
+        run_dir.mkdir()
+
+        mock_sim_config = MagicMock()
+        mock_sim_config.output.projects_directory = tmp_path / "projects"
+        mock_sim_config.get_working_directory.return_value = run_dir
+        cond = Condition(
+            label="Unchecked",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1,),
+            sim_config=mock_sim_config,
+        )
+
+        result = analysis.filter_conditions([cond])
+
+        assert result == [cond]
+
 
 # ---------------------------------------------------------------------------
 # compare — full override
@@ -2416,7 +2439,7 @@ class TestCompare:
             AggregatedContactResult,
             AggregatedResidueStats,
         )
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
 
         analysis = ContactsAnalysis()
         settings = ContactsSettings()
@@ -2448,7 +2471,10 @@ class TestCompare:
             mean_contact_fraction_sem=0.1,
             equilibration_time=10.0,
             equilibration_unit="ns",
-            metadata={"settings_fingerprint": settings_fingerprint(settings), "replicates": [1, 2]},
+            metadata={
+                "settings_fingerprint": contacts_settings_fingerprint(settings),
+                "replicates": [1, 2],
+            },
         ).save(agg_dir / "result.json")
         ctx = ComparisonContext(
             name="test",
@@ -2682,6 +2708,60 @@ _PLOT_FUNCTIONS = [
 ]
 
 
+def _write_contacts_plot_aggregate(
+    analysis_dir: Path,
+    settings=None,
+    replicates: tuple[int, ...] = (1, 2),
+) -> Path:
+    """Write a valid contacts aggregate for plot orchestration tests."""
+
+    from polyzymd.analyses.contacts import ContactsSettings
+    from polyzymd.analyses.contacts._aggregator import (
+        AggregatedContactResult,
+        AggregatedResidueStats,
+    )
+    from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+
+    resolved_settings = settings or ContactsSettings()
+    aggregated_dir = analysis_dir / "aggregated"
+    aggregated_dir.mkdir(parents=True, exist_ok=True)
+    aggregate = AggregatedContactResult(
+        n_replicates=len(replicates),
+        replicates=list(replicates),
+        residue_stats=[
+            AggregatedResidueStats(
+                protein_resid=1,
+                protein_resname="ALA",
+                protein_group="nonpolar",
+                contact_fraction_mean=0.5,
+                contact_fraction_sem=0.1,
+                contact_fraction_per_replicate=[0.4, 0.6][: len(replicates)],
+                by_polymer_type={"PEG": (0.5, 0.1)},
+                by_polymer_type_per_replicate={"PEG": [0.4, 0.6][: len(replicates)]},
+            ),
+            AggregatedResidueStats(
+                protein_resid=2,
+                protein_resname="ASP",
+                protein_group="charged",
+                contact_fraction_mean=0.2,
+                contact_fraction_sem=0.05,
+                contact_fraction_per_replicate=[0.1, 0.3][: len(replicates)],
+                by_polymer_type={"PEG": (0.2, 0.05)},
+                by_polymer_type_per_replicate={"PEG": [0.1, 0.3][: len(replicates)]},
+            ),
+        ],
+        total_frames_per_replicate=[10] * len(replicates),
+        criteria_cutoff=resolved_settings.cutoff,
+        coverage_mean=1.0,
+        mean_contact_fraction=0.35,
+        metadata={
+            "settings_fingerprint": contacts_settings_fingerprint(resolved_settings),
+            "replicates": list(replicates),
+        },
+    )
+    return aggregate.save(aggregated_dir / "result.json")
+
+
 class TestPlot:
     """Test plot() delegates to private module-level plotting functions."""
 
@@ -2711,6 +2791,7 @@ class TestPlot:
             settings=ContactsSettings(),
             plot_settings=PlotSettings(),
         )
+        _write_contacts_plot_aggregate(ctx.analysis_dirs["A"], ctx.settings)
 
         # Mock all 11 private plot functions to return empty lists
         patches = {
@@ -2753,6 +2834,7 @@ class TestPlot:
             settings=ContactsSettings(),
             plot_settings=PlotSettings(),
         )
+        _write_contacts_plot_aggregate(ctx.analysis_dirs["A"], ctx.settings)
 
         # Make first two functions return paths, rest return empty
         path_a = tmp_path / "plot_a.png"
@@ -2808,6 +2890,7 @@ class TestPlot:
             settings=ContactsSettings(),
             plot_settings=PlotSettings(),
         )
+        _write_contacts_plot_aggregate(ctx.analysis_dirs["A"], ctx.settings)
 
         # Make all plot functions raise
         patches = {
@@ -2854,6 +2937,7 @@ class TestPlot:
             settings=ContactsSettings(),
             plot_settings=ps,
         )
+        _write_contacts_plot_aggregate(ctx.analysis_dirs["A"], ctx.settings)
 
         patches = {
             fn: patch(f"polyzymd.analyses.contacts.{fn}", return_value=[]) for fn in _PLOT_FUNCTIONS
@@ -2889,6 +2973,7 @@ class TestPlot:
             settings=ContactsSettings(compute_residence_times=False),
             plot_settings=PlotSettings(),
         )
+        _write_contacts_plot_aggregate(ctx.analysis_dirs["A"], ctx.settings)
         residence_plotters = {
             "_plot_residence_time_profile",
             "_plot_rt_by_aa_class_bars",
@@ -2918,7 +3003,7 @@ class TestPlot:
             AggregatedContactResult,
             AggregatedResidueStats,
         )
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
         from polyzymd.config.comparison import PlotSettings
 
         analysis = ContactsAnalysis()
@@ -2949,7 +3034,10 @@ class TestPlot:
             mean_contact_fraction=0.5,
             equilibration_time=10.0,
             equilibration_unit="ns",
-            metadata={"settings_fingerprint": settings_fingerprint(settings), "replicates": [1, 2]},
+            metadata={
+                "settings_fingerprint": contacts_settings_fingerprint(settings),
+                "replicates": [1, 2],
+            },
         ).save(agg_dir / "result.json")
         ctx = PlotContext(
             conditions=[condition],
@@ -2974,6 +3062,138 @@ class TestPlot:
                     patcher.stop()
 
         assert plot_fn.called
+
+    def test_plot_skips_condition_without_aggregate_data(self, tmp_path, caplog):
+        """Plot should not invoke plotters when aggregate artifacts are absent."""
+        from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.config.comparison import PlotSettings
+
+        analysis = ContactsAnalysis()
+        condition = Condition(
+            label="A",
+            config_path=Path("/tmp/a/config.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = PlotContext(
+            conditions=[condition],
+            analysis_dirs={"A": tmp_path / "A" / "contacts"},
+            results_dir=tmp_path / "results",
+            output_dir=tmp_path / "plots",
+            settings=ContactsSettings(),
+            plot_settings=PlotSettings(),
+        )
+
+        with patch(f"polyzymd.analyses.contacts.{_PLOT_FUNCTIONS[0]}", return_value=[]) as plot_fn:
+            with caplog.at_level("INFO", logger="polyzymd.analyses.contacts"):
+                result = analysis.plot(ctx)
+
+        assert result == []
+        assert not plot_fn.called
+        assert "no aggregated contacts JSON found" in caplog.text
+
+    def test_contact_plotter_loads_current_aggregate_layout(self, tmp_path):
+        """Contact plotters should load canonical aggregates below aggregated/."""
+        from polyzymd.analyses.contacts._plotters import _plot_contact_fraction_profile
+        from polyzymd.config.comparison import PlotSettings
+
+        analysis_dir = tmp_path / "A" / "contacts"
+        _write_contacts_plot_aggregate(analysis_dir)
+        data = {
+            "A": {
+                "analysis_dir": analysis_dir,
+                "aggregated_dir": analysis_dir / "aggregated",
+            },
+            "__meta__": {"settings": None},
+        }
+
+        paths = _plot_contact_fraction_profile(data, ["A"], tmp_path / "plots", PlotSettings())
+
+        assert paths
+        assert all(path.exists() for path in paths)
+
+    def test_plot_propagates_validated_sidecar_when_canonical_is_malformed(self, tmp_path):
+        """Plot gating should pass the exact validated aggregate artifact to plotters."""
+        from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.config.comparison import PlotSettings
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings()
+        condition = Condition(
+            label="A",
+            config_path=Path("/tmp/a/config.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        analysis_dir = tmp_path / "A" / "contacts"
+        canonical = _write_contacts_plot_aggregate(analysis_dir, settings)
+        sidecar = analysis._aggregated_sidecar_path(
+            canonical.parent,
+            settings,
+            "0ns",
+            condition.replicates,
+        )
+        canonical.rename(sidecar)
+        canonical.write_text("{malformed json")
+        ctx = PlotContext(
+            conditions=[condition],
+            analysis_dirs={"A": analysis_dir},
+            results_dir=tmp_path / "results",
+            output_dir=tmp_path / "plots",
+            settings=settings,
+            plot_settings=PlotSettings(),
+        )
+        captured: dict[str, Path | None] = {}
+
+        def capture_artifact(data, labels, output_dir, plot_settings):
+            captured["artifact"] = data["A"].get("aggregated_result_path")
+            return []
+
+        patches = {
+            fn: patch(f"polyzymd.analyses.contacts.{fn}", return_value=[]) for fn in _PLOT_FUNCTIONS
+        }
+        patches[_PLOT_FUNCTIONS[0]] = patch(
+            f"polyzymd.analyses.contacts.{_PLOT_FUNCTIONS[0]}",
+            side_effect=capture_artifact,
+        )
+        for patcher in patches.values():
+            patcher.start()
+        try:
+            analysis.plot(ctx)
+        finally:
+            for patcher in patches.values():
+                patcher.stop()
+
+        assert captured["artifact"] == sidecar
+
+    def test_contact_result_loader_falls_back_after_unloadable_candidate(self, tmp_path):
+        """Contact plot loaders should continue after a stale malformed candidate."""
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.contacts._plotters import _load_aggregated_contact_results
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings()
+        replicates = (1, 2)
+        analysis_dir = tmp_path / "A" / "contacts"
+        canonical = _write_contacts_plot_aggregate(analysis_dir, settings, replicates=replicates)
+        sidecar = analysis._aggregated_sidecar_path(canonical.parent, settings, "0ns", replicates)
+        canonical.rename(sidecar)
+        canonical.write_text("{malformed json")
+        data = {
+            "A": {
+                "analysis_dir": analysis_dir,
+                "aggregated_dir": analysis_dir / "aggregated",
+                "aggregated_result_path": canonical,
+            },
+            "__meta__": {"settings": settings},
+        }
+
+        results = _load_aggregated_contact_results(data, ["A"])
+
+        assert "A" in results
+        assert results["A"].mean_contact_fraction == pytest.approx(0.35)
 
 
 class TestPartitionDefinitions:

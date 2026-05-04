@@ -46,6 +46,100 @@ logger = logging.getLogger(__name__)
 # ===================================================================
 
 
+def _dedupe_paths(paths: Sequence[Path]) -> list[Path]:
+    """Return paths with duplicates removed while preserving order."""
+
+    return list(dict.fromkeys(paths))
+
+
+def _condition_aggregate_dir(cond_data: dict[str, Any]) -> Path | None:
+    """Return the preferred aggregate directory for a condition."""
+
+    aggregated_dir = cond_data.get("aggregated_dir")
+    if aggregated_dir:
+        return Path(aggregated_dir)
+
+    analysis_dir = cond_data.get("analysis_dir")
+    if analysis_dir:
+        return Path(analysis_dir) / "aggregated"
+    return None
+
+
+def _legacy_analysis_dir(cond_data: dict[str, Any], aggregate_dir: Path | None) -> Path | None:
+    """Return the legacy analysis directory when distinct from aggregate output."""
+
+    analysis_dir = cond_data.get("analysis_dir")
+    if not analysis_dir:
+        return None
+    analysis_path = Path(analysis_dir)
+    if aggregate_dir is not None and analysis_path == aggregate_dir:
+        return None
+    return analysis_path
+
+
+def _aggregate_candidates(
+    cond_data: dict[str, Any],
+    pattern: str,
+    *,
+    canonical_name: str | None = None,
+) -> list[Path]:
+    """Return aggregate result candidates for current and legacy layouts."""
+
+    candidates: list[Path] = []
+    aggregate_dir = _condition_aggregate_dir(cond_data)
+    if aggregate_dir is not None:
+        if canonical_name is not None:
+            canonical = aggregate_dir / canonical_name
+            if canonical.exists():
+                candidates.append(canonical)
+        candidates.extend(sorted(aggregate_dir.glob(pattern)))
+
+    analysis_dir = _legacy_analysis_dir(cond_data, aggregate_dir)
+    if analysis_dir is not None:
+        candidates.extend(sorted(analysis_dir.glob(pattern)))
+
+    return _dedupe_paths(candidates)
+
+
+def _contact_aggregate_candidates(cond_data: dict[str, Any]) -> list[Path]:
+    """Return contacts aggregate candidates in validation-compatible order.
+
+    Parameters
+    ----------
+    cond_data : dict[str, Any]
+        Plot data for one condition. ``aggregated_result_path`` is preferred
+        when plot orchestration has already validated a specific artifact.
+
+    Returns
+    -------
+    list[Path]
+        Existing contacts aggregate JSON candidates with sidecars before the
+        canonical result, preserving legacy layout compatibility.
+    """
+
+    candidates: list[Path] = []
+    artifact_path = cond_data.get("aggregated_result_path")
+    if artifact_path:
+        artifact = Path(artifact_path)
+        if artifact.exists():
+            candidates.append(artifact)
+
+    aggregate_dir = _condition_aggregate_dir(cond_data)
+    if aggregate_dir is not None:
+        candidates.extend(sorted(aggregate_dir.glob("contacts_aggregated*.json")))
+        candidates.extend(sorted(aggregate_dir.glob("aggregated_contacts*.json")))
+        canonical = aggregate_dir / "result.json"
+        if canonical.exists():
+            candidates.append(canonical)
+
+    analysis_dir = _legacy_analysis_dir(cond_data, aggregate_dir)
+    if analysis_dir is not None:
+        candidates.extend(sorted(analysis_dir.glob("contacts_aggregated*.json")))
+        candidates.extend(sorted(analysis_dir.glob("aggregated_contacts*.json")))
+
+    return _dedupe_paths(candidates)
+
+
 def _get_polymer_types_and_aa_classes(
     binding_results: dict[str, "AggregatedBindingPreferenceResult"],
 ) -> tuple[list[str], list[str]]:
@@ -244,18 +338,10 @@ def _load_binding_preference_results(
         if cond_data is None:
             continue
 
-        analysis_dir = cond_data.get("analysis_dir")
-        if not analysis_dir:
-            continue
-
-        analysis_dir = Path(analysis_dir)
-
-        # Find aggregated binding preference file
-        # Pattern: binding_preference_aggregated_reps*.json
-        agg_files = list(analysis_dir.glob("binding_preference_aggregated*.json"))
+        agg_files = _aggregate_candidates(cond_data, "binding_preference_aggregated*.json")
 
         if not agg_files:
-            logger.debug(f"No aggregated binding preference in {analysis_dir}")
+            logger.debug(f"No aggregated binding preference for {label}")
             continue
 
         # Use the most recent aggregated file
@@ -301,17 +387,10 @@ def _load_system_coverage_results(
         if cond_data is None:
             continue
 
-        analysis_dir = cond_data.get("analysis_dir")
-        if not analysis_dir:
-            continue
-
-        analysis_dir = Path(analysis_dir)
-
-        # Find aggregated binding preference file
-        agg_files = list(analysis_dir.glob("binding_preference_aggregated*.json"))
+        agg_files = _aggregate_candidates(cond_data, "binding_preference_aggregated*.json")
 
         if not agg_files:
-            logger.debug(f"No aggregated binding preference in {analysis_dir}")
+            logger.debug(f"No aggregated binding preference for {label}")
             continue
 
         # Use the most recent aggregated file
@@ -357,28 +436,22 @@ def _load_aggregated_contact_results(
         if cond_data is None:
             continue
 
-        analysis_dir = cond_data.get("analysis_dir")
-        if not analysis_dir:
-            continue
-
-        analysis_dir = Path(analysis_dir)
-
-        # Pattern: contacts_aggregated_reps*.json or contacts_aggregated.json
-        agg_files = list(analysis_dir.glob("contacts_aggregated*.json"))
+        agg_files = _contact_aggregate_candidates(cond_data)
 
         if not agg_files:
-            logger.debug(f"No aggregated contacts in {analysis_dir}")
+            logger.debug(f"No aggregated contacts for {label}")
             continue
 
-        # Use the most recent aggregated file
-        result_file = sorted(agg_files)[-1]
-
-        try:
-            result = AggregatedContactResult.load(result_file)
-            results[label] = result
-            logger.debug(f"Loaded aggregated contacts for {label} from {result_file}")
-        except (OSError, json.JSONDecodeError, KeyError, ValueError, ValidationError) as e:
-            logger.warning(f"Failed to load aggregated contacts {result_file}: {e}")
+        for result_file in agg_files:
+            try:
+                result = AggregatedContactResult.load(result_file)
+                results[label] = result
+                logger.debug(f"Loaded aggregated contacts for {label} from {result_file}")
+                break
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, ValidationError) as e:
+                logger.warning(f"Failed to load aggregated contacts {result_file}: {e}")
+        else:
+            logger.debug(f"No loadable aggregated contacts for {label}")
 
     return results
 

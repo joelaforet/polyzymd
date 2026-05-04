@@ -1189,6 +1189,65 @@ def load_validated_aggregated_result(
         is available.
     """
 
+    artifact = load_validated_aggregated_artifact(
+        analysis,
+        aggregated_dir,
+        settings=settings,
+        equilibration=equilibration,
+        replicates=replicates,
+        sim_config=sim_config,
+        recompute=recompute,
+        allow_replicate_subset=allow_replicate_subset,
+    )
+    if artifact is None:
+        return None
+    return artifact[0]
+
+
+def load_validated_aggregated_artifact(
+    analysis: Any,
+    aggregated_dir: Path,
+    *,
+    settings: BaseModel,
+    equilibration: str,
+    replicates: Sequence[int],
+    sim_config: Any,
+    recompute: bool,
+    allow_replicate_subset: bool = False,
+) -> tuple[Any, Path] | None:
+    """Load an aggregated contacts result and return its validated artifact.
+
+    The lookup order matches :func:`load_validated_aggregated_result` so plot
+    gating can pass the exact file that satisfied cache identity validation to
+    downstream plotters.
+
+    Parameters
+    ----------
+    analysis : Any
+        Contacts facade instance used for cache and path compatibility hooks.
+    aggregated_dir : Path
+        Directory containing aggregate cache files.
+    settings : BaseModel
+        Active contacts settings.
+    equilibration : str
+        Active equilibration/window request.
+    replicates : Sequence[int]
+        Replicates expected in the aggregate.
+    sim_config : Any
+        Active condition simulation configuration.
+    recompute : bool
+        Whether cache loading should be skipped.
+    allow_replicate_subset : bool, optional
+        Whether finalized aggregates with successful replicate subsets may be
+        loaded.
+
+    Returns
+    -------
+    tuple[Any, Path] or None
+        Valid aggregated contacts result and the JSON artifact that provided
+        it, or ``None`` when no compatible cache is available.
+    """
+
     candidates = analysis._aggregated_cache_candidates(
         aggregated_dir,
         settings,
@@ -1217,9 +1276,12 @@ def load_validated_aggregated_result(
             allow_replicate_subset=allow_replicate_subset,
             source=candidate,
         ):
-            return cached
+            return cached, candidate
 
     if saw_json:
         return None
 
-    return analysis._load_aggregated_result(aggregated_dir)
+    fallback = analysis._load_aggregated_result(aggregated_dir)
+    if fallback is None:
+        return None
+    return fallback, analysis.aggregate_result_path(aggregated_dir)
