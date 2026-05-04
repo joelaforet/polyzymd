@@ -1,0 +1,1 @@
+"""Bundled PolyzyMD template resources."""

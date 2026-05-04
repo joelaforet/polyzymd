@@ -12,9 +12,21 @@ from unittest.mock import patch
 
 import click
 import pytest
+import yaml
 from click.testing import CliRunner
+from jinja2 import UndefinedError
 
 from polyzymd.cli.main import _resolve_replicates_option, cli
+from polyzymd.utils.templates import render_package_template
+
+BRANDING_LINE = "PolyzyMD: Created by Joseph R. Laforet Jr."
+
+
+def _assert_no_jinja_markers(content: str) -> None:
+    """Assert rendered content contains no unresolved Jinja syntax."""
+    assert "{{" not in content
+    assert "{%" not in content
+    assert "%}" not in content
 
 
 def _make_dry_run_config() -> SimpleNamespace:
@@ -316,6 +328,55 @@ class TestInternalCommandsUnchanged:
         result = runner.invoke(cli, [cmd, "--help"])
         assert result.exit_code == 0
         assert "--replicate" in result.output
+
+
+class TestInitCommand:
+    """Tests for the project initialization scaffold."""
+
+    def test_init_creates_project_scaffold(self, tmp_path: Path) -> None:
+        """init should render project files with the requested project name."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(cli, ["init", "-n", "foo"])
+
+            assert result.exit_code == 0
+            project_dir = Path("foo")
+            assert project_dir.is_dir()
+            assert (project_dir / "config.yaml").is_file()
+            assert (project_dir / "structures").is_dir()
+            assert (project_dir / "job_scripts").is_dir()
+            assert (project_dir / "slurm_logs").is_dir()
+            assert (project_dir / "structures" / "place_protein_here.placeholder.txt").is_file()
+            assert (project_dir / "structures" / "place_ligand_here.placeholder.txt").is_file()
+
+            config_content = (project_dir / "config.yaml").read_text(encoding="utf-8")
+            config_data = yaml.safe_load(config_content)
+            assert config_data["name"] == "foo"
+            assert config_content.count(BRANDING_LINE) == 1
+            _assert_no_jinja_markers(config_content)
+
+            for path in project_dir.rglob("*"):
+                if path.is_file() and path.suffix in {".yaml", ".txt"}:
+                    content = path.read_text(encoding="utf-8")
+                    assert content.count(BRANDING_LINE) == 1
+                    _assert_no_jinja_markers(content)
+
+    def test_init_existing_directory_still_errors(self, tmp_path: Path) -> None:
+        """init should preserve the existing-directory error behavior."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            Path("foo").mkdir()
+            result = runner.invoke(cli, ["init", "-n", "foo"])
+
+            assert result.exit_code != 0
+            assert "already exists" in result.output
+
+    def test_shared_renderer_uses_strict_undefined(self) -> None:
+        """Missing template context values should fail fast."""
+        with pytest.raises(UndefinedError):
+            render_package_template("polyzymd.templates", "config_template.yaml", {})
 
 
 class TestDryRunOutput:

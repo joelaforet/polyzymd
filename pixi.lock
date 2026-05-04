@@ -8380,7 +8380,7 @@ packages:
 - pypi: ./
   name: polyzymd
   version: 1.3.0
-  sha256: 6933ca77b9ba8cb5a364e0a4d229ddc2ab67e165d3c0a54336f2bfc54a9114c3
+  sha256: f5a3eea4dfd8ebadf23f31e6833990dae08ceaf7e8af1538108b90346872a79e
   requires_dist:
   - pydantic>=2.0.0
   - pyyaml>=6.0

@@ -2416,7 +2416,8 @@ def init(name: str) -> None:
         └── slurm_logs/
     """
     import shutil
-    from importlib import resources
+
+    from polyzymd.utils.templates import render_package_template
 
     project_dir = Path(name)
 
@@ -2438,73 +2439,29 @@ def init(name: str) -> None:
         (project_dir / "job_scripts").mkdir()
         (project_dir / "slurm_logs").mkdir()
 
-        # Copy template configuration
-        template_path = resources.files("polyzymd.templates.templates").joinpath(
-            "config_template.yaml"
+        # Render template configuration
+        config_content = render_package_template(
+            "polyzymd.templates",
+            "config_template.yaml",
+            {"project_name": name},
         )
         config_dest = project_dir / "config.yaml"
-        with resources.as_file(template_path) as template_file:
-            shutil.copy(template_file, config_dest)
-
-        config_dest.write_text(prepend_file_header(config_dest.read_text(), comment_prefix="#"))
+        config_dest.write_text(prepend_file_header(config_content, comment_prefix="#"))
 
         # Create placeholder files
         protein_placeholder = project_dir / "structures" / "place_protein_here.placeholder.txt"
-        protein_placeholder.write_text(
-            prepend_file_header(
-                """\
-# ============================================================================
-# PLACEHOLDER: Place your protein PDB file here
-# ============================================================================
-#
-# This directory should contain your input structure files.
-#
-# PROTEIN PDB FILE (required):
-#   - Standard amino acid residue names (no nonstandard residues)
-#   - Properly protonated at your simulation pH
-#   - No missing heavy atoms in regions of interest
-#   - Rename to match your config.yaml enzyme.pdb_path setting
-#
-# PREPARATION:
-#   Use `polyzymd clean-pdb -i your_protein.pdb` or another PDB
-#   preparation tool to replace nonstandard residues and add
-#   missing hydrogens before building your system.
-#
-# Delete this placeholder file after adding your protein structure.
-# ============================================================================
-""",
-                comment_prefix="#",
-            )
+        protein_content = render_package_template(
+            "polyzymd.templates",
+            "protein_placeholder.txt.jinja",
         )
+        protein_placeholder.write_text(prepend_file_header(protein_content, comment_prefix="#"))
 
         ligand_placeholder = project_dir / "structures" / "place_ligand_here.placeholder.txt"
-        ligand_placeholder.write_text(
-            prepend_file_header(
-                """\
-# ============================================================================
-# PLACEHOLDER: Place your ligand SDF file here (if using substrate)
-# ============================================================================
-#
-# If your simulation includes a docked substrate or small molecule,
-# place the SDF file in this directory.
-#
-# LIGAND SDF FILE (optional):
-#   - 3D coordinates (from docking, crystal structure, or conformer generation)
-#   - Correct protonation state for simulation pH
-#   - Single conformer recommended (or specify conformer_index in config)
-#   - Rename to match your config.yaml substrate.sdf_path setting
-#
-# SUPPORTED FORMATS:
-#   - SDF (recommended)
-#   - MOL2
-#
-# If you're not using a substrate, you can delete this placeholder
-# and comment out the 'substrate' section in config.yaml.
-# ============================================================================
-""",
-                comment_prefix="#",
-            )
+        ligand_content = render_package_template(
+            "polyzymd.templates",
+            "ligand_placeholder.txt.jinja",
         )
+        ligand_placeholder.write_text(prepend_file_header(ligand_content, comment_prefix="#"))
 
         # Success message
         colored_echo()

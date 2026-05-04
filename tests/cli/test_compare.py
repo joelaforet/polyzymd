@@ -9,12 +9,13 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+import yaml
 from click.testing import CliRunner
 from pydantic import BaseModel
 
 from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.cli.compare import compare
-from polyzymd.config.comparison import PlotSettings
+from polyzymd.config.comparison import ComparisonConfig, PlotSettings
 from polyzymd.workflow.analysis_slurm import (
     ConditionTaskSpec,
     ReplicateTaskSpec,
@@ -25,6 +26,59 @@ from polyzymd.workflow.analysis_slurm import (
 
 class _Settings(BaseModel):
     threshold: float = 1.0
+
+
+BRANDING_LINE = "PolyzyMD: Created by Joseph R. Laforet Jr."
+
+
+def _assert_no_jinja_markers(content: str) -> None:
+    """Assert rendered content contains no unresolved Jinja syntax."""
+    assert "{{" not in content
+    assert "{%" not in content
+    assert "%}" not in content
+
+
+def test_compare_init_renders_comparison_scaffold(tmp_path: Path) -> None:
+    """compare init should render a valid comparison project scaffold."""
+    runner = CliRunner()
+
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(compare, ["init", "-n", "study", "--eq-time", "20ns"])
+
+        assert result.exit_code == 0
+        project_dir = Path("study")
+        assert project_dir.is_dir()
+        assert (project_dir / "comparison").is_dir()
+        assert (project_dir / "figures").is_dir()
+        assert (project_dir / "structures").is_dir()
+        assert (project_dir / "structures" / "README.md").is_file()
+
+        config_path = project_dir / "comparison.yaml"
+        content = config_path.read_text(encoding="utf-8")
+        data = yaml.safe_load(content)
+        assert data["name"] == "study"
+        assert data["defaults"]["equilibration_time"] == "20ns"
+        assert content.count(BRANDING_LINE) == 1
+        _assert_no_jinja_markers(content)
+
+        config = ComparisonConfig.from_yaml(config_path)
+        assert config.name == "study"
+
+        readme_content = (project_dir / "structures" / "README.md").read_text(encoding="utf-8")
+        assert readme_content.count(BRANDING_LINE) == 1
+        _assert_no_jinja_markers(readme_content)
+
+
+def test_compare_init_existing_directory_still_errors(tmp_path: Path) -> None:
+    """compare init should preserve existing-directory error behavior."""
+    runner = CliRunner()
+
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("study").mkdir()
+        result = runner.invoke(compare, ["init", "-n", "study"])
+
+        assert result.exit_code != 0
+        assert "Directory already exists" in result.output
 
 
 def test_submit_dry_run_prints_summary(monkeypatch, tmp_path: Path) -> None:

@@ -27,7 +27,7 @@
 # ============================================================================
 
 # Simulation identifier - used in output directory names
-name: "my_simulation"
+name: {{ project_name | yaml_quote }}
 description: "Description of your simulation system"
 
 # ============================================================================

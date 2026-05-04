@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jinja2 import Environment, PackageLoader, StrictUndefined
+from jinja2 import Environment
 
 from polyzymd.cli._scaffold.models import ScaffoldSpec
+from polyzymd.utils.templates import create_package_environment
 
 
 def create_environment() -> Environment:
@@ -17,14 +18,7 @@ def create_environment() -> Environment:
     Environment
         Configured Jinja environment using package-resource templates.
     """
-    return Environment(
-        loader=PackageLoader("polyzymd.cli._scaffold", "templates"),
-        undefined=StrictUndefined,
-        autoescape=False,
-        keep_trailing_newline=True,
-        trim_blocks=True,
-        lstrip_blocks=True,
-    )
+    return create_package_environment("polyzymd.cli._scaffold", "templates")
 
 
 def render_template(template_name: str, spec: ScaffoldSpec) -> str:
