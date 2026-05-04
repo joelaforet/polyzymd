@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Mapping
 from typing import Any
 
@@ -23,6 +24,22 @@ def yaml_quote(value: object) -> str:
         JSON-compatible quoted scalar, which is also valid YAML.
     """
     return json.dumps(str(value), ensure_ascii=False)
+
+
+def shell_quote(value: object) -> str:
+    """Return a POSIX shell-safe single argument.
+
+    Parameters
+    ----------
+    value : object
+        Value to quote for shell command interpolation.
+
+    Returns
+    -------
+    str
+        Shell-escaped value that is parsed as one argument.
+    """
+    return shlex.quote(str(value))
 
 
 def create_package_environment(package_name: str, template_dir: str = "templates") -> Environment:
@@ -50,6 +67,7 @@ def create_package_environment(package_name: str, template_dir: str = "templates
         lstrip_blocks=True,
     )
     env.filters["yaml_quote"] = yaml_quote
+    env.filters["shell_quote"] = shell_quote
     return env
 
 
