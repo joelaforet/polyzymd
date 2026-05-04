@@ -789,14 +789,17 @@ class TestEnergyMinimizationHelpers:
         [
             ("gmx_command", {"gmx_command": "/opt/gromacs/bin/gmx$1"}),
             ("gmx_command", {"gmx_command": r"C:\gromacs\bin\gmx"}),
+            ("gmx_command", {"gmx_command": "gmx mpi"}),
             ("prefix", {"prefix": "bad$prefix"}),
             ("prefix", {"prefix": r"bad\prefix"}),
+            ("prefix", {"prefix": "bad prefix"}),
             ("equilibration_mdp", {"equilibration_mdps": ["eq_$1.mdp"]}),
             ("equilibration_mdp", {"equilibration_mdps": [r"eq\01.mdp"]}),
+            ("equilibration_mdp", {"equilibration_mdps": ["eq 01.mdp"]}),
         ],
     )
-    def test_run_script_generator_rejects_bare_dollar_and_backslash(self, tmp_path, field, kwargs):
-        """Local run script values should reject unsafe shell characters."""
+    def test_run_script_generator_rejects_unsafe_shell_tokens(self, tmp_path, field, kwargs):
+        """Local run script values should reject unsafe shell tokens."""
         script_path = tmp_path / "run_test_gromacs.sh"
         init_kwargs = {
             "prefix": "system",

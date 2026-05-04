@@ -306,7 +306,9 @@ def aggregated_cache_candidates(
     Parameters
     ----------
     output_dir : Path
-        Directory containing aggregated contacts outputs.
+        Directory containing aggregated contacts outputs. When this is the
+        canonical ``aggregated`` directory, validated legacy aggregate artifacts
+        in the parent analysis directory are considered after canonical files.
     settings : BaseModel
         Active contacts settings.
     equilibration : str
@@ -324,11 +326,19 @@ def aggregated_cache_candidates(
     """
 
     canonical = result_path or output_dir / "result.json"
+    legacy_root_candidates: tuple[Path, ...] = ()
+    if output_dir.name == "aggregated":
+        legacy_root_candidates = _legacy_aggregated_sidecar_candidates(
+            output_dir.parent,
+            equilibration,
+        )
+
     return _dedupe_paths(
         [
             *aggregated_sidecar_candidates(output_dir, settings, equilibration, replicates),
             *_legacy_aggregated_sidecar_candidates(output_dir, equilibration),
             canonical,
+            *legacy_root_candidates,
         ]
     )
 

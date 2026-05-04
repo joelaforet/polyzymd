@@ -85,6 +85,36 @@ _GROMACS_TEMPLATE_PACKAGE = "polyzymd.engines.gromacs"
 _LOCAL_RUN_TEMPLATE = "run_gromacs.sh.jinja"
 
 
+def _validate_local_shell_token(value: str, field_name: str) -> str:
+    """Reject unsafe local run-script values expanded as shell tokens.
+
+    Parameters
+    ----------
+    value : str
+        The configured value to validate.
+    field_name : str
+        Name of the field for error messages.
+
+    Returns
+    -------
+    str
+        The validated value unchanged.
+
+    Raises
+    ------
+    ValueError
+        If the value contains unsafe shell characters or whitespace.
+    """
+
+    _validate_script_value(value, field_name)
+    if any(char.isspace() for char in value):
+        raise ValueError(
+            f"Local GROMACS script field '{field_name}' contains whitespace: {value!r}. "
+            "Values expanded as shell tokens must not contain whitespace."
+        )
+    return value
+
+
 # =============================================================================
 # Data Classes
 # =============================================================================
@@ -1302,10 +1332,10 @@ class RunScriptGenerator:
         ValueError
             If a configured value contains unsafe shell metacharacters.
         """
-        _validate_script_value(self._gmx, "gmx_command")
-        _validate_script_value(self._prefix, "prefix")
+        _validate_local_shell_token(self._gmx, "gmx_command")
+        _validate_local_shell_token(self._prefix, "prefix")
         for mdp_name in self._eq_mdps:
-            _validate_script_value(mdp_name, "equilibration_mdp")
+            _validate_local_shell_token(mdp_name, "equilibration_mdp")
 
     def _generate_header(self) -> List[str]:
         """Generate script header with configuration."""

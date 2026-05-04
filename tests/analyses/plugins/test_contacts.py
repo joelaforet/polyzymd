@@ -2356,6 +2356,41 @@ class TestCompare:
         assert result is not None
         assert result.conditions[0].label == "Cached"
 
+    def test_compare_loads_validated_root_level_legacy_aggregate(self, tmp_path):
+        """Comparison loading should find legacy contacts aggregates in the analysis root."""
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings()
+        condition = Condition(
+            label="LegacyRoot",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        analysis_dir = tmp_path / "LegacyRoot" / "contacts"
+        (analysis_dir / "aggregated").mkdir(parents=True)
+        legacy_path = analysis_dir / "contacts_aggregated_eq10ns_cut4.5_reps1-2.json"
+        _make_valid_agg_result(settings).save(legacy_path)
+        ctx = ComparisonContext(
+            name="test",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"LegacyRoot": analysis_dir},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=settings,
+            recompute=False,
+        )
+
+        with patch.object(analysis, "_load_or_compute_binding_preference", return_value=None):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        assert result.conditions[0].label == "LegacyRoot"
+
     def test_compare_excluded_conditions_recorded(self, tmp_path):
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings

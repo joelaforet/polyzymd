@@ -25,7 +25,7 @@
 set -e
 
 # Activate pixi environment
-eval "$(pixi shell-hook -e {{ pixi_env }} --manifest-path {{ manifest_path }})"
+eval "$(pixi shell-hook -e {{ pixi_env | shell_quote }} --manifest-path {{ manifest_path | shell_quote }})"
 
 {{ module_load_line }}
 {{ env_exports_block }}

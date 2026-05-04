@@ -1,6 +1,7 @@
 """Tests for GROMACS SLURM script generation."""
 
 import re
+import shlex
 from importlib import resources
 
 import pytest
@@ -84,6 +85,45 @@ def test_script_contains_expected_slurm_and_restart_logic(monkeypatch) -> None:
     assert 'run_mdrun_stage "production"' in script
     assert "--mark-complete || true" in script
     assert "prod_centered.xtc" in script
+    _assert_no_unresolved_jinja(script)
+
+
+def test_pixi_activation_quotes_env_and_manifest_as_single_arguments(monkeypatch) -> None:
+    """Pixi activation values with spaces or leading dashes should stay single arguments."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/polyzymd manifests/pixi.toml",
+    )
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(
+            partition="aa100",
+            time_limit="01:00:00",
+            nodes=1,
+            ntasks=1,
+            memory="3G",
+        ),
+        pixi_env="--cuda env",
+        gmx_binary="gmx",
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+    activation_line = next(line for line in script.splitlines() if "pixi shell-hook" in line)
+    command = activation_line.removeprefix('eval "$(').removesuffix(')"')
+
+    assert shlex.split(command) == [
+        "pixi",
+        "shell-hook",
+        "-e",
+        "--cuda env",
+        "--manifest-path",
+        "/tmp/polyzymd manifests/pixi.toml",
+    ]
     _assert_no_unresolved_jinja(script)
 
 
