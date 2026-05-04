@@ -162,6 +162,12 @@ Use MyST roles for cross-referencing:
 | `run_comparison()` | `analyses/orchestrator.py` | Run one analysis |
 | `run_all_comparisons()` | `analyses/orchestrator.py` | Run all analyses |
 
+`polyzymd.analyses.base` is a public facade. It re-exports context and result
+models from private framework modules so contributor documentation can keep a
+single stable import path. Do not document `_analysis_*`, `_contexts.py`, or
+`_comparison_models.py` as user-facing API pages unless explicitly writing
+internal developer reference material.
+
 ## ReadTheDocs
 
 The project is configured for ReadTheDocs via `.readthedocs.yaml` at the repo

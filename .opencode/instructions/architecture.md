@@ -24,10 +24,10 @@ src/polyzymd/
 | Layer | Files | Role |
 |-------|-------|------|
 | **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the extension point |
-| **Private modules** | `<name>/_plotters.py`, `<name>/_results.py`, etc. | Plotting functions, result models, formatters used internally by plugins |
+| **Private modules** | `_analysis_*`, `_contexts.py`, `_comparison_models.py`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics |
 | **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Cross-plugin compute (used by contacts, BFE, polymer_affinity) |
-| **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner |
+| **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Stable public facade, auto-discovery, lifecycle runner |
 
 New analysis types are added as **packages in `analyses/<name>/`**. All existing
 plugins are packages (no single-file plugins exist). New compute-stage plugins
@@ -35,6 +35,20 @@ use `build_runner()` + `summarize_replicate()` for MDAnalysis-first trajectory
 iteration. Keep PolyzyMD lifecycle orchestration in the plugin package and
 isolate MDAnalysis trajectory logic in a dedicated runner module such as
 `_runner.py`.
+
+`polyzymd.analyses.base` is the stable public API facade for contributors. It
+re-exports `Analysis`, lifecycle context objects, metric descriptors, and
+comparison models while delegating implementation to private modules such as
+`_analysis_runner.py`, `_analysis_compare.py`, `_analysis_io.py`,
+`_analysis_contract.py`, `_contexts.py`, and `_comparison_models.py`. Do not
+import these private modules from contributor plugins; import public symbols
+from `polyzymd.analyses.base`.
+
+`polyzymd.analyses.contacts` follows the same facade pattern. The public
+`ContactsAnalysis` class remains in `contacts/__init__.py`; cache handling,
+lifecycle helpers, condition filtering, custom comparison, binding-preference
+support, plotting orchestration, result models, and trajectory runners live in
+private `contacts/_*.py` modules.
 
 ## Chain Convention (Critical)
 
@@ -128,9 +142,10 @@ class AnalysisConfig(BaseModel):
 8. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 9. The CLI automatically discovers it via `polyzymd compare run <name>`
 
-See `analyses/base.py` for the full contract, `analysis-module.md` for
-detailed patterns, and `docs/source/contributor_guide/extending_analyses.md`
-for the contributor tutorial.
+See the `polyzymd.analyses.base` facade for the public contract,
+`analysis-module.md` for detailed patterns, and
+`docs/source/contributor_guide/extending_analyses.md` for the contributor
+tutorial.
 
 ### Adding comparison statistics or formatters
 

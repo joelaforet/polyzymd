@@ -6,7 +6,13 @@ The analysis system lives in the `analyses/` package:
 
 ```
 src/polyzymd/analyses/
-├── base.py                 # Analysis ABC, context objects, result models
+├── base.py                 # Public facade: Analysis, contexts, result models
+├── _analysis_runner.py     # Internal runner-backed replicate dispatch
+├── _analysis_compare.py    # Internal default comparison implementation
+├── _analysis_io.py         # Internal result paths, cache, serialization helpers
+├── _analysis_contract.py   # Internal plugin contract validation
+├── _contexts.py            # Internal definitions re-exported by base.py
+├── _comparison_models.py   # Internal models re-exported by base.py
 ├── discovery.py            # pkgutil-based auto-discovery
 ├── orchestrator.py         # Framework engine: compute → aggregate → compare → plot
 ├── stats.py                # default_scalar_comparison(), format_scalar_comparison()
@@ -31,22 +37,41 @@ src/polyzymd/analyses/
 │   ├── __init__.py         #   SecondaryStructureAnalysis plugin class
 │   └── _plotters.py        #   Plotting functions
 ├── contacts/               # Contacts plugin sub-package
-│   ├── __init__.py         #   ContactsAnalysis plugin class
-│   ├── _plotters.py        #   Plotting functions (19 functions)
-│   ├── _results.py         #   Result models (widely imported — do not modify)
-│   ├── _comparison_results.py  # Comparison result model
-│   ├── _aggregator.py      #   Aggregation logic
-│   └── _formatters.py      #   CLI formatting
+│   ├── __init__.py         #   Public ContactsAnalysis facade
+│   ├── _cache.py           #   Internal cache helpers
+│   ├── _lifecycle.py       #   Internal lifecycle helpers
+│   ├── _filters.py         #   Internal condition filtering
+│   ├── _comparison.py      #   Internal custom comparison implementation
+│   ├── _binding_preference.py  # Internal binding-preference orchestration
+│   ├── _plotting.py        #   Internal plot lifecycle orchestration
+│   ├── _plotters.py        #   Internal plotting functions
+│   ├── _results.py         #   Internal result models
+│   ├── _comparison_results.py  # Internal comparison result model
+│   ├── _aggregator.py      #   Internal aggregation logic
+│   ├── _formatters.py      #   Internal CLI formatting
+│   ├── _identity.py        #   Internal settings fingerprints
+│   ├── _runner.py          #   Internal trajectory runner and analyzer
+│   └── _paths.py           #   Internal result path helpers
 ├── exposure/               # Exposure dynamics plugin sub-package
 ├── binding_free_energy/    # Binding free energy plugin (custom compare)
 └── polymer_affinity/       # Polymer affinity plugin (custom compare)
 ```
 
+`polyzymd.analyses.base` is the supported public import surface. It re-exports
+`Analysis`, lifecycle contexts, metric descriptors, and comparison models from
+private framework modules. Contributors should import from
+`polyzymd.analyses.base` and should not import `_analysis_*`, `_contexts.py`, or
+`_comparison_models.py` directly.
+
 Each plugin is a self-contained package. All established plugins extract
 plotting functions into a `_plotters.py` module to keep `__init__.py` focused
-on Analysis lifecycle wiring. Public contributor plugins use the runner-backed
-lifecycle; trajectory-native plugins should isolate MDAnalysis trajectory logic
-in a dedicated module such as `_runner.py`.
+on Analysis lifecycle wiring. Contacts is larger, so `ContactsAnalysis` stays
+public in `contacts/__init__.py` while cache, filtering, lifecycle, comparison,
+binding-preference, plotting, result, and runner helpers live in private
+`contacts/_*.py` modules. These modules are implementation details, not
+contributor API. Public contributor plugins use the runner-backed lifecycle;
+trajectory-native plugins should isolate MDAnalysis trajectory logic in a
+dedicated module such as `_runner.py`.
 
 ### How to Add a New Analysis
 

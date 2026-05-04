@@ -24,6 +24,13 @@ The generated plugin is a small package under `src/polyzymd/analyses/<name>/`:
 The package is discovered automatically by `pkgutil`; no registry edits are
 needed.
 
+Import the public framework contract from `polyzymd.analyses.base`. That module
+is a stable facade: it re-exports `Analysis`, context objects, metric models,
+and comparison models while internal implementation lives in private modules
+such as `_analysis_runner.py`, `_analysis_compare.py`, `_analysis_io.py`,
+`_contexts.py`, and `_comparison_models.py`. Do not import from those private
+modules in contributor plugins.
+
 Choose the result-container style with `--style`:
 
 ```bash
@@ -50,6 +57,10 @@ Implement these methods on your `Analysis` subclass:
 Keep the base per-replicate dispatch inherited. The base class loads the
 Universe, resolves the trajectory window, calls your runner's `run(...)`, and
 passes the executed runner to `summarize_replicate()`.
+
+Do not implement older per-replicate hook names. Public compute-stage plugins
+use `build_runner()` plus `summarize_replicate()`; compare-only plugins set
+`has_compute_stage = False`.
 
 ## Minimal plugin shape
 

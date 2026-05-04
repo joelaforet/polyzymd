@@ -30,7 +30,7 @@ outside the managed pixi environment.
 ## Git Workflow
 
 - **Branches:** `main` (stable), `dev` (integration), `feature/*` (work)
-- Currently on `refactor/analysis-ocp-compliance` (checked out from `v1.2.1`)
+- Currently on `feature/mda-analysis-migration`
 - Commit messages: imperative mood, 50-char subject, reference issues (`#20`)
 - Run `ruff check` and `black --check` before committing
 - Never force-push to `main` or `dev`
@@ -59,15 +59,24 @@ src/polyzymd/
 | Layer | Files | Role |
 |-------|-------|------|
 | **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the **extension point** for contributors |
-| **Private modules** | `<name>/_plotters.py`, `<name>/_results.py`, etc. | Plotting functions, result models, formatters, aggregators used internally by plugins |
+| **Private modules** | `_analysis_*`, `_contexts.py`, `_comparison_models.py`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics, autocorrelation — reusable across plugins |
 | **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Cross-plugin compute (used by contacts, BFE, polymer_affinity) |
-| **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner, default comparison utilities |
+| **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Stable public facade, auto-discovery, lifecycle runner, default comparison utilities |
 
 New analysis types are added as **packages in `analyses/<name>/`**. All 13
 existing plugins are packages (no single-file plugins exist). Established
 plugins extract plotting into `_plotters.py` modules; new plugins can keep
 plotting inline in `plot()` or extract it as complexity grows.
+
+`polyzymd.analyses.base` is the stable public facade for contributor imports.
+It re-exports context objects and comparison models while delegating
+implementation to private modules such as `_analysis_runner.py`,
+`_analysis_compare.py`, `_analysis_io.py`, `_analysis_contract.py`,
+`_contexts.py`, and `_comparison_models.py`. Contributors should import
+`Analysis`, `ReplicateContext`, `AggregateContext`, `ComparisonContext`,
+`PlotContext`, `MetricValue`, and `ComparisonResult` from
+`polyzymd.analyses.base`, not from private modules.
 
 ## Key Patterns
 
@@ -86,7 +95,7 @@ in `src/polyzymd/analyses/<name>/` and subclass `Analysis`:
 | Resource | Location | What It Documents |
 |----------|----------|-------------------|
 | **Scaffold CLI** | `polyzymd new-analysis <name>` | Generates plugin package + tests automatically |
-| `Analysis` base class | `analyses/base.py` | Full contract: required methods, optional overrides, context objects |
+| `Analysis` base class | `analyses/base.py` | Stable public facade for the full contract, required methods, optional overrides, and context objects |
 | Plugin discovery | `analyses/discovery.py` | How auto-discovery works, naming rules |
 | Orchestrator | `analyses/orchestrator.py` | How the framework runs your plugin |
 | Shared utilities | `analyses/shared/` | `TrajectoryLoader`, alignment, statistics, autocorrelation |
