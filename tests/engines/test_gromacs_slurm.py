@@ -1,11 +1,20 @@
 """Tests for GROMACS SLURM script generation."""
 
 import re
+from importlib import resources
 
 import pytest
 
 from polyzymd.engines.gromacs.slurm import GromacsSlurmScriptGenerator
 from polyzymd.workflow.slurm import SlurmConfig
+
+
+def _assert_no_unresolved_jinja(script: str) -> None:
+    """Assert generated shell content has no unresolved Jinja syntax."""
+    assert "{{" not in script
+    assert "}}" not in script
+    assert "{%" not in script
+    assert "%}" not in script
 
 
 def _generator() -> GromacsSlurmScriptGenerator:
@@ -27,6 +36,21 @@ def _generator() -> GromacsSlurmScriptGenerator:
         mdrun_flags="-nb gpu",
         module_load="module load gromacs/2024",
     )
+
+
+def test_gromacs_slurm_template_resource_exists() -> None:
+    """GROMACS SLURM template should be packaged as a resource."""
+    template = resources.files("polyzymd.engines.gromacs").joinpath(
+        "templates", "slurm_self_resubmitting.sh.jinja"
+    )
+
+    assert template.is_file()
+    assert "PolyzyMD GROMACS Self-Resubmitting Simulation Job" in template.read_text()
+
+
+def test_no_embedded_job_template_remains() -> None:
+    """Generator should use the package Jinja template as the script source."""
+    assert not hasattr(GromacsSlurmScriptGenerator, "JOB_TEMPLATE")
 
 
 def test_script_contains_expected_slurm_and_restart_logic(monkeypatch) -> None:
@@ -54,6 +78,13 @@ def test_script_contains_expected_slurm_and_restart_logic(monkeypatch) -> None:
     assert 'sbatch "$THIS_SCRIPT"' in script
     assert "if [ ! -f eq_01.gro ]; then" in script
     assert "if [ ! -f eq_02.gro ]; then" in script
+    assert "trap 'handle_term' TERM" in script
+    assert "Forwarding TERM to mdrun" in script
+    assert "TERM_RECEIVED=1" in script
+    assert 'run_mdrun_stage "production"' in script
+    assert "--mark-complete || true" in script
+    assert "prod_centered.xtc" in script
+    _assert_no_unresolved_jinja(script)
 
 
 def test_parse_wall_time_hours_hms() -> None:
@@ -592,7 +623,7 @@ def test_env_exports_and_setup_commands_rendered_in_order(monkeypatch) -> None:
         },
         setup_commands=[
             "source /projects/software/gromacs/bin/GMXRC",
-            "export PATH=$PATH:/projects/software/plumed/bin",
+            "conda activate gromacs_env",
         ],
     )
 
@@ -607,8 +638,9 @@ def test_env_exports_and_setup_commands_rendered_in_order(monkeypatch) -> None:
     module_idx = script.index("module load gromacs/2024")
     env_idx = script.index('export GMX_GPU_DD_COMMS="true"')
     setup_idx = script.index("source /projects/software/gromacs/bin/GMXRC")
+    conda_idx = script.index("conda activate gromacs_env")
     resolve_idx = script.index("THIS_SCRIPT=")
-    assert module_idx < env_idx < setup_idx < resolve_idx
+    assert module_idx < env_idx < setup_idx < conda_idx < resolve_idx
 
 
 def test_env_exports_rejects_key_with_spaces(monkeypatch) -> None:
@@ -678,8 +710,9 @@ def test_env_exports_accepts_valid_identifier(monkeypatch) -> None:
     assert 'export GMX_GPU_DD_COMMS="true"' in script
 
 
-def test_setup_command_shell_variable_accepted(monkeypatch) -> None:
-    """setup_commands should allow shell variable expansion syntax."""
+@pytest.mark.parametrize("value", ["/scratch/run$1", r"C:\scratch\run_1"])
+def test_env_exports_rejects_bare_dollar_and_backslash(monkeypatch, value: str) -> None:
+    """env_exports values should reject shell metacharacters before rendering."""
     monkeypatch.setattr(
         "polyzymd.engines.gromacs.slurm._discover_manifest_path",
         lambda: "/tmp/pixi.toml",
@@ -687,7 +720,61 @@ def test_setup_command_shell_variable_accepted(monkeypatch) -> None:
 
     generator = GromacsSlurmScriptGenerator(
         slurm_config=SlurmConfig(),
-        setup_commands=["export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/lib"],
+        env_exports={"GMX_DATA": value},
+    )
+
+    with pytest.raises(ValueError, match="env_exports"):
+        generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+
+@pytest.mark.parametrize("value", ["apptainer exec $GMX_IMAGE", r"apptainer exec C:\gmx.sif"])
+def test_command_prefix_rejects_bare_dollar_and_backslash(monkeypatch, value: str) -> None:
+    """command_prefix should reject bare dollars and backslashes."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(),
+        command_prefix=value,
+    )
+
+    with pytest.raises(ValueError, match="command_prefix"):
+        generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+
+@pytest.mark.parametrize(
+    "module_load",
+    [
+        "module load gromacs",
+        "module load gromacs/2024.1",
+        "module purge",
+        "module swap gcc/12.2 gcc/13.2",
+    ],
+)
+def test_module_load_accepts_safe_module_commands(monkeypatch, module_load: str) -> None:
+    """module_load should accept only structured environment module commands."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(),
+        module_load=module_load,
     )
 
     script = generator.generate_job_script(
@@ -698,11 +785,26 @@ def test_setup_command_shell_variable_accepted(monkeypatch) -> None:
         equilibration_mdps=["eq_01_nvt.mdp"],
     )
 
-    assert "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/lib" in script
+    assert module_load in script
 
 
-def test_setup_command_command_substitution_accepted(monkeypatch) -> None:
-    """setup_commands should allow $(...) command substitution syntax."""
+@pytest.mark.parametrize(
+    "module_load",
+    [
+        "rm -rf /scratch/run1",
+        "touch /tmp/foo",
+        "module load rm -rf /scratch/run1",
+        "module load gromacs; rm -rf /scratch/run1",
+        "module load $(touch /tmp/foo)",
+        "module load gromacs && touch /tmp/foo",
+        "module load gromacs\ntouch /tmp/foo",
+        "module load",
+        "module purge gromacs",
+        "module swap gcc/12.2",
+    ],
+)
+def test_module_load_rejects_arbitrary_or_malformed_commands(monkeypatch, module_load: str) -> None:
+    """module_load should reject non-module commands and shell metacharacters."""
     monkeypatch.setattr(
         "polyzymd.engines.gromacs.slurm._discover_manifest_path",
         lambda: "/tmp/pixi.toml",
@@ -710,7 +812,34 @@ def test_setup_command_command_substitution_accepted(monkeypatch) -> None:
 
     generator = GromacsSlurmScriptGenerator(
         slurm_config=SlurmConfig(),
-        setup_commands=["cwd=$(pwd)"],
+        module_load=module_load,
+    )
+
+    with pytest.raises(ValueError, match="module_load"):
+        generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+
+def test_common_safe_setup_commands_accepted(monkeypatch) -> None:
+    """setup_commands should accept common simple environment setup forms."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(),
+        setup_commands=[
+            "module load gromacs/2024",
+            "source /projects/software/gromacs/bin/GMXRC",
+            "conda activate gromacs_env",
+            "export PLUMED_KERNEL=/projects/software/plumed/lib/libplumedKernel.so",
+        ],
     )
 
     script = generator.generate_job_script(
@@ -721,11 +850,28 @@ def test_setup_command_command_substitution_accepted(monkeypatch) -> None:
         equilibration_mdps=["eq_01_nvt.mdp"],
     )
 
-    assert "cwd=$(pwd)" in script
+    assert "module load gromacs/2024" in script
+    assert "source /projects/software/gromacs/bin/GMXRC" in script
+    assert "conda activate gromacs_env" in script
+    assert "export PLUMED_KERNEL=/projects/software/plumed/lib/libplumedKernel.so" in script
 
 
-def test_setup_command_backtick_accepted(monkeypatch) -> None:
-    """setup_commands should allow backtick command substitution syntax."""
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cwd=$(pwd)",
+        "cwd=`pwd`",
+        "export PATH=$PATH:/tmp/gromacs/bin",
+        r"source C:\\gromacs\\GMXRC",
+        "module load gromacs; rm -rf /tmp/example",
+        "source /tmp/env > /tmp/log",
+        "source /tmp/env < /tmp/input",
+        "source /tmp/env && conda activate foo",
+        "source /tmp/env | tee /tmp/log",
+    ],
+)
+def test_setup_command_rejects_shell_metacharacters(monkeypatch, command: str) -> None:
+    """setup_commands should reject shell metacharacters before rendering."""
     monkeypatch.setattr(
         "polyzymd.engines.gromacs.slurm._discover_manifest_path",
         lambda: "/tmp/pixi.toml",
@@ -733,18 +879,17 @@ def test_setup_command_backtick_accepted(monkeypatch) -> None:
 
     generator = GromacsSlurmScriptGenerator(
         slurm_config=SlurmConfig(),
-        setup_commands=["cwd=`pwd`"],
+        setup_commands=[command],
     )
 
-    script = generator.generate_job_script(
-        config_path="/path/config.yaml",
-        replicate=1,
-        working_dir="/scratch/run1/gromacs",
-        system_prefix="enzyme_polymer",
-        equilibration_mdps=["eq_01_nvt.mdp"],
-    )
-
-    assert "cwd=`pwd`" in script
+    with pytest.raises(ValueError, match="setup_commands"):
+        generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
 
 
 def test_setup_command_newline_rejected(monkeypatch) -> None:

@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 from polyzymd.core.branding import FULL_CREDIT_LINE, SHORT_CREDIT_LINE
+from polyzymd.utils.templates import render_package_template
+from polyzymd.workflow.slurm import _validate_script_value
 
 if TYPE_CHECKING:
     from openff.interchange import Interchange
@@ -79,6 +81,8 @@ WATER_COMPRESSIBILITY = 4.5e-5
 
 # Branding
 POLYZYMD_BRANDING = FULL_CREDIT_LINE
+_GROMACS_TEMPLATE_PACKAGE = "polyzymd.engines.gromacs"
+_LOCAL_RUN_TEMPLATE = "run_gromacs.sh.jinja"
 
 
 # =============================================================================
@@ -1255,25 +1259,53 @@ class RunScriptGenerator:
     def generate(self, output_path: Path) -> Path:
         """Generate the GROMACS run script.
 
-        Args:
-            output_path: Path to write the script.
+        Parameters
+        ----------
+        output_path : Path
+            Path to write the script.
 
-        Returns:
+        Returns
+        -------
+        Path
             Path to the generated script.
         """
-        lines = self._generate_header()
-        lines.extend(self._generate_energy_minimization())
-        lines.extend(self._generate_equilibration())
-        lines.extend(self._generate_production())
-        lines.extend(self._generate_postprocessing())
-        lines.extend(self._generate_footer())
-
-        content = "\n".join(lines)
+        self._validate_script_values()
+        content = render_package_template(
+            _GROMACS_TEMPLATE_PACKAGE,
+            _LOCAL_RUN_TEMPLATE,
+            {
+                "branding": POLYZYMD_BRANDING,
+                "short_credit_line": SHORT_CREDIT_LINE,
+                "generated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "gmx_command": self._gmx,
+                "prefix": self._prefix,
+                "energy_minimization_block": "\n".join(
+                    self._generate_energy_minimization()
+                ).rstrip(),
+                "equilibration_block": "\n".join(self._generate_equilibration()).rstrip(),
+                "production_block": "\n".join(self._generate_production()).rstrip(),
+                "postprocessing_block": "\n".join(self._generate_postprocessing()).rstrip(),
+                "footer_block": "\n".join(self._generate_footer()).rstrip(),
+            },
+        ).rstrip("\n")
         output_path.write_text(content)
         output_path.chmod(0o755)  # Make executable
 
         logger.info(f"Generated GROMACS run script: {output_path}")
         return output_path
+
+    def _validate_script_values(self) -> None:
+        """Validate values interpolated into the local GROMACS shell script.
+
+        Raises
+        ------
+        ValueError
+            If a configured value contains unsafe shell metacharacters.
+        """
+        _validate_script_value(self._gmx, "gmx_command")
+        _validate_script_value(self._prefix, "prefix")
+        for mdp_name in self._eq_mdps:
+            _validate_script_value(mdp_name, "equilibration_mdp")
 
     def _generate_header(self) -> List[str]:
         """Generate script header with configuration."""

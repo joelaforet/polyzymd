@@ -12,6 +12,7 @@ Covers:
   _parse_itp_atom_and_residue_counts, _fix_gro_residue_numbering)
 """
 
+from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,15 @@ from polyzymd.exporters.gromacs import (
     PositionRestraintGenerator,
     RunScriptGenerator,
 )
+
+
+def _assert_no_unresolved_jinja(script: str) -> None:
+    """Assert generated shell content has no unresolved Jinja syntax."""
+    assert "{{" not in script
+    assert "}}" not in script
+    assert "{%" not in script
+    assert "%}" not in script
+
 
 # ---------------------------------------------------------------------------
 # Fixtures — synthetic ITP content
@@ -717,6 +727,15 @@ class TestFixGroMultiplePolymerTypes:
 class TestEnergyMinimizationHelpers:
     """Tests for EM health checks."""
 
+    def test_run_script_template_resource_exists(self):
+        """Local GROMACS run template should be packaged as a resource."""
+        template = resources.files("polyzymd.engines.gromacs").joinpath(
+            "templates", "run_gromacs.sh.jinja"
+        )
+
+        assert template.is_file()
+        assert "GROMACS Workflow Script" in template.read_text()
+
     def test_run_script_generator_uses_single_stage_em_with_health_check(self, tmp_path):
         """Generated local run script should use single-stage EM and preserve health check."""
         script_path = tmp_path / "run_test_gromacs.sh"
@@ -735,6 +754,60 @@ class TestEnergyMinimizationHelpers:
 
         assert "grep -qi" in script_content
         assert "force.*not finite" in script_content
+        _assert_no_unresolved_jinja(script_content)
+
+    def test_run_script_generator_preserves_command_semantics(self, tmp_path):
+        """Generated local run script should preserve GROMACS command sequence."""
+        script_path = tmp_path / "run_test_gromacs.sh"
+        generator = RunScriptGenerator(
+            prefix="system",
+            equilibration_mdps=["eq_01_nvt.mdp", "eq_02_npt.mdp"],
+            gmx_command="/opt/gromacs/bin/gmx",
+        )
+
+        generator.generate(script_path)
+        script_content = script_path.read_text()
+
+        assert 'GMX="/opt/gromacs/bin/gmx"' in script_content
+        assert 'PREFIX="system"' in script_content
+        assert (
+            "$GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro "
+            "-p ${PREFIX}.top -o em.tpr -maxwarn 1"
+        ) in script_content
+        assert "$GMX mdrun -deffnm em -v" in script_content
+        assert "$GMX grompp -f eq_01_nvt.mdp -c em.gro -r em.gro" in script_content
+        assert "$GMX mdrun -deffnm eq_01 -v" in script_content
+        assert "$GMX grompp -f eq_02_npt.mdp -c eq_01.gro -r em.gro -t eq_01.cpt" in script_content
+        assert "$GMX mdrun -deffnm eq_02 -v" in script_content
+        assert "$GMX grompp -f prod.mdp -c ${LAST_EQ}.gro -t ${LAST_EQ}.cpt" in script_content
+        assert "$GMX mdrun -deffnm prod -v" in script_content
+        assert "prod_nojump.xtc" in script_content
+        assert "prod_centered.xtc" in script_content
+
+    @pytest.mark.parametrize(
+        ("field", "kwargs"),
+        [
+            ("gmx_command", {"gmx_command": "/opt/gromacs/bin/gmx$1"}),
+            ("gmx_command", {"gmx_command": r"C:\gromacs\bin\gmx"}),
+            ("prefix", {"prefix": "bad$prefix"}),
+            ("prefix", {"prefix": r"bad\prefix"}),
+            ("equilibration_mdp", {"equilibration_mdps": ["eq_$1.mdp"]}),
+            ("equilibration_mdp", {"equilibration_mdps": [r"eq\01.mdp"]}),
+        ],
+    )
+    def test_run_script_generator_rejects_bare_dollar_and_backslash(self, tmp_path, field, kwargs):
+        """Local run script values should reject unsafe shell characters."""
+        script_path = tmp_path / "run_test_gromacs.sh"
+        init_kwargs = {
+            "prefix": "system",
+            "equilibration_mdps": ["eq_01_nvt.mdp"],
+            "gmx_command": "gmx",
+        }
+        init_kwargs.update(kwargs)
+        generator = RunScriptGenerator(**init_kwargs)
+
+        with pytest.raises(ValueError, match=field):
+            generator.generate(script_path)
 
     def test_em_health_check_in_runner(self, tmp_path):
         """Runner health check should fail on non-finite force signatures."""
