@@ -2206,6 +2206,8 @@ def status(config: str) -> None:
     from polyzymd.engines import create_engine
     from polyzymd.simulation.progress import SimulationStatus, save_progress
 
+    logging.getLogger("polyzymd.simulation.progress").setLevel(logging.ERROR)
+
     try:
         sim_config = SimulationConfig.from_yaml(config)
     except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
