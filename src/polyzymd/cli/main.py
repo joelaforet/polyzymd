@@ -2271,13 +2271,21 @@ def status(config: str) -> None:
             progress = engine_inst.load_or_scan_progress(engine_dir, rep_num)
             save_progress(engine_dir, progress)
 
-            frac = progress.fraction_complete()
-            # Compute ns from total steps (not time_completed_ns which
-            # only counts COMPLETED segments, ignoring INTERRUPTED/RUNNING).
-            completed_ns = (progress.total_steps_completed * progress.timestep_fs) / 1e6
             status_val = progress.status
             status_str = status_val.value
             status_display = status_val.value
+            steps_for_display = progress.total_steps_completed
+            if status_val == SimulationStatus.FAILED:
+                steps_for_display = max((seg.steps_completed for seg in progress.segments), default=0)
+
+            frac = (
+                min(1.0, steps_for_display / progress.total_steps_requested)
+                if progress.total_steps_requested
+                else 0.0
+            )
+            # Compute ns from displayed steps so interrupted/running/failed
+            # rows show the latest known progress, not just completed segments.
+            completed_ns = (steps_for_display * progress.timestep_fs) / 1e6
 
         bar = render_progress_bar(frac, status_str)
         pct = frac * 100
