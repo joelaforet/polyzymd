@@ -114,7 +114,7 @@ The pipeline processes data in this order:
 
 ## Plugins — the analysis modules
 
-PolyzyMD ships with 13 analysis plugins. Each plugin is a self-contained
+PolyzyMD ships with 9 analysis plugins. Each plugin is a self-contained
 module that knows how to compute one type of measurement, aggregate it, compare
 across conditions, and generate plots.
 
@@ -131,7 +131,6 @@ The available plugins are:
 | `secondary_structure` | Secondary structure content (helix, sheet, coil fractions) |
 | `sasa` | Solvent-accessible surface area |
 | `hydrogen_bonds` | Hydrogen bond occupancy and lifetimes |
-| `polymer_bridging` | Polymer bridging topology between protein regions (experimental) |
 
 Each plugin has a `Settings` model with configurable parameters. Most
 parameters have sensible defaults, so you often just need `plugin_name: {}` in

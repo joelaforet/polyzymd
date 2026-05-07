@@ -52,7 +52,6 @@ src/polyzymd/analyses/
 │   ├── _identity.py        #   Internal settings fingerprints
 │   ├── _runner.py          #   Internal trajectory runner and analyzer
 │   └── _paths.py           #   Internal result path helpers
-└── polymer_bridging/       # Polymer bridging plugin (custom compare)
 ```
 
 `polyzymd.analyses.base` is the supported public import surface. It re-exports
@@ -155,7 +154,7 @@ def plot(self, ctx: PlotContext) -> list[Path]:
   automatically via `json.loads()`)
 - Framework handles loading, t-tests, ANOVA, ranking, and formatting automatically
 
-**Custom path** (contacts, distances, polymer_bridging):
+**Custom path** (contacts, distances):
 - Override `compare()` entirely — return your own Pydantic model with `.save()`
 - The returned model must be saveable/loadable
 
@@ -275,7 +274,6 @@ to detect changes. **Known issue:** the hash mismatch warning currently prints
 | `distances` | No (custom) | Multiple distance metrics |
 | `contacts` | No (custom) | Coverage + contact fraction |
 | `hydrogen_bonds` | No (custom) | H-bond occupancy + lifetime |
-| `polymer_bridging` | No (custom) | Bridging topology metrics |
 
 ## Issue #20 — Remaining TODOs
 

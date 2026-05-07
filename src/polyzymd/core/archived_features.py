@@ -50,6 +50,16 @@ ARCHIVED_ANALYSIS_PLUGINS: dict[str, ArchivedAnalysisPlugin] = {
         tag="archive_experimental_analysis",
         branch="feature/mda-analysis-migration",
     ),
+    "polymer_bridging": ArchivedAnalysisPlugin(
+        name="polymer_bridging",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
+    "bridging": ArchivedAnalysisPlugin(
+        name="polymer_bridging",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
 }
 
 

@@ -166,7 +166,18 @@ class TestPlotThemeValidation:
 class TestArchivedAnalysisDiagnostics:
     """Archived analyses should fail with recovery diagnostics."""
 
-    @pytest.mark.parametrize("analysis_name", ["exposure", "binding_free_energy", "bfe", "polymer_affinity", "pa"])
+    @pytest.mark.parametrize(
+        "analysis_name",
+        [
+            "exposure",
+            "binding_free_energy",
+            "bfe",
+            "polymer_affinity",
+            "pa",
+            "polymer_bridging",
+            "bridging",
+        ],
+    )
     def test_plugins_archived_analysis_reports_archive_location(
         self,
         analysis_name: str,
@@ -194,7 +205,18 @@ class TestArchivedAnalysisDiagnostics:
         assert "archive_experimental_analysis" in message
         assert "feature/mda-analysis-migration" in message
 
-    @pytest.mark.parametrize("analysis_name", ["exposure", "binding_free_energy", "bfe", "polymer_affinity", "pa"])
+    @pytest.mark.parametrize(
+        "analysis_name",
+        [
+            "exposure",
+            "binding_free_energy",
+            "bfe",
+            "polymer_affinity",
+            "pa",
+            "polymer_bridging",
+            "bridging",
+        ],
+    )
     def test_plot_settings_archived_analysis_reports_archive_location(
         self,
         analysis_name: str,

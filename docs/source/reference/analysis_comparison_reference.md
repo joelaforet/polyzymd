@@ -92,7 +92,6 @@ Stable analysis plugins:
 Experimental but still available:
 
 - binding preference through `contacts`
-- `polymer_bridging` (alias: `bridging`)
 
 ## Plugin Summary Table
 
@@ -107,7 +106,6 @@ Experimental but still available:
 | `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + ANOVA |
 | `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | Per-run pairwise t-tests + ANOVA |
 | `hydrogen_bonds` | Yes | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA |
-| `polymer_bridging` | No (custom) | Bridging event counts | Polymer-mediated inter-chain contacts | Custom statistical pipeline |
 
 ## Path Rules
 
@@ -147,15 +145,6 @@ polyzymd compare run hydrogen_bonds  # aliases: hbonds, hbond
 polyzymd compare run-all
 polyzymd compare plot-all
 ```
-
-## Experimental Commands
-
-```bash
-polyzymd compare run polymer_bridging   # alias: polyzymd compare run bridging
-```
-
-These remain callable, but PolyzyMD labels them as experimental in CLI output,
-docs, and generated figures.
 
 ## Output Locations
 

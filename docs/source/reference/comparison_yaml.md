@@ -286,21 +286,6 @@ and usable element metadata.
 |-------|------|---------|-------------|
 | `partitions` | mapping | — | Named partitions: `{name: "MDAnalysis selection"}` |
 
-### `plugins.polymer_bridging`
-
-```{admonition} Experimental
-:class: warning
-
-Polymer bridging detection is experimental and under active development.
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `protein_selection` | string | `"protein"` | MDAnalysis selection for protein |
-| `polymer_selection` | string | `"chainID C"` | MDAnalysis selection for polymer |
-| `cutoff` | float | `4.5` | Contact distance cutoff in Angstroms for oligomer-protein contact detection |
-| `min_ca_distance_angstrom` | float | `0.0` | Minimum frame-wise CA-CA distance to count as multisite (`0.0` disables geometric filtering) |
-
 ---
 
 ## `plot_settings`

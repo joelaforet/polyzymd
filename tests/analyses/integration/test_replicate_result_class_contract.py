@@ -20,7 +20,6 @@ TYPED_REPLICATE_PLUGINS = {
     "distances": "DistanceResult",
     "secondary_structure": "SecondaryStructureResult",
     "contacts": "ContactResult",
-    "polymer_bridging": "PolymerBridgingReplicateResult",
     "sasa": "SASAResult",
     "hydrogen_bonds": "HydrogenBondResult",
 }

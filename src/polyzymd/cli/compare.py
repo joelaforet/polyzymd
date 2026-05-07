@@ -1100,6 +1100,12 @@ def submit_analysis_hpc(
 
     _echo_qos_tip_if_needed(partition, qos)
 
+    if get_archived_analysis_plugin(analysis) is not None:
+        raise _archived_analysis_click_exception(
+            analysis,
+            context="CLI submission lookup",
+        )
+
     if not dry_run and shutil.which("sbatch") is None:
         raise click.ClickException(
             "SLURM is not available: 'sbatch' not found on PATH. The HPC submission "
@@ -1115,12 +1121,6 @@ def submit_analysis_hpc(
     try:
         analysis_cls = get_analysis(analysis)
     except KeyError:
-        if get_archived_analysis_plugin(analysis) is not None:
-            raise _archived_analysis_click_exception(
-                analysis,
-                context="CLI submission lookup",
-            ) from None
-
         from polyzymd.analyses.discovery import list_all_names
 
         available = list_all_names()
@@ -1311,17 +1311,17 @@ def submit_all_analyses_hpc(
 
     _echo_qos_tip_if_needed(partition, qos)
 
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
+        raise click.ClickException(f"Error loading config: {e}") from e
+
     if not dry_run and shutil.which("sbatch") is None:
         raise click.ClickException(
             "SLURM is not available: 'sbatch' not found on PATH. The HPC submission "
             "commands require a SLURM cluster. Run analysis locally with "
             "'polyzymd compare run' instead."
         )
-
-    try:
-        config = ComparisonConfig.from_yaml(config_file)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
-        raise click.ClickException(f"Error loading config: {e}") from e
 
     enabled = list(config.plugins.get_enabled_plugins())
     excluded_set = set(excluded_analyses)

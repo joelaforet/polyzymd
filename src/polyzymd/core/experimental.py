@@ -7,7 +7,6 @@ from typing import Final
 
 EXPERIMENTAL_FEATURES: Final[dict[str, str]] = {
     "contacts_binding_preference": "Contacts binding preference",
-    "polymer_bridging_chemistry": "Polymer bridging chemistry profiling",
 }
 
 EXPERIMENTAL_COMPARISON_TYPES: Final[dict[str, tuple[str, ...]]] = {}

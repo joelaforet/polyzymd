@@ -97,7 +97,6 @@ evolving. Treat results as exploratory, not settled science.
 :maxdepth: 1
 
 Analyze Binding Preference <analysis_binding_preference>
-Analyze Polymer Bridging <analysis_polymer_bridging>
 ```
 
 ## Plots & Troubleshooting

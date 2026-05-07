@@ -48,7 +48,6 @@ class TestDiscovery:
             "contacts",
             "distances",
             "hydrogen_bonds",
-            "polymer_bridging",
             "rg",
             "rmsd",
             "rmsf",
@@ -71,11 +70,19 @@ class TestDiscovery:
         active_plugins = list_analyses()
         active_names = list_all_names()
 
-        for name in ("exposure", "binding_free_energy", "bfe", "polymer_affinity", "pa"):
+        for name in (
+            "exposure",
+            "binding_free_energy",
+            "bfe",
+            "polymer_affinity",
+            "pa",
+            "polymer_bridging",
+            "bridging",
+        ):
             assert name not in active_plugins
             assert name not in active_names
 
-        for name in ("contacts", "polymer_bridging", "rmsf", "sasa"):
+        for name in ("contacts", "rmsf", "sasa"):
             assert name in active_plugins
 
     def test_get_analysis_unknown_raises(self):

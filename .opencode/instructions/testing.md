@@ -36,7 +36,6 @@ tests/
 │   │   ├── test_contacts.py
 │   │   ├── test_distances.py
 │   │   ├── test_hydrogen_bonds.py
-│   │   ├── test_polymer_bridging.py
 │   │   ├── test_rg.py
 │   │   ├── test_rmsd.py
 │   │   ├── test_rmsf.py

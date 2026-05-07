@@ -26,13 +26,6 @@ together.
 Replication, convergence, multiple testing, and per-plugin best practices.
 :::
 
-:::{grid-item-card} Experimental Analysis Concepts
-:link: polymer_bridging_interpretation
-:link-type: doc
-
-Interpretation guidance for experimental analysis workflows.
-:::
-
 ::::
 
 ## Concepts and Design
@@ -59,16 +52,4 @@ RMSF Best Practices <analysis_rmsf_best_practices>
 RMSF Reference Selection <analysis_reference_selection>
 RMSF Verification <analysis_rmsf_verification>
 Catalytic Triad Best Practices <analysis_triad_best_practices>
-```
-
-## Experimental Analysis Concepts
-
-These workflows remain available in PolyzyMD, but their interpretation is still
-evolving and they should be treated as experimental. See also the how-to guides
-for {doc}`../how_to/analysis_binding_preference`.
-
-```{toctree}
-:maxdepth: 1
-
-Polymer Bridging Interpretation <polymer_bridging_interpretation>
 ```

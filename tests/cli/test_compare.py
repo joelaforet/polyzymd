@@ -38,6 +38,29 @@ def _assert_no_jinja_markers(content: str) -> None:
     assert "%}" not in content
 
 
+def _write_minimal_comparison_config(path: Path) -> None:
+    """Write a minimal valid comparison config for CLI diagnostics tests."""
+    path.write_text(
+        yaml.dump(
+            {
+                "name": "archive-cli-test",
+                "conditions": [
+                    {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                ],
+                "plugins": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _assert_archive_recovery_guidance(output: str, analysis_name: str) -> None:
+    """Assert archived-analysis diagnostics include recovery location details."""
+    assert f"Analysis plugin '{analysis_name}'" in output
+    assert "archive_experimental_analysis" in output
+    assert "feature/mda-analysis-migration" in output
+
+
 def test_compare_init_renders_comparison_scaffold(tmp_path: Path) -> None:
     """compare init should render a valid comparison project scaffold."""
     runner = CliRunner()
@@ -535,7 +558,18 @@ def test_run_reports_plugin_contract_error(monkeypatch, tmp_path: Path) -> None:
     assert "likely a PolyzyMD/plugin bug, not missing trajectory data" in result.output
 
 
-@pytest.mark.parametrize("analysis_name", ["exposure", "binding_free_energy", "bfe", "polymer_affinity", "pa"])
+@pytest.mark.parametrize(
+    "analysis_name",
+    [
+        "exposure",
+        "binding_free_energy",
+        "bfe",
+        "polymer_affinity",
+        "pa",
+        "polymer_bridging",
+        "bridging",
+    ],
+)
 def test_run_archived_analysis_reports_archive_diagnostic(
     analysis_name: str,
     tmp_path: Path,
@@ -546,9 +580,85 @@ def test_run_archived_analysis_reports_archive_diagnostic(
     result = runner.invoke(compare, ["run", analysis_name, "-f", str(tmp_path / "missing.yaml")])
 
     assert result.exit_code != 0
-    assert f"Analysis plugin '{analysis_name}'" in result.output
-    assert "archive_experimental_analysis" in result.output
-    assert "feature/mda-analysis-migration" in result.output
+    _assert_archive_recovery_guidance(result.output, analysis_name)
+
+
+def test_plot_all_analysis_archived_analysis_reports_archive_diagnostic(tmp_path: Path) -> None:
+    """compare plot-all -a should report the archive tag and source branch."""
+    runner = CliRunner()
+    config_path = tmp_path / "comparison.yaml"
+    _write_minimal_comparison_config(config_path)
+
+    result = runner.invoke(compare, ["plot-all", "-f", str(config_path), "-a", "polymer_bridging"])
+
+    assert result.exit_code != 0
+    _assert_archive_recovery_guidance(result.output, "polymer_bridging")
+
+
+def test_submit_archived_analysis_reports_archive_diagnostic_before_sbatch(
+    tmp_path: Path,
+) -> None:
+    """compare submit should not mask archived analyses with SLURM prechecks."""
+    runner = CliRunner()
+
+    result = runner.invoke(
+        compare,
+        ["submit", "polymer_bridging", "-f", str(tmp_path / "missing.yaml")],
+    )
+
+    assert result.exit_code != 0
+    _assert_archive_recovery_guidance(result.output, "polymer_bridging")
+    assert "sbatch" not in result.output
+
+
+def test_status_archived_analysis_reports_archive_diagnostic(tmp_path: Path) -> None:
+    """compare status should report the archive tag and source branch."""
+    runner = CliRunner()
+    config_path = tmp_path / "comparison.yaml"
+    _write_minimal_comparison_config(config_path)
+
+    result = runner.invoke(compare, ["status", "polymer_bridging", "-f", str(config_path)])
+
+    assert result.exit_code != 0
+    _assert_archive_recovery_guidance(result.output, "polymer_bridging")
+
+
+def test_finalize_archived_analysis_reports_archive_diagnostic(tmp_path: Path) -> None:
+    """compare finalize should report the archive tag and source branch."""
+    runner = CliRunner()
+    config_path = tmp_path / "comparison.yaml"
+    _write_minimal_comparison_config(config_path)
+
+    result = runner.invoke(compare, ["finalize", "polymer_bridging", "-f", str(config_path)])
+
+    assert result.exit_code != 0
+    _assert_archive_recovery_guidance(result.output, "polymer_bridging")
+
+
+def test_submit_all_archived_plugin_config_reports_archive_diagnostic_before_sbatch(
+    tmp_path: Path,
+) -> None:
+    """compare submit-all config handling should surface archived plugin diagnostics."""
+    runner = CliRunner()
+    config_path = tmp_path / "comparison.yaml"
+    config_path.write_text(
+        yaml.dump(
+            {
+                "name": "archive-cli-test",
+                "conditions": [
+                    {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                ],
+                "plugins": {"polymer_bridging": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(compare, ["submit-all", "-f", str(config_path)])
+
+    assert result.exit_code != 0
+    _assert_archive_recovery_guidance(result.output, "polymer_bridging")
+    assert "sbatch" not in result.output
 
 
 def test_finalize_compare_only_plugin_skips_aggregated_precheck(
