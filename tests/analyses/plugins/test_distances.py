@@ -308,6 +308,237 @@ def _make_distance_cache_result(
     )
 
 
+class TestDistanceResultFactories:
+    """Factory helpers preserve the flat distance result schema."""
+
+    @staticmethod
+    def _make_payload():
+        """Create a representative runner payload for factory tests."""
+        import numpy as np
+
+        from polyzymd.analyses.distances._runner import DistancePairPayload
+
+        return DistancePairPayload(
+            pair_label="pair0",
+            selection1="sel_a",
+            selection2="sel_b",
+            distances=np.asarray([3.0, 3.2, 3.4], dtype=np.float64),
+            mean_distance=3.2,
+            std_distance=0.1,
+            median_distance=3.2,
+            min_distance=3.0,
+            max_distance=3.4,
+            sem_distance=0.05,
+            correlation_time=20.0,
+            correlation_time_unit="ps",
+            n_independent_frames=12,
+            statistical_inefficiency=1.5,
+            autocorrelation_warning=None,
+            threshold=3.5,
+            fraction_below_threshold=1.0,
+            histogram_edges=np.asarray([3.0, 3.2, 3.4], dtype=np.float64),
+            histogram_counts=np.asarray([1, 2], dtype=np.int64),
+            kde_x=np.asarray([3.0, 3.1, 3.2], dtype=np.float64),
+            kde_y=np.asarray([0.1, 0.2, 0.1], dtype=np.float64),
+            kde_peak=3.1,
+            kde_bandwidth=0.2,
+            n_frames_total=100,
+            n_frames_used=90,
+        )
+
+    @staticmethod
+    def _make_metadata(replicate: int | None = 1):
+        """Create common result metadata for factory tests."""
+        from polyzymd.analyses.distances._results import DistanceResultMetadata
+
+        return DistanceResultMetadata(
+            config_hash="hash123",
+            polyzymd_version="1.3.0-test",
+            replicate=replicate,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+        )
+
+    def test_pair_factory_matches_direct_constructor_schema(self):
+        from polyzymd.analyses.distances._results import DistancePairResult
+
+        payload = self._make_payload()
+        metadata = self._make_metadata(replicate=None)
+
+        factory_result = DistancePairResult.from_runner_payload(metadata, payload)
+        direct_result = DistancePairResult(
+            config_hash="hash123",
+            polyzymd_version="1.3.0-test",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="sel_a : sel_b",
+            pair_label="pair0",
+            selection1="sel_a",
+            selection2="sel_b",
+            distances=[3.0, 3.2, 3.4],
+            mean_distance=3.2,
+            std_distance=0.1,
+            median_distance=3.2,
+            min_distance=3.0,
+            max_distance=3.4,
+            sem_distance=0.05,
+            correlation_time=20.0,
+            correlation_time_unit="ps",
+            n_independent_frames=12,
+            statistical_inefficiency=1.5,
+            autocorrelation_warning=None,
+            threshold=3.5,
+            fraction_below_threshold=1.0,
+            histogram_edges=[3.0, 3.2, 3.4],
+            histogram_counts=[1, 2],
+            kde_x=[3.0, 3.1, 3.2],
+            kde_y=[0.1, 0.2, 0.1],
+            kde_peak=3.1,
+            kde_bandwidth=0.2,
+            n_frames_total=100,
+            n_frames_used=90,
+        )
+
+        assert factory_result.model_dump(exclude={"created_at"}) == direct_result.model_dump(
+            exclude={"created_at"}
+        )
+
+    def test_pair_factory_can_omit_distributions(self):
+        from polyzymd.analyses.distances._results import DistancePairResult
+
+        result = DistancePairResult.from_runner_payload(
+            self._make_metadata(replicate=None),
+            self._make_payload(),
+            store_distributions=False,
+        )
+
+        assert result.distances is None
+        assert result.histogram_counts == [1, 2]
+
+    def test_factory_results_have_flat_keys(self):
+        from polyzymd.analyses.distances._results import DistancePairResult
+
+        result = DistancePairResult.from_runner_payload(
+            self._make_metadata(replicate=None),
+            self._make_payload(),
+        )
+        dumped = result.model_dump()
+
+        assert "metadata" not in dumped
+        assert "payload" not in dumped
+        assert "stats" not in dumped
+        assert dumped["config_hash"] == "hash123"
+        assert dumped["pair_label"] == "pair0"
+
+    def test_result_factory_stringifies_paths(self):
+        from polyzymd.analyses.distances._results import DistancePairResult, DistanceResult
+
+        pair_result = DistancePairResult.from_runner_payload(
+            self._make_metadata(replicate=None),
+            self._make_payload(),
+        )
+
+        result = DistanceResult.from_pair_results(
+            self._make_metadata(replicate=1),
+            [pair_result],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=[Path("/fake/traj.dcd"), "relative.xtc"],
+        )
+
+        assert result.trajectory_files == ["/fake/traj.dcd", "relative.xtc"]
+
+    def test_aggregate_factory_preserves_flat_schema(self):
+        from types import SimpleNamespace
+
+        from polyzymd.analyses.distances._results import (
+            DistanceAggregatedResult,
+            DistancePairAggregatedResult,
+        )
+
+        source_pair = SimpleNamespace(pair_label="pair0", selection1="sel_a", selection2="sel_b")
+        stats = SimpleNamespace(
+            mean_stats=SimpleNamespace(mean=3.2, sem=0.05),
+            median_stats=SimpleNamespace(mean=3.1, sem=0.04),
+            fraction_stats=SimpleNamespace(mean=0.8, sem=0.02),
+            kde_peak_stats=SimpleNamespace(mean=3.0, sem=0.03),
+            per_rep_means=[3.1, 3.3],
+            per_rep_stds=[0.1, 0.2],
+            per_rep_medians=[3.0, 3.2],
+            per_rep_fractions=[0.75, 0.85],
+            per_rep_kde_peaks=[2.9, 3.1],
+        )
+
+        pair_result = DistancePairAggregatedResult.from_aggregated_stats(
+            self._make_metadata(replicate=None),
+            source_pair,
+            stats,
+            replicates=(1, 2),
+            threshold=3.5,
+        )
+        result = DistanceAggregatedResult.from_pair_results(
+            self._make_metadata(replicate=None),
+            [pair_result],
+            replicates=(1, 2),
+            source_result_files=[Path("/fake/run_1.json")],
+        )
+
+        dumped = result.model_dump()
+        assert dumped["replicates"] == [1, 2]
+        assert dumped["source_result_files"] == ["/fake/run_1.json"]
+        assert dumped["pair_results"][0]["overall_mean"] == 3.2
+        assert "metadata" not in dumped
+        assert "stats" not in dumped
+
+    def test_direct_constructors_still_supported(self):
+        from polyzymd.analyses.distances._results import DistancePairResult, DistanceResult
+
+        pair_result = DistancePairResult(
+            config_hash="hash123",
+            polyzymd_version="1.3.0-test",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="sel_a : sel_b",
+            pair_label="pair0",
+            selection1="sel_a",
+            selection2="sel_b",
+            distances=None,
+            mean_distance=3.2,
+            std_distance=0.1,
+            median_distance=3.2,
+            min_distance=3.0,
+            max_distance=3.4,
+            n_frames_total=100,
+            n_frames_used=90,
+        )
+        result = DistanceResult(
+            config_hash="hash123",
+            polyzymd_version="1.3.0-test",
+            replicate=1,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="(sel_a : sel_b)",
+            pair_results=[pair_result],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=[],
+        )
+
+        assert result.pair_results[0].pair_label == "pair0"
+
+    def test_distance_pair_factory_replicate_is_none_for_distances(self):
+        from polyzymd.analyses.distances._results import DistancePairResult
+
+        result = DistancePairResult.from_runner_payload(
+            self._make_metadata(replicate=1).with_replicate(None),
+            self._make_payload(),
+        )
+
+        assert result.replicate is None
+
+
 class TestRunReplicate:
     """run_replicate delegates to the runner seam."""
 
@@ -554,6 +785,7 @@ class TestRunReplicate:
         assert result.trajectory_files == ["/fake/traj.dcd"]
         assert result.pair_results[0].distances == [3.0, 3.2, 3.4]
         assert result.pair_results[0].histogram_counts == [1, 2]
+        assert result.pair_results[0].replicate is None
 
 
 # ---------------------------------------------------------------------------
@@ -1252,6 +1484,41 @@ class TestDistanceCalculatorCacheIdentity:
         assert calc_a._settings_tag != "legacy"
         assert calc_a._make_result_filename() != calc_b._make_result_filename()
 
+    def test_cached_result_rejected_when_config_hash_validation_fails(self, tmp_path):
+        from polyzymd.analyses.distances import DistanceCalculator
+
+        config = MagicMock()
+        pairs = [("resid 1 and name CA", "resid 2 and name CA")]
+        thresholds = [3.5]
+
+        with (
+            patch("polyzymd.analyses.shared.loader._require_mdanalysis"),
+            patch("polyzymd.analyses.distances.TrajectoryLoader"),
+        ):
+            calc = DistanceCalculator(
+                config,
+                pairs=pairs,
+                thresholds=thresholds,
+            )
+
+        result_file = tmp_path / calc._make_result_filename()
+        cached_result = _make_distance_cache_result(
+            config_hash="stale-config-hash",
+            pairs=pairs,
+            thresholds=thresholds,
+        )
+        cached_result.save(result_file)
+        calc._write_cache_metadata(result_file)
+
+        with patch(
+            "polyzymd.analyses.shared.config_hash.validate_config_hash",
+            return_value=False,
+        ) as mock_validate:
+            reused = calc._load_cached_result(result_file)
+
+        assert reused is None
+        mock_validate.assert_called_once_with("stale-config-hash", config)
+
     def test_stale_legacy_named_cache_is_rejected_when_settings_change(self, tmp_path):
         from polyzymd.analyses.distances import DistanceCalculator
 
@@ -1294,7 +1561,10 @@ class TestDistanceCalculatorCacheIdentity:
         cached_result.save(result_file)
         calc_old._write_cache_metadata(result_file)
 
-        with patch("polyzymd.analyses.shared.config_hash.validate_config_hash"):
+        with patch(
+            "polyzymd.analyses.shared.config_hash.validate_config_hash",
+            return_value=True,
+        ):
             reused = calc_new._load_cached_result(result_file)
 
         assert reused is None

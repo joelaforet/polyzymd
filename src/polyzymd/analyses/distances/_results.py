@@ -9,7 +9,9 @@ Supports both single pair and multiple pair analyses.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any, ClassVar, Protocol, Sequence
 
 from pydantic import Field
 
@@ -17,6 +19,164 @@ from polyzymd.analyses._results_base import (
     AggregatedResultMixin,
     BaseAnalysisResult,
 )
+
+
+@dataclass(frozen=True)
+class DistanceResultMetadata:
+    """Non-serialized metadata shared by distance result factories.
+
+    Parameters
+    ----------
+    config_hash : str
+        Hash of the simulation configuration used for cache validation.
+    polyzymd_version : str
+        PolyzyMD version used to compute the result.
+    replicate : int or None
+        Replicate number for the result being constructed.
+    equilibration_time : float
+        Equilibration offset value.
+    equilibration_unit : str
+        Equilibration offset unit.
+    """
+
+    config_hash: str
+    polyzymd_version: str
+    replicate: int | None
+    equilibration_time: float
+    equilibration_unit: str
+
+    def with_replicate(self, replicate: int | None) -> DistanceResultMetadata:
+        """Return a copy with a different replicate value.
+
+        Parameters
+        ----------
+        replicate : int or None
+            Replicate value for the copied metadata.
+
+        Returns
+        -------
+        DistanceResultMetadata
+            Metadata copy with the requested replicate.
+        """
+
+        return replace(self, replicate=replicate)
+
+    def to_base_kwargs(self, *, selection_string: str) -> dict[str, Any]:
+        """Return keyword arguments for common ``BaseAnalysisResult`` fields.
+
+        Parameters
+        ----------
+        selection_string : str
+            Selection string to store on the serialized result.
+
+        Returns
+        -------
+        dict[str, Any]
+            Flat keyword arguments accepted by distance result constructors.
+        """
+
+        return {
+            "config_hash": self.config_hash,
+            "polyzymd_version": self.polyzymd_version,
+            "replicate": self.replicate,
+            "equilibration_time": self.equilibration_time,
+            "equilibration_unit": self.equilibration_unit,
+            "selection_string": selection_string,
+        }
+
+
+class _DistancePairPayloadProtocol(Protocol):
+    """Structural protocol for runner payloads used by result factories."""
+
+    pair_label: str
+    selection1: str
+    selection2: str
+    distances: Any
+    mean_distance: float
+    std_distance: float
+    median_distance: float
+    min_distance: float
+    max_distance: float
+    sem_distance: float | None
+    correlation_time: float | None
+    correlation_time_unit: str | None
+    n_independent_frames: int | None
+    statistical_inefficiency: float | None
+    autocorrelation_warning: str | None
+    threshold: float | None
+    fraction_below_threshold: float | None
+    histogram_edges: Any
+    histogram_counts: Any
+    kde_x: Any
+    kde_y: Any
+    kde_peak: float | None
+    kde_bandwidth: float | None
+    n_frames_total: int
+    n_frames_used: int
+
+
+class _DistanceAggregatedStatsProtocol(Protocol):
+    """Structural protocol for per-pair aggregation statistics."""
+
+    mean_stats: Any
+    median_stats: Any
+    fraction_stats: Any
+    kde_peak_stats: Any
+    per_rep_means: list[float]
+    per_rep_stds: list[float]
+    per_rep_medians: list[float]
+    per_rep_fractions: list[float]
+    per_rep_kde_peaks: list[float]
+
+
+class _DistancePairSourceProtocol(Protocol):
+    """Structural protocol for pair identity fields in aggregation."""
+
+    pair_label: str
+    selection1: str
+    selection2: str
+
+
+def _as_serializable_list(value: Any) -> list[Any] | None:
+    """Convert array-like values to plain lists for JSON serialization.
+
+    Parameters
+    ----------
+    value : Any
+        Value that may be a NumPy array, tuple, list, or ``None``.
+
+    Returns
+    -------
+    list[Any] or None
+        Plain list representation, or ``None`` when the input is ``None``.
+    """
+
+    if value is None:
+        return None
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
+
+
+def _stringify_paths(paths: Sequence[str | Path]) -> list[str]:
+    """Convert path-like values to strings for serialized result fields.
+
+    Parameters
+    ----------
+    paths : sequence of str or Path
+        Paths to stringify.
+
+    Returns
+    -------
+    list[str]
+        Stringified path list.
+    """
+
+    return [str(path) for path in paths]
 
 
 class DistancePairResult(BaseAnalysisResult):
@@ -126,6 +286,68 @@ class DistancePairResult(BaseAnalysisResult):
     n_frames_total: int = Field(..., description="Total frames in trajectory")
     n_frames_used: int = Field(..., description="Frames used after equilibration")
 
+    @classmethod
+    def from_runner_payload(
+        cls,
+        metadata: DistanceResultMetadata,
+        payload: _DistancePairPayloadProtocol,
+        *,
+        pair_label: str | None = None,
+        store_distributions: bool = True,
+        selection_string: str | None = None,
+    ) -> DistancePairResult:
+        """Construct a pair result from a trajectory runner payload.
+
+        Parameters
+        ----------
+        metadata : DistanceResultMetadata
+            Common result metadata to flatten into the serialized result.
+        payload : _DistancePairPayloadProtocol
+            Structural runner payload for one distance pair.
+        pair_label : str or None, optional
+            Label override for user-facing analyses, by default ``None``.
+        store_distributions : bool, optional
+            If ``False``, omit the full per-frame distance distribution.
+        selection_string : str or None, optional
+            Selection string override, by default ``None``.
+
+        Returns
+        -------
+        DistancePairResult
+            Flat Pydantic result preserving the current serialized schema.
+        """
+
+        selection = selection_string or f"{payload.selection1} : {payload.selection2}"
+        distances = _as_serializable_list(payload.distances) if store_distributions else None
+        return cls(
+            **metadata.to_base_kwargs(selection_string=selection),
+            pair_label=pair_label or payload.pair_label,
+            selection1=payload.selection1,
+            selection2=payload.selection2,
+            distances=distances,
+            mean_distance=payload.mean_distance,
+            std_distance=payload.std_distance,
+            median_distance=payload.median_distance,
+            min_distance=payload.min_distance,
+            max_distance=payload.max_distance,
+            sem_distance=payload.sem_distance,
+            correlation_time=payload.correlation_time,
+            correlation_time_unit=payload.correlation_time_unit,
+            n_independent_frames=payload.n_independent_frames,
+            statistical_inefficiency=payload.statistical_inefficiency,
+            autocorrelation_warning=payload.autocorrelation_warning,
+            threshold=payload.threshold,
+            fraction_below_threshold=payload.fraction_below_threshold,
+            histogram_edges=_as_serializable_list(payload.histogram_edges),
+            histogram_counts=_as_serializable_list(payload.histogram_counts),
+            kde_x=_as_serializable_list(payload.kde_x),
+            kde_y=_as_serializable_list(payload.kde_y),
+            kde_peak=payload.kde_peak,
+            kde_bandwidth=payload.kde_bandwidth,
+            n_frames_total=payload.n_frames_total,
+            n_frames_used=payload.n_frames_used,
+        )
+
     def summary(self) -> str:
         """Return human-readable summary."""
         lines = [
@@ -192,6 +414,51 @@ class DistanceResult(BaseAnalysisResult):
     trajectory_files: list[str] = Field(
         default_factory=list, description="Trajectory files analyzed"
     )
+
+    @classmethod
+    def from_pair_results(
+        cls,
+        metadata: DistanceResultMetadata,
+        pair_results: Sequence[DistancePairResult],
+        *,
+        n_frames_total: int,
+        n_frames_used: int,
+        trajectory_files: Sequence[str | Path] = (),
+        selection_string: str | None = None,
+    ) -> DistanceResult:
+        """Construct a replicate distance result from pair results.
+
+        Parameters
+        ----------
+        metadata : DistanceResultMetadata
+            Common result metadata to flatten into the serialized result.
+        pair_results : sequence of DistancePairResult
+            Per-pair distance results.
+        n_frames_total : int
+            Total frames available in the trajectory.
+        n_frames_used : int
+            Frames analyzed after equilibration and striding.
+        trajectory_files : sequence of str or Path, optional
+            Source trajectory files, by default ``()``.
+        selection_string : str or None, optional
+            Combined selection override, by default ``None``.
+
+        Returns
+        -------
+        DistanceResult
+            Flat replicate result preserving the current serialized schema.
+        """
+
+        selection = selection_string or "; ".join(
+            f"({pair.selection1} : {pair.selection2})" for pair in pair_results
+        )
+        return cls(
+            **metadata.to_base_kwargs(selection_string=selection),
+            pair_results=list(pair_results),
+            n_frames_total=n_frames_total,
+            n_frames_used=n_frames_used,
+            trajectory_files=_stringify_paths(trajectory_files),
+        )
 
     def summary(self) -> str:
         """Return human-readable summary."""
@@ -276,6 +543,72 @@ class DistancePairAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         default=None, description="KDE peak (mode) from each replicate"
     )
 
+    @classmethod
+    def from_aggregated_stats(
+        cls,
+        metadata: DistanceResultMetadata,
+        source_pair: _DistancePairSourceProtocol,
+        stats: _DistanceAggregatedStatsProtocol,
+        *,
+        replicates: Sequence[int],
+        threshold: float | None,
+        pair_label: str | None = None,
+        selection_string: str | None = None,
+    ) -> DistancePairAggregatedResult:
+        """Construct an aggregated pair result from shared statistics.
+
+        Parameters
+        ----------
+        metadata : DistanceResultMetadata
+            Common result metadata to flatten into the serialized result.
+        source_pair : _DistancePairSourceProtocol
+            Pair result that provides label and selection identity.
+        stats : _DistanceAggregatedStatsProtocol
+            Aggregated per-pair statistics.
+        replicates : sequence of int
+            Replicate numbers included in the aggregation.
+        threshold : float or None
+            Effective threshold for this pair.
+        pair_label : str or None, optional
+            Label override, by default ``None``.
+        selection_string : str or None, optional
+            Selection string override, by default ``None``.
+
+        Returns
+        -------
+        DistancePairAggregatedResult
+            Flat aggregated pair result preserving the current schema.
+        """
+
+        fraction_stats = getattr(stats, "fraction_stats", None)
+        kde_peak_stats = getattr(stats, "kde_peak_stats", None)
+        per_rep_fractions = list(getattr(stats, "per_rep_fractions", None) or [])
+        per_rep_kde_peaks = list(getattr(stats, "per_rep_kde_peaks", None) or [])
+        selection = selection_string or f"{source_pair.selection1} : {source_pair.selection2}"
+        replicate_list = list(replicates)
+
+        return cls(
+            **metadata.to_base_kwargs(selection_string=selection),
+            replicates=replicate_list,
+            n_replicates=len(replicate_list),
+            pair_label=pair_label or source_pair.pair_label,
+            selection1=source_pair.selection1,
+            selection2=source_pair.selection2,
+            overall_mean=stats.mean_stats.mean,
+            overall_sem=stats.mean_stats.sem,
+            overall_median=stats.median_stats.mean,
+            per_replicate_means=list(stats.per_rep_means),
+            per_replicate_stds=list(stats.per_rep_stds),
+            per_replicate_medians=list(stats.per_rep_medians),
+            threshold=threshold,
+            overall_fraction_below=(fraction_stats.mean if fraction_stats else None),
+            sem_fraction_below=(fraction_stats.sem if fraction_stats else None),
+            per_replicate_fractions_below=per_rep_fractions or None,
+            overall_kde_peak=(kde_peak_stats.mean if kde_peak_stats else None),
+            sem_kde_peak=(kde_peak_stats.sem if kde_peak_stats else None),
+            per_replicate_kde_peaks=per_rep_kde_peaks or None,
+        )
+
     def summary(self) -> str:
         """Return human-readable summary."""
         rep_range = self.replicate_range
@@ -325,6 +658,49 @@ class DistanceAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     source_result_files: list[str] = Field(
         default_factory=list, description="Paths to individual replicate result files"
     )
+
+    @classmethod
+    def from_pair_results(
+        cls,
+        metadata: DistanceResultMetadata,
+        pair_results: Sequence[DistancePairAggregatedResult],
+        *,
+        replicates: Sequence[int],
+        source_result_files: Sequence[str | Path] = (),
+        selection_string: str | None = None,
+    ) -> DistanceAggregatedResult:
+        """Construct an aggregated distance result from pair results.
+
+        Parameters
+        ----------
+        metadata : DistanceResultMetadata
+            Common result metadata to flatten into the serialized result.
+        pair_results : sequence of DistancePairAggregatedResult
+            Aggregated per-pair results.
+        replicates : sequence of int
+            Replicate numbers included in the aggregation.
+        source_result_files : sequence of str or Path, optional
+            Source replicate result files, by default ``()``.
+        selection_string : str or None, optional
+            Combined selection override, by default ``None``.
+
+        Returns
+        -------
+        DistanceAggregatedResult
+            Flat aggregated result preserving the current serialized schema.
+        """
+
+        selection = selection_string or "; ".join(
+            f"({pair.selection1} : {pair.selection2})" for pair in pair_results
+        )
+        replicate_list = list(replicates)
+        return cls(
+            **metadata.to_base_kwargs(selection_string=selection),
+            replicates=replicate_list,
+            n_replicates=len(replicate_list),
+            pair_results=list(pair_results),
+            source_result_files=_stringify_paths(source_result_files),
+        )
 
     def summary(self) -> str:
         """Return human-readable summary."""

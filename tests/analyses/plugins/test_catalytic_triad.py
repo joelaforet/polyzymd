@@ -508,6 +508,8 @@ class TestRunReplicate:
         assert result.triad_name == "LipA_triad"
         assert result.pair_results[0].pair_label == "Asp133-His156"
         assert result.pair_results[1].pair_label == "His156-Ser77"
+        assert result.pair_results[0].replicate == 1
+        assert result.pair_results[1].replicate == 1
         assert result.simultaneous_contact_fraction == pytest.approx(0.5)
         assert result.n_frames_simultaneous == 2
         assert result.settings_fingerprint == settings_fingerprint(default_settings)
@@ -732,6 +734,10 @@ class TestAggregate:
         assert result.replicates == [1, 2, 3]
         assert result.triad_name == "LipA_triad"
         assert len(result.pair_results) == 2
+        assert [pair.pair_label for pair in result.pair_results] == [
+            "Asp133-His156",
+            "His156-Ser77",
+        ]
         assert len(result.per_replicate_simultaneous) == 3
         # Mean of 0.65, 0.70, 0.75
         assert result.overall_simultaneous_contact == pytest.approx(0.7, abs=0.01)

@@ -51,7 +51,13 @@ from polyzymd.analyses.distances._plotters import (
     _plot_distance_state_bars,
     _plot_distance_threshold_bars,
 )
-from polyzymd.analyses.distances._results import DistanceAggregatedResult, DistanceResult
+from polyzymd.analyses.distances._results import (
+    DistanceAggregatedResult,
+    DistancePairAggregatedResult,
+    DistancePairResult,
+    DistanceResult,
+    DistanceResultMetadata,
+)
 from polyzymd.analyses.distances._runner import DistancesReplicateRunner, compute_distance_payloads
 from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
 from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
@@ -727,7 +733,8 @@ class DistanceCalculator:
 
         logger.info("Loading cached result from %s", result_file)
         result = DistanceResult.load(result_file)
-        validate_config_hash(result.config_hash, self.config)
+        if not validate_config_hash(result.config_hash, self.config):
+            return None
         if not self._cached_result_matches_settings(result, result_file):
             return None
         return result
@@ -812,42 +819,20 @@ class DistanceCalculator:
             pair_label_func=_make_pair_label,
         )
 
-        from polyzymd.analyses.distances._results import DistancePairResult
-
+        metadata = DistanceResultMetadata(
+            config_hash=self._config_hash,
+            polyzymd_version=get_polyzymd_version(),
+            replicate=replicate,
+            equilibration_time=self.equilibration_time,
+            equilibration_unit=self.equilibration_unit,
+        )
+        pair_metadata = metadata.with_replicate(None)
         pair_results = []
         for pair_payload in payload.pair_payloads:
-            pr = DistancePairResult(
-                config_hash=self._config_hash,
-                polyzymd_version=get_polyzymd_version(),
-                replicate=None,
-                equilibration_time=self.equilibration_time,
-                equilibration_unit=self.equilibration_unit,
-                selection_string=f"{pair_payload.selection1} : {pair_payload.selection2}",
-                pair_label=pair_payload.pair_label,
-                selection1=pair_payload.selection1,
-                selection2=pair_payload.selection2,
-                distances=(pair_payload.distances.tolist() if store_distributions else None),
-                mean_distance=pair_payload.mean_distance,
-                std_distance=pair_payload.std_distance,
-                median_distance=pair_payload.median_distance,
-                min_distance=pair_payload.min_distance,
-                max_distance=pair_payload.max_distance,
-                sem_distance=pair_payload.sem_distance,
-                correlation_time=pair_payload.correlation_time,
-                correlation_time_unit=pair_payload.correlation_time_unit,
-                n_independent_frames=pair_payload.n_independent_frames,
-                statistical_inefficiency=pair_payload.statistical_inefficiency,
-                autocorrelation_warning=pair_payload.autocorrelation_warning,
-                threshold=pair_payload.threshold,
-                fraction_below_threshold=pair_payload.fraction_below_threshold,
-                histogram_edges=pair_payload.histogram_edges.tolist(),
-                histogram_counts=pair_payload.histogram_counts.tolist(),
-                kde_x=(pair_payload.kde_x.tolist() if pair_payload.kde_x is not None else None),
-                kde_y=(pair_payload.kde_y.tolist() if pair_payload.kde_y is not None else None),
-                kde_peak=pair_payload.kde_peak,
-                kde_bandwidth=pair_payload.kde_bandwidth,
-                n_frames_total=pair_payload.n_frames_total,
-                n_frames_used=pair_payload.n_frames_used,
+            pr = DistancePairResult.from_runner_payload(
+                pair_metadata,
+                pair_payload,
+                store_distributions=store_distributions,
             )
             pair_results.append(pr)
 
@@ -864,17 +849,13 @@ class DistanceCalculator:
         selection_strs = [f"({s1} : {s2})" for s1, s2 in self.pairs]
         combined_selection = "; ".join(selection_strs)
 
-        result = DistanceResult(
-            config_hash=self._config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=replicate,
-            equilibration_time=self.equilibration_time,
-            equilibration_unit=self.equilibration_unit,
-            selection_string=combined_selection,
-            pair_results=pair_results,
+        result = DistanceResult.from_pair_results(
+            metadata,
+            pair_results,
             n_frames_total=payload.n_frames_total,
             n_frames_used=payload.n_frames_used,
-            trajectory_files=[str(f) for f in traj_info.trajectory_files],
+            trajectory_files=traj_info.trajectory_files,
+            selection_string=combined_selection,
         )
 
         if save:
@@ -1100,44 +1081,22 @@ class DistancesAnalysis(Analysis):
         """Serialize runner output into the legacy distances result schema."""
 
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.distances._results import DistancePairResult
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         payload = runner.results
+        metadata = DistanceResultMetadata(
+            config_hash=compute_config_hash(ctx.sim_config),
+            polyzymd_version=get_polyzymd_version(),
+            replicate=replicate,
+            equilibration_time=eq_value,
+            equilibration_unit=eq_unit,
+        )
+        pair_metadata = metadata.with_replicate(None)
 
         pair_results = [
-            DistancePairResult(
-                config_hash=compute_config_hash(ctx.sim_config),
-                polyzymd_version=get_polyzymd_version(),
-                replicate=None,
-                equilibration_time=eq_value,
-                equilibration_unit=eq_unit,
-                selection_string=f"{pair_payload.selection1} : {pair_payload.selection2}",
-                pair_label=pair_payload.pair_label,
-                selection1=pair_payload.selection1,
-                selection2=pair_payload.selection2,
-                distances=pair_payload.distances.tolist(),
-                mean_distance=pair_payload.mean_distance,
-                std_distance=pair_payload.std_distance,
-                median_distance=pair_payload.median_distance,
-                min_distance=pair_payload.min_distance,
-                max_distance=pair_payload.max_distance,
-                sem_distance=pair_payload.sem_distance,
-                correlation_time=pair_payload.correlation_time,
-                correlation_time_unit=pair_payload.correlation_time_unit,
-                n_independent_frames=pair_payload.n_independent_frames,
-                statistical_inefficiency=pair_payload.statistical_inefficiency,
-                autocorrelation_warning=pair_payload.autocorrelation_warning,
-                threshold=pair_payload.threshold,
-                fraction_below_threshold=pair_payload.fraction_below_threshold,
-                histogram_edges=pair_payload.histogram_edges.tolist(),
-                histogram_counts=pair_payload.histogram_counts.tolist(),
-                kde_x=(pair_payload.kde_x.tolist() if pair_payload.kde_x is not None else None),
-                kde_y=(pair_payload.kde_y.tolist() if pair_payload.kde_y is not None else None),
-                kde_peak=pair_payload.kde_peak,
-                kde_bandwidth=pair_payload.kde_bandwidth,
-                n_frames_total=pair_payload.n_frames_total,
-                n_frames_used=pair_payload.n_frames_used,
+            DistancePairResult.from_runner_payload(
+                pair_metadata,
+                pair_payload,
             )
             for pair_payload in payload.pair_payloads
         ]
@@ -1148,17 +1107,13 @@ class DistancesAnalysis(Analysis):
         )
         trajectory_files = [str(path) for path in getattr(window, "trajectory_files", ())]
 
-        return DistanceResult(
-            config_hash=compute_config_hash(ctx.sim_config),
-            polyzymd_version=get_polyzymd_version(),
-            replicate=replicate,
-            equilibration_time=eq_value,
-            equilibration_unit=eq_unit,
-            selection_string=combined_selection,
-            pair_results=pair_results,
+        return DistanceResult.from_pair_results(
+            metadata,
+            pair_results,
             n_frames_total=payload.n_frames_total,
             n_frames_used=payload.n_frames_used,
             trajectory_files=trajectory_files,
+            selection_string=combined_selection,
         )
 
     def aggregate(
@@ -1185,15 +1140,18 @@ class DistancesAnalysis(Analysis):
             Aggregated result with per-pair statistics and SEM.
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.distances._results import (
-            DistanceAggregatedResult,
-            DistancePairAggregatedResult,
-        )
         from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
 
         settings = ctx.settings
         self._validate_replicate_pair_schema(ctx, results, settings)
         first = results[0]
+        metadata = DistanceResultMetadata(
+            config_hash=first.config_hash,
+            polyzymd_version=get_polyzymd_version(),
+            replicate=None,
+            equilibration_time=first.equilibration_time,
+            equilibration_unit=first.equilibration_unit,
+        )
 
         n_pairs = len(first.pair_results)
         aggregated_pairs: list[DistancePairAggregatedResult] = []
@@ -1205,37 +1163,12 @@ class DistancesAnalysis(Analysis):
             thresholds = settings.get_pair_thresholds()
             threshold = thresholds[pair_idx] if pair_idx < len(thresholds) else None
 
-            agg_pair = DistancePairAggregatedResult(
-                config_hash=first.config_hash,
-                polyzymd_version=get_polyzymd_version(),
-                replicate=None,
-                equilibration_time=first.equilibration_time,
-                equilibration_unit=first.equilibration_unit,
-                selection_string=f"{pr.selection1} : {pr.selection2}",
-                replicates=list(ctx.replicates),
-                n_replicates=len(ctx.replicates),
-                pair_label=pr.pair_label,
-                selection1=pr.selection1,
-                selection2=pr.selection2,
-                overall_mean=stats.mean_stats.mean,
-                overall_sem=stats.mean_stats.sem,
-                overall_median=stats.median_stats.mean,
-                per_replicate_means=stats.per_rep_means,
-                per_replicate_stds=stats.per_rep_stds,
-                per_replicate_medians=stats.per_rep_medians,
+            agg_pair = DistancePairAggregatedResult.from_aggregated_stats(
+                metadata,
+                pr,
+                stats,
+                replicates=ctx.replicates,
                 threshold=threshold,
-                overall_fraction_below=(
-                    stats.fraction_stats.mean if stats.fraction_stats else None
-                ),
-                sem_fraction_below=(stats.fraction_stats.sem if stats.fraction_stats else None),
-                per_replicate_fractions_below=(
-                    stats.per_rep_fractions if stats.per_rep_fractions else None
-                ),
-                overall_kde_peak=(stats.kde_peak_stats.mean if stats.kde_peak_stats else None),
-                sem_kde_peak=(stats.kde_peak_stats.sem if stats.kde_peak_stats else None),
-                per_replicate_kde_peaks=(
-                    stats.per_rep_kde_peaks if stats.per_rep_kde_peaks else None
-                ),
             )
             aggregated_pairs.append(agg_pair)
 
@@ -1243,17 +1176,12 @@ class DistancesAnalysis(Analysis):
         selection_strs = [f"({pr.selection1} : {pr.selection2})" for pr in first.pair_results]
         combined_selection = "; ".join(selection_strs)
 
-        agg_result = DistanceAggregatedResult(
-            config_hash=first.config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=None,
-            equilibration_time=first.equilibration_time,
-            equilibration_unit=first.equilibration_unit,
+        agg_result = DistanceAggregatedResult.from_pair_results(
+            metadata,
+            aggregated_pairs,
+            replicates=ctx.replicates,
+            source_result_files=[],
             selection_string=combined_selection,
-            replicates=list(ctx.replicates),
-            n_replicates=len(ctx.replicates),
-            pair_results=aggregated_pairs,
-            source_result_files=[],  # Not tracked in plugin mode
         )
 
         target_path = ctx.result_path

@@ -31,6 +31,11 @@ from polyzymd.analyses.catalytic_triad._plotters import (
 from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult, TriadResult
 from polyzymd.analyses.catalytic_triad._runner import CatalyticTriadReplicateRunner
 from polyzymd.analyses.distances import _make_pair_label
+from polyzymd.analyses.distances._results import (
+    DistancePairAggregatedResult,
+    DistancePairResult,
+    DistanceResultMetadata,
+)
 from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
 from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
 
@@ -270,7 +275,6 @@ class CatalyticTriadAnalysis(Analysis):
         """Serialize runner output into the legacy triad result schema."""
 
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.distances._results import DistancePairResult
         from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
 
         settings = ctx.settings
@@ -278,43 +282,22 @@ class CatalyticTriadAnalysis(Analysis):
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         config_hash = compute_config_hash(ctx.sim_config)
         payload = runner.results
+        metadata = DistanceResultMetadata(
+            config_hash=config_hash,
+            polyzymd_version=get_polyzymd_version(),
+            replicate=replicate,
+            equilibration_time=eq_value,
+            equilibration_unit=eq_unit,
+        )
 
         pair_results: list[DistancePairResult] = []
         pair_distance_arrays: list[np.ndarray] = []
         for pair_setting, pair_payload in zip(settings.pairs, payload.pair_payloads, strict=True):
             pair_results.append(
-                DistancePairResult(
-                    config_hash=config_hash,
-                    polyzymd_version=get_polyzymd_version(),
-                    replicate=replicate,
-                    equilibration_time=eq_value,
-                    equilibration_unit=eq_unit,
-                    selection_string=f"{pair_payload.selection1} : {pair_payload.selection2}",
+                DistancePairResult.from_runner_payload(
+                    metadata,
+                    pair_payload,
                     pair_label=pair_setting.label,
-                    selection1=pair_payload.selection1,
-                    selection2=pair_payload.selection2,
-                    distances=pair_payload.distances.tolist(),
-                    mean_distance=pair_payload.mean_distance,
-                    std_distance=pair_payload.std_distance,
-                    median_distance=pair_payload.median_distance,
-                    min_distance=pair_payload.min_distance,
-                    max_distance=pair_payload.max_distance,
-                    sem_distance=pair_payload.sem_distance,
-                    correlation_time=pair_payload.correlation_time,
-                    correlation_time_unit=pair_payload.correlation_time_unit,
-                    n_independent_frames=pair_payload.n_independent_frames,
-                    statistical_inefficiency=pair_payload.statistical_inefficiency,
-                    autocorrelation_warning=pair_payload.autocorrelation_warning,
-                    threshold=pair_payload.threshold,
-                    fraction_below_threshold=pair_payload.fraction_below_threshold,
-                    histogram_edges=pair_payload.histogram_edges.tolist(),
-                    histogram_counts=pair_payload.histogram_counts.tolist(),
-                    kde_x=(pair_payload.kde_x.tolist() if pair_payload.kde_x is not None else None),
-                    kde_y=(pair_payload.kde_y.tolist() if pair_payload.kde_y is not None else None),
-                    kde_peak=pair_payload.kde_peak,
-                    kde_bandwidth=pair_payload.kde_bandwidth,
-                    n_frames_total=pair_payload.n_frames_total,
-                    n_frames_used=pair_payload.n_frames_used,
                 )
             )
             pair_distance_arrays.append(np.asarray(pair_payload.distances, dtype=np.float64))
@@ -367,8 +350,8 @@ class CatalyticTriadAnalysis(Analysis):
                 )
 
         return TriadResult(
-            config_hash=config_hash,
-            polyzymd_version=get_polyzymd_version(),
+            config_hash=metadata.config_hash,
+            polyzymd_version=metadata.polyzymd_version,
             replicate=replicate,
             equilibration_time=eq_value,
             equilibration_unit=eq_unit,
@@ -417,7 +400,6 @@ class CatalyticTriadAnalysis(Analysis):
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
         from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
-        from polyzymd.analyses.distances._results import DistancePairAggregatedResult
         from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
         from polyzymd.analyses.shared.statistics import compute_sem
 
@@ -426,6 +408,13 @@ class CatalyticTriadAnalysis(Analysis):
         self._validate_replicate_pair_schema(ctx, results, settings)
         first = results[0]
         settings_tag = self._settings_cache_tag(settings)
+        metadata = DistanceResultMetadata(
+            config_hash=first.config_hash,
+            polyzymd_version=get_polyzymd_version(),
+            replicate=None,
+            equilibration_time=first.equilibration_time,
+            equilibration_unit=first.equilibration_unit,
+        )
 
         # Aggregate per-pair distance statistics
         n_pairs = len(first.pair_results)
@@ -437,37 +426,13 @@ class CatalyticTriadAnalysis(Analysis):
             # Get pair config from the first result's pair_results
             pr = first.pair_results[pair_idx]
 
-            agg_pair = DistancePairAggregatedResult(
-                config_hash=first.config_hash,
-                polyzymd_version=get_polyzymd_version(),
-                replicate=None,
-                equilibration_time=first.equilibration_time,
-                equilibration_unit=first.equilibration_unit,
-                selection_string=f"{pr.selection1} : {pr.selection2}",
-                replicates=list(ctx.replicates),
-                n_replicates=len(ctx.replicates),
-                pair_label=pr.pair_label,
-                selection1=pr.selection1,
-                selection2=pr.selection2,
-                overall_mean=stats.mean_stats.mean,
-                overall_sem=stats.mean_stats.sem,
-                overall_median=stats.median_stats.mean,
-                per_replicate_means=stats.per_rep_means,
-                per_replicate_stds=stats.per_rep_stds,
-                per_replicate_medians=stats.per_rep_medians,
+            agg_pair = DistancePairAggregatedResult.from_aggregated_stats(
+                metadata,
+                pr,
+                stats,
+                replicates=ctx.replicates,
                 threshold=settings.threshold,
-                overall_fraction_below=(
-                    stats.fraction_stats.mean if stats.fraction_stats else None
-                ),
-                sem_fraction_below=(stats.fraction_stats.sem if stats.fraction_stats else None),
-                per_replicate_fractions_below=(
-                    stats.per_rep_fractions if stats.per_rep_fractions else None
-                ),
-                overall_kde_peak=(stats.kde_peak_stats.mean if stats.kde_peak_stats else None),
-                sem_kde_peak=(stats.kde_peak_stats.sem if stats.kde_peak_stats else None),
-                per_replicate_kde_peaks=(
-                    stats.per_rep_kde_peaks if stats.per_rep_kde_peaks else None
-                ),
+                pair_label=pr.pair_label,
             )
             aggregated_pairs.append(agg_pair)
 
@@ -480,7 +445,7 @@ class CatalyticTriadAnalysis(Analysis):
 
         agg_result = TriadAggregatedResult(
             config_hash=first.config_hash,
-            polyzymd_version=get_polyzymd_version(),
+            polyzymd_version=metadata.polyzymd_version,
             replicate=None,
             equilibration_time=first.equilibration_time,
             equilibration_unit=first.equilibration_unit,
