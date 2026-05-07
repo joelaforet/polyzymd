@@ -11,6 +11,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analyses.base import BasePlotSettings
 from polyzymd.analyses.shared.defaults import AnalysisDefaults
+from polyzymd.core.archived_features import (
+    format_archived_analysis_message,
+    get_archived_analysis_plugin,
+)
 from polyzymd.core.branding import prepend_file_header
 from polyzymd.utils.templates import render_package_template
 
@@ -87,9 +91,13 @@ class PluginSettingsContainer(BaseModel):
 
         parsed_settings: dict[str, Any] = {}
         for key, value in data.items():
+            key_lower = str(key).lower()
+            if get_archived_analysis_plugin(key_lower) is not None:
+                raise ValueError(
+                    format_archived_analysis_message(key, context="plugins section")
+                )
             if value is None:
                 continue
-            key_lower = key.lower()
             try:
                 analysis_cls = get_analysis(key_lower)
             except KeyError:
@@ -429,6 +437,12 @@ class PlotSettings(BaseModel):
                 stacklevel=2,
             )
             # Do NOT silently remap — raise the normal unknown-key error below
+
+        for key in data:
+            if key not in PlotSettings._GLOBAL_FIELDS and get_archived_analysis_plugin(key) is not None:
+                raise ValueError(
+                    format_archived_analysis_message(key, context="plot_settings section")
+                )
 
         global_data: dict[str, Any] = {}
         per_analysis: dict[str, BasePlotSettings] = {}

@@ -132,7 +132,6 @@ The available plugins are:
 | `sasa` | Solvent-accessible surface area |
 | `hydrogen_bonds` | Hydrogen bond occupancy and lifetimes |
 | `binding_free_energy` | Per-contact binding free energy estimates (experimental) |
-| `exposure` | Exposure dynamics of active-site residues (experimental) |
 | `polymer_affinity` | Polymer–protein interaction scoring (experimental) |
 | `polymer_bridging` | Polymer bridging topology between protein regions (experimental) |
 

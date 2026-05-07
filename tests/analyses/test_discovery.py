@@ -48,7 +48,6 @@ class TestDiscovery:
             "catalytic_triad",
             "contacts",
             "distances",
-            "exposure",
             "hydrogen_bonds",
             "polymer_affinity",
             "polymer_bridging",
@@ -65,6 +64,14 @@ class TestDiscovery:
 
         assert analyses["rmsf"] is RMSFAnalysis
         assert analyses["contacts"] is ContactsAnalysis
+
+    def test_discovery_excludes_archived_exposure_plugin(self):
+        """Archived exposure plugin should not be discoverable as active code."""
+        from polyzymd.analyses.discovery import clear_cache, list_all_names, list_analyses
+
+        clear_cache()
+        assert "exposure" not in list_analyses()
+        assert "exposure" not in list_all_names()
 
     def test_get_analysis_unknown_raises(self):
         from polyzymd.analyses.discovery import clear_cache, get_analysis

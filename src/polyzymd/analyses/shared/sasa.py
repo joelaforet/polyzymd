@@ -465,7 +465,6 @@ def load_sasa_artifacts(
 SASA_ARTIFACT_SCHEMA_NAME = "polyzymd.sasa_artifact"
 SASA_ARTIFACT_SCHEMA_VERSION = 1
 SASA_ARTIFACT_COMPATIBILITY_VERSION = 1
-A2_TO_NM2 = 0.01
 SASA_COMPAT_PROBE_RADIUS_ABS_TOL = 1e-6
 
 
@@ -891,55 +890,6 @@ def check_sasa_artifact_compatibility(
     )
 
 
-def adapt_canonical_sasa_to_exposure(
-    result: SASAComputationResult,
-    *,
-    exposure_threshold: float,
-) -> Any:
-    """Adapt canonical shared SASA result into exposure SASA trajectory format.
-
-    Parameters
-    ----------
-    result : SASAComputationResult
-        Canonical shared SASA computation result in Å².
-    exposure_threshold : float
-        Relative SASA threshold used by exposure consumers.
-
-    Returns
-    -------
-    Any
-        ``SASATrajectoryResult`` instance for exposure analysis.
-    """
-    from polyzymd.analyses.exposure._sasa_trajectory import SASATrajectoryResult
-    from polyzymd.analyses.shared.aa_classification import MAX_ASA_TABLE, get_aa_class
-
-    sasa_per_frame = result.residue_sasa_a2.astype(np.float32) * A2_TO_NM2
-    resids = np.asarray(result.residue_resids, dtype=np.int32)
-    resnames = [str(x).upper() for x in result.residue_resnames]
-    aa_classes = [get_aa_class(name) for name in resnames]
-
-    max_sasa_nm2 = np.asarray(
-        [MAX_ASA_TABLE.get(name, 200.0) * A2_TO_NM2 for name in resnames],
-        dtype=np.float32,
-    )
-    safe_max = np.where(max_sasa_nm2 > 0.0, max_sasa_nm2, 1.0).astype(np.float32)
-    relative_sasa_per_frame = sasa_per_frame / safe_max[np.newaxis, :]
-
-    n_frames = int(sasa_per_frame.shape[0])
-    n_residues = int(sasa_per_frame.shape[1]) if sasa_per_frame.ndim == 2 else 0
-    return SASATrajectoryResult(
-        sasa_per_frame=sasa_per_frame,
-        relative_sasa_per_frame=relative_sasa_per_frame.astype(np.float32),
-        resids=resids,
-        resnames=resnames,
-        aa_classes=aa_classes,
-        max_sasa_nm2=max_sasa_nm2,
-        n_frames=n_frames,
-        n_residues=n_residues,
-        exposure_threshold=exposure_threshold,
-    )
-
-
 def find_sibling_sasa_artifacts(
     replicate_analysis_dir: Path,
     query: SASAArtifactCompatibilityQuery,
@@ -949,7 +899,7 @@ def find_sibling_sasa_artifacts(
     Parameters
     ----------
     replicate_analysis_dir : Path
-        Replicate analysis directory, for example ``analysis/<cond>/exposure/run_1``.
+        Replicate analysis directory, for example ``analysis/<cond>/<analysis>/run_1``.
     query : SASAArtifactCompatibilityQuery
         Compatibility query used to pre-filter candidates.
 

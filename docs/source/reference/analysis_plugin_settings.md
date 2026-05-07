@@ -149,21 +149,6 @@ element metadata are required for meaningful counts.
 |---|---|---|---|
 | `partitions` | `dict[str, str]` | `{}` | Named composition partitions as MDAnalysis selections |
 
-## `exposure`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `protein_selection` | `str` | `"protein"` | Protein selection |
-| `polymer_selection` | `str` | `"chainID C"` | Polymer selection |
-| `exposure_threshold` | `float` | `0.2` | Relative SASA cutoff for exposed vs buried residues |
-| `transient_lower` | `float` | `0.2` | Lower transient bound |
-| `transient_upper` | `float` | `0.8` | Upper transient bound (`> transient_lower`) |
-| `min_event_length` | `int` | `1` | Minimum contiguous exposed-frame length per event |
-| `probe_radius_nm` | `float` | `0.14` | SASA probe radius (nm) |
-| `n_sphere_points` | `int` | `960` | Sphere points for Shrake-Rupley SASA |
-| `protein_chain` | `str` | `"A"` | Protein chain letter |
-| `polymer_resnames` | `list[str] \| null` | `null` | Optional polymer residue-name subset |
-
 ## `binding_free_energy`
 
 | Key | Type | Default | Description |

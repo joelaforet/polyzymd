@@ -52,7 +52,6 @@ src/polyzymd/analyses/
 │   ├── _identity.py        #   Internal settings fingerprints
 │   ├── _runner.py          #   Internal trajectory runner and analyzer
 │   └── _paths.py           #   Internal result path helpers
-├── exposure/               # Exposure dynamics plugin sub-package
 ├── binding_free_energy/    # Binding free energy plugin (custom compare)
 └── polymer_affinity/       # Polymer affinity plugin (custom compare)
 ```
@@ -157,7 +156,7 @@ def plot(self, ctx: PlotContext) -> list[Path]:
   automatically via `json.loads()`)
 - Framework handles loading, t-tests, ANOVA, ranking, and formatting automatically
 
-**Custom path** (contacts, distances, exposure, BFE, polymer_affinity):
+**Custom path** (contacts, distances, BFE, polymer_affinity):
 - Override `compare()` entirely — return your own Pydantic model with `.save()`
 - The returned model must be saveable/loadable
 
@@ -276,7 +275,6 @@ to detect changes. **Known issue:** the hash mismatch warning currently prints
 | `sasa` | No (custom) | Solvent-accessible surface area metrics |
 | `distances` | No (custom) | Multiple distance metrics |
 | `contacts` | No (custom) | Coverage + contact fraction |
-| `exposure` | No (custom) | Exposure dynamics metrics |
 | `hydrogen_bonds` | No (custom) | H-bond occupancy + lifetime |
 | `binding_free_energy` | No (custom) | Per-contact ΔG_sel |
 | `polymer_affinity` | No (custom) | Total interaction score |

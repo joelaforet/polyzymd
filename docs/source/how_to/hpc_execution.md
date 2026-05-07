@@ -83,8 +83,8 @@ This command:
 - orders plugins by declared `dependencies`
 - submits each plugin DAG with cross-plugin finalize dependencies
 
-For example, analyses that depend on `contacts` (such as `exposure`,
-`binding_free_energy`, or `polymer_affinity`) are submitted after `contacts`,
+For example, analyses that depend on `contacts` (such as
+`binding_free_energy` or `polymer_affinity`) are submitted after `contacts`,
 and their root finalize jobs are wired to the upstream `contacts` finalize job.
 
 Exclude one or more analyses with repeatable `--exclude`:
@@ -92,7 +92,7 @@ Exclude one or more analyses with repeatable `--exclude`:
 ```bash
 pixi run -e build polyzymd compare submit-all \
     -f comparison.yaml \
-    --exclude exposure \
+    --exclude binding_free_energy \
     --exclude polymer_affinity \
     --partition aa100
 ```
@@ -523,7 +523,6 @@ For `--mem`, `--time`, and `--cpus-per-task`, submission precedence is:
 Current plugin resource hints:
 
 - `sasa`: `8G`, `02:00:00`
-- `exposure`: `16G`
 - `secondary_structure`: `16G`
 - `hydrogen_bonds`: `16G`
 

@@ -36,7 +36,6 @@ tests/
 │   │   ├── test_catalytic_triad.py
 │   │   ├── test_contacts.py
 │   │   ├── test_distances.py
-│   │   ├── test_exposure.py
 │   │   ├── test_hydrogen_bonds.py
 │   │   ├── test_polymer_affinity.py
 │   │   ├── test_polymer_bridging.py

@@ -100,7 +100,6 @@ Stable analysis plugins:
 Experimental but still available:
 
 - binding preference through `contacts`
-- `exposure`
 - `binding_free_energy`
 - `polymer_affinity`
 - `polymer_bridging` (alias: `bridging`)
@@ -118,7 +117,6 @@ Experimental but still available:
 | `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + ANOVA |
 | `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | Per-run pairwise t-tests + ANOVA |
 | `hydrogen_bonds` | Yes | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA |
-| `exposure` | No (custom) | Exposure dynamics metrics | Time-resolved surface exposure | Custom statistical pipeline |
 | `binding_free_energy` | No (custom) | Per-contact ΔG_sel | Free energy decomposition | Custom statistical pipeline |
 | `polymer_affinity` | No (custom) | Total interaction score | Combined contact + energetic scoring | Custom statistical pipeline |
 | `polymer_bridging` | No (custom) | Bridging event counts | Polymer-mediated inter-chain contacts | Custom statistical pipeline |
@@ -165,7 +163,6 @@ polyzymd compare plot-all
 ## Experimental Commands
 
 ```bash
-polyzymd compare run exposure
 polyzymd compare run binding_free_energy
 polyzymd compare run polymer_affinity
 polyzymd compare run polymer_bridging   # alias: polyzymd compare run bridging

@@ -64,7 +64,7 @@ src/polyzymd/
 | **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Cross-plugin compute (used by contacts, BFE, polymer_affinity) |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Stable public facade, auto-discovery, lifecycle runner, default comparison utilities |
 
-New analysis types are added as **packages in `analyses/<name>/`**. All 13
+New analysis types are added as **packages in `analyses/<name>/`**. All 12
 existing plugins are packages (no single-file plugins exist). Established
 plugins extract plotting into `_plotters.py` modules; new plugins can keep
 plotting inline in `plot()` or extract it as complexity grows.

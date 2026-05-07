@@ -422,28 +422,6 @@ def test_rg_compare_run_handles_zero_control_infinite_direction() -> None:
     assert comp.direction == "expansion"
 
 
-def test_exposure_pairwise_comparison_zero_control_direction() -> None:
-    """Exposure custom comparison path should classify zero-control +inf as increased."""
-    from polyzymd.analyses.exposure import ExposureAnalysis
-
-    cond_a = SimpleNamespace(
-        label="Control",
-        replicate_values=[0.0, 0.0, 0.0],
-        mean_chaperone_fraction=0.0,
-    )
-    cond_b = SimpleNamespace(
-        label="Treatment",
-        replicate_values=[0.4, 0.5, 0.6],
-        mean_chaperone_fraction=0.5,
-    )
-
-    comp = ExposureAnalysis._compare_pair(cond_a, cond_b)
-    assert isinstance(comp, PairwiseResult)
-    assert math.isinf(comp.percent_change)
-    assert comp.percent_change > 0
-    assert comp.direction == "increased"
-
-
 def test_distances_formatter_zero_control_emits_infinity_with_direction() -> None:
     """Distances formatter should report direction when control distance is zero."""
     pair_label = "Catalytic distance"

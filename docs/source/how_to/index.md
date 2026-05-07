@@ -100,7 +100,6 @@ Analyze Binding Preference <analysis_binding_preference>
 Analyze Binding Free Energy <analysis_binding_free_energy>
 Analyze Polymer Affinity <analysis_polymer_affinity>
 Analyze Polymer Bridging <analysis_polymer_bridging>
-Analyze Exposure Dynamics <analysis_exposure_dynamics>
 ```
 
 ## Plots & Troubleshooting

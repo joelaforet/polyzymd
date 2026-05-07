@@ -146,6 +146,57 @@ class TestPlotThemeValidation:
         assert ps.theme is not None
 
 
+class TestArchivedAnalysisDiagnostics:
+    """Archived analyses should fail with recovery diagnostics."""
+
+    def test_plugins_exposure_reports_archive_location(self, tmp_path: Path) -> None:
+        """plugins.exposure should explain where the archived code lives."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "archive-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {"exposure": {"exposure_threshold": 0.2}},
+                }
+            )
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            ComparisonConfig.from_yaml(yaml_path)
+
+        message = str(excinfo.value)
+        assert "plugins section" in message
+        assert "archive_experimental_analysis" in message
+        assert "feature/mda-analysis-migration" in message
+
+    def test_plot_settings_exposure_reports_archive_location(self, tmp_path: Path) -> None:
+        """plot_settings.exposure should explain where the archived code lives."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "archive-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {},
+                    "plot_settings": {"exposure": {"generate_enrichment_heatmap": True}},
+                }
+            )
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            ComparisonConfig.from_yaml(yaml_path)
+
+        message = str(excinfo.value)
+        assert "plot_settings section" in message
+        assert "archive_experimental_analysis" in message
+        assert "feature/mda-analysis-migration" in message
+
+
 class TestPluginSettingsPathResolution:
     """Plugin path-like settings should resolve relative to comparison.yaml."""
 

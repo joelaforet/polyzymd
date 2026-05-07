@@ -7,14 +7,12 @@ from typing import Final
 
 EXPERIMENTAL_FEATURES: Final[dict[str, str]] = {
     "contacts_binding_preference": "Contacts binding preference",
-    "exposure": "Exposure dynamics",
     "binding_free_energy": "Binding free energy",
     "polymer_affinity": "Polymer affinity score",
     "polymer_bridging_chemistry": "Polymer bridging chemistry profiling",
 }
 
 EXPERIMENTAL_COMPARISON_TYPES: Final[dict[str, tuple[str, ...]]] = {
-    "exposure": ("exposure",),
     "binding_free_energy": ("binding_free_energy",),
     "polymer_affinity": ("polymer_affinity",),
 }
@@ -25,8 +23,6 @@ EXPERIMENTAL_PLOT_TYPES: Final[dict[str, tuple[str, ...]]] = {
     "system_coverage_heatmap": ("contacts_binding_preference",),
     "system_coverage_bars": ("contacts_binding_preference",),
     "user_partition_bars": ("contacts_binding_preference",),
-    "exposure_chaperone_fraction": ("exposure",),
-    "exposure_enrichment_heatmap": ("exposure",),
     "bfe_heatmap": ("binding_free_energy",),
     "bfe_bars": ("binding_free_energy",),
     "affinity_stacked_bars": ("polymer_affinity",),

@@ -9,14 +9,12 @@ import numpy as np
 import pytest
 
 from polyzymd.analyses.shared.sasa import (
-    A2_TO_NM2,
     SASA_ARTIFACT_COMPATIBILITY_VERSION,
     SASA_ARTIFACT_SCHEMA_NAME,
     SASA_ARTIFACT_SCHEMA_VERSION,
     SASA_COMPAT_PROBE_RADIUS_ABS_TOL,
     SASAArtifactCompatibilityQuery,
     SASAComputationResult,
-    adapt_canonical_sasa_to_exposure,
     build_sasa_artifact_metadata,
     check_sasa_artifact_compatibility,
     compute_sasa,
@@ -939,66 +937,9 @@ class TestCheckSASAArtifactCompatibility:
         assert compat.selection_hash_matches is False
 
 
-class TestAdaptCanonicalSASAToExposure:
-    def test_converts_units(self) -> None:
-        result = _make_sasa_result()
-        adapted = adapt_canonical_sasa_to_exposure(result, exposure_threshold=0.25)
-        expected = result.residue_sasa_a2.astype(np.float32) * A2_TO_NM2
-        assert np.allclose(adapted.sasa_per_frame, expected)
-
-    def test_computes_relative_sasa(self) -> None:
-        result = _make_sasa_result()
-        adapted = adapt_canonical_sasa_to_exposure(result, exposure_threshold=0.25)
-        max_nm2 = np.asarray([121.0, 97.0], dtype=np.float32) * A2_TO_NM2
-        expected = (result.residue_sasa_a2.astype(np.float32) * A2_TO_NM2) / max_nm2[np.newaxis, :]
-        assert np.allclose(adapted.relative_sasa_per_frame, expected)
-
-    def test_handles_unknown_residues(self) -> None:
-        result = SASAComputationResult(
-            atom_sasa_a2=np.asarray([[1.0]], dtype=np.float64),
-            residue_sasa_a2=np.asarray([[20.0]], dtype=np.float64),
-            total_sasa_a2=np.asarray([1.0], dtype=np.float64),
-            frames=np.asarray([0], dtype=np.int64),
-            time_ns=np.asarray([0.0], dtype=np.float64),
-            target_atom_indices=np.asarray([0], dtype=np.int64),
-            context_atom_indices=np.asarray([0], dtype=np.int64),
-            residue_keys=["A:1:UNK"],
-            residue_chainids=["A"],
-            residue_resids=[1],
-            residue_resnames=["UNK"],
-        )
-        adapted = adapt_canonical_sasa_to_exposure(result, exposure_threshold=0.3)
-        assert np.allclose(adapted.max_sasa_nm2, np.asarray([200.0 * A2_TO_NM2], dtype=np.float32))
-
-    def test_empty_residues(self) -> None:
-        result = SASAComputationResult(
-            atom_sasa_a2=np.empty((2, 0), dtype=np.float64),
-            residue_sasa_a2=np.empty((2, 0), dtype=np.float64),
-            total_sasa_a2=np.asarray([np.nan, np.nan], dtype=np.float64),
-            frames=np.asarray([0, 1], dtype=np.int64),
-            time_ns=np.asarray([0.0, 0.01], dtype=np.float64),
-            target_atom_indices=np.empty((0,), dtype=np.int64),
-            context_atom_indices=np.empty((0,), dtype=np.int64),
-            residue_keys=[],
-            residue_chainids=[],
-            residue_resids=[],
-            residue_resnames=[],
-        )
-        adapted = adapt_canonical_sasa_to_exposure(result, exposure_threshold=0.5)
-        assert adapted.sasa_per_frame.shape == (2, 0)
-        assert adapted.relative_sasa_per_frame.shape == (2, 0)
-        assert adapted.n_residues == 0
-
-    def test_preserves_resids_resnames(self) -> None:
-        result = _make_sasa_result()
-        adapted = adapt_canonical_sasa_to_exposure(result, exposure_threshold=0.25)
-        assert np.array_equal(adapted.resids, np.asarray([10, 11], dtype=np.int32))
-        assert adapted.resnames == ["ALA", "GLY"]
-
-
 class TestFindSiblingSASAArtifacts:
     def _make_replicate_dir(self, tmp_path: Path) -> Path:
-        replicate_dir = tmp_path / "analysis" / "condA" / "exposure" / "run_1"
+        replicate_dir = tmp_path / "analysis" / "condA" / "fake_analysis" / "run_1"
         replicate_dir.mkdir(parents=True, exist_ok=True)
         return replicate_dir
 

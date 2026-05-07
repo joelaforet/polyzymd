@@ -13,7 +13,7 @@ You will:
 ```{important}
 For the `v1.3.0` release, the stable comparison stack is RMSD, Rg, RMSF,
 contacts, distances, catalytic triad, secondary structure, and SASA. Binding
-preference, exposure dynamics, binding free energy, and polymer affinity remain
+preference, binding free energy, and polymer affinity remain
 available, but PolyzyMD labels them as experimental.
 ```
 
@@ -336,7 +336,6 @@ the presentation release:
 - [Experimental: Analyze Binding Free Energy](analysis_binding_free_energy.md)
 - [Experimental: Analyze Polymer Affinity](analysis_polymer_affinity.md)
 - [Experimental: Analyze Polymer Bridging](analysis_polymer_bridging.md)
-- [Experimental: Analyze Exposure Dynamics](analysis_exposure_dynamics.md)
 
 ## Troubleshooting
 

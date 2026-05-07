@@ -64,7 +64,6 @@ from modules named `_analysis_*`, `_contexts`, or `_comparison_models`.
 | `sasa` | `analyses.sasa` | Custom (per-run) |
 | `distances` | `analyses.distances` | Custom |
 | `contacts` | `analyses.contacts` | Custom |
-| `exposure` | `analyses.exposure` | Custom (experimental) |
 | `hydrogen_bonds` | `analyses.hydrogen_bonds` | Default (scalar) |
 | `binding_free_energy` | `analyses.binding_free_energy` | Custom (experimental) |
 | `polymer_affinity` | `analyses.polymer_affinity` | Custom (experimental) |

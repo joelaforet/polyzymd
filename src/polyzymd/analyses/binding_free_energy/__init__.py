@@ -305,7 +305,7 @@ class BindingFreeEnergyAnalysis(Analysis):
     ) -> list[Condition]:
         """Keep all conditions — no-polymer conditions get empty entries.
 
-        Unlike exposure/contacts, BFE includes all conditions. No-polymer
+        Unlike contacts, BFE includes all conditions. No-polymer
         conditions simply have no entries and serve as reference points.
         """
         return list(conditions)

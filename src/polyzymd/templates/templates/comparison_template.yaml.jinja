@@ -167,23 +167,6 @@ plugins:
   #       substrate: "resname LIG"
   #       polymer: "chainid C"
 
-  # EXPERIMENTAL: Exposure Dynamics Analysis (chaperone-like polymer activity)
-  # Requires contacts analysis to be run first for each condition.
-  # Definitions and interpretation may change after the presentation release.
-  # Run: polyzymd compare run exposure
-  #
-  # exposure:
-  #   exposure_threshold: 0.20     # fraction SASA defining 'exposed' residue
-  #   transient_lower: 0.20        # lower bound: residue must reach this to be transient
-  #   transient_upper: 0.80        # upper bound: residue must also reach this threshold
-  #   min_event_length: 1          # minimum consecutive frames to count as an event
-  #   protein_chain: "A"           # chain ID for the protein
-  #   protein_selection: "protein" # MDAnalysis selection for protein
-  #   polymer_selection: "chainID C"  # MDAnalysis selection for polymer
-  #   # polymer_resnames: [SBM, EGM]  # optional: residue names for enrichment analysis
-  #   probe_radius_nm: 0.14        # SASA probe radius (nm)
-  #   n_sphere_points: 960         # number of sphere points for SASA computation
-
   # EXPERIMENTAL: Binding Free Energy Analysis (ΔG_sel via Boltzmann inversion)
   # Requires contacts analysis with compute_binding_preference: true to be run first.
   # Converts binding preference probabilities into ΔG_sel = -k_B·T·ln(contact_share / expected_share).

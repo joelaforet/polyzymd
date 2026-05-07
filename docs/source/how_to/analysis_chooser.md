@@ -40,7 +40,6 @@ This set gives a useful first pass before you move to more specialized analyses.
 | Does the polymer bridge different protein regions? | `polymer_bridging` (experimental) |
 | What is the interaction energy with each contact? | `binding_free_energy` (experimental) |
 | What is the overall polymer-protein affinity? | `polymer_affinity` (experimental) |
-| How does active-site exposure change over time? | `exposure` (experimental) |
 
 ## Plugin quick reference
 
@@ -56,7 +55,6 @@ This set gives a useful first pass before you move to more specialized analyses.
 | `sasa` | ✓ | High | Target + context selections |
 | `hydrogen_bonds` | ✓ | High | Groups + summaries |
 | `binding_free_energy` | Experimental | High | Polymer + protein selections |
-| `exposure` | Experimental | Medium | Active-site selection |
 | `polymer_affinity` | Experimental | Medium | Polymer + protein selections |
 | `polymer_bridging` | Experimental | Medium | Polymer + protein selections |
 

@@ -286,28 +286,6 @@ and usable element metadata.
 |-------|------|---------|-------------|
 | `partitions` | mapping | — | Named partitions: `{name: "MDAnalysis selection"}` |
 
-### `plugins.exposure`
-
-```{admonition} Experimental
-:class: warning
-
-Exposure dynamics is an experimental analysis. Results should be interpreted
-with caution and are subject to change.
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `exposure_threshold` | float | `0.20` | Fraction SASA defining "exposed" |
-| `transient_lower` | float | `0.20` | Lower bound for transient classification |
-| `transient_upper` | float | `0.80` | Upper bound for transient classification |
-| `min_event_length` | int | `1` | Minimum consecutive frames for an event |
-| `protein_chain` | string | `"A"` | Chain ID for protein |
-| `protein_selection` | string | `"protein"` | MDAnalysis selection for protein |
-| `polymer_selection` | string | `"chainID C"` | MDAnalysis selection for polymer |
-| `polymer_resnames` | list of string | `null` | Residue names for enrichment analysis |
-| `probe_radius_nm` | float | `0.14` | SASA probe radius (nm) |
-| `n_sphere_points` | int | `960` | Number of sphere points |
-
 ### `plugins.binding_free_energy`
 
 ```{admonition} Experimental

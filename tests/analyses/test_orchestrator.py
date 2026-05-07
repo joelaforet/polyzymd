@@ -840,8 +840,8 @@ class TestOrchestrator:
             def aggregate(self, ctx, results):
                 return {"n": len(results)}
 
-        class _Exposure(Analysis):
-            name: ClassVar[str] = "exposure"
+        class _DependentAnalysis(Analysis):
+            name: ClassVar[str] = "dependent_analysis"
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("contacts",)
 
@@ -853,18 +853,18 @@ class TestOrchestrator:
 
         monkeypatch.setattr(
             "polyzymd.analyses.discovery.get_analysis",
-            lambda name: _Exposure if name == "exposure" else _Contacts,
+            lambda name: _DependentAnalysis if name == "dependent_analysis" else _Contacts,
         )
         monkeypatch.setattr(
             "polyzymd.analyses.discovery.list_all_names",
-            lambda: ["contacts", "exposure"],
+            lambda: ["contacts", "dependent_analysis"],
         )
 
         with pytest.raises(DependencyError, match="not in the current run list"):
-            order_analyses_for_execution(["exposure"])
+            order_analyses_for_execution(["dependent_analysis"])
 
-        ordered = order_analyses_for_execution(["exposure"], satisfied={"contacts"})
-        assert ordered == ["exposure"]
+        ordered = order_analyses_for_execution(["dependent_analysis"], satisfied={"contacts"})
+        assert ordered == ["dependent_analysis"]
 
     def test_run_analysis_full(self, toy_analysis, toy_condition, toy_settings, tmp_path):
         """Test the full run_analysis path (compute + aggregate)."""

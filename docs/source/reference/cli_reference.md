@@ -973,7 +973,7 @@ Options:
 polyzymd compare submit-all -f comparison.yaml --partition aa100 --qos normal
 
 # Skip selected plugins
-polyzymd compare submit-all -f comparison.yaml --exclude exposure --exclude polymer_affinity
+polyzymd compare submit-all -f comparison.yaml --exclude binding_free_energy --exclude polymer_affinity
 
 # Dry-run planning only
 polyzymd compare submit-all -f comparison.yaml --dry-run
