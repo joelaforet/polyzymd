@@ -77,15 +77,8 @@ below.
 | `polymer_types` | `list[str] \| null` | `null` | Optional polymer residue-name filter |
 | `grouping` | `str` | `"aa_class"` | Grouping mode: `aa_class`, `secondary_structure`, or `none` |
 | `compute_residence_times` | `bool` | `true` | Compute aggregate residence-time summaries and plots; per-replicate contact events remain stored when disabled |
-| `compute_binding_preference` | `bool` | `false` | Enable binding-preference enrichment sub-analysis |
-| `surface_exposure_threshold` | `float` | `0.2` | Relative SASA threshold for surface-exposed residues |
-| `enzyme_pdb_for_sasa` | `str \| null` | `null` | Optional PDB path for SASA calculations |
-| `include_default_aa_groups` | `bool` | `true` | Include built-in amino-acid class groups |
 | `protein_groups` | `dict[str, list[int]] \| null` | `null` | Custom residue groups, e.g. `{name: [resid, ...]}` |
 | `protein_partitions` | `dict[str, list[str]] \| null` | `null` | Partition definitions over custom `protein_groups` |
-| `polymer_type_selections` | `dict[str, str] \| null` | `null` | Custom polymer-type selections |
-| `polymer_chain` | `str` | `"C"` | Polymer chain ID for auto-detection |
-| `enrichment_normalization` | `str` | `"residue"` | Deprecated compatibility key (ignored at runtime) |
 | `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
 | `min_effect_size` | `float` | `0.5` | Minimum Cohen's d highlighted in output |
 | `top_residues` | `int` | `10` | Number of top-contact residues shown in summaries |

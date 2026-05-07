@@ -429,7 +429,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/01/c12a04269340d7e2b904e9dd1d2df6b165871514ae63aec53baf19660c0d/looseversion-1.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7c/a1/c5aabe25db98da6b9aee1c117fd7ac5481be368410593f2698de64cb9b6b/polymerist-1.0.2-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/82/ae/c6b41a2013800c4f9250d49f78aa636c6ddff35cd390b12be9b7e679acc2/rust_sasa_python-0.7.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: ./
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/_openmp_mutex-4.5-7_kmp_llvm.conda
@@ -809,7 +808,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/b9/cc/e6eeff951a3e15148fac78dead7c50f2d6891f99efd80da599fbf6821b87/lammps-2024.8.29.0.0-py2.py3-none-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/01/c12a04269340d7e2b904e9dd1d2df6b165871514ae63aec53baf19660c0d/looseversion-1.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7c/a1/c5aabe25db98da6b9aee1c117fd7ac5481be368410593f2698de64cb9b6b/polymerist-1.0.2-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/f4/ba/79b8274a373cee0a692cce6e8b11c289f9ca1791a0a2d5912214f349a84b/rust_sasa_python-0.7.2-cp311-cp311-macosx_11_0_arm64.whl
       - pypi: ./
   cuda-12-4:
     channels:
@@ -1239,7 +1237,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/01/c12a04269340d7e2b904e9dd1d2df6b165871514ae63aec53baf19660c0d/looseversion-1.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7c/a1/c5aabe25db98da6b9aee1c117fd7ac5481be368410593f2698de64cb9b6b/polymerist-1.0.2-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/82/ae/c6b41a2013800c4f9250d49f78aa636c6ddff35cd390b12be9b7e679acc2/rust_sasa_python-0.7.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: ./
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/_openmp_mutex-4.5-7_kmp_llvm.conda
@@ -1620,7 +1617,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/b9/cc/e6eeff951a3e15148fac78dead7c50f2d6891f99efd80da599fbf6821b87/lammps-2024.8.29.0.0-py2.py3-none-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/01/c12a04269340d7e2b904e9dd1d2df6b165871514ae63aec53baf19660c0d/looseversion-1.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7c/a1/c5aabe25db98da6b9aee1c117fd7ac5481be368410593f2698de64cb9b6b/polymerist-1.0.2-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/f4/ba/79b8274a373cee0a692cce6e8b11c289f9ca1791a0a2d5912214f349a84b/rust_sasa_python-0.7.2-cp311-cp311-macosx_11_0_arm64.whl
       - pypi: ./
   cuda-12-6:
     channels:
@@ -2051,7 +2047,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/01/c12a04269340d7e2b904e9dd1d2df6b165871514ae63aec53baf19660c0d/looseversion-1.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7c/a1/c5aabe25db98da6b9aee1c117fd7ac5481be368410593f2698de64cb9b6b/polymerist-1.0.2-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/82/ae/c6b41a2013800c4f9250d49f78aa636c6ddff35cd390b12be9b7e679acc2/rust_sasa_python-0.7.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: ./
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/_openmp_mutex-4.5-7_kmp_llvm.conda
@@ -2432,7 +2427,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/b9/cc/e6eeff951a3e15148fac78dead7c50f2d6891f99efd80da599fbf6821b87/lammps-2024.8.29.0.0-py2.py3-none-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/01/c12a04269340d7e2b904e9dd1d2df6b165871514ae63aec53baf19660c0d/looseversion-1.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7c/a1/c5aabe25db98da6b9aee1c117fd7ac5481be368410593f2698de64cb9b6b/polymerist-1.0.2-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/f4/ba/79b8274a373cee0a692cce6e8b11c289f9ca1791a0a2d5912214f349a84b/rust_sasa_python-0.7.2-cp311-cp311-macosx_11_0_arm64.whl
       - pypi: ./
   default:
     channels:
@@ -8380,7 +8374,7 @@ packages:
 - pypi: ./
   name: polyzymd
   version: 1.3.0
-  sha256: a84d50d003603be817bc127782956b2ab9026d269716257dc1b0f804978b1aae
+  sha256: 15625555ec8659e764c1f7b3f53706b8d12c83f5b18ab936ac6a56de583b97fb
   requires_dist:
   - pydantic>=2.0.0
   - pyyaml>=6.0
@@ -8391,7 +8385,6 @@ packages:
   - tqdm>=4.60.0
   - biopandas>=0.4.0
   - scipy>=1.9.0
-  - rust-sasa-python>=0.1.0
   - openmm>=8.0 ; extra == 'simulation'
   - openff-toolkit>=0.16.0 ; extra == 'simulation'
   - openff-interchange>=0.4.0 ; extra == 'simulation'
@@ -9635,22 +9628,6 @@ packages:
   - pkg:pypi/ruff?source=hash-mapping
   size: 8389699
   timestamp: 1774602454769
-- pypi: https://files.pythonhosted.org/packages/82/ae/c6b41a2013800c4f9250d49f78aa636c6ddff35cd390b12be9b7e679acc2/rust_sasa_python-0.7.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-  name: rust-sasa-python
-  version: 0.7.2
-  sha256: e67c0f733ba32b0b9e4653410c8cc7108f8edaf0b905402dc308b04885c6b98b
-  requires_dist:
-  - pytest>=8.4.1 ; extra == 'dev'
-  - maturin>=1.5,<2.0 ; extra == 'dev'
-  requires_python: '>=3.11'
-- pypi: https://files.pythonhosted.org/packages/f4/ba/79b8274a373cee0a692cce6e8b11c289f9ca1791a0a2d5912214f349a84b/rust_sasa_python-0.7.2-cp311-cp311-macosx_11_0_arm64.whl
-  name: rust-sasa-python
-  version: 0.7.2
-  sha256: 7bb041407a5b16d3e2e50d09b4a33665243c28bdf1dc9d96427fc0fa952cb077
-  requires_dist:
-  - pytest>=8.4.1 ; extra == 'dev'
-  - maturin>=1.5,<2.0 ; extra == 'dev'
-  requires_python: '>=3.11'
 - conda: https://conda.anaconda.org/conda-forge/linux-64/scikit-learn-1.8.0-np2py311ha15b03d_1.conda
   sha256: 1b28c914e59b0e346fef3574c192ea919c710784a9b5a4eff640fb81825a91a9
   md5: 20166c092c5a5093bbaca59925d573a3

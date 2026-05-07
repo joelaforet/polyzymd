@@ -1325,13 +1325,15 @@ def _build_analysis_settings(enzyme_pdb_rel: str | None) -> dict:
     Parameters
     ----------
     enzyme_pdb_rel : str or None
-        Relative path to enzyme PDB for SASA, or None.
+        Relative path to enzyme PDB retained for backward-compatible calls.
 
     Returns
     -------
     dict
         Analysis settings configuration.
     """
+    del enzyme_pdb_rel
+
     settings: dict = {
         # RMSF: per-residue fluctuations (backbone CA atoms)
         "rmsf": {
@@ -1356,16 +1358,13 @@ def _build_analysis_settings(enzyme_pdb_rel: str | None) -> dict:
                 },
             ],
         },
-        # Contacts: polymer-protein contacts with binding preference
+        # Contacts: polymer-protein contacts
         "contacts": {
             "polymer_selection": "chainID C",
             "protein_selection": "protein",
             "cutoff": 4.5,
             "grouping": "aa_class",
             "compute_residence_times": True,
-            "compute_binding_preference": True,
-            "surface_exposure_threshold": 0.2,
-            "include_default_aa_groups": True,
             "protein_groups": {
                 "catalytic_triad": [77, 133, 156],
             },
@@ -1380,19 +1379,11 @@ def _build_analysis_settings(enzyme_pdb_rel: str | None) -> dict:
         # Binding free energy: thermodynamic analysis
         "binding_free_energy": {
             "units": "kcal/mol",
-            "compute_binding_preference": True,
-            "surface_exposure_threshold": 0.2,
-            "include_default_aa_groups": True,
             "protein_groups": {
                 "catalytic_triad": [77, 133, 156],
             },
         },
     }
-
-    # Add enzyme PDB path for SASA calculations
-    if enzyme_pdb_rel:
-        settings["contacts"]["enzyme_pdb_for_sasa"] = enzyme_pdb_rel
-        settings["binding_free_energy"]["enzyme_pdb_for_sasa"] = enzyme_pdb_rel
 
     return settings
 
@@ -1449,8 +1440,6 @@ def _build_plot_settings() -> dict:
         },
         "contacts": {
             "figsize": [10, 8],
-            "generate_enrichment_heatmap": True,
-            "generate_enrichment_bars": True,
         },
         "binding_free_energy": {
             "generate_heatmap": True,

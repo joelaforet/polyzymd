@@ -17,9 +17,6 @@ src/polyzymd/analyses/
 ├── orchestrator.py         # Framework engine: compute → aggregate → compare → plot
 ├── stats.py                # default_scalar_comparison(), format_scalar_comparison()
 ├── shared/                 # Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-│   ├── binding_preference.py   # Shared compute for contacts binding preference
-│   ├── binding_preference_helpers.py  # Orchestration helpers for binding preference
-│   └── surface_exposure.py     # SASA-based surface exposure utility
 ├── _results_base.py        # Base result model (shared, stays at top level)
 ├── rmsf/                   # RMSF plugin sub-package
 │   ├── __init__.py         #   RMSFAnalysis plugin class
@@ -42,7 +39,6 @@ src/polyzymd/analyses/
 │   ├── _lifecycle.py       #   Internal lifecycle helpers
 │   ├── _filters.py         #   Internal condition filtering
 │   ├── _comparison.py      #   Internal custom comparison implementation
-│   ├── _binding_preference.py  # Internal binding-preference orchestration
 │   ├── _plotting.py        #   Internal plot lifecycle orchestration
 │   ├── _plotters.py        #   Internal plotting functions
 │   ├── _results.py         #   Internal result models
@@ -64,8 +60,8 @@ Each plugin is a self-contained package. All established plugins extract
 plotting functions into a `_plotters.py` module to keep `__init__.py` focused
 on Analysis lifecycle wiring. Contacts is larger, so `ContactsAnalysis` stays
 public in `contacts/__init__.py` while cache, filtering, lifecycle, comparison,
-binding-preference, plotting, result, and runner helpers live in private
-`contacts/_*.py` modules. These modules are implementation details, not
+plotting, result, and runner helpers live in private `contacts/_*.py` modules.
+These modules are implementation details, not
 contributor API. Public contributor plugins use the runner-backed lifecycle;
 trajectory-native plugins should isolate MDAnalysis trajectory logic in a
 dedicated module such as `_runner.py`.

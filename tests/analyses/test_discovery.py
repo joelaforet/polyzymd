@@ -157,13 +157,7 @@ class TestDiscoveryRobustness:
 
         package_prefix = "polyzymd.analyses."
         assert _should_skip_module("polyzymd.analyses.shared.loader", package_prefix) is True
-        assert (
-            _should_skip_module("polyzymd.analyses.shared.binding_preference", package_prefix)
-            is True
-        )
-        assert (
-            _should_skip_module("polyzymd.analyses.shared.surface_exposure", package_prefix) is True
-        )
+        assert _should_skip_module("polyzymd.analyses.shared.statistics", package_prefix) is True
 
         assert _should_skip_module("polyzymd.analyses.rmsf", package_prefix) is False
         assert _should_skip_module("polyzymd.analyses.contacts", package_prefix) is False

@@ -103,36 +103,6 @@ submodules.
    :no-index:
 ```
 
-## `polyzymd.analyses.shared.surface_exposure`
-
-```{eval-rst}
-.. automodule:: polyzymd.analyses.shared.surface_exposure
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-```
-
-## `polyzymd.analyses.shared.binding_preference`
-
-```{eval-rst}
-.. automodule:: polyzymd.analyses.shared.binding_preference
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-```
-
-## `polyzymd.analyses.shared.binding_preference_helpers`
-
-```{eval-rst}
-.. automodule:: polyzymd.analyses.shared.binding_preference_helpers
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-```
-
 ## `polyzymd.analyses.shared.groupings`
 
 ```{eval-rst}

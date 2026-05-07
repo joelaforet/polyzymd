@@ -199,15 +199,9 @@ Each entry in `pairs`:
 | `cutoff` | float | `4.5` | Contact distance cutoff in Angstroms |
 | `grouping` | string | `"aa_class"` | Residue grouping: `"aa_class"`, `"secondary_structure"`, or `"none"` |
 | `compute_residence_times` | bool | `true` | Whether to compute aggregate residence-time summaries and plots. When `false`, per-replicate contact events are still stored and the cache identity changes. |
-| `compute_binding_preference` | bool | `false` | **Experimental.** Enable enrichment by residue group |
-| `surface_exposure_threshold` | float | `0.2` | Relative SASA cutoff defining "surface exposed" (for binding preference) |
-| `enzyme_pdb_for_sasa` | path | `null` | Path to enzyme PDB for standalone SASA computation (relative to `comparison.yaml`) |
-| `include_default_aa_groups` | bool | `true` | Include built-in amino acid groups (aromatic, polar, nonpolar, charged) |
 | `protein_groups` | mapping | `null` | Custom residue groups: `{group_name: [resid, ...]}` |
-| `protein_partitions` | mapping | `null` | Mutually exclusive partitions for coverage plots: `{partition_name: [group_name, ...]}` |
+| `protein_partitions` | mapping | `null` | Mutually exclusive partitions for contact-fraction and residence-time plots: `{partition_name: [group_name, ...]}` |
 | `polymer_types` | list of string | `null` | Explicit polymer type labels. If `null`, types are auto-detected from topology. |
-| `polymer_type_selections` | mapping | `null` | Custom MDAnalysis selections per polymer type: `{type_name: "selection string"}` |
-| `polymer_chain` | string | `"C"` | Chain ID used for polymer auto-detection |
 | `fdr_alpha` | float | `0.05` | Per-plugin FDR threshold |
 | `min_effect_size` | float | `0.5` | Minimum Cohen's d for practical significance |
 | `top_residues` | int | `10` | Max residues shown per condition in formatted output |
@@ -395,12 +389,12 @@ level as `style`, `dpi`, etc.
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `generate_enrichment_heatmap` | `true` | Binding preference heatmap |
-| `generate_enrichment_bars` | `true` | Enrichment bar chart |
-| `generate_system_coverage_heatmap` | `true` | System coverage heatmap |
-| `generate_system_coverage_bars` | `true` | System coverage bar chart |
 | `generate_contact_fraction_profile` | `true` | Per-residue contact fraction profile |
 | `generate_residence_time_profile` | `true` | Per-residue residence time profile |
+| `generate_cf_by_aa_class_bars` | `true` | Contact fraction by amino acid class bar chart |
+| `generate_cf_by_partition_bars` | `true` | Contact fraction by user partition bar charts |
+| `generate_rt_by_aa_class_bars` | `true` | Residence time by amino acid class bar chart |
+| `generate_rt_by_partition_bars` | `true` | Residence time by user partition bar charts |
 
 **`plot_settings.secondary_structure`:**
 

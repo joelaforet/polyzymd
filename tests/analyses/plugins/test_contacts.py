@@ -1,8 +1,8 @@
 """Tests for the contacts analysis plugin.
 
 Covers discovery, settings, run_replicate, aggregate, compare (full override),
-filter_conditions, binding preference sub-pipeline, plot delegation,
-AggregatedResultClass, and per-replicate metric helpers.
+filter_conditions, plot delegation, AggregatedResultClass, and per-replicate
+metric helpers.
 """
 
 from __future__ import annotations
@@ -94,7 +94,6 @@ class TestSettings:
         assert s.cutoff == 4.5
         assert s.grouping == "aa_class"
         assert s.compute_residence_times is True
-        assert s.compute_binding_preference is False
         assert s.fdr_alpha == 0.05
 
     def test_custom_values(self):
@@ -105,16 +104,76 @@ class TestSettings:
             protein_selection="protein and name CA",
             cutoff=5.0,
             grouping="none",
-            compute_binding_preference=True,
-            surface_exposure_threshold=0.3,
+            protein_groups={"active": [1, 2]},
+            protein_partitions={"site": ["active"]},
             fdr_alpha=0.01,
         )
         assert s.polymer_selection == "chainID D"
         assert s.cutoff == 5.0
         assert s.grouping == "none"
-        assert s.compute_binding_preference is True
-        assert s.surface_exposure_threshold == 0.3
+        assert s.protein_groups == {"active": [1, 2]}
+        assert s.protein_partitions == {"site": ["active"]}
         assert s.fdr_alpha == 0.01
+
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("compute_binding_preference", True),
+            ("surface_exposure_threshold", 0.3),
+            ("enzyme_pdb_for_sasa", "enzyme.pdb"),
+            ("include_default_aa_groups", False),
+            ("polymer_type_selections", {"PEG": "resname PEG"}),
+            ("polymer_chain", "C"),
+            ("enrichment_normalization", "residue"),
+        ],
+    )
+    def test_archived_binding_preference_settings_rejected(self, key, value):
+        from polyzymd.analyses.contacts import ContactsSettings
+
+        with pytest.raises(ValueError, match="archive_experimental_analysis") as excinfo:
+            ContactsSettings.model_validate({key: value})
+        assert "feature/mda-analysis-migration" in str(excinfo.value)
+
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("generate_enrichment_heatmap", True),
+            ("generate_enrichment_bars", True),
+            ("figsize_enrichment_heatmap", (10, 6)),
+            ("figsize_enrichment_bars", (10, 6)),
+            ("enrichment_colormap", "RdBu_r"),
+            ("show_enrichment_error", True),
+            ("generate_system_coverage_heatmap", True),
+            ("generate_system_coverage_bars", True),
+            ("figsize_system_coverage_heatmap", (10, 6)),
+            ("figsize_system_coverage_bars", (10, 6)),
+            ("show_system_coverage_error", True),
+            ("generate_user_partition_bars", True),
+            ("figsize_user_partition_bars", (10, 6)),
+            ("show_user_partition_error", True),
+        ],
+    )
+    def test_archived_binding_preference_plot_settings_rejected(self, key, value):
+        from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
+
+        with pytest.raises(ValueError, match="archive_experimental_analysis") as excinfo:
+            ContactsPlotSettings.model_validate({key: value})
+        assert "feature/mda-analysis-migration" in str(excinfo.value)
+
+    def test_retained_contacts_plot_settings_still_validate(self):
+        from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
+
+        settings = ContactsPlotSettings(
+            generate_contact_fraction_profile=True,
+            generate_residence_time_profile=True,
+            generate_cf_by_aa_class_bars=True,
+            generate_cf_by_partition_bars=True,
+            generate_rt_by_aa_class_bars=True,
+            generate_rt_by_partition_bars=True,
+            highlight_residues=[1, 2, 3],
+        )
+
+        assert settings.highlight_residues == [1, 2, 3]
 
     def test_invalid_grouping(self):
         from polyzymd.analyses.contacts import ContactsSettings
@@ -171,13 +230,15 @@ class TestSettings:
         s = ContactsSettings(
             cutoff=5.0,
             polymer_types=["SBM", "EGM"],
-            compute_binding_preference=True,
+            protein_groups={"active": [1, 2]},
+            protein_partitions={"site": ["active"]},
         )
         d = s.model_dump()
         s2 = ContactsSettings.model_validate(d)
         assert s2.cutoff == 5.0
         assert s2.polymer_types == ["SBM", "EGM"]
-        assert s2.compute_binding_preference is True
+        assert s2.protein_groups == {"active": [1, 2]}
+        assert s2.protein_partitions == {"site": ["active"]}
 
     def test_settings_fingerprint_changes_with_cutoff(self):
         from polyzymd.analyses.contacts import ContactsSettings
@@ -188,15 +249,13 @@ class TestSettings:
 
         assert contacts_settings_fingerprint(low) != contacts_settings_fingerprint(high)
 
-    def test_contacts_domain_fingerprint_excludes_binding_preference_fields(self):
+    def test_contacts_domain_fingerprint_excludes_comparison_partition_fields(self):
         from polyzymd.analyses.contacts import ContactsSettings
         from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
 
         base = ContactsSettings(cutoff=4.5)
         downstream_only = ContactsSettings(
             cutoff=4.5,
-            compute_binding_preference=True,
-            surface_exposure_threshold=0.5,
             protein_groups={"active": [1, 2]},
             protein_partitions={"site": ["active"]},
             top_residues=25,
@@ -2109,10 +2168,7 @@ class TestCompare:
             label = agg_dir.parent.parent.name
             return mock_agg_results.get(label)
 
-        with (
-            patch.object(analysis, "_load_aggregated_result", side_effect=side_effect),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_aggregated_result", side_effect=side_effect):
             result = analysis.compare(ctx)
 
         assert result is not None
@@ -2121,6 +2177,8 @@ class TestCompare:
         assert result.control_label == "Control"
         assert len(result.ranking_by_coverage) == 3
         assert len(result.ranking_by_contact_fraction) == 3
+        assert "binding_preference" not in result.model_dump()
+        assert "binding_preference" not in result.model_dump_json()
 
     def test_compare_pairwise_with_control(self, tmp_path):
         from polyzymd.analyses.contacts import ContactsAnalysis
@@ -2136,10 +2194,7 @@ class TestCompare:
             label = agg_dir.parent.parent.name
             return mock_agg_results.get(label)
 
-        with (
-            patch.object(analysis, "_load_aggregated_result", side_effect=side_effect),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_aggregated_result", side_effect=side_effect):
             result = analysis.compare(ctx)
 
         # With 3 conditions and a control, expect 2 pairwise comparisons
@@ -2162,10 +2217,7 @@ class TestCompare:
             label = agg_dir.parent.parent.name
             return mock_agg_results.get(label)
 
-        with (
-            patch.object(analysis, "_load_aggregated_result", side_effect=side_effect),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_aggregated_result", side_effect=side_effect):
             result = analysis.compare(ctx)
 
         # Without control: all pairs = C(3,2) = 3
@@ -2185,10 +2237,7 @@ class TestCompare:
             label = agg_dir.parent.parent.name
             return mock_agg_results.get(label)
 
-        with (
-            patch.object(analysis, "_load_validated_aggregated_result", side_effect=side_effect),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_validated_aggregated_result", side_effect=side_effect):
             result = analysis.compare(ctx)
 
         assert result is not None
@@ -2211,10 +2260,7 @@ class TestCompare:
             label = agg_dir.parent.parent.name
             return mock_agg_results.get(label)
 
-        with (
-            patch.object(analysis, "_load_aggregated_result", side_effect=side_effect),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_aggregated_result", side_effect=side_effect):
             result = analysis.compare(ctx)
 
         # ANOVA with 3+ conditions: 2 summaries (coverage + contact_fraction)
@@ -2236,10 +2282,7 @@ class TestCompare:
             label = agg_dir.parent.parent.name
             return mock_agg_results.get(label)
 
-        with (
-            patch.object(analysis, "_load_aggregated_result", side_effect=side_effect),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_aggregated_result", side_effect=side_effect):
             result = analysis.compare(ctx)
 
         # No ANOVA with < 3 conditions
@@ -2270,11 +2313,8 @@ class TestCompare:
             recompute=False,
         )
 
-        with (
-            patch.object(
-                analysis, "_load_aggregated_result", return_value=_make_mock_agg_result(3, 5)
-            ),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
+        with patch.object(
+            analysis, "_load_aggregated_result", return_value=_make_mock_agg_result(3, 5)
         ):
             result = analysis.compare(ctx)
 
@@ -2311,10 +2351,7 @@ class TestCompare:
             recompute=True,
         )
 
-        with (
-            patch.object(analysis, "_load_validated_aggregated_result") as load_mock,
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_validated_aggregated_result") as load_mock:
             result = analysis.compare(ctx)
 
         assert result is not None
@@ -2350,8 +2387,7 @@ class TestCompare:
             recompute=True,
         )
 
-        with patch.object(analysis, "_load_or_compute_binding_preference", return_value=None):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         assert result is not None
         assert result.conditions[0].label == "Cached"
@@ -2385,8 +2421,7 @@ class TestCompare:
             recompute=False,
         )
 
-        with patch.object(analysis, "_load_or_compute_binding_preference", return_value=None):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         assert result is not None
         assert result.conditions[0].label == "LegacyRoot"
@@ -2436,10 +2471,7 @@ class TestCompare:
 
         mock_agg = _make_mock_agg_result(3, 5)
 
-        with (
-            patch.object(analysis, "_load_aggregated_result", return_value=mock_agg),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_aggregated_result", return_value=mock_agg):
             result = analysis.compare(ctx)
 
         assert "No Polymer" in result.excluded_conditions
@@ -2523,8 +2555,7 @@ class TestCompare:
             recompute=False,
         )
 
-        with patch.object(analysis, "_load_or_compute_binding_preference", return_value=None):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         assert result is not None
         assert result.conditions[0].n_replicates == 2
@@ -2583,8 +2614,7 @@ class TestCompare:
             recompute=False,
         )
 
-        with patch.object(analysis, "_load_or_compute_binding_preference", return_value=None):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         assert result is None
 
@@ -2735,11 +2765,6 @@ _PLOT_FUNCTIONS = [
     "_plot_cf_by_partition_bars",
     "_plot_rt_by_aa_class_bars",
     "_plot_rt_by_partition_bars",
-    "_plot_user_partition_bars",
-    "_plot_system_coverage_bars",
-    "_plot_system_coverage_heatmap",
-    "_plot_binding_preference_bars",
-    "_plot_binding_preference_heatmap",
 ]
 
 
@@ -3292,172 +3317,6 @@ class TestPartitionDefinitions:
 
 
 # ---------------------------------------------------------------------------
-# Binding preference sub-pipeline
-# ---------------------------------------------------------------------------
-
-
-class TestBindingPreference:
-    """Test _load_or_compute_binding_preference and helpers."""
-
-    def test_returns_none_when_disabled_and_no_cached(self, tmp_path):
-        from polyzymd.analyses.base import ComparisonContext, Condition
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings(compute_binding_preference=False)
-
-        mock_sim = MagicMock()
-        conditions = [
-            Condition(
-                label=label,
-                config_path=Path(f"/tmp/{label}/config.yaml"),
-                replicates=(1, 2),
-                sim_config=mock_sim,
-            )
-            for label in ["A", "B"]
-        ]
-        analysis_dirs = {
-            "A": tmp_path / "A" / "contacts",
-            "B": tmp_path / "B" / "contacts",
-        }
-        for d in analysis_dirs.values():
-            d.mkdir(parents=True, exist_ok=True)
-
-        ctx = ComparisonContext(
-            name="test",
-            conditions=conditions,
-            excluded_conditions=[],
-            control_label=None,
-            analysis_dirs=analysis_dirs,
-            results_dir=tmp_path / "results",
-            equilibration="10ns",
-            settings=settings,
-            recompute=False,
-        )
-
-        condition_data = [(cond, {"agg_result": MagicMock()}) for cond in conditions]
-
-        result = analysis._load_or_compute_binding_preference(ctx, condition_data)
-        assert result is None
-
-    def test_try_load_cached_bp_not_found(self, tmp_path):
-        from polyzymd.analyses.base import Condition
-        from polyzymd.analyses.shared.binding_preference_helpers import (
-            try_load_cached_binding_preference,
-        )
-
-        cond = Condition(
-            label="test",
-            config_path=Path("/tmp/config.yaml"),
-            replicates=(1,),
-            sim_config=MagicMock(),
-        )
-
-        # Empty directory — no cached results
-        result = try_load_cached_binding_preference(cond, tmp_path)
-        assert result is None
-
-    def test_optional_bp_uses_contacts_domain_fingerprint_for_contacts_sidecar(self, tmp_path):
-        """Contacts BP should resolve upstream contacts by contacts-domain identity."""
-
-        from polyzymd.analyses.base import ComparisonContext, Condition
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings(
-            compute_binding_preference=True,
-            cutoff=6.0,
-            grouping="none",
-            surface_exposure_threshold=0.4,
-            protein_groups={"site": [1, 2]},
-        )
-        contacts_fp = contacts_settings_fingerprint(settings)
-        assert contacts_fp != settings_fingerprint(settings)
-
-        condition = Condition(
-            label="A",
-            config_path=tmp_path / "A" / "config.yaml",
-            replicates=(1,),
-            sim_config=MagicMock(),
-        )
-        analysis_dir = tmp_path / "A" / "contacts"
-        analysis_dir.mkdir(parents=True)
-        sidecar = analysis_dir / f"contacts_eq10ns_cut6.0_s{contacts_fp}_rep1.json"
-        sidecar.write_text(f'{{"contacts_settings_fingerprint": "{contacts_fp}"}}')
-        enzyme_pdb = tmp_path / "enzyme.pdb"
-        enzyme_pdb.write_text("ATOM\n")
-        computed = SimpleNamespace(surface_exposure_threshold=settings.surface_exposure_threshold)
-        ctx = ComparisonContext(
-            name="test",
-            conditions=[condition],
-            excluded_conditions=[],
-            control_label=None,
-            analysis_dirs={condition.label: analysis_dir},
-            results_dir=tmp_path / "results",
-            equilibration="10ns",
-            settings=settings,
-            recompute=True,
-        )
-
-        with (
-            patch(
-                "polyzymd.analyses.shared.binding_preference_helpers.resolve_enzyme_pdb",
-                return_value=enzyme_pdb,
-            ),
-            patch(
-                "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
-                return_value=computed,
-            ) as mock_compute,
-        ):
-            result = analysis._load_or_compute_binding_preference(
-                ctx,
-                [(condition, {"agg_result": MagicMock()})],
-            )
-
-        assert result is not None
-        assert mock_compute.call_args.kwargs["contact_results_by_replicate"] == {1: sidecar}
-        assert mock_compute.call_args.kwargs["contact_settings_fp"] == contacts_fp
-
-
-# ---------------------------------------------------------------------------
-# Binding preference pairwise p-values
-# ---------------------------------------------------------------------------
-
-
-class TestBPPairwisePValues:
-    """Test _compute_bp_pairwise_pvalues."""
-
-    def test_returns_empty_with_one_condition(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
-
-        result = ContactsAnalysis._compute_bp_pairwise_pvalues({"A": [1.0, 2.0, 3.0]})
-        assert result == {}
-
-    def test_returns_pvalues_with_two_conditions(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
-
-        data = {
-            "A": [1.0, 1.1, 1.2, 0.9, 1.05],
-            "B": [2.0, 2.1, 2.2, 1.9, 2.05],
-        }
-        result = ContactsAnalysis._compute_bp_pairwise_pvalues(data)
-        assert "A_vs_B" in result
-        assert 0.0 <= result["A_vs_B"] <= 1.0
-
-    def test_skips_insufficient_data(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
-
-        data = {
-            "A": [1.0],  # Only 1 value — not enough for t-test
-            "B": [2.0, 2.1, 2.2],
-        }
-        result = ContactsAnalysis._compute_bp_pairwise_pvalues(data)
-        assert result == {}  # Skipped due to insufficient data
-
-
-# ---------------------------------------------------------------------------
 # Integration: full lifecycle
 # ---------------------------------------------------------------------------
 
@@ -3921,57 +3780,6 @@ class TestContactsCacheAmbiguity:
         )
 
         assert result == sidecar
-
-    def test_infer_contacts_artifact_settings_stops_before_bp_when_sidecar_unproven(
-        self,
-        tmp_path,
-    ):
-        """Filename-only contacts sidecars are an identity barrier for BP fallback."""
-        from polyzymd.analyses.contacts._paths import infer_contacts_artifact_settings_fingerprint
-
-        (tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
-        (tmp_path / "binding_preference_sfeedface_rep1.json").write_text(
-            '{"metadata": {"contacts_settings_fingerprint": "feedface", "equilibration": "10ns"}}'
-        )
-
-        result = infer_contacts_artifact_settings_fingerprint(
-            tmp_path,
-            (1,),
-            equilibration="10ns",
-        )
-
-        assert result is None
-
-    def test_binding_preference_generic_settings_do_not_infer_contacts_identity(
-        self,
-        tmp_path,
-    ):
-        """BP settings fingerprints must not masquerade as contacts fingerprints."""
-        from polyzymd.analyses.contacts._paths import infer_contacts_artifact_settings_fingerprint
-
-        generic = tmp_path / "binding_preference_sdeadbeef_rep1.json"
-        generic.write_text(
-            "{"
-            '"settings_fingerprint": "badcafe0",'
-            '"settings_fp": "feedface",'
-            '"metadata": {"settings_fingerprint": "cafebabe"}'
-            "}"
-        )
-
-        result = infer_contacts_artifact_settings_fingerprint(tmp_path, (1,))
-
-        assert result is None
-
-    def test_binding_preference_contacts_metadata_infers_contacts_identity(self, tmp_path):
-        """BP artifacts may declare contacts identity with explicit contacts keys."""
-        from polyzymd.analyses.contacts._paths import infer_contacts_artifact_settings_fingerprint
-
-        artifact = tmp_path / "binding_preference_sbadcafe_rep1.json"
-        artifact.write_text('{"metadata": {"contacts_settings_fingerprint": "deadbeef"}}')
-
-        result = infer_contacts_artifact_settings_fingerprint(tmp_path, (1,))
-
-        assert result == "deadbeef"
 
     def test_aggregated_sidecar_names_noncontiguous_replicates_uniquely(self, tmp_path):
         """Non-contiguous replicate IDs should not collide with contiguous ranges."""

@@ -25,19 +25,12 @@ contacts-derived analyses. The setting participates in contacts cache identity;
 older caches without this identity are accepted only for the default `true`
 setting when their other metadata is valid.
 
-### Binding preference and partition fields
+### Partition fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `compute_binding_preference` | `bool` | `false` | Enable binding-preference enrichment pipeline |
-| `surface_exposure_threshold` | `float` | `0.2` | Relative SASA threshold for surface exposure |
-| `enzyme_pdb_for_sasa` | `str \| None` | `null` | Optional enzyme PDB path for SASA computation |
-| `include_default_aa_groups` | `bool` | `true` | Include default AA-class groups |
 | `protein_groups` | `dict[str, list[int]] \| None` | `null` | Custom residue groups, e.g. `{active_site: [77, 133]}` |
-| `protein_partitions` | `dict[str, list[str]] \| None` | `null` | Named partitions of `protein_groups` |
-| `polymer_type_selections` | `dict[str, str] \| None` | `null` | Custom polymer type mappings by selection |
-| `polymer_chain` | `str` | `"C"` | Polymer chain ID used for auto-detection |
-| `enrichment_normalization` | `str` | `"residue"` | Deprecated backward-compatibility field (ignored) |
+| `protein_partitions` | `dict[str, list[str]] \| None` | `null` | Named partitions of `protein_groups` for contact-fraction and residence-time plots |
 
 ### Comparison output fields
 
@@ -173,21 +166,11 @@ Contacts plots are generated through the comparison plotting workflow
 | `cf_by_partition_<partition>_bars` | Contact-fraction grouped bars by user-defined partition | `generate_cf_by_partition_bars` |
 | `rt_by_aa_class_bars` | Residence-time grouped bars by amino-acid class | `generate_rt_by_aa_class_bars` |
 | `rt_by_partition_<partition>_bars` | Residence-time grouped bars by user-defined partition | `generate_rt_by_partition_bars` |
-| `system_coverage_bars` | Coverage-enrichment bars by AA class | `generate_system_coverage_bars` |
-| `system_coverage_heatmap` | Coverage-enrichment heatmap | `generate_system_coverage_heatmap` |
-| `user_partition_<partition>_bars` | Coverage-enrichment bars for user partition elements | `generate_user_partition_bars` |
-| `binding_preference_bars` | Binding-preference enrichment bars | `generate_enrichment_bars` |
-| `binding_preference_heatmap` | Binding-preference enrichment heatmap | `generate_enrichment_heatmap` |
 
 ### Contacts plot settings
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `generate_enrichment_heatmap` | `true` | Enable binding-preference heatmap |
-| `generate_enrichment_bars` | `true` | Enable binding-preference bars |
-| `generate_system_coverage_heatmap` | `true` | Enable system-coverage heatmap |
-| `generate_system_coverage_bars` | `true` | Enable system-coverage bars |
-| `generate_user_partition_bars` | `true` | Enable user partition bar plots |
 | `generate_contact_fraction_profile` | `true` | Enable per-residue contact-fraction profiles |
 | `generate_residence_time_profile` | `true` | Enable per-residue residence-time profiles |
 | `generate_cf_by_aa_class_bars` | `true` | Enable contact-fraction AA-class bars |
@@ -198,8 +181,8 @@ Contacts plots are generated through the comparison plotting workflow
 | `contact_fraction_profile_threshold` | `null` | Optional threshold line on contact-fraction profile |
 
 Figure-size and error-display fields are also available per plot type (for
-example `figsize_contact_fraction_profile`,
-`show_contact_fraction_profile_error`, `figsize_enrichment_bars`).
+example `figsize_contact_fraction_profile` and
+`show_contact_fraction_profile_error`).
 
 For global plotting keys (`style`, `dpi`, output format), see
 {doc}`analysis_comparison_reference` and {doc}`comparison_yaml`.

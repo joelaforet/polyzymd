@@ -15,8 +15,8 @@ def contacts_settings_fingerprint(settings: BaseModel) -> str:
     """Compute the contacts-domain settings fingerprint.
 
     The contacts-domain identity includes only settings that alter the contact
-    trajectory result itself. Downstream binding-preference and comparison-only
-    settings are intentionally excluded so those workflows can change without
+    trajectory result itself. Downstream comparison-only and plotting settings
+    are intentionally excluded so those workflows can change without
     invalidating contact caches.
 
     Parameters

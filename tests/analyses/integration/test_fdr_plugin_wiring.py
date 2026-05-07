@@ -583,10 +583,7 @@ class TestContactsCompareWiring:
             label = agg_dir.parent.parent.name
             return mock_results.get(label)
 
-        with (
-            patch.object(analysis, "_load_aggregated_result", side_effect=load_side_effect),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_aggregated_result", side_effect=load_side_effect):
             result = analysis.compare(ctx)
 
         assert result is not None
@@ -616,10 +613,7 @@ class TestContactsCompareWiring:
             label = agg_dir.parent.parent.name
             return mock_results.get(label)
 
-        with (
-            patch.object(analysis, "_load_aggregated_result", side_effect=load_side_effect),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_aggregated_result", side_effect=load_side_effect):
             result = analysis.compare(ctx)
 
         assert result is not None
@@ -647,10 +641,7 @@ class TestContactsCompareWiring:
             label = agg_dir.parent.parent.name
             return mock_results.get(label)
 
-        with (
-            patch.object(analysis, "_load_aggregated_result", side_effect=load_side_effect),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_aggregated_result", side_effect=load_side_effect):
             result = analysis.compare(ctx)
 
         assert result is not None
@@ -693,16 +684,10 @@ class TestContactsCompareWiring:
         def permissive_side_effect(agg_dir: Path) -> AggregatedContactResult | None:
             return permissive_results.get(agg_dir.parent.parent.name)
 
-        with (
-            patch.object(analysis, "_load_aggregated_result", side_effect=strict_side_effect),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_aggregated_result", side_effect=strict_side_effect):
             strict_result = analysis.compare(strict_ctx)
 
-        with (
-            patch.object(analysis, "_load_aggregated_result", side_effect=permissive_side_effect),
-            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
-        ):
+        with patch.object(analysis, "_load_aggregated_result", side_effect=permissive_side_effect):
             permissive_result = analysis.compare(permissive_ctx)
 
         assert strict_result is not None

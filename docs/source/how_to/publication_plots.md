@@ -160,8 +160,10 @@ What changes:
 plot_settings:
   style: "publication"
   contacts:
-    generate_enrichment_heatmap: true
-    generate_system_coverage_heatmap: false
+    generate_contact_fraction_profile: true
+    generate_residence_time_profile: true
+    generate_cf_by_aa_class_bars: true
+    generate_cf_by_partition_bars: true
     figsize_contact_fraction_profile: [16, 5]
     show_contact_fraction_profile_error: true
     highlight_residues: [77, 133, 156]

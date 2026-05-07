@@ -138,11 +138,6 @@ def plot(analysis: Any, ctx: PlotContext) -> list[Path]:
         _facade_plotter("_plot_contact_fraction_profile"),
         _facade_plotter("_plot_cf_by_aa_class_bars"),
         _facade_plotter("_plot_cf_by_partition_bars"),
-        _facade_plotter("_plot_user_partition_bars"),
-        _facade_plotter("_plot_system_coverage_bars"),
-        _facade_plotter("_plot_system_coverage_heatmap"),
-        _facade_plotter("_plot_binding_preference_bars"),
-        _facade_plotter("_plot_binding_preference_heatmap"),
     ]
     if ctx.settings.compute_residence_times:
         plot_functions[1:1] = [

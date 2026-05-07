@@ -75,7 +75,6 @@ from polyzymd.analyses.shared.config_hash import (
 from polyzymd.analyses.shared.constants import (
     DEFAULT_CONTACT_CUTOFF,
     DEFAULT_DISTANCE_THRESHOLD,
-    DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
 )
 from polyzymd.analyses.shared.convergence import (
     ConvergenceResult,
@@ -158,7 +157,6 @@ __all__ = [
     # Constants
     "DEFAULT_CONTACT_CUTOFF",
     "DEFAULT_DISTANCE_THRESHOLD",
-    "DEFAULT_SURFACE_EXPOSURE_THRESHOLD",
     # Defaults
     "AnalysisDefaults",
     # Config hash

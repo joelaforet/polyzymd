@@ -30,8 +30,7 @@ Use this site by *need*:
    Stable analysis workflows for the `v1.3.0` release are RMSD, Rg, RMSF,
    contacts, distances, catalytic triad, secondary structure, SASA, and
    hydrogen bonds. RMSD analysis now includes automated convergence detection
-   diagnostics. Contacts binding preference remains available through the
-   contacts plugin and is documented as experimental.
+   diagnostics.
 
 Choose Your Path
 ----------------

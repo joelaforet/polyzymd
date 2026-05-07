@@ -364,22 +364,8 @@ def init(name: str, eq_time: str, output_dir: Path | None):
 
 Place shared structure files here for use in comparison analyses.
 
-## For Binding Preference Analysis
-
-Copy your enzyme PDB file here for SASA (solvent-accessible surface area)
-calculation used in binding preference analysis:
-
-    cp /path/to/your/enzyme.pdb structures/
-
-Then reference it in comparison.yaml:
-
-    plugins:
-      contacts:
-        compute_binding_preference: true
-        enzyme_pdb_for_sasa: "structures/enzyme.pdb"
-
-The enzyme PDB should be the reference structure (e.g., from PDB or your
-prepared simulation input), NOT a trajectory frame.
+Keep condition-specific input structures with their simulation projects and
+place only comparison-wide references in this directory.
 """
         (project_dir / "structures" / "README.md").write_text(
             prepend_file_header(structures_readme, comment_prefix="#")
@@ -397,11 +383,8 @@ prepared simulation input), NOT a trajectory frame.
         click.echo("     - Add your simulation conditions (paths to config.yaml files)")
         click.echo("     - Define catalytic_triad for active site analysis")
         click.echo()
-        click.echo("  2. For binding preference analysis, copy your enzyme PDB:")
-        click.echo(f"     cp /path/to/enzyme.pdb {_display_path(project_dir)}/structures/")
-        click.echo()
-        click.echo(f"  3. cd {_display_path(project_dir)}")
-        click.echo("  4. Run comparisons:")
+        click.echo(f"  2. cd {_display_path(project_dir)}")
+        click.echo("  3. Run comparisons:")
         click.echo("     polyzymd compare run rmsf      # Compare flexibility")
         click.echo("     polyzymd compare run triad     # Compare triad geometry")
         click.echo("     polyzymd compare run contacts  # Compare polymer-protein contacts")

@@ -5,19 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import Final
 
-EXPERIMENTAL_FEATURES: Final[dict[str, str]] = {
-    "contacts_binding_preference": "Contacts binding preference",
-}
+EXPERIMENTAL_FEATURES: Final[dict[str, str]] = {}
 
 EXPERIMENTAL_COMPARISON_TYPES: Final[dict[str, tuple[str, ...]]] = {}
 
-EXPERIMENTAL_PLOT_TYPES: Final[dict[str, tuple[str, ...]]] = {
-    "binding_preference_heatmap": ("contacts_binding_preference",),
-    "binding_preference_bars": ("contacts_binding_preference",),
-    "system_coverage_heatmap": ("contacts_binding_preference",),
-    "system_coverage_bars": ("contacts_binding_preference",),
-    "user_partition_bars": ("contacts_binding_preference",),
-}
+EXPERIMENTAL_PLOT_TYPES: Final[dict[str, tuple[str, ...]]] = {}
 
 
 def normalize_experimental_features(features: Iterable[str] | None) -> tuple[str, ...]:
@@ -50,10 +42,7 @@ def experimental_features_for_comparison_type(
     analysis_settings: object | None = None,
 ) -> tuple[str, ...]:
     """Return experimental feature ids for a comparison type."""
-    if comparison_type == "contacts" and getattr(
-        analysis_settings, "compute_binding_preference", False
-    ):
-        return ("contacts_binding_preference",)
+    del analysis_settings
     return EXPERIMENTAL_COMPARISON_TYPES.get(comparison_type, ())
 
 

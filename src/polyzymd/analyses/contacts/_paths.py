@@ -417,8 +417,6 @@ def extract_contact_settings_fingerprint(path: Path) -> str | None:
         return None
 
     if isinstance(data, dict):
-        if path.name.startswith("binding_preference"):
-            return _extract_contacts_fingerprint_from_binding_preference(data)
         direct = (
             data.get("contacts_settings_fingerprint")
             or data.get("contact_settings_fingerprint")
@@ -502,36 +500,6 @@ def has_unproven_fingerprinted_contact_artifacts(
         ):
             return True
     return False
-
-
-def _extract_contacts_fingerprint_from_binding_preference(
-    data: dict[str, Any],
-) -> str | None:
-    """Extract upstream contacts identity from a BP artifact.
-
-    Parameters
-    ----------
-    data : dict[str, Any]
-        Parsed JSON payload.
-
-    Returns
-    -------
-    str or None
-        Contacts settings fingerprint from explicitly contact-domain BP metadata.
-    """
-
-    direct = data.get("contacts_settings_fingerprint") or data.get("contact_settings_fingerprint")
-    if isinstance(direct, str):
-        return direct
-
-    metadata = data.get("metadata")
-    if isinstance(metadata, dict):
-        stored = metadata.get("contacts_settings_fingerprint") or metadata.get(
-            "contact_settings_fingerprint"
-        )
-        if isinstance(stored, str):
-            return stored
-    return None
 
 
 def infer_contact_results_settings_fingerprint(paths_by_replicate: dict[int, Path]) -> str | None:
@@ -652,17 +620,7 @@ def infer_contacts_artifact_settings_fingerprint(
     if resolved_contact_fingerprints:
         return _unique_contacts_settings_fingerprint(resolved_contact_fingerprints)
 
-    fingerprints = set()
-    for path in _iter_fingerprinted_binding_preference_artifacts(
-        analysis_dir,
-        replicates,
-        equilibration=equilibration,
-    ):
-        fingerprint = extract_contact_settings_fingerprint(path)
-        if fingerprint is not None:
-            fingerprints.add(fingerprint)
-
-    return _unique_contacts_settings_fingerprint(fingerprints)
+    return None
 
 
 def _iter_non_fingerprinted_contact_artifacts(
@@ -779,46 +737,6 @@ def _iter_fingerprinted_contact_artifacts(
     ]
 
 
-def _iter_fingerprinted_binding_preference_artifacts(
-    analysis_dir: Path,
-    replicates: Sequence[int],
-    *,
-    equilibration: str | None = None,
-) -> list[Path]:
-    """Return fingerprinted binding-preference artifacts in deterministic order.
-
-    Parameters
-    ----------
-    analysis_dir : Path
-        Contacts analysis directory for one condition.
-    replicates : Sequence[int]
-        Replicate IDs associated with the condition.
-    equilibration : str or None, optional
-        Requested contacts analysis window.
-
-    Returns
-    -------
-    list[Path]
-        Unique fingerprinted binding-preference artifact paths.
-    """
-
-    patterns = [
-        "binding_preference_aggregated_s*.json",
-        "binding_preference_aggregated_s*_reps*.json",
-        "binding_preference_s*.json",
-    ]
-    paths: list[Path] = []
-    for pattern in patterns:
-        paths.extend(sorted(analysis_dir.glob(pattern)))
-    for replicate in replicates:
-        paths.extend(sorted(analysis_dir.glob(f"binding_preference_s*_rep{replicate}.json")))
-    return [
-        path
-        for path in dict.fromkeys(paths)
-        if binding_preference_artifact_matches_window(path, equilibration)
-    ]
-
-
 def contact_equilibration_filename_token(equilibration: str | None) -> str | None:
     """Return the contacts filename token for an equilibration window.
 
@@ -884,28 +802,6 @@ def contact_artifact_matches_settings_fingerprint(path: Path, settings_fp: str) 
     """
 
     return extract_contact_settings_fingerprint(path) == settings_fp
-
-
-def binding_preference_artifact_matches_window(path: Path, equilibration: str | None) -> bool:
-    """Return whether a binding-preference artifact proves the requested window.
-
-    Parameters
-    ----------
-    path : Path
-        Binding-preference result path.
-    equilibration : str or None
-        Requested equilibration window.
-
-    Returns
-    -------
-    bool
-        ``True`` when no window was requested, or when artifact metadata records
-        the requested contacts window.
-    """
-
-    if equilibration is None:
-        return True
-    return _json_artifact_matches_window(path, equilibration)
 
 
 def _filename_has_equilibration_token(path: Path, equilibration: str) -> bool:

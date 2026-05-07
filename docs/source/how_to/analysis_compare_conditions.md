@@ -12,8 +12,7 @@ You will:
 
 ```{important}
 For the `v1.3.0` release, the stable comparison stack is RMSD, Rg, RMSF,
-contacts, distances, catalytic triad, secondary structure, and SASA. Contacts
-binding preference remains available, but PolyzyMD labels it as experimental.
+contacts, distances, catalytic triad, secondary structure, and SASA.
 ```
 
 ```{note}
@@ -330,7 +329,6 @@ For end-to-end examples, see:
 Experimental workflows remain available, but they are not the default path for
 the presentation release:
 
-- [Experimental: Analyze Binding Preference](analysis_binding_preference.md)
 
 ## Troubleshooting
 

@@ -14,9 +14,6 @@ primary metrics — coverage (fraction of residues contacted) and mean
 contact fraction (average per-residue contact fraction).  Therefore
 ``compare()`` is overridden entirely and ``extract_metrics()`` is not used.
 
-Additional sub-pipeline: binding preference comparison is optionally
-computed when ``compute_binding_preference=True`` in settings.
-
 Condition filtering
 -------------------
 No-polymer conditions (e.g. "No Polymer" controls) are automatically
@@ -42,7 +39,6 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
-from polyzymd.analyses.contacts import _binding_preference as _contacts_binding_preference
 from polyzymd.analyses.contacts import _cache as _contacts_cache
 from polyzymd.analyses.contacts import _comparison as _contacts_comparison
 from polyzymd.analyses.contacts import _filters as _contacts_filters
@@ -55,17 +51,12 @@ from polyzymd.analyses.contacts._identity import (
 )
 from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
 from polyzymd.analyses.contacts._plotters import (
-    _plot_binding_preference_bars,
-    _plot_binding_preference_heatmap,
     _plot_cf_by_aa_class_bars,
     _plot_cf_by_partition_bars,
     _plot_contact_fraction_profile,
     _plot_residence_time_profile,
     _plot_rt_by_aa_class_bars,
     _plot_rt_by_partition_bars,
-    _plot_system_coverage_bars,
-    _plot_system_coverage_heatmap,
-    _plot_user_partition_bars,
 )
 from polyzymd.analyses.contacts._results import ContactResult
 from polyzymd.analyses.contacts._runner import (
@@ -79,6 +70,24 @@ logger = logging.getLogger("polyzymd.analyses.contacts")
 
 # Default cutoff matching the existing settings module
 DEFAULT_CONTACT_CUTOFF = 4.5
+
+ARCHIVED_BINDING_PREFERENCE_SETTINGS: frozenset[str] = frozenset(
+    {
+        "compute_binding_preference",
+        "surface_exposure_threshold",
+        "enzyme_pdb_for_sasa",
+        "include_default_aa_groups",
+        "polymer_type_selections",
+        "polymer_chain",
+        "enrichment_normalization",
+    }
+)
+
+ARCHIVE_DIAGNOSTIC = (
+    "Contacts binding-preference support has been archived and is no longer shipped as "
+    "an active PolyzyMD contacts subpipeline. To recover the archived implementation, "
+    "use git tag 'archive_experimental_analysis' from branch 'feature/mda-analysis-migration'."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -106,31 +115,16 @@ class ContactsSettings(BaseModel):
         or ``none``.
     compute_residence_times : bool
         If ``True``, compute residence time statistics.
-    compute_binding_preference : bool
-        If ``True``, compute binding preference enrichment analysis.
-    surface_exposure_threshold : float
-        Relative SASA threshold for surface-exposed residues.
-    enzyme_pdb_for_sasa : str | None
-        Path to enzyme PDB for SASA calculation.
-    include_default_aa_groups : bool
-        Include default AA class groupings in binding preference.
     protein_groups : dict[str, list[int]] | None
         Custom protein groups as ``{name: [resid, ...]}``.
     protein_partitions : dict[str, list[str]] | None
         Custom partitions as ``{partition_name: [group1, ...]}``.
-    polymer_type_selections : dict[str, str] | None
-        Custom polymer type selections as ``{name: "MDAnalysis selection"}``.
-    polymer_chain : str
-        Chain ID for polymer auto-detection when *polymer_type_selections*
-        is None. Defaults to ``"C"`` (PolyzyMD chain convention).
     fdr_alpha : float
         False discovery rate alpha for Benjamini-Hochberg correction.
     min_effect_size : float
         Minimum Cohen's d effect size to highlight.
     top_residues : int
         Number of top residues to display in console.
-    enrichment_normalization : str
-        **DEPRECATED** — kept for backward compatibility. Ignored.
     """
 
     # --- Analysis settings ---
@@ -155,23 +149,6 @@ class ContactsSettings(BaseModel):
         default=True, description="Compute residence time statistics"
     )
 
-    # --- Binding preference settings ---
-    compute_binding_preference: bool = Field(
-        default=False,
-        description="Compute binding preference enrichment analysis",
-    )
-    surface_exposure_threshold: float = Field(
-        default=0.2,
-        description="Relative SASA threshold for surface-exposed residues",
-    )
-    enzyme_pdb_for_sasa: str | None = Field(
-        default=None,
-        description="Path to enzyme PDB for SASA calculation",
-    )
-    include_default_aa_groups: bool = Field(
-        default=True,
-        description="Include default AA class groupings",
-    )
     protein_groups: dict[str, list[int]] | None = Field(
         default=None,
         description="Custom protein groups as {name: [resid, ...]}",
@@ -180,22 +157,6 @@ class ContactsSettings(BaseModel):
         default=None,
         description="Custom partitions as {partition_name: [group1, ...]}",
     )
-    polymer_type_selections: dict[str, str] | None = Field(
-        default=None,
-        description="Custom polymer type selections as {name: 'MDAnalysis selection'}",
-    )
-    polymer_chain: str = Field(
-        default="C",
-        description=(
-            "Chain ID for polymer auto-detection when polymer_type_selections "
-            "is None. Defaults to 'C' (PolyzyMD chain convention)."
-        ),
-    )
-    enrichment_normalization: str = Field(
-        default="residue",
-        description="DEPRECATED: ignored. Kept for backward compat.",
-    )
-
     # --- Comparison settings ---
     fdr_alpha: float = Field(
         default=0.05,
@@ -209,6 +170,21 @@ class ContactsSettings(BaseModel):
         default=10,
         description="Number of top residues to display in console",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_archived_binding_preference_settings(cls, data: Any) -> Any:
+        """Reject archived contacts binding-preference settings."""
+
+        if not isinstance(data, dict):
+            return data
+        archived_keys = sorted(ARCHIVED_BINDING_PREFERENCE_SETTINGS.intersection(data))
+        if archived_keys:
+            joined = ", ".join(archived_keys)
+            raise ValueError(
+                f"Archived contacts binding-preference setting(s): {joined}. {ARCHIVE_DIAGNOSTIC}"
+            )
+        return data
 
     @field_validator("grouping", mode="after")
     @classmethod
@@ -274,17 +250,14 @@ class ContactsAnalysis(Analysis):
 
     - Two primary metrics: coverage and mean_contact_fraction.
     - Auto-exclusion of no-polymer conditions.
-    - Optional binding preference sub-pipeline.
     - Residue set validation across conditions.
 
     Plots
     -----
-    Generates 11 plot types via private module-level functions:
+    Generates stable contact plot types via private module-level functions:
 
     - Contact fraction / residence time profiles
     - Grouped bar charts (by AA class, by partition)
-    - System coverage bar / heatmap
-    - Binding preference bar / heatmap
     """
 
     name: ClassVar[str] = "contacts"
@@ -819,35 +792,3 @@ class ContactsAnalysis(Analysis):
         """Compute top contacted residues per condition."""
 
         return _contacts_comparison.compute_top_contacted_residues(condition_data, top_n)
-
-    # === Private helper wrappers: binding preference ===
-
-    def _load_or_compute_binding_preference(
-        self,
-        ctx: ComparisonContext,
-        condition_data: list[tuple[Condition, dict[str, Any]]],
-    ) -> Any | None:
-        """Load or compute binding preference results across conditions."""
-
-        return _contacts_binding_preference.load_or_compute_binding_preference(
-            self, ctx, condition_data
-        )
-
-    def _build_binding_preference_summary(
-        self,
-        condition_results: dict[str, Any],
-        surface_threshold: float | None,
-    ) -> Any:
-        """Build binding preference comparison summary from per-condition results."""
-
-        return _contacts_binding_preference.build_binding_preference_summary(
-            self, condition_results, surface_threshold
-        )
-
-    @staticmethod
-    def _compute_bp_pairwise_pvalues(
-        per_replicate_data: dict[str, list[float]],
-    ) -> dict[str, float]:
-        """Compute pairwise t-test p-values from per-replicate enrichment data."""
-
-        return _contacts_binding_preference.compute_bp_pairwise_pvalues(per_replicate_data)

@@ -26,7 +26,6 @@ src/polyzymd/
 | **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the extension point |
 | **Private modules** | `_analysis_*`, `_contexts.py`, `_comparison_models.py`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics |
-| **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Shared compute for contacts binding preference |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Stable public facade, auto-discovery, lifecycle runner |
 
 New analysis types are added as **packages in `analyses/<name>/`**. All existing
@@ -46,9 +45,8 @@ from `polyzymd.analyses.base`.
 
 `polyzymd.analyses.contacts` follows the same facade pattern. The public
 `ContactsAnalysis` class remains in `contacts/__init__.py`; cache handling,
-lifecycle helpers, condition filtering, custom comparison, binding-preference
-support, plotting orchestration, result models, and trajectory runners live in
-private `contacts/_*.py` modules.
+lifecycle helpers, condition filtering, custom comparison, plotting orchestration,
+result models, and trajectory runners live in private `contacts/_*.py` modules.
 
 ## Chain Convention (Critical)
 

@@ -86,19 +86,6 @@ Analyze Hydrogen Bonds <hydrogen_bonds>
 Run Catalytic Triad Analysis <analysis_triad_quickstart>
 ```
 
-## Experimental Analysis Workflows
-
-```{warning}
-These workflows are available in PolyzyMD but their interpretation is still
-evolving. Treat results as exploratory, not settled science.
-```
-
-```{toctree}
-:maxdepth: 1
-
-Analyze Binding Preference <analysis_binding_preference>
-```
-
 ## Plots & Troubleshooting
 
 Customize publication-quality figures and debug common issues.

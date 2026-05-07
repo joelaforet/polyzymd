@@ -133,8 +133,6 @@ def compare(analysis: Any, ctx: ComparisonContext) -> Any:
     top_residues_data = analysis._compute_top_contacted_residues(
         condition_data, settings.top_residues
     )
-    binding_pref_summary = analysis._load_or_compute_binding_preference(ctx, condition_data)
-
     return ContactsComparisonResult(
         name=ctx.name,
         contacts_name="polymer_contacts",
@@ -154,7 +152,6 @@ def compare(analysis: Any, ctx: ComparisonContext) -> Any:
         ranking_by_coverage=[s.label for s in ranked_coverage],
         ranking_by_contact_fraction=[s.label for s in ranked_contact],
         excluded_conditions=[c.label for c in ctx.excluded_conditions],
-        binding_preference=binding_pref_summary,
         top_contacted_residues=top_residues_data,
         equilibration_time=ctx.equilibration,
         created_at=datetime.now(),

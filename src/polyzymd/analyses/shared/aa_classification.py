@@ -1,12 +1,13 @@
 """Amino acid classification and SASA reference data.
 
 This module provides centralized reference data for amino acid properties:
+
 - Maximum accessible surface area (maxASA) from Tien et al. 2013
 - Standard amino acid classification by physicochemical properties
 - Default MDAnalysis selection strings for each AA class
 
 These constants are used by:
-- Surface exposure filtering (binding preference analysis)
+
 - Protein grouping in contact analysis
 - Template generation for analysis configs
 
@@ -24,7 +25,7 @@ from enum import Enum
 from typing import Final
 
 # Canonical ordering of amino acid classes for consistent display across plots.
-# Used by binding preference and contacts plotters.
+# Used by contacts plotters.
 CANONICAL_AA_CLASS_ORDER: Final[list[str]] = [
     "aromatic",
     "polar",
@@ -119,7 +120,7 @@ STANDARD_AA_CODES: Final[list[str]] = list(AA_CLASSIFICATION_TABLE.keys())
 # =============================================================================
 
 # Default MDAnalysis selections for each AA class
-# These are used in analysis.yaml templates and binding preference analysis
+# These are used in analysis config templates and contacts grouping
 DEFAULT_AA_CLASS_SELECTIONS: Final[dict[str, str]] = {
     "aromatic": "protein and resname PHE TRP TYR HIS",
     "polar": "protein and resname SER THR ASN GLN CYS",

@@ -89,10 +89,6 @@ Stable analysis plugins:
 - `sasa`
 - `hydrogen_bonds` (aliases: `hbonds`, `hbond`)
 
-Experimental but still available:
-
-- binding preference through `contacts`
-
 ## Plugin Summary Table
 
 | Plugin | Default compare? | Primary metric | Key feature | Statistical method |

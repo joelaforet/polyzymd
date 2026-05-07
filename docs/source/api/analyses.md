@@ -71,8 +71,8 @@ from modules named `_analysis_*`, `_contexts`, or `_comparison_models`.
 `polyzymd.analyses.contacts` exposes the public `ContactsAnalysis` plugin and
 its supported settings/result classes. The package is intentionally split into
 private helper modules for cache handling, lifecycle dispatch, condition
-filtering, custom comparison, binding-preference support, plotting, result
-models, and trajectory runners. These `contacts/_*.py` modules are internal
+filtering, custom comparison, plotting, result models, and trajectory runners.
+These `contacts/_*.py` modules are internal
 implementation details and are not separate contributor API entry points.
 
 ## Shared Utilities
