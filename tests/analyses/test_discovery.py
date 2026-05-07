@@ -54,7 +54,7 @@ class TestDiscovery:
             "sasa",
             "secondary_structure",
         }
-        assert expected_names.issubset(analyses.keys())
+        assert set(analyses) == expected_names
 
         for name, cls in analyses.items():
             assert issubclass(cls, Analysis), f"{name} is not an Analysis subclass"
@@ -64,14 +64,25 @@ class TestDiscovery:
 
     def test_discovery_excludes_archived_plugins(self):
         """Archived plugins and aliases should not be discoverable as active code."""
-        from polyzymd.analyses.discovery import clear_cache, list_all_names, list_analyses
+        from polyzymd.analyses.discovery import (
+            clear_cache,
+            get_analysis,
+            list_all_names,
+            list_analyses,
+        )
 
         clear_cache()
         active_plugins = list_analyses()
         active_names = list_all_names()
 
         for name in (
+            "binding_preference",
+            "contacts_binding_preference",
+            "contact_binding_preference",
+            "bp",
             "exposure",
+            "exposure_dynamics",
+            "surface_exposure",
             "binding_free_energy",
             "bfe",
             "polymer_affinity",
@@ -81,6 +92,8 @@ class TestDiscovery:
         ):
             assert name not in active_plugins
             assert name not in active_names
+            with pytest.raises(KeyError, match="archive_experimental_analysis"):
+                get_analysis(name)
 
         for name in ("contacts", "rmsf", "sasa"):
             assert name in active_plugins

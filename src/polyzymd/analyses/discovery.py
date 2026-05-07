@@ -262,6 +262,14 @@ def get_analysis(name: str) -> type["Analysis"]:
     canonical = aliases.get(name)
     if canonical is not None:
         return registry[canonical]
+    from polyzymd.core.archived_features import (
+        format_archived_analysis_message,
+        get_archived_analysis_plugin,
+    )
+
+    if get_archived_analysis_plugin(name) is not None:
+        raise KeyError(format_archived_analysis_message(name, context="analysis lookup"))
+
     available = sorted(set(registry.keys()) | set(aliases.keys()))
     raise KeyError(f"Unknown analysis {name!r}.  Available: {', '.join(available)}")
 

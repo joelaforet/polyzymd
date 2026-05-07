@@ -112,8 +112,5 @@ This file tracks where images should be added after the text overhaul is stable.
 - `docs/source/tutorials/hpc_slurm.md`
   - Suggested image: SLURM submission lifecycle or job-script anatomy
 
-- `docs/source/tutorials/analysis_exposure_dynamics.md`
-  - Suggested image: event schematic for buried -> exposed -> polymer-contact -> reburied
-
 - `docs/source/tutorials/residue_assignment.md`
   - Suggested image: chain identity diagram for protein, substrate, polymer, and solvent

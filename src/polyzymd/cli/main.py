@@ -2276,7 +2276,9 @@ def status(config: str) -> None:
             status_display = status_val.value
             steps_for_display = progress.total_steps_completed
             if status_val == SimulationStatus.FAILED:
-                steps_for_display = max((seg.steps_completed for seg in progress.segments), default=0)
+                steps_for_display = max(
+                    (seg.steps_completed for seg in progress.segments), default=0
+                )
 
             frac = (
                 min(1.0, steps_for_display / progress.total_steps_requested)

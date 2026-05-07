@@ -68,6 +68,7 @@ Catalytic Triad Plugin Reference <analysis_triad_reference>
 Distances Plugin Reference <analysis_distances_reference>
 Contacts Plugin Reference <analysis_contacts_reference>
 Post-Hoc Testing Reference <posthoc_testing>
+Experimental Analyses Archive <experimental_analyses_archive>
 ```
 
 ## API Reference

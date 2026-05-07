@@ -220,6 +220,6 @@ figures exist, and `polyzymd compare plot-all` completes without error.
   - [Run Contacts Analysis](../how_to/analysis_contacts_quickstart.md)
   - [Run Distance Analysis](../how_to/analysis_distances_quickstart.md)
   - [Run Catalytic Triad Analysis](../how_to/analysis_triad_quickstart.md)
-
-Experimental workflows remain available, but they are intentionally outside the
-main tutorial path for this release.
+- For removed experimental analyses, see
+  [Experimental analyses](../reference/experimental_analyses_archive.md); they
+  are not active v1.3 workflows.

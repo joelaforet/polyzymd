@@ -1310,8 +1310,6 @@ def generate_comparison_yaml(
         f"\n       polyzymd compare run rmsf -c {comparison_yaml_path}"
         f"\n       polyzymd compare run catalytic_triad -c {comparison_yaml_path}"
         f"\n       polyzymd compare run contacts -c {comparison_yaml_path}"
-        f"\n       polyzymd compare run exposure -c {comparison_yaml_path}"
-        f"\n       polyzymd compare run binding_free_energy -c {comparison_yaml_path}"
         f"\n    4. Generate all plots:"
         f"\n       polyzymd compare plot-all -c {comparison_yaml_path}"
     )
@@ -1369,20 +1367,6 @@ def _build_analysis_settings(enzyme_pdb_rel: str | None) -> dict:
                 "catalytic_triad": [77, 133, 156],
             },
         },
-        # Exposure: polymer shielding of protein surface
-        "exposure": {
-            "protein_selection": "protein",
-            "polymer_selection": "chainID C",
-            "exposure_threshold": 0.2,
-            "protein_chain": "A",
-        },
-        # Binding free energy: thermodynamic analysis
-        "binding_free_energy": {
-            "units": "kcal/mol",
-            "protein_groups": {
-                "catalytic_triad": [77, 133, 156],
-            },
-        },
     }
 
     return settings
@@ -1405,10 +1389,6 @@ def _build_comparison_settings() -> dict:
             "fdr_alpha": 0.05,
             "min_effect_size": 0.5,
             "top_residues": 10,
-        },
-        "exposure": {},
-        "binding_free_energy": {
-            "fdr_alpha": 0.05,
         },
     }
 
@@ -1440,12 +1420,6 @@ def _build_plot_settings() -> dict:
         },
         "contacts": {
             "figsize": [10, 8],
-        },
-        "binding_free_energy": {
-            "generate_heatmap": True,
-            "generate_bars": True,
-            "figsize_bars": [10, 6],
-            "show_error_bars": True,
         },
     }
 

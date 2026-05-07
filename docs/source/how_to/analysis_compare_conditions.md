@@ -324,10 +324,9 @@ For end-to-end examples, see:
 - [Run Distance Analysis](analysis_distances_quickstart.md)
 - [Run Catalytic Triad Analysis](analysis_triad_quickstart.md)
 
-## Experimental Workflows
-
-Experimental workflows remain available, but they are not the default path for
-the presentation release:
+Archived experimental analyses are not active v1.3 plugins. See
+[Experimental analyses](../reference/experimental_analyses_archive.md) for
+historical access details.
 
 
 ## Troubleshooting

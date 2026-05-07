@@ -25,6 +25,26 @@ class ArchivedAnalysisPlugin:
 
 
 ARCHIVED_ANALYSIS_PLUGINS: dict[str, ArchivedAnalysisPlugin] = {
+    "binding_preference": ArchivedAnalysisPlugin(
+        name="binding_preference",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
+    "contacts_binding_preference": ArchivedAnalysisPlugin(
+        name="binding_preference",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
+    "contact_binding_preference": ArchivedAnalysisPlugin(
+        name="binding_preference",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
+    "bp": ArchivedAnalysisPlugin(
+        name="binding_preference",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
     "binding_free_energy": ArchivedAnalysisPlugin(
         name="binding_free_energy",
         tag="archive_experimental_analysis",
@@ -36,6 +56,16 @@ ARCHIVED_ANALYSIS_PLUGINS: dict[str, ArchivedAnalysisPlugin] = {
         branch="feature/mda-analysis-migration",
     ),
     "exposure": ArchivedAnalysisPlugin(
+        name="exposure",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
+    "exposure_dynamics": ArchivedAnalysisPlugin(
+        name="exposure",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
+    "surface_exposure": ArchivedAnalysisPlugin(
         name="exposure",
         tag="archive_experimental_analysis",
         branch="feature/mda-analysis-migration",
