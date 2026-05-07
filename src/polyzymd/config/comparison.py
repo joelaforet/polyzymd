@@ -93,9 +93,7 @@ class PluginSettingsContainer(BaseModel):
         for key, value in data.items():
             key_lower = str(key).lower()
             if get_archived_analysis_plugin(key_lower) is not None:
-                raise ValueError(
-                    format_archived_analysis_message(key, context="plugins section")
-                )
+                raise ValueError(format_archived_analysis_message(key, context="plugins section"))
             if value is None:
                 continue
             try:
@@ -439,7 +437,10 @@ class PlotSettings(BaseModel):
             # Do NOT silently remap — raise the normal unknown-key error below
 
         for key in data:
-            if key not in PlotSettings._GLOBAL_FIELDS and get_archived_analysis_plugin(key) is not None:
+            if (
+                key not in PlotSettings._GLOBAL_FIELDS
+                and get_archived_analysis_plugin(key) is not None
+            ):
                 raise ValueError(
                     format_archived_analysis_message(key, context="plot_settings section")
                 )

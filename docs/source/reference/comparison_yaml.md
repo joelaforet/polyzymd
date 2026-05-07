@@ -14,9 +14,9 @@ Plugin settings path fields are resolved relative to the directory containing
 
 For example, in:
 
-`plugins.rmsf.reference_file`, `plugins.contacts.enzyme_pdb_for_sasa`,
-`plugins.binding_free_energy.enzyme_pdb_for_sasa`, and other plugin-declared
-path fields, a relative path like `structures/enzyme.pdb` is interpreted as:
+`plugins.rmsf.reference_file`, `plugins.contacts.enzyme_pdb_for_sasa`, and
+other plugin-declared path fields, a relative path like `structures/enzyme.pdb`
+is interpreted as:
 
 `<comparison_yaml_parent>/structures/enzyme.pdb`
 ```
@@ -286,47 +286,6 @@ and usable element metadata.
 |-------|------|---------|-------------|
 | `partitions` | mapping | — | Named partitions: `{name: "MDAnalysis selection"}` |
 
-### `plugins.binding_free_energy`
-
-```{admonition} Experimental
-:class: warning
-
-Binding free energy decomposition is experimental and under active development.
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `units` | string | `"kT"` | Energy units: `"kT"`, `"kcal/mol"`, or `"kJ/mol"` |
-| `compute_binding_preference` | bool | `true` | Recompute binding preference from contacts if no cache is available |
-| `surface_exposure_threshold` | float | `0.2` | Minimum relative SASA for surface-exposed |
-| `enzyme_pdb_for_sasa` | path | `null` | Enzyme PDB for SASA computation |
-| `include_default_aa_groups` | bool | `true` | Include built-in amino acid class groups |
-| `protein_groups` | mapping | `null` | Custom residue groups: `{name: [resid, ...]}` |
-| `protein_partitions` | mapping | `null` | Mutually exclusive protein-group partitions |
-| `polymer_type_selections` | mapping | `null` | Custom MDAnalysis selections per polymer type |
-| `polymer_chain` | string | `"C"` | Chain ID used for polymer auto-detection |
-| `fdr_alpha` | float | `0.05` | FDR threshold |
-
-### `plugins.polymer_affinity`
-
-```{admonition} Experimental
-:class: warning
-
-Polymer affinity scoring is experimental and under active development.
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `compute_binding_preference` | bool | `true` | Recompute binding preference from contacts if no cache is available |
-| `surface_exposure_threshold` | float | `0.2` | Minimum relative SASA |
-| `enzyme_pdb_for_sasa` | path | `null` | Enzyme PDB for SASA computation |
-| `include_default_aa_groups` | bool | `true` | Use built-in AA groups |
-| `protein_groups` | mapping | `null` | Custom residue groups |
-| `protein_partitions` | mapping | `null` | Mutually exclusive partitions |
-| `polymer_type_selections` | mapping | `null` | Custom MDAnalysis selections per polymer type |
-| `polymer_chain` | string | `"C"` | Chain ID used for polymer auto-detection |
-| `fdr_alpha` | float | `0.05` | FDR threshold |
-
 ### `plugins.polymer_bridging`
 
 ```{admonition} Experimental
@@ -457,21 +416,6 @@ level as `style`, `dpi`, etc.
 | `generate_system_coverage_bars` | `true` | System coverage bar chart |
 | `generate_contact_fraction_profile` | `true` | Per-residue contact fraction profile |
 | `generate_residence_time_profile` | `true` | Per-residue residence time profile |
-
-**`plot_settings.binding_free_energy`:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `generate_heatmap` | `true` | ΔG_sel heatmap |
-| `generate_bars` | `true` | ΔG_sel bar chart |
-| `colormap` | `"RdBu_r"` | Diverging colormap for heatmap |
-
-**`plot_settings.polymer_affinity`:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `generate_stacked_bars` | `true` | Total score by condition |
-| `generate_group_bars` | `true` | Per-group contributions |
 
 **`plot_settings.secondary_structure`:**
 

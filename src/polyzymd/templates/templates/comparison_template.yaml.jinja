@@ -167,33 +167,6 @@ plugins:
   #       substrate: "resname LIG"
   #       polymer: "chainid C"
 
-  # EXPERIMENTAL: Binding Free Energy Analysis (ΔG_sel via Boltzmann inversion)
-  # Requires contacts analysis with compute_binding_preference: true to be run first.
-  # Converts binding preference probabilities into ΔG_sel = -k_B·T·ln(contact_share / expected_share).
-  # Definitions and interpretation may change after the presentation release.
-  # Run: polyzymd compare run binding_free_energy
-  #
-  # binding_free_energy:
-  #   units: kT                    # energy units: kT (default), kcal/mol, or kJ/mol
-  #   surface_exposure_threshold: 0.2  # minimum relative SASA to be considered surface-exposed
-  #   # protein_partitions: null   # optional: restrict to user-defined AA partitions
-
-  # EXPERIMENTAL: Polymer Affinity Score (composite selectivity metric)
-  # Requires contacts analysis with compute_binding_preference: true.
-  # Computes S = Σ N_pg × ΔG_sel_pg for each polymer composition.
-  # Definitions and interpretation may change after the presentation release.
-  # Run: polyzymd compare run polymer_affinity
-  #
-  # polymer_affinity:
-  #   surface_exposure_threshold: 0.2
-  #   enzyme_pdb_for_sasa: "structures/enzyme.pdb"
-  #   include_default_aa_groups: true
-  #   # protein_groups:            # same format as contacts.protein_groups
-  #   #   catalytic_triad: [77, 133, 156]
-  #   # protein_partitions:        # same format as contacts.protein_partitions
-  #   #   lid_helices:
-  #   #     - lid_helix_5
-
 # ============================================================================
 # Plot Settings (HOW to visualize - figure customization)
 # ============================================================================
@@ -276,15 +249,6 @@ plot_settings:
   #   generate_system_coverage_bars: true
   #   generate_contact_fraction_profile: true
   #   generate_residence_time_profile: true
-
-  # binding_free_energy:
-  #   generate_heatmap: true       # ΔG_sel heatmap (AA groups × conditions)
-  #   generate_bars: true          # ΔG_sel grouped bar chart
-  #   colormap: "RdBu_r"           # diverging colormap for heatmap
-
-  # polymer_affinity:
-  #   generate_stacked_bars: true  # total score by condition
-  #   generate_group_bars: true    # per-group contributions
 
   # secondary_structure:
   #   generate_timeline: true      # per-condition residue × time SS heatmap

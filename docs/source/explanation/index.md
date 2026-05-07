@@ -65,9 +65,7 @@ Catalytic Triad Best Practices <analysis_triad_best_practices>
 
 These workflows remain available in PolyzyMD, but their interpretation is still
 evolving and they should be treated as experimental. See also the how-to guides
-for {doc}`../how_to/analysis_binding_preference`,
-{doc}`../how_to/analysis_binding_free_energy`, and
-{doc}`../how_to/analysis_polymer_affinity`.
+for {doc}`../how_to/analysis_binding_preference`.
 
 ```{toctree}
 :maxdepth: 1

@@ -2,9 +2,8 @@
 
 Shared utility for determining which protein residues are surface-exposed
 based on solvent-accessible surface area (SASA) calculations.  Surface
-exposure data is consumed by multiple analysis plugins (contacts,
-binding_free_energy, polymer_affinity) for binding preference analysis,
-since buried residues cannot participate in polymer-protein contacts.
+exposure data is consumed by contacts binding-preference analysis since buried
+residues cannot participate in polymer-protein contacts.
 
 Uses `rust_sasa_python` for fast SASA computation on initial PDB structures.
 

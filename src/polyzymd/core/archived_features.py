@@ -25,8 +25,28 @@ class ArchivedAnalysisPlugin:
 
 
 ARCHIVED_ANALYSIS_PLUGINS: dict[str, ArchivedAnalysisPlugin] = {
+    "binding_free_energy": ArchivedAnalysisPlugin(
+        name="binding_free_energy",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
+    "bfe": ArchivedAnalysisPlugin(
+        name="binding_free_energy",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
     "exposure": ArchivedAnalysisPlugin(
         name="exposure",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
+    "pa": ArchivedAnalysisPlugin(
+        name="polymer_affinity",
+        tag="archive_experimental_analysis",
+        branch="feature/mda-analysis-migration",
+    ),
+    "polymer_affinity": ArchivedAnalysisPlugin(
+        name="polymer_affinity",
         tag="archive_experimental_analysis",
         branch="feature/mda-analysis-migration",
     ),

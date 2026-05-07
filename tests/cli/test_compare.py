@@ -535,14 +535,18 @@ def test_run_reports_plugin_contract_error(monkeypatch, tmp_path: Path) -> None:
     assert "likely a PolyzyMD/plugin bug, not missing trajectory data" in result.output
 
 
-def test_run_exposure_reports_archive_diagnostic(tmp_path: Path) -> None:
-    """compare run exposure should report the archive tag and source branch."""
+@pytest.mark.parametrize("analysis_name", ["exposure", "binding_free_energy", "bfe", "polymer_affinity", "pa"])
+def test_run_archived_analysis_reports_archive_diagnostic(
+    analysis_name: str,
+    tmp_path: Path,
+) -> None:
+    """compare run should report the archive tag and source branch."""
     runner = CliRunner()
 
-    result = runner.invoke(compare, ["run", "exposure", "-f", str(tmp_path / "missing.yaml")])
+    result = runner.invoke(compare, ["run", analysis_name, "-f", str(tmp_path / "missing.yaml")])
 
     assert result.exit_code != 0
-    assert "Analysis plugin 'exposure'" in result.output
+    assert f"Analysis plugin '{analysis_name}'" in result.output
     assert "archive_experimental_analysis" in result.output
     assert "feature/mda-analysis-migration" in result.output
 

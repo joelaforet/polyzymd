@@ -12,9 +12,9 @@ You will:
 
 ```{important}
 For the `v1.3.0` release, the stable comparison stack is RMSD, Rg, RMSF,
-contacts, distances, catalytic triad, secondary structure, and SASA. Binding
-preference, binding free energy, and polymer affinity remain
-available, but PolyzyMD labels them as experimental.
+contacts, distances, catalytic triad, secondary structure, and SASA. Contacts
+binding preference and polymer bridging remain available, but PolyzyMD labels
+them as experimental.
 ```
 
 ```{note}
@@ -159,8 +159,7 @@ plugins:
 
 Plugins that perform cross-condition statistical tests support per-plugin
 settings in the `plugins:` block. For example, contacts supports `fdr_alpha`,
-`min_effect_size`, and `top_residues`; binding free energy and polymer affinity
-support `fdr_alpha`. See the
+`min_effect_size`, and `top_residues`. See the
 [Comparison Reference](../reference/analysis_comparison_reference.md#per-plugin-statistical-settings)
 for the full settings table. For post-hoc method details (BH t-tests, Tukey
 HSD, Cohen's d, and significance markers), see the
@@ -333,8 +332,6 @@ Experimental workflows remain available, but they are not the default path for
 the presentation release:
 
 - [Experimental: Analyze Binding Preference](analysis_binding_preference.md)
-- [Experimental: Analyze Binding Free Energy](analysis_binding_free_energy.md)
-- [Experimental: Analyze Polymer Affinity](analysis_polymer_affinity.md)
 - [Experimental: Analyze Polymer Bridging](analysis_polymer_bridging.md)
 
 ## Troubleshooting
@@ -353,16 +350,6 @@ You need at least one configured section under `plugins:`.
 Check that the corresponding comparison JSON files already exist under
 `comparison/<analysis>/result.json` and use
 `polyzymd compare plot-all --list-available` to verify the enabled plot types.
-
-### `polyzymd compare run` fails for an experimental metric
-
-Run the prerequisite analysis first. For example, `binding_free_energy` and
-`polymer_affinity` depend on cached contact-derived data, so you usually run:
-
-```bash
-polyzymd compare run contacts
-polyzymd compare run binding_free_energy
-```
 
 ## See Also
 

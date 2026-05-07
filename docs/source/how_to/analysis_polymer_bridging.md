@@ -423,7 +423,6 @@ before presenting or publishing polymer bridging results.
 |----------|-----------------|------------------------------|
 | **Contacts** | Total contact counts and frequencies | Polymer bridging decomposes contacts per-chain, adding valency information. |
 | **Binding Preference** | Enrichment by residue class | Provides surface-normalized context that bridging lacks. |
-| **Polymer Affinity** | Total interaction strength (N x deltaG) | Complementary: affinity measures total adhesion; bridging measures spatial distribution of adhesion per chain. |
 | **RMSF** | Structural flexibility | Complementary: does multisite bridging correlate with reduced flexibility? |
 | **Catalytic Triad** | Active site geometry | Complementary: do bridging events coincide with triad perturbation? |
 
@@ -462,7 +461,6 @@ aggregated results programmatically (see above).
 
 - [Contacts Analysis Quick Start](analysis_contacts_quickstart.md) — prerequisite contact computation
 - [Binding Preference Analysis](analysis_binding_preference.md) — surface-normalized enrichment (complementary)
-- [Polymer Affinity Analysis](analysis_polymer_affinity.md) — total interaction strength scoring
 - [Statistics Best Practices](../explanation/analysis_statistics_best_practices.md) — replicate planning
 - [Comparing Conditions](analysis_compare_conditions.md) — multi-condition workflows
 - [Extending the Analysis Framework](../contributor_guide/extending_analyses.md) — contribute a new plugin

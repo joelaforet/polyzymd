@@ -338,10 +338,8 @@ Each plugin defines its own hypothesis family:
 - **Contacts** — All pairwise t-test p-values (both coverage and
   contact_fraction metrics) form **one hypothesis family**. ANOVA p-values
   form a separate small family (typically 2 tests).
-- **Binding free energy** — Same-temperature pairwise entries form **one
-  family per temperature group**.
-- **Polymer affinity** — Same pattern as binding free energy: one family per
-  temperature group.
+- **Default scalar plugins** — Each extracted metric forms its own family for
+  pairwise t-test correction.
 
 ### Tukey's HSD Alternative
 

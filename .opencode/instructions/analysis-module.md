@@ -17,7 +17,7 @@ src/polyzymd/analyses/
 ├── orchestrator.py         # Framework engine: compute → aggregate → compare → plot
 ├── stats.py                # default_scalar_comparison(), format_scalar_comparison()
 ├── shared/                 # Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-│   ├── binding_preference.py   # Cross-plugin compute (contacts, BFE, polymer_affinity)
+│   ├── binding_preference.py   # Shared compute for contacts binding preference
 │   ├── binding_preference_helpers.py  # Orchestration helpers for binding preference
 │   └── surface_exposure.py     # SASA-based surface exposure utility
 ├── _results_base.py        # Base result model (shared, stays at top level)
@@ -52,8 +52,7 @@ src/polyzymd/analyses/
 │   ├── _identity.py        #   Internal settings fingerprints
 │   ├── _runner.py          #   Internal trajectory runner and analyzer
 │   └── _paths.py           #   Internal result path helpers
-├── binding_free_energy/    # Binding free energy plugin (custom compare)
-└── polymer_affinity/       # Polymer affinity plugin (custom compare)
+└── polymer_bridging/       # Polymer bridging plugin (custom compare)
 ```
 
 `polyzymd.analyses.base` is the supported public import surface. It re-exports
@@ -156,7 +155,7 @@ def plot(self, ctx: PlotContext) -> list[Path]:
   automatically via `json.loads()`)
 - Framework handles loading, t-tests, ANOVA, ranking, and formatting automatically
 
-**Custom path** (contacts, distances, BFE, polymer_affinity):
+**Custom path** (contacts, distances, polymer_bridging):
 - Override `compare()` entirely — return your own Pydantic model with `.save()`
 - The returned model must be saveable/loadable
 
@@ -276,8 +275,6 @@ to detect changes. **Known issue:** the hash mismatch warning currently prints
 | `distances` | No (custom) | Multiple distance metrics |
 | `contacts` | No (custom) | Coverage + contact fraction |
 | `hydrogen_bonds` | No (custom) | H-bond occupancy + lifetime |
-| `binding_free_energy` | No (custom) | Per-contact ΔG_sel |
-| `polymer_affinity` | No (custom) | Total interaction score |
 | `polymer_bridging` | No (custom) | Bridging topology metrics |
 
 ## Issue #20 — Remaining TODOs

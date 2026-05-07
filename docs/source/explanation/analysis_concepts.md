@@ -131,8 +131,6 @@ The available plugins are:
 | `secondary_structure` | Secondary structure content (helix, sheet, coil fractions) |
 | `sasa` | Solvent-accessible surface area |
 | `hydrogen_bonds` | Hydrogen bond occupancy and lifetimes |
-| `binding_free_energy` | Per-contact binding free energy estimates (experimental) |
-| `polymer_affinity` | Polymer–protein interaction scoring (experimental) |
 | `polymer_bridging` | Polymer bridging topology between protein regions (experimental) |
 
 Each plugin has a `Settings` model with configurable parameters. Most

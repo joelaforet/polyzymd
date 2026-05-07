@@ -1,7 +1,6 @@
 """Binding preference metrics for polymer-protein contacts.
 
-Shared compute layer consumed by contacts, binding_free_energy, and
-polymer_affinity plugins.
+Shared compute layer consumed by contacts binding-preference analysis.
 """
 
 from __future__ import annotations

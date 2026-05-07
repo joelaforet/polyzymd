@@ -44,12 +44,10 @@ class TestDiscovery:
         analyses = list_analyses()
 
         expected_names = {
-            "binding_free_energy",
             "catalytic_triad",
             "contacts",
             "distances",
             "hydrogen_bonds",
-            "polymer_affinity",
             "polymer_bridging",
             "rg",
             "rmsd",
@@ -65,13 +63,20 @@ class TestDiscovery:
         assert analyses["rmsf"] is RMSFAnalysis
         assert analyses["contacts"] is ContactsAnalysis
 
-    def test_discovery_excludes_archived_exposure_plugin(self):
-        """Archived exposure plugin should not be discoverable as active code."""
+    def test_discovery_excludes_archived_plugins(self):
+        """Archived plugins and aliases should not be discoverable as active code."""
         from polyzymd.analyses.discovery import clear_cache, list_all_names, list_analyses
 
         clear_cache()
-        assert "exposure" not in list_analyses()
-        assert "exposure" not in list_all_names()
+        active_plugins = list_analyses()
+        active_names = list_all_names()
+
+        for name in ("exposure", "binding_free_energy", "bfe", "polymer_affinity", "pa"):
+            assert name not in active_plugins
+            assert name not in active_names
+
+        for name in ("contacts", "polymer_bridging", "rmsf", "sasa"):
+            assert name in active_plugins
 
     def test_get_analysis_unknown_raises(self):
         from polyzymd.analyses.discovery import clear_cache, get_analysis

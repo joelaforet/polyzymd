@@ -149,35 +149,6 @@ element metadata are required for meaningful counts.
 |---|---|---|---|
 | `partitions` | `dict[str, str]` | `{}` | Named composition partitions as MDAnalysis selections |
 
-## `binding_free_energy`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `units` | `str` | `"kT"` | Output free-energy units: `kT`, `kcal/mol`, or `kJ/mol` |
-| `compute_binding_preference` | `bool` | `true` | Compute binding preference if cache is missing |
-| `surface_exposure_threshold` | `float` | `0.2` | Relative SASA threshold for surface exposure |
-| `enzyme_pdb_for_sasa` | `str \| null` | `null` | Optional enzyme PDB for SASA |
-| `include_default_aa_groups` | `bool` | `true` | Include built-in amino-acid class groups |
-| `protein_groups` | `dict[str, list[int]] \| null` | `null` | Custom residue groups |
-| `protein_partitions` | `dict[str, list[str]] \| null` | `null` | Custom partitions over `protein_groups` |
-| `polymer_type_selections` | `dict[str, str] \| null` | `null` | Custom polymer-type selections |
-| `polymer_chain` | `str` | `"C"` | Polymer chain ID for auto-detection |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
-
-## `polymer_affinity`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `compute_binding_preference` | `bool` | `true` | Compute binding preference if cache is missing |
-| `surface_exposure_threshold` | `float` | `0.2` | Relative SASA threshold for surface exposure |
-| `enzyme_pdb_for_sasa` | `str \| null` | `null` | Optional enzyme PDB for SASA |
-| `include_default_aa_groups` | `bool` | `true` | Include built-in amino-acid class groups |
-| `protein_groups` | `dict[str, list[int]] \| null` | `null` | Custom residue groups |
-| `protein_partitions` | `dict[str, list[str]] \| null` | `null` | Custom partitions over `protein_groups` |
-| `polymer_type_selections` | `dict[str, str] \| null` | `null` | Custom polymer-type selections |
-| `polymer_chain` | `str` | `"C"` | Polymer chain ID for auto-detection |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
-
 ## `rg`
 
 | Key | Type | Default | Description |

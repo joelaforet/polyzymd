@@ -24,7 +24,7 @@ from enum import Enum
 from typing import Final
 
 # Canonical ordering of amino acid classes for consistent display across plots.
-# Used by binding preference, contacts, and binding free energy plotters.
+# Used by binding preference and contacts plotters.
 CANONICAL_AA_CLASS_ORDER: Final[list[str]] = [
     "aromatic",
     "polar",

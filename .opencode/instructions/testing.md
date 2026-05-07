@@ -32,12 +32,10 @@ tests/
 │   │   ├── test_result_io.py
 │   │   └── test_sasa.py
 │   ├── plugins/                 # One file per analysis plugin
-│   │   ├── test_binding_free_energy.py
 │   │   ├── test_catalytic_triad.py
 │   │   ├── test_contacts.py
 │   │   ├── test_distances.py
 │   │   ├── test_hydrogen_bonds.py
-│   │   ├── test_polymer_affinity.py
 │   │   ├── test_polymer_bridging.py
 │   │   ├── test_rg.py
 │   │   ├── test_rmsd.py

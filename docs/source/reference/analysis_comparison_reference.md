@@ -51,23 +51,15 @@ plugins:
     fdr_alpha: 0.05
     min_effect_size: 0.5
     top_residues: 10
-
-  binding_free_energy:
-    units: "kcal/mol"
-    fdr_alpha: 0.05
-
-  polymer_affinity:
-    surface_exposure_threshold: 0.2
-    fdr_alpha: 0.05
 ```
 
 ### Settings Support Matrix
 
-| Setting | contacts | binding_free_energy | polymer_affinity | Default |
-|---------|----------|---------------------|------------------|---------|
-| `fdr_alpha` | ✓ | ✓ | ✓ | 0.05 |
-| `min_effect_size` | ✓ | — | — | 0.5 |
-| `top_residues` | ✓ | — | — | 10 |
+| Setting | contacts | Default |
+|---------|----------|---------|
+| `fdr_alpha` | ✓ | 0.05 |
+| `min_effect_size` | ✓ | 0.5 |
+| `top_residues` | ✓ | 10 |
 
 ### Setting Descriptions
 
@@ -100,8 +92,6 @@ Stable analysis plugins:
 Experimental but still available:
 
 - binding preference through `contacts`
-- `binding_free_energy`
-- `polymer_affinity`
 - `polymer_bridging` (alias: `bridging`)
 
 ## Plugin Summary Table
@@ -117,8 +107,6 @@ Experimental but still available:
 | `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + ANOVA |
 | `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | Per-run pairwise t-tests + ANOVA |
 | `hydrogen_bonds` | Yes | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA |
-| `binding_free_energy` | No (custom) | Per-contact ΔG_sel | Free energy decomposition | Custom statistical pipeline |
-| `polymer_affinity` | No (custom) | Total interaction score | Combined contact + energetic scoring | Custom statistical pipeline |
 | `polymer_bridging` | No (custom) | Bridging event counts | Polymer-mediated inter-chain contacts | Custom statistical pipeline |
 
 ## Path Rules
@@ -163,8 +151,6 @@ polyzymd compare plot-all
 ## Experimental Commands
 
 ```bash
-polyzymd compare run binding_free_energy
-polyzymd compare run polymer_affinity
 polyzymd compare run polymer_bridging   # alias: polyzymd compare run bridging
 ```
 

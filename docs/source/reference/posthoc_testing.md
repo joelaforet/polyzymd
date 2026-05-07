@@ -125,7 +125,8 @@ The CLI formatter annotates pairwise rows with significance markers:
 | `***` | `p_adj <= 0.001` |
 
 ```{note}
-The multi-level markers (`**`, `***`) are used by the contacts, binding free energy, and polymer affinity formatters. The default scalar formatter uses a single `*` for any significant result.
+The contacts formatter uses multi-level markers (`**`, `***`). The default
+scalar formatter uses a single `*` for any significant result.
 ```
 
 Some plugins also use:

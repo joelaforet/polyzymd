@@ -1,7 +1,6 @@
 """Shared helpers for computing binding preference from contacts data.
 
-Used by the contacts, binding_free_energy, and polymer_affinity analysis
-plugins to compute SASA-based binding preference enrichment.
+Used by contacts binding-preference analysis to compute SASA-based enrichment.
 
 Public functions
 ----------------

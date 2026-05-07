@@ -83,17 +83,12 @@ This command:
 - orders plugins by declared `dependencies`
 - submits each plugin DAG with cross-plugin finalize dependencies
 
-For example, analyses that depend on `contacts` (such as
-`binding_free_energy` or `polymer_affinity`) are submitted after `contacts`,
-and their root finalize jobs are wired to the upstream `contacts` finalize job.
-
 Exclude one or more analyses with repeatable `--exclude`:
 
 ```bash
 pixi run -e build polyzymd compare submit-all \
     -f comparison.yaml \
-    --exclude binding_free_energy \
-    --exclude polymer_affinity \
+    --exclude sasa \
     --partition aa100
 ```
 

@@ -61,10 +61,10 @@ src/polyzymd/
 | **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the **extension point** for contributors |
 | **Private modules** | `_analysis_*`, `_contexts.py`, `_comparison_models.py`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics, autocorrelation — reusable across plugins |
-| **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Cross-plugin compute (used by contacts, BFE, polymer_affinity) |
+| **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Shared compute for contacts binding preference |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Stable public facade, auto-discovery, lifecycle runner, default comparison utilities |
 
-New analysis types are added as **packages in `analyses/<name>/`**. All 12
+New analysis types are added as **packages in `analyses/<name>/`**. All 10
 existing plugins are packages (no single-file plugins exist). Established
 plugins extract plotting into `_plotters.py` modules; new plugins can keep
 plotting inline in `plot()` or extract it as complexity grows.

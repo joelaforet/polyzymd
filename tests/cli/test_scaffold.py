@@ -101,7 +101,7 @@ class TestToPascalCase:
         assert to_pascal_case("solvent_shell") == "SolventShell"
 
     def test_three_words(self):
-        assert to_pascal_case("binding_free_energy") == "BindingFreeEnergy"
+        assert to_pascal_case("solvent_shell_density") == "SolventShellDensity"
 
 
 class TestGenerateScaffold:

@@ -1,11 +1,28 @@
 """Tests for comparison config validation."""
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 import yaml
+from pydantic import BaseModel
 
 from polyzymd.config.comparison import ComparisonConfig, ConditionConfig, PlotSettings
+
+
+class _FakePathSettings(BaseModel):
+    """Settings model with a plugin-declared path field."""
+
+    enzyme_pdb_for_sasa: str | None = None
+    units: str = "kT"
+
+
+class _FakePathAnalysis:
+    """Fake plugin used to test config path resolution."""
+
+    name: ClassVar[str] = "fake_paths"
+    Settings: ClassVar[type[_FakePathSettings]] = _FakePathSettings
+    settings_path_fields: ClassVar[tuple[str, ...]] = ("enzyme_pdb_for_sasa",)
 
 
 class TestUnknownTopLevelKeys:
@@ -149,8 +166,13 @@ class TestPlotThemeValidation:
 class TestArchivedAnalysisDiagnostics:
     """Archived analyses should fail with recovery diagnostics."""
 
-    def test_plugins_exposure_reports_archive_location(self, tmp_path: Path) -> None:
-        """plugins.exposure should explain where the archived code lives."""
+    @pytest.mark.parametrize("analysis_name", ["exposure", "binding_free_energy", "bfe", "polymer_affinity", "pa"])
+    def test_plugins_archived_analysis_reports_archive_location(
+        self,
+        analysis_name: str,
+        tmp_path: Path,
+    ) -> None:
+        """Archived plugin settings should explain where the archived code lives."""
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
@@ -159,7 +181,7 @@ class TestArchivedAnalysisDiagnostics:
                     "conditions": [
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
-                    "plugins": {"exposure": {"exposure_threshold": 0.2}},
+                    "plugins": {analysis_name: {}},
                 }
             )
         )
@@ -172,8 +194,13 @@ class TestArchivedAnalysisDiagnostics:
         assert "archive_experimental_analysis" in message
         assert "feature/mda-analysis-migration" in message
 
-    def test_plot_settings_exposure_reports_archive_location(self, tmp_path: Path) -> None:
-        """plot_settings.exposure should explain where the archived code lives."""
+    @pytest.mark.parametrize("analysis_name", ["exposure", "binding_free_energy", "bfe", "polymer_affinity", "pa"])
+    def test_plot_settings_archived_analysis_reports_archive_location(
+        self,
+        analysis_name: str,
+        tmp_path: Path,
+    ) -> None:
+        """Archived plot settings should explain where the archived code lives."""
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
@@ -183,7 +210,7 @@ class TestArchivedAnalysisDiagnostics:
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
                     "plugins": {},
-                    "plot_settings": {"exposure": {"generate_enrichment_heatmap": True}},
+                    "plot_settings": {analysis_name: {}},
                 }
             )
         )
@@ -200,8 +227,16 @@ class TestArchivedAnalysisDiagnostics:
 class TestPluginSettingsPathResolution:
     """Plugin path-like settings should resolve relative to comparison.yaml."""
 
-    def test_relative_plugin_path_resolves_from_yaml_parent(self, tmp_path: Path) -> None:
+    def test_relative_plugin_path_resolves_from_yaml_parent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         """Relative plugin path fields should be rebased to yaml directory."""
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.get_analysis",
+            lambda name: _FakePathAnalysis,
+        )
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
@@ -211,7 +246,7 @@ class TestPluginSettingsPathResolution:
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
                     "plugins": {
-                        "binding_free_energy": {
+                        "fake_paths": {
                             "enzyme_pdb_for_sasa": "structures/enzyme.pdb",
                         }
                     },
@@ -220,12 +255,20 @@ class TestPluginSettingsPathResolution:
         )
 
         config = ComparisonConfig.from_yaml(yaml_path)
-        settings = config.plugins.get("binding_free_energy")
+        settings = config.plugins.get("fake_paths")
         assert settings is not None
         assert settings.enzyme_pdb_for_sasa == str(tmp_path / "structures" / "enzyme.pdb")
 
-    def test_absolute_plugin_path_is_unchanged(self, tmp_path: Path) -> None:
+    def test_absolute_plugin_path_is_unchanged(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         """Absolute plugin path fields should remain unchanged."""
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.get_analysis",
+            lambda name: _FakePathAnalysis,
+        )
         yaml_path = tmp_path / "comparison.yaml"
         absolute_path = tmp_path / "already_absolute" / "enzyme.pdb"
         yaml_path.write_text(
@@ -236,7 +279,7 @@ class TestPluginSettingsPathResolution:
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
                     "plugins": {
-                        "polymer_affinity": {
+                        "fake_paths": {
                             "enzyme_pdb_for_sasa": str(absolute_path),
                         }
                     },
@@ -245,12 +288,20 @@ class TestPluginSettingsPathResolution:
         )
 
         config = ComparisonConfig.from_yaml(yaml_path)
-        settings = config.plugins.get("polymer_affinity")
+        settings = config.plugins.get("fake_paths")
         assert settings is not None
         assert settings.enzyme_pdb_for_sasa == str(absolute_path)
 
-    def test_missing_declared_path_field_is_ignored(self, tmp_path: Path) -> None:
+    def test_missing_declared_path_field_is_ignored(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         """Declared path fields missing from YAML should be ignored."""
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.get_analysis",
+            lambda name: _FakePathAnalysis,
+        )
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
@@ -260,7 +311,7 @@ class TestPluginSettingsPathResolution:
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
                     "plugins": {
-                        "binding_free_energy": {
+                        "fake_paths": {
                             "units": "kT",
                         }
                     },
@@ -269,6 +320,6 @@ class TestPluginSettingsPathResolution:
         )
 
         config = ComparisonConfig.from_yaml(yaml_path)
-        settings = config.plugins.get("binding_free_energy")
+        settings = config.plugins.get("fake_paths")
         assert settings is not None
         assert settings.enzyme_pdb_for_sasa is None

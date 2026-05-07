@@ -97,8 +97,6 @@ evolving. Treat results as exploratory, not settled science.
 :maxdepth: 1
 
 Analyze Binding Preference <analysis_binding_preference>
-Analyze Binding Free Energy <analysis_binding_free_energy>
-Analyze Polymer Affinity <analysis_polymer_affinity>
 Analyze Polymer Bridging <analysis_polymer_bridging>
 ```
 
