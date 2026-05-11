@@ -1395,7 +1395,9 @@ class RgAnalysis(Analysis):
                     )
 
             if len(available) >= 3:
-                groups = [summary.get_run(run_label).per_replicate_means for summary in available.values()]
+                groups = [
+                    summary.get_run(run_label).per_replicate_means for summary in available.values()
+                ]
                 if any(len(group) < 2 for group in groups):
                     anova_by_run.append(
                         RgRunANOVA(
