@@ -1005,7 +1005,7 @@ def test_aggregate_fails_on_residue_metadata_mismatch(tmp_path: Path) -> None:
 
 
 def test_aggregate_fails_on_structural_metadata_mismatch(tmp_path: Path) -> None:
-    """aggregate should reject mismatched structural SASA counts across replicates."""
+    """aggregate should reject mismatched target SASA counts across replicates."""
     analysis = SASAAnalysis()
     settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
     condition = _make_condition("cond")
@@ -1024,8 +1024,50 @@ def test_aggregate_fails_on_structural_metadata_mismatch(tmp_path: Path) -> None
         _make_sasa_result(2, [run_b]),
     ]
 
-    with pytest.raises(ValueError, match="structural metadata mismatch"):
+    with pytest.raises(ValueError, match="target metadata mismatch"):
         analysis.aggregate(ctx, results)
+
+
+def test_aggregate_allows_variable_context_atom_counts(tmp_path: Path) -> None:
+    """aggregate should allow polymer context counts to vary across replicates."""
+    analysis = SASAAnalysis()
+    settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
+    condition = _make_condition("cond")
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    residue_kwargs = {
+        "residue_keys": ["A:1:ALA"],
+        "residue_chainids": ["A"],
+        "residue_resids": [1],
+        "residue_resnames": ["ALA"],
+    }
+    run_a = _make_run_result_with_sidecars(
+        tmp_path,
+        replicate=1,
+        label="protein",
+        mean=100.0,
+        **residue_kwargs,
+    ).model_copy(update={"n_context_atoms": 200})
+    run_b = _make_run_result_with_sidecars(
+        tmp_path,
+        replicate=2,
+        label="protein",
+        mean=101.0,
+        **residue_kwargs,
+    ).model_copy(update={"n_context_atoms": 260})
+    results = [
+        _make_sasa_result(1, [run_a]),
+        _make_sasa_result(2, [run_b]),
+    ]
+
+    aggregated = analysis.aggregate(ctx, results)
+
+    assert aggregated.run_results[0].overall_mean == pytest.approx(100.5)
 
 
 def test_compare_and_format(tmp_path: Path) -> None:

@@ -629,7 +629,7 @@ class SASAAnalysis(Analysis):
         run_label: str,
         entries: Sequence[Any],
     ) -> None:
-        """Require structural SASA counts to match across contributing replicates.
+        """Require target SASA counts to match across contributing replicates.
 
         Parameters
         ----------
@@ -643,14 +643,13 @@ class SASAAnalysis(Analysis):
         Raises
         ------
         ValueError
-            Raised when target atom, context atom, or target residue counts do
-            not match across contributing replicates.
+            Raised when target atom or target residue counts do not match
+            across contributing replicates.
         """
 
         first = entries[0]
         expected_counts = (
             int(first.n_target_atoms),
-            int(first.n_context_atoms),
             int(first.n_target_residues),
         )
         mismatch_details: list[str] = []
@@ -658,7 +657,6 @@ class SASAAnalysis(Analysis):
         for entry in entries[1:]:
             current_counts = (
                 int(entry.n_target_atoms),
-                int(entry.n_context_atoms),
                 int(entry.n_target_residues),
             )
             if current_counts == expected_counts:
@@ -666,7 +664,7 @@ class SASAAnalysis(Analysis):
 
             mismatch_details.append(
                 "replicate "
-                f"{entry.replicate}: counts {current_counts} != {expected_counts} "
+                f"{entry.replicate}: target counts {current_counts} != {expected_counts} "
                 f"(replicate {first.replicate})"
             )
 
@@ -674,7 +672,7 @@ class SASAAnalysis(Analysis):
             issue_text = "; ".join(mismatch_details)
             raise ValueError(
                 f"SASA aggregation for condition '{ctx.condition.label}' run '{run_label}' "
-                f"found structural metadata mismatch across replicates. Problems detected: "
+                f"found target metadata mismatch across replicates. Problems detected: "
                 f"{issue_text}."
             )
 
