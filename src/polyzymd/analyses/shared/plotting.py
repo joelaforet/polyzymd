@@ -533,16 +533,17 @@ def scatter_stacked_segment_replicates(
     dot_color: Any | None = None,
     dot_size: float | None = None,
     dot_alpha: float | None = None,
+    placement: str = "center",
     zorder: float = 5,
 ) -> int:
-    """Overlay replicate dots at stacked segment centers.
+    """Overlay replicate dots on stacked segments.
 
     The per-component replicate value is a segment height, not an absolute
     stacked coordinate. Plotting at ``base + replicate / 2`` places each dot at
     the center of the component-specific replicate segment. Callers should pass
     replicate-specific bases when earlier stacked components vary by replicate.
     Signed stacks may pass separate positive and negative bases so each dot is
-    centered on the same sign stack as its own replicate value.
+    placed on the same sign stack as its own replicate value.
 
     Parameters
     ----------
@@ -571,6 +572,9 @@ def scatter_stacked_segment_replicates(
         Override for theme dot size.
     dot_alpha : float, optional
         Override for theme dot alpha.
+    placement : {"center", "end"}, optional
+        Dot placement within each replicate segment. ``"center"`` uses
+        ``base + replicate / 2`` and ``"end"`` uses ``base + replicate``.
     zorder : float, optional
         Matplotlib z-order for dot overlays, by default ``5``.
 
@@ -587,6 +591,9 @@ def scatter_stacked_segment_replicates(
     import math
 
     import numpy as np
+
+    if placement not in {"center", "end"}:
+        raise ValueError("placement must be 'center' or 'end'")
 
     raw_values = list(replicate_values)
     if positive_base_values is not None or negative_base_values is not None:
@@ -635,13 +642,14 @@ def scatter_stacked_segment_replicates(
     if segment_values.size == 0:
         return 0
 
-    segment_centers = [
-        float(base) + float(value) / 2.0 for base, value in zip(bases, segment_values)
+    divisor = 2.0 if placement == "center" else 1.0
+    segment_positions = [
+        float(base) + float(value) / divisor for base, value in zip(bases, segment_values)
     ]
     return scatter_replicate_values(
         ax,
         [x_position],
-        [segment_centers],
+        [segment_positions],
         plot_settings,
         orientation="vertical",
         bar_width=bar_width,

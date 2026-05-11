@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -49,7 +50,7 @@ from polyzymd.analyses.stats import (
     interpret_direction,
     rank_conditions,
 )
-from polyzymd.config.comparison import PlotSettings
+from polyzymd.config.comparison import PlotSettings, PlotTheme
 
 
 class _MockAtom:
@@ -2462,10 +2463,12 @@ def test_plot_returns_paths(tmp_path: Path) -> None:
         ),
         patch(
             "polyzymd.analyses.hydrogen_bonds._plotters.plot_composition_absolute",
+            autospec=True,
             return_value=tmp_path / "figures" / "hbond_composition_absolute.png",
         ),
         patch(
             "polyzymd.analyses.hydrogen_bonds._plotters.plot_composition_fraction",
+            autospec=True,
             return_value=tmp_path / "figures" / "hbond_composition_fraction.png",
         ),
     ):
@@ -2594,10 +2597,12 @@ def test_plot_composition_gating(tmp_path: Path) -> None:
         patch("polyzymd.analyses.hydrogen_bonds._plotters.plot_timeseries", return_value=None),
         patch("polyzymd.analyses.hydrogen_bonds._plotters.plot_top_pairs", return_value=None),
         patch(
-            "polyzymd.analyses.hydrogen_bonds._plotters.plot_composition_absolute"
+            "polyzymd.analyses.hydrogen_bonds._plotters.plot_composition_absolute",
+            autospec=True,
         ) as mock_comp_abs,
         patch(
-            "polyzymd.analyses.hydrogen_bonds._plotters.plot_composition_fraction"
+            "polyzymd.analyses.hydrogen_bonds._plotters.plot_composition_fraction",
+            autospec=True,
         ) as mock_comp_frac,
     ):
         _ = analysis.plot(ctx)
@@ -2636,10 +2641,12 @@ def test_plot_composition_gating(tmp_path: Path) -> None:
         patch("polyzymd.analyses.hydrogen_bonds._plotters.plot_top_pairs", return_value=None),
         patch(
             "polyzymd.analyses.hydrogen_bonds._plotters.plot_composition_absolute",
+            autospec=True,
             return_value=None,
         ) as mock_comp_abs,
         patch(
             "polyzymd.analyses.hydrogen_bonds._plotters.plot_composition_fraction",
+            autospec=True,
             return_value=None,
         ) as mock_comp_frac,
     ):
@@ -3320,24 +3327,29 @@ def test_plot_composition_absolute_uses_replicate_specific_bases(tmp_path: Path)
     }
 
     with patch(
-        "polyzymd.analyses.hydrogen_bonds._plotters.scatter_stacked_segment_replicates"
+        "polyzymd.analyses.hydrogen_bonds._plotters.scatter_stacked_segment_replicates",
+        autospec=True,
     ) as scatter:
         path = plot_composition_absolute(results, ["CondA"], output_dir, PlotSettings())
 
     assert path is not None
     assert scatter.call_count == 2
     assert scatter.call_args_list[0].kwargs["replicate_base_values"] == [0.0, 0.0]
+    assert scatter.call_args_list[0].kwargs["placement"] == "end"
     assert scatter.call_args_list[1].kwargs["replicate_base_values"] == [1.0, 3.0]
+    assert scatter.call_args_list[1].kwargs["placement"] == "end"
 
 
 def test_plot_composition_fraction_overlap_exceeds_one(tmp_path: Path) -> None:
     """Composition fraction plot should not clip stacked fractions above 1.0."""
     pytest.importorskip("matplotlib")
+    import matplotlib.pyplot as plt
+
     from polyzymd.analyses.hydrogen_bonds._plotters import plot_composition_fraction
 
     output_dir = tmp_path / "plots"
     output_dir.mkdir(parents=True)
-    # Two partitions with fractions summing to 1.4 (simulating overlap)
+    # Two partitions with fractions summing to 1.4, simulating overlap
     results = {
         "CondA": HydrogenBondAggregatedResult(
             replicates=[1],
@@ -3367,10 +3379,25 @@ def test_plot_composition_fraction_overlap_exceeds_one(tmp_path: Path) -> None:
             ],
         )
     }
+    captured_upper_limits: list[float] = []
 
-    path = plot_composition_fraction(results, ["CondA"], output_dir, PlotSettings())
-    assert path is not None
-    assert path.exists()
+    def _capture_save_figure(fig: Any, output_path: Path, plot_settings: PlotSettings) -> Path:
+        """Capture the y-axis limit before closing the test figure."""
+        del plot_settings
+        captured_upper_limits.append(float(fig.axes[0].get_ylim()[1]))
+        plt.close(fig)
+        return output_path
+
+    with patch(
+        "polyzymd.analyses.hydrogen_bonds._plotters.save_figure",
+        autospec=True,
+        side_effect=_capture_save_figure,
+    ):
+        path = plot_composition_fraction(results, ["CondA"], output_dir, PlotSettings())
+
+    assert path == output_dir / "hbond_composition_fraction.png"
+    assert captured_upper_limits
+    assert captured_upper_limits[0] > 1.4
 
 
 def test_plot_composition_fraction_uses_replicate_specific_bases(tmp_path: Path) -> None:
@@ -3411,14 +3438,149 @@ def test_plot_composition_fraction_uses_replicate_specific_bases(tmp_path: Path)
     }
 
     with patch(
-        "polyzymd.analyses.hydrogen_bonds._plotters.scatter_stacked_segment_replicates"
+        "polyzymd.analyses.hydrogen_bonds._plotters.scatter_stacked_segment_replicates",
+        autospec=True,
     ) as scatter:
         path = plot_composition_fraction(results, ["CondA"], output_dir, PlotSettings())
 
     assert path is not None
     assert scatter.call_count == 2
     assert scatter.call_args_list[0].kwargs["replicate_base_values"] == [0.0, 0.0]
+    assert scatter.call_args_list[0].kwargs["placement"] == "end"
     assert scatter.call_args_list[1].kwargs["replicate_base_values"] == [0.4, 0.6]
+    assert scatter.call_args_list[1].kwargs["placement"] == "end"
+
+
+def test_plot_composition_fraction_ylim_covers_skewed_replicate_endpoints(
+    tmp_path: Path,
+) -> None:
+    """Fraction composition y-axis should include end-placed replicate endpoints."""
+    pytest.importorskip("matplotlib")
+    import matplotlib.pyplot as plt
+
+    from polyzymd.analyses.hydrogen_bonds._plotters import plot_composition_fraction
+
+    output_dir = tmp_path / "plots"
+    output_dir.mkdir(parents=True)
+    results = {
+        "CondA": HydrogenBondAggregatedResult(
+            replicates=[1, 2],
+            n_replicates=2,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0, 2.0])],
+            composition_entries=[
+                AggregatedCompositionEntry(
+                    donor_partition="groupA",
+                    acceptor_partition="groupA",
+                    mean_hbonds_per_frame=2.0,
+                    sem_hbonds_per_frame=0.0,
+                    per_replicate_hbonds=[2.0, 2.0],
+                    mean_fraction_of_total=0.5,
+                    sem_fraction_of_total=0.0,
+                    per_replicate_fraction=[0.9, 0.1],
+                ),
+                AggregatedCompositionEntry(
+                    donor_partition="groupA",
+                    acceptor_partition="groupB",
+                    mean_hbonds_per_frame=2.0,
+                    sem_hbonds_per_frame=0.0,
+                    per_replicate_hbonds=[2.0, 2.0],
+                    mean_fraction_of_total=0.5,
+                    sem_fraction_of_total=0.0,
+                    per_replicate_fraction=[0.9, 0.1],
+                ),
+            ],
+        )
+    }
+    captured_upper_limits: list[float] = []
+
+    def _capture_save_figure(fig: Any, output_path: Path, plot_settings: PlotSettings) -> Path:
+        """Capture the y-axis limit before closing the test figure."""
+        del plot_settings
+        captured_upper_limits.append(float(fig.axes[0].get_ylim()[1]))
+        plt.close(fig)
+        return output_path
+
+    with patch(
+        "polyzymd.analyses.hydrogen_bonds._plotters.save_figure",
+        autospec=True,
+        side_effect=_capture_save_figure,
+    ):
+        path = plot_composition_fraction(results, ["CondA"], output_dir, PlotSettings())
+
+    assert path == output_dir / "hbond_composition_fraction.png"
+    assert captured_upper_limits
+    assert captured_upper_limits[0] > 1.8
+
+
+@pytest.mark.parametrize(
+    "theme",
+    [PlotTheme(dot_size=0, dot_alpha=0.7), PlotTheme(dot_size=8, dot_alpha=0.0)],
+)
+def test_plot_composition_fraction_ylim_ignores_hidden_replicate_endpoints(
+    tmp_path: Path,
+    theme: PlotTheme,
+) -> None:
+    """Fraction composition y-axis should ignore hidden replicate endpoints."""
+    pytest.importorskip("matplotlib")
+    import matplotlib.pyplot as plt
+
+    from polyzymd.analyses.hydrogen_bonds._plotters import plot_composition_fraction
+
+    output_dir = tmp_path / "plots"
+    output_dir.mkdir(parents=True)
+    results = {
+        "CondA": HydrogenBondAggregatedResult(
+            replicates=[1, 2],
+            n_replicates=2,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0, 2.0])],
+            composition_entries=[
+                AggregatedCompositionEntry(
+                    donor_partition="groupA",
+                    acceptor_partition="groupA",
+                    mean_hbonds_per_frame=2.0,
+                    sem_hbonds_per_frame=0.0,
+                    per_replicate_hbonds=[2.0, 2.0],
+                    mean_fraction_of_total=0.5,
+                    sem_fraction_of_total=0.0,
+                    per_replicate_fraction=[0.9, 0.1],
+                ),
+                AggregatedCompositionEntry(
+                    donor_partition="groupA",
+                    acceptor_partition="groupB",
+                    mean_hbonds_per_frame=2.0,
+                    sem_hbonds_per_frame=0.0,
+                    per_replicate_hbonds=[2.0, 2.0],
+                    mean_fraction_of_total=0.5,
+                    sem_fraction_of_total=0.0,
+                    per_replicate_fraction=[0.9, 0.1],
+                ),
+            ],
+        )
+    }
+    captured_upper_limits: list[float] = []
+
+    def _capture_save_figure(fig: Any, output_path: Path, plot_settings: PlotSettings) -> Path:
+        """Capture the y-axis limit before closing the test figure."""
+        del plot_settings
+        captured_upper_limits.append(float(fig.axes[0].get_ylim()[1]))
+        plt.close(fig)
+        return output_path
+
+    with patch(
+        "polyzymd.analyses.hydrogen_bonds._plotters.save_figure",
+        autospec=True,
+        side_effect=_capture_save_figure,
+    ):
+        path = plot_composition_fraction(
+            results,
+            ["CondA"],
+            output_dir,
+            PlotSettings(theme=theme),
+        )
+
+    assert path == output_dir / "hbond_composition_fraction.png"
+    assert captured_upper_limits
+    assert captured_upper_limits[0] < 1.8
 
 
 def test_plot_timeseries_smoke(tmp_path: Path) -> None:

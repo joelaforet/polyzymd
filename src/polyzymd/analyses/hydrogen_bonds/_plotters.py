@@ -25,6 +25,8 @@ from polyzymd.analyses.shared.plotting import (
 
 logger = logging.getLogger("polyzymd.analyses.hydrogen_bonds")
 
+_FRACTION_COMPOSITION_Y_HEADROOM = 1.05
+
 
 def _safe_name(name: str) -> str:
     """Return a filesystem-safe token for filenames."""
@@ -376,6 +378,7 @@ def plot_composition_absolute(
                     reps,
                     plot_settings,
                     replicate_base_values=list(replicate_bases[: len(reps)]),
+                    placement="end",
                 )
                 for replicate_idx, value in enumerate(reps):
                     replicate_bases[replicate_idx] += float(value)
@@ -463,13 +466,22 @@ def plot_composition_fraction(
                     reps,
                     plot_settings,
                     replicate_base_values=list(replicate_bases[: len(reps)]),
+                    placement="end",
                 )
                 for replicate_idx, value in enumerate(reps):
                     replicate_bases[replicate_idx] += float(value)
         bottom += values_arr
 
     max_stack = float(np.max(bottom)) if len(bottom) > 0 else 1.0
-    ax.set_ylim(0.0, max(1.0, max_stack * 1.05))
+    if plot_settings.theme.dot_size > 0 and plot_settings.theme.dot_alpha > 0:
+        max_replicate_endpoint = 0.0
+        for replicate_bases in replicate_bases_by_label.values():
+            for value in replicate_bases:
+                endpoint = float(value)
+                if np.isfinite(endpoint):
+                    max_replicate_endpoint = max(max_replicate_endpoint, endpoint)
+        max_stack = max(max_stack, max_replicate_endpoint)
+    ax.set_ylim(0.0, max(1.0, max_stack * _FRACTION_COMPOSITION_Y_HEADROOM))
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=20, ha="right")
     apply_axis_style(

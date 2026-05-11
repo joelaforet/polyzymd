@@ -170,6 +170,30 @@ def test_scatter_stacked_segment_replicates_uses_replicate_bases() -> None:
     plt.close(fig)
 
 
+def test_scatter_stacked_segment_replicates_can_place_dots_at_segment_ends() -> None:
+    """Stacked overlays should optionally place dots at segment ends."""
+    import matplotlib.pyplot as plt
+
+    plot_settings = PlotSettings()
+    fig, ax = plt.subplots()
+
+    with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
+        n_calls = scatter_stacked_segment_replicates(
+            ax,
+            1.0,
+            0.4,
+            [0.2, 0.4],
+            plot_settings,
+            replicate_base_values=[1.0, 2.0],
+            placement="end",
+            bar_width=0.8,
+        )
+
+    assert n_calls == 1
+    np.testing.assert_allclose(mock_scatter.call_args.args[2], [1.2, 2.4])
+    plt.close(fig)
+
+
 def test_scatter_stacked_segment_replicates_uses_signed_replicate_bases() -> None:
     """Signed stacked overlays should choose bases from each replicate sign."""
     import matplotlib.pyplot as plt
