@@ -54,7 +54,7 @@ def _create_openmm_daisy_chain(run_dir: Path, n_segments: int = 3) -> None:
     for i in range(n_segments):
         seg_dir = run_dir / f"production_{i}"
         seg_dir.mkdir()
-        (seg_dir / f"production_{i}_trajectory.dcd").write_bytes(b"\x00")
+        (seg_dir / f"production_{i}_trajectory.dcd").write_bytes(b"DCD")
         (seg_dir / f"production_{i}_topology.pdb").write_text("ATOM topology")
 
 
@@ -64,7 +64,7 @@ def _create_openmm_legacy(run_dir: Path) -> None:
     prod_dir = run_dir / "production"
     prod_dir.mkdir()
     (prod_dir / "production_topology.pdb").write_text("ATOM topology")
-    (prod_dir / "production_trajectory.dcd").write_bytes(b"\x00")
+    (prod_dir / "production_trajectory.dcd").write_bytes(b"DCD")
 
 
 def _create_gromacs_flat(run_dir: Path, *, use_gro: bool = False) -> None:
@@ -139,6 +139,23 @@ class TestOpenMMDaisyChain:
         assert info.n_segments == 3
         for i, f in enumerate(info.trajectory_files):
             assert f.name == f"production_{i}_trajectory.dcd"
+
+    def test_skips_zero_byte_segments(self, tmp_path):
+        run_dir = tmp_path / "run_1"
+        _create_openmm_daisy_chain(run_dir, n_segments=3)
+        empty_segment = run_dir / "production_3"
+        empty_segment.mkdir()
+        (empty_segment / "production_3_trajectory.dcd").write_bytes(b"")
+        config = _make_openmm_config(tmp_path)
+        loader = TrajectoryLoader(config)
+
+        info = loader.get_trajectory_info(replicate=1)
+
+        assert [path.name for path in info.trajectory_files] == [
+            "production_0_trajectory.dcd",
+            "production_1_trajectory.dcd",
+            "production_2_trajectory.dcd",
+        ]
 
     def test_replicate_routing(self, tmp_path):
         for rep in (1, 3):

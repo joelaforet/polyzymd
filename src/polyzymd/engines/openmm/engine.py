@@ -262,6 +262,8 @@ class OpenMMEngine(SimulationEngine):
         prod_re = re.compile(r"production_(\d+)[/\\]production_\d+_trajectory\.dcd$")
         segments: dict[int, Path] = {}
         for file_path in working_dir.glob("production_*/production_*_trajectory.dcd"):
+            if file_path.stat().st_size == 0:
+                continue
             match = prod_re.search(str(file_path))
             if match:
                 segments[int(match.group(1))] = file_path
@@ -271,8 +273,10 @@ class OpenMMEngine(SimulationEngine):
 
         # Legacy single-file production trajectory path
         legacy = working_dir / "production" / "production_trajectory.dcd"
-        if legacy.exists():
+        if legacy.exists() and legacy.stat().st_size > 0:
             return [legacy]
 
         # Last-resort recursive pattern for historical layouts
-        return sorted(working_dir.glob("**/production*trajectory.dcd"))
+        return sorted(
+            path for path in working_dir.glob("**/production*trajectory.dcd") if path.stat().st_size > 0
+        )
