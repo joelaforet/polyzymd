@@ -57,6 +57,43 @@ class RgRunnerPayload:
 
     n_frames_total: int
     run_payloads: list[RgRunPayload]
+    skipped_run_payloads: list[RgSkippedRunPayload] = field(default_factory=list)
+
+
+@dataclass
+class RgSkippedRunPayload:
+    """Provenance for one skipped Rg run in a replicate."""
+
+    run_label: str
+    selection: str
+    replicate: int
+    reason: str
+    reason_code: str = "empty_selection"
+
+
+class RgEmptySelectionError(ValueError):
+    """Raised when an Rg run selection matches no atoms."""
+
+    def __init__(self, *, run_label: str, selection: str, replicate: int) -> None:
+        """Build a diagnostic empty-selection error.
+
+        Parameters
+        ----------
+        run_label : str
+            Configured run label.
+        selection : str
+            MDAnalysis selection string that matched no atoms.
+        replicate : int
+            Replicate number where the selection was empty.
+        """
+
+        self.run_label = run_label
+        self.selection = selection
+        self.replicate = replicate
+        super().__init__(
+            f"Run '{run_label}' selection matched no atoms for replicate "
+            f"{replicate}: {selection!r}"
+        )
 
 
 class RgReplicateRunner:
@@ -96,7 +133,11 @@ class RgReplicateRunner:
         self._loader_factory = loader_factory
         self._n_frames_total = int(n_frames_total)
         self._timestep_ps = float(timestep_ps)
-        self.results = RgRunnerPayload(n_frames_total=0, run_payloads=[])
+        self.results = RgRunnerPayload(
+            n_frames_total=0,
+            run_payloads=[],
+            skipped_run_payloads=[],
+        )
 
     def run(self, start: int, stop: int, step: int = 1) -> RgReplicateRunner:
         """Execute all configured Rg runs.
@@ -118,20 +159,38 @@ class RgReplicateRunner:
 
         loader = self._loader_factory(self._sim_config)
         run_payloads: list[RgRunPayload] = []
+        skipped_run_payloads: list[RgSkippedRunPayload] = []
         for run in self._runs:
-            payload = compute_rg_run(
-                universe=loader.load_universe(self._replicate, cache=False),
-                run=run,
-                replicate=self._replicate,
-                start=start,
-                stop=stop,
-                step=step,
-                timestep_ps=self._timestep_ps,
-            )
+            try:
+                payload = compute_rg_run(
+                    universe=loader.load_universe(self._replicate, cache=False),
+                    run=run,
+                    replicate=self._replicate,
+                    start=start,
+                    stop=stop,
+                    step=step,
+                    timestep_ps=self._timestep_ps,
+                )
+            except RgEmptySelectionError as exc:
+                LOGGER.warning(
+                    "Skipping Rg run '%s' for replicate %s because the selection matched no atoms",
+                    exc.run_label,
+                    exc.replicate,
+                )
+                skipped_run_payloads.append(
+                    RgSkippedRunPayload(
+                        run_label=exc.run_label,
+                        selection=exc.selection,
+                        replicate=exc.replicate,
+                        reason=str(exc),
+                    )
+                )
+                continue
             run_payloads.append(payload)
         self.results = RgRunnerPayload(
             n_frames_total=self._n_frames_total,
             run_payloads=run_payloads,
+            skipped_run_payloads=skipped_run_payloads,
         )
         return self
 
@@ -175,9 +234,10 @@ def compute_rg_run(
 
     atom_group = universe.select_atoms(run.selection)
     if len(atom_group) == 0:
-        raise ValueError(
-            f"Run '{run.label}' selection matched no atoms for replicate "
-            f"{replicate}: {run.selection!r}"
+        raise RgEmptySelectionError(
+            run_label=run.label,
+            selection=run.selection,
+            replicate=replicate,
         )
 
     frame_indices = np.arange(start, stop, step, dtype=np.int64)

@@ -32,6 +32,7 @@ from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
+    filter_summaries_with_run,
 )
 from polyzymd.analyses.shared.statistics import compute_sem
 
@@ -367,6 +368,55 @@ class RgAnalysis(Analysis):
         )
 
     @staticmethod
+    def _has_skip_provenance(result: Any, run_label: str) -> bool:
+        """Return whether a missing replicate run has explicit skip provenance.
+
+        Parameters
+        ----------
+        result : Any
+            Replicate-level Rg result.
+        run_label : str
+            Configured run label to inspect.
+
+        Returns
+        -------
+        bool
+            ``True`` when the replicate records a skip for ``run_label``.
+        """
+
+        replicate = getattr(result, "replicate", None)
+        for skipped_run in getattr(result, "skipped_runs", []):
+            if (
+                skipped_run.run_label == run_label
+                and skipped_run.replicate == replicate
+                and skipped_run.reason_code == "empty_selection"
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _skipped_replicates_by_run(skipped_runs: Sequence[Any]) -> dict[str, set[int]]:
+        """Group skipped Rg replicate provenance by run label.
+
+        Parameters
+        ----------
+        skipped_runs : Sequence[Any]
+            Skip provenance entries from an aggregated or replicate result.
+
+        Returns
+        -------
+        dict[str, set[int]]
+            Replicate numbers with explicit skips for each run label.
+        """
+
+        skipped_by_run: dict[str, set[int]] = {}
+        for skipped_run in skipped_runs:
+            if skipped_run.reason_code != "empty_selection":
+                continue
+            skipped_by_run.setdefault(skipped_run.run_label, set()).add(skipped_run.replicate)
+        return skipped_by_run
+
+    @staticmethod
     def _validate_aggregate_input_completeness(
         ctx: AggregateContext,
         results: Sequence[Any],
@@ -430,7 +480,7 @@ class RgAnalysis(Analysis):
             )
 
         for run_label in configured_run_labels:
-            missing_run_replicates: list[int] = []
+            missing_without_skip_replicates: list[int] = []
             duplicate_run_replicates: list[int] = []
             for result in results:
                 replicate = getattr(result, "replicate", None)
@@ -440,18 +490,21 @@ class RgAnalysis(Analysis):
                     if run_result.run_label == run_label
                 ]
                 if not matches:
-                    if replicate is not None:
-                        missing_run_replicates.append(replicate)
+                    if replicate is not None and not RgAnalysis._has_skip_provenance(
+                        result,
+                        run_label,
+                    ):
+                        missing_without_skip_replicates.append(replicate)
                     continue
                 if len(matches) > 1 and replicate is not None:
                     duplicate_run_replicates.append(replicate)
 
-            if missing_run_replicates:
+            if missing_without_skip_replicates:
                 raise ValueError(
                     f"Configured Rg run '{run_label}' is missing replicate entries in condition "
                     f"'{ctx.condition.label}'. Missing replicates: "
-                    f"{sorted(missing_run_replicates)}. Recompute missing replicates or clear "
-                    "stale caches before aggregating."
+                    f"{sorted(missing_without_skip_replicates)} without skip provenance. "
+                    "Recompute missing replicates or clear stale caches before aggregating."
                 )
 
             if duplicate_run_replicates:
@@ -541,10 +594,25 @@ class RgAnalysis(Analysis):
         observed_run_labels = {run_result.run_label for run_result in agg_result.run_results}
         missing_runs = sorted(expected_run_labels - observed_run_labels)
         unexpected_runs = sorted(observed_run_labels - expected_run_labels)
-        if missing_runs or unexpected_runs:
+        expected_replicates = sorted(condition.replicates)
+        skipped_by_run = RgAnalysis._skipped_replicates_by_run(agg_result.skipped_runs)
+        missing_without_skip = {
+            run_label: [
+                replicate
+                for replicate in expected_replicates
+                if replicate not in skipped_by_run.get(run_label, set())
+            ]
+            for run_label in missing_runs
+        }
+        missing_without_skip = {
+            run_label: replicates
+            for run_label, replicates in missing_without_skip.items()
+            if replicates
+        }
+        if unexpected_runs or missing_without_skip:
             details: list[str] = []
-            if missing_runs:
-                details.append(f"missing runs {missing_runs}")
+            if missing_without_skip:
+                details.append(f"missing runs without skip provenance {missing_without_skip}")
             if unexpected_runs:
                 details.append(f"unexpected runs {unexpected_runs}")
             detail_text = "; ".join(details)
@@ -554,7 +622,6 @@ class RgAnalysis(Analysis):
                 "comparing."
             )
 
-        expected_replicates = sorted(condition.replicates)
         observed_replicates = sorted(agg_result.replicates)
         if (
             agg_result.n_replicates != len(expected_replicates)
@@ -569,6 +636,13 @@ class RgAnalysis(Analysis):
 
         for run_result in agg_result.run_results:
             run_replicates = sorted(run_result.replicates)
+            missing_run_replicates = sorted(set(expected_replicates) - set(run_replicates))
+            unexpected_run_replicates = sorted(set(run_replicates) - set(expected_replicates))
+            missing_without_skip = [
+                replicate
+                for replicate in missing_run_replicates
+                if replicate not in skipped_by_run.get(run_result.run_label, set())
+            ]
             counts = {
                 "per_replicate_means": len(run_result.per_replicate_means),
                 "per_replicate_stds": len(run_result.per_replicate_stds),
@@ -579,25 +653,37 @@ class RgAnalysis(Analysis):
                     run_result.per_replicate_mean_fragments_per_frame
                 )
             mismatched_fields = {
-                name: count for name, count in counts.items() if count != len(expected_replicates)
+                name: count for name, count in counts.items() if count != len(run_replicates)
             }
             if (
-                run_result.n_replicates != len(expected_replicates)
-                or run_replicates != expected_replicates
+                run_result.n_replicates != len(run_replicates)
+                or unexpected_run_replicates
+                or missing_without_skip
             ):
+                detail_parts: list[str] = []
+                if unexpected_run_replicates:
+                    detail_parts.append(f"unexpected replicates {unexpected_run_replicates}")
+                if missing_without_skip:
+                    detail_parts.append(
+                        f"missing replicates without skip provenance {missing_without_skip}"
+                    )
+                if run_result.n_replicates != len(run_replicates):
+                    detail_parts.append(
+                        f"n_replicates={run_result.n_replicates} but listed "
+                        f"{len(run_replicates)} replicates"
+                    )
+                detail_text = "; ".join(detail_parts)
                 raise ValueError(
                     f"Aggregated Rg run '{run_result.run_label}' for condition "
-                    f"'{condition.label}' has incomplete replicate metadata. Expected "
-                    f"replicates {expected_replicates}, found {run_replicates} with "
-                    f"n_replicates={run_result.n_replicates}. Recompute the condition or clear "
-                    "stale caches before comparing."
+                    f"'{condition.label}' has incomplete replicate metadata: {detail_text}. "
+                    "Recompute the condition or clear stale caches before comparing."
                 )
 
             if mismatched_fields:
                 raise ValueError(
                     f"Aggregated Rg run '{run_result.run_label}' for condition "
                     f"'{condition.label}' has incomplete replicate values: {mismatched_fields}. "
-                    f"Expected {len(expected_replicates)} entries per field. Recompute the "
+                    f"Expected {len(run_replicates)} entries per field. Recompute the "
                     "condition or clear stale caches before comparing."
                 )
 
@@ -762,7 +848,7 @@ class RgAnalysis(Analysis):
         import numpy as np
 
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.rg._results import RgResult, RgRunResult
+        from polyzymd.analyses.rg._results import RgResult, RgRunResult, RgSkippedRunResult
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         eq_str = f"eq{eq_value:g}{eq_unit}"
@@ -828,6 +914,17 @@ class RgAnalysis(Analysis):
                 )
             )
 
+        skipped_runs = [
+            RgSkippedRunResult(
+                run_label=payload.run_label,
+                selection=payload.selection,
+                replicate=payload.replicate,
+                reason=payload.reason,
+                reason_code=payload.reason_code,
+            )
+            for payload in getattr(runner.results, "skipped_run_payloads", [])
+        ]
+
         return RgResult(
             config_hash=config_hash,
             polyzymd_version=get_polyzymd_version(),
@@ -836,6 +933,7 @@ class RgAnalysis(Analysis):
             equilibration_unit=eq_unit,
             selection_string="; ".join(run.selection for run in ctx.settings.runs),
             run_results=run_results,
+            skipped_runs=skipped_runs,
             settings_fingerprint=settings_tag,
             n_frames_total=runner.results.n_frames_total,
             n_frames_used=window.n_frames_selected,
@@ -877,22 +975,46 @@ class RgAnalysis(Analysis):
             )
 
         aggregated_runs: list[RgRunAggregatedResult] = []
+        skipped_runs = [
+            skipped_run
+            for result in ordered_results
+            for skipped_run in getattr(result, "skipped_runs", [])
+        ]
         for run in ctx.settings.runs:
             run_label = run.label
             run_entries = []
+            run_replicates: list[int] = []
             for result in ordered_results:
                 matches = [
                     run_result
                     for run_result in result.run_results
                     if run_result.run_label == run_label
                 ]
-                if len(matches) != 1:
+                if len(matches) > 1:
                     raise ValueError(
                         f"Configured Rg run '{run_label}' has invalid aggregate inputs in "
-                        f"condition '{ctx.condition.label}'. Expected one entry per replicate, "
+                        f"condition '{ctx.condition.label}'. Expected at most one entry per replicate, "
                         f"found {len(matches)} for replicate {result.replicate}."
                     )
+                if not matches:
+                    if self._has_skip_provenance(result, run_label):
+                        continue
+                    raise ValueError(
+                        f"Configured Rg run '{run_label}' has invalid aggregate inputs in "
+                        f"condition '{ctx.condition.label}'. Missing replicate "
+                        f"{result.replicate} without skip provenance."
+                    )
                 run_entries.append(matches[0])
+                run_replicates.append(int(result.replicate))
+
+            if not run_entries:
+                logger.info(
+                    "Skipping Rg aggregation for run '%s' in condition '%s' because all "
+                    "replicates recorded empty-selection skips",
+                    run_label,
+                    ctx.condition.label,
+                )
+                continue
 
             per_means = [entry.mean_rg for entry in run_entries]
             per_stds = [entry.std_rg for entry in run_entries]
@@ -920,7 +1042,7 @@ class RgAnalysis(Analysis):
             required_sidecar_outputs = self._describe_sidecar_aggregation_contract(run)
             missing_sidecar_replicates = [
                 replicate
-                for replicate, entry in zip(replicate_order, run_entries)
+                for replicate, entry in zip(run_replicates, run_entries, strict=True)
                 if entry.npz_path is None
             ]
             if missing_sidecar_replicates:
@@ -932,7 +1054,7 @@ class RgAnalysis(Analysis):
                     "stale caches before aggregating."
                 )
 
-            for replicate, entry in zip(replicate_order, run_entries):
+            for replicate, entry in zip(run_replicates, run_entries, strict=True):
                 npz_path_value = entry.npz_path
                 if npz_path_value is None:
                     raise ValueError(
@@ -989,7 +1111,7 @@ class RgAnalysis(Analysis):
             if template.calculation_mode == "fragments":
                 missing_fragment_metrics = [
                     replicate
-                    for replicate, entry in zip(replicate_order, run_entries)
+                    for replicate, entry in zip(run_replicates, run_entries, strict=True)
                     if entry.mean_fragments_per_frame is None
                 ]
                 if missing_fragment_metrics:
@@ -1087,8 +1209,8 @@ class RgAnalysis(Analysis):
                     equilibration_time=first.equilibration_time,
                     equilibration_unit=first.equilibration_unit,
                     selection_string=template.selection,
-                    replicates=replicate_order,
-                    n_replicates=len(replicate_order),
+                    replicates=run_replicates,
+                    n_replicates=len(run_replicates),
                     run_label=run_label,
                     selection=template.selection,
                     overall_mean=mean_stats.mean,
@@ -1120,6 +1242,7 @@ class RgAnalysis(Analysis):
             replicates=replicate_order,
             n_replicates=len(replicate_order),
             run_results=aggregated_runs,
+            skipped_runs=skipped_runs,
             settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
             source_result_files=[],
         )
@@ -1231,16 +1354,29 @@ class RgAnalysis(Analysis):
         anova_by_run: list[RgRunANOVA] | None = []
 
         for run_label in configured_run_labels:
+            available = filter_summaries_with_run(
+                summaries_by_label,
+                run_label,
+                lambda summary, label: summary.get_run(label),
+                logger=logger,
+            )
+            if not available:
+                logger.warning(
+                    "Rg run '%s' has no available condition summaries; skipping comparison",
+                    run_label,
+                )
+                continue
+
             run_labels.append(run_label)
             ranked = sorted(
-                summaries_by_label,
-                key=lambda label: summaries_by_label[label].get_run(run_label).mean_rg,
+                available,
+                key=lambda label: available[label].get_run(run_label).mean_rg,
             )
             ranking_by_run[run_label] = ranked
 
-            if len(summaries_by_label) >= 2:
+            if len(available) >= 2:
                 condition_pairs = build_condition_pairs(
-                    list(summaries_by_label.keys()),
+                    list(available.keys()),
                     effective_control,
                     on_control_missing="all_pairs",
                     logger=logger,
@@ -1251,15 +1387,15 @@ class RgAnalysis(Analysis):
                             run_label=run_label,
                             condition_a=condition_a,
                             condition_b=condition_b,
-                            run_a=summaries_by_label[condition_a].get_run(run_label),
-                            run_b=summaries_by_label[condition_b].get_run(run_label),
+                            run_a=available[condition_a].get_run(run_label),
+                            run_b=available[condition_b].get_run(run_label),
                         )
                     )
 
-            if len(summaries_by_label) >= 3:
+            if len(available) >= 3:
                 groups = [
                     summary.get_run(run_label).per_replicate_means
-                    for summary in summaries_by_label.values()
+                    for summary in available.values()
                 ]
                 if any(len(group) < 2 for group in groups):
                     anova_by_run.append(

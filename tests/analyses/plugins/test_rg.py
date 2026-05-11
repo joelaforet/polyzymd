@@ -27,6 +27,7 @@ from polyzymd.analyses.rg._results import (
     RgResult,
     RgRunAggregatedResult,
     RgRunResult,
+    RgSkippedRunResult,
 )
 from polyzymd.analyses.rg._runner import RgRunnerPayload, RgRunPayload, compute_rg_run
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
@@ -582,14 +583,23 @@ def test_compute_single_run_zero_atoms_raises(
         )
 
 
-def test_run_replicate_raises_before_writing_partial_results(
+def test_run_replicate_records_empty_selection_skip(
     condition: Condition,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """run_replicate should fail before writing partial outputs for missing runs."""
+    """run_replicate should keep available runs and record empty-selection skips."""
+    import numpy as np
+
+    from polyzymd.analyses.rg import _runner as runner_module
+
     analysis = RgAnalysis()
-    settings = RgSettings(runs=[RgRunSettings(label="polymer_blob_rg", selection="resname SBM")])
+    settings = RgSettings(
+        runs=[
+            RgRunSettings(label="protein_rg", selection="protein"),
+            RgRunSettings(label="polymer_blob_rg", selection="resname SBM"),
+        ]
+    )
     output_dir = tmp_path / "run_1"
     output_dir.mkdir(parents=True, exist_ok=True)
     ctx = make_replicate_context(
@@ -602,15 +612,28 @@ def test_run_replicate_raises_before_writing_partial_results(
 
     universe = FakeUniverse(
         n_frames=1200,
-        selection_map={"resname SBM": FakeAtomGroup(n_atoms=0)},
+        selection_map={
+            "protein": FakeAtomGroup(n_atoms=5),
+            "resname SBM": FakeAtomGroup(n_atoms=0),
+        },
     )
+    monkeypatch.setattr(
+        runner_module,
+        "_run_selection_rg_analysis",
+        lambda **kwargs: np.asarray([10.0, 11.0, 12.0], dtype=np.float64),
+    )
+    monkeypatch.setattr("polyzymd.analyses.rg.compute_config_hash", lambda _sim_config: "hash123")
     patch_trajectory_loader(monkeypatch, "polyzymd.analyses.shared.loader", universe=universe)
     patch_trajectory_loader(monkeypatch, "polyzymd.analyses.rg", universe=universe)
 
-    with pytest.raises(ValueError, match="selection matched no atoms"):
-        analysis.run_replicate(ctx, 1)
+    result = analysis.run_replicate(ctx, 1)
 
-    assert list(output_dir.iterdir()) == []
+    assert [run.run_label for run in result.run_results] == ["protein_rg"]
+    assert len(result.skipped_runs) == 1
+    skipped = result.skipped_runs[0]
+    assert skipped.run_label == "polymer_blob_rg"
+    assert skipped.replicate == 1
+    assert skipped.reason_code == "empty_selection"
 
 
 def test_settings_cache_tag_changes_with_settings() -> None:
@@ -808,10 +831,68 @@ def test_aggregate_handles_missing_run(
         ValueError,
         match=(
             rf"Configured Rg run 'polymer_core' is missing replicate entries in "
-            rf"condition '{condition.label}'. Missing replicates: \[1, 2\]"
+            rf"condition '{condition.label}'. Missing replicates: \[1, 2\] without skip provenance"
         ),
     ):
         analysis.aggregate(ctx, results)
+
+
+def test_aggregate_skips_empty_selection_runs_with_provenance(
+    condition: Condition,
+    tmp_path: Path,
+) -> None:
+    """aggregate should omit runs only when every missing entry has skip provenance."""
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=_make_run_settings())
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    results = []
+    for rep in (1, 2):
+        backbone_npz = _write_rg_sidecar(
+            tmp_path,
+            "protein_backbone",
+            rep,
+            rg_values=[14.0 + rep, 14.1 + rep],
+        )
+        results.append(
+            RgResult(
+                config_hash="hash123",
+                polyzymd_version="1.2.1",
+                replicate=rep,
+                equilibration_time=10.0,
+                equilibration_unit="ns",
+                selection_string="protein and name CA; segid C and backbone",
+                run_results=[
+                    _make_run_result(
+                        rep,
+                        "protein_backbone",
+                        14.0 + rep,
+                        npz_path=str(backbone_npz),
+                    )
+                ],
+                skipped_runs=[
+                    RgSkippedRunResult(
+                        run_label="polymer_core",
+                        selection="segid C and backbone",
+                        replicate=rep,
+                        reason="selection matched no atoms",
+                    )
+                ],
+                n_frames_total=100,
+                n_frames_used=90,
+                trajectory_files=["/fake/traj.dcd"],
+            )
+        )
+
+    aggregated = analysis.aggregate(ctx, results)
+
+    assert [run.run_label for run in aggregated.run_results] == ["protein_backbone"]
+    assert len(aggregated.skipped_runs) == 2
 
 
 def test_aggregate_single_replicate(
@@ -1365,7 +1446,7 @@ def test_compare_requires_aggregated_results_for_all_conditions(tmp_path: Path) 
 
 
 def test_compare_requires_configured_runs_in_all_conditions(tmp_path: Path) -> None:
-    """compare should fail when a configured run is absent from a condition."""
+    """compare should fail when a configured run is absent without skip provenance."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
     settings_hash = _settings_hash(settings)
@@ -1418,9 +1499,114 @@ def test_compare_requires_configured_runs_in_all_conditions(tmp_path: Path) -> N
 
     with pytest.raises(
         ValueError,
-        match=r"Aggregated Rg result for condition 'Control' is incomplete: missing runs \['polymer_core'\]",
+        match=r"missing runs without skip provenance",
     ):
         analysis.compare(ctx)
+
+
+def test_compare_operates_per_run_availability(tmp_path: Path) -> None:
+    """compare should exclude skip-only conditions for unavailable runs."""
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
+    control = make_condition(label="No Polymer")
+    condition_a = make_condition(label="Polymer A")
+    condition_b = make_condition(label="Polymer B")
+
+    control_agg = RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA; segid C and backbone",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[
+            _make_aggregated_run("protein_backbone", "protein and name CA", [15.0, 15.1, 14.9]),
+        ],
+        skipped_runs=[
+            RgSkippedRunResult(
+                run_label="polymer_core",
+                selection="segid C and backbone",
+                replicate=rep,
+                reason="selection matched no atoms",
+            )
+            for rep in (1, 2, 3)
+        ],
+        settings_fingerprint=settings_hash,
+        source_result_files=[],
+    )
+    polymer_a_agg = RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA; segid C and backbone",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[
+            _make_aggregated_run("protein_backbone", "protein and name CA", [14.0, 14.1, 13.9]),
+            _make_aggregated_run("polymer_core", "segid C and backbone", [20.0, 20.1, 19.9]),
+        ],
+        settings_fingerprint=settings_hash,
+        source_result_files=[],
+    )
+    polymer_b_agg = RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA; segid C and backbone",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[
+            _make_aggregated_run("protein_backbone", "protein and name CA", [16.0, 16.1, 15.9]),
+            _make_aggregated_run("polymer_core", "segid C and backbone", [23.0, 23.1, 22.9]),
+        ],
+        settings_fingerprint=settings_hash,
+        source_result_files=[],
+    )
+
+    ctx = make_comparison_context(
+        name="rg_compare",
+        conditions=[control, condition_a, condition_b],
+        analysis_dirs={
+            "No Polymer": tmp_path / "control",
+            "Polymer A": tmp_path / "polymer_a",
+            "Polymer B": tmp_path / "polymer_b",
+        },
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label="No Polymer",
+        equilibration="10ns",
+        recompute=False,
+        aggregated_results={
+            "No Polymer": control_agg,
+            "Polymer A": polymer_a_agg,
+            "Polymer B": polymer_b_agg,
+        },
+    )
+
+    comparison = analysis.compare(ctx)
+
+    assert comparison is not None
+    assert comparison.ranking_by_run["protein_backbone"] == [
+        "Polymer A",
+        "No Polymer",
+        "Polymer B",
+    ]
+    assert comparison.ranking_by_run["polymer_core"] == ["Polymer A", "Polymer B"]
+    polymer_pairs = [
+        comparison
+        for comparison in comparison.pairwise_comparisons
+        if comparison.run_label == "polymer_core"
+    ]
+    assert [(pair.condition_a, pair.condition_b) for pair in polymer_pairs] == [
+        ("Polymer A", "Polymer B")
+    ]
 
 
 @pytest.mark.parametrize(

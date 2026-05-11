@@ -14,12 +14,22 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from polyzymd.analyses._results_base import (
     AggregatedResultMixin,
     BaseAnalysisResult,
 )
+
+
+class RgSkippedRunResult(BaseModel):
+    """Provenance for a configured Rg run skipped in one replicate."""
+
+    run_label: str = Field(..., description="Human-readable run label")
+    selection: str = Field(..., description="MDAnalysis selection that matched no atoms")
+    replicate: int = Field(..., description="Replicate where the run was skipped")
+    reason: str = Field(..., description="Human-readable skip reason")
+    reason_code: str = Field(default="empty_selection", description="Machine-readable skip reason")
 
 
 class RgRunResult(BaseAnalysisResult):
@@ -224,6 +234,10 @@ class RgResult(BaseAnalysisResult):
 
     # Collection of run results
     run_results: list[RgRunResult] = Field(..., description="Results for each Rg run")
+    skipped_runs: list[RgSkippedRunResult] = Field(
+        default_factory=list,
+        description="Configured Rg runs skipped with provenance",
+    )
 
     # Cache identity
     settings_fingerprint: str | None = Field(
@@ -244,6 +258,7 @@ class RgResult(BaseAnalysisResult):
             f"Rg Analysis (replicate {self.replicate})",
             "=" * 50,
             f"Runs analyzed: {len(self.run_results)}",
+            f"Runs skipped: {len(self.skipped_runs)}",
             f"Equilibration: {self._format_equilibration()}",
             f"Frames used: {self.n_frames_used}/{self.n_frames_total}",
             "",
@@ -389,6 +404,10 @@ class RgAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     # Collection of aggregated run results
     run_results: list[RgRunAggregatedResult] = Field(
         ..., description="Aggregated results for each run"
+    )
+    skipped_runs: list[RgSkippedRunResult] = Field(
+        default_factory=list,
+        description="Configured Rg runs skipped in contributing replicates",
     )
 
     # Cache identity
