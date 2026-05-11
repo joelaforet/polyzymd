@@ -769,7 +769,10 @@ class SASAAnalysis(Analysis):
         condition_text = f" for condition '{condition.label}'"
         expected_replicates = sorted(condition.replicates)
         observed_replicates = sorted(result.replicates)
-        if result.n_replicates != len(expected_replicates) or observed_replicates != expected_replicates:
+        if (
+            result.n_replicates != len(expected_replicates)
+            or observed_replicates != expected_replicates
+        ):
             raise ValueError(
                 "Aggregated SASA result"
                 f"{condition_text} has stale replicate coverage{source_text}. Expected "
