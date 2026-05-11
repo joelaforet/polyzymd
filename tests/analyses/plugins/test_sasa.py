@@ -63,7 +63,7 @@ def _make_run_result(replicate: int, label: str, mean: float) -> SASARunResult:
         selection_string="chainid A",
         run_label=label,
         target_selection="chainid A",
-        context_selection="all",
+        context_selection="chainid A",
         mean_sasa=mean,
         std_sasa=1.0,
         median_sasa=mean,
