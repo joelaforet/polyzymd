@@ -381,6 +381,20 @@ def test_rg_condition_summary_get_run() -> None:
     assert run.mean_rg == pytest.approx(15.0)
 
 
+def test_rg_run_summary_defaults_replicate_count_from_values() -> None:
+    """RgRunSummary should retain legacy count behavior without IDs."""
+    summary = RgRunSummary(
+        label="protein_backbone",
+        selection="protein and name CA",
+        mean_rg=15.0,
+        sem_rg=0.05,
+        per_replicate_means=[14.9, 15.0, 15.1],
+    )
+
+    assert summary.replicates == []
+    assert summary.n_replicates == 3
+
+
 def test_rg_plugin_discovered() -> None:
     """Rg plugin should be auto-discovered by analyses discovery."""
     from polyzymd.analyses.discovery import clear_cache, list_analyses
@@ -1607,6 +1621,62 @@ def test_compare_operates_per_run_availability(tmp_path: Path) -> None:
     assert [(pair.condition_a, pair.condition_b) for pair in polymer_pairs] == [
         ("Polymer A", "Polymer B")
     ]
+
+
+def test_compare_records_per_run_replicate_coverage_after_skips(tmp_path: Path) -> None:
+    """compare should report per-run replicate IDs when skip provenance exists."""
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=_make_run_settings())
+    condition = make_condition("control", replicates=(1, 2, 3))
+    settings_hash = _settings_hash(settings)
+
+    aggregate = RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA; segid C and backbone",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[
+            _make_aggregated_run("protein_backbone", "protein and name CA", [14.9, 15.0, 15.1]),
+            _make_aggregated_run("polymer_core", "segid C and backbone", [21.9, 22.1]).model_copy(
+                update={"replicates": [1, 3], "n_replicates": 2}
+            ),
+        ],
+        skipped_runs=[
+            RgSkippedRunResult(
+                run_label="polymer_core",
+                selection="segid C and backbone",
+                replicate=2,
+                reason="selection matched no atoms",
+                reason_code="empty_selection",
+            )
+        ],
+        settings_fingerprint=settings_hash,
+        source_result_files=[],
+    )
+    ctx = make_comparison_context(
+        name="rg_compare_skips",
+        conditions=[condition],
+        analysis_dirs={"control": tmp_path / "control"},
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label="control",
+        equilibration="10ns",
+        aggregated_results={"control": aggregate},
+    )
+
+    comparison = analysis.compare(ctx)
+
+    assert comparison is not None
+    condition_summary = comparison.get_condition("control")
+    assert condition_summary.n_replicates == 3
+    polymer_summary = condition_summary.get_run("polymer_core")
+    assert polymer_summary.replicates == [1, 3]
+    assert polymer_summary.n_replicates == 2
+    assert polymer_summary.per_replicate_means == [21.9, 22.1]
 
 
 @pytest.mark.parametrize(

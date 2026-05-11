@@ -1324,6 +1324,8 @@ class RgAnalysis(Analysis):
                     mean_rg=run_result.overall_mean,
                     sem_rg=run_result.overall_sem,
                     per_replicate_means=run_result.per_replicate_means,
+                    replicates=run_result.replicates,
+                    n_replicates=run_result.n_replicates,
                     calculation_mode=run_result.calculation_mode,
                     fragment_weighting=run_result.fragment_weighting,
                     mean_fragments_per_frame=run_result.overall_mean_fragments_per_frame,

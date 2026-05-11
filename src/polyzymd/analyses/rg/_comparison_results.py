@@ -15,42 +15,32 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from polyzymd.analyses.base import BaseComparisonResult, BaseConditionSummary
 
 
 class RgRunSummary(BaseModel):
-    """Summary statistics for one Rg run across replicates.
-
-    Attributes
-    ----------
-    label : str
-        Human-readable label for this run (e.g., "protein_backbone").
-    selection : str
-        MDAnalysis selection used for Rg calculation.
-    mean_rg : float
-        Mean Rg in Angstroms (averaged across replicates).
-    sem_rg : float
-        SEM of Rg across replicates.
-    per_replicate_means : list[float]
-        Mean Rg from each replicate (for statistical tests).
-    calculation_mode : str
-        Calculation mode used.
-    fragment_weighting : str | None
-        Fragment weighting scheme used, if applicable.
-    mean_fragments_per_frame : float | None
-        Mean number of fragments per frame, if applicable.
-    """
+    """Summary statistics for one Rg run across contributing replicates."""
 
     label: str
     selection: str
     mean_rg: float
     sem_rg: float
     per_replicate_means: list[float] = Field(default_factory=list)
+    replicates: list[int] = Field(default_factory=list)
+    n_replicates: int = Field(default=0, description="Number of replicates for this run")
     calculation_mode: str = Field(default="selection", description="Calculation mode used")
     fragment_weighting: str | None = Field(default=None, description="Fragment weighting scheme")
     mean_fragments_per_frame: float | None = Field(default=None, description="Mean fragments/frame")
+
+    @model_validator(mode="after")
+    def populate_replicate_count(self) -> RgRunSummary:
+        """Populate replicate count for legacy summaries without explicit metadata."""
+
+        if self.n_replicates == 0:
+            self.n_replicates = len(self.replicates) or len(self.per_replicate_means)
+        return self
 
 
 class RgConditionSummary(BaseConditionSummary):
