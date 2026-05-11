@@ -99,7 +99,7 @@ def _make_agg_run(label: str, means: list[float]) -> SASARunAggregatedResult:
         n_replicates=len(means),
         run_label=label,
         target_selection="chainid A",
-        context_selection="all",
+        context_selection="chainid A",
         overall_mean=mean_value,
         overall_sem=0.1,
         overall_median=mean_value,
