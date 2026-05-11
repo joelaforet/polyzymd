@@ -351,6 +351,8 @@ class SASAAnalysis(Analysis):
 
         first = results[0]
         aggregated_runs: list[SASARunAggregatedResult] = []
+        settings = cast(SASASettings, ctx.settings)
+        settings_token = self._settings_cache_token(settings)
         if len(ctx.replicates) == 1:
             LOGGER.warning(
                 "Only one replicate available for SASA aggregation in condition '%s'; "
@@ -358,7 +360,6 @@ class SASAAnalysis(Analysis):
                 ctx.condition.label,
             )
 
-        settings = cast(SASASettings, ctx.settings)
         self._validate_replicate_run_coverage(ctx, results, settings)
         for run in settings.runs:
             entries = [
@@ -410,6 +411,8 @@ class SASAAnalysis(Analysis):
                 per_residue_sem = np.asarray([], dtype=np.float64)
 
             template = entries[0]
+            context_atom_counts = [int(entry.n_context_atoms) for entry in entries]
+            context_count_is_variable = len(set(context_atom_counts)) > 1
             aggregated_runs.append(
                 SASARunAggregatedResult(
                     config_hash=first.config_hash,
@@ -436,7 +439,9 @@ class SASAAnalysis(Analysis):
                     per_replicate_maxs=per_maxs,
                     per_replicate_finals=per_finals,
                     n_target_atoms=template.n_target_atoms,
-                    n_context_atoms=template.n_context_atoms,
+                    n_context_atoms=(None if context_count_is_variable else context_atom_counts[0]),
+                    per_replicate_context_atom_counts=context_atom_counts,
+                    n_context_atoms_variable=context_count_is_variable,
                     n_target_residues=template.n_target_residues,
                     zero_atom_selection=all(entry.zero_atom_selection for entry in entries),
                     residue_keys=residue_keys,
@@ -458,12 +463,17 @@ class SASAAnalysis(Analysis):
             replicates=list(ctx.replicates),
             n_replicates=len(ctx.replicates),
             run_results=aggregated_runs,
+            settings_fingerprint=settings_token,
             source_result_files=[],
         )
 
         target_path = ctx.result_path
         if target_path is None:
-            target_path = ctx.output_dir / self._make_aggregated_filename(ctx.replicates, first)
+            target_path = ctx.output_dir / self._make_aggregated_filename(
+                ctx.replicates,
+                first,
+                settings_token,
+            )
         self.save_result(agg_result, target_path)
         return agg_result
 
@@ -676,6 +686,241 @@ class SASAAnalysis(Analysis):
                 f"{issue_text}."
             )
 
+    @classmethod
+    def _coerce_and_validate_aggregated_result(
+        cls,
+        result: Any,
+        settings: SASASettings,
+        condition: Any,
+        *,
+        source: Path | None = None,
+    ) -> SASAAggregatedResult:
+        """Coerce an aggregate and validate it against the current config.
+
+        Parameters
+        ----------
+        result : Any
+            Aggregated result loaded from disk or supplied in memory.
+        settings : SASASettings
+            Current SASA settings from the comparison configuration.
+        condition : Any
+            Condition whose replicate coverage must match the aggregate.
+        source : Path | None, optional
+            Source path for diagnostics.
+
+        Returns
+        -------
+        SASAAggregatedResult
+            Validated aggregate result.
+
+        Raises
+        ------
+        ValueError
+            Raised when cache identity, replicate coverage, or run selections
+            do not match the current configuration.
+        """
+
+        if isinstance(result, dict):
+            result = SASAAggregatedResult.model_validate(result)
+        if not isinstance(result, SASAAggregatedResult):
+            raise TypeError(
+                "SASA aggregated result loader expected SASAAggregatedResult, "
+                f"got {type(result).__name__}"
+            )
+
+        cls._validate_aggregated_result_identity(
+            result,
+            settings,
+            condition,
+            source=source,
+        )
+        return result
+
+    @classmethod
+    def _validate_aggregated_result_identity(
+        cls,
+        result: SASAAggregatedResult,
+        settings: SASASettings,
+        condition: Any,
+        *,
+        source: Path | None = None,
+    ) -> None:
+        """Validate an SASA aggregate cache against active comparison inputs.
+
+        Parameters
+        ----------
+        result : SASAAggregatedResult
+            Aggregated SASA result to validate.
+        settings : SASASettings
+            Current SASA settings.
+        condition : Any
+            Current comparison condition.
+        source : Path | None, optional
+            Source path for diagnostics.
+
+        Raises
+        ------
+        ValueError
+            Raised when the aggregate was produced for different replicates,
+            settings, or run selections.
+        """
+
+        source_text = f" at {source}" if source is not None else ""
+        condition_text = f" for condition '{condition.label}'"
+        expected_replicates = sorted(condition.replicates)
+        observed_replicates = sorted(result.replicates)
+        if result.n_replicates != len(expected_replicates) or observed_replicates != expected_replicates:
+            raise ValueError(
+                "Aggregated SASA result"
+                f"{condition_text} has stale replicate coverage{source_text}. Expected "
+                f"replicates {expected_replicates}, found {observed_replicates} with "
+                f"n_replicates={result.n_replicates}. Recompute the condition or clear "
+                "stale caches before comparing."
+            )
+
+        stored_fingerprint = result.settings_fingerprint
+        current_fingerprint = cls._settings_cache_token(settings)
+        if stored_fingerprint is None:
+            raise ValueError(
+                "Aggregated SASA result"
+                f"{condition_text} is missing a settings fingerprint{source_text}. Legacy "
+                "SASA aggregated caches are not compatible with settings-sensitive "
+                "comparison loading. Recompute the condition before comparing."
+            )
+        if stored_fingerprint != current_fingerprint:
+            raise ValueError(
+                "Aggregated SASA result"
+                f"{condition_text} was computed with settings fingerprint "
+                f"{stored_fingerprint}, but current settings require {current_fingerprint}"
+                f"{source_text}. Recompute the condition or clear stale caches before comparing."
+            )
+
+        expected_runs = {run.label: run for run in settings.runs}
+        observed_labels = [run_result.run_label for run_result in result.run_results]
+        missing_runs = [label for label in expected_runs if label not in observed_labels]
+        unexpected_runs = sorted(set(observed_labels) - set(expected_runs))
+        duplicate_runs = sorted(
+            {label for label in observed_labels if observed_labels.count(label) > 1}
+        )
+        if missing_runs or unexpected_runs or duplicate_runs:
+            details: list[str] = []
+            if missing_runs:
+                details.append(f"missing runs {missing_runs}")
+            if unexpected_runs:
+                details.append(f"unexpected runs {unexpected_runs}")
+            if duplicate_runs:
+                details.append(f"duplicate runs {duplicate_runs}")
+            raise ValueError(
+                "Aggregated SASA result"
+                f"{condition_text} has stale run coverage{source_text}: "
+                f"{'; '.join(details)}. Recompute the condition before comparing."
+            )
+
+        for run_result in result.run_results:
+            expected_run = expected_runs[run_result.run_label]
+            if (
+                run_result.target_selection != expected_run.target_selection
+                or run_result.context_selection != expected_run.context_selection
+            ):
+                raise ValueError(
+                    "Aggregated SASA run "
+                    f"'{run_result.run_label}'{condition_text} has stale selection context"
+                    f"{source_text}. Expected target/context "
+                    f"{expected_run.target_selection!r}/{expected_run.context_selection!r}, "
+                    f"found {run_result.target_selection!r}/{run_result.context_selection!r}. "
+                    "Recompute the condition before comparing."
+                )
+
+            run_replicates = sorted(run_result.replicates)
+            value_count = len(run_result.per_replicate_means)
+            if (
+                run_result.n_replicates != len(expected_replicates)
+                or run_replicates != expected_replicates
+                or value_count != len(expected_replicates)
+            ):
+                raise ValueError(
+                    "Aggregated SASA run "
+                    f"'{run_result.run_label}'{condition_text} has stale replicate metadata"
+                    f"{source_text}. Expected replicates {expected_replicates}, found "
+                    f"{run_replicates} with n_replicates={run_result.n_replicates} and "
+                    f"{value_count} per-replicate values. Recompute the condition before "
+                    "comparing."
+                )
+
+    def _resolve_aggregated_result_path(self, aggregated_dir: Path) -> Path | None:
+        """Resolve the aggregated SASA result path.
+
+        Parameters
+        ----------
+        aggregated_dir : Path
+            Directory containing aggregated SASA result files.
+
+        Returns
+        -------
+        Path | None
+            Path to the selected JSON result, or ``None`` when absent.
+        """
+
+        if not aggregated_dir.exists():
+            return None
+        canonical = self.aggregate_result_path(aggregated_dir)
+        if canonical.exists():
+            return canonical
+
+        json_files = sorted(aggregated_dir.glob("*.json"), key=lambda path: path.stat().st_mtime)
+        if not json_files:
+            return None
+
+        chosen = json_files[-1]
+        LOGGER.warning(
+            "%s: canonical result.json not found in %s — falling back to %s "
+            "(%d JSON file(s) present)",
+            self.name,
+            aggregated_dir,
+            chosen.name,
+            len(json_files),
+        )
+        return chosen
+
+    def _load_aggregated_result(
+        self,
+        aggregated_dir: Path,
+        *,
+        settings: SASASettings | None = None,
+        condition: Any | None = None,
+    ) -> Any:
+        """Load and optionally validate an aggregated SASA result.
+
+        Parameters
+        ----------
+        aggregated_dir : Path
+            Directory containing aggregated SASA result files.
+        settings : SASASettings | None, optional
+            Current SASA settings for cache identity validation.
+        condition : Any | None, optional
+            Current comparison condition for replicate coverage validation.
+
+        Returns
+        -------
+        Any
+            Loaded aggregate, or ``None`` when no result file exists.
+        """
+
+        result_path = self._resolve_aggregated_result_path(aggregated_dir)
+        if result_path is None:
+            return None
+
+        result = self._deserialize_result(result_path)
+        if settings is None or condition is None:
+            return result
+
+        return self._coerce_and_validate_aggregated_result(
+            result,
+            settings,
+            condition,
+            source=result_path,
+        )
+
     def compare(self, ctx: ComparisonContext) -> Any:
         """Compare SASA runs across conditions."""
         from polyzymd import __version__
@@ -699,9 +944,20 @@ class SASAAnalysis(Analysis):
 
         for condition in ctx.conditions:
             agg_result = ctx.aggregated_results.get(condition.label)
-            if agg_result is None:
+            if agg_result is not None:
+                agg_result = self._coerce_and_validate_aggregated_result(
+                    agg_result,
+                    settings,
+                    condition,
+                    source=self._resolve_aggregated_result_path(
+                        ctx.analysis_dirs[condition.label] / "aggregated"
+                    ),
+                )
+            else:
                 agg_result = self._load_aggregated_result(
-                    ctx.analysis_dirs[condition.label] / "aggregated"
+                    ctx.analysis_dirs[condition.label] / "aggregated",
+                    settings=settings,
+                    condition=condition,
                 )
             if agg_result is None:
                 continue
@@ -987,11 +1243,12 @@ class SASAAnalysis(Analysis):
     def _make_aggregated_filename(
         replicates: tuple[int, ...] | Sequence[int],
         first_result: Any,
+        settings_token: str,
     ) -> str:
         """Generate an aggregated SASA filename."""
         eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
         rep_str = Analysis._format_replicate_range(replicates)
-        return f"sasa_{rep_str}_{eq_str}.json"
+        return f"sasa_{rep_str}_{eq_str}_{settings_token}.json"
 
     @staticmethod
     def _deserialize_comparison(path: Path) -> SASAComparisonResult | None:

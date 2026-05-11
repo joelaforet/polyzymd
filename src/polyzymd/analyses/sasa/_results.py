@@ -149,7 +149,18 @@ class SASARunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     per_replicate_finals: list[float] = Field(..., description="Final SASA from each replicate")
 
     n_target_atoms: int = Field(..., description="Target atom count")
-    n_context_atoms: int = Field(..., description="Context atom count")
+    n_context_atoms: int | None = Field(
+        ...,
+        description="Context atom count, or None when counts vary across replicates",
+    )
+    per_replicate_context_atom_counts: list[int] = Field(
+        default_factory=list,
+        description="Context atom count from each contributing replicate",
+    )
+    n_context_atoms_variable: bool = Field(
+        default=False,
+        description="True when context atom counts vary across replicates",
+    )
     n_target_residues: int = Field(..., description="Target residue count")
     zero_atom_selection: bool = Field(
         default=False, description="True when selection had zero atoms"
@@ -191,6 +202,10 @@ class SASAAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     run_results: list[SASARunAggregatedResult] = Field(
         ...,
         description="Aggregated results for each run",
+    )
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Settings fingerprint used to validate aggregated SASA caches",
     )
     source_result_files: list[str] = Field(
         default_factory=list,

@@ -114,6 +114,8 @@ def _make_agg_run(label: str, means: list[float]) -> SASARunAggregatedResult:
         per_replicate_finals=means,
         n_target_atoms=20,
         n_context_atoms=200,
+        per_replicate_context_atom_counts=[200 for _ in means],
+        n_context_atoms_variable=False,
         n_target_residues=5,
         zero_atom_selection=False,
         residue_keys=["A:1:ALA"],
@@ -1029,7 +1031,7 @@ def test_aggregate_fails_on_structural_metadata_mismatch(tmp_path: Path) -> None
 
 
 def test_aggregate_allows_variable_context_atom_counts(tmp_path: Path) -> None:
-    """aggregate should allow polymer context counts to vary across replicates."""
+    """aggregate should preserve variable polymer context counts truthfully."""
     analysis = SASAAnalysis()
     settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
     condition = _make_condition("cond")
@@ -1067,7 +1069,71 @@ def test_aggregate_allows_variable_context_atom_counts(tmp_path: Path) -> None:
 
     aggregated = analysis.aggregate(ctx, results)
 
-    assert aggregated.run_results[0].overall_mean == pytest.approx(100.5)
+    run_result = aggregated.run_results[0]
+    assert run_result.overall_mean == pytest.approx(100.5)
+    assert run_result.n_context_atoms is None
+    assert run_result.n_context_atoms_variable is True
+    assert run_result.per_replicate_context_atom_counts == [200, 260]
+
+
+def test_compare_rejects_stale_sasa_aggregate_identity(tmp_path: Path) -> None:
+    """compare should reject aggregates from stale replicate or settings configs."""
+    analysis = SASAAnalysis()
+    settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
+    current_fingerprint = analysis._settings_cache_token(settings)
+    condition = _make_condition("control")
+
+    stale_replicates = SASAAggregatedResult(
+        config_hash="hash",
+        polyzymd_version="1.0.0",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="chainid A",
+        replicates=[1, 2],
+        n_replicates=2,
+        run_results=[_make_agg_run("protein", [100.0, 101.0])],
+        settings_fingerprint=current_fingerprint,
+        source_result_files=[],
+    )
+    ctx = make_comparison_context(
+        name="sasa_compare_stale",
+        conditions=[condition],
+        analysis_dirs={"control": tmp_path / "control"},
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label="control",
+        equilibration="10ns",
+        aggregated_results={"control": stale_replicates},
+    )
+    with pytest.raises(ValueError, match="stale replicate coverage"):
+        analysis.compare(ctx)
+
+    stale_settings = SASAAggregatedResult(
+        config_hash="hash",
+        polyzymd_version="1.0.0",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="chainid A",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[_make_agg_run("protein", [100.0, 101.0, 99.0])],
+        settings_fingerprint="stale-token",
+        source_result_files=[],
+    )
+    ctx = make_comparison_context(
+        name="sasa_compare_stale",
+        conditions=[condition],
+        analysis_dirs={"control": tmp_path / "control"},
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label="control",
+        equilibration="10ns",
+        aggregated_results={"control": stale_settings},
+    )
+    with pytest.raises(ValueError, match="settings fingerprint"):
+        analysis.compare(ctx)
 
 
 def test_compare_and_format(tmp_path: Path) -> None:
@@ -1077,6 +1143,7 @@ def test_compare_and_format(tmp_path: Path) -> None:
 
     control = _make_condition("control")
     treated = _make_condition("treated")
+    settings_fingerprint = analysis._settings_cache_token(settings)
     aggregated_results = {
         "control": SASAAggregatedResult(
             config_hash="hash",
@@ -1088,6 +1155,7 @@ def test_compare_and_format(tmp_path: Path) -> None:
             replicates=[1, 2, 3],
             n_replicates=3,
             run_results=[_make_agg_run("protein", [100.0, 101.0, 99.0])],
+            settings_fingerprint=settings_fingerprint,
             source_result_files=[],
         ),
         "treated": SASAAggregatedResult(
@@ -1100,6 +1168,7 @@ def test_compare_and_format(tmp_path: Path) -> None:
             replicates=[1, 2, 3],
             n_replicates=3,
             run_results=[_make_agg_run("protein", [120.0, 121.0, 119.0])],
+            settings_fingerprint=settings_fingerprint,
             source_result_files=[],
         ),
     }
@@ -1132,6 +1201,7 @@ def test_compare_skips_all_nan_runs(tmp_path: Path) -> None:
     control = _make_condition("control")
     treated = _make_condition("treated")
     nan_run = _make_agg_run("protein", [float("nan"), float("nan"), float("nan")])
+    settings_fingerprint = analysis._settings_cache_token(settings)
     aggregated_results = {
         "control": SASAAggregatedResult(
             config_hash="hash",
@@ -1143,6 +1213,7 @@ def test_compare_skips_all_nan_runs(tmp_path: Path) -> None:
             replicates=[1, 2, 3],
             n_replicates=3,
             run_results=[nan_run],
+            settings_fingerprint=settings_fingerprint,
             source_result_files=[],
         ),
         "treated": SASAAggregatedResult(
@@ -1155,6 +1226,7 @@ def test_compare_skips_all_nan_runs(tmp_path: Path) -> None:
             replicates=[1, 2, 3],
             n_replicates=3,
             run_results=[nan_run],
+            settings_fingerprint=settings_fingerprint,
             source_result_files=[],
         ),
     }
