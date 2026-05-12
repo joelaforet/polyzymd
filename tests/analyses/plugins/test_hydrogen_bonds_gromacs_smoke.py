@@ -95,9 +95,8 @@ class TestHydrogenBondsGromacsSmoke:
                 "MDAnalysis.analysis.hydrogenbonds.hbond_analysis"
             ),
         }
-        mock_modules["MDAnalysis.analysis.hydrogenbonds.hbond_analysis"].HydrogenBondAnalysis = (
-            hbond_cls
-        )
+        hbond_module = mock_modules["MDAnalysis.analysis.hydrogenbonds.hbond_analysis"]
+        hbond_module.HydrogenBondAnalysis = hbond_cls
 
         original_resolve = GromacsEngine.resolve_trajectory_layout
         with (

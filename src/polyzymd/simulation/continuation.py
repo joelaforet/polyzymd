@@ -728,13 +728,12 @@ class ContinuationManager:
 
         # Update parameters for this segment
         if self._param_dict:
-            self._param_dict["__values__"]["integ_params"]["__values__"]["total_time"] = {
+            integ_values = self._param_dict["__values__"]["integ_params"]["__values__"]
+            integ_values["total_time"] = {
                 "__class__": "Quantity",
                 "__values__": {"value": duration_ns, "unit": "nanosecond"},
             }
-            self._param_dict["__values__"]["integ_params"]["__values__"][
-                "num_samples"
-            ] = num_samples
+            integ_values["num_samples"] = num_samples
 
         # Add barostat if needed
         self._add_barostat_if_needed()

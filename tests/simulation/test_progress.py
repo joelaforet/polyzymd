@@ -415,9 +415,10 @@ class TestProgressIO:
         assert flush_idx is not None, "f.flush() not found in save_progress"
         assert fsync_idx is not None, "os.fsync() not found in save_progress"
         assert replace_idx is not None, "os.replace() not found in save_progress"
-        assert (
-            flush_idx < fsync_idx < replace_idx
-        ), f"Expected order: flush ({flush_idx}) < fsync ({fsync_idx}) < replace ({replace_idx})"
+        message = (
+            f"Expected order: flush ({flush_idx}) < fsync ({fsync_idx}) < replace ({replace_idx})"
+        )
+        assert flush_idx < fsync_idx < replace_idx, message
 
 
 # ---------------------------------------------------------------------------

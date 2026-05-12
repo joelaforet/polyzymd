@@ -47,9 +47,8 @@ class TestReplicateResultClassContract:
         cls = get_analysis(plugin_name)
         result_cls = cls.ReplicateResultClass
         assert result_cls is not None
-        assert hasattr(result_cls, "model_validate_json") or hasattr(
-            result_cls, "load"
-        ), f"{plugin_name}.ReplicateResultClass must have model_validate_json() or load()"
+        message = f"{plugin_name}.ReplicateResultClass must have model_validate_json() or load()"
+        assert hasattr(result_cls, "model_validate_json") or hasattr(result_cls, "load"), message
 
     def test_all_compute_stage_plugins_covered(self):
         """Sanity check for compute-stage plugin coverage."""

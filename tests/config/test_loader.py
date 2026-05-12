@@ -23,9 +23,8 @@ class TestSaveConfigYamlDumper:
         save_config(config, out)
 
         after_representer = yaml.Dumper.yaml_representers.get(str)
-        assert (
-            after_representer is original_representer
-        ), "save_config must not mutate yaml.Dumper.yaml_representers"
+        message = "save_config must not mutate yaml.Dumper.yaml_representers"
+        assert after_representer is original_representer, message
 
     def test_multiline_strings_use_block_style(self, tmp_path):
         """Multiline strings in saved YAML use literal block (|) style."""
@@ -123,9 +122,8 @@ class TestReactionDefaultSentinel:
         for variant in ("Default", "DEFAULT", " default ", "  Default  "):
             data = {"reactions": {"initiation": variant}}
             result = _expand_paths(data, Path("/some/project"))
-            assert (
-                result["reactions"]["initiation"] == variant
-            ), f"Sentinel variant {variant!r} was not preserved"
+            message = f"Sentinel variant {variant!r} was not preserved"
+            assert result["reactions"]["initiation"] == variant, message
 
     def test_expand_paths_still_expands_non_sentinel_reaction_paths(self):
         """Regular .rxn paths must still be expanded to absolute."""

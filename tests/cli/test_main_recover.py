@@ -844,9 +844,8 @@ class TestBuildDryRunGromacs:
             cli, ["build", "-c", str(config_file), "--dry-run", "--gromacs", "-r", "1"]
         )
         assert result.exit_code == 0, result.output
-        assert (
-            "{projects_dir}" not in result.output
-        ), "Output path must be interpolated, not literal {projects_dir}"
+        message = "Output path must be interpolated, not literal {projects_dir}"
+        assert "{projects_dir}" not in result.output, message
         assert str(tmp_path / "projects") in result.output
 
 
