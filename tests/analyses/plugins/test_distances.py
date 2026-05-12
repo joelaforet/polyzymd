@@ -72,7 +72,7 @@ class TestClassAttributes:
     def test_min_replicates(self):
         from polyzymd.analyses.distances import DistancesAnalysis
 
-        assert DistancesAnalysis.min_replicates == 2
+        assert DistancesAnalysis.min_replicates == 1
 
 
 # ---------------------------------------------------------------------------

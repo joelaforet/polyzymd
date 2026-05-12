@@ -410,6 +410,11 @@ def test_rg_plugin_name() -> None:
     assert RgAnalysis.name == "rg"
 
 
+def test_rg_min_replicates() -> None:
+    """Rg plugin should allow one-replicate smoke-test runs."""
+    assert RgAnalysis.min_replicates == 1
+
+
 def test_format_table() -> None:
     """Table formatting should produce human-readable Rg output."""
     text = format_rg_comparison(_make_comparison_result(), "table")

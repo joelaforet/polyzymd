@@ -804,6 +804,11 @@ def test_rmsd_plugin_name() -> None:
     assert RMSDAnalysis.name == "rmsd"
 
 
+def test_rmsd_min_replicates() -> None:
+    """RMSD plugin should allow one-replicate smoke-test runs."""
+    assert RMSDAnalysis.min_replicates == 1
+
+
 def test_format_table() -> None:
     """Table formatting should produce human-readable RMSD output."""
     text = format_rmsd_comparison(_make_comparison_result(), "table")

@@ -298,6 +298,11 @@ def test_sasa_plugin_discovered() -> None:
     assert analyses["sasa"] is SASAAnalysis
 
 
+def test_sasa_min_replicates() -> None:
+    """SASA plugin should allow one-replicate smoke-test runs."""
+    assert SASAAnalysis.min_replicates == 1
+
+
 def test_sasa_settings_validation() -> None:
     """SASA settings should enforce run and scalar constraints."""
     settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])

@@ -507,6 +507,7 @@ class HydrogenBondsAnalysis(Analysis):
     AggregatedResultClass: ClassVar[type | None] = HydrogenBondAggregatedResult
     execution_cost_hint: ClassVar[str] = "high"
     aliases: ClassVar[tuple[str, ...]] = ("hbonds", "hbond")
+    min_replicates: ClassVar[int] = 1
     has_compute_stage: ClassVar[bool] = True
     has_aggregate_stage: ClassVar[bool] = True
     slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(mem="16G")

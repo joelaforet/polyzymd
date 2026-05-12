@@ -121,6 +121,7 @@ def test_class_variables() -> None:
     cls = get_analysis("hydrogen_bonds")
     assert cls.name == "hydrogen_bonds"
     assert cls.Settings is HydrogenBondSettings
+    assert cls.min_replicates == 1
     assert cls.has_compute_stage is True
     assert cls.has_aggregate_stage is True
     assert cls.slurm_resource_hint == SlurmResourceHint(mem="16G")

@@ -160,7 +160,7 @@ class TestClassAttributes:
         assert SecondaryStructureAnalysis.dependencies == ()
 
     def test_min_replicates(self):
-        assert SecondaryStructureAnalysis.min_replicates == 2
+        assert SecondaryStructureAnalysis.min_replicates == 1
 
     def test_slurm_resource_hint(self):
         assert SecondaryStructureAnalysis.slurm_resource_hint == SlurmResourceHint(mem="16G")
@@ -560,6 +560,40 @@ class TestAggregate:
             agg = ss_analysis.aggregate(agg_ctx, results)
 
         assert agg.n_replicates == 2
+
+    def test_aggregate_singleton_uses_zero_sem(
+        self, ss_analysis, default_settings, condition, tmp_path
+    ):
+        """aggregate() should avoid NaN SEM values for one-replicate smoke tests."""
+        results = [_make_mock_ss_result(1)]
+        single_condition = Condition(
+            label=condition.label,
+            config_path=condition.config_path,
+            replicates=(1,),
+            sim_config=condition.sim_config,
+        )
+
+        agg_ctx = AggregateContext(
+            condition=single_condition,
+            replicates=(1,),
+            output_dir=tmp_path / "aggregated",
+            equilibration="200ns",
+            settings=default_settings,
+        )
+
+        with patch(
+            "polyzymd.analyses._results_base.get_polyzymd_version",
+            return_value="0.0.0-test",
+        ):
+            agg = ss_analysis.aggregate(agg_ctx, results)
+
+        assert agg.n_replicates == 1
+        assert agg.sem_overall_helix == 0.0
+        assert agg.sem_overall_strand == 0.0
+        assert agg.sem_overall_coil == 0.0
+        assert all(value == 0.0 for value in agg.sem_persistence_helix)
+        assert all(value == 0.0 for value in agg.sem_persistence_strand)
+        assert all(value == 0.0 for value in agg.sem_persistence_coil)
 
     def test_validate_aggregate_rejects_missing_settings_fingerprint(
         self, ss_analysis, default_settings, condition, tmp_path

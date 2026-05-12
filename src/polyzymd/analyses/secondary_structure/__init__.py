@@ -150,7 +150,7 @@ class SecondaryStructureAnalysis(Analysis):
     ReplicateResultClass: ClassVar[type | None] = SecondaryStructureResult
     aliases: ClassVar[tuple[str, ...]] = ("ss",)
     dependencies: ClassVar[tuple[str, ...]] = ()
-    min_replicates: ClassVar[int] = 2
+    min_replicates: ClassVar[int] = 1
     slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(mem="16G")
 
     # === Required methods ===
@@ -404,9 +404,14 @@ class SecondaryStructureAnalysis(Analysis):
         mean_helix = helix_stack.mean(axis=0).tolist()
         mean_strand = strand_stack.mean(axis=0).tolist()
 
-        sem_coil = (coil_stack.std(axis=0, ddof=1) / np.sqrt(n_reps)).tolist()
-        sem_helix = (helix_stack.std(axis=0, ddof=1) / np.sqrt(n_reps)).tolist()
-        sem_strand = (strand_stack.std(axis=0, ddof=1) / np.sqrt(n_reps)).tolist()
+        if n_reps == 1:
+            sem_coil = np.zeros(coil_stack.shape[1], dtype=float).tolist()
+            sem_helix = np.zeros(helix_stack.shape[1], dtype=float).tolist()
+            sem_strand = np.zeros(strand_stack.shape[1], dtype=float).tolist()
+        else:
+            sem_coil = (coil_stack.std(axis=0, ddof=1) / np.sqrt(n_reps)).tolist()
+            sem_helix = (helix_stack.std(axis=0, ddof=1) / np.sqrt(n_reps)).tolist()
+            sem_strand = (strand_stack.std(axis=0, ddof=1) / np.sqrt(n_reps)).tolist()
 
         # Overall content fractions per replicate
         per_rep_helix = [r.overall_helix_fraction for r in results]
@@ -417,9 +422,14 @@ class SecondaryStructureAnalysis(Analysis):
         mean_overall_strand = float(np.mean(per_rep_strand))
         mean_overall_coil = float(np.mean(per_rep_coil))
 
-        sem_overall_helix = float(np.std(per_rep_helix, ddof=1) / np.sqrt(n_reps))
-        sem_overall_strand = float(np.std(per_rep_strand, ddof=1) / np.sqrt(n_reps))
-        sem_overall_coil = float(np.std(per_rep_coil, ddof=1) / np.sqrt(n_reps))
+        if n_reps == 1:
+            sem_overall_helix = 0.0
+            sem_overall_strand = 0.0
+            sem_overall_coil = 0.0
+        else:
+            sem_overall_helix = float(np.std(per_rep_helix, ddof=1) / np.sqrt(n_reps))
+            sem_overall_strand = float(np.std(per_rep_strand, ddof=1) / np.sqrt(n_reps))
+            sem_overall_coil = float(np.std(per_rep_coil, ddof=1) / np.sqrt(n_reps))
 
         agg_result = SecondaryStructureAggregatedResult(
             config_hash=first.config_hash,

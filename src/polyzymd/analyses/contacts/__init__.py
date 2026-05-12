@@ -268,7 +268,7 @@ class ContactsAnalysis(Analysis):
     ReplicateResultClass: ClassVar[type | None] = ContactResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
-    min_replicates: ClassVar[int] = 2
+    min_replicates: ClassVar[int] = 1
 
     # === Required methods ===
 

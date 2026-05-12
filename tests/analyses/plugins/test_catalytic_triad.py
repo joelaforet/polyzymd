@@ -194,7 +194,7 @@ class TestTriadClassVars:
         assert triad_analysis.dependencies == ()
 
     def test_min_replicates(self, triad_analysis):
-        assert triad_analysis.min_replicates == 2
+        assert triad_analysis.min_replicates == 1
 
     def test_repr(self, triad_analysis):
         assert repr(triad_analysis) == "<CatalyticTriadAnalysis(name='catalytic_triad')>"
