@@ -1,23 +1,22 @@
-"""Automatic discovery of Analysis plugins via ``pkgutil``.
+"""Automatic discovery of Analysis plugin packages via ``pkgutil``.
 
-Scans ``src/polyzymd/analyses/`` for modules and sub-packages, imports
-them, and collects all concrete :class:`Analysis` subclasses.  No
-bootstrap files, no ``__init__.py`` edits, no decorators needed.
+Scans ``src/polyzymd/analyses/`` for plugin packages, imports them, and
+collects all concrete :class:`Analysis` subclasses. No bootstrap files,
+no package-level registry edits, no decorators needed.
 
 How Discovery Works
 -------------------
-1. ``pkgutil.iter_modules()`` yields every ``.py`` file and sub-package
-   inside ``polyzymd.analyses``.
-2. Each module is imported via ``importlib.import_module()``.
-3. All module-level names are inspected; concrete subclasses of
+1. ``pkgutil.walk_packages()`` yields packages inside ``polyzymd.analyses``.
+2. Each package is imported via ``importlib.import_module()``.
+3. All package-level names are inspected; concrete subclasses of
    :class:`~polyzymd.analyses.base.Analysis` are collected.
 4. Name collisions (two plugins with the same ``name``) raise immediately.
 
 Contributor Impact
 ------------------
-To add a new analysis, create a file in ``src/polyzymd/analyses/`` (or a
-sub-package with ``__init__.py``), define a class inheriting from
-``Analysis``, and set ``name`` as a ``ClassVar[str]``.  That's it.
+To add a new analysis, create a package in ``src/polyzymd/analyses/<name>/``
+with ``__init__.py``, define a class inheriting from ``Analysis``, and set
+``name`` as a ``ClassVar[str]``. Single-file plugins are not supported.
 """
 
 from __future__ import annotations
@@ -103,6 +102,29 @@ def _should_skip_module(modname: str, package_prefix: str) -> bool:
     return any(component.startswith("_") or component in _SKIP_MODULES for component in components)
 
 
+def _is_top_level_module(modname: str, package_prefix: str) -> bool:
+    """Return whether *modname* is a direct module under ``polyzymd.analyses``.
+
+    Parameters
+    ----------
+    modname : str
+        Fully qualified module name discovered by ``pkgutil``.
+    package_prefix : str
+        Base package prefix including trailing dot, for example
+        ``"polyzymd.analyses."``.
+
+    Returns
+    -------
+    bool
+        ``True`` when the relative module name has no package separator.
+    """
+
+    relative_name = modname
+    if modname.startswith(package_prefix):
+        relative_name = modname[len(package_prefix) :]
+    return "." not in relative_name
+
+
 def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
     """Import all analysis modules and collect concrete Analysis subclasses.
 
@@ -121,14 +143,17 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
     registry: dict[str, type[Analysis]] = {}
     alias_registry: dict[str, str] = {}  # alias -> canonical name
 
-    # Walk all modules in the analyses package (one level deep for files,
-    # recurse into sub-packages)
+    # Walk plugin packages while rejecting top-level single-file plugins
     package_path = analyses_pkg.__path__
     package_prefix = analyses_pkg.__name__ + "."
 
-    for _, modname, _ in pkgutil.walk_packages(package_path, prefix=package_prefix):
+    for _, modname, is_pkg in pkgutil.walk_packages(package_path, prefix=package_prefix):
         # Skip infrastructure modules
         if _should_skip_module(modname, package_prefix):
+            continue
+
+        if not is_pkg and _is_top_level_module(modname, package_prefix):
+            logger.debug("Skipping top-level analysis module without package: %s", modname)
             continue
 
         try:

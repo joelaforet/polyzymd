@@ -175,6 +175,30 @@ class TestDiscoveryRobustness:
         assert _should_skip_module("polyzymd.analyses.rmsf", package_prefix) is False
         assert _should_skip_module("polyzymd.analyses.contacts", package_prefix) is False
 
+    def test_top_level_module_detection(self):
+        """Only direct children of analyses are top-level modules."""
+        from polyzymd.analyses.discovery import _is_top_level_module
+
+        package_prefix = "polyzymd.analyses."
+        assert _is_top_level_module("polyzymd.analyses.contacts", package_prefix) is True
+        assert _is_top_level_module("polyzymd.analyses.contacts._runner", package_prefix) is False
+
+    def test_discovery_skips_top_level_single_file_plugins(self):
+        """Single-file plugins should not be imported as contributor plugins."""
+        from polyzymd.analyses.discovery import _discover_plugins
+
+        module_name = "polyzymd.analyses.single_file_plugin"
+
+        with (
+            patch("pkgutil.walk_packages", return_value=[(None, module_name, False)]),
+            patch("importlib.import_module") as mock_import,
+        ):
+            registry, aliases = _discover_plugins()
+
+        assert registry == {}
+        assert aliases == {}
+        mock_import.assert_not_called()
+
     def test_discovery_skips_shared_descendants_end_to_end(self):
         """Discovery should never import skipped shared descendants."""
         from polyzymd.analyses.discovery import _discover_plugins
