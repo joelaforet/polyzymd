@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import sys
 from importlib.resources import files
 from pathlib import Path
@@ -24,6 +25,7 @@ from polyzymd.cli.scaffold import (
 )
 
 FakeSimulationConfig = SimpleNamespace
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _prepare_project(tmp_path: Path) -> None:
@@ -46,6 +48,32 @@ def _assert_black_compliant(path: Path) -> None:
     except black.NothingChanged:
         return
     pytest.fail(f"Generated file is not Black formatted: {path}")
+
+
+def _assert_ruff_compliant(paths: list[Path]) -> None:
+    """Assert that generated Python files already satisfy the project Ruff config."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ruff",
+            "check",
+            "--config",
+            str(REPO_ROOT / "pyproject.toml"),
+            "--config",
+            'lint.isort.known-first-party=["polyzymd"]',
+            *(str(path) for path in paths),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.fail(
+            "Generated files are not Ruff compliant:\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
 
 
 class TestValidateName:
@@ -173,7 +201,7 @@ class TestGenerateScaffold:
         assert "class TestExtractMetrics:" in text
         assert "class TestPlot:" in text
         assert "test_run_replicate_uses_base_runner_dispatch" in text
-        assert "from polyzymd.analyses.solvent_shell._runner import" in text
+        assert 'runner.__class__.__name__ == "SolventShellReplicateRunner"' in text
 
     def test_custom_class_name(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -277,6 +305,8 @@ class TestGenerateScaffoldPydantic:
         assert "class SolventShellAggregatedResult(BaseModel):" not in init_text
         assert "class SolventShellReplicateResult(BaseModel):" in results_text
         assert "class SolventShellAggregatedResult(BaseModel):" in results_text
+        assert "replicates: list[int] = Field(default_factory=list)" in results_text
+        assert "settings_fingerprint: str | None = None" in results_text
 
     def test_test_file_content(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -293,7 +323,7 @@ class TestGenerateScaffoldPydantic:
         assert "test_run_replicate_uses_base_runner_dispatch" in text
         assert "SolventShellReplicateResult" in text
         assert "SolventShellAggregatedResult" in text
-        assert "from polyzymd.analyses.solvent_shell._runner import" in text
+        assert 'runner.__class__.__name__ == "SolventShellReplicateRunner"' in text
 
     def test_custom_class_name(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -373,7 +403,7 @@ class TestTemplateResources:
 
 
 class TestGeneratedCodeQuality:
-    """Ensure generated code compiles and is Black formatted."""
+    """Ensure generated code compiles and satisfies formatters."""
 
     @pytest.mark.parametrize(
         ("name", "style", "expected_count"),
@@ -384,7 +414,7 @@ class TestGeneratedCodeQuality:
             ("scaffold_pydantic_e2e", "pydantic", 4),
         ],
     )
-    def test_generated_files_compile_and_are_black_formatted(
+    def test_generated_files_compile_and_are_formatter_clean(
         self,
         tmp_path: Path,
         name: str,
@@ -400,6 +430,7 @@ class TestGeneratedCodeQuality:
         for path in generated:
             compile(path.read_text(encoding="utf-8"), str(path), "exec")
             _assert_black_compliant(path)
+        _assert_ruff_compliant(generated)
 
 
 class TestGeneratedPluginEndToEnd:

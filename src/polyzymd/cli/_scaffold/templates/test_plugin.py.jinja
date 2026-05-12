@@ -16,16 +16,6 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 from polyzymd.analyses.discovery import clear_cache, get_analysis
-{% if spec.uses_pydantic_results %}
-from polyzymd.analyses.{{ spec.name }} import (
-    {{ spec.class_name }}AggregatedResult,
-    {{ spec.class_name }}Analysis,
-    {{ spec.class_name }}ReplicateResult,
-)
-{% endif %}
-from polyzymd.analyses.{{ spec.name }}._runner import (
-    {{ spec.class_name }}ReplicateRunner,
-)
 from polyzymd.analyses.shared import PlotSettings
 
 FakeSimulationConfig = SimpleNamespace
@@ -33,22 +23,14 @@ FakeSimulationConfig = SimpleNamespace
 
 @pytest.fixture
 def analysis():
-{% if spec.uses_pydantic_results %}
-    return {{ spec.class_name }}Analysis()
-{% else %}
     cls = get_analysis("{{ spec.name }}")
     return cls()
-{% endif %}
 
 
 @pytest.fixture
 def settings():
-{% if spec.uses_pydantic_results %}
-    return {{ spec.class_name }}Analysis.Settings()
-{% else %}
     cls = get_analysis("{{ spec.name }}")
     return cls.Settings()
-{% endif %}
 
 
 @pytest.fixture
@@ -104,20 +86,16 @@ class TestDiscovery:
 
     def test_discoverable_by_name(self):
         clear_cache()
-{% if spec.uses_pydantic_results %}
-        assert get_analysis("{{ spec.name }}") is {{ spec.class_name }}Analysis
-{% else %}
         analysis_cls = get_analysis("{{ spec.name }}")
         assert analysis_cls.name == "{{ spec.name }}"
+{% if spec.uses_pydantic_results %}
+        assert analysis_cls.ReplicateResultClass.__name__ == "{{ spec.class_name }}ReplicateResult"
+        assert analysis_cls.AggregatedResultClass.__name__ == "{{ spec.class_name }}AggregatedResult"
 {% endif %}
 
     def test_settings_type(self):
-{% if spec.uses_pydantic_results %}
-        assert hasattr({{ spec.class_name }}Analysis, "Settings")
-{% else %}
         analysis_cls = get_analysis("{{ spec.name }}")
         assert hasattr(analysis_cls, "Settings")
-{% endif %}
 
 
 class TestRunnerBackedReplicate:
@@ -135,7 +113,7 @@ class TestRunnerBackedReplicate:
         )
         runner = analysis.build_runner(ctx, 1, FakeUniverse(), FakeWindow())
 
-        assert isinstance(runner, {{ spec.class_name }}ReplicateRunner)
+        assert runner.__class__.__name__ == "{{ spec.class_name }}ReplicateRunner"
         assert runner.settings is settings
         assert runner.results == {}
 
@@ -157,7 +135,7 @@ class TestRunnerBackedReplicate:
         result = analysis.summarize_replicate(ctx, 1, runner, FakeWindow())
 
 {% if spec.uses_pydantic_results %}
-        assert isinstance(result, {{ spec.class_name }}ReplicateResult)
+        assert isinstance(result, type(analysis).ReplicateResultClass)
         assert result.replicate == 1
         assert result.value == pytest.approx(2.0)
         assert result.n_frames == 2
@@ -193,7 +171,7 @@ class TestRunnerBackedReplicate:
         result = analysis.run_replicate(ctx, 1)
 
 {% if spec.uses_pydantic_results %}
-        assert isinstance(result, {{ spec.class_name }}ReplicateResult)
+        assert isinstance(result, type(analysis).ReplicateResultClass)
         assert result.value == pytest.approx(2.0)
         assert result.n_frames == 2
 {% else %}
@@ -215,9 +193,10 @@ class TestAggregate:
             settings=settings,
         )
 {% if spec.uses_pydantic_results %}
+        replicate_cls = type(analysis).ReplicateResultClass
         results = [
-            {{ spec.class_name }}ReplicateResult(replicate=1, value=1.0, n_frames=4),
-            {{ spec.class_name }}ReplicateResult(replicate=2, value=3.0, n_frames=4),
+            replicate_cls(replicate=1, value=1.0, n_frames=4),
+            replicate_cls(replicate=2, value=3.0, n_frames=4),
         ]
 {% else %}
         results = [
@@ -228,15 +207,19 @@ class TestAggregate:
         summary = analysis.aggregate(ctx, results)
 
 {% if spec.uses_pydantic_results %}
-        assert isinstance(summary, {{ spec.class_name }}AggregatedResult)
+        assert isinstance(summary, type(analysis).AggregatedResultClass)
         assert summary.mean_value == pytest.approx(2.0)
         assert summary.replicate_values == [1.0, 3.0]
         assert summary.n_replicates == 2
+        assert summary.replicates == [1, 2]
+        assert summary.settings_fingerprint == analysis.aggregate_settings_fingerprint(settings)
 {% else %}
         assert isinstance(summary, dict)
         assert summary["mean_value"] == pytest.approx(2.0)
         assert summary["replicate_values"] == [1.0, 3.0]
         assert summary["n_replicates"] == 2
+        assert summary["replicates"] == [1, 2]
+        assert summary["settings_fingerprint"] == analysis.aggregate_settings_fingerprint(settings)
 {% endif %}
 
 
@@ -245,7 +228,8 @@ class TestExtractMetrics:
 
     def test_returns_metric_value(self, analysis):
 {% if spec.uses_pydantic_results %}
-        summary = {{ spec.class_name }}AggregatedResult(
+        aggregated_cls = type(analysis).AggregatedResultClass
+        summary = aggregated_cls(
             mean_value=2.0,
             sem_value=0.5,
             replicate_values=[1.0, 3.0],

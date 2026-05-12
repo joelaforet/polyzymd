@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class {{ spec.class_name }}ReplicateResult(BaseModel):
@@ -21,3 +21,5 @@ class {{ spec.class_name }}AggregatedResult(BaseModel):
     sem_value: float
     replicate_values: list[float]
     n_replicates: int
+    replicates: list[int] = Field(default_factory=list)
+    settings_fingerprint: str | None = None

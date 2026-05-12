@@ -173,7 +173,6 @@ class {{ spec.class_name }}Analysis(Analysis):
             Aggregated result mapping for the condition.
 {% endif %}
         """
-        del ctx
 {% if spec.uses_pydantic_results %}
         values = [
             float(result.value if hasattr(result, "value") else result["value"])
@@ -196,6 +195,8 @@ class {{ spec.class_name }}Analysis(Analysis):
             sem_value=sem,
             replicate_values=values,
             n_replicates=n,
+            replicates=list(ctx.replicates),
+            settings_fingerprint=self.aggregate_settings_fingerprint(ctx.settings),
         )
 {% else %}
         return {
@@ -203,6 +204,8 @@ class {{ spec.class_name }}Analysis(Analysis):
             "sem_value": sem,
             "replicate_values": values,
             "n_replicates": n,
+            "replicates": list(ctx.replicates),
+            "settings_fingerprint": self.aggregate_settings_fingerprint(ctx.settings),
         }
 {% endif %}
 
