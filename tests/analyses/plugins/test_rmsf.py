@@ -158,7 +158,7 @@ class TestRMSFClassVars:
         assert rmsf_analysis.dependencies == ()
 
     def test_min_replicates(self, rmsf_analysis):
-        assert rmsf_analysis.min_replicates == 2
+        assert rmsf_analysis.min_replicates == 1
 
     def test_repr(self, rmsf_analysis):
         assert repr(rmsf_analysis) == "<RMSFAnalysis(name='rmsf')>"
@@ -730,6 +730,28 @@ class TestAggregate:
         assert len(result.per_replicate_mean_rmsf) == 3
         assert result.overall_mean_rmsf == pytest.approx(1.2, abs=0.01)  # mean of 1.1, 1.2, 1.3
 
+    def test_aggregates_single_replicate_with_zero_sem(self, rmsf_analysis, condition, tmp_path):
+        """Single-replicate RMSF should aggregate without fabricating uncertainty."""
+        result_payload = _make_mock_rmsf_result(1, mean_rmsf=1.1)
+        agg_dir = tmp_path / "aggregated"
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1,),
+            output_dir=agg_dir,
+            equilibration="10ns",
+            settings=RMSFSettings(),
+        )
+
+        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
+            result = rmsf_analysis.aggregate(ctx, [result_payload])
+
+        assert result.n_replicates == 1
+        assert result.replicates == [1]
+        assert result.per_replicate_mean_rmsf == [1.1]
+        assert result.overall_mean_rmsf == pytest.approx(1.1)
+        assert result.overall_sem_rmsf == 0.0
+        assert result.sem_rmsf_per_residue == [0.0] * len(result.mean_rmsf_per_residue)
+
     def test_aggregate_saves_result_file(self, rmsf_analysis, condition, tmp_path):
         """Verify aggregated result is saved to the output directory."""
         results = [_make_mock_rmsf_result(i, mean_rmsf=1.5) for i in range(1, 3)]
@@ -832,6 +854,19 @@ class TestExtractMetrics:
 
         metrics = rmsf_analysis.extract_metrics(summary)
         assert len(metrics) == 1
+
+    def test_single_replicate_metric_uses_zero_sem(self, rmsf_analysis):
+        """Single-replicate metrics should expose the lone value and zero SEM."""
+        summary = MagicMock()
+        summary.overall_mean_rmsf = 1.1
+        summary.overall_sem_rmsf = 0.0
+        summary.per_replicate_mean_rmsf = [1.1]
+
+        metric = rmsf_analysis.extract_metrics(summary)["mean_rmsf"]
+
+        assert metric.mean == 1.1
+        assert metric.sem == 0.0
+        assert metric.replicate_values == [1.1]
 
 
 class TestCompare:
@@ -1030,6 +1065,15 @@ class TestMakeAggregatedFilename:
         filename = RMSFAnalysis._make_aggregated_filename((1, 2), result)
         assert filename == "rmsf_reps1-2_eq0ns.json"
 
+    def test_single_replicate(self):
+        """Single-replicate aggregate filenames should remain cache-compatible."""
+        result = MagicMock()
+        result.equilibration_time = 10.0
+        result.equilibration_unit = "ns"
+
+        filename = RMSFAnalysis._make_aggregated_filename((1,), result)
+        assert filename == "rmsf_reps1-1_eq10ns.json"
+
 
 # ============================================================================
 # Test: plot
@@ -1077,6 +1121,56 @@ class TestRMSFComparisonDots:
 
         mock_scatter.assert_called_once()
         np.testing.assert_allclose(mock_scatter.call_args.args[1], [0.0, 1.2, 1.4])
+
+    def test_aggregated_fallback_omits_errorbar_for_single_replicate(self, tmp_path):
+        """Single-replicate RMSF comparison plots should not draw SEM error bars."""
+        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_aggregated
+
+        aggregated_dir = tmp_path / "analysis" / "control" / "rmsf" / "aggregated"
+        self._write_aggregated_result(
+            aggregated_dir,
+            {
+                "overall_mean_rmsf": 1.2,
+                "overall_sem_rmsf": 0.0,
+                "per_replicate_mean_rmsf": [1.2],
+            },
+        )
+        data = {"Control": {"aggregated_dir": aggregated_dir}}
+
+        with patch("matplotlib.axes.Axes.errorbar", autospec=True) as mock_errorbar:
+            _plot_rmsf_comparison_from_aggregated(
+                data,
+                ["Control"],
+                tmp_path / "figures",
+                self._plot_settings(),
+            )
+
+        mock_errorbar.assert_not_called()
+
+    def test_aggregated_fallback_draws_errorbar_for_multiple_replicates(self, tmp_path):
+        """Multi-replicate RMSF comparison plots should retain SEM error bars."""
+        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_aggregated
+
+        aggregated_dir = tmp_path / "analysis" / "control" / "rmsf" / "aggregated"
+        self._write_aggregated_result(
+            aggregated_dir,
+            {
+                "overall_mean_rmsf": 1.2,
+                "overall_sem_rmsf": 0.1,
+                "per_replicate_mean_rmsf": [1.1, 1.3],
+            },
+        )
+        data = {"Control": {"aggregated_dir": aggregated_dir}}
+
+        with patch("matplotlib.axes.Axes.errorbar", autospec=True) as mock_errorbar:
+            _plot_rmsf_comparison_from_aggregated(
+                data,
+                ["Control"],
+                tmp_path / "figures",
+                self._plot_settings(),
+            )
+
+        mock_errorbar.assert_called_once()
 
     def test_generic_comparison_result_draws_metric_replicate_dots(self, tmp_path):
         """Generic default comparison results should provide replicate dots."""

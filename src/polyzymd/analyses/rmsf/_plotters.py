@@ -123,7 +123,7 @@ def _plot_rmsf_profile(
 
         color = colors[idx] if idx < len(colors) else f"C{idx}"
 
-        if plot_settings.rmsf.show_error and "sem" in profile:
+        if plot_settings.rmsf.show_error and profile.get("n_replicates", 0) > 1 and "sem" in profile:
             sem = np.array(profile["sem"])
             ax_rmsf.fill_between(
                 residues,
@@ -251,13 +251,12 @@ def _plot_rmsf_comparison_from_result(
     ax.barh(
         positions,
         means_arr,
-        xerr=sems_arr,
         color=colors,
         edgecolor=t.bar_edgecolor,
         linewidth=t.bar_linewidth,
-        capsize=t.bar_capsize,
         height=bar_height,
     )
+    _draw_sem_errorbars(ax, means_arr, positions, sems_arr, replicate_data, plot_settings)
 
     scatter_replicate_values(
         ax,
@@ -357,16 +356,18 @@ def _plot_rmsf_comparison_from_aggregated(
     colors = get_colors(len(plot_labels), plot_settings)
 
     bar_height = 0.7
+    means_arr = np.asarray(means, dtype=np.float64)
+    sems_arr = np.asarray(sems, dtype=np.float64)
+
     ax.barh(
         positions,
-        means,
-        xerr=sems,
+        means_arr,
         color=colors,
         edgecolor=t.bar_edgecolor,
         linewidth=t.bar_linewidth,
-        capsize=t.bar_capsize,
         height=bar_height,
     )
+    _draw_sem_errorbars(ax, means_arr, positions, sems_arr, replicate_data, plot_settings)
 
     scatter_replicate_values(
         ax,
@@ -414,6 +415,32 @@ def _get_condition_summary(result: Any, label: str) -> Any | None:
         if getattr(condition, "label", None) == label:
             return condition
     return None
+
+
+def _draw_sem_errorbars(
+    ax: Any,
+    means: np.ndarray,
+    positions: np.ndarray,
+    sems: np.ndarray,
+    replicate_data: Sequence[Any],
+    plot_settings: Any,
+) -> None:
+    """Draw SEM error bars only for conditions with replicate uncertainty."""
+
+    mask = np.array([len(values) > 1 for values in replicate_data], dtype=bool)
+    if not np.any(mask):
+        return
+
+    theme = plot_settings.theme
+    ax.errorbar(
+        means[mask],
+        positions[mask],
+        xerr=sems[mask],
+        fmt="none",
+        ecolor=theme.bar_edgecolor,
+        elinewidth=theme.bar_linewidth,
+        capsize=theme.bar_capsize,
+    )
 
 
 def _get_first_available_field(item: Any, *names: str, default: Any = None) -> Any:
@@ -615,6 +642,7 @@ def _load_rmsf_profile(aggregated_dir: Path) -> dict | None:
                 "residues": data.get("residue_ids", list(range(1, len(per_res) + 1))),
                 "rmsf": per_res,
                 "sem": data.get("sem_rmsf_per_residue", []),
+                "n_replicates": data.get("n_replicates", 0),
             }
         elif "per_residue_rmsf" in data:
             per_res = data["per_residue_rmsf"]
@@ -622,12 +650,14 @@ def _load_rmsf_profile(aggregated_dir: Path) -> dict | None:
                 "residues": data.get("residue_ids", list(range(1, len(per_res) + 1))),
                 "rmsf": per_res,
                 "sem": data.get("per_residue_sem", []),
+                "n_replicates": data.get("n_replicates", 0),
             }
         elif "residue_rmsf" in data:
             return {
                 "residues": data.get("residue_ids", list(range(len(data["residue_rmsf"])))),
                 "rmsf": data["residue_rmsf"],
                 "sem": data.get("residue_sem", []),
+                "n_replicates": data.get("n_replicates", 0),
             }
 
         return None
