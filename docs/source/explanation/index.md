@@ -22,6 +22,13 @@ Read the concepts, statistics, convergence, and reference-selection pages that
 shape analysis-plugin design.
 :::
 
+:::{grid-item-card} Protein modifications
+:link: protein_modification_architecture
+:link-type: doc
+
+How covalent residue modifications and polymer conjugation are represented.
+:::
+
 :::{grid-item-card} Statistical interpretation
 :link: analysis_statistics_best_practices
 :link-type: doc
@@ -68,6 +75,7 @@ If you are adding or reviewing an analysis plugin, read these pages first:
 
 Analysis system concepts <analysis_concepts>
 Architecture and design rationale <architecture>
+Protein modification architecture <protein_modification_architecture>
 Residue assignment and chain conventions <residue_assignment>
 Why PolyzyMD uses colored logging <colored_logging>
 ```
