@@ -32,6 +32,13 @@ Every key in `config.yaml` — types, defaults, and constraints.
 OpenFF chemistry requirements and PolyzyMD chain conventions for enzyme PDBs.
 :::
 
+:::{grid-item-card} Protein Modification Config
+:link: protein_modification_config
+:link-type: doc
+
+Lookup fields for covalent modifications and polymer conjugation.
+:::
+
 :::{grid-item-card} Analysis Plugin Reference
 :link: analysis_plugin_settings
 :link-type: doc
@@ -63,6 +70,7 @@ Configuration Reference <configuration>
 ```{toctree}
 :maxdepth: 1
 
+Protein Modification Config Reference <protein_modification_config>
 Data Requirements & Directory Layout <data_requirements>
 OpenFF PDB Ingestion Reference <openff_pdb_ingestion>
 Benchmarks <benchmarks>
