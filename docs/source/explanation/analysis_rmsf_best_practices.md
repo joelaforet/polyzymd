@@ -249,14 +249,11 @@ WARNING: Aggregating 2 of 3 requested replicates. Skipped: [2]
 
 ### Minimum Requirements
 
-**At least 2 successful replicates are required for aggregation.** This is
-because SEM calculation requires n ≥ 2. If fewer than 2 replicates succeed,
-PolyzyMD raises an error:
-
-```
-ValueError: Aggregation requires at least 2 successful replicates, but only
-1 succeeded. Failed replicates: [2, 3]
-```
+RMSF aggregation supports one successful replicate for descriptive summaries and
+smoke tests. With one replicate, PolyzyMD reports the mean and suppresses
+condition-level SEM because between-replicate uncertainty is not estimable.
+Inferential statistics, SEM, and publication-grade comparisons require at least
+2 successful replicates per condition, and 3-5 replicates are recommended.
 
 ### Output File Naming
 

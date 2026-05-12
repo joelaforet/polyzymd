@@ -387,6 +387,10 @@ Run **at least 3 replicates** per condition. The aggregated analysis will:
 2. Report mean and SEM across replicates
 3. Show per-replicate values to assess variability
 
+One replicate is still supported for descriptive aggregation and smoke tests,
+but singleton summaries cannot estimate between-replicate SEM or support
+inferential comparisons.
+
 ### Interpreting Replicate Variability
 
 High replicate variability (large SEM) suggests:
@@ -436,14 +440,11 @@ WARNING: Aggregating 2 of 3 requested replicates. Skipped: [2]
 
 ### Minimum Requirements
 
-**At least 2 successful replicates are required for aggregation.** This is
-because SEM calculation requires n ≥ 2. If fewer than 2 replicates succeed,
-PolyzyMD raises an error:
-
-```
-ValueError: Aggregation requires at least 2 successful replicates, but only
-1 succeeded. Failed replicates: [2, 3]
-```
+Catalytic triad aggregation supports one successful replicate for descriptive
+summaries and smoke tests. With one replicate, PolyzyMD reports means and
+suppresses condition-level SEM because between-replicate uncertainty is not
+estimable. SEM and inferential comparisons require at least 2 successful
+replicates per condition, and 3-5 replicates are recommended for robust studies.
 
 ### Output File Naming
 

@@ -136,7 +136,9 @@ Equilibration: 10ns
 [My Simulation] Aggregating 1 replicate...
 
 RMSF Comparison Complete
-  My Simulation: mean RMSF = 0.621 ± 0.015 Å
+  My Simulation: mean RMSF = 0.621 Å
+  SEM: n/a (single replicate)
+  Statistical comparisons: not testable until each condition has at least 2 replicates
 ```
 
 ```{tip}
@@ -174,14 +176,15 @@ The key files are:
 - **`aggregated/result.json`** --- aggregated statistics across replicates (with
   one replicate, this matches the per-replicate file).
 - **`comparison/rmsf/result.json`** --- the comparison-level summary with mean
-  RMSF, standard error, and ranking information.
+  RMSF and ranking information. Singleton SEM is unavailable and suppressed
+  until at least 2 replicates contribute to a condition.
 
 ```{note}
 This tutorial intentionally uses one replicate so you can complete the workflow
 quickly. RMSF supports this smoke-test mode, but a single replicate cannot
-estimate between-replicate uncertainty. Error bars and condition-level
-statistical comparisons become meaningful only after you add more replicates and
-conditions.
+estimate between-replicate uncertainty. SEM is unavailable, and condition-level
+statistical comparisons are not testable until each condition has at least 2
+replicates.
 ```
 
 ## Step 5: Add Plotting (Optional)

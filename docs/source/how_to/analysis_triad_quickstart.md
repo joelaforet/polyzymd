@@ -42,7 +42,8 @@ Before running catalytic triad analysis, you need:
 
 1. Completed production simulation output
 2. A `comparison.yaml` file with a `plugins.catalytic_triad` section
-3. At least two replicates per condition for robust aggregation and comparison
+3. One or more replicates per condition; use at least two replicates for SEM
+   and robust inferential comparisons
 
 ## What Catalytic Triad Analysis Provides
 
