@@ -34,6 +34,11 @@ from polyzymd.analyses.base import (
     MetricValue,
     PairwiseResult,
 )
+from polyzymd.analyses.shared.multi_run_formatting import (
+    SINGLE_REPLICATE_SEM_NOTE,
+    format_sem_value,
+    is_sem_estimable,
+)
 
 logger = logging.getLogger("polyzymd.analyses")
 
@@ -724,14 +729,17 @@ def _format_scalar_text(
         marker = "*" if label == result.control_label else " "
         mean_val = _get_mean(cond)
         sem_val = _get_sem(cond)
+        sem_str = format_sem_value(sem_val, cond.n_replicates, precision=4)
         lines.append(
             f"{rank:<5} {cond.label:<20} {mean_val:>10.4f}{unit_str}  "
-            f"{sem_val:>8.4f}  {cond.n_replicates:<4}{marker}"
+            f"{sem_str:>8}  {cond.n_replicates:<4}{marker}"
         )
 
     lines.append("-" * 60)
     if result.control_label:
         lines.append("* = control condition")
+    if any(not is_sem_estimable(_get_cond(label).n_replicates) for label in selected_ranking):
+        lines.append(SINGLE_REPLICATE_SEM_NOTE)
     lines.append("")
 
     # Pairwise comparisons
@@ -923,10 +931,15 @@ def _format_scalar_markdown(
         marker = " (control)" if label == result.control_label else ""
         mean_val = _get_mean(cond)
         sem_val = _get_sem(cond)
+        sem_str = format_sem_value(sem_val, cond.n_replicates, precision=4)
         lines.append(
             f"| {rank} | **{cond.label}**{marker} | "
-            f"{mean_val:.4f} | {sem_val:.4f} | {cond.n_replicates} |"
+            f"{mean_val:.4f} | {sem_str} | {cond.n_replicates} |"
         )
+
+    if any(not is_sem_estimable(_get_cond(label).n_replicates) for label in selected_ranking):
+        lines.append("")
+        lines.append(f"*{SINGLE_REPLICATE_SEM_NOTE}.*")
 
     lines.append("")
 

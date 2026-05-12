@@ -5,6 +5,85 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 
+SINGLE_REPLICATE_SEM_NOTE = "SEM: n/a (single replicate; not estimable)"
+
+
+def is_sem_estimable(n_replicates: int) -> bool:
+    """Return whether SEM can be estimated from replicate-level values.
+
+    Parameters
+    ----------
+    n_replicates : int
+        Number of replicate values contributing to the summary.
+
+    Returns
+    -------
+    bool
+        ``True`` when at least two replicates are available.
+    """
+    return n_replicates >= 2
+
+
+def format_sem_value(
+    sem: float | None,
+    n_replicates: int,
+    *,
+    precision: int = 2,
+    unit: str = "",
+) -> str:
+    """Format SEM without implying singleton uncertainty is estimable.
+
+    Parameters
+    ----------
+    sem : float | None
+        SEM value to display when enough replicates are available.
+    n_replicates : int
+        Number of replicates contributing to the summary.
+    precision : int, optional
+        Decimal places for numeric SEM values, by default 2.
+    unit : str, optional
+        Unit suffix appended to numeric SEM values, by default ``""``.
+
+    Returns
+    -------
+    str
+        ``"n/a"`` for singleton summaries, otherwise a formatted SEM value.
+    """
+    if not is_sem_estimable(n_replicates) or sem is None:
+        return "n/a"
+    return f"{sem:.{precision}f}{unit}"
+
+
+def format_sem_phrase(
+    sem: float | None,
+    n_replicates: int,
+    *,
+    precision: int = 2,
+    unit: str = "",
+) -> str:
+    """Format a compact ``SEM: ...`` phrase for summaries.
+
+    Parameters
+    ----------
+    sem : float | None
+        SEM value to display when enough replicates are available.
+    n_replicates : int
+        Number of replicates contributing to the summary.
+    precision : int, optional
+        Decimal places for numeric SEM values, by default 2.
+    unit : str, optional
+        Unit suffix appended to numeric SEM values, by default ``""``.
+
+    Returns
+    -------
+    str
+        ``"SEM: n/a (single replicate)"`` for singleton summaries, otherwise
+        a numeric SEM phrase.
+    """
+    if not is_sem_estimable(n_replicates):
+        return "SEM: n/a (single replicate)"
+    return f"SEM: {format_sem_value(sem, n_replicates, precision=precision, unit=unit)}"
+
 
 def _format_pct(pct: float) -> str:
     """Format percent changes for multi-run output helpers.

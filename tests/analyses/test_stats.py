@@ -133,6 +133,34 @@ def test_default_scalar_singleton_pairwise_not_testable() -> None:
     assert math.isnan(comparison.p_value)
 
 
+def test_format_scalar_singleton_sem_rendered_as_not_available() -> None:
+    """Scalar formatter should not display singleton SEM as a numeric value."""
+    metrics_by_condition = {
+        "Control": {"metric": _metric(1.0, [1.0])},
+        "Treatment": {"metric": _metric(2.0, [2.0])},
+    }
+    result = default_scalar_comparison(
+        analysis_name="test",
+        project_name="Singleton format",
+        metrics_by_condition=metrics_by_condition,
+        control_label="Control",
+    )
+
+    text_output = format_scalar_comparison(result, output_format="text", metric_key="metric")
+    markdown_output = format_scalar_comparison(
+        result,
+        output_format="markdown",
+        metric_key="metric",
+    )
+
+    assert "n/a" in text_output
+    assert "SEM: n/a (single replicate; not estimable)" in text_output
+    assert "0.1000" not in text_output
+    assert "| 1.0000 | n/a | 1 |" in markdown_output
+    assert "*SEM: n/a (single replicate; not estimable).*" in markdown_output
+    assert "0.1000" not in markdown_output
+
+
 def test_default_scalar_singleton_anova_not_testable() -> None:
     """ANOVA should report singleton conditions as not testable."""
     metrics_by_condition = {

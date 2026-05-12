@@ -346,6 +346,47 @@ def test_sasa_singleton_pairwise_not_testable() -> None:
     assert comparison.note is not None
 
 
+def test_sasa_formatter_singleton_sem_rendered_as_not_available() -> None:
+    """SASA formatter should not show singleton SEM as a numeric value."""
+    result = SASAComparisonResult(
+        metric="mean_sasa",
+        name="singleton_sasa",
+        n_runs=1,
+        run_labels=["protein"],
+        conditions=[
+            SASAConditionSummary(
+                label="control",
+                config_path="/fake/control.yaml",
+                n_replicates=1,
+                run_summaries=[
+                    SASARunSummary(
+                        label="protein",
+                        target_selection="chainid A",
+                        context_selection="all",
+                        mean_sasa=100.0,
+                        sem_sasa=0.0,
+                        per_replicate_means=[100.0],
+                    )
+                ],
+            )
+        ],
+        pairwise_comparisons=[],
+        ranking_by_run={"protein": ["control"]},
+        equilibration_time="10ns",
+        created_at=datetime.now(),
+        polyzymd_version="1.0.0",
+    )
+
+    text_output = format_sasa_comparison(result, "table")
+    markdown_output = format_sasa_comparison(result, "markdown")
+
+    assert "n/a" in text_output
+    assert "SEM: n/a (single replicate; not estimable)" in text_output
+    assert " 0.00    " not in text_output
+    assert "| control | 100.00 | n/a | 1 |" in markdown_output
+    assert "*SEM: n/a (single replicate; not estimable).*" in markdown_output
+
+
 def test_sasa_settings_validation() -> None:
     """SASA settings should enforce run and scalar constraints."""
     settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])

@@ -15,6 +15,12 @@ from __future__ import annotations
 
 from polyzymd.analyses.distances._comparison_results import DistanceComparisonResult
 from polyzymd.analyses.shared.inferential_statistics import percent_change
+from polyzymd.analyses.shared.multi_run_formatting import (
+    SINGLE_REPLICATE_SEM_NOTE,
+    format_sem_phrase,
+    format_sem_value,
+    is_sem_estimable,
+)
 from polyzymd.analyses.stats import format_pct, interpret_direction
 
 
@@ -89,7 +95,7 @@ def format_distances_console_table(
             pair_data = cond.get_pair(pair_label)
             marker = "*" if label == result.control_label else " "
             dist_str = f"{pair_data.mean_distance:.2f} A"
-            sem_str = f"{pair_data.sem_distance:.3f}"
+            sem_str = format_sem_value(pair_data.sem_distance, cond.n_replicates, precision=3)
 
             if threshold is not None and pair_data.fraction_below_threshold is not None:
                 frac_pct = pair_data.fraction_below_threshold * 100
@@ -104,6 +110,8 @@ def format_distances_console_table(
                 )
 
         lines.append("-" * 80)
+        if any(not is_sem_estimable(result.get_condition(label).n_replicates) for label in ranking):
+            lines.append(SINGLE_REPLICATE_SEM_NOTE)
 
         # Secondary ranking (by fraction below threshold)
         if threshold is not None and fraction_ranking:
@@ -113,8 +121,18 @@ def format_distances_console_table(
                 pair_data = cond.get_pair(pair_label)
                 if pair_data.fraction_below_threshold is not None:
                     frac_pct = pair_data.fraction_below_threshold * 100
-                    sem_pct = (pair_data.sem_fraction_below or 0) * 100
-                    lines.append(f"  {rank}. {label}: {frac_pct:.1f}% (SEM: {sem_pct:.2f}%)")
+                    sem_pct = (
+                        pair_data.sem_fraction_below * 100
+                        if pair_data.sem_fraction_below is not None
+                        else None
+                    )
+                    sem_phrase = format_sem_phrase(
+                        sem_pct,
+                        cond.n_replicates,
+                        precision=2,
+                        unit="%",
+                    )
+                    lines.append(f"  {rank}. {label}: {frac_pct:.1f}% ({sem_phrase})")
 
         lines.append("")
 
@@ -368,15 +386,21 @@ def format_distances_markdown(
 
             if threshold is not None and pair_data.fraction_below_threshold is not None:
                 frac_pct = pair_data.fraction_below_threshold * 100
+                sem_str = format_sem_value(pair_data.sem_distance, cond.n_replicates, precision=3)
                 lines.append(
                     f"| {rank} | **{label}**{marker} | {pair_data.mean_distance:.2f} A | "
-                    f"{pair_data.sem_distance:.3f} | {frac_pct:.1f}% | {cond.n_replicates} |"
+                    f"{sem_str} | {frac_pct:.1f}% | {cond.n_replicates} |"
                 )
             else:
+                sem_str = format_sem_value(pair_data.sem_distance, cond.n_replicates, precision=3)
                 lines.append(
                     f"| {rank} | **{label}**{marker} | {pair_data.mean_distance:.2f} A | "
-                    f"{pair_data.sem_distance:.3f} | {cond.n_replicates} |"
+                    f"{sem_str} | {cond.n_replicates} |"
                 )
+
+        if any(not is_sem_estimable(result.get_condition(label).n_replicates) for label in ranking):
+            lines.append("")
+            lines.append(f"*{SINGLE_REPLICATE_SEM_NOTE}.*")
 
         lines.append("")
 

@@ -12,6 +12,11 @@ Note:
 from __future__ import annotations
 
 from polyzymd.analyses.contacts._comparison_results import ContactsComparisonResult
+from polyzymd.analyses.shared.multi_run_formatting import (
+    SINGLE_REPLICATE_SEM_NOTE,
+    format_sem_value,
+    is_sem_estimable,
+)
 from polyzymd.analyses.stats import format_pct
 
 
@@ -66,10 +71,12 @@ def format_contacts_console_table(
         cond = result.get_condition(label)
         marker = "*" if label == result.control_label else " "
         coverage_pct = cond.coverage_mean * 100
-        sem_pct = cond.coverage_sem * 100
+        sem_str = format_sem_value(
+            cond.coverage_sem * 100, cond.n_replicates, precision=2, unit="%"
+        )
         lines.append(
             f"{rank:<5} {cond.label:<25} {coverage_pct:>8.1f}%   "
-            f"{sem_pct:>8.2f}%  {cond.n_replicates:<4}{marker}"
+            f"{sem_str:>8}  {cond.n_replicates:<4}{marker}"
         )
 
     lines.append("-" * 80)
@@ -88,13 +95,20 @@ def format_contacts_console_table(
         cond = result.get_condition(label)
         marker = "*" if label == result.control_label else " "
         contact_pct = cond.mean_contact_fraction * 100
-        sem_pct = cond.mean_contact_fraction_sem * 100
+        sem_str = format_sem_value(
+            cond.mean_contact_fraction_sem * 100,
+            cond.n_replicates,
+            precision=2,
+            unit="%",
+        )
         lines.append(
             f"{rank:<5} {cond.label:<25} {contact_pct:>8.1f}%   "
-            f"{sem_pct:>8.2f}%  {cond.n_replicates:<4}{marker}"
+            f"{sem_str:>8}  {cond.n_replicates:<4}{marker}"
         )
 
     lines.append("-" * 80)
+    if any(not is_sem_estimable(cond.n_replicates) for cond in result.conditions):
+        lines.append(SINGLE_REPLICATE_SEM_NOTE)
     lines.append("")
 
     # Residence Time by Polymer Type summary
@@ -119,7 +133,8 @@ def format_contacts_console_table(
             for ptype in sorted_types:
                 if ptype in cond.residence_time_by_polymer_type:
                     mean, sem = cond.residence_time_by_polymer_type[ptype]
-                    row_parts.append(f"{mean:>5.1f}±{sem:<4.1f}")
+                    sem_str = format_sem_value(sem, cond.n_replicates, precision=1)
+                    row_parts.append(f"{mean:>5.1f}±{sem_str:<4}")
                 else:
                     row_parts.append(f"{'--':>12}")
             lines.append(" ".join(row_parts))
@@ -304,13 +319,21 @@ def format_contacts_markdown(
         cond = result.get_condition(label)
         marker = " (control)" if label == result.control_label else ""
         coverage_pct = cond.coverage_mean * 100
-        sem_pct = cond.coverage_sem * 100
+        sem_str = format_sem_value(
+            cond.coverage_sem * 100, cond.n_replicates, precision=2, unit="%"
+        )
         lines.append(
             f"| {rank} | **{cond.label}**{marker} | {coverage_pct:.1f}% | "
-            f"{sem_pct:.2f}% | {cond.n_replicates} |"
+            f"{sem_str} | {cond.n_replicates} |"
         )
 
     lines.append("")
+    if any(
+        not is_sem_estimable(result.get_condition(label).n_replicates)
+        for label in result.ranking_by_coverage
+    ):
+        lines.append(f"*{SINGLE_REPLICATE_SEM_NOTE}.*")
+        lines.append("")
 
     # Mean contact fraction summary
     lines.append("## Condition Summary - Mean Contact Fraction")
@@ -324,13 +347,24 @@ def format_contacts_markdown(
         cond = result.get_condition(label)
         marker = " (control)" if label == result.control_label else ""
         contact_pct = cond.mean_contact_fraction * 100
-        sem_pct = cond.mean_contact_fraction_sem * 100
+        sem_str = format_sem_value(
+            cond.mean_contact_fraction_sem * 100,
+            cond.n_replicates,
+            precision=2,
+            unit="%",
+        )
         lines.append(
             f"| {rank} | **{cond.label}**{marker} | {contact_pct:.1f}% | "
-            f"{sem_pct:.2f}% | {cond.n_replicates} |"
+            f"{sem_str} | {cond.n_replicates} |"
         )
 
     lines.append("")
+    if any(
+        not is_sem_estimable(result.get_condition(label).n_replicates)
+        for label in result.ranking_by_contact_fraction
+    ):
+        lines.append(f"*{SINGLE_REPLICATE_SEM_NOTE}.*")
+        lines.append("")
 
     # Aggregate comparisons
     if show_pairwise and result.pairwise_comparisons:
