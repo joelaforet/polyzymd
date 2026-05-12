@@ -18,6 +18,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel
 
+from polyzymd.analyses._aggregate_validation import AggregateValidationError
+from polyzymd.analyses._aggregate_validation import (
+    aggregate_settings_fingerprint as _aggregate_settings_fingerprint_impl,
+)
+from polyzymd.analyses._aggregate_validation import (
+    validate_aggregated_result as _validate_aggregated_result_impl,
+)
 from polyzymd.analyses._analysis_compare import default_compare as _default_compare
 from polyzymd.analyses._analysis_contract import validate_analysis_subclass
 from polyzymd.analyses._analysis_io import (
@@ -83,6 +90,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ANOVAResult",
     "AggregateContext",
+    "AggregateValidationError",
     "Analysis",
     "BaseComparisonResult",
     "BaseConditionSummary",
@@ -338,6 +346,69 @@ class Analysis(ABC):
         """
         del summary
         return {}
+
+    def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
+        """Return the settings fingerprint expected on aggregate results.
+
+        Parameters
+        ----------
+        settings : BaseModel or None
+            Active analysis settings.
+
+        Returns
+        -------
+        str or None
+            Fingerprint used to validate aggregate caches, or ``None`` to skip
+            settings identity checks.
+        """
+        return _aggregate_settings_fingerprint_impl(settings)
+
+    def validate_aggregated_result(
+        self,
+        result: Any,
+        *,
+        condition: Condition | None,
+        settings: BaseModel | None,
+        equilibration: str,
+        source: str | Path | None = None,
+        expected_replicates: Sequence[int] | None = None,
+        allow_replicate_subset: bool = False,
+    ) -> Any:
+        """Validate an aggregate result against the active framework context.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded or newly computed aggregate result.
+        condition : Condition or None
+            Condition providing configuration context.
+        settings : BaseModel or None
+            Active analysis settings.
+        equilibration : str
+            Requested equilibration window.
+        source : str or Path or None, optional
+            Cache path or description used in diagnostics.
+        expected_replicates : sequence of int or None, optional
+            Replicate IDs expected in the aggregate.
+        allow_replicate_subset : bool, optional
+            Whether a successful subset of requested replicates is acceptable.
+
+        Returns
+        -------
+        Any
+            Validated aggregate result, potentially coerced through the plugin's
+            ``AggregatedResultClass``.
+        """
+        return _validate_aggregated_result_impl(
+            self,
+            result,
+            condition=condition,
+            settings=settings,
+            equilibration=equilibration,
+            source=source,
+            expected_replicates=expected_replicates,
+            allow_replicate_subset=allow_replicate_subset,
+        )
 
     def plot(self, ctx: PlotContext) -> list[Path]:
         """Generate comparison figures.
