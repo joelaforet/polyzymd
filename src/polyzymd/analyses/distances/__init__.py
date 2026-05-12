@@ -70,6 +70,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("polyzymd.analyses.distances")
 
+NOT_TESTABLE_SINGLETON_NOTE = "Inferential statistics require at least two replicates per condition."
+
 # Default threshold from the existing settings module
 DEFAULT_DISTANCE_THRESHOLD = 3.5
 
@@ -1452,25 +1454,36 @@ class DistancesAnalysis(Analysis):
                         fraction_groups.append(pair_data.per_replicate_fractions)
 
                 anova_dist = one_way_anova(*distance_groups)
+                distance_testable = all(len(group) >= 2 for group in distance_groups)
 
                 fraction_f = None
                 fraction_p = None
                 fraction_sig = None
+                fraction_testable = None
+                fraction_note = None
                 if len(fraction_groups) == len(summaries):
                     anova_frac = one_way_anova(*fraction_groups)
+                    fraction_testable = all(len(group) >= 2 for group in fraction_groups)
                     fraction_f = anova_frac.f_statistic
                     fraction_p = anova_frac.p_value
-                    fraction_sig = anova_frac.significant
+                    fraction_sig = anova_frac.significant if fraction_testable else False
+                    fraction_note = None if fraction_testable else NOT_TESTABLE_SINGLETON_NOTE
 
                 anova_by_pair.append(
                     DistancePairANOVA(
                         pair_label=pair_label,
                         distance_f_statistic=anova_dist.f_statistic,
                         distance_p_value=anova_dist.p_value,
-                        distance_significant=anova_dist.significant,
+                        distance_significant=anova_dist.significant if distance_testable else False,
+                        distance_testable=distance_testable,
+                        distance_note=(
+                            None if distance_testable else NOT_TESTABLE_SINGLETON_NOTE
+                        ),
                         fraction_f_statistic=fraction_f,
                         fraction_p_value=fraction_p,
                         fraction_significant=fraction_sig,
+                        fraction_testable=fraction_testable,
+                        fraction_note=fraction_note,
                     )
                 )
 
@@ -1601,6 +1614,7 @@ class DistancesAnalysis(Analysis):
         # Distance metric comparison
         values_a = pair_a.per_replicate_means
         values_b = pair_b.per_replicate_means
+        distance_testable = len(values_a) >= 2 and len(values_b) >= 2
 
         ttest_dist = independent_ttest(values_a, values_b)
         effect_dist = cohens_d(values_a, values_b)
@@ -1621,10 +1635,13 @@ class DistancesAnalysis(Analysis):
         fraction_dir = None
         fraction_sig = None
         fraction_pct = None
+        fraction_testable = None
+        fraction_note = None
 
         if pair_a.per_replicate_fractions and pair_b.per_replicate_fractions:
             frac_a = pair_a.per_replicate_fractions
             frac_b = pair_b.per_replicate_fractions
+            fraction_testable = len(frac_a) >= 2 and len(frac_b) >= 2
 
             ttest_frac = independent_ttest(frac_a, frac_b)
             effect_frac = cohens_d(frac_a, frac_b)
@@ -1637,7 +1654,8 @@ class DistancesAnalysis(Analysis):
             fraction_p = ttest_frac.p_value
             fraction_d = effect_frac.cohens_d
             fraction_interp = effect_frac.interpretation
-            fraction_sig = ttest_frac.significant
+            fraction_sig = ttest_frac.significant if fraction_testable else False
+            fraction_note = None if fraction_testable else NOT_TESTABLE_SINGLETON_NOTE
 
             # Direction: positive change = more contact = improving
             fraction_dir = interpret_direction(
@@ -1657,8 +1675,10 @@ class DistancesAnalysis(Analysis):
             distance_cohens_d=effect_dist.cohens_d,
             distance_effect_interpretation=effect_dist.interpretation,
             distance_direction=direction_dist,
-            distance_significant=ttest_dist.significant,
+            distance_significant=ttest_dist.significant if distance_testable else False,
             distance_percent_change=pct_dist,
+            distance_testable=distance_testable,
+            distance_note=None if distance_testable else NOT_TESTABLE_SINGLETON_NOTE,
             fraction_t_statistic=fraction_t,
             fraction_p_value=fraction_p,
             fraction_cohens_d=fraction_d,
@@ -1666,6 +1686,8 @@ class DistancesAnalysis(Analysis):
             fraction_direction=fraction_dir,
             fraction_significant=fraction_sig,
             fraction_percent_change=fraction_pct,
+            fraction_testable=fraction_testable,
+            fraction_note=fraction_note,
         )
 
     @staticmethod

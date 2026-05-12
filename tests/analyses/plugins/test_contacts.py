@@ -77,6 +77,37 @@ class TestClassAttributes:
         assert ContactsAnalysis.min_replicates == 1
 
 
+def test_singleton_contacts_pairwise_not_testable() -> None:
+    """Contacts singleton pairwise metrics should be marked not testable."""
+    from polyzymd.analyses.contacts._comparison import compare_contacts_pair
+
+    summary_a = SimpleNamespace(
+        coverage_mean=0.4,
+        coverage_sem=0.0,
+        mean_contact_fraction=0.1,
+        mean_contact_fraction_sem=0.0,
+    )
+    summary_b = SimpleNamespace(
+        coverage_mean=0.6,
+        coverage_sem=0.0,
+        mean_contact_fraction=0.2,
+        mean_contact_fraction_sem=0.0,
+    )
+
+    result = compare_contacts_pair(
+        "A",
+        summary_a,
+        {"coverage_per_replicate": [0.4], "contact_fraction_per_replicate": [0.1]},
+        "B",
+        summary_b,
+        {"coverage_per_replicate": [0.6], "contact_fraction_per_replicate": [0.2]},
+    )
+
+    assert all(comparison.testable is False for comparison in result.aggregate_comparisons)
+    assert all(comparison.significant is False for comparison in result.aggregate_comparisons)
+    assert all(comparison.p_value_adjusted is None for comparison in result.aggregate_comparisons)
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------

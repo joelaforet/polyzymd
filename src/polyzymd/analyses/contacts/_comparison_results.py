@@ -84,6 +84,8 @@ class AggregateComparisonResult(BaseModel):
     meets_effect_size_threshold: bool = True
     percent_change: float
     direction: str
+    testable: bool = True
+    note: str | None = None
 
 
 class ContactsConditionSummary(BaseModel):
@@ -171,6 +173,8 @@ class ContactsANOVASummary(BaseModel):
     p_value: float
     p_value_adjusted: float | None = None
     significant: bool
+    testable: bool = True
+    note: str | None = None
 
 
 class ContactsComparisonResult(BaseModel):

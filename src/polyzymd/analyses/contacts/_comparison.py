@@ -12,6 +12,8 @@ from polyzymd.analyses.base import ComparisonContext, Condition
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
 
+NOT_TESTABLE_SINGLETON_NOTE = "Inferential statistics require at least two replicates per condition."
+
 
 def compare(analysis: Any, ctx: ComparisonContext) -> Any:
     """Compare contacts metrics across conditions.
@@ -378,6 +380,7 @@ def compare_contacts_pair(
 
     coverage_a = data_a["coverage_per_replicate"]
     coverage_b = data_b["coverage_per_replicate"]
+    coverage_testable = len(coverage_a) >= 2 and len(coverage_b) >= 2
     ttest = independent_ttest(coverage_a, coverage_b)
     effect = cohens_d(coverage_a, coverage_b)
     pct = percent_change(summary_a.coverage_mean, summary_b.coverage_mean)
@@ -400,14 +403,17 @@ def compare_contacts_pair(
             p_value=ttest.p_value,
             cohens_d=effect.cohens_d,
             effect_size_interpretation=effect.interpretation,
-            significant=ttest.significant,
+            significant=ttest.significant if coverage_testable else False,
             percent_change=pct,
             direction=direction,
+            testable=coverage_testable,
+            note=None if coverage_testable else NOT_TESTABLE_SINGLETON_NOTE,
         )
     )
 
     contact_a = data_a["contact_fraction_per_replicate"]
     contact_b = data_b["contact_fraction_per_replicate"]
+    contact_testable = len(contact_a) >= 2 and len(contact_b) >= 2
     ttest = independent_ttest(contact_a, contact_b)
     effect = cohens_d(contact_a, contact_b)
     pct = percent_change(summary_a.mean_contact_fraction, summary_b.mean_contact_fraction)
@@ -430,9 +436,11 @@ def compare_contacts_pair(
             p_value=ttest.p_value,
             cohens_d=effect.cohens_d,
             effect_size_interpretation=effect.interpretation,
-            significant=ttest.significant,
+            significant=ttest.significant if contact_testable else False,
             percent_change=pct,
             direction=direction,
+            testable=contact_testable,
+            note=None if contact_testable else NOT_TESTABLE_SINGLETON_NOTE,
         )
     )
 
@@ -463,24 +471,30 @@ def compute_contacts_anova(condition_data: list[tuple[Condition, dict[str, Any]]
     results = []
 
     coverage_groups = [data["coverage_per_replicate"] for _, data in condition_data]
+    coverage_testable = all(len(group) >= 2 for group in coverage_groups)
     anova_coverage = one_way_anova(*coverage_groups)
     results.append(
         ContactsANOVASummary(
             metric="coverage",
             f_statistic=anova_coverage.f_statistic,
             p_value=anova_coverage.p_value,
-            significant=anova_coverage.significant,
+            significant=anova_coverage.significant if coverage_testable else False,
+            testable=coverage_testable,
+            note=None if coverage_testable else NOT_TESTABLE_SINGLETON_NOTE,
         )
     )
 
     contact_groups = [data["contact_fraction_per_replicate"] for _, data in condition_data]
+    contact_testable = all(len(group) >= 2 for group in contact_groups)
     anova_contact = one_way_anova(*contact_groups)
     results.append(
         ContactsANOVASummary(
             metric="mean_contact_fraction",
             f_statistic=anova_contact.f_statistic,
             p_value=anova_contact.p_value,
-            significant=anova_contact.significant,
+            significant=anova_contact.significant if contact_testable else False,
+            testable=contact_testable,
+            note=None if contact_testable else NOT_TESTABLE_SINGLETON_NOTE,
         )
     )
 
@@ -514,14 +528,14 @@ def apply_fdr_correction(
             len(all_pairwise_agg),
             fdr_alpha,
         )
-        raw_p = [agg.p_value for agg in all_pairwise_agg]
+        raw_p = [agg.p_value if agg.testable else None for agg in all_pairwise_agg]
         bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
         changed_significance = 0
         for agg, bh in zip(all_pairwise_agg, bh_results, strict=False):
             if agg.significant != bh.significant:
                 changed_significance += 1
             agg.p_value_adjusted = bh.adjusted_p_value
-            agg.significant = bh.significant
+            agg.significant = bh.significant if agg.testable else False
         n_significant = sum(1 for agg in all_pairwise_agg if agg.significant)
         logger.info(
             "Applied BH correction to %d contacts pairwise tests at α=%.3f: "
@@ -538,14 +552,14 @@ def apply_fdr_correction(
             len(anova_results),
             fdr_alpha,
         )
-        raw_p = [a.p_value for a in anova_results]
+        raw_p = [a.p_value if a.testable else None for a in anova_results]
         bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
         changed_significance = 0
         for anova, bh in zip(anova_results, bh_results, strict=False):
             if anova.significant != bh.significant:
                 changed_significance += 1
             anova.p_value_adjusted = bh.adjusted_p_value
-            anova.significant = bh.significant
+            anova.significant = bh.significant if anova.testable else False
         n_significant = sum(1 for anova in anova_results if anova.significant)
         logger.info(
             "Applied BH correction to %d contacts ANOVA tests at α=%.3f: "
@@ -572,7 +586,9 @@ def apply_effect_size_threshold(comparisons: list[Any], min_effect_size: float) 
     failed_threshold = 0
     for comp in comparisons:
         for agg in comp.aggregate_comparisons:
-            agg.meets_effect_size_threshold = abs(agg.cohens_d) >= min_effect_size
+            agg.meets_effect_size_threshold = (
+                bool(agg.testable) and abs(agg.cohens_d) >= min_effect_size
+            )
             if agg.meets_effect_size_threshold:
                 met_threshold += 1
             else:

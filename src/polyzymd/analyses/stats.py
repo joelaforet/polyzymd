@@ -37,6 +37,8 @@ from polyzymd.analyses.base import (
 
 logger = logging.getLogger("polyzymd.analyses")
 
+NOT_TESTABLE_SINGLETON_NOTE = "Inferential statistics require at least two replicates per condition."
+
 
 # ---------------------------------------------------------------------------
 # Direction interpretation
@@ -182,6 +184,7 @@ def pairwise_comparisons(
         for label_a, label_b in pairs:
             mv_a = metrics_by_condition[label_a]
             mv_b = metrics_by_condition[label_b]
+            testable = len(mv_a.replicate_values) >= 2 and len(mv_b.replicate_values) >= 2
 
             ttest = independent_ttest(
                 mv_a.replicate_values,
@@ -204,19 +207,30 @@ def pairwise_comparisons(
                     cohens_d=effect.cohens_d,
                     effect_size_interpretation=effect.interpretation,
                     direction=direction,
-                    significant=ttest.significant,
+                    significant=ttest.significant if testable else False,
                     percent_change=pct,
+                    testable=testable,
+                    note=None if testable else NOT_TESTABLE_SINGLETON_NOTE,
                 )
             )
     elif posthoc_method == "tukey_hsd":
         if len(labels) < 2:
             return results  # Not enough conditions for pairwise Tukey
         group_arrays = [metrics_by_condition[label].replicate_values for label in labels]
-        tukey_results = tukey_hsd(*group_arrays)
+        if any(len(group) < 2 for group in group_arrays):
+            tukey_results = []
+            for i in range(len(labels)):
+                for j in range(i + 1, len(labels)):
+                    tukey_results.append((i, j, float("nan"), False))
+        else:
+            tukey_results = [
+                (item.group_i, item.group_j, item.p_value, True)
+                for item in tukey_hsd(*group_arrays)
+            ]
 
-        for tukey_result in tukey_results:
-            label_a = labels[tukey_result.group_i]
-            label_b = labels[tukey_result.group_j]
+        for group_i, group_j, p_value, testable in tukey_results:
+            label_a = labels[group_i]
+            label_b = labels[group_j]
 
             if (
                 control_label
@@ -240,14 +254,16 @@ def pairwise_comparisons(
                     condition_b=label_b,
                     metric=mv_a.name,
                     t_statistic=float("nan"),
-                    p_value=tukey_result.p_value,
-                    p_value_adjusted=tukey_result.p_value,
+                    p_value=p_value,
+                    p_value_adjusted=p_value if testable else None,
                     posthoc_method=posthoc_method,
                     cohens_d=effect.cohens_d,
                     effect_size_interpretation=effect.interpretation,
                     direction=direction,
-                    significant=tukey_result.p_value <= fdr_alpha,
+                    significant=p_value <= fdr_alpha if testable else False,
                     percent_change=pct,
+                    testable=testable,
+                    note=None if testable else NOT_TESTABLE_SINGLETON_NOTE,
                 )
             )
     else:
@@ -291,13 +307,16 @@ def anova_test(
     from polyzymd.analyses.shared.inferential_statistics import one_way_anova
 
     groups = [mv.replicate_values for mv in metrics_by_condition.values()]
+    testable = all(len(group) >= 2 for group in groups)
     result = one_way_anova(*groups)
 
     return ANOVAResult(
         metric=metric_name,
         f_statistic=result.f_statistic,
         p_value=result.p_value,
-        significant=result.p_value <= alpha,
+        significant=result.p_value <= alpha if testable else False,
+        testable=testable,
+        note=None if testable else NOT_TESTABLE_SINGLETON_NOTE,
     )
 
 
@@ -496,10 +515,13 @@ def default_scalar_comparison(
     if all_pairwise and posthoc_method == "ttest_bh":
         from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
-        raw_p_values = [r.p_value for r in all_pairwise]
+        raw_p_values = [r.p_value if r.testable else None for r in all_pairwise]
         bh_results = benjamini_hochberg(raw_p_values, alpha=fdr_alpha)
         for result, bh in zip(all_pairwise, bh_results, strict=False):
             result.p_value_adjusted = bh.adjusted_p_value
+            if not result.testable:
+                result.significant = False
+                continue
             p_for_significance = (
                 bh.adjusted_p_value if bh.adjusted_p_value is not None else result.p_value
             )
@@ -742,12 +764,16 @@ def _format_scalar_text(
             name = f"{comp.condition_b} vs {comp.condition_a}"
             sig_marker = "*" if comp.significant else ""
             pct_str = format_pct(comp.percent_change)
-            d_str = f"{comp.cohens_d:.2f}"
+            d_str = f"{comp.cohens_d:.2f}" if comp.testable else "n/a"
             if comp.posthoc_method == "ttest_bh":
-                p_str = f"{comp.p_value:.4f}{sig_marker}"
+                p_str = f"{comp.p_value:.4f}{sig_marker}" if comp.testable else "not testable"
                 p_adj = comp.p_value_adjusted
                 p_adj_str = "n/a" if p_adj is None else f"{p_adj:.4f}{sig_marker}"
-                t_str = f"{comp.t_statistic:.3f}" if not math.isnan(comp.t_statistic) else "nan"
+                t_str = (
+                    f"{comp.t_statistic:.3f}"
+                    if comp.testable and not math.isnan(comp.t_statistic)
+                    else "n/a"
+                )
                 if has_adjusted:
                     lines.append(
                         f"{name:<30} {pct_str:<10} {t_str:<10} {p_str:<12} {p_adj_str:<12} "
@@ -759,7 +785,7 @@ def _format_scalar_text(
                         f"{d_str:<10} {comp.effect_size_interpretation:<12}"
                     )
             elif comp.posthoc_method == "tukey_hsd":
-                p_str = f"{comp.p_value:.4f}{sig_marker}"
+                p_str = f"{comp.p_value:.4f}{sig_marker}" if comp.testable else "not testable"
                 lines.append(
                     f"{name:<30} {pct_str:<10} {p_str:<12} "
                     f"{d_str:<10} {comp.effect_size_interpretation:<12}"
@@ -778,6 +804,8 @@ def _format_scalar_text(
             lines.append(f"* Tukey HSD p <= {alpha:g}")
         else:
             raise ValueError(f"Unknown posthoc method {posthoc_method!r}")
+        if any(not comp.testable for comp in selected_pairwise):
+            lines.append("Not testable: inferential statistics require at least two replicates per condition")
         lines.append("")
 
     # ANOVA
@@ -788,9 +816,15 @@ def _format_scalar_text(
             sig = "Yes" if a.significant else "No"
             if a.metric != "default":
                 lines.append(f"Metric: {a.metric}")
-            lines.append(f"F-statistic: {a.f_statistic:.3f}")
-            lines.append(f"p-value:     {a.p_value:.4f}")
-            lines.append(f"Significant: {sig} (alpha={alpha:g})")
+            if a.testable:
+                lines.append(f"F-statistic: {a.f_statistic:.3f}")
+                lines.append(f"p-value:     {a.p_value:.4f}")
+                lines.append(f"Significant: {sig} (alpha={alpha:g})")
+            else:
+                lines.append("F-statistic: n/a")
+                lines.append("p-value:     not testable")
+                lines.append("Significant: No")
+                lines.append(f"Note: {a.note or NOT_TESTABLE_SINGLETON_NOTE}")
         lines.append("")
 
     # Interpretation
@@ -921,25 +955,32 @@ def _format_scalar_markdown(
         for comp in selected_pairwise:
             name = f"{comp.condition_b} vs {comp.condition_a}"
             sig = "Yes" if comp.significant else "No"
+            d_str = f"{comp.cohens_d:.2f}" if comp.testable else "n/a"
             if comp.posthoc_method == "ttest_bh":
                 p_adj = "n/a" if comp.p_value_adjusted is None else f"{comp.p_value_adjusted:.4f}"
-                t_str = f"{comp.t_statistic:.3f}" if not math.isnan(comp.t_statistic) else "nan"
+                p_value = f"{comp.p_value:.4f}" if comp.testable else "not testable"
+                t_str = (
+                    f"{comp.t_statistic:.3f}"
+                    if comp.testable and not math.isnan(comp.t_statistic)
+                    else "n/a"
+                )
                 if has_adjusted:
                     lines.append(
                         f"| {name} | {format_pct(comp.percent_change)} | "
-                        f"{t_str} | {comp.p_value:.4f} | {p_adj} | {comp.cohens_d:.2f} | "
+                        f"{t_str} | {p_value} | {p_adj} | {d_str} | "
                         f"{comp.effect_size_interpretation} | {sig} |"
                     )
                 else:
                     lines.append(
                         f"| {name} | {format_pct(comp.percent_change)} | "
-                        f"{t_str} | {comp.p_value:.4f} | {comp.cohens_d:.2f} | "
+                        f"{t_str} | {p_value} | {d_str} | "
                         f"{comp.effect_size_interpretation} | {sig} |"
                     )
             elif comp.posthoc_method == "tukey_hsd":
+                p_value = f"{comp.p_value:.4f}" if comp.testable else "not testable"
                 lines.append(
                     f"| {name} | {format_pct(comp.percent_change)} | "
-                    f"{comp.p_value:.4f} | {comp.cohens_d:.2f} | "
+                    f"{p_value} | {d_str} | "
                     f"{comp.effect_size_interpretation} | {sig} |"
                 )
             else:
@@ -953,6 +994,9 @@ def _format_scalar_markdown(
         elif posthoc_method == "tukey_hsd":
             lines.append("")
             lines.append(f"*Significance uses Tukey HSD p <= {alpha:g}.*")
+        if any(not comp.testable for comp in selected_pairwise):
+            lines.append("")
+            lines.append("*Not testable: inferential statistics require at least two replicates per condition.*")
         lines.append("")
 
     # ANOVA
@@ -961,8 +1005,13 @@ def _format_scalar_markdown(
         lines.append("")
         for a in selected_anova:
             sig = "Yes" if a.significant else "No"
-            lines.append(f"- **F-statistic:** {a.f_statistic:.3f}")
-            lines.append(f"- **p-value:** {a.p_value:.4f}")
+            if a.testable:
+                lines.append(f"- **F-statistic:** {a.f_statistic:.3f}")
+                lines.append(f"- **p-value:** {a.p_value:.4f}")
+            else:
+                lines.append("- **F-statistic:** n/a")
+                lines.append("- **p-value:** not testable")
+                lines.append(f"- **Note:** {a.note or NOT_TESTABLE_SINGLETON_NOTE}")
             lines.append(f"- **Significant:** {sig}")
         lines.append("")
 

@@ -142,11 +142,11 @@ def format_contacts_console_table(
             comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
             for agg in comp.aggregate_comparisons:
                 sig_marker = "*" if agg.significant else ""
-                p_str = f"{agg.p_value:.4f}"
+                p_str = f"{agg.p_value:.4f}" if agg.testable else "not testable"
                 p_adj = agg.p_value_adjusted
                 p_adj_str = f"{p_adj:.4f}{sig_marker}" if p_adj is not None else "--"
                 pct_str = format_pct(agg.percent_change)
-                d_str = f"{agg.cohens_d:.2f}"
+                d_str = f"{agg.cohens_d:.2f}" if agg.testable else "n/a"
                 metric = agg.metric.replace("_", " ")[:14]
                 effect_marker = "†" if agg.meets_effect_size_threshold else ""
                 lines.append(
@@ -164,6 +164,14 @@ def format_contacts_console_table(
             f"{result.fdr_alpha} (BH-corrected); "
             f"† meets min effect size |d| >= {result.min_effect_size}"
         )
+        if any(
+            not agg.testable
+            for comp in result.pairwise_comparisons
+            for agg in comp.aggregate_comparisons
+        ):
+            lines.append(
+                "Not testable: inferential statistics require at least two replicates per condition"
+            )
         lines.append("positive % change = more contact in treatment")
         lines.append("")
 
@@ -181,8 +189,10 @@ def format_contacts_console_table(
             p_adj_str = (
                 f"{anova.p_value_adjusted:.4f}" if anova.p_value_adjusted is not None else "--"
             )
+            f_stat = f"{anova.f_statistic:.3f}" if anova.testable else "n/a"
+            p_value = f"{anova.p_value:.4f}" if anova.testable else "not testable"
             lines.append(
-                f"{metric:<25} {anova.f_statistic:<12.3f} {anova.p_value:<12.4f} "
+                f"{metric:<25} {f_stat:<12} {p_value:<12} "
                 f"{p_adj_str:<12} {sig:<12}"
             )
         lines.append("-" * 84)
@@ -344,10 +354,12 @@ def format_contacts_markdown(
                 p_adj_str = (
                     f"{agg.p_value_adjusted:.4f}" if agg.p_value_adjusted is not None else "--"
                 )
+                p_value = f"{agg.p_value:.4f}" if agg.testable else "not testable"
+                d_value = f"{agg.cohens_d:.2f}" if agg.testable else "n/a"
                 effect_marker = "†" if agg.meets_effect_size_threshold else ""
                 lines.append(
                     f"| {comparison_name} | {metric} | {format_pct(agg.percent_change)} | "
-                    f"{agg.p_value:.4f} | {p_adj_str} | {agg.cohens_d:.2f} | "
+                    f"{p_value} | {p_adj_str} | {d_value} | "
                     f"{agg.effect_size_interpretation} | {effect_marker} | {sig} |"
                 )
 
@@ -356,6 +368,14 @@ def format_contacts_markdown(
             f"*p_adj < {result.fdr_alpha} (BH-corrected); "
             f"† meets min effect size |d| >= {result.min_effect_size}"
         )
+        if any(
+            not agg.testable
+            for comp in result.pairwise_comparisons
+            for agg in comp.aggregate_comparisons
+        ):
+            lines.append(
+                "*Not testable: inferential statistics require at least two replicates per condition.*"
+            )
         lines.append("positive % change = more contact in treatment")
         lines.append("")
 
@@ -371,8 +391,10 @@ def format_contacts_markdown(
             p_adj_str = (
                 f"{anova.p_value_adjusted:.4f}" if anova.p_value_adjusted is not None else "--"
             )
+            f_stat = f"{anova.f_statistic:.3f}" if anova.testable else "n/a"
+            p_value = f"{anova.p_value:.4f}" if anova.testable else "not testable"
             lines.append(
-                f"| {metric} | {anova.f_statistic:.3f} | {anova.p_value:.4f} | {p_adj_str} | {sig} |"
+                f"| {metric} | {f_stat} | {p_value} | {p_adj_str} | {sig} |"
             )
         lines.append("")
         lines.append(f"*p_adj < {result.fdr_alpha} (BH-corrected)")

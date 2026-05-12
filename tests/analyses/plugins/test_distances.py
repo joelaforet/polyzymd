@@ -7,6 +7,7 @@ plot delegation, AggregatedResultClass, _make_aggregated_filename, and lifecycle
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -73,6 +74,33 @@ class TestClassAttributes:
         from polyzymd.analyses.distances import DistancesAnalysis
 
         assert DistancesAnalysis.min_replicates == 1
+
+
+def test_singleton_distance_pairwise_not_testable() -> None:
+    """Distances singleton pairwise metrics should be marked not testable."""
+    from polyzymd.analyses.distances import DistancesAnalysis
+
+    pair_a = SimpleNamespace(
+        mean_distance=3.0,
+        fraction_below_threshold=0.4,
+        per_replicate_means=[3.0],
+        per_replicate_fractions=[0.4],
+    )
+    pair_b = SimpleNamespace(
+        mean_distance=2.5,
+        fraction_below_threshold=0.7,
+        per_replicate_means=[2.5],
+        per_replicate_fractions=[0.7],
+    )
+
+    result = DistancesAnalysis._compare_pair("Pair", "A", "B", pair_a, pair_b)
+
+    assert result.distance_testable is False
+    assert result.distance_significant is False
+    assert result.distance_note is not None
+    assert result.fraction_testable is False
+    assert result.fraction_significant is False
+    assert result.fraction_note is not None
 
 
 # ---------------------------------------------------------------------------

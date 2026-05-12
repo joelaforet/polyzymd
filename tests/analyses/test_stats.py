@@ -111,6 +111,86 @@ def test_default_scalar_comparison_applies_bh_across_full_family(monkeypatch) ->
     assert [r.significant for r in result.pairwise_comparisons] == [False, False, False, False]
 
 
+def test_default_scalar_singleton_pairwise_not_testable() -> None:
+    """Singleton replicate comparisons should not be treated as significant tests."""
+    metrics_by_condition = {
+        "Control": {"metric": _metric(1.0, [1.0])},
+        "Treatment": {"metric": _metric(2.0, [2.0])},
+    }
+
+    result = default_scalar_comparison(
+        analysis_name="test",
+        project_name="Singleton",
+        metrics_by_condition=metrics_by_condition,
+        control_label="Control",
+    )
+
+    comparison = result.pairwise_comparisons[0]
+    assert comparison.testable is False
+    assert comparison.significant is False
+    assert comparison.p_value_adjusted is None
+    assert comparison.note is not None
+    assert math.isnan(comparison.p_value)
+
+
+def test_default_scalar_singleton_anova_not_testable() -> None:
+    """ANOVA should report singleton conditions as not testable."""
+    metrics_by_condition = {
+        "A": _metric(1.0, [1.0]),
+        "B": _metric(2.0, [2.0]),
+        "C": _metric(3.0, [3.0]),
+    }
+
+    anova = anova_test(metrics_by_condition, "metric")
+
+    assert anova is not None
+    assert anova.testable is False
+    assert anova.significant is False
+    assert anova.note is not None
+    assert math.isnan(anova.p_value)
+
+
+def test_default_scalar_fdr_ignores_non_testable_results(monkeypatch) -> None:
+    """BH correction should skip non-testable singleton comparisons."""
+    p_values = [0.01]
+
+    def _fake_ttest(group1, group2, method="student"):
+        del method
+        if len(group1) < 2 or len(group2) < 2:
+            return TTestResult(t_statistic=float("nan"), p_value=float("nan"))
+        return TTestResult(t_statistic=3.0, p_value=p_values.pop(0))
+
+    def _fake_effect(_group1, _group2):
+        return EffectSize(cohens_d=0.5, interpretation="medium", direction="higher")
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.inferential_statistics.independent_ttest",
+        _fake_ttest,
+    )
+    monkeypatch.setattr("polyzymd.analyses.shared.inferential_statistics.cohens_d", _fake_effect)
+
+    metrics_by_condition = {
+        "Control": {"metric": _metric(1.0, [1.0, 1.1])},
+        "Singleton": {"metric": _metric(1.2, [1.2])},
+        "Treatment": {"metric": _metric(1.4, [1.3, 1.5])},
+    }
+
+    result = default_scalar_comparison(
+        analysis_name="test",
+        project_name="Mixed replicate counts",
+        metrics_by_condition=metrics_by_condition,
+        control_label="Control",
+        fdr_alpha=0.05,
+    )
+
+    singleton_comp, treatment_comp = result.pairwise_comparisons
+    assert singleton_comp.testable is False
+    assert singleton_comp.p_value_adjusted is None
+    assert singleton_comp.significant is False
+    assert treatment_comp.testable is True
+    assert treatment_comp.p_value_adjusted == pytest.approx(0.01)
+
+
 def test_default_scalar_comparison_threads_ttest_method(monkeypatch) -> None:
     """default_scalar_comparison should pass ttest_method to pairwise tests."""
     seen_methods: list[str] = []

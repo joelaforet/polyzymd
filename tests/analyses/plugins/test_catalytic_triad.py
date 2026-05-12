@@ -1423,3 +1423,28 @@ class TestTriadLifecycle:
         assert len(result.pairwise_comparisons) >= 1
         # Higher triad score = better, so 100% SBMA should rank first
         assert result.ranking[0] == "100% SBMA"
+
+    def test_singleton_default_compare_not_testable(self, triad_analysis):
+        """Singleton triad comparison should not report inferential significance."""
+        from polyzymd.analyses.stats import default_scalar_comparison
+
+        metrics_by_condition = {}
+        for label, mean in [("No Polymer", 0.55), ("100% SBMA", 0.75)]:
+            summary = MagicMock()
+            summary.overall_simultaneous_contact = mean
+            summary.sem_simultaneous_contact = 0.0
+            summary.per_replicate_simultaneous = [mean]
+            metrics_by_condition[label] = triad_analysis.extract_metrics(summary)
+
+        result = default_scalar_comparison(
+            analysis_name="catalytic_triad",
+            project_name="test_project",
+            metrics_by_condition=metrics_by_condition,
+            control_label="No Polymer",
+            equilibration="10ns",
+        )
+
+        pairwise = result.pairwise_comparisons[0]
+        assert pairwise.testable is False
+        assert pairwise.significant is False
+        assert pairwise.p_value_adjusted is None

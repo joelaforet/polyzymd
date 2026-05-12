@@ -303,6 +303,49 @@ def test_sasa_min_replicates() -> None:
     assert SASAAnalysis.min_replicates == 1
 
 
+def test_sasa_singleton_pairwise_not_testable() -> None:
+    """SASA singleton pairwise results should carry not-testable metadata."""
+    from polyzymd.analyses.shared.inferential_statistics import (
+        cohens_d,
+        independent_ttest,
+        percent_change,
+    )
+
+    run_a = SASARunSummary(
+        label="protein",
+        target_selection="chainid A",
+        context_selection="chainid A",
+        mean_sasa=100.0,
+        sem_sasa=0.0,
+        per_replicate_means=[100.0],
+    )
+    run_b = SASARunSummary(
+        label="protein",
+        target_selection="chainid A",
+        context_selection="chainid A",
+        mean_sasa=120.0,
+        sem_sasa=0.0,
+        per_replicate_means=[120.0],
+    )
+
+    comparison = SASAAnalysis._compare_run(
+        run_label="protein",
+        condition_a="A",
+        condition_b="B",
+        run_a=run_a,
+        run_b=run_b,
+        independent_ttest=independent_ttest,
+        cohens_d=cohens_d,
+        percent_change=percent_change,
+    )
+
+    assert comparison.testable is False
+    assert comparison.significant is False
+    assert comparison.p_value is None
+    assert comparison.p_value_adjusted is None
+    assert comparison.note is not None
+
+
 def test_sasa_settings_validation() -> None:
     """SASA settings should enforce run and scalar constraints."""
     settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])

@@ -147,13 +147,17 @@ def format_distances_console_table(
 
                 # Format p-value with significance marker
                 sig_marker = "*" if comp.distance_significant else ""
-                p_str = f"{comp.distance_p_value:.4f}{sig_marker}"
+                p_str = (
+                    f"{comp.distance_p_value:.4f}{sig_marker}"
+                    if comp.distance_testable
+                    else "not testable"
+                )
 
                 # Format percent change
                 pct_str = format_pct(comp.distance_percent_change)
 
                 # Format Cohen's d
-                d_str = f"{comp.distance_cohens_d:.2f}"
+                d_str = f"{comp.distance_cohens_d:.2f}" if comp.distance_testable else "n/a"
 
                 lines.append(
                     f"{comparison_name:<30} {pct_str:<10} {p_str:<12} "
@@ -164,7 +168,7 @@ def format_distances_console_table(
             lines.append("-" * 90)
 
             # Fraction comparisons (if available)
-            if pair_comparisons[0].fraction_p_value is not None:
+            if pair_comparisons[0].fraction_p_value is not None or pair_comparisons[0].fraction_testable is False:
                 lines.append("\nFraction Below Threshold:")
                 lines.append("-" * 90)
 
@@ -178,9 +182,13 @@ def format_distances_console_table(
                 for comp in pair_comparisons:
                     comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
                     sig_marker = "*" if comp.fraction_significant else ""
-                    p_str = f"{comp.fraction_p_value:.4f}{sig_marker}"
+                    p_str = (
+                        f"{comp.fraction_p_value:.4f}{sig_marker}"
+                        if comp.fraction_testable
+                        else "not testable"
+                    )
                     pct_str = format_pct(comp.fraction_percent_change)
-                    d_str = f"{comp.fraction_cohens_d:.2f}"
+                    d_str = f"{comp.fraction_cohens_d:.2f}" if comp.fraction_testable else "n/a"
 
                     lines.append(
                         f"{comparison_name:<30} {pct_str:<10} {p_str:<12} "
@@ -192,6 +200,13 @@ def format_distances_console_table(
 
         lines.append("")
         lines.append("* p < 0.05")
+        if any(
+            not comp.distance_testable or comp.fraction_testable is False
+            for comp in result.pairwise_comparisons
+        ):
+            lines.append(
+                "Not testable: inferential statistics require at least two replicates per condition"
+            )
         lines.append("Negative % change in distance = closer")
         lines.append("Positive % change in fraction = more contact")
         lines.append("")
@@ -204,17 +219,23 @@ def format_distances_console_table(
         for anova in result.anova_by_pair:
             lines.append(f"\n{anova.pair_label}:")
             sig = "Yes" if anova.distance_significant else "No"
-            lines.append(
-                f"  Distance: F={anova.distance_f_statistic:.3f}, "
-                f"p={anova.distance_p_value:.4f}, Significant={sig}"
-            )
-
-            if anova.fraction_f_statistic is not None:
-                sig = "Yes" if anova.fraction_significant else "No"
+            if anova.distance_testable:
                 lines.append(
-                    f"  Fraction: F={anova.fraction_f_statistic:.3f}, "
-                    f"p={anova.fraction_p_value:.4f}, Significant={sig}"
+                    f"  Distance: F={anova.distance_f_statistic:.3f}, "
+                    f"p={anova.distance_p_value:.4f}, Significant={sig}"
                 )
+            else:
+                lines.append("  Distance: F=n/a, p=not testable, Significant=No")
+
+            if anova.fraction_f_statistic is not None or anova.fraction_testable is False:
+                sig = "Yes" if anova.fraction_significant else "No"
+                if anova.fraction_testable:
+                    lines.append(
+                        f"  Fraction: F={anova.fraction_f_statistic:.3f}, "
+                        f"p={anova.fraction_p_value:.4f}, Significant={sig}"
+                    )
+                else:
+                    lines.append("  Fraction: F=n/a, p=not testable, Significant=No")
 
         lines.append("")
 
@@ -380,16 +401,23 @@ def format_distances_markdown(
             for comp in pair_comparisons:
                 comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
                 sig = "Yes*" if comp.distance_significant else "No"
+                p_value = (
+                    f"{comp.distance_p_value:.4f}" if comp.distance_testable else "not testable"
+                )
+                d_value = f"{comp.distance_cohens_d:.2f}" if comp.distance_testable else "n/a"
                 lines.append(
                     f"| {comparison_name} | {format_pct(comp.distance_percent_change)} | "
-                    f"{comp.distance_p_value:.4f} | {comp.distance_cohens_d:.2f} | "
+                    f"{p_value} | {d_value} | "
                     f"{comp.distance_effect_interpretation} | {comp.distance_direction} | {sig} |"
                 )
 
             lines.append("")
 
             # Fraction comparisons
-            if pair_comparisons[0].fraction_p_value is not None:
+            if (
+                pair_comparisons[0].fraction_p_value is not None
+                or pair_comparisons[0].fraction_testable is False
+            ):
                 lines.append("#### Fraction Below Threshold")
                 lines.append("")
                 lines.append(
@@ -402,9 +430,15 @@ def format_distances_markdown(
                 for comp in pair_comparisons:
                     comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
                     sig = "Yes*" if comp.fraction_significant else "No"
+                    p_value = (
+                        f"{comp.fraction_p_value:.4f}"
+                        if comp.fraction_testable
+                        else "not testable"
+                    )
+                    d_value = f"{comp.fraction_cohens_d:.2f}" if comp.fraction_testable else "n/a"
                     lines.append(
                         f"| {comparison_name} | {format_pct(comp.fraction_percent_change)} | "
-                        f"{comp.fraction_p_value:.4f} | {comp.fraction_cohens_d:.2f} | "
+                        f"{p_value} | {d_value} | "
                         f"{comp.fraction_effect_interpretation} | {comp.fraction_direction} | "
                         f"{sig} |"
                     )
@@ -412,6 +446,13 @@ def format_distances_markdown(
                 lines.append("")
 
         lines.append("*p < 0.05")
+        if any(
+            not comp.distance_testable or comp.fraction_testable is False
+            for comp in result.pairwise_comparisons
+        ):
+            lines.append(
+                "*Not testable: inferential statistics require at least two replicates per condition.*"
+            )
         lines.append("")
 
     # ANOVA
@@ -423,17 +464,23 @@ def format_distances_markdown(
             lines.append(f"### {anova.pair_label}")
             lines.append("")
             sig = "Yes" if anova.distance_significant else "No"
-            lines.append(
-                f"- **Distance:** F={anova.distance_f_statistic:.3f}, "
-                f"p={anova.distance_p_value:.4f}, Significant={sig}"
-            )
-
-            if anova.fraction_f_statistic is not None:
-                sig = "Yes" if anova.fraction_significant else "No"
+            if anova.distance_testable:
                 lines.append(
-                    f"- **Fraction:** F={anova.fraction_f_statistic:.3f}, "
-                    f"p={anova.fraction_p_value:.4f}, Significant={sig}"
+                    f"- **Distance:** F={anova.distance_f_statistic:.3f}, "
+                    f"p={anova.distance_p_value:.4f}, Significant={sig}"
                 )
+            else:
+                lines.append("- **Distance:** F=n/a, p=not testable, Significant=No")
+
+            if anova.fraction_f_statistic is not None or anova.fraction_testable is False:
+                sig = "Yes" if anova.fraction_significant else "No"
+                if anova.fraction_testable:
+                    lines.append(
+                        f"- **Fraction:** F={anova.fraction_f_statistic:.3f}, "
+                        f"p={anova.fraction_p_value:.4f}, Significant={sig}"
+                    )
+                else:
+                    lines.append("- **Fraction:** F=n/a, p=not testable, Significant=No")
 
             lines.append("")
 

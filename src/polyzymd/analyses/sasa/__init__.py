@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from polyzymd.analyses.sasa._comparison_results import SASAComparisonResult
 
 LOGGER = logging.getLogger(__name__)
+NOT_TESTABLE_SINGLETON_NOTE = "Inferential statistics require at least two replicates per condition."
 
 
 @dataclass(frozen=True)
@@ -1069,12 +1070,15 @@ class SASAAnalysis(Analysis):
                         groups.append(values)
                 if len(groups) >= 3:
                     anova = one_way_anova(*groups)
+                    testable = all(len(group) >= 2 for group in groups)
                     anova_by_run.append(
                         SASARunANOVA(
                             run_label=run_label,
-                            f_statistic=anova.f_statistic,
-                            p_value=anova.p_value,
-                            significant=anova.significant,
+                            f_statistic=anova.f_statistic if testable else None,
+                            p_value=anova.p_value if testable else None,
+                            significant=anova.significant if testable else False,
+                            testable=testable,
+                            note=None if testable else NOT_TESTABLE_SINGLETON_NOTE,
                         )
                     )
 
@@ -1181,8 +1185,7 @@ class SASAAnalysis(Analysis):
 
         values_a = [value for value in run_a.per_replicate_means if SASAAnalysis._is_finite(value)]
         values_b = [value for value in run_b.per_replicate_means if SASAAnalysis._is_finite(value)]
-        if len(values_a) < 2 or len(values_b) < 2:
-            return None
+        testable = len(values_a) >= 2 and len(values_b) >= 2
 
         t_result = independent_ttest(values_a, values_b)
         d_result = cohens_d(values_a, values_b)
@@ -1197,13 +1200,15 @@ class SASAAnalysis(Analysis):
             run_label=run_label,
             condition_a=condition_a,
             condition_b=condition_b,
-            t_statistic=t_result.t_statistic,
-            p_value=t_result.p_value,
-            cohens_d=d_result.cohens_d,
+            t_statistic=t_result.t_statistic if testable else None,
+            p_value=t_result.p_value if testable else None,
+            cohens_d=d_result.cohens_d if testable else None,
             effect_interpretation=d_result.interpretation,
             direction=direction,
-            significant=t_result.significant,
+            significant=t_result.significant if testable else False,
             percent_change=pct_change,
+            testable=testable,
+            note=None if testable else NOT_TESTABLE_SINGLETON_NOTE,
         )
 
     @staticmethod

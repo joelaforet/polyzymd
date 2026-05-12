@@ -2269,6 +2269,38 @@ def test_format_neutral_metric_keeps_condition_rows_and_neutral_language() -> No
     assert "best" not in text
 
 
+def test_singleton_hydrogen_bond_comparison_not_testable() -> None:
+    """Hydrogen-bond default comparison should mark singleton runs not testable."""
+    analysis = HydrogenBondsAnalysis()
+    cond_a = HydrogenBondAggregatedResult(
+        replicates=[1],
+        n_replicates=1,
+        summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.0, [2.0])],
+    )
+    cond_b = HydrogenBondAggregatedResult(
+        replicates=[1],
+        n_replicates=1,
+        summaries=[_make_aggregated_summary("protein_polymer", 3.0, 0.0, [3.0])],
+    )
+
+    comparison = default_scalar_comparison(
+        analysis_name="hydrogen_bonds",
+        project_name="hbonds_singleton",
+        metrics_by_condition={
+            "Alpha": analysis.extract_metrics(cond_a),
+            "Beta": analysis.extract_metrics(cond_b),
+        },
+        control_label="Alpha",
+        equilibration="10ns",
+    )
+
+    pairwise = comparison.pairwise_comparisons[0]
+    assert pairwise.testable is False
+    assert pairwise.significant is False
+    assert pairwise.note is not None
+    assert "not testable" in analysis.format(comparison, output_format="text")
+
+
 def test_format_non_comparison_result() -> None:
     """format should fall back to base formatter for non-ComparisonResult objects."""
     analysis = HydrogenBondsAnalysis()

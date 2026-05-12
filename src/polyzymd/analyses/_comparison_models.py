@@ -61,6 +61,8 @@ class PairwiseResult(BaseModel):
     direction: str
     significant: bool
     percent_change: float
+    testable: bool = True
+    note: str | None = None
 
 
 class ANOVAResult(BaseModel):
@@ -70,6 +72,8 @@ class ANOVAResult(BaseModel):
     f_statistic: float
     p_value: float
     significant: bool
+    testable: bool = True
+    note: str | None = None
 
 
 class ComparisonResult(BaseModel):
