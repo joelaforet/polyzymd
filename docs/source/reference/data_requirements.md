@@ -270,4 +270,4 @@ paths in `comparison.yaml`.
 - {doc}`configuration` -- Full configuration field reference
 - {doc}`cli_reference` -- CLI command reference including `init` and `compare init`
 - {doc}`../how_to/analysis_compare_conditions` -- How to set up and run a comparison
-- {doc}`../tutorials/quickstart` -- Run your first simulation end-to-end
+- {doc}`../get_started/quickstart` -- Run your first simulation end-to-end

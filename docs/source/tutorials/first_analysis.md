@@ -18,10 +18,10 @@ Before starting, make sure you have:
 - The `config.yaml` file from that simulation
 - Trajectory files in the expected directory layout (see
   {doc}`../reference/data_requirements`)
-- PolyzyMD installed in a pixi environment (see {doc}`installation`)
+- PolyzyMD installed in a pixi environment (see {doc}`../get_started/installation`)
 
 If you have not run a simulation yet, complete
-{doc}`quickstart` first.
+{doc}`../get_started/quickstart` first.
 
 ```{important}
 **Resource requirements:** `polyzymd compare init`, `validate`, `status`, and

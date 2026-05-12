@@ -30,7 +30,7 @@ polyzymd info
 If both commands print output without errors, you are ready to go.
 
 For the full installation guide (including GPU cluster setup and
-troubleshooting), see {doc}`../tutorials/installation`.
+troubleshooting), see {doc}`installation`.
 
 ## Create Your First Project
 
@@ -53,7 +53,7 @@ and production settings. You edit this file to describe your system, then
 PolyzyMD handles the rest.
 
 For a detailed walkthrough of writing your first config and running a build, see
-{doc}`../tutorials/quickstart`.
+{doc}`quickstart`.
 
 ## Where to Go Next
 
@@ -63,7 +63,7 @@ Pick the path that matches your situation:
 :gutter: 3
 
 :::{grid-item-card} I want to set up and run a simulation
-:link: ../tutorials/quickstart
+:link: quickstart
 :link-type: doc
 
 Follow the first simulation tutorial step by step.
@@ -96,6 +96,6 @@ Jump to how-to guides for polymers, restraints, GROMACS export, SLURM, and more.
 :hidden:
 :maxdepth: 1
 
-Install PolyzyMD with pixi <../tutorials/installation>
-Run Your First PolyzyMD Simulation <../tutorials/quickstart>
+Install PolyzyMD with pixi <installation>
+Run Your First PolyzyMD Simulation <quickstart>
 ```

@@ -1101,7 +1101,7 @@ output:
 
 ## See Also
 
-- {doc}`../tutorials/quickstart` - Getting started tutorial
+- {doc}`../get_started/quickstart` - Getting started tutorial
 - {doc}`configuration` - Configuration file reference
 - {doc}`../how_to/hpc_slurm` - HPC and SLURM guide
 - {doc}`../how_to/analysis_rmsf_quickstart` - RMSF analysis tutorial

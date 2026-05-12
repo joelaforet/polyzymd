@@ -25,7 +25,7 @@ Before starting, make sure you have:
   in PolyzyMD's standard directory layout)
 - One `config.yaml` per condition
 - A topology such as `solvated_system.pdb` already produced during the build
-- PolyzyMD installed in a pixi environment (see {doc}`installation`)
+- PolyzyMD installed in a pixi environment (see {doc}`../get_started/installation`)
 
 If you have not run a single-condition analysis yet, complete
 {doc}`first_analysis` first.

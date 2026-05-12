@@ -9,7 +9,7 @@ HPC clusters using PolyzyMD's self-resubmitting SLURM workflow.
 - A working `config.yaml` validated with `polyzymd validate`
 - GROMACS installed on your cluster (via `module load` or container)
 - Familiarity with your cluster's SLURM partitions and GPU types
-- PolyzyMD installed with `pixi` (see {doc}`../tutorials/installation`)
+- PolyzyMD installed with `pixi` (see {doc}`../get_started/installation`)
 
 All commands below assume you prefix with `pixi run -e build` or have
 activated the environment with `pixi shell -e build`.
@@ -706,4 +706,4 @@ polyzymd submit -c config.yaml --engine gromacs --memory 64G ...
 - {doc}`../reference/cli_reference` — CLI options for `submit` and `recover`
 - {doc}`../reference/configuration` — Full configuration reference including `gromacs:` block
 - {doc}`hpc_slurm` — General SLURM submission workflow (OpenMM and GROMACS)
-- {doc}`../tutorials/quickstart` — Getting started guide
+- {doc}`../get_started/quickstart` — Getting started guide
