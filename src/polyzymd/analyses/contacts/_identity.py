@@ -48,8 +48,8 @@ def contacts_identity_payload(settings: BaseModel) -> dict[str, Any]:
         Canonical JSON-compatible identity payload.
     """
 
-    polymer_selection = _normalized_text(getattr(settings, "polymer_selection", "chainID C"))
-    protein_selection = _normalized_text(getattr(settings, "protein_selection", "protein"))
+    polymer_selection = _normalized_text(getattr(settings, "polymer_selection", "chainid C"))
+    protein_selection = _normalized_text(getattr(settings, "protein_selection", "chainid A"))
     polymer_types = normalize_polymer_types(getattr(settings, "polymer_types", None))
 
     return {

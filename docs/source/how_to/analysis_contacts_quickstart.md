@@ -71,8 +71,8 @@ defaults:
 
 plugins:
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A"
     cutoff: 4.5
     grouping: "aa_class"
     compute_residence_times: true
@@ -127,8 +127,8 @@ events. Changing the setting creates a distinct contacts cache identity.
 ```yaml
 plugins:
   contacts:
-    polymer_selection: "chainID C and resname SBM"
-    protein_selection: "protein"
+    polymer_selection: "chainid C and resname SBM"
+    protein_selection: "chainid A"
 ```
 
 For EGMA-only analysis, switch to `resname EGM`.
@@ -138,14 +138,14 @@ For EGMA-only analysis, switch to `resname EGM`.
 ```yaml
 plugins:
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein and (resname TRP PHE TYR)"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A and (resname TRP PHE TYR)"
 ```
 
 For an active-site slice, use a residue range selection such as:
 
 ```yaml
-protein_selection: "protein and (resid 75-80 or resid 130-140)"
+protein_selection: "chainid A and (resid 75-80 or resid 130-140)"
 ```
 
 ### Run with reproducible cache behavior
@@ -165,8 +165,8 @@ If you want one place to set the most common contacts options:
 ```yaml
 plugins:
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A"
     cutoff: 4.5
     polymer_types: ["SBM", "EGM"]
     grouping: "aa_class"

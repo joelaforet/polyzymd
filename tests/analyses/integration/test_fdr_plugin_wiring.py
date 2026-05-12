@@ -75,8 +75,8 @@ def _make_contacts_result_for_formatting() -> ContactsComparisonResult:
     return ContactsComparisonResult(
         name="test_contacts",
         contacts_name="contacts",
-        polymer_selection="chainID C",
-        protein_selection="protein",
+        polymer_selection="chainid C",
+        protein_selection="chainid A",
         cutoff=4.5,
         contact_criteria="distance_cutoff",
         conditions=conditions,

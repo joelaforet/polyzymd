@@ -129,10 +129,10 @@ class ContactsSettings(BaseModel):
 
     # --- Analysis settings ---
     polymer_selection: str = Field(
-        default="chainID C", description="MDAnalysis selection for polymer atoms"
+        default="chainid C", description="MDAnalysis selection for polymer atoms"
     )
     protein_selection: str = Field(
-        default="protein", description="MDAnalysis selection for protein atoms"
+        default="chainid A", description="MDAnalysis selection for protein atoms"
     )
     cutoff: float = Field(
         default=DEFAULT_CONTACT_CUTOFF,

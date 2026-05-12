@@ -115,8 +115,8 @@ plugins:
     selection: "protein and name CA"
 
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A"
     cutoff: 4.5
 
   catalytic_triad:

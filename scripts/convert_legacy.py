@@ -1358,8 +1358,8 @@ def _build_analysis_settings(enzyme_pdb_rel: str | None) -> dict:
         },
         # Contacts: polymer-protein contacts
         "contacts": {
-            "polymer_selection": "chainID C",
-            "protein_selection": "protein",
+            "polymer_selection": "chainid C",
+            "protein_selection": "chainid A",
             "cutoff": 4.5,
             "grouping": "aa_class",
             "compute_residence_times": True,

@@ -194,8 +194,8 @@ Each entry in `pairs`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `polymer_selection` | string | `"chainID C"` | MDAnalysis selection for polymer atoms |
-| `protein_selection` | string | `"protein"` | MDAnalysis selection for protein atoms |
+| `polymer_selection` | string | `"chainid C"` | MDAnalysis selection for polymer atoms |
+| `protein_selection` | string | `"chainid A"` | MDAnalysis selection for protein atoms |
 | `cutoff` | float | `4.5` | Contact distance cutoff in Angstroms |
 | `grouping` | string | `"aa_class"` | Residue grouping: `"aa_class"`, `"secondary_structure"`, or `"none"` |
 | `compute_residence_times` | bool | `true` | Whether to compute aggregate residence-time summaries and plots. When `false`, per-replicate contact events are still stored and the cache identity changes. |

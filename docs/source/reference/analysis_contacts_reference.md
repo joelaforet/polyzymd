@@ -11,8 +11,8 @@ Contacts plugin settings live under `plugins.contacts` in `comparison.yaml`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `polymer_selection` | `str` | `"chainID C"` | MDAnalysis selection for polymer atoms |
-| `protein_selection` | `str` | `"protein"` | MDAnalysis selection for protein atoms |
+| `polymer_selection` | `str` | `"chainid C"` | MDAnalysis selection for polymer atoms |
+| `protein_selection` | `str` | `"chainid A"` | MDAnalysis selection for protein atoms |
 | `cutoff` | `float` | `4.5` | Contact distance cutoff in Angstroms |
 | `polymer_types` | `list[str] \| None` | `null` | Optional polymer residue-name filter |
 | `grouping` | `str` | `"aa_class"` | Protein grouping mode: `aa_class`, `secondary_structure`, or `none` |
@@ -103,8 +103,8 @@ Representative structure:
     "start_frame": 1000,
     "schema_version": 2,
     "metadata": {
-        "target_selector": "protein",
-        "query_selector": "chainID C",
+        "target_selector": "chainid A",
+        "query_selector": "chainid C",
         "algorithm": "capped_distance"
     }
 }
@@ -214,7 +214,7 @@ polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
 **Fix:**
 
 - Verify chain and residue naming in your topology
-- Start with `polymer_selection: "chainID C"` and narrow incrementally
+- Start with `polymer_selection: "chainid C"` and narrow incrementally
 - Run with `--debug` to inspect selection behavior
 
 ### "Selection matched no atoms" (protein or polymer)

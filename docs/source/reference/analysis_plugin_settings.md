@@ -71,8 +71,8 @@ below.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `polymer_selection` | `str` | `"chainID C"` | MDAnalysis selection for polymer atoms |
-| `protein_selection` | `str` | `"protein"` | MDAnalysis selection for protein atoms |
+| `polymer_selection` | `str` | `"chainid C"` | MDAnalysis selection for polymer atoms |
+| `protein_selection` | `str` | `"chainid A"` | MDAnalysis selection for protein atoms |
 | `cutoff` | `float` | `4.5` | Contact cutoff distance in Å |
 | `polymer_types` | `list[str] \| null` | `null` | Optional polymer residue-name filter |
 | `grouping` | `str` | `"aa_class"` | Grouping mode: `aa_class`, `secondary_structure`, or `none` |

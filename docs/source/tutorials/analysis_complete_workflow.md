@@ -127,8 +127,8 @@ plugins:
         selection_b: "protein and resid 77 and name OG"
 
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A"
     cutoff: 4.5
     compute_residence_times: true
 ```

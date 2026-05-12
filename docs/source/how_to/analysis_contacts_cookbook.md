@@ -60,7 +60,7 @@ plugins:
   contacts:
     name: "polymer_contacts"
     polymer_selection: "resname SBM EGM"  # 3-char residue names
-    protein_selection: "protein"
+    protein_selection: "chainid A"
     cutoff: 4.5
     contact_criteria: "heavy_atom"        # distance | heavy_atom | any_atom
     fdr_alpha: 0.05                       # For statistical corrections
@@ -138,7 +138,7 @@ plugins:
   contacts:
     name: "polymer_aa_preferences"
     polymer_selection: "resname SBM EGM"
-    protein_selection: "protein"
+    protein_selection: "chainid A"
     cutoff: 4.5
     contact_criteria: "heavy_atom"
     fdr_alpha: 0.05
@@ -453,8 +453,8 @@ Run two analyses with different `protein_selection` values. Create two
 # comparison_active_site.yaml (excerpt)
 plugins:
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein and (resid 75-80 or resid 130-140 or resid 153-160)"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A and (resid 75-80 or resid 130-140 or resid 153-160)"
     cutoff: 4.5
 ```
 
@@ -462,8 +462,8 @@ plugins:
 # comparison_surface.yaml (excerpt)
 plugins:
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein and not (resid 75-80 or resid 130-140 or resid 153-160)"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A and not (resid 75-80 or resid 130-140 or resid 153-160)"
     cutoff: 4.5
 ```
 

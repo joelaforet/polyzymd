@@ -89,8 +89,8 @@ class TestSettings:
         from polyzymd.analyses.contacts import ContactsSettings
 
         s = ContactsSettings()
-        assert s.polymer_selection == "chainID C"
-        assert s.protein_selection == "protein"
+        assert s.polymer_selection == "chainid C"
+        assert s.protein_selection == "chainid A"
         assert s.cutoff == 4.5
         assert s.grouping == "aa_class"
         assert s.compute_residence_times is True
@@ -100,15 +100,15 @@ class TestSettings:
         from polyzymd.analyses.contacts import ContactsSettings
 
         s = ContactsSettings(
-            polymer_selection="chainID D",
-            protein_selection="protein and name CA",
+            polymer_selection="chainid D",
+            protein_selection="chainid A and name CA",
             cutoff=5.0,
             grouping="none",
             protein_groups={"active": [1, 2]},
             protein_partitions={"site": ["active"]},
             fdr_alpha=0.01,
         )
-        assert s.polymer_selection == "chainID D"
+        assert s.polymer_selection == "chainid D"
         assert s.cutoff == 5.0
         assert s.grouping == "none"
         assert s.protein_groups == {"active": [1, 2]}
@@ -267,8 +267,8 @@ class TestSettings:
         from polyzymd.analyses.contacts import ContactsSettings
         from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
 
-        unfiltered = ContactsSettings(polymer_selection="chainID C")
-        filtered = ContactsSettings(polymer_selection="chainID C", polymer_types=["PEG"])
+        unfiltered = ContactsSettings(polymer_selection="chainid C")
+        filtered = ContactsSettings(polymer_selection="chainid C", polymer_types=["PEG"])
 
         assert contacts_settings_fingerprint(unfiltered) != contacts_settings_fingerprint(filtered)
 
@@ -925,7 +925,7 @@ class TestRunReplicate:
             timestep_ps=10.0,
             criteria_label="any_atom_4.5A",
             criteria_cutoff=4.5,
-            selection_string="protein : chainID C",
+            selection_string="chainid A : chainid C",
             equilibration_time=10.0,
             equilibration_unit="ns",
             metadata={"grouping": "aa_class"},
@@ -945,7 +945,7 @@ class TestRunReplicate:
             timestep_ps=10.0,
             criteria_label="any_atom_4.5A",
             criteria_cutoff=4.5,
-            selection_string="protein : chainID C",
+            selection_string="chainid A : chainid C",
             equilibration_time=10.0,
             equilibration_unit="ns",
             metadata={"grouping": "aa_class"},
@@ -953,6 +953,26 @@ class TestRunReplicate:
 
         assert ContactsAnalysis._cache_matches_contacts_settings(legacy, settings)
         assert legacy.metadata["compute_residence_times"] is True
+
+    def test_old_chain_default_cache_selection_is_rejected(self):
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.contacts._results import ContactResult
+
+        settings = ContactsSettings()
+        legacy = ContactResult(
+            replicate=1,
+            residue_contacts=[],
+            n_frames=10,
+            timestep_ps=10.0,
+            criteria_label="any_atom_4.5A",
+            criteria_cutoff=4.5,
+            selection_string="protein : chainID C",
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            metadata={"grouping": "aa_class"},
+        )
+
+        assert not ContactsAnalysis._cache_matches_contacts_settings(legacy, settings)
 
 
 class TestParallelContactAnalyzerResidueIdentity:
@@ -1178,12 +1198,12 @@ class TestContactsRunnerGrouping:
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
 
         analysis = ContactsAnalysis()
-        settings = ContactsSettings(polymer_selection="chainID C", polymer_types=["SBM", "EGM"])
+        settings = ContactsSettings(polymer_selection="chainid C", polymer_types=["SBM", "EGM"])
         ctx = self._make_context(tmp_path, settings)
 
         runner = analysis.build_runner(ctx, 1, MagicMock(), MagicMock())
 
-        assert runner.query_selector.selection == "(chainID C) and (resname SBM EGM)"
+        assert runner.query_selector.selection == "(chainid C) and (resname SBM EGM)"
 
     def test_settings_fingerprint_changes_with_polymer_types(self):
         """polymer_types should participate in contacts cache identity."""
@@ -1191,8 +1211,8 @@ class TestContactsRunnerGrouping:
         from polyzymd.analyses.contacts import ContactsSettings
         from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
-        unfiltered = ContactsSettings(polymer_selection="chainID C")
-        filtered = ContactsSettings(polymer_selection="chainID C", polymer_types=["SBM"])
+        unfiltered = ContactsSettings(polymer_selection="chainid C")
+        filtered = ContactsSettings(polymer_selection="chainid C", polymer_types=["SBM"])
 
         assert settings_fingerprint(unfiltered) != settings_fingerprint(filtered)
 
@@ -1995,11 +2015,11 @@ class TestFilterConditions:
             MockUniverse.return_value = mock_universe
 
             result = analysis.filter_conditions(
-                [cond], settings=ContactsSettings(polymer_selection="chainID C and resname PEG")
+                [cond], settings=ContactsSettings(polymer_selection="chainid C and resname PEG")
             )
 
         assert result == []
-        mock_universe.select_atoms.assert_called_with("chainID C and resname PEG")
+        mock_universe.select_atoms.assert_called_with("chainid C and resname PEG")
 
     def test_condition_without_polymer_excluded(self, tmp_path):
         from polyzymd.analyses.base import Condition
