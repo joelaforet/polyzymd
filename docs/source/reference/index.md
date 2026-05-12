@@ -25,6 +25,13 @@ All `polyzymd` commands, flags, and options.
 Every key in `config.yaml` — types, defaults, and constraints.
 :::
 
+:::{grid-item-card} Protein Modification Config
+:link: protein_modification_config
+:link-type: doc
+
+Lookup fields for covalent modifications and polymer conjugation.
+:::
+
 :::{grid-item-card} Analysis Plugin Reference
 :link: analysis_plugin_settings
 :link-type: doc
@@ -49,6 +56,7 @@ analysis.
 
 CLI Reference <cli_reference>
 Configuration Reference <configuration>
+Protein Modification Config Reference <protein_modification_config>
 Data Requirements & Directory Layout <data_requirements>
 Benchmarks <benchmarks>
 ```
