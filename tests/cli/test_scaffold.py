@@ -201,6 +201,8 @@ class TestGenerateScaffold:
         assert "class TestExtractMetrics:" in text
         assert "class TestPlot:" in text
         assert "test_run_replicate_uses_base_runner_dispatch" in text
+        assert '"replicates": list(cond.replicates)' in text
+        assert '"settings_fingerprint": analysis.aggregate_settings_fingerprint(settings)' in text
         assert 'runner.__class__.__name__ == "SolventShellReplicateRunner"' in text
 
     def test_custom_class_name(self, tmp_path: Path):
@@ -323,6 +325,8 @@ class TestGenerateScaffoldPydantic:
         assert "test_run_replicate_uses_base_runner_dispatch" in text
         assert "SolventShellReplicateResult" in text
         assert "SolventShellAggregatedResult" in text
+        assert '"replicates": list(cond.replicates)' in text
+        assert '"settings_fingerprint": analysis.aggregate_settings_fingerprint(settings)' in text
         assert 'runner.__class__.__name__ == "SolventShellReplicateRunner"' in text
 
     def test_custom_class_name(self, tmp_path: Path):

@@ -275,6 +275,8 @@ class TestPlot:
                         "sem_value": sem,
                         "replicate_values": [mean - 0.1, mean + 0.1],
                         "n_replicates": 2,
+                        "replicates": list(cond.replicates),
+                        "settings_fingerprint": analysis.aggregate_settings_fingerprint(settings),
                     }
                 ),
                 encoding="utf-8",
