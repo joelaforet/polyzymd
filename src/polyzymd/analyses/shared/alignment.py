@@ -185,6 +185,7 @@ def align_trajectory(
     config: AlignmentConfig,
     start_frame: int = 0,
     stop_frame: int | None = None,
+    step_frame: int = 1,
 ) -> int | None:
     """Align trajectory in-memory to a reference structure.
 
@@ -203,6 +204,9 @@ def align_trajectory(
         Frames before this are typically equilibration and should be excluded.
     stop_frame : int, optional
         Last frame (exclusive). If None, uses all frames after start_frame.
+    step_frame : int, optional
+        Frame stride for reference generation and selected-window alignment,
+        by default 1.
 
     Returns
     -------
@@ -274,7 +278,7 @@ def align_trajectory(
         del aligner
 
     elif config.reference_mode == "average":
-        # Compute average structure and align to it
+        # Compute average structure and align only the selected production window
         LOGGER.info(f"Aligning trajectory to average structure (selection: '{config.selection}')")
 
         average = align.AverageStructure(
@@ -282,7 +286,7 @@ def align_trajectory(
             universe,
             select=config.selection,
             ref_frame=start_frame,  # Initial reference for iterative averaging
-        ).run()
+        ).run(start=start_frame, stop=stop_frame, step=step_frame)
         ref_universe = average.results.universe
 
         aligner = align.AlignTraj(
@@ -290,7 +294,7 @@ def align_trajectory(
             ref_universe,
             select=config.selection,
             in_memory=True,
-        ).run()
+        ).run(start=start_frame, stop=stop_frame, step=step_frame)
         del aligner
         del average
 

@@ -252,7 +252,7 @@ def compute_distance_payloads(
     from polyzymd.analyses.shared.alignment import align_trajectory
 
     if getattr(alignment, "enabled", False):
-        align_trajectory(universe, alignment, start_frame=start, stop_frame=stop)
+        align_trajectory(universe, alignment, start_frame=start, stop_frame=stop, step_frame=step)
 
     if use_pbc:
         LOGGER.info("Using PBC-aware distance calculation (minimum image convention)")

@@ -136,6 +136,7 @@ class RMSFReplicateRunner:
             alignment_config,
             start_frame=start,
             stop_frame=stop,
+            step_frame=step,
         )
         ref_frame_1indexed = ref_frame_idx + 1 if ref_frame_idx is not None else None
 

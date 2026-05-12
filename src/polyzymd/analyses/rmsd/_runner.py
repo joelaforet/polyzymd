@@ -257,6 +257,7 @@ def compute_rmsd_run(
         alignment_config,
         start_frame=start,
         stop_frame=stop,
+        step_frame=step,
     )
 
     atom_group = universe.select_atoms(run.selection)
