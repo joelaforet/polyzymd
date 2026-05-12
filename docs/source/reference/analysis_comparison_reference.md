@@ -109,6 +109,14 @@ Stable analysis plugins:
 - absolute paths are used as-is
 - `replicates` must be an explicit list such as `[1, 2, 3]`
 
+## Replicate Counts
+
+All stable shipped analyses support `replicates: [1]` for smoke tests and
+protocol validation. One-replicate runs compute aggregate metrics and plots, but
+inferential statistics, FDR correction, and uncertainty bands require at least
+two independent replicates per condition. Singleton pairwise tests and ANOVA are
+reported as not testable rather than significant.
+
 ## Commands
 
 | Command | Purpose |
