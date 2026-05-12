@@ -33,6 +33,7 @@ def default_compare(analysis: Any, ctx: Any) -> BaseModel | None:
     metrics_by_condition: dict[str, dict[str, MetricValue]] = {}
     for condition in ctx.conditions:
         summary = ctx.aggregated_results.get(condition.label)
+        source: str | None = f"comparison context for {condition.label}"
         if summary is None:
             agg_dir_parent = ctx.analysis_dirs.get(condition.label)
             if agg_dir_parent is None:
@@ -43,6 +44,7 @@ def default_compare(analysis: Any, ctx: Any) -> BaseModel | None:
                 )
                 continue
             agg_dir = agg_dir_parent / "aggregated"
+            source = str(analysis.aggregate_result_path(agg_dir))
             summary = analysis._load_aggregated_result(agg_dir)
             if summary is None:
                 logger.warning(
@@ -52,6 +54,15 @@ def default_compare(analysis: Any, ctx: Any) -> BaseModel | None:
                 )
                 continue
 
+        summary = analysis.validate_aggregated_result(
+            summary,
+            condition=condition,
+            settings=ctx.settings,
+            equilibration=ctx.equilibration,
+            source=source,
+            expected_replicates=condition.replicates,
+            allow_replicate_subset=True,
+        )
         extracted = analysis.extract_metrics(summary)
         if not isinstance(extracted, dict):
             raise PluginContractError(

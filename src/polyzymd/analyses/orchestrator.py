@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 from polyzymd.analyses.base import (
     AggregateContext,
+    AggregateValidationError,
     ComparisonContext,
     Condition,
     PlotContext,
@@ -385,6 +386,14 @@ def aggregate_condition_from_disk(
             f"{type(e).__name__}: {e}"
         ) from e
     _check_compute_result(aggregated, "aggregate", analysis.name)
+    aggregated = analysis.validate_aggregated_result(
+        aggregated,
+        condition=condition,
+        settings=settings,
+        equilibration=equilibration,
+        source=agg_result_path,
+        expected_replicates=successful_reps,
+    )
     try:
         analysis.save_result(aggregated, agg_result_path)
     except OSError as save_err:
@@ -522,6 +531,14 @@ def run_analysis(
             f"{type(e).__name__}: {e}"
         ) from e
     _check_compute_result(aggregated, "aggregate", analysis.name)
+    aggregated = analysis.validate_aggregated_result(
+        aggregated,
+        condition=condition,
+        settings=settings,
+        equilibration=equilibration,
+        source=agg_result_path,
+        expected_replicates=successful,
+    )
     if recompute or not agg_result_path.exists():
         try:
             analysis.save_result(aggregated, agg_result_path)
@@ -810,6 +827,28 @@ def finalize_comparison_from_disk(
                     label,
                     cond_dir / "aggregated",
                     agg_path,
+                )
+                failed_conditions.append(condition)
+                continue
+
+        if agg_result is not None and analysis.has_aggregate_stage:
+            agg_path = analysis.aggregate_result_path(cond_dir / "aggregated")
+            try:
+                agg_result = analysis.validate_aggregated_result(
+                    agg_result,
+                    condition=condition,
+                    settings=settings,
+                    equilibration=resolved_equilibration,
+                    source=agg_path,
+                    expected_replicates=condition.replicates,
+                    allow_replicate_subset=True,
+                )
+            except AggregateValidationError as exc:
+                logger.warning(
+                    "%s: invalid aggregated result for '%s': %s",
+                    analysis.name,
+                    label,
+                    exc,
                 )
                 failed_conditions.append(condition)
                 continue
