@@ -97,6 +97,8 @@ class ToyAggregatedResult(BaseModel):
     sem_value: float
     replicate_values: list[float]
     n_replicates: int
+    replicates: list[int] | None = None
+    settings_fingerprint: str | None = None
 
 
 class ToyAnalysis(Analysis):
@@ -120,6 +122,8 @@ class ToyAnalysis(Analysis):
             sem_value=sem_val,
             replicate_values=values,
             n_replicates=len(values),
+            replicates=list(ctx.replicates),
+            settings_fingerprint=self.aggregate_settings_fingerprint(ctx.settings),
         )
 
 
@@ -140,6 +144,8 @@ class ToyDependentAnalysis(Analysis):
             sem_value=0.0,
             replicate_values=values,
             n_replicates=len(values),
+            replicates=list(ctx.replicates),
+            settings_fingerprint=self.aggregate_settings_fingerprint(ctx.settings),
         )
 
 

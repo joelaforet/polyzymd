@@ -49,6 +49,8 @@ class ToyAggregatedResult(BaseModel):
     sem_value: float
     replicate_values: list[float]
     n_replicates: int
+    replicates: list[int] | None = None
+    settings_fingerprint: str | None = None
 
     def save(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,6 +86,8 @@ class ToyAnalysis(Analysis):
             sem_value=sem_val,
             replicate_values=values,
             n_replicates=len(values),
+            replicates=list(ctx.replicates),
+            settings_fingerprint=self.aggregate_settings_fingerprint(ctx.settings),
         )
 
     def extract_metrics(self, summary: ToyAggregatedResult) -> dict[str, MetricValue]:
@@ -721,7 +725,13 @@ class TestDefaultCompareContract:
             equilibration="10ns",
             settings=ToySettings(),
             recompute=False,
-            aggregated_results={"A": {"dummy": True}},
+            aggregated_results={
+                "A": {
+                    "dummy": True,
+                    "n_replicates": 2,
+                    "settings_fingerprint": analysis.aggregate_settings_fingerprint(ToySettings()),
+                }
+            },
         )
 
         with pytest.raises(
@@ -764,7 +774,13 @@ class TestDefaultCompareContract:
             equilibration="10ns",
             settings=ToySettings(),
             recompute=False,
-            aggregated_results={"A": {"dummy": True}},
+            aggregated_results={
+                "A": {
+                    "dummy": True,
+                    "n_replicates": 2,
+                    "settings_fingerprint": analysis.aggregate_settings_fingerprint(ToySettings()),
+                }
+            },
         )
 
         with pytest.raises(
@@ -809,7 +825,13 @@ class TestDefaultCompareContract:
             equilibration="10ns",
             settings=ToySettings(),
             recompute=False,
-            aggregated_results={"A": {"dummy": True}},
+            aggregated_results={
+                "A": {
+                    "dummy": True,
+                    "n_replicates": 2,
+                    "settings_fingerprint": analysis.aggregate_settings_fingerprint(ToySettings()),
+                }
+            },
         )
 
         with pytest.raises(

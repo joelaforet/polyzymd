@@ -105,6 +105,78 @@ def _check_compute_result(result: Any, method: str, analysis_name: str) -> None:
     _check_result_type(result, method, analysis_name)
 
 
+def _attach_aggregate_identity_metadata(
+    analysis: Analysis,
+    result: Any,
+    *,
+    settings: BaseModel,
+    replicates: Sequence[int],
+) -> Any:
+    """Attach framework-known aggregate identity to newly computed results.
+
+    Parameters
+    ----------
+    analysis : Analysis
+        Analysis plugin that produced the aggregate.
+    result : Any
+        Newly computed aggregate result.
+    settings : BaseModel
+        Active analysis settings.
+    replicates : sequence of int
+        Successful replicate IDs represented by the aggregate.
+
+    Returns
+    -------
+    Any
+        Aggregate result with missing identity fields filled when the result
+        shape supports them.
+    """
+
+    settings_fp = analysis.aggregate_settings_fingerprint(settings)
+    replicate_ids = [int(rep) for rep in replicates]
+
+    if isinstance(result, dict):
+        enriched = dict(result)
+        metadata = enriched.get("metadata")
+        metadata_has_settings = isinstance(metadata, dict) and any(
+            key in metadata for key in ("settings_fingerprint", "settings_fp")
+        )
+        metadata_has_replicates = isinstance(metadata, dict) and any(
+            key in metadata for key in ("replicates", "replicate_ids")
+        )
+
+        if settings_fp is not None and not metadata_has_settings:
+            enriched.setdefault("settings_fingerprint", settings_fp)
+        if not metadata_has_replicates:
+            enriched.setdefault("replicates", replicate_ids)
+        enriched.setdefault("n_replicates", len(replicate_ids))
+        return enriched
+
+    field_names = set(getattr(type(result), "model_fields", {}) or {})
+    if not field_names or not hasattr(result, "model_copy"):
+        return result
+
+    updates: dict[str, Any] = {}
+    if settings_fp is not None:
+        if (
+            "settings_fingerprint" in field_names
+            and getattr(result, "settings_fingerprint", None) is None
+        ):
+            updates["settings_fingerprint"] = settings_fp
+        elif "settings_fp" in field_names and getattr(result, "settings_fp", None) is None:
+            updates["settings_fp"] = settings_fp
+    if "replicates" in field_names and getattr(result, "replicates", None) is None:
+        updates["replicates"] = replicate_ids
+    elif "replicate_ids" in field_names and getattr(result, "replicate_ids", None) is None:
+        updates["replicate_ids"] = replicate_ids
+    if "n_replicates" in field_names and getattr(result, "n_replicates", None) is None:
+        updates["n_replicates"] = len(replicate_ids)
+
+    if not updates:
+        return result
+    return result.model_copy(update=updates)
+
+
 def _remove_stale_directory(path: Path) -> None:
     """Remove an analysis-owned directory before forced recomputation.
 
@@ -386,6 +458,12 @@ def aggregate_condition_from_disk(
             f"{type(e).__name__}: {e}"
         ) from e
     _check_compute_result(aggregated, "aggregate", analysis.name)
+    aggregated = _attach_aggregate_identity_metadata(
+        analysis,
+        aggregated,
+        settings=settings,
+        replicates=successful_reps,
+    )
     aggregated = analysis.validate_aggregated_result(
         aggregated,
         condition=condition,
@@ -531,6 +609,12 @@ def run_analysis(
             f"{type(e).__name__}: {e}"
         ) from e
     _check_compute_result(aggregated, "aggregate", analysis.name)
+    aggregated = _attach_aggregate_identity_metadata(
+        analysis,
+        aggregated,
+        settings=settings,
+        replicates=successful,
+    )
     aggregated = analysis.validate_aggregated_result(
         aggregated,
         condition=condition,
