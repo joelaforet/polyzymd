@@ -82,6 +82,19 @@ jobs:
           name: dist
           path: dist/
 
+  docs:
+    name: Docs Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0
+        with:
+          environments: build
+
+      - name: Build docs with warnings as errors
+        run: pixi run -e build make -C docs clean html SPHINXOPTS="-W --keep-going"
+
   test-install:
     name: Test Installation
     runs-on: ubuntu-latest
