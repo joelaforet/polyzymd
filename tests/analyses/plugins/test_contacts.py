@@ -3477,8 +3477,7 @@ class TestContactsCacheAmbiguity:
         legacy = tmp_path / relative_name
         legacy.parent.mkdir(parents=True, exist_ok=True)
         legacy.write_text(
-            '{"metadata": {"contacts_settings_fingerprint": "deadbeef", '
-            '"equilibration": "10ns"}}'
+            '{"metadata": {"contacts_settings_fingerprint": "deadbeef", "equilibration": "10ns"}}'
         )
 
         result = find_contact_result_for_replicate(
@@ -3509,8 +3508,7 @@ class TestContactsCacheAmbiguity:
         legacy = tmp_path / "contacts_eq10ns_cut4.5_rep1.json"
         fingerprinted.write_text(fingerprinted_payload)
         legacy.write_text(
-            '{"metadata": {"contacts_settings_fingerprint": "deadbeef", '
-            '"equilibration": "10ns"}}'
+            '{"metadata": {"contacts_settings_fingerprint": "deadbeef", "equilibration": "10ns"}}'
         )
 
         result = find_contact_result_for_replicate(
@@ -3710,8 +3708,7 @@ class TestContactsCacheAmbiguity:
         run_dir.mkdir()
         (run_dir / "result.json").write_text('{"metadata": {"equilibration": "10ns"}}')
         (tmp_path / "contacts_eq10ns_cut6.0_rep1.json").write_text(
-            '{"metadata": {"contacts_settings_fingerprint": "deadbeef", '
-            '"equilibration": "10ns"}}'
+            '{"metadata": {"contacts_settings_fingerprint": "deadbeef", "equilibration": "10ns"}}'
         )
 
         result = infer_contacts_artifact_settings_fingerprint(
@@ -3728,8 +3725,7 @@ class TestContactsCacheAmbiguity:
 
         (tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
         (tmp_path / "contacts_eq10ns_cut6.0_rep1.json").write_text(
-            '{"metadata": {"contacts_settings_fingerprint": "feedface", '
-            '"equilibration": "10ns"}}'
+            '{"metadata": {"contacts_settings_fingerprint": "feedface", "equilibration": "10ns"}}'
         )
 
         result = infer_contacts_artifact_settings_fingerprint(

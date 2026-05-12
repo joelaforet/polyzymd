@@ -91,8 +91,7 @@ class RgEmptySelectionError(ValueError):
         self.selection = selection
         self.replicate = replicate
         super().__init__(
-            f"Run '{run_label}' selection matched no atoms for replicate "
-            f"{replicate}: {selection!r}"
+            f"Run '{run_label}' selection matched no atoms for replicate {replicate}: {selection!r}"
         )
 
 

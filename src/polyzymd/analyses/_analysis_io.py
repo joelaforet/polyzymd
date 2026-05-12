@@ -41,8 +41,7 @@ def load_aggregated_result(analysis: Any, aggregated_dir: Path) -> Any:
         return None
     chosen = json_files[-1]
     logger.warning(
-        "%s: canonical result.json not found in %s — falling back to %s "
-        "(%d JSON file(s) present)",
+        "%s: canonical result.json not found in %s — falling back to %s (%d JSON file(s) present)",
         analysis.name,
         aggregated_dir,
         chosen.name,

@@ -278,5 +278,7 @@ class OpenMMEngine(SimulationEngine):
 
         # Last-resort recursive pattern for historical layouts
         return sorted(
-            path for path in working_dir.glob("**/production*trajectory.dcd") if path.stat().st_size > 0
+            path
+            for path in working_dir.glob("**/production*trajectory.dcd")
+            if path.stat().st_size > 0
         )

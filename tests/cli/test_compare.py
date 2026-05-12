@@ -802,9 +802,11 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.run_replicate_once",
-        lambda *args, **kwargs: called.__setitem__("rep", called["rep"] + 1)
-        or captured_recompute.__setitem__("rep", args[-1])
-        or {"ok": True},
+        lambda *args, **kwargs: (
+            called.__setitem__("rep", called["rep"] + 1)
+            or captured_recompute.__setitem__("rep", args[-1])
+            or {"ok": True}
+        ),
     )
 
     def _capture_aggregate(*args, **kwargs):

@@ -61,8 +61,7 @@ def validate_name(name: str, *, check_existing: bool = True) -> str | None:
     """
     if not _NAME_RE.match(name):
         return (
-            f"'{name}' is not a valid plugin name. Use lowercase snake_case "
-            "(e.g. 'my_analysis')."
+            f"'{name}' is not a valid plugin name. Use lowercase snake_case (e.g. 'my_analysis')."
         )
     if keyword.iskeyword(name):
         return f"'{name}' is a Python keyword."

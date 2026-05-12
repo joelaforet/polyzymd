@@ -735,8 +735,7 @@ def grouped_bars(
     if replicate_values is not None:
         if len(replicate_values) != n:
             raise ValueError(
-                "replicate_values length must match series length "
-                f"({len(replicate_values)} != {n})"
+                f"replicate_values length must match series length ({len(replicate_values)} != {n})"
             )
         for idx, series_replicates in enumerate(replicate_values):
             if len(series_replicates) != len(x):
