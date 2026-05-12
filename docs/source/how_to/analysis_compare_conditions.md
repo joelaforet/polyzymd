@@ -12,7 +12,8 @@ You will:
 
 ```{important}
 For the `v1.3.0` release, the stable comparison stack is RMSD, Rg, RMSF,
-contacts, distances, catalytic triad, secondary structure, and SASA.
+contacts, distances, catalytic triad, secondary structure, SASA, and hydrogen
+bonds.
 ```
 
 ```{note}
@@ -314,6 +315,7 @@ Common next additions to `comparison.yaml` are:
 - `distances` for custom atom-pair distances
 - `catalytic_triad` for active-site geometry
 - `secondary_structure` for helix/strand persistence and content
+- `hydrogen_bonds` for hydrogen-bond occupancy and lifetime summaries
 
 For end-to-end examples, see:
 

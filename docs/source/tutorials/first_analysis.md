@@ -140,7 +140,7 @@ RMSF Comparison Complete
 ```
 
 ```{tip}
-If you see `RMSF Analysis Complete` with a mean value, the analysis succeeded.
+If you see `RMSF Comparison Complete` with a mean value, the analysis succeeded.
 If you see an error about a missing working directory or trajectory, check that
 the `config` path in `comparison.yaml` is correct and that your trajectory
 files exist on disk. See {doc}`../how_to/troubleshooting` for common fixes.
@@ -204,12 +204,14 @@ Figures are saved to the `figures/` directory:
 ```text
 figures/
 └── rmsf/
+    ├── rmsf_comparison.png
     └── rmsf_profile.png
 ```
 
-With a single condition, the profile plot shows per-residue RMSF values.
-Comparison bar charts and error bars appear when you add additional conditions
-and replicates.
+With a single condition, the comparison chart is a simple one-bar summary and
+the profile plot shows per-residue RMSF values. Error bars and statistical
+comparisons become more useful when you add additional conditions and
+replicates.
 
 ## What's Next
 
