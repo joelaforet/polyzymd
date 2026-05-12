@@ -123,7 +123,11 @@ def _plot_rmsf_profile(
 
         color = colors[idx] if idx < len(colors) else f"C{idx}"
 
-        if plot_settings.rmsf.show_error and profile.get("n_replicates", 0) > 1 and "sem" in profile:
+        if (
+            plot_settings.rmsf.show_error
+            and profile.get("n_replicates", 0) > 1
+            and "sem" in profile
+        ):
             sem = np.array(profile["sem"])
             ax_rmsf.fill_between(
                 residues,
