@@ -1018,7 +1018,7 @@ class SASAAnalysis(Analysis):
                 finite_values = [
                     value for value in run_summary.per_replicate_means if self._is_finite(value)
                 ]
-                if len(finite_values) >= 2 and self._is_finite(run_summary.mean_sasa):
+                if finite_values and self._is_finite(run_summary.mean_sasa):
                     comparable.append(summary)
 
             if not comparable:

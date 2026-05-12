@@ -1282,6 +1282,80 @@ def test_compare_and_format(tmp_path: Path) -> None:
     assert "SASA Comparison" in text
 
 
+def test_compare_singleton_conditions_returns_descriptive_result(tmp_path: Path) -> None:
+    """compare should rank singleton conditions and mark inference not testable."""
+    analysis = SASAAnalysis()
+    settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
+
+    control = make_condition(
+        label="control",
+        config_path="/fake/control.yaml",
+        replicates=(1,),
+        sim_config=MagicMock(),
+    )
+    treated = make_condition(
+        label="treated",
+        config_path="/fake/treated.yaml",
+        replicates=(1,),
+        sim_config=MagicMock(),
+    )
+    settings_fingerprint = analysis._settings_cache_token(settings)
+    aggregated_results = {
+        "control": SASAAggregatedResult(
+            config_hash="hash",
+            polyzymd_version="1.0.0",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="chainid A",
+            replicates=[1],
+            n_replicates=1,
+            run_results=[_make_agg_run("protein", [100.0])],
+            settings_fingerprint=settings_fingerprint,
+            source_result_files=[],
+        ),
+        "treated": SASAAggregatedResult(
+            config_hash="hash",
+            polyzymd_version="1.0.0",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="chainid A",
+            replicates=[1],
+            n_replicates=1,
+            run_results=[_make_agg_run("protein", [120.0])],
+            settings_fingerprint=settings_fingerprint,
+            source_result_files=[],
+        ),
+    }
+
+    ctx = make_comparison_context(
+        name="sasa_compare_singletons",
+        conditions=[control, treated],
+        analysis_dirs={"control": tmp_path / "control", "treated": tmp_path / "treated"},
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label="control",
+        equilibration="10ns",
+        recompute=False,
+        aggregated_results=aggregated_results,
+    )
+
+    comparison = analysis.compare(ctx)
+
+    assert comparison is not None
+    assert isinstance(comparison, SASAComparisonResult)
+    assert comparison.run_labels == ["protein"]
+    assert comparison.ranking_by_run == {"protein": ["control", "treated"]}
+    assert len(comparison.pairwise_comparisons) == 1
+    pairwise = comparison.pairwise_comparisons[0]
+    assert pairwise.testable is False
+    assert pairwise.p_value is None
+    assert pairwise.p_value_adjusted is None
+    assert pairwise.significant is False
+    assert pairwise.note == "Inferential statistics require at least two replicates per condition."
+
+
 def test_compare_skips_all_nan_runs(tmp_path: Path) -> None:
     """Comparison should skip runs with all-NaN replicate values."""
     analysis = SASAAnalysis()
