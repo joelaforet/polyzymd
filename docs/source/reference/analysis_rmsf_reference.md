@@ -45,6 +45,14 @@ plugins:
     reference_file: "/path/to/crystal_structure.pdb"
 ```
 
+```{important}
+When `reference_mode: external` or another explicit reference mode is used,
+RMSF values are deviations about that specified reference structure. They are
+not necessarily fluctuations about the trajectory mean. Use this mode when the
+scientific question is reference deviation, such as motion away from a crystal
+or catalytically competent conformation.
+```
+
 ## Output Files
 
 RMSF writes per-replicate and aggregated JSON files under each condition's
