@@ -129,6 +129,15 @@ openmm = ">=8.1,<8.5"
 
 
 # =============================================================================
+# FEATURE: package-build
+# Build and release validation tools for Python distributions.
+# =============================================================================
+[feature.package-build.dependencies]
+python-build = ">=1.2"
+twine        = ">=5.0"
+
+
+# =============================================================================
 # FEATURE: cuda-12-6
 # CUDA 12.6 driver — e.g. PSC Bridges2 (V100, sm_70)
 # OpenMM 8.4 is the tested version for this CUDA/GPU combination.
@@ -161,7 +170,7 @@ cuda = "12.4"
 # GPU environments with unrelated deps.
 # =============================================================================
 [environments]
-build     = { features = ["base", "openmm-any"], no-default-feature = true, solve-group = "build" }
+build     = { features = ["base", "openmm-any", "package-build"], no-default-feature = true, solve-group = "build" }
 cuda-12-6 = { features = ["base", "cuda-12-6"], no-default-feature = true, solve-group = "cuda-12-6" }
 cuda-12-4 = { features = ["base", "cuda-12-4"], no-default-feature = true, solve-group = "cuda-12-4" }
 
