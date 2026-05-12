@@ -2611,8 +2611,8 @@ class TestCompare:
         assert result is not None
         assert result.conditions[0].n_replicates == 2
 
-    def test_compare_rejects_replicate_subset_below_minimum(self, tmp_path):
-        """Finalize should not accept successful subsets below plugin minimum."""
+    def test_compare_accepts_singleton_replicate_subset(self, tmp_path):
+        """Finalize should accept one successful replicate for smoke-test comparisons."""
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
         from polyzymd.analyses.contacts._aggregator import (
@@ -2667,7 +2667,9 @@ class TestCompare:
 
         result = analysis.compare(ctx)
 
-        assert result is None
+        assert result is not None
+        assert result.conditions[0].n_replicates == 1
+        assert result.pairwise_comparisons == []
 
 
 # ---------------------------------------------------------------------------
