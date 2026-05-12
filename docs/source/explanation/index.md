@@ -19,6 +19,13 @@ How the analysis pipeline, chain conventions, and plugin architecture fit
 together.
 :::
 
+:::{grid-item-card} Protein Modifications
+:link: protein_modification_architecture
+:link-type: doc
+
+How covalent residue modifications and polymer conjugation are represented.
+:::
+
 :::{grid-item-card} Interpretation and Best Practices
 :link: analysis_statistics_best_practices
 :link-type: doc
@@ -42,6 +49,7 @@ Interpretation guidance for experimental analysis workflows.
 
 Analysis System Concepts <analysis_concepts>
 Architecture <architecture>
+Protein Modification Architecture <protein_modification_architecture>
 Residue Assignment and Chain Conventions <residue_assignment>
 Colored Logging <colored_logging>
 ```
