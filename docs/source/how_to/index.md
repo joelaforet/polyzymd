@@ -26,6 +26,13 @@ Add polymers, prepare inputs, configure restraints, or export to GROMACS.
 Diagnose OpenFF PDB ingestion failures before running a PolyzyMD build.
 :::
 
+:::{grid-item-card} Extension Guides
+:link: extend_protein_modifications
+:link-type: doc
+
+Add new protein modification recipes, mechanisms, and builders.
+:::
+
 :::{grid-item-card} Analysis Workflows
 :link: analysis_chooser
 :link-type: doc
@@ -59,6 +66,7 @@ Prepare build inputs and configure your enzyme-polymer conjugate systems.
 Add Polymers to a Simulation <polymers>
 Generate Polymers from SMILES <dynamic_polymers>
 Troubleshoot OpenFF PDB Ingestion <troubleshoot_openff_pdb_ingestion>
+Extend Protein Modifications <extend_protein_modifications>
 Add Distance Restraints <restraints>
 Set Up Equilibration Stages <equilibration>
 Run GROMACS Simulations on HPC Clusters <gromacs_export>
