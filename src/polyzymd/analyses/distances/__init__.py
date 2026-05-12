@@ -70,7 +70,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("polyzymd.analyses.distances")
 
-NOT_TESTABLE_SINGLETON_NOTE = "Inferential statistics require at least two replicates per condition."
+NOT_TESTABLE_SINGLETON_NOTE = (
+    "Inferential statistics require at least two replicates per condition."
+)
 
 # Default threshold from the existing settings module
 DEFAULT_DISTANCE_THRESHOLD = 3.5
@@ -1476,9 +1478,7 @@ class DistancesAnalysis(Analysis):
                         distance_p_value=anova_dist.p_value,
                         distance_significant=anova_dist.significant if distance_testable else False,
                         distance_testable=distance_testable,
-                        distance_note=(
-                            None if distance_testable else NOT_TESTABLE_SINGLETON_NOTE
-                        ),
+                        distance_note=(None if distance_testable else NOT_TESTABLE_SINGLETON_NOTE),
                         fraction_f_statistic=fraction_f,
                         fraction_p_value=fraction_p,
                         fraction_significant=fraction_sig,

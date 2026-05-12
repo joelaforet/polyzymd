@@ -12,7 +12,9 @@ from polyzymd.analyses.base import ComparisonContext, Condition
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
 
-NOT_TESTABLE_SINGLETON_NOTE = "Inferential statistics require at least two replicates per condition."
+NOT_TESTABLE_SINGLETON_NOTE = (
+    "Inferential statistics require at least two replicates per condition."
+)
 
 
 def compare(analysis: Any, ctx: ComparisonContext) -> Any:

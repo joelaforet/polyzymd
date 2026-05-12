@@ -38,7 +38,9 @@ if TYPE_CHECKING:
     from polyzymd.analyses.sasa._comparison_results import SASAComparisonResult
 
 LOGGER = logging.getLogger(__name__)
-NOT_TESTABLE_SINGLETON_NOTE = "Inferential statistics require at least two replicates per condition."
+NOT_TESTABLE_SINGLETON_NOTE = (
+    "Inferential statistics require at least two replicates per condition."
+)
 
 
 @dataclass(frozen=True)

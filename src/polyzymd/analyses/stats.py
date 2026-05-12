@@ -37,7 +37,9 @@ from polyzymd.analyses.base import (
 
 logger = logging.getLogger("polyzymd.analyses")
 
-NOT_TESTABLE_SINGLETON_NOTE = "Inferential statistics require at least two replicates per condition."
+NOT_TESTABLE_SINGLETON_NOTE = (
+    "Inferential statistics require at least two replicates per condition."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -805,7 +807,9 @@ def _format_scalar_text(
         else:
             raise ValueError(f"Unknown posthoc method {posthoc_method!r}")
         if any(not comp.testable for comp in selected_pairwise):
-            lines.append("Not testable: inferential statistics require at least two replicates per condition")
+            lines.append(
+                "Not testable: inferential statistics require at least two replicates per condition"
+            )
         lines.append("")
 
     # ANOVA
@@ -996,7 +1000,9 @@ def _format_scalar_markdown(
             lines.append(f"*Significance uses Tukey HSD p <= {alpha:g}.*")
         if any(not comp.testable for comp in selected_pairwise):
             lines.append("")
-            lines.append("*Not testable: inferential statistics require at least two replicates per condition.*")
+            lines.append(
+                "*Not testable: inferential statistics require at least two replicates per condition.*"
+            )
         lines.append("")
 
     # ANOVA

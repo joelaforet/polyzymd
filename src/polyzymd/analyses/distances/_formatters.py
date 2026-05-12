@@ -168,7 +168,10 @@ def format_distances_console_table(
             lines.append("-" * 90)
 
             # Fraction comparisons (if available)
-            if pair_comparisons[0].fraction_p_value is not None or pair_comparisons[0].fraction_testable is False:
+            if (
+                pair_comparisons[0].fraction_p_value is not None
+                or pair_comparisons[0].fraction_testable is False
+            ):
                 lines.append("\nFraction Below Threshold:")
                 lines.append("-" * 90)
 
@@ -431,9 +434,7 @@ def format_distances_markdown(
                     comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
                     sig = "Yes*" if comp.fraction_significant else "No"
                     p_value = (
-                        f"{comp.fraction_p_value:.4f}"
-                        if comp.fraction_testable
-                        else "not testable"
+                        f"{comp.fraction_p_value:.4f}" if comp.fraction_testable else "not testable"
                     )
                     d_value = f"{comp.fraction_cohens_d:.2f}" if comp.fraction_testable else "n/a"
                     lines.append(
