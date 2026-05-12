@@ -13,6 +13,8 @@ want a worked example with a clear beginning, middle, and end.
   Follow the full path from finished trajectories to comparison figures.
 - [Measure Surface Accessibility with SASA](sasa_analysis.md)
   Configure multi-run SASA analysis to quantify polymer shielding effects.
+- [Build a Protein With Multiple Modifications](protein_modification_workflow.md)
+  Learn the target config shape for mixed glycosylation and polymer attachment.
 
 ## What Belongs Here
 
@@ -38,4 +40,5 @@ Run Your First PolyzyMD Simulation <quickstart>
 Run Your First Analysis <first_analysis>
 Analyze a Multi-Condition Study <analysis_complete_workflow>
 Measure Surface Accessibility with SASA <sasa_analysis>
+Build a Protein With Multiple Modifications <protein_modification_workflow>
 ```
