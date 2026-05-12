@@ -176,6 +176,14 @@ The key files are:
 - **`comparison/rmsf/result.json`** --- the comparison-level summary with mean
   RMSF, standard error, and ranking information.
 
+```{note}
+This tutorial intentionally uses one replicate so you can complete the workflow
+quickly. RMSF supports this smoke-test mode, but a single replicate cannot
+estimate between-replicate uncertainty. Error bars and condition-level
+statistical comparisons become meaningful only after you add more replicates and
+conditions.
+```
+
 ## Step 5: Add Plotting (Optional)
 
 To generate figures alongside the analysis, re-run with the `--plot` flag on
@@ -200,7 +208,8 @@ figures/
 ```
 
 With a single condition, the profile plot shows per-residue RMSF values.
-Comparison bar charts appear when you add a second condition.
+Comparison bar charts and error bars appear when you add additional conditions
+and replicates.
 
 ## What's Next
 

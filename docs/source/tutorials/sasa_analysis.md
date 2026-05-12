@@ -183,7 +183,20 @@ into memory at once.
 
 ## Step 4: Run on HPC
 
-For large systems or many replicates, submit the analysis as SLURM jobs:
+For large systems or many replicates, submit the analysis as SLURM jobs. Start
+with a dry run so you can inspect the generated scripts and resource requests
+without dispatching jobs:
+
+```bash
+pixi run -e build polyzymd compare submit sasa \
+    -f comparison.yaml \
+    --partition aa100 \
+    --mem 8G \
+    --time 02:00:00 \
+    --dry-run
+```
+
+If the dry-run summary looks correct, submit the real jobs:
 
 ```bash
 pixi run -e build polyzymd compare submit sasa \

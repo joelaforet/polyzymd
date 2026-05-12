@@ -95,11 +95,17 @@ pixi run -e build polyzymd compare submit-all \
 Use `--dry-run` to generate all scripts and print the submission summary table
 without dispatching jobs.
 
-## Comparator-only plugins and finalize-only mode
+## Framework finalize-only mode
 
-Some plugins do not implement compute/aggregate stages and only run
-comparison/plot logic. For these, the manifest pipeline mode is
-`finalize_only`, and submission creates a single finalize job.
+The submission framework supports plugins that do not implement
+compute/aggregate stages and only run comparison/plot logic. For those plugins,
+the manifest pipeline mode is `finalize_only`, and submission creates a single
+finalize job.
+
+The stable v1.3 analysis plugins use compute and/or aggregate stages before
+finalization. Treat `finalize_only` as a framework capability for future or
+custom compare-only plugins, not as the normal path for the stable plugins
+listed in this guide.
 
 This behavior applies to both `compare submit` and `compare submit-all`.
 
