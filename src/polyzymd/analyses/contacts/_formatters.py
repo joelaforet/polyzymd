@@ -191,7 +191,7 @@ def format_contacts_console_table(
             )
             f_stat = f"{anova.f_statistic:.3f}" if anova.testable else "n/a"
             p_value = f"{anova.p_value:.4f}" if anova.testable else "not testable"
-            lines.append(f"{metric:<25} {f_stat:<12} {p_value:<12} " f"{p_adj_str:<12} {sig:<12}")
+            lines.append(f"{metric:<25} {f_stat:<12} {p_value:<12} {p_adj_str:<12} {sig:<12}")
         lines.append("-" * 84)
         lines.append(f"* p_adj < {result.fdr_alpha} (BH-corrected)")
         lines.append("")
