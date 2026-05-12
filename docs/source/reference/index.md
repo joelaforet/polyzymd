@@ -67,6 +67,9 @@ RMSF Plugin Reference <analysis_rmsf_reference>
 Catalytic Triad Plugin Reference <analysis_triad_reference>
 Distances Plugin Reference <analysis_distances_reference>
 Contacts Plugin Reference <analysis_contacts_reference>
+Secondary Structure Plugin Reference <analysis_secondary_structure_reference>
+SASA Plugin Reference <analysis_sasa_reference>
+Hydrogen Bonds Plugin Reference <analysis_hydrogen_bonds_reference>
 Post-Hoc Testing Reference <posthoc_testing>
 Experimental Analyses Archive <experimental_analyses_archive>
 ```

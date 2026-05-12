@@ -64,7 +64,7 @@ from modules named `_analysis_*`, `_contexts`, or `_comparison_models`.
 | `sasa` | `analyses.sasa` | Custom (per-run) |
 | `distances` | `analyses.distances` | Custom |
 | `contacts` | `analyses.contacts` | Custom |
-| `hydrogen_bonds` | `analyses.hydrogen_bonds` | Default (scalar) |
+| `hydrogen_bonds` | `analyses.hydrogen_bonds` | Custom result loading with default-style scalar comparison per summary |
 
 ### Contacts package facade
 

@@ -122,6 +122,10 @@ below.
 | `composition` | `HydrogenBondCompositionSettings \| null` | `null` | Optional partitioning for composition analysis |
 | `timestep_ps` | `float \| null` | `null` | Optional timestep override (ps) for time-axis plots |
 
+Time-axis plots assume uniformly saved frames. PolyzyMD maps frame index to time
+as `frame_index * timestep_ps`; variable-timestep concatenated trajectories are
+not supported.
+
 `HydrogenBondSummarySettings` entries in `summaries`:
 
 | Key | Type | Default | Description |

@@ -14,9 +14,9 @@ Plugin settings path fields are resolved relative to the directory containing
 
 For example, in:
 
-`plugins.rmsf.reference_file`, `plugins.contacts.enzyme_pdb_for_sasa`, and
-other plugin-declared path fields, a relative path like `structures/enzyme.pdb`
-is interpreted as:
+`plugins.rmsf.reference_file`, condition `config` paths, and other
+plugin-declared path fields, a relative path like `structures/enzyme.pdb` is
+interpreted as:
 
 `<comparison_yaml_parent>/structures/enzyme.pdb`
 ```
@@ -259,6 +259,10 @@ Each entry in `runs`:
 | `allow_overlapping_composition` | bool | `false` | Whether overlapping composition partitions are allowed |
 | `composition` | mapping | `null` | Composition analysis settings |
 | `timestep_ps` | float | `null` | Override trajectory timestep in picoseconds for time-axis plots |
+
+Time-axis plots assume uniformly saved frames. PolyzyMD converts frame index to
+time as `frame_index * timestep_ps`; variable-timestep concatenated
+trajectories are not supported.
 
 Each summary entry in `summaries` has:
 
