@@ -416,6 +416,69 @@ def replicate_jitter_offsets(n_values: int, bar_width: float) -> "np.ndarray":
     return np.linspace(-max_jitter, max_jitter, n_values)
 
 
+def has_replicate_uncertainty(
+    replicate_values: Any = None,
+    *,
+    n_replicates: int | None = None,
+) -> bool:
+    """Return whether replicate-level uncertainty can be displayed.
+
+    Parameters
+    ----------
+    replicate_values : Any, optional
+        Per-condition or per-bar replicate values. Finite numeric entries are
+        counted after coercion.
+    n_replicates : int or None, optional
+        Explicit replicate count when the raw replicate values are not
+        available.
+
+    Returns
+    -------
+    bool
+        True when at least two finite independent replicate values are present.
+    """
+
+    if n_replicates is not None:
+        return n_replicates >= 2
+    return finite_numeric_values(replicate_values).size >= 2
+
+
+def suppress_singleton_errors(
+    errors: Sequence[float],
+    replicate_values: Sequence[Any] | None,
+) -> list[float] | None:
+    """Return errors with singleton replicate uncertainties suppressed.
+
+    Parameters
+    ----------
+    errors : sequence of float
+        SEM or uncertainty values aligned to ``replicate_values``.
+    replicate_values : sequence or None
+        Per-bar replicate values used to decide whether an error bar is
+        statistically displayable.
+
+    Returns
+    -------
+    list of float or None
+        Sanitized error values. Returns ``None`` when no bar has replicate
+        uncertainty, allowing callers to omit error bars entirely.
+    """
+
+    if replicate_values is None:
+        return list(errors)
+
+    sanitized: list[float] = []
+    has_any_uncertainty = False
+    for error, values in zip(errors, replicate_values, strict=False):
+        if has_replicate_uncertainty(values):
+            sanitized.append(float(error))
+            has_any_uncertainty = True
+        else:
+            sanitized.append(0.0)
+
+    return sanitized if has_any_uncertainty else None
+
+
 def scatter_replicate_values(
     ax: "Axes",
     bar_positions: "Sequence[float] | np.ndarray",
@@ -756,7 +819,11 @@ def grouped_bars(
             "linewidth": linewidth,
         }
         if show_error:
-            bar_kwargs["yerr"] = errors
+            errors_for_plot = errors
+            if replicate_values is not None:
+                errors_for_plot = suppress_singleton_errors(errors, replicate_values[i])
+            if errors_for_plot is not None:
+                bar_kwargs["yerr"] = errors_for_plot
         bar_positions = np.asarray(x) + offset
         ax.bar(bar_positions, means, **bar_kwargs)
 

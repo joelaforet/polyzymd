@@ -22,6 +22,7 @@ from polyzymd.analyses.shared.plotting import (
     get_output_path,
     save_figure,
     scatter_replicate_values,
+    suppress_singleton_errors,
 )
 
 if TYPE_CHECKING:
@@ -118,14 +119,15 @@ def plot_rmsd_timeseries(ctx: PlotContext, comparison_result: RMSDComparisonResu
                 label=condition_label,
                 zorder=3,
             )
-            ax.fill_between(
-                time_ns,
-                mean_rmsd - sem_rmsd,
-                mean_rmsd + sem_rmsd,
-                color=color,
-                alpha=0.2,
-                zorder=2,
-            )
+            if rmsd_matrix.shape[0] > 1:
+                ax.fill_between(
+                    time_ns,
+                    mean_rmsd - sem_rmsd,
+                    mean_rmsd + sem_rmsd,
+                    color=color,
+                    alpha=0.2,
+                    zorder=2,
+                )
             had_data = True
 
         if not had_data:
@@ -218,7 +220,7 @@ def plot_rmsd_comparison_bars(
         ax.bar(
             positions,
             means,
-            yerr=sems,
+            yerr=suppress_singleton_errors(sems, replicate_values),
             color=colors,
             edgecolor=theme.bar_edgecolor,
             linewidth=theme.bar_linewidth,

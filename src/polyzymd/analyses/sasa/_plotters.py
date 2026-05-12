@@ -14,8 +14,10 @@ from polyzymd.analyses.shared.plotting import (
     apply_legend,
     get_colors,
     get_output_path,
+    has_replicate_uncertainty,
     save_figure,
     scatter_replicate_values,
+    suppress_singleton_errors,
 )
 
 if TYPE_CHECKING:
@@ -90,7 +92,7 @@ def plot_sasa_comparison_bars(
         ax.bar(
             positions,
             means,
-            yerr=sems,
+            yerr=suppress_singleton_errors(sems, replicate_values),
             color=colors,
             edgecolor=theme.bar_edgecolor,
             linewidth=theme.bar_linewidth,
@@ -165,10 +167,9 @@ def plot_sasa_normalized_control_bars(
         replicate_values = [row.replicate_percent_deltas for row in rows]
         positions = np.arange(len(labels), dtype=np.float64)
         colors = get_colors(len(labels), ctx.plot_settings)
-        yerr = (
-            [sem if sem is not None else 0.0 for sem in sems]
-            if any(sem is not None for sem in sems)
-            else None
+        yerr = suppress_singleton_errors(
+            [sem if sem is not None else 0.0 for sem in sems],
+            replicate_values,
         )
 
         fig, ax = plt.subplots(figsize=plot_settings.figsize)  # type: ignore[attr-defined]
@@ -249,14 +250,15 @@ def plot_sasa_timeseries(ctx: PlotContext, comparison_result: SASAComparisonResu
                     ax.plot(time_ns, row, color=color, linewidth=0.8, alpha=0.25, zorder=1)
 
             ax.plot(time_ns, mean_sasa, color=color, linewidth=2.0, label=condition_label, zorder=3)
-            ax.fill_between(
-                time_ns,
-                mean_sasa - sem_sasa,
-                mean_sasa + sem_sasa,
-                color=color,
-                alpha=0.2,
-                zorder=2,
-            )
+            if sasa_matrix.shape[0] > 1:
+                ax.fill_between(
+                    time_ns,
+                    mean_sasa - sem_sasa,
+                    mean_sasa + sem_sasa,
+                    color=color,
+                    alpha=0.2,
+                    zorder=2,
+                )
             had_data = True
 
         if not had_data:
@@ -336,7 +338,8 @@ def plot_sasa_residue_profiles(
 
             color = colors[idx] if idx < len(colors) else f"C{idx}"
             ax.plot(residue_ids, means, color=color, linewidth=2.0, label=condition_label)
-            ax.fill_between(residue_ids, means - sems, means + sems, color=color, alpha=0.2)
+            if has_replicate_uncertainty(n_replicates=payload.get("n_replicates")):
+                ax.fill_between(residue_ids, means - sems, means + sems, color=color, alpha=0.2)
             had_data = True
 
         if not had_data:

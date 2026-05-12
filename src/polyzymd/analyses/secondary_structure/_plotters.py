@@ -22,6 +22,7 @@ from polyzymd.analyses.shared.plotting import (
     grouped_bars,
     save_figure,
     scatter_replicate_values,
+    suppress_singleton_errors,
     symmetric_clim,
 )
 
@@ -593,7 +594,7 @@ def _render_ss_individual_plots(
         ax.bar(
             x,
             means,
-            yerr=sems,
+            yerr=suppress_singleton_errors(sems, ss_data[internal_key].get("reps")),
             color=condition_colors,
             alpha=t.bar_alpha,
             edgecolor=t.bar_edgecolor,

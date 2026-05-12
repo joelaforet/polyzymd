@@ -23,6 +23,7 @@ from polyzymd.analyses.shared.plotting import (
     get_output_path,
     save_figure,
     scatter_replicate_values,
+    suppress_singleton_errors,
 )
 
 if TYPE_CHECKING:
@@ -117,14 +118,15 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
                 label=condition_label,
                 zorder=3,
             )
-            ax.fill_between(
-                time_ns,
-                mean_rg - sem_rg,
-                mean_rg + sem_rg,
-                color=color,
-                alpha=0.2,
-                zorder=2,
-            )
+            if rg_matrix.shape[0] > 1:
+                ax.fill_between(
+                    time_ns,
+                    mean_rg - sem_rg,
+                    mean_rg + sem_rg,
+                    color=color,
+                    alpha=0.2,
+                    zorder=2,
+                )
             had_data = True
 
         if not had_data:
@@ -217,7 +219,7 @@ def plot_rg_comparison_bars(
         ax.bar(
             positions,
             means,
-            yerr=sems,
+            yerr=suppress_singleton_errors(sems, replicate_values),
             color=colors,
             edgecolor=theme.bar_edgecolor,
             linewidth=theme.bar_linewidth,

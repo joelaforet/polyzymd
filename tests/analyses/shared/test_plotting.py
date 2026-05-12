@@ -11,8 +11,10 @@ import pytest
 from polyzymd.analyses.shared.plotting import (
     finite_numeric_values,
     grouped_bars,
+    has_replicate_uncertainty,
     scatter_replicate_values,
     scatter_stacked_segment_replicates,
+    suppress_singleton_errors,
 )
 from polyzymd.config.comparison import PlotSettings, PlotTheme
 
@@ -24,6 +26,24 @@ def test_finite_numeric_values_skips_invalid_entries() -> None:
     values = finite_numeric_values([1.0, "bad", float("nan"), "2.5", float("inf")])
 
     np.testing.assert_allclose(values, [1.0, 2.5])
+
+
+def test_has_replicate_uncertainty_requires_two_replicates() -> None:
+    """Replicate uncertainty should require at least two finite values."""
+    assert has_replicate_uncertainty([1.0]) is False
+    assert has_replicate_uncertainty([1.0, 1.2]) is True
+    assert has_replicate_uncertainty(n_replicates=1) is False
+    assert has_replicate_uncertainty(n_replicates=2) is True
+
+
+def test_suppress_singleton_errors_returns_none_for_singletons() -> None:
+    """Singleton-only bars should omit uncertainty bars entirely."""
+    assert suppress_singleton_errors([0.1, 0.2], [[1.0], [2.0]]) is None
+
+
+def test_suppress_singleton_errors_zeroes_mixed_singletons() -> None:
+    """Mixed replicate bars should keep only displayable uncertainties."""
+    assert suppress_singleton_errors([0.1, 0.2], [[1.0], [2.0, 2.2]]) == [0.0, 0.2]
 
 
 def test_scatter_replicate_values_vertical_filters_and_jitters() -> None:

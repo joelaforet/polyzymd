@@ -27,6 +27,7 @@ from polyzymd.analyses.shared.plotting import (
     get_output_path,
     get_theme,
     grouped_bars,
+    has_replicate_uncertainty,
     save_figure,
 )
 
@@ -315,7 +316,11 @@ def _plot_contact_fraction_profile(
 
             color = colors[idx] if idx < len(colors) else f"C{idx}"
 
-            if settings.show_contact_fraction_profile_error and np.any(sems > 0):
+            if (
+                settings.show_contact_fraction_profile_error
+                and has_replicate_uncertainty(n_replicates=result.n_replicates)
+                and np.any(sems > 0)
+            ):
                 ax.fill_between(
                     resids,
                     means - sems,
@@ -456,7 +461,11 @@ def _plot_residence_time_profile(
 
             color = colors[idx] if idx < len(colors) else f"C{idx}"
 
-            if settings.show_residence_time_profile_error and np.any(sems > 0):
+            if (
+                settings.show_residence_time_profile_error
+                and has_replicate_uncertainty(n_replicates=result.n_replicates)
+                and np.any(sems > 0)
+            ):
                 ax.fill_between(
                     resids,
                     means - sems,

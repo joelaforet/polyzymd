@@ -21,6 +21,7 @@ from polyzymd.analyses.shared.plotting import (
     save_figure,
     scatter_replicate_values,
     scatter_stacked_segment_replicates,
+    suppress_singleton_errors,
 )
 
 logger = logging.getLogger("polyzymd.analyses.hydrogen_bonds")
@@ -90,11 +91,12 @@ def plot_summary_comparison(
                 list(summary.per_replicate_mean_hbonds) if summary is not None else []
             )
 
+        yerr = suppress_singleton_errors(sems, replicate_values)
         ax.bar(
             x,
             means,
             width=0.72,
-            yerr=sems,
+            yerr=yerr,
             color=colors,
             capsize=plot_settings.theme.bar_capsize,
             alpha=plot_settings.theme.bar_alpha,

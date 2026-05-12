@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 import numpy as np
 
 from polyzymd.analyses.shared.loader import _require_matplotlib
-from polyzymd.analyses.shared.plotting import scatter_replicate_values
+from polyzymd.analyses.shared.plotting import has_replicate_uncertainty, scatter_replicate_values
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -566,7 +566,11 @@ def plot_triad_threshold_bars(
             bar_positions,
             data[cond_idx],
             width,
-            yerr=errors[cond_idx],
+            yerr=(
+                errors[cond_idx]
+                if any(has_replicate_uncertainty(values) for values in replicate_values[cond_idx])
+                else None
+            ),
             label=label,
             color=color,
             edgecolor="black",
