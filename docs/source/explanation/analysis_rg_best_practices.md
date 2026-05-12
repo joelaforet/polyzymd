@@ -291,10 +291,11 @@ like before. Use both for comprehensive structural analysis.
 | 5 | Medium effects (d > 1.3) | Recommended standard |
 
 ```{note}
-With only 1 replicate, PolyzyMD still computes Rg and reports
-within-trajectory statistics (mean, SEM from autocorrelation correction).
-Comparison across conditions requires at least 2 replicates per condition
-for pairwise t-tests.
+With only 1 replicate, PolyzyMD still computes Rg and includes the condition in
+descriptive summaries and rankings. Replicate SEM is unavailable and shown as
+n/a because variability across independent simulations cannot be estimated from
+a singleton. Pairwise inferential tests require at least 2 replicates per
+condition.
 ```
 
 ## Comparing Conditions
