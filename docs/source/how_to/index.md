@@ -19,6 +19,13 @@ basics.
 Add polymers, restraints, equilibration stages, or export to GROMACS.
 :::
 
+:::{grid-item-card} Extension Guides
+:link: extend_protein_modifications
+:link-type: doc
+
+Add new protein modification recipes, mechanisms, and builders.
+:::
+
 :::{grid-item-card} Analysis Workflows
 :link: analysis_chooser
 :link-type: doc
@@ -51,6 +58,7 @@ Build and configure your enzyme-polymer conjugate systems.
 
 Add Polymers to a Simulation <polymers>
 Generate Polymers from SMILES <dynamic_polymers>
+Extend Protein Modifications <extend_protein_modifications>
 Add Distance Restraints <restraints>
 Set Up Equilibration Stages <equilibration>
 Run GROMACS Simulations on HPC Clusters <gromacs_export>
