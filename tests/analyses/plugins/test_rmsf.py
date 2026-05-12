@@ -19,6 +19,7 @@ import pytest
 
 from polyzymd.analyses.base import (
     AggregateContext,
+    AggregateValidationError,
     ComparisonContext,
     ComparisonResult,
     Condition,
@@ -861,7 +862,11 @@ class TestCompare:
             equilibration="10ns",
             settings=RMSFSettings(),
             recompute=False,
-            aggregated_results={"Control": _make_aggregated_rmsf_result()},
+            aggregated_results={
+                "Control": _make_aggregated_rmsf_result().model_copy(
+                    update={"config_hash": "unknown"}
+                )
+            },
         )
 
         with pytest.raises(
@@ -900,8 +905,12 @@ class TestCompare:
             settings=RMSFSettings(),
             recompute=False,
             aggregated_results={
-                "Control": _make_aggregated_rmsf_result(replicates=(1, 2)),
-                "Treated": _make_aggregated_rmsf_result(replicates=(1, 2, 3)),
+                "Control": _make_aggregated_rmsf_result(replicates=(1, 2)).model_copy(
+                    update={"config_hash": "unknown"}
+                ),
+                "Treated": _make_aggregated_rmsf_result(replicates=(1, 2, 3)).model_copy(
+                    update={"config_hash": "unknown"}
+                ),
             },
         )
 
@@ -909,6 +918,34 @@ class TestCompare:
             ValueError,
             match="Aggregated RMSF result for condition 'Control' has incomplete replicate coverage",
         ):
+            rmsf_analysis.compare(ctx)
+
+    def test_compare_rejects_stale_settings_fingerprint(self, rmsf_analysis, tmp_path):
+        """compare should reject stale aggregate settings identity."""
+
+        condition = Condition(
+            label="Control",
+            config_path=Path("/fake/control.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        stale = _make_aggregated_rmsf_result(settings_fingerprint="deadbeef").model_copy(
+            update={"config_hash": "unknown"}
+        )
+        ctx = ComparisonContext(
+            name="rmsf_compare",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"Control": tmp_path / "control"},
+            results_dir=tmp_path / "comparison",
+            equilibration="10ns",
+            settings=RMSFSettings(),
+            recompute=False,
+            aggregated_results={"Control": stale},
+        )
+
+        with pytest.raises(AggregateValidationError, match="settings fingerprint mismatch"):
             rmsf_analysis.compare(ctx)
 
 

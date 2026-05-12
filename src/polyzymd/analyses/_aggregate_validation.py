@@ -347,8 +347,7 @@ def _validate_replicate_count(
         raise _validation_error(
             analysis.name,
             source,
-            f"n_replicates={declared_count} does not match {count_context} "
-            f"count {expected_count}",
+            f"n_replicates={declared_count} does not match {count_context} count {expected_count}",
         )
 
 

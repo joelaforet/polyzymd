@@ -89,6 +89,10 @@ class SecondaryStructureResult(BaseAnalysisResult):
 
     # Path to NPZ sidecar (set after save)
     npz_path: str | None = None
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Settings fingerprint used to validate secondary-structure caches",
+    )
 
     def summary(self) -> str:
         """One-line summary for console output."""
@@ -234,6 +238,10 @@ class SecondaryStructureAggregatedResult(AggregatedResultMixin, BaseAnalysisResu
     per_replicate_helix: list[float]
     per_replicate_strand: list[float]
     per_replicate_coil: list[float]
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Settings fingerprint used to validate aggregated secondary-structure caches",
+    )
 
     def summary(self) -> str:
         """One-line summary for console output."""

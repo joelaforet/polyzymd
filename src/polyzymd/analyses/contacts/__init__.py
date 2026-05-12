@@ -272,6 +272,24 @@ class ContactsAnalysis(Analysis):
 
     # === Required methods ===
 
+    def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
+        """Return the contacts-domain aggregate settings fingerprint.
+
+        Parameters
+        ----------
+        settings : BaseModel or None
+            Active contacts settings.
+
+        Returns
+        -------
+        str or None
+            Contacts-domain fingerprint, or ``None`` when settings are absent.
+        """
+
+        if settings is None:
+            return None
+        return contacts_settings_fingerprint(settings)
+
     @staticmethod
     def _replicate_sidecar_path(
         output_dir: Path,

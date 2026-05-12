@@ -830,12 +830,13 @@ class TestAggregate:
         return results
 
     def test_aggregate_produces_result(self, tmp_path):
-        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.base import AggregateContext, AggregateValidationError, Condition
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
         )
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
         analysis = DistancesAnalysis()
         settings = DistancesSettings(
@@ -893,6 +894,19 @@ class TestAggregate:
         assert result is not None
         assert result.n_replicates == 3
         assert len(result.pair_results) == 2
+        assert result.settings_fingerprint == settings_fingerprint(settings)
+
+        stale = result.model_copy(
+            update={"config_hash": "unknown", "settings_fingerprint": "deadbeef"}
+        )
+        with pytest.raises(AggregateValidationError, match="settings fingerprint mismatch"):
+            analysis.validate_aggregated_result(
+                stale,
+                condition=cond,
+                settings=settings,
+                equilibration="100ns",
+                expected_replicates=(1, 2, 3),
+            )
 
     def test_aggregate_saves_file(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition
@@ -1039,7 +1053,26 @@ class TestAggregate:
 
 def _make_mock_agg_result(n_pairs: int = 2, n_reps: int = 3, offset: float = 0.0):
     """Create a mock DistanceAggregatedResult for comparison tests."""
+    from polyzymd.analyses.distances import DistancePairSettings, DistancesSettings
+    from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+    labels = ["Alpha", "Beta", "Gamma", "Delta"]
+    settings = DistancesSettings(
+        pairs=[
+            DistancePairSettings(
+                label=labels[i] if i < len(labels) else f"pair{i}",
+                selection_a=f"sel_a_{i}",
+                selection_b=f"sel_b_{i}",
+            )
+            for i in range(n_pairs)
+        ]
+    )
     mock = MagicMock()
+    mock.config_hash = "unknown"
+    mock.equilibration_time = 100.0
+    mock.equilibration_unit = "ns"
+    mock.settings_fingerprint = settings_fingerprint(settings)
+    mock.replicates = list(range(1, n_reps + 1))
     mock.n_replicates = n_reps
 
     pair_results = []

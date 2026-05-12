@@ -40,7 +40,7 @@ from polyzymd.analyses.secondary_structure._results import (
     SecondaryStructureResult,
 )
 from polyzymd.analyses.secondary_structure._runner import SecondaryStructureReplicateRunner
-from polyzymd.analyses.shared.config_hash import compute_config_hash
+from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
 from polyzymd.analyses.shared.loader import TrajectoryLoader, convert_time, parse_time_string
 
 logger = logging.getLogger("polyzymd.analyses.secondary_structure")
@@ -350,6 +350,7 @@ class SecondaryStructureAnalysis(Analysis):
             overall_helix_fraction=payload.overall_helix_fraction,
             overall_strand_fraction=payload.overall_strand_fraction,
             overall_coil_fraction=payload.overall_coil_fraction,
+            settings_fingerprint=settings_fingerprint(ctx.settings),
         )
 
         output_dir = Path(ctx.output_dir)
@@ -446,6 +447,7 @@ class SecondaryStructureAnalysis(Analysis):
             per_replicate_helix=per_rep_helix,
             per_replicate_strand=per_rep_strand,
             per_replicate_coil=per_rep_coil,
+            settings_fingerprint=settings_fingerprint(ctx.settings),
         )
 
         target_path = ctx.result_path

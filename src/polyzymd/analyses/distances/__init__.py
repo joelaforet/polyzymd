@@ -1113,6 +1113,7 @@ class DistancesAnalysis(Analysis):
             n_frames_total=payload.n_frames_total,
             n_frames_used=payload.n_frames_used,
             trajectory_files=trajectory_files,
+            settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
             selection_string=combined_selection,
         )
 
@@ -1181,6 +1182,7 @@ class DistancesAnalysis(Analysis):
             aggregated_pairs,
             replicates=ctx.replicates,
             source_result_files=[],
+            settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
             selection_string=combined_selection,
         )
 
@@ -1317,13 +1319,25 @@ class DistancesAnalysis(Analysis):
         for cond in ctx.conditions:
             # Prefer in-memory results from orchestrator, fall back to disk
             agg_result = ctx.aggregated_results.get(cond.label)
+            agg_source: Path | str = f"comparison context for {cond.label}"
             if agg_result is None:
                 agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
+                agg_source = self.aggregate_result_path(agg_dir)
                 agg_result = self._load_aggregated_result(agg_dir)
 
             if agg_result is None:
                 logger.warning(f"No aggregated result found for '{cond.label}' — skipping.")
                 continue
+
+            agg_result = self.validate_aggregated_result(
+                agg_result,
+                condition=cond,
+                settings=ctx.settings,
+                equilibration=ctx.equilibration,
+                source=agg_source,
+                expected_replicates=cond.replicates,
+                allow_replicate_subset=True,
+            )
 
             # Map auto-generated pair labels to user-defined labels from settings
             selection_to_label: dict[tuple[str, str], str] = {

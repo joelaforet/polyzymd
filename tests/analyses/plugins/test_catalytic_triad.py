@@ -17,6 +17,7 @@ import pytest
 
 from polyzymd.analyses.base import (
     AggregateContext,
+    AggregateValidationError,
     Condition,
     MetricValue,
     PlotContext,
@@ -742,6 +743,18 @@ class TestAggregate:
         # Mean of 0.65, 0.70, 0.75
         assert result.overall_simultaneous_contact == pytest.approx(0.7, abs=0.01)
         assert result.sem_simultaneous_contact > 0
+
+        stale = result.model_copy(
+            update={"config_hash": "unknown", "settings_fingerprint": "deadbeef"}
+        )
+        with pytest.raises(AggregateValidationError, match="settings fingerprint mismatch"):
+            triad_analysis.validate_aggregated_result(
+                stale,
+                condition=condition,
+                settings=default_settings,
+                equilibration="10ns",
+                expected_replicates=(1, 2, 3),
+            )
 
     def test_aggregate_saves_result_file(
         self, triad_analysis, condition, tmp_path, default_settings

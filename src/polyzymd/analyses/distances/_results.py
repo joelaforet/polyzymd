@@ -411,6 +411,10 @@ class DistanceResult(BaseAnalysisResult):
     # Trajectory info (shared across pairs)
     n_frames_total: int = Field(..., description="Total frames in trajectory")
     n_frames_used: int = Field(..., description="Frames used after equilibration")
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Settings fingerprint used to validate distance caches",
+    )
     trajectory_files: list[str] = Field(
         default_factory=list, description="Trajectory files analyzed"
     )
@@ -424,6 +428,7 @@ class DistanceResult(BaseAnalysisResult):
         n_frames_total: int,
         n_frames_used: int,
         trajectory_files: Sequence[str | Path] = (),
+        settings_fingerprint: str | None = None,
         selection_string: str | None = None,
     ) -> DistanceResult:
         """Construct a replicate distance result from pair results.
@@ -440,6 +445,9 @@ class DistanceResult(BaseAnalysisResult):
             Frames analyzed after equilibration and striding.
         trajectory_files : sequence of str or Path, optional
             Source trajectory files, by default ``()``.
+        settings_fingerprint : str or None, optional
+            Settings identity token used for cache validation, by default
+            ``None``.
         selection_string : str or None, optional
             Combined selection override, by default ``None``.
 
@@ -457,6 +465,7 @@ class DistanceResult(BaseAnalysisResult):
             pair_results=list(pair_results),
             n_frames_total=n_frames_total,
             n_frames_used=n_frames_used,
+            settings_fingerprint=settings_fingerprint,
             trajectory_files=_stringify_paths(trajectory_files),
         )
 
@@ -655,6 +664,10 @@ class DistanceAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     )
 
     # Source files
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Settings fingerprint used to validate aggregated distance caches",
+    )
     source_result_files: list[str] = Field(
         default_factory=list, description="Paths to individual replicate result files"
     )
@@ -667,6 +680,7 @@ class DistanceAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         *,
         replicates: Sequence[int],
         source_result_files: Sequence[str | Path] = (),
+        settings_fingerprint: str | None = None,
         selection_string: str | None = None,
     ) -> DistanceAggregatedResult:
         """Construct an aggregated distance result from pair results.
@@ -681,6 +695,9 @@ class DistanceAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
             Replicate numbers included in the aggregation.
         source_result_files : sequence of str or Path, optional
             Source replicate result files, by default ``()``.
+        settings_fingerprint : str or None, optional
+            Settings identity token used for aggregate validation, by default
+            ``None``.
         selection_string : str or None, optional
             Combined selection override, by default ``None``.
 
@@ -699,6 +716,7 @@ class DistanceAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
             replicates=replicate_list,
             n_replicates=len(replicate_list),
             pair_results=list(pair_results),
+            settings_fingerprint=settings_fingerprint,
             source_result_files=_stringify_paths(source_result_files),
         )
 

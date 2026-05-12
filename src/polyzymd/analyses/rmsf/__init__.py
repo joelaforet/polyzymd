@@ -777,6 +777,7 @@ class RMSFAnalysis(Analysis):
         metrics_by_condition: dict[str, dict[str, MetricValue]] = {}
         for condition in ctx.conditions:
             summary = ctx.aggregated_results.get(condition.label)
+            source: Path | str = f"comparison context for {condition.label}"
             if summary is None:
                 analysis_dir = ctx.analysis_dirs.get(condition.label)
                 if analysis_dir is None:
@@ -786,7 +787,9 @@ class RMSFAnalysis(Analysis):
                         "the condition or clear stale caches before comparing."
                     )
 
-                summary = self._load_aggregated_result(analysis_dir / "aggregated")
+                agg_dir = analysis_dir / "aggregated"
+                source = self.aggregate_result_path(agg_dir)
+                summary = self._load_aggregated_result(agg_dir)
 
             if summary is None:
                 raise ValueError(
@@ -795,6 +798,15 @@ class RMSFAnalysis(Analysis):
                     "comparing."
                 )
 
+            summary = self.validate_aggregated_result(
+                summary,
+                condition=condition,
+                settings=ctx.settings,
+                equilibration=ctx.equilibration,
+                source=source,
+                expected_replicates=condition.replicates,
+                allow_replicate_subset=True,
+            )
             self._validate_aggregated_result_completeness(condition, summary, ctx.settings)
 
             extracted = self.extract_metrics(summary)

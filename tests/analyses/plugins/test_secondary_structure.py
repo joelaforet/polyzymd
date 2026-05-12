@@ -18,6 +18,7 @@ import pytest
 
 from polyzymd.analyses.base import (
     AggregateContext,
+    AggregateValidationError,
     ComparisonContext,
     Condition,
     MetricValue,
@@ -30,6 +31,7 @@ from polyzymd.analyses.secondary_structure import (
     SecondaryStructureSettings,
 )
 from polyzymd.analyses.secondary_structure._runner import SecondaryStructureRunnerResult
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 # ============================================================================
 # Fixtures
@@ -492,6 +494,7 @@ class TestAggregate:
         assert agg.replicates == [1, 2, 3]
         assert agg.config_hash == "abc123"
         assert agg.selection_string == results[0].selection_string
+        assert agg.settings_fingerprint == settings_fingerprint(default_settings)
 
         # Check mean overall values are the mean of per-replicate values
         expected_helix_mean = np.mean([r.overall_helix_fraction for r in results])
@@ -557,6 +560,35 @@ class TestAggregate:
             agg = ss_analysis.aggregate(agg_ctx, results)
 
         assert agg.n_replicates == 2
+
+    def test_validate_aggregate_rejects_missing_settings_fingerprint(
+        self, ss_analysis, default_settings, condition, tmp_path
+    ):
+        """Framework validation should reject stale legacy SS aggregates."""
+
+        results = [_make_mock_ss_result(r) for r in (1, 2)]
+        agg_ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="200ns",
+            settings=default_settings,
+        )
+        with patch(
+            "polyzymd.analyses._results_base.get_polyzymd_version",
+            return_value="0.0.0-test",
+        ):
+            agg = ss_analysis.aggregate(agg_ctx, results)
+
+        stale = agg.model_copy(update={"config_hash": "unknown", "settings_fingerprint": None})
+        with pytest.raises(AggregateValidationError, match="missing settings fingerprint"):
+            ss_analysis.validate_aggregated_result(
+                stale,
+                condition=condition,
+                settings=default_settings,
+                equilibration="200ns",
+                expected_replicates=(1, 2),
+            )
 
 
 # ============================================================================
@@ -906,11 +938,23 @@ class TestCompare:
         mock_agg_control.mean_overall_helix = 0.22
         mock_agg_control.sem_overall_helix = 0.008
         mock_agg_control.per_replicate_helix = [0.215, 0.225, 0.220]
+        mock_agg_control.config_hash = "unknown"
+        mock_agg_control.equilibration_time = 200.0
+        mock_agg_control.equilibration_unit = "ns"
+        mock_agg_control.settings_fingerprint = settings_fingerprint(SecondaryStructureSettings())
+        mock_agg_control.replicates = [1, 2, 3]
+        mock_agg_control.n_replicates = 3
 
         mock_agg_treatment = MagicMock()
         mock_agg_treatment.mean_overall_helix = 0.25
         mock_agg_treatment.sem_overall_helix = 0.005
         mock_agg_treatment.per_replicate_helix = [0.245, 0.255, 0.250]
+        mock_agg_treatment.config_hash = "unknown"
+        mock_agg_treatment.equilibration_time = 200.0
+        mock_agg_treatment.equilibration_unit = "ns"
+        mock_agg_treatment.settings_fingerprint = settings_fingerprint(SecondaryStructureSettings())
+        mock_agg_treatment.replicates = [1, 2, 3]
+        mock_agg_treatment.n_replicates = 3
 
         agg_map = {
             str(tmp_path / "Control" / "aggregated"): mock_agg_control,
@@ -966,6 +1010,12 @@ class TestCompare:
         mock_agg.mean_overall_helix = 0.22
         mock_agg.sem_overall_helix = 0.008
         mock_agg.per_replicate_helix = [0.215, 0.225, 0.220]
+        mock_agg.config_hash = "unknown"
+        mock_agg.equilibration_time = 200.0
+        mock_agg.equilibration_unit = "ns"
+        mock_agg.settings_fingerprint = settings_fingerprint(SecondaryStructureSettings())
+        mock_agg.replicates = [1, 2, 3]
+        mock_agg.n_replicates = 3
 
         with patch.object(
             SecondaryStructureAnalysis,
