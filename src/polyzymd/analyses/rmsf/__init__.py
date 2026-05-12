@@ -891,6 +891,34 @@ class RMSFAnalysis(Analysis):
         if not labels:
             return plots
 
+        condition_by_label = {condition.label: condition for condition in ctx.conditions}
+        for label in labels:
+            cond_data = data.get(label)
+            condition = condition_by_label.get(label)
+            if cond_data is None or condition is None:
+                continue
+
+            agg_dir = cond_data.get("aggregated_dir")
+            if agg_dir is None:
+                continue
+
+            source = self.aggregate_result_path(Path(agg_dir))
+            summary = self._load_aggregated_result(Path(agg_dir))
+            if summary is None:
+                continue
+
+            summary = self.validate_aggregated_result(
+                summary,
+                condition=condition,
+                settings=ctx.settings,
+                equilibration=ctx.equilibration,
+                source=source,
+                expected_replicates=condition.replicates,
+                allow_replicate_subset=True,
+            )
+            self._validate_aggregated_result_completeness(condition, summary, ctx.settings)
+            cond_data["aggregated_result"] = summary
+
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
         plot_settings = ctx.plot_settings

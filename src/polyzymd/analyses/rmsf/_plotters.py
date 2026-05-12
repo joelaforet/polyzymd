@@ -18,7 +18,6 @@ from pydantic import ValidationError
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
-    find_json,
     get_colors,
     get_output_path,
     save_figure,
@@ -84,11 +83,11 @@ def _plot_rmsf_profile(
         if cond_data is None:
             continue
 
-        aggregated_dir = cond_data.get("aggregated_dir")
-        if not aggregated_dir:
+        aggregated_result = cond_data.get("aggregated_result")
+        if aggregated_result is None:
             continue
 
-        profile_data = _load_rmsf_profile(Path(aggregated_dir))
+        profile_data = _rmsf_profile_from_aggregated(aggregated_result)
         if profile_data:
             profiles[label] = profile_data
 
@@ -288,9 +287,7 @@ def _plot_rmsf_comparison_from_aggregated(
     output_dir: Path,
     plot_settings: Any,
 ) -> list[Path]:
-    """Generate simple bar chart from aggregated RMSF data."""
-    import json
-
+    """Generate simple bar chart from validated aggregated RMSF data."""
     import matplotlib.pyplot as plt
 
     # Collect mean RMSF and SEM for each condition
@@ -304,20 +301,11 @@ def _plot_rmsf_comparison_from_aggregated(
         if cond_data is None:
             continue
 
-        aggregated_dir = cond_data.get("aggregated_dir")
-        if not aggregated_dir:
-            continue
-
-        aggregated_dir = Path(aggregated_dir)
-
-        result_file = _find_rmsf_aggregated_result_file(aggregated_dir)
-        if result_file is None:
+        agg_data = cond_data.get("aggregated_result")
+        if agg_data is None:
             continue
 
         try:
-            with open(result_file) as f:
-                agg_data = json.load(f)
-
             # Support multiple key naming conventions without dropping zeros
             mean_val = _get_first_available_field(
                 agg_data,
@@ -345,7 +333,7 @@ def _plot_rmsf_comparison_from_aggregated(
                 sems.append(sem_val)
                 replicate_data.append(rep_vals)
 
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+        except (KeyError, TypeError, ValueError) as e:
             logger.warning(f"Failed to load aggregated RMSF for {label}: {e}")
 
     if not plot_labels:
@@ -621,87 +609,56 @@ def _draw_ss_bar(ax: Any, ss_annotation: dict, plot_settings: Any) -> None:
     )
 
 
-def _load_rmsf_profile(aggregated_dir: Path) -> dict | None:
-    """Load per-residue RMSF data from aggregated directory.
+def _rmsf_profile_from_aggregated(data: Any) -> dict | None:
+    """Return per-residue RMSF data from a validated aggregate.
 
     Returns
     -------
     dict or None
         {"residues": [...], "rmsf": [...], "sem": [...]}
     """
-    import json
-
-    result_file = _find_rmsf_aggregated_result_file(aggregated_dir)
-    if result_file is None:
-        return None
-
     try:
-        with open(result_file) as f:
-            data = json.load(f)
-
         # Check for per-residue data (support multiple key naming conventions)
-        if "mean_rmsf_per_residue" in data:
-            per_res = data["mean_rmsf_per_residue"]
+        per_res = _get_first_available_field(data, "mean_rmsf_per_residue")
+        if per_res is not None:
             return {
-                "residues": data.get("residue_ids", list(range(1, len(per_res) + 1))),
+                "residues": _get_first_available_field(
+                    data,
+                    "residue_ids",
+                    default=list(range(1, len(per_res) + 1)),
+                ),
                 "rmsf": per_res,
-                "sem": data.get("sem_rmsf_per_residue", []),
-                "n_replicates": data.get("n_replicates", 0),
+                "sem": _get_first_available_field(data, "sem_rmsf_per_residue", default=[]),
+                "n_replicates": _get_first_available_field(data, "n_replicates", default=0),
             }
-        elif "per_residue_rmsf" in data:
-            per_res = data["per_residue_rmsf"]
+        per_res = _get_first_available_field(data, "per_residue_rmsf")
+        if per_res is not None:
             return {
-                "residues": data.get("residue_ids", list(range(1, len(per_res) + 1))),
+                "residues": _get_first_available_field(
+                    data,
+                    "residue_ids",
+                    default=list(range(1, len(per_res) + 1)),
+                ),
                 "rmsf": per_res,
-                "sem": data.get("per_residue_sem", []),
-                "n_replicates": data.get("n_replicates", 0),
+                "sem": _get_first_available_field(data, "per_residue_sem", default=[]),
+                "n_replicates": _get_first_available_field(data, "n_replicates", default=0),
             }
-        elif "residue_rmsf" in data:
+
+        residue_rmsf = _get_first_available_field(data, "residue_rmsf")
+        if residue_rmsf is not None:
             return {
-                "residues": data.get("residue_ids", list(range(len(data["residue_rmsf"])))),
-                "rmsf": data["residue_rmsf"],
-                "sem": data.get("residue_sem", []),
-                "n_replicates": data.get("n_replicates", 0),
+                "residues": _get_first_available_field(
+                    data,
+                    "residue_ids",
+                    default=list(range(len(residue_rmsf))),
+                ),
+                "rmsf": residue_rmsf,
+                "sem": _get_first_available_field(data, "residue_sem", default=[]),
+                "n_replicates": _get_first_available_field(data, "n_replicates", default=0),
             }
 
         return None
 
-    except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
-        logger.debug(f"Failed to load RMSF profile from {result_file}: {e}")
+    except (KeyError, TypeError, ValueError) as e:
+        logger.debug(f"Failed to extract RMSF profile from aggregated result: {e}")
         return None
-
-
-def _find_rmsf_aggregated_result_file(aggregated_dir: Path) -> Path | None:
-    """Find an aggregated RMSF JSON file with backward-compatible fallbacks.
-
-    Search order keeps legacy behavior while supporting the framework's
-    canonical ``result.json`` filename.
-
-    Parameters
-    ----------
-    aggregated_dir : Path
-        Condition aggregated results directory.
-
-    Returns
-    -------
-    Path | None
-        Located JSON file path, or ``None`` when no candidate exists.
-    """
-    result_file = find_json(aggregated_dir, "rmsf_aggregated.json", "rmsf_*.json")
-    if result_file is not None:
-        if result_file.name != "rmsf_aggregated.json":
-            logger.warning(
-                f"Expected rmsf_aggregated.json not found in {aggregated_dir}; "
-                f"falling back to {result_file.name}"
-            )
-        return result_file
-
-    canonical_file = aggregated_dir / "result.json"
-    if canonical_file.exists():
-        logger.warning(
-            f"Expected rmsf_aggregated.json not found in {aggregated_dir}; "
-            "falling back to canonical result.json"
-        )
-        return canonical_file
-
-    return None

@@ -480,11 +480,14 @@ class TestGeneratedPluginEndToEnd:
         import polyzymd.analyses as analyses_pkg
         from polyzymd.analyses.base import (
             AggregateContext,
+            AggregateValidationError,
             ComparisonContext,
             Condition,
+            PlotContext,
             ReplicateContext,
         )
         from polyzymd.analyses.discovery import clear_cache, get_analysis, list_analyses
+        from polyzymd.config.comparison import PlotSettings
 
         original_path = list(analyses_pkg.__path__)
         monkeypatch.setattr(analyses_pkg, "__path__", [*original_path, str(analyses_root)])
@@ -560,6 +563,27 @@ class TestGeneratedPluginEndToEnd:
             assert comparison.analysis_type == plugin_name
             assert len(comparison.conditions) == 1
             assert comparison.conditions[0].label == condition.label
+
+            stale_analysis_dir = tmp_path / "stale_analysis_dir"
+            stale_agg_dir = stale_analysis_dir / "aggregated"
+            stale_agg_dir.mkdir(parents=True)
+            (stale_agg_dir / "result.json").write_text(
+                '{"mean_value": 2.0, "sem_value": 0.1, "replicate_values": [1.0, 3.0], '
+                '"n_replicates": 2, "replicates": [1, 2], '
+                '"settings_fingerprint": "deadbeef"}',
+                encoding="utf-8",
+            )
+            plot_ctx = PlotContext(
+                conditions=[condition],
+                analysis_dirs={condition.label: stale_analysis_dir},
+                results_dir=tmp_path / "comparison" / plugin_name,
+                output_dir=tmp_path / "figures" / plugin_name,
+                settings=settings,
+                plot_settings=PlotSettings(),
+                equilibration="0ns",
+            )
+            with pytest.raises(AggregateValidationError, match="settings fingerprint mismatch"):
+                analysis.plot(plot_ctx)
         finally:
             clear_cache()
             for module_name in [

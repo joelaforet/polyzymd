@@ -301,13 +301,26 @@ class {{ spec.class_name }}Analysis(Analysis):
         means: list[float] = []
         sems: list[float] = []
         valid_labels: list[str] = []
+        condition_by_label = {condition.label: condition for condition in ctx.conditions}
         for label in labels:
             if label not in data or label == "__meta__":
+                continue
+            condition = condition_by_label.get(label)
+            if condition is None:
                 continue
             agg_dir = data[label]["aggregated_dir"]
             summary = self._load_aggregated_result(agg_dir)
             if summary is None:
                 continue
+            summary = self.validate_aggregated_result(
+                summary,
+                condition=condition,
+                settings=ctx.settings,
+                equilibration=ctx.equilibration,
+                source=self.aggregate_result_path(Path(agg_dir)),
+                expected_replicates=condition.replicates,
+                allow_replicate_subset=False,
+            )
 {% if spec.uses_pydantic_results %}
             means.append(float(summary.mean_value))
             sems.append(float(summary.sem_value))

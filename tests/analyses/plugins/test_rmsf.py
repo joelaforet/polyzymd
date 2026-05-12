@@ -1083,6 +1083,35 @@ class TestMakeAggregatedFilename:
 class TestRMSFComparisonDots:
     """Test replicate dot overlays on RMSF comparison plots."""
 
+    def test_plot_rejects_stale_aggregated_result(self, rmsf_analysis, tmp_path):
+        """plot should reject aggregate caches with stale settings fingerprints."""
+
+        from polyzymd.config.comparison import PlotSettings
+
+        condition = Condition(
+            label="Control",
+            config_path=Path("/fake/control.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        analysis_dir = tmp_path / "analysis" / "control" / "rmsf"
+        stale = _make_aggregated_rmsf_result(settings_fingerprint="deadbeef").model_copy(
+            update={"config_hash": "unknown"}
+        )
+        stale.save(analysis_dir / "aggregated" / "result.json")
+        ctx = PlotContext(
+            conditions=[condition],
+            analysis_dirs={"Control": analysis_dir},
+            results_dir=tmp_path / "comparison" / "rmsf",
+            output_dir=tmp_path / "figures" / "rmsf",
+            settings=RMSFSettings(),
+            plot_settings=PlotSettings(),
+            equilibration="10ns",
+        )
+
+        with pytest.raises(AggregateValidationError, match="settings fingerprint mismatch"):
+            rmsf_analysis.plot(ctx)
+
     @staticmethod
     def _plot_settings(**theme_overrides):
         """Return plot settings with optional theme overrides."""
@@ -1091,25 +1120,22 @@ class TestRMSFComparisonDots:
         return PlotSettings(theme=theme_overrides) if theme_overrides else PlotSettings()
 
     @staticmethod
-    def _write_aggregated_result(aggregated_dir: Path, payload: dict) -> None:
-        """Write an aggregated RMSF JSON fixture."""
-        aggregated_dir.mkdir(parents=True)
-        (aggregated_dir / "rmsf_aggregated.json").write_text(json.dumps(payload))
+    def _aggregated_plot_entry(payload: dict) -> dict[str, dict]:
+        """Return plot data containing a prevalidated aggregate payload."""
+
+        return {"Control": {"aggregated_result": payload}}
 
     def test_aggregated_fallback_draws_per_replicate_dots(self, tmp_path):
         """Aggregated fallback should draw dots from per_replicate_mean_rmsf."""
         from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_aggregated
 
-        aggregated_dir = tmp_path / "analysis" / "control" / "rmsf" / "aggregated"
-        self._write_aggregated_result(
-            aggregated_dir,
+        data = self._aggregated_plot_entry(
             {
                 "overall_mean_rmsf": 0.0,
                 "overall_sem_rmsf": 0.0,
                 "per_replicate_mean_rmsf": [0.0, 1.2, 1.4],
             },
         )
-        data = {"Control": {"aggregated_dir": aggregated_dir}}
 
         with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
             _plot_rmsf_comparison_from_aggregated(
@@ -1126,16 +1152,13 @@ class TestRMSFComparisonDots:
         """Single-replicate RMSF comparison plots should not draw SEM error bars."""
         from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_aggregated
 
-        aggregated_dir = tmp_path / "analysis" / "control" / "rmsf" / "aggregated"
-        self._write_aggregated_result(
-            aggregated_dir,
+        data = self._aggregated_plot_entry(
             {
                 "overall_mean_rmsf": 1.2,
                 "overall_sem_rmsf": 0.0,
                 "per_replicate_mean_rmsf": [1.2],
             },
         )
-        data = {"Control": {"aggregated_dir": aggregated_dir}}
 
         with patch("matplotlib.axes.Axes.errorbar", autospec=True) as mock_errorbar:
             _plot_rmsf_comparison_from_aggregated(
@@ -1151,16 +1174,13 @@ class TestRMSFComparisonDots:
         """Multi-replicate RMSF comparison plots should retain SEM error bars."""
         from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_aggregated
 
-        aggregated_dir = tmp_path / "analysis" / "control" / "rmsf" / "aggregated"
-        self._write_aggregated_result(
-            aggregated_dir,
+        data = self._aggregated_plot_entry(
             {
                 "overall_mean_rmsf": 1.2,
                 "overall_sem_rmsf": 0.1,
                 "per_replicate_mean_rmsf": [1.1, 1.3],
             },
         )
-        data = {"Control": {"aggregated_dir": aggregated_dir}}
 
         with patch("matplotlib.axes.Axes.errorbar", autospec=True) as mock_errorbar:
             _plot_rmsf_comparison_from_aggregated(
