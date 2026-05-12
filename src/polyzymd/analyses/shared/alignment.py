@@ -274,7 +274,7 @@ def align_trajectory(
             select=config.selection,
             ref_frame=ref_frame_idx,
             in_memory=True,
-        ).run()
+        ).run(start=start_frame, stop=stop_frame, step=step_frame)
         del aligner
 
     elif config.reference_mode == "average":
@@ -323,7 +323,7 @@ def align_trajectory(
             select=config.selection,
             ref_frame=ref_frame_idx,
             in_memory=True,
-        ).run()
+        ).run(start=start_frame, stop=stop_frame, step=step_frame)
         del aligner
 
     elif config.reference_mode == "external":
@@ -380,7 +380,7 @@ def align_trajectory(
             ref_universe,
             select=config.selection,
             in_memory=True,
-        ).run()
+        ).run(start=start_frame, stop=stop_frame, step=step_frame)
         del aligner
 
         ref_frame_idx = None  # External reference is not a trajectory frame
