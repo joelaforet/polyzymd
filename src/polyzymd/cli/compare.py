@@ -996,7 +996,11 @@ def run_all(
         click.echo()
         click.echo("Generating plots ...")
 
-        generated, plot_failures = run_all_plots(config, succeeded)
+        generated, plot_failures = run_all_plots(
+            config,
+            succeeded,
+            equilibration=equilibration,
+        )
         click.echo(f"Generated {len(generated)} plots.")
         if plot_failures:
             click.echo(f"Plot failures ({len(plot_failures)}):", err=True)

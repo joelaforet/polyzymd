@@ -22,6 +22,7 @@ from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.orchestrator import (
     finalize_comparison_from_disk,
     prepare_comparison_run,
+    run_all_plots,
     run_analysis,
     run_comparison,
     run_plot_only,
@@ -430,6 +431,40 @@ def test_public_plot_only_returns_paths_and_failures(
     )
     assert failing_paths == []
     assert failing_failures == [("failing_plot_lifecycle", "plot boom")]
+
+
+def test_public_run_all_plots_passes_equilibration_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Plot-all wrapper should pass equilibration overrides to plot-only execution."""
+
+    captured: dict[str, Any] = {}
+
+    def _get_analysis(name: str):
+        captured["analysis_name"] = name
+        return _DelegatingAnalysis
+
+    def _run_plot_only(
+        analysis: Analysis,
+        config: _ComparisonConfig,
+        equilibration: str | None = None,
+    ) -> tuple[list[Path], list[tuple[str, str]]]:
+        captured["analysis"] = analysis.name
+        captured["config"] = config
+        captured["equilibration"] = equilibration
+        return [tmp_path / "plot.png"], []
+
+    monkeypatch.setattr("polyzymd.analyses.discovery.get_analysis", _get_analysis)
+    monkeypatch.setattr("polyzymd.analyses.orchestrator.run_plot_only", _run_plot_only)
+
+    paths, failures = run_all_plots(_ComparisonConfig(tmp_path), ["lifecycle_delegate"], "2ns")
+
+    assert paths == [tmp_path / "plot.png"]
+    assert failures == []
+    assert captured["analysis_name"] == "lifecycle_delegate"
+    assert captured["analysis"] == "lifecycle_delegate"
+    assert captured["equilibration"] == "2ns"
 
 
 def test_public_prepare_validation_error_uses_lifecycle_filter(

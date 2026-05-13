@@ -558,6 +558,42 @@ def test_run_reports_plugin_contract_error(monkeypatch, tmp_path: Path) -> None:
     assert "likely a PolyzyMD/plugin bug, not missing trajectory data" in result.output
 
 
+def test_run_all_plot_phase_receives_eq_time_override(monkeypatch, tmp_path: Path) -> None:
+    """compare run-all --plot should pass --eq-time to plot-only execution."""
+
+    runner = CliRunner()
+    config = SimpleNamespace(
+        name="eq_override_project",
+        conditions=[SimpleNamespace(label="A")],
+        defaults=SimpleNamespace(equilibration_time="10ns"),
+        plugins=SimpleNamespace(get_enabled_plugins=lambda: ["toy"]),
+    )
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr("polyzymd.cli.compare.load_comparison_config", lambda path: config)
+    monkeypatch.setattr("polyzymd.cli.compare.validate_and_report", lambda config: None)
+
+    def _run_all_comparisons(*args, **kwargs):
+        captured["comparison_equilibration"] = kwargs.get("equilibration")
+        return {"toy": {"comparison": {"ok": True}, "comparison_path": tmp_path / "result.json"}}
+
+    def _run_all_plots(*args, **kwargs):
+        captured["plot_equilibration"] = kwargs.get("equilibration")
+        return [tmp_path / "plot.png"], []
+
+    monkeypatch.setattr("polyzymd.analyses.orchestrator.run_all_comparisons", _run_all_comparisons)
+    monkeypatch.setattr("polyzymd.analyses.orchestrator.run_all_plots", _run_all_plots)
+
+    result = runner.invoke(
+        compare,
+        ["run-all", "-f", str(tmp_path / "comparison.yaml"), "--eq-time", "2ns", "--plot"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["comparison_equilibration"] == "2ns"
+    assert captured["plot_equilibration"] == "2ns"
+
+
 @pytest.mark.parametrize(
     "analysis_name",
     [

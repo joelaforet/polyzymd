@@ -582,6 +582,7 @@ def run_plot_only(
 def run_all_plots(
     config: "ComparisonConfig",
     analysis_names: list[str] | None = None,
+    equilibration: str | None = None,
 ) -> tuple[list[Path], list[tuple[str, str]]]:
     """Run plot-only for all (or selected) enabled analyses.
 
@@ -591,6 +592,9 @@ def run_all_plots(
         Comparison configuration.
     analysis_names : list[str] | None
         Analyses to plot. ``None`` means all enabled analyses.
+    equilibration : str | None
+        Override equilibration time. If ``None``, uses
+        ``config.defaults.equilibration_time``.
 
     Returns
     -------
@@ -614,7 +618,11 @@ def run_all_plots(
             continue
 
         analysis = analysis_cls()
-        generated, failures = run_plot_only(analysis, config)
+        generated, failures = run_plot_only(
+            analysis,
+            config,
+            equilibration=equilibration,
+        )
         all_generated.extend(generated)
         all_failures.extend(failures)
 
