@@ -22,12 +22,14 @@ from polyzymd.analyses.base import (
     MetricValue,
     PlotContext,
     ReplicateContext,
+    ScalarMeasurementAnalysis,
 )
 from polyzymd.analyses.catalytic_triad import (
     CatalyticTriadAnalysis,
     CatalyticTriadSettings,
     TriadPairSettings,
 )
+from polyzymd.analyses.catalytic_triad._measurement import TriadSimultaneousContactMeasurement
 from polyzymd.analyses.catalytic_triad._results import TriadResult
 from polyzymd.analyses.distances._results import DistancePairResult
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
@@ -201,6 +203,27 @@ class TestTriadClassVars:
 
     def test_settings_type(self, triad_analysis):
         assert triad_analysis.Settings is CatalyticTriadSettings
+
+    def test_subclasses_scalar_measurement_analysis(self):
+        """Catalytic triad should be the first built-in measurement-backed plugin."""
+
+        assert issubclass(CatalyticTriadAnalysis, ScalarMeasurementAnalysis)
+
+    def test_measurement_metadata_preserves_legacy_metric(self, triad_analysis):
+        """Measurement metadata should match the legacy comparison metric."""
+
+        measurement = triad_analysis._measurement_instance()
+
+        assert isinstance(measurement, TriadSimultaneousContactMeasurement)
+        assert measurement.name == "simultaneous_contact_fraction"
+        assert measurement.metric.name == "simultaneous_contact_fraction"
+        assert measurement.metric.higher_is_better is True
+        assert measurement.metric.direction_labels == ("worsening", "unchanged", "improving")
+
+    def test_extract_metrics_uses_measurement_adapter(self):
+        """Catalytic triad should inherit scalar measurement extraction."""
+
+        assert "extract_metrics" not in CatalyticTriadAnalysis.__dict__
 
 
 # ============================================================================
@@ -743,6 +766,35 @@ class TestAggregate:
         # Mean of 0.65, 0.70, 0.75
         assert result.overall_simultaneous_contact == pytest.approx(0.7, abs=0.01)
         assert result.sem_simultaneous_contact > 0
+        assert result.settings_fingerprint == settings_fingerprint(default_settings)
+
+        result_payload = result.model_dump(mode="json")
+        assert "cache_identity" not in result_payload
+        assert "measurement" not in result_payload
+        assert "metric" not in result_payload
+        assert set(result_payload) == {
+            "config_hash",
+            "created_at",
+            "polyzymd_version",
+            "replicate",
+            "equilibration_time",
+            "equilibration_unit",
+            "selection_string",
+            "correlation_time",
+            "correlation_time_unit",
+            "n_independent_frames",
+            "replicates",
+            "n_replicates",
+            "triad_name",
+            "triad_description",
+            "pair_results",
+            "threshold",
+            "overall_simultaneous_contact",
+            "sem_simultaneous_contact",
+            "per_replicate_simultaneous",
+            "source_result_files",
+            "settings_fingerprint",
+        }
 
         stale = result.model_copy(
             update={"config_hash": "unknown", "settings_fingerprint": "deadbeef"}

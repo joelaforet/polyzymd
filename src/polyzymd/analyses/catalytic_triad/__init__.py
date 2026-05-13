@@ -19,10 +19,11 @@ from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
     BasePlotSettings,
-    MetricValue,
     PlotContext,
     ReplicateContext,
+    ScalarMeasurementAnalysis,
 )
+from polyzymd.analyses.catalytic_triad._measurement import TriadSimultaneousContactMeasurement
 from polyzymd.analyses.catalytic_triad._plot_settings import TriadPlotSettings
 from polyzymd.analyses.catalytic_triad._plotters import (
     plot_triad_kde_panel_from_data,
@@ -121,15 +122,15 @@ class CatalyticTriadSettings(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class CatalyticTriadAnalysis(Analysis):
+class CatalyticTriadAnalysis(ScalarMeasurementAnalysis):
     """Catalytic triad analysis: active-site geometry from MD trajectories.
 
     Computes per-pair distances through the shared runner seam and derives a
     simultaneous contact fraction — the percentage of frames where ALL pairs are
     below the threshold at the same time.
 
-    The ``compare()`` method is NOT overridden — it uses the default
-    implementation which calls ``extract_metrics()`` to get
+    The ``compare()`` method is NOT overridden — it uses the default scalar
+    measurement implementation to extract
     ``simultaneous_contact_fraction`` as a single scalar metric with
     ``higher_is_better=True`` (more contact = better triad integrity).
 
@@ -144,6 +145,9 @@ class CatalyticTriadAnalysis(Analysis):
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = TriadPlotSettings
     AggregatedResultClass: ClassVar[type] = TriadAggregatedResult
     ReplicateResultClass: ClassVar[type | None] = TriadResult
+    measurement: ClassVar[type[TriadSimultaneousContactMeasurement]] = (
+        TriadSimultaneousContactMeasurement
+    )
     aliases: ClassVar[tuple[str, ...]] = ("triad",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 1
@@ -179,6 +183,24 @@ class CatalyticTriadAnalysis(Analysis):
         """Return the catalytic-triad settings fingerprint."""
 
         return settings_fingerprint(settings)
+
+    def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
+        """Return the legacy catalytic-triad aggregate settings fingerprint.
+
+        Parameters
+        ----------
+        settings : BaseModel or None
+            Active catalytic-triad settings.
+
+        Returns
+        -------
+        str or None
+            Existing settings-only fingerprint used by saved aggregate results.
+        """
+
+        if settings is None:
+            return None
+        return self._settings_cache_tag(settings)
 
     @classmethod
     def _validate_replicate_result_settings_identity(
@@ -551,31 +573,6 @@ class CatalyticTriadAnalysis(Analysis):
             )
 
     # === Optional methods ===
-
-    def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-        """Extract simultaneous contact fraction for scalar comparison.
-
-        Parameters
-        ----------
-        summary : TriadAggregatedResult
-            Aggregated triad result.
-
-        Returns
-        -------
-        dict[str, MetricValue]
-            Single entry ``"simultaneous_contact_fraction"`` with
-            ``higher_is_better=True`` (more contact = better integrity).
-        """
-        return {
-            "simultaneous_contact_fraction": MetricValue(
-                name="simultaneous_contact_fraction",
-                mean=summary.overall_simultaneous_contact * 100,
-                sem=summary.sem_simultaneous_contact * 100,
-                replicate_values=[v * 100 for v in summary.per_replicate_simultaneous],
-                higher_is_better=True,
-                direction_labels=("worsening", "unchanged", "improving"),
-            ),
-        }
 
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format catalytic triad comparison result for CLI display.
