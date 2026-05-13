@@ -158,7 +158,7 @@ def _build_spec(
             "Advanced scaffolds require style 'dict' or 'pydantic', " f"got '{effective_style}'."
         )
 
-    name_error = validate_name(name, check_existing=True)
+    name_error = validate_name(name, check_existing=False)
     if name_error:
         raise ValueError(name_error)
 
@@ -168,6 +168,154 @@ def _build_spec(
         raise ValueError(cls_error)
 
     return ScaffoldSpec(name=name, class_name=cls, style=effective_style)
+
+
+def _format_paths(paths: list[Path]) -> str:
+    """Return a concise, deterministic path list for errors.
+
+    Parameters
+    ----------
+    paths : list[Path]
+        Paths to format.
+
+    Returns
+    -------
+    str
+        Comma-separated path list.
+    """
+    return ", ".join(str(path) for path in sorted(paths))
+
+
+def _source_target_paths(files: dict[Path, str], project_root: Path) -> set[Path]:
+    """Return generated source paths that can define a plugin module.
+
+    Parameters
+    ----------
+    files : dict[Path, str]
+        Rendered scaffold files keyed by output path.
+    project_root : Path
+        Repository root for the scaffold operation.
+
+    Returns
+    -------
+    set[Path]
+        Resolved generated paths under ``src/polyzymd/analyses``.
+    """
+    analyses_root = (project_root / "src" / "polyzymd" / "analyses").resolve()
+    paths: set[Path] = set()
+    for path in files:
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(analyses_root)
+        except ValueError:
+            continue
+        paths.add(resolved)
+    return paths
+
+
+def _path_has_scaffold_signature(path: Path) -> bool:
+    """Return whether an existing file looks like scaffold output.
+
+    Parameters
+    ----------
+    path : Path
+        Existing source path to inspect.
+
+    Returns
+    -------
+    bool
+        True when the file contains scaffold-specific placeholder text.
+    """
+    if not path.exists() or not path.is_file():
+        return False
+
+    text = path.read_text(encoding="utf-8")
+    signatures = (
+        "Replace this placeholder with domain-specific measurement logic",
+        "Uses plain dicts for result containers",
+        "Uses typed Pydantic result models for validation",
+    )
+    return any(signature in text for signature in signatures)
+
+
+def _check_registered_name_conflict(
+    spec: ScaffoldSpec,
+    files: dict[Path, str],
+    project_root: Path,
+    *,
+    force: bool,
+) -> None:
+    """Reject registered-name collisions unless force targets scaffold files.
+
+    Parameters
+    ----------
+    spec : ScaffoldSpec
+        Validated scaffold rendering specification.
+    files : dict[Path, str]
+        Rendered scaffold files keyed by output path.
+    project_root : Path
+        Repository root for the scaffold operation.
+    force : bool
+        Whether existing scaffold files may be overwritten.
+
+    Raises
+    ------
+    ValueError
+        If the requested name collides with a built-in, external, or alias-only
+        analysis registration.
+    """
+    try:
+        from polyzymd.analyses.discovery import get_analysis, list_all_names
+
+        if spec.name not in list_all_names():
+            return
+
+        if not force:
+            raise ValueError(f"'{spec.name}' already exists as a registered analysis plugin.")
+
+        analysis_cls = get_analysis(spec.name)
+    except ModuleNotFoundError as exc:
+        if exc.name not in ("polyzymd.analyses", "polyzymd.analyses.discovery"):
+            raise
+        return
+
+    if getattr(analysis_cls, "name", None) != spec.name:
+        raise ValueError(
+            f"'{spec.name}' already exists as an analysis alias and cannot be overwritten."
+        )
+
+    module_file = Path(
+        __import__(analysis_cls.__module__, fromlist=["__file__"]).__file__
+    ).resolve()
+    source_paths = _source_target_paths(files=files, project_root=project_root)
+    if module_file not in source_paths or not _path_has_scaffold_signature(module_file):
+        raise ValueError(
+            f"'{spec.name}' already exists as a registered analysis plugin and is not a "
+            "matching scaffold target. Choose a different name."
+        )
+
+
+def _check_target_conflicts(files: dict[Path, str], *, force: bool) -> None:
+    """Preflight all scaffold output paths before writing.
+
+    Parameters
+    ----------
+    files : dict[Path, str]
+        Rendered scaffold files keyed by output path.
+    force : bool
+        Whether existing files may be overwritten.
+
+    Raises
+    ------
+    FileExistsError
+        If any target path exists and ``force`` is False.
+    """
+    conflicts = [path for path in files if path.exists()]
+    if conflicts and not force:
+        raise FileExistsError(
+            f"Scaffold target path already exists: {_format_paths(conflicts)}. "
+            "Use --force to overwrite."
+        )
 
 
 def _check_layout_conflicts(spec: ScaffoldSpec, project_root: Path) -> None:
@@ -248,11 +396,11 @@ def generate_scaffold(
     spec = _build_spec(name=name, class_name=class_name, style=style, advanced=advanced)
     _check_layout_conflicts(spec=spec, project_root=project_root)
     files = render_scaffold(spec=spec, project_root=project_root)
+    _check_registered_name_conflict(spec=spec, files=files, project_root=project_root, force=force)
+    _check_target_conflicts(files=files, force=force)
 
     created: list[Path] = []
     for path, content in files.items():
-        if path.exists() and not force:
-            raise FileExistsError(f"{path} already exists. Use --force to overwrite.")
         if not dry_run:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")

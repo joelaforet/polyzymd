@@ -219,12 +219,34 @@ class TestGenerateScaffold:
         with pytest.raises(FileExistsError, match="already exists"):
             generate_scaffold("solvent_shell", tmp_path)
 
+    def test_preflights_default_test_file_collision_before_writing_source(
+        self,
+        tmp_path: Path,
+    ):
+        _prepare_project(tmp_path)
+        test_path = tmp_path / "tests" / "analyses" / "plugins" / "test_solvent_shell.py"
+        test_path.parent.mkdir(parents=True)
+        test_path.write_text("# existing test\n", encoding="utf-8")
+        plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+
+        with pytest.raises(FileExistsError, match="test_solvent_shell.py"):
+            generate_scaffold("solvent_shell", tmp_path)
+
+        assert not plugin_path.exists()
+        assert test_path.read_text(encoding="utf-8") == "# existing test\n"
+
     def test_force_overwrites(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
         generate_scaffold("solvent_shell", tmp_path)
+        plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+        plugin_path.write_text(
+            plugin_path.read_text(encoding="utf-8") + "\n# stale local edit\n",
+            encoding="utf-8",
+        )
         created = generate_scaffold("solvent_shell", tmp_path, force=True)
         assert len(created) == 2
+        assert "stale local edit" not in plugin_path.read_text(encoding="utf-8")
 
     def test_dry_run_creates_no_files(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -276,6 +298,24 @@ class TestGenerateScaffoldAdvancedDict:
         assert (plugin_dir / "__init__.py").exists()
         assert (plugin_dir / "_runner.py").exists()
         assert not (plugin_dir / "_results.py").exists()
+
+    def test_preflights_dict_partial_source_collision_before_writing_anything(
+        self,
+        tmp_path: Path,
+    ):
+        _prepare_project(tmp_path)
+        plugin_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        runner_path = plugin_dir / "_runner.py"
+        plugin_dir.mkdir()
+        runner_path.write_text("# existing runner\n", encoding="utf-8")
+        test_path = tmp_path / "tests" / "analyses" / "plugins" / "test_solvent_shell.py"
+
+        with pytest.raises(FileExistsError, match="_runner.py"):
+            generate_scaffold("solvent_shell", tmp_path, style="dict")
+
+        assert not (plugin_dir / "__init__.py").exists()
+        assert not test_path.exists()
+        assert runner_path.read_text(encoding="utf-8") == "# existing runner\n"
 
 
 class TestGenerateScaffoldPydantic:
@@ -379,8 +419,31 @@ class TestGenerateScaffoldPydantic:
         _prepare_project(tmp_path)
 
         generate_scaffold("solvent_shell", tmp_path, style="pydantic")
+        plugin_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        results_path = plugin_dir / "_results.py"
+        results_path.write_text(
+            results_path.read_text(encoding="utf-8") + "\n# stale local edit\n",
+            encoding="utf-8",
+        )
         created = generate_scaffold("solvent_shell", tmp_path, style="pydantic", force=True)
         assert len(created) == 4
+        assert "stale local edit" not in results_path.read_text(encoding="utf-8")
+
+    def test_preflights_pydantic_partial_test_collision_before_writing_source(
+        self,
+        tmp_path: Path,
+    ):
+        _prepare_project(tmp_path)
+        test_path = tmp_path / "tests" / "analyses" / "plugins" / "test_solvent_shell.py"
+        test_path.parent.mkdir(parents=True)
+        test_path.write_text("# existing pydantic test\n", encoding="utf-8")
+        plugin_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
+
+        with pytest.raises(FileExistsError, match="test_solvent_shell.py"):
+            generate_scaffold("solvent_shell", tmp_path, style="pydantic")
+
+        assert not plugin_dir.exists()
+        assert test_path.read_text(encoding="utf-8") == "# existing pydantic test\n"
 
 
 class TestStyleValidation:
@@ -842,6 +905,51 @@ class TestNewAnalysisCLI:
             ["solvent_shell", "--project-root", str(self.root), "--force"],
         )
         assert result.exit_code == 0, result.output
+
+    def test_force_overwrites_discoverable_scaffold_after_fresh_discovery(
+        self,
+        runner: CliRunner,
+        cli,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        plugin_name = "scaffold_force"
+        analyses_root = self.root / "src" / "polyzymd" / "analyses"
+        result = runner.invoke(cli, [plugin_name, "--project-root", str(self.root)])
+        assert result.exit_code == 0, result.output
+
+        plugin_path = analyses_root / f"{plugin_name}.py"
+        plugin_path.write_text(
+            plugin_path.read_text(encoding="utf-8") + "\n# stale local edit\n",
+            encoding="utf-8",
+        )
+
+        import polyzymd.analyses as analyses_pkg
+        from polyzymd.analyses.discovery import clear_cache, list_analyses
+
+        original_path = list(analyses_pkg.__path__)
+        monkeypatch.setattr(analyses_pkg, "__path__", [*original_path, str(analyses_root)])
+        clear_cache()
+
+        try:
+            assert plugin_name in list_analyses()
+
+            result = runner.invoke(
+                cli,
+                [plugin_name, "--project-root", str(self.root), "--force"],
+            )
+            assert result.exit_code == 0, result.output
+            assert "stale local edit" not in plugin_path.read_text(encoding="utf-8")
+        finally:
+            clear_cache()
+            sys.modules.pop(f"polyzymd.analyses.{plugin_name}", None)
+
+    def test_force_rejects_registered_builtin_name(self, runner: CliRunner, cli):
+        result = runner.invoke(
+            cli,
+            ["rmsf", "--project-root", str(self.root), "--style", "pydantic", "--force"],
+        )
+        assert result.exit_code != 0
+        assert "registered analysis plugin" in result.output
 
     def test_help_shows_correct_test_path(self, runner: CliRunner, cli):
         result = runner.invoke(cli, ["--help"])

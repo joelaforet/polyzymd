@@ -3136,8 +3136,8 @@ def new_analysis(
     """
     from polyzymd.cli.scaffold import generate_scaffold, validate_class_name, validate_name
 
-    # Validate name
-    error = validate_name(name)
+    # Force needs scaffold-level ownership checks before registered-name rejection
+    error = validate_name(name, check_existing=not force)
     if error:
         raise click.BadParameter(error, param_hint="'NAME'")
 
@@ -3173,7 +3173,7 @@ def new_analysis(
             force=force,
             dry_run=dry_run,
         )
-    except FileExistsError as exc:
+    except (FileExistsError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     verb = "Would create" if dry_run else "Created"
