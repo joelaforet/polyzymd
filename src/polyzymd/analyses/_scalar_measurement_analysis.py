@@ -9,9 +9,9 @@ import statistics
 from abc import ABC
 from typing import Any, ClassVar, Sequence
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from polyzymd.analyses._measurement import ScalarMeasurement
+from polyzymd.analyses._measurement import CacheIdentity, MetricSpec, ScalarMeasurement
 from polyzymd.analyses.base import AggregateContext, Analysis, MetricValue, ReplicateContext
 
 
@@ -175,11 +175,37 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
                     f"{cls.__name__}.measurement must be a ScalarMeasurement instance or "
                     f"class, got {measurement!r}."
                 )
+            cls._validate_metric_contract(measurement)
             return
         if not isinstance(measurement, ScalarMeasurement):
             raise TypeError(
                 f"{cls.__name__}.measurement must be a ScalarMeasurement instance or class, "
                 f"got {measurement!r}."
+            )
+        cls._validate_metric_contract(measurement)
+
+    @classmethod
+    def _validate_metric_contract(
+        cls, measurement: type[ScalarMeasurement] | ScalarMeasurement
+    ) -> None:
+        """Raise a clear error for invalid scalar measurement metric metadata.
+
+        Parameters
+        ----------
+        measurement : type[ScalarMeasurement] or ScalarMeasurement
+            Measurement class or instance configured on the analysis class.
+
+        Raises
+        ------
+        TypeError
+            If ``measurement.metric`` is missing, is not a ``MetricSpec``, or
+            has a blank metric name.
+        """
+
+        metric = getattr(measurement, "metric", None)
+        if not isinstance(metric, MetricSpec) or not metric.name.strip():
+            raise TypeError(
+                f"{cls.__name__}.measurement.metric must be a MetricSpec with a non-empty name."
             )
 
     def _measurement_instance(self) -> ScalarMeasurement:
@@ -329,11 +355,19 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
             Serializable aggregate result payload.
         """
 
+        measurement = self._measurement_instance()
+        cache_identity = measurement.cache_identity(ctx.settings, analysis_name=self.name)
+        for index, result in enumerate(results):
+            self._validate_replicate_result(
+                result,
+                expected_cache_identity=cache_identity,
+                expected_measurement=measurement,
+                index=index,
+            )
+
         values = [float(result["value"]) for result in results]
         mean_value = statistics.mean(values) if values else math.nan
         sem_value = statistics.stdev(values) / math.sqrt(len(values)) if len(values) > 1 else 0.0
-        measurement = self._measurement_instance()
-        cache_identity = measurement.cache_identity(ctx.settings, analysis_name=self.name)
         return {
             "analysis": self.name,
             "measurement": measurement.name,
@@ -346,6 +380,90 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
             "settings_fingerprint": self.aggregate_settings_fingerprint(ctx.settings),
             "cache_identity": cache_identity.model_dump(mode="json"),
         }
+
+    def _validate_replicate_result(
+        self,
+        result: dict[str, Any],
+        *,
+        expected_cache_identity: CacheIdentity,
+        expected_measurement: ScalarMeasurement,
+        index: int,
+    ) -> None:
+        """Validate that a scalar replicate result matches the active identity.
+
+        Parameters
+        ----------
+        result : dict[str, Any]
+            Per-replicate scalar result payload to validate.
+        expected_cache_identity : CacheIdentity
+            Cache identity for the active analysis settings and measurement.
+        expected_measurement : ScalarMeasurement
+            Active measurement configured on this analysis instance.
+        index : int
+            Zero-based result index used in error messages.
+
+        Raises
+        ------
+        TypeError
+            If the replicate result is not a dictionary.
+        ValueError
+            If the result identity does not match the active analysis,
+            measurement, metric, or settings payload.
+        """
+
+        if not isinstance(result, dict):
+            raise TypeError(
+                f"{type(self).__name__}.aggregate() expected replicate result {index} to be a "
+                f"dict, got {type(result).__name__}."
+            )
+
+        expected_fields = {
+            "analysis": self.name,
+            "measurement": expected_measurement.name,
+            "metric": expected_measurement.metric.name,
+        }
+        for field, expected_value in expected_fields.items():
+            actual_value = result.get(field)
+            if actual_value != expected_value:
+                raise ValueError(
+                    f"Stale scalar replicate result {index}: {field} mismatch "
+                    f"({actual_value!r} != {expected_value!r})."
+                )
+
+        raw_identity = result.get("cache_identity")
+        if not isinstance(raw_identity, dict):
+            raise ValueError(f"Stale scalar replicate result {index}: cache_identity is missing.")
+
+        for field in ("analysis_name", "measurement_name", "version", "payload"):
+            if field not in raw_identity:
+                raise ValueError(
+                    f"Stale scalar replicate result {index}: cache_identity.{field} is missing."
+                )
+
+        try:
+            actual_identity = CacheIdentity.model_validate(raw_identity)
+        except ValidationError as exc:
+            raise ValueError(
+                f"Stale scalar replicate result {index}: cache_identity is invalid."
+            ) from exc
+
+        expected_identity_fields = {
+            "analysis_name": expected_cache_identity.analysis_name,
+            "measurement_name": expected_cache_identity.measurement_name,
+            "version": expected_cache_identity.version,
+        }
+        for field, expected_value in expected_identity_fields.items():
+            actual_value = getattr(actual_identity, field)
+            if actual_value != expected_value:
+                raise ValueError(
+                    f"Stale scalar replicate result {index}: cache_identity.{field} mismatch "
+                    f"({actual_value!r} != {expected_value!r})."
+                )
+
+        if actual_identity.payload != expected_cache_identity.payload:
+            raise ValueError(
+                f"Stale scalar replicate result {index}: cache_identity settings payload mismatch."
+            )
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
         """Extract the scalar metric for default cross-condition comparison.

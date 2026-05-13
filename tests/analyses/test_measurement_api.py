@@ -63,6 +63,12 @@ class ToyScalarMeasurementV3(ToyScalarMeasurement):
     version: ClassVar[str] = "3"
 
 
+class ToyScalarMeasurementRenamedMetric(ToyScalarMeasurement):
+    """Toy scalar measurement with a changed scalar metric key."""
+
+    metric: ClassVar[MetricSpec] = MetricSpec(name="renamed_toy_value")
+
+
 class ToyScalarAnalysis(ScalarMeasurementAnalysis):
     """Toy scalar measurement analysis with explicit settings."""
 
@@ -92,6 +98,14 @@ class VersionedScalarAnalysis(ScalarMeasurementAnalysis):
     name: ClassVar[str] = "toy_scalar"
     Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
     measurement: ClassVar[type[ScalarMeasurement]] = ToyScalarMeasurementV3
+
+
+class RenamedMetricScalarAnalysis(ScalarMeasurementAnalysis):
+    """Toy scalar analysis with a changed metric name."""
+
+    name: ClassVar[str] = "toy_scalar"
+    Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
+    measurement: ClassVar[type[ScalarMeasurement]] = ToyScalarMeasurementRenamedMetric
 
 
 class FakeTrajectory:
@@ -133,6 +147,46 @@ class FakeLoader:
 
         assert replicate == 1
         return FakeUniverse()
+
+
+def build_aggregate_context(tmp_path: Path, settings: BaseModel) -> AggregateContext:
+    """Build an aggregate context for scalar measurement tests."""
+
+    condition = Condition(
+        label="Toy",
+        config_path=tmp_path / "config.yaml",
+        replicates=(1,),
+        sim_config=object(),
+    )
+    return AggregateContext(
+        condition=condition,
+        replicates=(1,),
+        output_dir=tmp_path / "aggregated",
+        equilibration="0ns",
+        settings=settings,
+    )
+
+
+def build_scalar_replicate_result(
+    analysis: ScalarMeasurementAnalysis,
+    settings: BaseModel,
+    *,
+    value: float = 17.0,
+) -> dict[str, object]:
+    """Build a serialized scalar replicate result for aggregation tests."""
+
+    measurement = analysis._measurement_instance()
+    return {
+        "analysis": analysis.name,
+        "measurement": measurement.name,
+        "metric": measurement.metric.name,
+        "replicate": 1,
+        "value": value,
+        "cache_identity": measurement.cache_identity(
+            settings,
+            analysis_name=analysis.name,
+        ).model_dump(mode="json"),
+    }
 
 
 def test_metric_spec_converts_to_metric_value() -> None:
@@ -223,6 +277,68 @@ def test_scalar_measurement_analysis_rejects_invalid_measurement() -> None:
             measurement: ClassVar[object] = object()
 
 
+def test_scalar_measurement_analysis_requires_metric() -> None:
+    """Scalar measurement analyses should fail clearly when metric is missing."""
+
+    class MissingMetricMeasurement(ScalarMeasurement):
+        """Scalar measurement without metric metadata."""
+
+        name: ClassVar[str] = "missing_metric_measurement"
+
+        def measure(
+            self,
+            universe,
+            settings: BaseModel,
+            *,
+            start: int | None = None,
+            stop: int | None = None,
+            step: int | None = None,
+        ) -> float:
+            """Return a scalar value for the invalid metric contract test."""
+
+            del universe, settings, start, stop, step
+            return 1.0
+
+    with pytest.raises(TypeError, match="measurement.metric must be a MetricSpec"):
+
+        class MissingMetricAnalysis(ScalarMeasurementAnalysis):
+            name: ClassVar[str] = "missing_metric"
+            Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
+            measurement: ClassVar[type[ScalarMeasurement]] = MissingMetricMeasurement
+
+
+def test_scalar_measurement_analysis_rejects_wrong_metric_type() -> None:
+    """Scalar measurement analyses should reject non-MetricSpec metric metadata."""
+
+    class WrongMetricTypeMeasurement(ToyScalarMeasurement):
+        """Scalar measurement with invalid metric metadata type."""
+
+        metric: ClassVar[object] = object()
+
+    with pytest.raises(TypeError, match="measurement.metric must be a MetricSpec"):
+
+        class WrongMetricTypeAnalysis(ScalarMeasurementAnalysis):
+            name: ClassVar[str] = "wrong_metric_type"
+            Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
+            measurement: ClassVar[type[ScalarMeasurement]] = WrongMetricTypeMeasurement
+
+
+def test_scalar_measurement_analysis_rejects_blank_metric_name() -> None:
+    """Scalar measurement analyses should reject blank scalar metric names."""
+
+    class BlankMetricNameMeasurement(ToyScalarMeasurement):
+        """Scalar measurement with a blank metric name."""
+
+        metric: ClassVar[MetricSpec] = MetricSpec(name="   ")
+
+    with pytest.raises(TypeError, match="measurement.metric must be a MetricSpec"):
+
+        class BlankMetricNameAnalysis(ScalarMeasurementAnalysis):
+            name: ClassVar[str] = "blank_metric_name"
+            Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
+            measurement: ClassVar[type[ScalarMeasurement]] = BlankMetricNameMeasurement
+
+
 def test_scalar_measurement_fingerprint_includes_measurement_version() -> None:
     """Changing measurement version should change aggregate cache identity."""
 
@@ -284,3 +400,52 @@ def test_scalar_measurement_analysis_run_replicate_and_aggregate(tmp_path) -> No
     assert list(metrics) == ["toy_value"]
     assert metrics["toy_value"].mean == 18.0
     assert metrics["toy_value"].replicate_values == [17.0, 19.0]
+
+
+def test_scalar_measurement_aggregate_rejects_missing_cache_identity(tmp_path) -> None:
+    """Aggregation should reject scalar replicates without cache identity metadata."""
+
+    settings = ToyScalarSettings(offset=10.0)
+    result = build_scalar_replicate_result(ToyScalarAnalysis(), settings)
+    result.pop("cache_identity")
+
+    with pytest.raises(ValueError, match="cache_identity is missing"):
+        ToyScalarAnalysis().aggregate(build_aggregate_context(tmp_path, settings), [result])
+
+
+def test_scalar_measurement_aggregate_rejects_changed_measurement_version(tmp_path) -> None:
+    """Aggregation should reject replicates from an older measurement version."""
+
+    settings = ToyScalarSettings(offset=10.0)
+    stale_result = build_scalar_replicate_result(ToyScalarAnalysis(), settings)
+
+    with pytest.raises(ValueError, match="cache_identity.version mismatch"):
+        VersionedScalarAnalysis().aggregate(
+            build_aggregate_context(tmp_path, settings), [stale_result]
+        )
+
+
+def test_scalar_measurement_aggregate_rejects_changed_metric_name(tmp_path) -> None:
+    """Aggregation should reject replicates from a different metric identity."""
+
+    settings = ToyScalarSettings(offset=10.0)
+    stale_result = build_scalar_replicate_result(ToyScalarAnalysis(), settings)
+
+    with pytest.raises(ValueError, match="metric mismatch"):
+        RenamedMetricScalarAnalysis().aggregate(
+            build_aggregate_context(tmp_path, settings),
+            [stale_result],
+        )
+
+
+def test_scalar_measurement_aggregate_rejects_changed_settings_payload(tmp_path) -> None:
+    """Aggregation should reject replicates computed with different settings."""
+
+    old_settings = ToyScalarSettings(offset=10.0)
+    new_settings = ToyScalarSettings(offset=12.0)
+    stale_result = build_scalar_replicate_result(ToyScalarAnalysis(), old_settings)
+
+    with pytest.raises(ValueError, match="settings payload mismatch"):
+        ToyScalarAnalysis().aggregate(
+            build_aggregate_context(tmp_path, new_settings), [stale_result]
+        )
