@@ -248,14 +248,20 @@ organization tools, not the default contributor pattern.
 
 ## Testing checklist
 
-Generated scalar measurement tests focus on the contributor contract:
+Generated scalar measurement tests currently focus on the scaffold contract:
 
 - discovery and class variables
 - settings defaults and validation
 - direct `measure()` behavior with a fake Universe
+- metric metadata exposed by the measurement
+
+For production plugins, consider adding targeted tests for optional behavior you
+customize or rely on heavily:
+
 - base scalar runner dispatch through the framework bridge
 - aggregation and default metric extraction inherited from
   `ScalarMeasurementAnalysis`
+- custom plotting, formatting, filtering, or cache identity logic
 
 Run plugin tests through the pixi environment:
 
