@@ -165,8 +165,7 @@ class _ComparisonConfig:
         self.defaults = SimpleNamespace(equilibration_time="10ns")
         self.control = None
         self.conditions = [
-            _CondCfg(label, tmp_path / f"{label.lower()}.yaml", (1, 2))
-            for label in labels
+            _CondCfg(label, tmp_path / f"{label.lower()}.yaml", (1, 2)) for label in labels
         ]
         self.plugins = SimpleNamespace(get=lambda name: None)
         self.plot_settings = PlotSettings(output_dir=tmp_path / "figures")
