@@ -183,21 +183,34 @@ class TestDiscoveryRobustness:
         assert _is_top_level_module("polyzymd.analyses.contacts", package_prefix) is True
         assert _is_top_level_module("polyzymd.analyses.contacts._runner", package_prefix) is False
 
-    def test_discovery_skips_top_level_single_file_plugins(self):
-        """Single-file plugins should not be imported as contributor plugins."""
+    def test_discovery_imports_top_level_single_file_plugins(self):
+        """Single-file plugins should be imported as contributor plugins."""
         from polyzymd.analyses.discovery import _discover_plugins
 
         module_name = "polyzymd.analyses.single_file_plugin"
+        single_file_mod = types.ModuleType(module_name)
+
+        class SingleFilePlugin(Analysis):
+            name: ClassVar[str] = "single_file_plugin"
+            Settings: ClassVar[type] = ToySettings
+
+            def run_replicate(self, ctx, replicate):
+                return {"replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                return {"count": len(results)}
+
+        single_file_mod.SingleFilePlugin = SingleFilePlugin
 
         with (
             patch("pkgutil.walk_packages", return_value=[(None, module_name, False)]),
-            patch("importlib.import_module") as mock_import,
+            patch("importlib.import_module", return_value=single_file_mod) as mock_import,
         ):
             registry, aliases = _discover_plugins()
 
-        assert registry == {}
+        assert registry == {"single_file_plugin": SingleFilePlugin}
         assert aliases == {}
-        mock_import.assert_not_called()
+        mock_import.assert_called_once_with(module_name)
 
     def test_discovery_skips_shared_descendants_end_to_end(self):
         """Discovery should never import skipped shared descendants."""

@@ -1,22 +1,22 @@
-"""Automatic discovery of Analysis plugin packages via ``pkgutil``.
+"""Automatic discovery of Analysis plugin modules via ``pkgutil``.
 
-Scans ``src/polyzymd/analyses/`` for plugin packages, imports them, and
+Scans ``src/polyzymd/analyses/`` for plugin packages or modules, imports them, and
 collects all concrete :class:`Analysis` subclasses. No bootstrap files,
 no package-level registry edits, no decorators needed.
 
 How Discovery Works
 -------------------
-1. ``pkgutil.walk_packages()`` yields packages inside ``polyzymd.analyses``.
-2. Each package is imported via ``importlib.import_module()``.
-3. All package-level names are inspected; concrete subclasses of
+1. ``pkgutil.walk_packages()`` yields modules inside ``polyzymd.analyses``.
+2. Each non-infrastructure module is imported via ``importlib.import_module()``.
+3. All module-level names are inspected; concrete subclasses of
    :class:`~polyzymd.analyses.base.Analysis` are collected.
 4. Name collisions (two plugins with the same ``name``) raise immediately.
 
 Contributor Impact
 ------------------
 To add a new analysis, create a package in ``src/polyzymd/analyses/<name>/``
-with ``__init__.py``, define a class inheriting from ``Analysis``, and set
-``name`` as a ``ClassVar[str]``. Single-file plugins are not supported.
+or a simple module at ``src/polyzymd/analyses/<name>.py``, define a class
+inheriting from ``Analysis``, and set ``name`` as a ``ClassVar[str]``.
 """
 
 from __future__ import annotations
@@ -143,17 +143,13 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
     registry: dict[str, type[Analysis]] = {}
     alias_registry: dict[str, str] = {}  # alias -> canonical name
 
-    # Walk plugin packages while rejecting top-level single-file plugins
+    # Walk plugin packages and simple single-file plugin modules
     package_path = analyses_pkg.__path__
     package_prefix = analyses_pkg.__name__ + "."
 
     for _, modname, is_pkg in pkgutil.walk_packages(package_path, prefix=package_prefix):
         # Skip infrastructure modules
         if _should_skip_module(modname, package_prefix):
-            continue
-
-        if not is_pkg and _is_top_level_module(modname, package_prefix):
-            logger.debug("Skipping top-level analysis module without package: %s", modname)
             continue
 
         try:
