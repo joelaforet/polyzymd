@@ -34,6 +34,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
+from polyzymd.analyses._analysis_lifecycle import AnalysisLifecycle
 from polyzymd.analyses.base import (
     AggregateContext,
     AggregateValidationError,
@@ -324,40 +325,14 @@ def run_replicate_once(
     Any
         Replicate result returned by the plugin.
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    result_path = analysis.replicate_result_path(output_dir)
-    ctx = ReplicateContext(
-        condition=condition,
-        replicate=replicate,
-        sim_config=condition.sim_config,
-        output_dir=output_dir,
-        equilibration=equilibration,
-        recompute=recompute,
-        settings=settings,
-        result_path=result_path,
+    return AnalysisLifecycle(analysis).run_replicate_once(
+        condition,
+        settings,
+        equilibration,
+        output_dir,
+        replicate,
+        recompute,
     )
-    try:
-        result = analysis.run_replicate(ctx, replicate)
-    except (FileNotFoundError, OSError):
-        raise
-    except ReplicateSkippedError:
-        raise
-    except PluginContractError:
-        raise
-    except Exception as e:
-        raise ReplicateError(
-            f"{analysis.name}: run_replicate failed for "
-            f"condition='{condition.label}' replicate={replicate}: {type(e).__name__}: {e}"
-        ) from e
-    _check_compute_result(result, "run_replicate", analysis.name)
-    try:
-        analysis.save_result(result, result_path)
-    except OSError as save_err:
-        raise ReplicateError(
-            f"{analysis.name}: failed to save replicate result for "
-            f"condition='{condition.label}' replicate={replicate}: {save_err}"
-        ) from save_err
-    return result
 
 
 def aggregate_condition_from_disk(
@@ -398,88 +373,14 @@ def aggregate_condition_from_disk(
     ValueError
         If fewer than ``analysis.min_replicates`` replicate results are available.
     """
-    loaded_results: list[Any] = []
-    successful_reps: list[int] = []
-    missing_paths: list[Path] = []
-    for rep in replicates:
-        rep_dir = output_dir / f"run_{rep}"
-        result = analysis._load_replicate_result(rep_dir)
-        if result is None:
-            expected_path = analysis.replicate_result_path(rep_dir)
-            missing_paths.append(expected_path)
-            logger.warning(
-                "%s: missing replicate result for '%s' rep %d at %s",
-                analysis.name,
-                condition.label,
-                rep,
-                expected_path,
-            )
-            continue
-        loaded_results.append(result)
-        successful_reps.append(rep)
-
-    if len(loaded_results) < analysis.min_replicates:
-        expected_text = ""
-        if missing_paths:
-            expected_text = " Expected missing replicate output path(s): " + ", ".join(
-                str(path) for path in missing_paths[:5]
-            )
-            if len(missing_paths) > 5:
-                expected_text += f", ... {len(missing_paths) - 5} more"
-        raise ValueError(
-            f"{analysis.name}: condition '{condition.label}' has {len(loaded_results)} "
-            f"replicate result(s) on disk, need at least {analysis.min_replicates}."
-            f"{expected_text}"
-        )
-
-    agg_dir = output_dir / "aggregated"
-    if recompute:
-        _remove_stale_directory(agg_dir)
-    agg_dir.mkdir(parents=True, exist_ok=True)
-    agg_result_path = analysis.aggregate_result_path(agg_dir)
-    agg_ctx = AggregateContext(
-        condition=condition,
-        replicates=tuple(successful_reps),
-        output_dir=agg_dir,
-        equilibration=equilibration,
-        settings=settings,
+    return AnalysisLifecycle(analysis).aggregate_condition_from_disk(
+        condition,
+        settings,
+        equilibration,
+        output_dir,
+        replicates,
         recompute=recompute,
-        result_path=agg_result_path,
     )
-    try:
-        aggregated = analysis.aggregate(agg_ctx, loaded_results)
-    except (FileNotFoundError, OSError):
-        raise
-    except PluginContractError:
-        raise
-    except Exception as e:
-        raise AggregationError(
-            f"{analysis.name}: aggregate failed for condition='{condition.label}': "
-            f"{type(e).__name__}: {e}"
-        ) from e
-    _check_compute_result(aggregated, "aggregate", analysis.name)
-    aggregated = _attach_aggregate_identity_metadata(
-        analysis,
-        aggregated,
-        settings=settings,
-        replicates=successful_reps,
-    )
-    aggregated = analysis.validate_aggregated_result(
-        aggregated,
-        condition=condition,
-        settings=settings,
-        equilibration=equilibration,
-        source=agg_result_path,
-        expected_replicates=successful_reps,
-    )
-    try:
-        analysis.save_result(aggregated, agg_result_path)
-    except OSError as save_err:
-        raise AggregationError(
-            f"{analysis.name}: failed to save aggregated result for "
-            f"condition='{condition.label}': {save_err}"
-        ) from save_err
-    return aggregated
 
 
 # ---------------------------------------------------------------------------
@@ -517,123 +418,13 @@ def run_analysis(
     BaseModel
         Aggregated result.
     """
-    if output_dir is None:
-        # Default: next to the condition's config.yaml
-        output_dir = condition.config_path.parent / "analysis" / analysis.name
-
-    logger.info(
-        f"Running {analysis.name} for '{condition.label}' (replicates {list(condition.replicates)})"
-    )
-
-    if not analysis.has_compute_stage:
-        logger.info(f"{analysis.name}: skipping compute stage for '{condition.label}'")
-        return None
-
-    # Run per-replicate stage
-    results: list[Any] = []
-    successful: list[int] = []
-    failed: list[int] = []
-    failure_reasons: list[str] = []
-    for rep in condition.replicates:
-        rep_dir = output_dir / f"run_{rep}"
-        try:
-            result = run_replicate_once(
-                analysis,
-                condition,
-                settings,
-                equilibration,
-                rep_dir,
-                rep,
-                recompute,
-            )
-            results.append(result)
-            successful.append(rep)
-        except (FileNotFoundError, OSError) as e:
-            logger.warning("  Skipping %s rep %d: data not found — %s", condition.label, rep, e)
-            failed.append(rep)
-            failure_reasons.append(f"replicate {rep}: {type(e).__name__}: {e}")
-        except ReplicateSkippedError as e:
-            logger.warning("  Skipping %s rep %d: %s", condition.label, rep, e)
-            failed.append(rep)
-            failure_reasons.append(f"replicate {rep}: {e}")
-        except ReplicateError:
-            raise
-
-    if len(results) < analysis.min_replicates:
-        raise ValueError(
-            f"{analysis.name}: condition '{condition.label}' has {len(results)} successful "
-            f"replicates, need at least {analysis.min_replicates}.  Failed: {failed}"
-            f"{_format_failure_reasons(failure_reasons)}"
-        )
-
-    if failed:
-        logger.warning(
-            "  %s: %d replicate(s) failed %s, using %d of %d",
-            condition.label,
-            len(failed),
-            failed,
-            len(results),
-            len(condition.replicates),
-        )
-
-    if not analysis.has_aggregate_stage:
-        logger.info(f"{analysis.name}: skipping aggregate stage for '{condition.label}'")
-        return None
-
-    # Aggregate successful replicates
-    agg_dir = output_dir / "aggregated"
-    if recompute:
-        _remove_stale_directory(agg_dir)
-    agg_dir.mkdir(parents=True, exist_ok=True)
-    agg_result_path = analysis.aggregate_result_path(agg_dir)
-
-    agg_ctx = AggregateContext(
-        condition=condition,
-        replicates=tuple(successful),
-        output_dir=agg_dir,
+    return AnalysisLifecycle(analysis).run_analysis(
+        condition,
+        settings,
         equilibration=equilibration,
-        settings=settings,
+        output_dir=output_dir,
         recompute=recompute,
-        result_path=agg_result_path,
     )
-
-    try:
-        aggregated = analysis.aggregate(agg_ctx, results)
-    except (FileNotFoundError, OSError):
-        raise
-    except PluginContractError:
-        raise
-    except Exception as e:
-        raise AggregationError(
-            f"{analysis.name}: aggregate failed for condition='{condition.label}': "
-            f"{type(e).__name__}: {e}"
-        ) from e
-    _check_compute_result(aggregated, "aggregate", analysis.name)
-    aggregated = _attach_aggregate_identity_metadata(
-        analysis,
-        aggregated,
-        settings=settings,
-        replicates=successful,
-    )
-    aggregated = analysis.validate_aggregated_result(
-        aggregated,
-        condition=condition,
-        settings=settings,
-        equilibration=equilibration,
-        source=agg_result_path,
-        expected_replicates=successful,
-    )
-    if recompute or not agg_result_path.exists():
-        try:
-            analysis.save_result(aggregated, agg_result_path)
-        except OSError as save_err:
-            raise AggregationError(
-                f"{analysis.name}: failed to save aggregated result for "
-                f"condition='{condition.label}': {save_err}"
-            ) from save_err
-    logger.info(f"  Aggregated {len(results)} replicates for '{condition.label}'")
-
-    return aggregated
 
 
 def _prepare_conditions_with_filter(
@@ -755,17 +546,9 @@ def prepare_comparison_run(
     dict[str, Any]
         Prepared comparison state including filtered conditions.
     """
-    resolved_equilibration = equilibration or config.defaults.equilibration_time
-    analysis_root = (
-        config.source_path.parent / "analysis" if config.source_path else Path("analysis")
-    )
-    settings = _resolve_settings(analysis, config)
-    return _create_prepared_state(
-        analysis,
+    return AnalysisLifecycle(analysis, settings_resolver=_resolve_settings).prepare_comparison_run(
         config,
-        settings,
-        resolved_equilibration,
-        analysis_root,
+        equilibration,
     )
 
 
@@ -860,6 +643,21 @@ def finalize_comparison_from_disk(
     dict[str, Any]
         Dictionary with ``comparison``, ``comparison_path``, and ``plots``.
     """
+    return AnalysisLifecycle(
+        analysis, settings_resolver=_resolve_settings
+    ).finalize_comparison_from_disk(
+        config=config,
+        analysis_dirs=analysis_dirs,
+        aggregated_results=aggregated_results,
+        results_dir=results_dir,
+        figures_dir=figures_dir,
+        settings=settings,
+        effective_control=effective_control,
+        prepared_state=prepared_state,
+        allow_partial=allow_partial,
+        recompute=recompute,
+    )
+
     if prepared_state is None:
         source_path = getattr(config, "source_path", None)
         prepared_state = _create_prepared_state(
@@ -1263,6 +1061,19 @@ def run_comparison(
     dict[str, Any]
         Dictionary with ``"aggregated"``, ``"comparison"``, ``"plots"`` keys.
     """
+    return AnalysisLifecycle(
+        analysis,
+        settings_resolver=_resolve_settings,
+        prepare_comparison_run=prepare_comparison_run,
+        run_analysis=run_analysis,
+        finalize_comparison_from_disk=finalize_comparison_from_disk,
+        execution_summary=_print_execution_summary,
+    ).run_comparison(
+        config,
+        recompute=recompute,
+        equilibration=equilibration,
+    )
+
     from polyzymd.analyses.shared.paths import sanitize_label
 
     prepared_state = prepare_comparison_run(
@@ -1471,6 +1282,11 @@ def run_plot_only(
         A tuple of (generated_paths, failures) where failures is a list
         of (analysis_name, error_message) tuples.
     """
+    return AnalysisLifecycle(analysis, settings_resolver=_resolve_settings).run_plot_only(
+        config,
+        equilibration=equilibration,
+    )
+
     from polyzymd.analyses.shared.paths import sanitize_label
 
     prepared_state = prepare_comparison_run(analysis, config, equilibration)
