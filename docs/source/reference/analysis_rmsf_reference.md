@@ -9,7 +9,6 @@ RMSF settings live under `plugins.rmsf` in `comparison.yaml`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | `bool` | `true` | Enable or disable RMSF analysis |
 | `selection` | `str` | `"protein and name CA"` | MDAnalysis selection used for RMSF calculation |
 | `reference_mode` | `str` | `"centroid"` | Alignment reference mode: `centroid`, `average`, `frame`, `external` |
 | `reference_frame` | `int \| null` | `null` | 1-indexed frame when `reference_mode: frame` |
