@@ -101,7 +101,6 @@ Analysis
 - :py:class:`~polyzymd.analyses.base.MetricSpec` - Metadata for a scalar measurement metric
 - :py:class:`~polyzymd.analyses.distances.DistanceCalculator` - Inter-group distances
 - :py:class:`~polyzymd.analyses.contacts.ParallelContactAnalyzer` - Polymer-protein contacts
-- :py:class:`~polyzymd.analyses._results_base.BaseAnalysisResult` - Serializable result base class
 
 Comparison
 ~~~~~~~~~~
