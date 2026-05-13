@@ -3,6 +3,13 @@
 This page documents the `polyzymd.analyses` package — the plugin system for
 adding new analysis types to PolyzyMD.
 
+New contributor analyses usually use the Measurement API: a single-file plugin
+subclasses `ScalarMeasurementAnalysis`, declares a `ScalarMeasurement`, and
+returns one scalar value per replicate from `measure()`. The framework handles
+the runner bridge, aggregation, cache identity, and default scalar comparison.
+Advanced runner-backed package plugins remain supported for multi-metric or
+custom result workflows.
+
 ## Public API
 
 ```{eval-rst}
@@ -27,12 +34,24 @@ adding new analysis types to PolyzyMD.
 ### Base Class
 
 - `Analysis` — abstract base class all plugins inherit from
+- `MetricSpec` — metadata for a scalar metric produced by a measurement
+- `ScalarMeasurement` — strategy object that measures one scalar per replicate
+- `ScalarMeasurementAnalysis` — adapter base class for scalar measurement plugins
 
 `polyzymd.analyses.base` is the stable public facade for contributor imports.
-It re-exports the base class, lifecycle contexts, metric descriptors, and
-comparison result models while delegating implementation to private framework
-modules. Contributor plugins should import from `polyzymd.analyses.base`, not
-from modules named `_analysis_*`, `_contexts`, or `_comparison_models`.
+It re-exports the Measurement API, base class, lifecycle contexts, metric
+descriptors, and comparison result models while delegating implementation to
+private framework modules. Contributor plugins should import from
+`polyzymd.analyses.base`, not from modules named `_analysis_*`, `_contexts`,
+`_comparison_models`, or `_measurement`.
+
+### Discovery
+
+Discovery supports both contributor-friendly single-file plugins such as
+`polyzymd.analyses.my_metric` and package plugins such as
+`polyzymd.analyses.contacts`. Use a package when the plugin needs private helper
+modules for runners, results, plotting, or formatting; use a single file for the
+default scalar measurement pattern.
 
 ### Context Objects
 
@@ -59,7 +78,7 @@ from modules named `_analysis_*`, `_contexts`, or `_comparison_models`.
 | `rmsd` | `analyses.rmsd` | Custom (per-run) |
 | `rg` | `analyses.rg` | Custom (per-run) |
 | `rmsf` | `analyses.rmsf` | Default (scalar) |
-| `catalytic_triad` | `analyses.catalytic_triad` | Default (scalar) |
+| `catalytic_triad` | `analyses.catalytic_triad` | Measurement-backed default (scalar) |
 | `secondary_structure` | `analyses.secondary_structure` | Default (scalar) |
 | `sasa` | `analyses.sasa` | Custom (per-run) |
 | `distances` | `analyses.distances` | Custom |
@@ -122,5 +141,4 @@ summaries.
 ## Related Documentation
 
 - [Extending the Analysis Framework](../contributor_guide/extending_analyses.md) — tutorial
-- [Analysis API Overview](analysis.md) — entry point for the analysis API
 - [API Overview](overview.rst)

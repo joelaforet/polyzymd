@@ -672,27 +672,36 @@ Example configs: polyzymd/templates/examples/
 
 ## polyzymd new-analysis
 
-Scaffold a runner-backed analysis plugin and matching tests.
+Scaffold an analysis plugin and matching tests.
 
 ```bash
 polyzymd new-analysis NAME [OPTIONS]
 
 Options:
   --class-name TEXT                 PascalCase class prefix
-  --style [dict|pydantic]           Result-container style [default: dict]
+  --style [dict|pydantic]           Advanced package style
+  --advanced                        Create the runner-backed package scaffold
   --project-root DIRECTORY          Repository root
   --force                           Overwrite existing files
   --dry-run                         Print paths without writing files
 ```
 
-The generated plugin package contains an `__init__.py` analysis facade and a
-`_runner.py` trajectory runner. With `--style pydantic`, it also includes
-`_results.py` result models re-exported from the facade. The facade implements
-`build_runner()`, `summarize_replicate()`, `aggregate()`, `extract_metrics()`,
-and `plot()`. The base class handles the per-replicate dispatch.
+By default, the command creates a single-file scalar measurement plugin at
+`src/polyzymd/analyses/<NAME>.py`. The generated analysis subclasses
+`ScalarMeasurementAnalysis`; its `measure()` method returns one scalar per
+replicate while the framework handles the runner bridge, aggregation, cache
+identity, and default scalar comparison.
+
+Use `--advanced` when you need a runner-backed package plugin with explicit
+`build_runner()`, `summarize_replicate()`, `aggregate()`, and `extract_metrics()`
+hooks. Passing `--style dict` or `--style pydantic` also selects advanced package
+scaffolding for backward compatibility. The `pydantic` style adds `_results.py`
+typed result models; the `dict` style uses plain dictionaries.
 
 ```bash
 polyzymd new-analysis solvent_shell
+polyzymd new-analysis solvent_shell --advanced
+polyzymd new-analysis solvent_shell --style pydantic
 pixi run -e build pytest tests/analyses/plugins/test_solvent_shell.py -v
 ```
 

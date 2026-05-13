@@ -59,30 +59,42 @@ generation, resubmission, and recovery flows.
 
 ### `analyses/`
 
-The **plugin system** — the primary extension point for contributors. Each
-analysis plugin participates in a unified lifecycle, but not every plugin uses
-every stage:
+The **plugin system** — the primary extension point for contributors. The
+default contributor path is measurement-first: a scalar measurement plugin
+returns one value per replicate and lets PolyzyMD handle the runner bridge,
+aggregation, cache identity, comparison, and CLI integration. Each analysis
+plugin still participates in a unified lifecycle, but not every plugin uses every
+stage:
 compute → aggregate → compare → plot → format.
 
 Within that lifecycle, PolyzyMD now draws a sharper boundary between
 trajectory-level work and ensemble-level work:
 
-- **MDAnalysis owns per-trajectory analysis** when a plugin can be expressed as
-  an MDAnalysis runner or compatible ``run(...)`` object
+- **Measurement plugins are the default contributor pattern** when a calculation
+  can be expressed as one scalar value per replicate
+- **MDAnalysis owns per-trajectory analysis** when an advanced plugin needs an
+  MDAnalysis runner or compatible ``run(...)`` object
 - **PolyzyMD owns ensemble/comparison workflow** including replicate discovery,
   caching, aggregation, cross-condition statistics, plotting, and CLI output
 - **Composition is preferred over mixins or deep inheritance** so trajectory-
   native plugins can provide small hooks instead of re-implementing the full
   framework lifecycle
-- **Trajectory-native plugins should keep per-trajectory logic in dedicated
-  runner modules**
+- **Advanced trajectory-native plugins can keep per-trajectory logic in
+  dedicated runner modules**
 - **Derived analyses stay outside `Analysis` unless they truly process
   trajectories**; post-processing of already-aggregated outputs should remain a
   higher-level PolyzyMD concern
 
-To add a new analysis, create a package in `analyses/<name>/` that subclasses
-`Analysis`, or use `polyzymd new-analysis <name>` to scaffold one automatically.
-The public contributor path is runner-backed:
+To add a new analysis, run `polyzymd new-analysis <name>` to scaffold the
+single-file scalar measurement pattern. The public default path is
+measurement-backed:
+
+- subclass `ScalarMeasurementAnalysis`
+- declare a `ScalarMeasurement` with a `MetricSpec`
+- implement `measure(...)` to return one scalar per replicate
+
+Use `polyzymd new-analysis <name> --advanced` when a plugin needs the explicit
+runner-backed package lifecycle:
 
 - implement `build_runner(...)` and `summarize_replicate(...)` for
   trajectory-native replicate work
@@ -101,9 +113,10 @@ Comparison functionality is split across focused modules:
 - `analyses/shared/result_io.py` for result discovery and loading
 - `analyses/shared/paths.py` for label/path helpers such as `sanitize_label()`
 
-Established analysis plugins delegate plotting to `_plotters.py` modules
-within their package; the `plot()` method in `__init__.py` orchestrates what
-to plot.
+Established analysis package plugins often delegate plotting to `_plotters.py`
+modules, but that is optional organization for larger plugins. Simple
+single-file measurement plugins can keep plotting in `plot()` when they need
+figures at all.
 
 ### `core/` and `utils/`
 
@@ -143,16 +156,21 @@ CLI operations usable even when optional heavy dependencies are absent.
 
 ### Plugin-based extension points
 
-Analysis is the primary extensibility axis. New analysis types are added by
-creating a package in `analyses/<name>/` that subclasses `Analysis`. The
-framework discovers plugins automatically via `pkgutil` — no registries,
-no decorators, no imports needed. Use `polyzymd new-analysis <name>` to
-scaffold the package structure automatically.
+Analysis is the primary extensibility axis. New scalar analyses are usually
+single files that subclass `ScalarMeasurementAnalysis`; advanced analyses can be
+packages that subclass `Analysis` directly. The framework discovers both shapes
+automatically via `pkgutil` — no registries, no decorators, no imports needed.
+Use `polyzymd new-analysis <name>` for the default single-file measurement
+scaffold, or add `--advanced` for the runner-backed package scaffold.
 
 ### Separation between per-condition and cross-condition work
 
 The unified `analyses/` lifecycle still handles both scopes in one plugin
-contract. Public plugins either:
+contract. Public plugins usually:
+
+- use `ScalarMeasurementAnalysis` when one scalar per replicate is sufficient
+
+Advanced plugins can also:
 
 - use the runner-backed path with `build_runner(...)` and
   `summarize_replicate(...)`
@@ -162,10 +180,11 @@ Per-condition aggregation is likewise optional and is required only when
 `has_aggregate_stage = True`. Cross-condition work still happens through
 `compare()`, `plot()`, and `format()`.
 
-The important migration rule is that PolyzyMD does not own the per-frame loop
-in runner-backed mode. MDAnalysis owns per-trajectory iteration through the
-runner, while PolyzyMD owns replicate discovery, caching, ensemble
-aggregation, cross-condition statistics, plotting, and CLI output.
+The important migration rule is that simple contributors should not reimplement
+the lifecycle. Measurement plugins provide `measure()` only; advanced
+runner-backed plugins let MDAnalysis own per-trajectory iteration through the
+runner while PolyzyMD owns replicate discovery, caching, ensemble aggregation,
+cross-condition statistics, plotting, and CLI output.
 
 ## Where contributors usually need to look
 
@@ -174,7 +193,7 @@ aggregation, cross-condition statistics, plotting, and CLI output.
 | add or validate config fields | `src/polyzymd/config/` |
 | change build behavior | `src/polyzymd/builders/` |
 | change run or restart behavior | `src/polyzymd/simulation/` and `src/polyzymd/workflow/` |
-| add an analysis type | `src/polyzymd/analyses/` (plugin package — subclass `Analysis` and choose the appropriate lifecycle mode) |
+| add an analysis type | `src/polyzymd/analyses/` (default: single-file `ScalarMeasurementAnalysis`; advanced: package `Analysis` plugin) |
 | add comparison statistics | `src/polyzymd/analyses/shared/inferential_statistics.py` |
 | add or change CLI commands | `src/polyzymd/cli/` |
 

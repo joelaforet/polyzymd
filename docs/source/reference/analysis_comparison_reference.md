@@ -98,7 +98,7 @@ Stable analysis plugins:
 | `rmsf` | Yes | `mean_rmsf` | Per-residue flexibility | FDR-corrected pairwise t-tests + ANOVA |
 | `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests per residue |
 | `distances` | No (custom) | Multiple distance metrics | Named distance pairs | Per-distance t-tests + ANOVA |
-| `catalytic_triad` | Yes | `mean_triad_proximity` | Active-site geometry | FDR-corrected pairwise t-tests + ANOVA |
+| `catalytic_triad` | Yes | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected pairwise t-tests + ANOVA |
 | `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + ANOVA |
 | `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | Per-run pairwise t-tests + ANOVA |
 | `hydrogen_bonds` | Custom loader with default-style scalar statistics | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA per configured summary |

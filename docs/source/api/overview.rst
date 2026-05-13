@@ -30,7 +30,7 @@ Package Structure
     │   ├── parameters.py # Simulation parameters
     │   └── restraints.py # Restraint definitions
     ├── analyses/         # ★ Plugin system — unified analysis lifecycle
-    │   ├── base.py       # Analysis ABC, context objects, result models
+    │   ├── base.py       # Public facade, Measurement API, contexts, result models
     │   ├── discovery.py  # pkgutil-based auto-discovery
     │   ├── orchestrator.py  # Framework engine
     │   ├── stats.py      # Shared statistical utilities
@@ -41,7 +41,7 @@ Package Structure
     │   ├── contacts/     # Contacts plugin package
     │   ├── distances/    # Distance analysis plugin package
     │   ├── secondary_structure/  # Secondary structure plugin package
-    │   └── ...           # One sub-package per analysis type
+    │   └── ...           # Single-file or package plugins for each analysis type
     ├── config/
     │   └── comparison.py # ComparisonConfig, PlotSettings, condition models
     ├── analyses/shared/
@@ -96,6 +96,9 @@ Analysis
 ~~~~~~~~
 
 - :py:class:`~polyzymd.analyses.base.Analysis` - Plugin base class for all analyses
+- :py:class:`~polyzymd.analyses.base.ScalarMeasurementAnalysis` - Base class for simple scalar measurement plugins
+- :py:class:`~polyzymd.analyses.base.ScalarMeasurement` - Strategy that returns one scalar per replicate
+- :py:class:`~polyzymd.analyses.base.MetricSpec` - Metadata for a scalar measurement metric
 - :py:class:`~polyzymd.analyses.distances.DistanceCalculator` - Inter-group distances
 - :py:class:`~polyzymd.analyses.contacts.ParallelContactAnalyzer` - Polymer-protein contacts
 - :py:class:`~polyzymd.analyses._results_base.BaseAnalysisResult` - Serializable result base class
