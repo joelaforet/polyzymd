@@ -1007,7 +1007,10 @@ class AnalysisLifecycle:
 
         try:
             paths = self.adapter.plot(plot_ctx)
+            _check_plot_result(paths, self.analysis.name)
             return paths, []
+        except PluginContractError:
+            raise
         except Exception as e:
             logger.error(f"Failed to generate plots for {self.analysis.name}: {e}")
             return [], [(self.analysis.name, str(e))]

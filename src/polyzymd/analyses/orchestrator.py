@@ -34,7 +34,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
-from polyzymd.analyses._analysis_lifecycle import AnalysisLifecycle
+from polyzymd.analyses._analysis_lifecycle import AnalysisLifecycle, _resolve_settings
 from polyzymd.analyses.base import Condition
 from polyzymd.analyses.exceptions import (
     AnalysisError,
@@ -439,6 +439,7 @@ def run_comparison(
     """Run the full comparison pipeline for one analysis type.
 
     Steps:
+
     1. Build ``Condition`` objects from ``ComparisonConfig``.
     2. Filter conditions via ``analysis.filter_conditions()``.
     3. For each condition: compute replicates + aggregate.
@@ -658,39 +659,6 @@ def _validate_dependencies(analyses: list[Analysis], satisfied: set[str] | None 
                 raise DependencyError(
                     f"{a.name}: declared dependency {dep!r} is not in the current run list"
                 )
-
-
-def _resolve_settings(analysis: Analysis, config: "ComparisonConfig") -> Any:
-    """Extract analysis-specific settings from the comparison config.
-
-    Uses the unified plugin settings from comparison config.
-
-    Parameters
-    ----------
-    analysis : Analysis
-        The analysis plugin.
-    config : ComparisonConfig
-        Comparison config.
-
-    Returns
-    -------
-    BaseModel
-        Settings instance (the analysis's ``Settings`` class).
-    """
-    plugin_settings = getattr(config, "plugins", None)
-    if plugin_settings is None:
-        return analysis.Settings()
-
-    settings_obj = plugin_settings.get(analysis.name)
-    if settings_obj is None:
-        return analysis.Settings()
-    if isinstance(settings_obj, analysis.Settings):
-        return settings_obj
-    if isinstance(settings_obj, dict):
-        return analysis.Settings.model_validate(settings_obj)
-    if hasattr(settings_obj, "model_dump"):
-        return analysis.Settings.model_validate(settings_obj.model_dump())
-    return analysis.Settings.model_validate(settings_obj)
 
 
 def _get_enabled_from_config(config: "ComparisonConfig") -> list[str]:
