@@ -94,7 +94,6 @@ Customize publication-quality figures and debug common issues.
 :maxdepth: 1
 
 Customizing Plots for Publication <publication_plots>
-Contacts Cookbook <analysis_contacts_cookbook>
 Broken Molecule Debugging <broken_molecules_debugging>
 Troubleshoot Common Problems <troubleshooting>
 ```

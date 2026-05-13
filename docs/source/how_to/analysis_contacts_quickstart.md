@@ -280,8 +280,8 @@ print(
 )
 ```
 
-For worked Python recipes (interaction matrices, group-level summaries, custom
-queries), use {doc}`analysis_contacts_cookbook`.
+For complete contacts configuration, output, plotting, and troubleshooting
+details, use {doc}`../reference/analysis_contacts_reference`.
 
 ## Compare conditions
 
@@ -314,7 +314,6 @@ see {doc}`../reference/analysis_contacts_reference`.
 ## Next steps
 
 - {doc}`analysis_compare_conditions`
-- {doc}`analysis_contacts_cookbook`
 - {doc}`analysis_rmsf_quickstart`
 - {doc}`analysis_triad_quickstart`
 - {doc}`../reference/analysis_contacts_reference`

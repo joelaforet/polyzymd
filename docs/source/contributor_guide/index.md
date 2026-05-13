@@ -13,8 +13,8 @@ PolyzyMD, understand the codebase, or add new capabilities.
 ## Extension Workflows
 
 - **[Extend the Analysis Framework](extending_analyses.md)** —
-  how to add a new analysis type as a plugin package, including compute,
-  comparison, formatting, and plotting
+  how to add a new scalar measurement analysis or advanced runner-backed plugin,
+  including comparison, formatting, and plotting
 
 ## Contributor Mindset
 
@@ -33,6 +33,4 @@ Contributing to PolyzyMD <contributing>
 Set Up a Contributor Environment <setup>
 Packaging and Distribution Notes <packaging>
 Extend the Analysis Framework <extending_analyses>
-Comparison Logic in an Analysis Plugin <extending_comparators>
-Plotting in an Analysis Plugin <extending_plotters>
 ```

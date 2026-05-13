@@ -12,7 +12,6 @@ Use these pages for module-level API documentation.
    simulation
    workflow
    core
-   analysis
    analyses
    analyses_base
    analyses_shared
