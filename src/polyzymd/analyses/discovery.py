@@ -1,4 +1,4 @@
-"""Automatic discovery of Analysis plugin modules via ``pkgutil``.
+"""Automatic discovery of top-level Analysis plugin modules via ``pkgutil``.
 
 Scans ``src/polyzymd/analyses/`` for plugin packages or modules, imports them, and
 collects all concrete :class:`Analysis` subclasses. No bootstrap files,
@@ -6,8 +6,9 @@ no package-level registry edits, no decorators needed.
 
 How Discovery Works
 -------------------
-1. ``pkgutil.walk_packages()`` yields modules inside ``polyzymd.analyses``.
-2. Each non-infrastructure module is imported via ``importlib.import_module()``.
+1. ``pkgutil.iter_modules()`` yields direct children of ``polyzymd.analyses``.
+2. Each non-infrastructure top-level module or package is imported via
+   ``importlib.import_module()``.
 3. All module-level names are inspected; concrete subclasses of
    :class:`~polyzymd.analyses.base.Analysis` are collected.
 4. Name collisions (two plugins with the same ``name``) raise immediately.
@@ -143,11 +144,12 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
     registry: dict[str, type[Analysis]] = {}
     alias_registry: dict[str, str] = {}  # alias -> canonical name
 
-    # Walk plugin packages and simple single-file plugin modules
+    # Import only direct plugin packages and simple single-file plugin modules
     package_path = analyses_pkg.__path__
     package_prefix = analyses_pkg.__name__ + "."
 
-    for _, modname, is_pkg in pkgutil.walk_packages(package_path, prefix=package_prefix):
+    for _, modname, is_pkg in pkgutil.iter_modules(package_path, prefix=package_prefix):
+        del is_pkg
         # Skip infrastructure modules
         if _should_skip_module(modname, package_prefix):
             continue

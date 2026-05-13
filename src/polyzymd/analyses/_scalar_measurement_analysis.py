@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import math
-import statistics
 import hashlib
 import json
+import math
+import statistics
 from abc import ABC
 from typing import Any, ClassVar, Sequence
 

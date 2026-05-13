@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
+import sys
+import textwrap
 import types
 from typing import ClassVar
 from unittest.mock import patch
@@ -29,6 +32,55 @@ class ToyAnalysis(Analysis):
 
     def aggregate(self, ctx, results):
         return {"count": len(results)}
+
+
+def _plugin_source(class_name: str, plugin_name: str, aliases: tuple[str, ...] = ()) -> str:
+    """Return source for a temporary top-level discovery plugin."""
+
+    return textwrap.dedent(f'''
+        from typing import ClassVar
+
+        from pydantic import BaseModel
+
+        from polyzymd.analyses.base import Analysis
+
+
+        class TempSettings(BaseModel):
+            """Temporary settings model."""
+
+            threshold: float = 1.0
+
+
+        class {class_name}(Analysis):
+            """Temporary plugin discovered from a real import path."""
+
+            name: ClassVar[str] = {plugin_name!r}
+            Settings: ClassVar[type] = TempSettings
+            aliases: ClassVar[tuple[str, ...]] = {aliases!r}
+
+            def run_replicate(self, ctx, replicate):
+                return {{"replicate": replicate}}
+
+            def aggregate(self, ctx, results):
+                return {{"count": len(results)}}
+        ''')
+
+
+def _discover_from_temp_analysis_path(monkeypatch, tmp_path):
+    """Discover plugins from an isolated temporary analyses package path."""
+
+    import polyzymd.analyses as analyses_pkg
+    from polyzymd.analyses.discovery import _discover_plugins
+
+    monkeypatch.setattr(analyses_pkg, "__path__", [str(tmp_path)])
+    importlib.invalidate_caches()
+    try:
+        return _discover_plugins()
+    finally:
+        for module_name in list(sys.modules):
+            if module_name.startswith("polyzymd.analyses.temp_"):
+                sys.modules.pop(module_name, None)
+        importlib.invalidate_caches()
 
 
 class TestDiscovery:
@@ -152,7 +204,7 @@ class TestDiscovery:
             raise AssertionError(f"Unexpected import: {name}")
 
         with (
-            patch("pkgutil.walk_packages", return_value=walked),
+            patch("pkgutil.iter_modules", return_value=walked),
             patch("importlib.import_module", side_effect=_import_side_effect),
         ):
             registry, aliases = _discover_plugins()
@@ -183,6 +235,94 @@ class TestDiscoveryRobustness:
         assert _is_top_level_module("polyzymd.analyses.contacts", package_prefix) is True
         assert _is_top_level_module("polyzymd.analyses.contacts._runner", package_prefix) is False
 
+    def test_realistic_top_level_module_and_package_discovery(self, monkeypatch, tmp_path):
+        """Discovery should import real top-level modules and package plugins."""
+
+        (tmp_path / "temp_single_real.py").write_text(
+            _plugin_source("TempSingleRealAnalysis", "temp_single_real")
+        )
+        package_dir = tmp_path / "temp_package_real"
+        package_dir.mkdir()
+        (package_dir / "__init__.py").write_text(
+            _plugin_source("TempPackageRealAnalysis", "temp_package_real")
+        )
+
+        registry, aliases = _discover_from_temp_analysis_path(monkeypatch, tmp_path)
+
+        assert set(registry) == {"temp_single_real", "temp_package_real"}
+        assert aliases == {}
+        assert registry["temp_single_real"].__name__ == "TempSingleRealAnalysis"
+        assert registry["temp_package_real"].__name__ == "TempPackageRealAnalysis"
+
+    def test_realistic_discovery_does_not_import_skipped_or_nested_modules(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """Discovery should not import private, skipped, or nested package modules."""
+
+        (tmp_path / "_temp_private_boom.py").write_text("raise RuntimeError('private imported')\n")
+        shared_dir = tmp_path / "shared"
+        shared_dir.mkdir()
+        (shared_dir / "__init__.py").write_text("raise RuntimeError('shared imported')\n")
+
+        package_dir = tmp_path / "temp_nested_package"
+        package_dir.mkdir()
+        (package_dir / "__init__.py").write_text(
+            _plugin_source("TempNestedPackageAnalysis", "temp_nested_package")
+        )
+        (package_dir / "_private_runner.py").write_text("raise RuntimeError('nested imported')\n")
+
+        registry, aliases = _discover_from_temp_analysis_path(monkeypatch, tmp_path)
+
+        assert set(registry) == {"temp_nested_package"}
+        assert aliases == {}
+
+    def test_realistic_single_file_and_package_name_collision(self, monkeypatch, tmp_path):
+        """Duplicate plugin names across modules and packages should fail."""
+
+        (tmp_path / "temp_collision_module.py").write_text(
+            _plugin_source("TempCollisionModuleAnalysis", "temp_collision")
+        )
+        package_dir = tmp_path / "temp_collision_package"
+        package_dir.mkdir()
+        (package_dir / "__init__.py").write_text(
+            _plugin_source("TempCollisionPackageAnalysis", "temp_collision")
+        )
+
+        with pytest.raises(RuntimeError, match="Analysis name collision"):
+            _discover_from_temp_analysis_path(monkeypatch, tmp_path)
+
+    def test_realistic_alias_collision(self, monkeypatch, tmp_path):
+        """Duplicate aliases across top-level plugins should fail."""
+
+        (tmp_path / "temp_alias_left.py").write_text(
+            _plugin_source("TempAliasLeftAnalysis", "temp_alias_left", aliases=("temp_alias",))
+        )
+        (tmp_path / "temp_alias_right.py").write_text(
+            _plugin_source("TempAliasRightAnalysis", "temp_alias_right", aliases=("temp_alias",))
+        )
+
+        with pytest.raises(RuntimeError, match="Analysis alias collision"):
+            _discover_from_temp_analysis_path(monkeypatch, tmp_path)
+
+    def test_realistic_alias_name_collision(self, monkeypatch, tmp_path):
+        """Aliases should not collide with top-level plugin names."""
+
+        (tmp_path / "temp_alias_name_left.py").write_text(
+            _plugin_source("TempAliasNameLeftAnalysis", "temp_existing_name")
+        )
+        (tmp_path / "temp_alias_name_right.py").write_text(
+            _plugin_source(
+                "TempAliasNameRightAnalysis",
+                "temp_alias_name_right",
+                aliases=("temp_existing_name",),
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="conflicts with existing analysis name"):
+            _discover_from_temp_analysis_path(monkeypatch, tmp_path)
+
     def test_discovery_imports_top_level_single_file_plugins(self):
         """Single-file plugins should be imported as contributor plugins."""
         from polyzymd.analyses.discovery import _discover_plugins
@@ -203,7 +343,7 @@ class TestDiscoveryRobustness:
         single_file_mod.SingleFilePlugin = SingleFilePlugin
 
         with (
-            patch("pkgutil.walk_packages", return_value=[(None, module_name, False)]),
+            patch("pkgutil.iter_modules", return_value=[(None, module_name, False)]),
             patch("importlib.import_module", return_value=single_file_mod) as mock_import,
         ):
             registry, aliases = _discover_plugins()
@@ -241,7 +381,7 @@ class TestDiscoveryRobustness:
             raise AssertionError(f"Unexpected import: {name}")
 
         with (
-            patch("pkgutil.walk_packages", return_value=walked),
+            patch("pkgutil.iter_modules", return_value=walked),
             patch("importlib.import_module", side_effect=_import_side_effect) as mock_import,
         ):
             registry, aliases = _discover_plugins()
@@ -271,7 +411,7 @@ class TestDiscoveryRobustness:
         poison_mod.good_attr = object()
 
         with (
-            patch("pkgutil.walk_packages", return_value=[(None, module_name, True)]),
+            patch("pkgutil.iter_modules", return_value=[(None, module_name, True)]),
             patch("importlib.import_module", return_value=poison_mod),
             caplog.at_level("DEBUG", logger="polyzymd.analyses"),
         ):
@@ -301,7 +441,7 @@ class TestDiscoveryRobustness:
         poison_mod.good_attr = object()
 
         with (
-            patch("pkgutil.walk_packages", return_value=[(None, module_name, True)]),
+            patch("pkgutil.iter_modules", return_value=[(None, module_name, True)]),
             patch("importlib.import_module", return_value=poison_mod),
         ):
             with pytest.raises(RuntimeError, match="poisoned"):
@@ -319,7 +459,7 @@ class TestDiscoveryRobustness:
             raise AssertionError(f"Unexpected import: {name}")
 
         with (
-            patch("pkgutil.walk_packages", return_value=walked),
+            patch("pkgutil.iter_modules", return_value=walked),
             patch("importlib.import_module", side_effect=_import_side_effect),
             caplog.at_level("INFO", logger="polyzymd.analyses"),
         ):
@@ -348,7 +488,7 @@ class TestDiscoveryRobustness:
             raise AssertionError(f"Unexpected import: {name}")
 
         with (
-            patch("pkgutil.walk_packages", return_value=walked),
+            patch("pkgutil.iter_modules", return_value=walked),
             patch("importlib.import_module", side_effect=_import_side_effect),
         ):
             with pytest.raises(ModuleNotFoundError, match="totally_missing_pkg"):
