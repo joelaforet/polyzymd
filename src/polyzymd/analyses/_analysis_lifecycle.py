@@ -180,7 +180,7 @@ class AnalysisCompatibilityAdapter:
             Formatted comparison output.
         """
 
-        return self.analysis.format(result, fmt=fmt)
+        return self.analysis.format(result, fmt)
 
 
 class AnalysisLifecycle:
