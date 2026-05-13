@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar
 
+import pytest
 from pydantic import BaseModel
 
 from polyzymd.analyses import ScalarMeasurement as TopLevelScalarMeasurement
@@ -56,6 +57,12 @@ class ToyScalarMeasurement(ScalarMeasurement):
         return float(settings.offset + (start or 0) + (stop or 0) + (step or 0))
 
 
+class ToyScalarMeasurementV3(ToyScalarMeasurement):
+    """Toy scalar measurement with a changed cache version."""
+
+    version: ClassVar[str] = "3"
+
+
 class ToyScalarAnalysis(ScalarMeasurementAnalysis):
     """Toy scalar measurement analysis with explicit settings."""
 
@@ -64,11 +71,27 @@ class ToyScalarAnalysis(ScalarMeasurementAnalysis):
     measurement: ClassVar[ScalarMeasurement] = ToyScalarMeasurement()
 
 
+class ClassVariableScalarAnalysis(ScalarMeasurementAnalysis):
+    """Toy scalar analysis configured with a measurement class."""
+
+    name: ClassVar[str] = "class_variable_scalar"
+    Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
+    measurement: ClassVar[type[ScalarMeasurement]] = ToyScalarMeasurement
+
+
 class DefaultSettingsScalarAnalysis(ScalarMeasurementAnalysis):
     """Toy scalar analysis that relies on adapter default settings."""
 
     name: ClassVar[str] = "default_settings_scalar"
     measurement: ClassVar[ScalarMeasurement] = ToyScalarMeasurement()
+
+
+class VersionedScalarAnalysis(ScalarMeasurementAnalysis):
+    """Toy scalar analysis with a changed measurement version."""
+
+    name: ClassVar[str] = "toy_scalar"
+    Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
+    measurement: ClassVar[type[ScalarMeasurement]] = ToyScalarMeasurementV3
 
 
 class FakeTrajectory:
@@ -167,6 +190,48 @@ def test_scalar_measurement_analysis_default_settings_model() -> None:
 
     assert isinstance(settings, BaseModel)
     assert settings.model_dump() == {}
+
+
+def test_scalar_measurement_analysis_accepts_measurement_class() -> None:
+    """Scalar measurement analyses should accept a class-variable measurement class."""
+
+    analysis = ClassVariableScalarAnalysis()
+    measurement = analysis._measurement_instance()
+
+    assert isinstance(measurement, ToyScalarMeasurement)
+    assert measurement.name == "toy_measurement"
+
+
+def test_scalar_measurement_analysis_requires_measurement() -> None:
+    """Scalar measurement analyses should fail clearly when measurement is missing."""
+
+    with pytest.raises(TypeError, match="MissingMeasurementAnalysis.measurement must be defined"):
+
+        class MissingMeasurementAnalysis(ScalarMeasurementAnalysis):
+            name: ClassVar[str] = "missing_measurement"
+            Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
+
+
+def test_scalar_measurement_analysis_rejects_invalid_measurement() -> None:
+    """Scalar measurement analyses should fail clearly for invalid measurement values."""
+
+    with pytest.raises(TypeError, match="InvalidMeasurementAnalysis.measurement must be"):
+
+        class InvalidMeasurementAnalysis(ScalarMeasurementAnalysis):
+            name: ClassVar[str] = "invalid_measurement"
+            Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
+            measurement: ClassVar[object] = object()
+
+
+def test_scalar_measurement_fingerprint_includes_measurement_version() -> None:
+    """Changing measurement version should change aggregate cache identity."""
+
+    settings = ToyScalarSettings(offset=10.0)
+
+    old_fingerprint = ToyScalarAnalysis().aggregate_settings_fingerprint(settings)
+    new_fingerprint = VersionedScalarAnalysis().aggregate_settings_fingerprint(settings)
+
+    assert old_fingerprint != new_fingerprint
 
 
 def test_scalar_measurement_analysis_run_replicate_and_aggregate(tmp_path) -> None:
