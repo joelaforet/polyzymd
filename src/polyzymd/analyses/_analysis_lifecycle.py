@@ -401,7 +401,6 @@ class AnalysisLifecycle:
             results=loaded_results,
             successful_reps=successful_reps,
             recompute=recompute,
-            save_when_existing=True,
         )
 
     def run_analysis(
@@ -503,7 +502,6 @@ class AnalysisLifecycle:
             results=results,
             successful_reps=successful,
             recompute=recompute,
-            save_when_existing=False,
         )
         logger.info(f"  Aggregated {len(results)} replicates for '{condition.label}'")
         return aggregated
@@ -1145,7 +1143,6 @@ class AnalysisLifecycle:
         results: Sequence[Any],
         successful_reps: Sequence[int],
         recompute: bool,
-        save_when_existing: bool,
     ) -> Any:
         """Run aggregate hook, validate identity, and save aggregate output.
 
@@ -1165,9 +1162,6 @@ class AnalysisLifecycle:
             Replicate IDs represented by ``results``.
         recompute : bool
             Whether recomputation was requested.
-        save_when_existing : bool
-            Whether to save even when the aggregate path already exists.
-
         Returns
         -------
         Any
@@ -1214,14 +1208,13 @@ class AnalysisLifecycle:
             source=agg_result_path,
             expected_replicates=successful_reps,
         )
-        if save_when_existing or recompute or not agg_result_path.exists():
-            try:
-                self.analysis.save_result(aggregated, agg_result_path)
-            except OSError as save_err:
-                raise AggregationError(
-                    f"{self.analysis.name}: failed to save aggregated result for "
-                    f"condition='{condition.label}': {save_err}"
-                ) from save_err
+        try:
+            self.analysis.save_result(aggregated, agg_result_path)
+        except OSError as save_err:
+            raise AggregationError(
+                f"{self.analysis.name}: failed to save aggregated result for "
+                f"condition='{condition.label}': {save_err}"
+            ) from save_err
         return aggregated
 
 

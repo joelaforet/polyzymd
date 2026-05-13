@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar, Sequence
@@ -246,6 +247,33 @@ def test_public_run_analysis_order_and_canonical_save(tmp_path: Path) -> None:
     assert (output_dir / "run_1" / "result.json").exists()
     assert (output_dir / "run_2" / "result.json").exists()
     assert (output_dir / "aggregated" / "result.json").exists()
+
+
+def test_public_run_analysis_overwrites_stale_aggregate(tmp_path: Path) -> None:
+    """Fresh aggregation should always replace stale canonical aggregate JSON."""
+
+    analysis = _OrderAnalysis()
+    condition = _condition(tmp_path)
+    settings = _LifecycleSettings(scale=2.0)
+    output_dir = tmp_path / "analysis" / analysis.name
+    aggregate_path = output_dir / "aggregated" / "result.json"
+    aggregate_path.parent.mkdir(parents=True, exist_ok=True)
+    aggregate_path.write_text(json.dumps({"mean_value": -1.0, "stale": True}))
+
+    result = run_analysis(
+        analysis,
+        condition,
+        settings,
+        equilibration="10ns",
+        output_dir=output_dir,
+        recompute=False,
+    )
+
+    saved = json.loads(aggregate_path.read_text())
+    assert result["mean_value"] == 3.0
+    assert saved["mean_value"] == 3.0
+    assert saved["replicate_values"] == [2.0, 4.0]
+    assert "stale" not in saved
 
 
 def test_public_run_analysis_recompute_removes_aggregate_sidecars(tmp_path: Path) -> None:
