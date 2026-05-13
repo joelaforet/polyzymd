@@ -82,6 +82,7 @@ from polyzymd.analyses._contexts import (
     ReplicateContext,
     _default_plot_settings,
 )
+from polyzymd.analyses._measurement import CacheIdentity, Measurement, MetricSpec, ScalarMeasurement
 from polyzymd.analyses.exceptions import PluginContractError
 
 if TYPE_CHECKING:
@@ -95,15 +96,20 @@ __all__ = [
     "BaseComparisonResult",
     "BaseConditionSummary",
     "BasePlotSettings",
+    "CacheIdentity",
     "ComparisonContext",
     "ComparisonResult",
     "Condition",
     "ConditionSummary",
+    "Measurement",
     "MetricValue",
+    "MetricSpec",
     "PairwiseResult",
     "PlotContext",
     "PluginContractError",
     "ReplicateContext",
+    "ScalarMeasurement",
+    "ScalarMeasurementAnalysis",
     "SlurmResourceHint",
     "TConditionSummary",
     "TPairwiseResult",
@@ -124,6 +130,10 @@ for _public_class in (
     ComparisonResult,
     BaseConditionSummary,
     BaseComparisonResult,
+    MetricSpec,
+    CacheIdentity,
+    Measurement,
+    ScalarMeasurement,
 ):
     _public_class.__module__ = __name__
 del _public_class
@@ -556,3 +566,6 @@ class Analysis(ABC):
 
 
 Analysis.__module__ = __name__
+from polyzymd.analyses._scalar_measurement_analysis import ScalarMeasurementAnalysis  # noqa: E402
+
+ScalarMeasurementAnalysis.__module__ = __name__
