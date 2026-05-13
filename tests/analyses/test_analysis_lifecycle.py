@@ -9,11 +9,7 @@ from typing import Any, ClassVar, Sequence
 import pytest
 from pydantic import BaseModel
 
-from polyzymd.analyses._analysis_lifecycle import (
-    ONE_ANALYSIS_STAGE_ORDER,
-    AnalysisCompatibilityAdapter,
-    AnalysisLifecycle,
-)
+from polyzymd.analyses._analysis_lifecycle import AnalysisLifecycle
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -23,7 +19,14 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 from polyzymd.analyses.exceptions import PluginContractError
-from polyzymd.analyses.orchestrator import run_replicate_once
+from polyzymd.analyses.orchestrator import (
+    finalize_comparison_from_disk,
+    prepare_comparison_run,
+    run_analysis,
+    run_comparison,
+    run_plot_only,
+    run_replicate_once,
+)
 from polyzymd.config.comparison import PlotSettings
 
 
@@ -87,7 +90,10 @@ class _DelegatingAnalysis(_OrderAnalysis):
         """Record plot delegation and return a synthetic path."""
 
         self.events.append(f"plot:{ctx.output_dir.name}")
-        return [ctx.output_dir / "plot.png"]
+        path = ctx.output_dir / "plot.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("plot")
+        return [path]
 
     def format(self, result: Any, output_format: str = "text") -> str:
         """Record format delegation and return formatted text."""
@@ -112,6 +118,76 @@ class _InvalidAggregateAnalysis(_OrderAnalysis):
         return ["invalid"]
 
 
+class _RejectingAnalysis(_DelegatingAnalysis):
+    """Analysis that rejects all conditions during filtering."""
+
+    name: ClassVar[str] = "rejecting_lifecycle"
+
+    def filter_conditions(
+        self,
+        conditions: list[Condition],
+        settings: BaseModel | None = None,
+    ) -> list[Condition]:
+        """Reject every condition to exercise validation errors."""
+
+        del conditions, settings
+        self.events.append("filter")
+        return []
+
+
+class _ContractReplicateAnalysis(_OrderAnalysis):
+    """Analysis that raises a contract error from the replicate hook."""
+
+    name: ClassVar[str] = "contract_replicate_lifecycle"
+
+    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, Any]:
+        """Raise a plugin contract error without lifecycle wrapping."""
+
+        del ctx, replicate
+        raise PluginContractError("contract boom")
+
+
+class _CondCfg:
+    """Small condition config stand-in for public wrapper tests."""
+
+    def __init__(self, label: str, config: Path, replicates: tuple[int, ...]) -> None:
+        self.label = label
+        self.config = config
+        self.replicates = list(replicates)
+
+
+class _ComparisonConfig:
+    """Small comparison config stand-in for public wrapper tests."""
+
+    def __init__(self, tmp_path: Path, labels: tuple[str, ...] = ("Cond",)) -> None:
+        self.name = "project"
+        self.source_path = tmp_path / "comparison.yaml"
+        self.defaults = SimpleNamespace(equilibration_time="10ns")
+        self.control = None
+        self.conditions = [
+            _CondCfg(label, tmp_path / f"{label.lower()}.yaml", (1, 2))
+            for label in labels
+        ]
+        self.plugins = SimpleNamespace(get=lambda name: None)
+        self.plot_settings = PlotSettings(output_dir=tmp_path / "figures")
+
+    def model_copy(self, deep: bool = True) -> "_ComparisonConfig":
+        """Return a shallow behavioral copy for lifecycle finalization."""
+
+        del deep
+        copied = object.__new__(type(self))
+        copied.name = self.name
+        copied.source_path = self.source_path
+        copied.defaults = SimpleNamespace(
+            equilibration_time=self.defaults.equilibration_time,
+        )
+        copied.control = self.control
+        copied.conditions = self.conditions
+        copied.plugins = self.plugins
+        copied.plot_settings = self.plot_settings
+        return copied
+
+
 def _condition(tmp_path: Path, replicates: tuple[int, ...] = (1, 2)) -> Condition:
     """Build a lightweight condition for lifecycle tests.
 
@@ -131,81 +207,30 @@ def _condition(tmp_path: Path, replicates: tuple[int, ...] = (1, 2)) -> Conditio
     return Condition("Cond", tmp_path / "cond.yaml", replicates, SimpleNamespace())
 
 
-def test_stage_order_constant_documents_one_analysis_order() -> None:
-    """Stage-order constants should expose the Template Method sequence."""
+def _patch_condition_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch config loading while keeping public lifecycle execution intact."""
 
-    assert ONE_ANALYSIS_STAGE_ORDER == ("prepare", "compute", "aggregate", "compare", "plot")
+    def _from_condition_config(cond_cfg: _CondCfg) -> Condition:
+        return Condition(
+            cond_cfg.label,
+            cond_cfg.config,
+            tuple(cond_cfg.replicates),
+            SimpleNamespace(),
+        )
 
-
-def test_adapter_delegates_existing_analysis_hooks(tmp_path: Path) -> None:
-    """Compatibility adapter should delegate to existing Analysis hooks."""
-
-    analysis = _DelegatingAnalysis()
-    adapter = AnalysisCompatibilityAdapter(analysis)
-    settings = _LifecycleSettings(scale=2.0)
-    condition = _condition(tmp_path, replicates=(1,))
-    rep_ctx = ReplicateContext(
-        condition=condition,
-        replicate=1,
-        sim_config=condition.sim_config,
-        output_dir=tmp_path / "run_1",
-        equilibration="10ns",
-        recompute=False,
-        settings=settings,
-    )
-    agg_ctx = AggregateContext(
-        condition=condition,
-        replicates=(1,),
-        output_dir=tmp_path / "aggregated",
-        equilibration="10ns",
-        settings=settings,
-    )
-    comp_ctx = ComparisonContext(
-        name="project",
-        conditions=[condition],
-        excluded_conditions=[],
-        control_label=None,
-        analysis_dirs={"Cond": tmp_path},
-        results_dir=tmp_path / "comparison",
-        equilibration="10ns",
-        settings=settings,
-    )
-    plot_ctx = PlotContext(
-        conditions=[condition],
-        analysis_dirs={"Cond": tmp_path},
-        results_dir=tmp_path / "comparison",
-        output_dir=tmp_path / "figures",
-        settings=settings,
-        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
-    )
-
-    assert adapter.filter_conditions([condition], settings=settings) == [condition]
-    rep_result = adapter.run_replicate(rep_ctx, 1)
-    assert rep_result["value"] == 2.0
-    assert adapter.aggregate(agg_ctx, [rep_result])["mean_value"] == 2.0
-    assert adapter.compare(comp_ctx) == {"compared": True}
-    assert adapter.plot(plot_ctx) == [tmp_path / "figures" / "plot.png"]
-    assert adapter.format({"ok": True}, fmt="json") == "json:{'ok': True}"
-    assert analysis.events == [
-        "filter",
-        "run:1",
-        "aggregate",
-        "compare:project",
-        "plot:figures",
-        "format:json",
-    ]
+    monkeypatch.setattr(Condition, "from_condition_config", staticmethod(_from_condition_config))
 
 
-def test_lifecycle_run_analysis_order_and_canonical_save(tmp_path: Path) -> None:
-    """Lifecycle run_analysis should preserve order, paths, and identity metadata."""
+def test_public_run_analysis_order_and_canonical_save(tmp_path: Path) -> None:
+    """Public run_analysis should preserve order, paths, and identity metadata."""
 
     analysis = _OrderAnalysis()
-    lifecycle = AnalysisLifecycle(analysis)
     condition = _condition(tmp_path)
     settings = _LifecycleSettings(scale=1.5)
     output_dir = tmp_path / "analysis" / analysis.name
 
-    result = lifecycle.run_analysis(
+    result = run_analysis(
+        analysis,
         condition,
         settings,
         equilibration="10ns",
@@ -221,6 +246,40 @@ def test_lifecycle_run_analysis_order_and_canonical_save(tmp_path: Path) -> None
     assert (output_dir / "run_1" / "result.json").exists()
     assert (output_dir / "run_2" / "result.json").exists()
     assert (output_dir / "aggregated" / "result.json").exists()
+
+
+def test_public_run_analysis_recompute_removes_aggregate_sidecars(tmp_path: Path) -> None:
+    """Public run_analysis should clean analysis-owned aggregate outputs on recompute."""
+
+    class _CleanupAnalysis(_OrderAnalysis):
+        name: ClassVar[str] = "cleanup_lifecycle"
+
+        def aggregate(
+            self,
+            ctx: AggregateContext,
+            results: Sequence[dict[str, Any]],
+        ) -> dict[str, Any]:
+            assert ctx.recompute is True
+            assert not (ctx.output_dir / "stale_sidecar.txt").exists()
+            return super().aggregate(ctx, results)
+
+    analysis = _CleanupAnalysis()
+    condition = _condition(tmp_path)
+    output_dir = tmp_path / "analysis" / analysis.name
+    stale_sidecar = output_dir / "aggregated" / "stale_sidecar.txt"
+    stale_sidecar.parent.mkdir(parents=True, exist_ok=True)
+    stale_sidecar.write_text("stale")
+
+    run_analysis(
+        analysis,
+        condition,
+        _LifecycleSettings(),
+        equilibration="10ns",
+        output_dir=output_dir,
+        recompute=True,
+    )
+
+    assert not stale_sidecar.exists()
 
 
 def test_lifecycle_validates_and_rejects_invalid_aggregate(tmp_path: Path) -> None:
@@ -239,39 +298,160 @@ def test_lifecycle_validates_and_rejects_invalid_aggregate(tmp_path: Path) -> No
         )
 
 
-def test_orchestrator_wrapper_delegates_to_lifecycle(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Public wrappers should remain thin delegations to the private lifecycle."""
+def test_public_run_replicate_once_writes_canonical_result(tmp_path: Path) -> None:
+    """Public run_replicate_once should execute and persist the canonical result."""
 
-    calls: list[tuple[str, int, bool]] = []
-
-    def _fake_run_replicate_once(
-        self: AnalysisLifecycle,
-        condition: Condition,
-        settings: BaseModel,
-        equilibration: str,
-        output_dir: Path,
-        replicate: int,
-        recompute: bool,
-    ) -> dict[str, Any]:
-        """Record public wrapper delegation arguments."""
-
-        del self, condition, settings, equilibration, output_dir
-        calls.append(("run_replicate_once", replicate, recompute))
-        return {"replicate": replicate}
-
-    monkeypatch.setattr(AnalysisLifecycle, "run_replicate_once", _fake_run_replicate_once)
+    analysis = _OrderAnalysis()
+    condition = _condition(tmp_path, replicates=(3,))
+    output_dir = tmp_path / "run_3"
 
     result = run_replicate_once(
-        _OrderAnalysis(),
-        _condition(tmp_path, replicates=(3,)),
-        _LifecycleSettings(),
+        analysis,
+        condition,
+        _LifecycleSettings(scale=2.0),
         "5ns",
-        tmp_path / "run_3",
+        output_dir,
         replicate=3,
         recompute=True,
     )
 
-    assert result == {"replicate": 3}
-    assert calls == [("run_replicate_once", 3, True)]
+    result_path = output_dir / "result.json"
+    assert result == {"value": 6.0, "replicate": 3}
+    assert result_path.exists()
+    assert '"replicate": 3' in result_path.read_text()
+    assert analysis.events == ["run:3"]
+
+
+def test_public_run_comparison_executes_full_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Public run_comparison should produce concrete aggregate, compare, and plot outputs."""
+
+    _patch_condition_loader(monkeypatch)
+    analysis = _DelegatingAnalysis()
+    config = _ComparisonConfig(tmp_path)
+
+    result = run_comparison(analysis, config, recompute=False, equilibration="5ns")
+
+    comparison_path = tmp_path / "comparison" / analysis.name / "result.json"
+    plot_path = tmp_path / "figures" / analysis.name / "plot.png"
+    assert result["aggregated"]["Cond"]["mean_value"] == 1.5
+    assert result["comparison"] == {"compared": True}
+    assert result["comparison_path"] == comparison_path
+    assert result["plots"] == [plot_path]
+    assert comparison_path.exists()
+    assert plot_path.exists()
+    assert analysis.events == [
+        "filter",
+        "run:1",
+        "run:2",
+        "aggregate",
+        "compare:project",
+        f"plot:{analysis.name}",
+    ]
+
+
+def test_public_finalize_loads_aggregate_from_disk_and_writes_outputs(tmp_path: Path) -> None:
+    """Finalize should load existing aggregates, then save comparison and plot results."""
+
+    analysis = _DelegatingAnalysis()
+    condition = _condition(tmp_path)
+    settings = _LifecycleSettings()
+    analysis_root = tmp_path / "analysis"
+    condition_dir = analysis_root / condition.label / analysis.name
+    run_analysis(
+        analysis,
+        condition,
+        settings,
+        equilibration="10ns",
+        output_dir=condition_dir,
+    )
+    analysis.events.clear()
+    config = _ComparisonConfig(tmp_path)
+    prepared_state = {
+        "all_conditions": [condition],
+        "valid_conditions": [condition],
+        "excluded_conditions": [],
+        "condition_by_label": {condition.label: condition},
+        "settings": settings,
+        "equilibration": "10ns",
+        "analysis_root": analysis_root,
+    }
+
+    result = finalize_comparison_from_disk(
+        analysis=analysis,
+        config=config,
+        analysis_dirs={condition.label: condition_dir},
+        aggregated_results={},
+        results_dir=tmp_path / "comparison" / analysis.name,
+        figures_dir=tmp_path / "figures" / analysis.name,
+        settings=settings,
+        effective_control=None,
+        prepared_state=prepared_state,
+    )
+
+    assert result["comparison"] == {"compared": True}
+    assert result["comparison_path"].exists()
+    assert result["plots"] == [tmp_path / "figures" / analysis.name / "plot.png"]
+    assert result["plots"][0].exists()
+    assert analysis.events == ["compare:project", f"plot:{analysis.name}"]
+
+
+def test_public_plot_only_returns_paths_and_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Plot-only wrapper should return generated paths or captured failures."""
+
+    class _FailingPlotAnalysis(_DelegatingAnalysis):
+        name: ClassVar[str] = "failing_plot_lifecycle"
+
+        def plot(self, ctx: PlotContext) -> list[Path]:
+            """Raise a plotting failure for plot-only failure reporting."""
+
+            del ctx
+            raise RuntimeError("plot boom")
+
+    _patch_condition_loader(monkeypatch)
+    config = _ComparisonConfig(tmp_path)
+    analysis = _DelegatingAnalysis()
+
+    paths, failures = run_plot_only(analysis, config, equilibration="1ns")
+
+    assert failures == []
+    assert paths == [tmp_path / "figures" / analysis.name / "plot.png"]
+    assert paths[0].exists()
+    assert analysis.events == ["filter", f"plot:{analysis.name}"]
+
+    failing_paths, failing_failures = run_plot_only(
+        _FailingPlotAnalysis(),
+        config,
+        equilibration="1ns",
+    )
+    assert failing_paths == []
+    assert failing_failures == [("failing_plot_lifecycle", "plot boom")]
+
+
+def test_public_prepare_validation_error_uses_lifecycle_filter(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Prepare should raise a concrete error when filtering removes every condition."""
+
+    _patch_condition_loader(monkeypatch)
+
+    with pytest.raises(ValueError, match="no valid conditions remain"):
+        prepare_comparison_run(_RejectingAnalysis(), _ComparisonConfig(tmp_path), "10ns")
+
+
+def test_public_wrapper_preserves_contract_exceptions(tmp_path: Path) -> None:
+    """Public lifecycle wrappers should propagate plugin contract errors."""
+
+    with pytest.raises(PluginContractError, match="contract boom"):
+        run_analysis(
+            _ContractReplicateAnalysis(),
+            _condition(tmp_path, replicates=(1,)),
+            _LifecycleSettings(),
+            output_dir=tmp_path / "analysis" / "contract",
+        )
