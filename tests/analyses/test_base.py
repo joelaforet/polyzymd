@@ -6,6 +6,7 @@ without requiring heavy dependencies (OpenMM, MDAnalysis, etc.).
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import ClassVar, Sequence
 
@@ -211,26 +212,57 @@ class TestAnalysisABC:
     def test_concrete_subclass_can_use_run_replicate(self) -> None:
         """Concrete plugins can implement the canonical replicate entry point."""
 
-        class RunReplicateAnalysis(Analysis):
-            """Analysis that implements the canonical replicate hook only."""
+        with pytest.warns(DeprecationWarning, match="directly defines analysis lifecycle"):
 
-            name: ClassVar[str] = "run_replicate_only"
-            Settings: ClassVar[type] = ToySettings
+            class RunReplicateAnalysis(Analysis):
+                """Analysis that implements the canonical replicate hook only."""
 
-            def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
-                """Return a simple per-replicate result."""
+                name: ClassVar[str] = "run_replicate_only"
+                Settings: ClassVar[type] = ToySettings
 
-                del ctx
-                return {"value": float(replicate)}
+                def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+                    """Return a simple per-replicate result."""
 
-            def aggregate(self, ctx, results):
-                """Return a simple aggregate result."""
+                    del ctx
+                    return {"value": float(replicate)}
 
-                del ctx, results
-                return {"dummy": True}
+                def aggregate(self, ctx, results):
+                    """Return a simple aggregate result."""
+
+                    del ctx, results
+                    return {"dummy": True}
 
         plugin = RunReplicateAnalysis()
         assert plugin.name == "run_replicate_only"
+
+    def test_direct_lifecycle_override_deprecation_skips_abstract_classes(self) -> None:
+        """Abstract classes should not emit direct lifecycle deprecation warnings."""
+        from abc import abstractmethod
+
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always")
+
+            class AbstractLegacyAnalysis(Analysis):
+                name: ClassVar[str] = "abstract_legacy"
+                Settings: ClassVar[type] = ToySettings
+
+                @abstractmethod
+                def extra_method(self):
+                    """Force the class to remain abstract."""
+
+                def run_replicate(self, ctx, replicate):
+                    """Return a simple per-replicate result."""
+
+                    del ctx
+                    return {"replicate": replicate}
+
+                def aggregate(self, ctx, results):
+                    """Return a simple aggregate result."""
+
+                    del ctx, results
+                    return {"dummy": True}
+
+        assert not [item for item in captured if issubclass(item.category, DeprecationWarning)]
 
     def test_run_replicate_uses_canonical_override(self, toy_analysis, toy_condition) -> None:
         """run_replicate should use the canonical plugin override."""

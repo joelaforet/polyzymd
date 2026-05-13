@@ -2,9 +2,32 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 from pydantic import BaseModel
+
+_LEGACY_LIFECYCLE_HOOKS = (
+    "run_replicate",
+    "aggregate",
+    "compare",
+    "plot",
+    "filter_conditions",
+    "build_runner",
+    "summarize_replicate",
+)
+
+_BUILTIN_PLUGIN_MODULE_PREFIXES = (
+    "polyzymd.analyses.catalytic_triad",
+    "polyzymd.analyses.contacts",
+    "polyzymd.analyses.distances",
+    "polyzymd.analyses.hydrogen_bonds",
+    "polyzymd.analyses.rg",
+    "polyzymd.analyses.rmsd",
+    "polyzymd.analyses.rmsf",
+    "polyzymd.analyses.sasa",
+    "polyzymd.analyses.secondary_structure",
+)
 
 
 def validate_analysis_subclass(cls: type, *, base_cls: type, kwargs: dict[str, Any]) -> None:
@@ -62,3 +85,50 @@ def validate_analysis_subclass(cls: type, *, base_cls: type, kwargs: dict[str, A
                 "build_runner() and summarize_replicate() when has_compute_stage=True; "
                 "direct run_replicate() overrides are advanced/internal only."
             )
+
+    _warn_on_direct_lifecycle_overrides(cls)
+
+
+def _warn_on_direct_lifecycle_overrides(cls: type) -> None:
+    """Warn when a concrete external plugin defines lifecycle hooks directly.
+
+    Parameters
+    ----------
+    cls : type
+        Concrete analysis subclass being validated.
+    """
+
+    if _is_shipped_plugin_module(cls.__module__):
+        return
+    hooks = [name for name in _LEGACY_LIFECYCLE_HOOKS if name in cls.__dict__]
+    if not hooks:
+        return
+    warnings.warn(
+        f"{cls.__name__} directly defines analysis lifecycle hook(s): "
+        f"{', '.join(hooks)}. Direct lifecycle overrides remain supported for "
+        "Feature Cycle 1 but are deprecated; prefer measurement strategy adapters "
+        "for new simple analyses.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+def _is_shipped_plugin_module(module_name: str) -> bool:
+    """Return whether a module belongs to an existing shipped plugin.
+
+    Parameters
+    ----------
+    module_name : str
+        Module path defining an analysis subclass.
+
+    Returns
+    -------
+    bool
+        ``True`` for built-in plugin modules that should not emit import-time
+        deprecation warnings during the transition.
+    """
+
+    return any(
+        module_name == prefix or module_name.startswith(prefix + ".")
+        for prefix in _BUILTIN_PLUGIN_MODULE_PREFIXES
+    )
