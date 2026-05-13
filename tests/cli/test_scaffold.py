@@ -235,6 +235,32 @@ class TestGenerateScaffold:
         assert not plugin_path.exists()
         assert test_path.read_text(encoding="utf-8") == "# existing test\n"
 
+    @pytest.mark.parametrize(
+        "collision_parts",
+        [
+            ("analyses",),
+            ("analyses", "plugins"),
+        ],
+    )
+    def test_preflights_default_test_parent_collision_before_writing_source(
+        self,
+        tmp_path: Path,
+        collision_parts: tuple[str, ...],
+    ):
+        _prepare_project(tmp_path)
+        collision_path = tmp_path / "tests" / Path(*collision_parts)
+        collision_path.parent.mkdir(parents=True, exist_ok=True)
+        collision_path.write_text("# parent collision\n", encoding="utf-8")
+        plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+        test_path = tmp_path / "tests" / "analyses" / "plugins" / "test_solvent_shell.py"
+
+        with pytest.raises(FileExistsError, match="parent path is not a directory"):
+            generate_scaffold("solvent_shell", tmp_path)
+
+        assert not plugin_path.exists()
+        assert not test_path.exists()
+        assert collision_path.read_text(encoding="utf-8") == "# parent collision\n"
+
     def test_force_overwrites(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
@@ -444,6 +470,32 @@ class TestGenerateScaffoldPydantic:
 
         assert not plugin_dir.exists()
         assert test_path.read_text(encoding="utf-8") == "# existing pydantic test\n"
+
+    @pytest.mark.parametrize(
+        "collision_parts",
+        [
+            ("analyses",),
+            ("analyses", "plugins"),
+        ],
+    )
+    def test_preflights_pydantic_test_parent_collision_before_writing_source(
+        self,
+        tmp_path: Path,
+        collision_parts: tuple[str, ...],
+    ):
+        _prepare_project(tmp_path)
+        collision_path = tmp_path / "tests" / Path(*collision_parts)
+        collision_path.parent.mkdir(parents=True, exist_ok=True)
+        collision_path.write_text("# parent collision\n", encoding="utf-8")
+        plugin_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        test_path = tmp_path / "tests" / "analyses" / "plugins" / "test_solvent_shell.py"
+
+        with pytest.raises(FileExistsError, match="parent path is not a directory"):
+            generate_scaffold("solvent_shell", tmp_path, style="pydantic")
+
+        assert not plugin_dir.exists()
+        assert not test_path.exists()
+        assert collision_path.read_text(encoding="utf-8") == "# parent collision\n"
 
 
 class TestStyleValidation:
@@ -906,18 +958,32 @@ class TestNewAnalysisCLI:
         )
         assert result.exit_code == 0, result.output
 
+    @pytest.mark.parametrize(
+        ("plugin_name", "style_args", "stale_path_parts"),
+        [
+            ("scaffold_force_measurement", [], ("scaffold_force_measurement.py",)),
+            ("scaffold_force_dict", ["--style", "dict"], ("scaffold_force_dict", "__init__.py")),
+            (
+                "scaffold_force_pydantic",
+                ["--style", "pydantic"],
+                ("scaffold_force_pydantic", "__init__.py"),
+            ),
+        ],
+    )
     def test_force_overwrites_discoverable_scaffold_after_fresh_discovery(
         self,
         runner: CliRunner,
         cli,
         monkeypatch: pytest.MonkeyPatch,
+        plugin_name: str,
+        style_args: list[str],
+        stale_path_parts: tuple[str, ...],
     ):
-        plugin_name = "scaffold_force"
         analyses_root = self.root / "src" / "polyzymd" / "analyses"
-        result = runner.invoke(cli, [plugin_name, "--project-root", str(self.root)])
+        result = runner.invoke(cli, [plugin_name, *style_args, "--project-root", str(self.root)])
         assert result.exit_code == 0, result.output
 
-        plugin_path = analyses_root / f"{plugin_name}.py"
+        plugin_path = analyses_root / Path(*stale_path_parts)
         plugin_path.write_text(
             plugin_path.read_text(encoding="utf-8") + "\n# stale local edit\n",
             encoding="utf-8",
@@ -935,13 +1001,15 @@ class TestNewAnalysisCLI:
 
             result = runner.invoke(
                 cli,
-                [plugin_name, "--project-root", str(self.root), "--force"],
+                [plugin_name, *style_args, "--project-root", str(self.root), "--force"],
             )
             assert result.exit_code == 0, result.output
             assert "stale local edit" not in plugin_path.read_text(encoding="utf-8")
         finally:
             clear_cache()
             sys.modules.pop(f"polyzymd.analyses.{plugin_name}", None)
+            sys.modules.pop(f"polyzymd.analyses.{plugin_name}._runner", None)
+            sys.modules.pop(f"polyzymd.analyses.{plugin_name}._results", None)
 
     def test_force_rejects_registered_builtin_name(self, runner: CliRunner, cli):
         result = runner.invoke(
@@ -950,6 +1018,52 @@ class TestNewAnalysisCLI:
         )
         assert result.exit_code != 0
         assert "registered analysis plugin" in result.output
+
+    def test_force_rejects_registered_external_name(
+        self,
+        runner: CliRunner,
+        cli,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        plugin_name = "external_force"
+        external_root = self.root / "external_plugins"
+        external_root.mkdir()
+        external_module = external_root / f"{plugin_name}.py"
+        external_module.write_text(
+            "from typing import ClassVar\n\n"
+            "from pydantic import BaseModel\n\n"
+            "from polyzymd.analyses.base import Analysis\n\n\n"
+            "class ExternalForceSettings(BaseModel):\n"
+            "    pass\n\n\n"
+            "class ExternalForceAnalysis(Analysis):\n"
+            f"    name: ClassVar[str] = {plugin_name!r}\n"
+            "    Settings: ClassVar[type[BaseModel]] = ExternalForceSettings\n"
+            "    has_compute_stage: ClassVar[bool] = False\n"
+            "    has_aggregate_stage: ClassVar[bool] = False\n",
+            encoding="utf-8",
+        )
+
+        import polyzymd.analyses as analyses_pkg
+        from polyzymd.analyses.discovery import clear_cache, list_analyses
+
+        original_path = list(analyses_pkg.__path__)
+        monkeypatch.setattr(analyses_pkg, "__path__", [*original_path, str(external_root)])
+        clear_cache()
+
+        try:
+            assert plugin_name in list_analyses()
+
+            result = runner.invoke(
+                cli,
+                [plugin_name, "--project-root", str(self.root), "--force"],
+            )
+
+            assert result.exit_code != 0
+            assert "registered analysis plugin" in result.output
+            assert not (self.root / "src" / "polyzymd" / "analyses" / f"{plugin_name}.py").exists()
+        finally:
+            clear_cache()
+            sys.modules.pop(f"polyzymd.analyses.{plugin_name}", None)
 
     def test_help_shows_correct_test_path(self, runner: CliRunner, cli):
         result = runner.invoke(cli, ["--help"])

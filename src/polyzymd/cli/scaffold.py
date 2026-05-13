@@ -308,12 +308,34 @@ def _check_target_conflicts(files: dict[Path, str], *, force: bool) -> None:
     Raises
     ------
     FileExistsError
-        If any target path exists and ``force`` is False.
+        If any parent path is not a directory, any target path has the wrong
+        type, or any target path exists and ``force`` is False.
     """
-    conflicts = [path for path in files if path.exists()]
-    if conflicts and not force:
+    parent_conflicts = sorted(
+        {
+            parent
+            for path in files
+            for parent in path.parents
+            if parent.exists() and not parent.is_dir()
+        }
+    )
+    if parent_conflicts:
         raise FileExistsError(
-            f"Scaffold target path already exists: {_format_paths(conflicts)}. "
+            "Scaffold parent path is not a directory: "
+            f"{_format_paths(parent_conflicts)}. Resolve the path collision before scaffolding."
+        )
+
+    target_type_conflicts = [path for path in files if path.exists() and not path.is_file()]
+    if target_type_conflicts:
+        raise FileExistsError(
+            "Scaffold target path exists but is not a file: "
+            f"{_format_paths(target_type_conflicts)}. Resolve the path collision before scaffolding."
+        )
+
+    existing_files = [path for path in files if path.exists()]
+    if existing_files and not force:
+        raise FileExistsError(
+            f"Scaffold target path already exists: {_format_paths(existing_files)}. "
             "Use --force to overwrite."
         )
 
