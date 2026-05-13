@@ -91,7 +91,6 @@ conditions:
 
 plugins:
   distances:
-    enabled: true
     pairs:
       - label: "Ser77-His156"
         selection_a: "protein and resid 77 and name OG"
@@ -147,7 +146,6 @@ hydrogen-bond-style geometry checks).
 ```yaml
 plugins:
   distances:
-    enabled: true
     threshold: 3.5
     pairs:
       - label: "Ser77-His156"

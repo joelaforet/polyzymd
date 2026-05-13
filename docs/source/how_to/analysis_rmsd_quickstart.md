@@ -98,7 +98,6 @@ conditions:
 
 plugins:
   rmsd:
-    enabled: true
     runs:
       - label: "Protein Backbone"
         selection: "protein and name CA"

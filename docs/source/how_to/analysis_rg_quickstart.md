@@ -96,7 +96,6 @@ conditions:
 
 plugins:
   rg:
-    enabled: true
     runs:
       - label: "Whole Protein"
         selection: "protein"

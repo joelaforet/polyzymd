@@ -127,7 +127,6 @@ run_comparison(analysis, config, equilibration="100ns")
 ```yaml
 plugins:
   rmsf:
-    enabled: true
     selection: "protein and name CA"
     reference_mode: "external"
     reference_file: "/path/to/crystal_structure.pdb"
