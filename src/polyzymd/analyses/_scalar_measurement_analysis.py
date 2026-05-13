@@ -479,15 +479,6 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
             Mapping from metric name to comparison metric value.
         """
 
-        metric = self._measurement_instance().metric
-        if not isinstance(summary, dict):
-            raise TypeError(
-                f"{type(self).__name__}.extract_metrics() expects a dict aggregate result, "
-                f"got {type(summary).__name__}."
-            )
-        metric_value = metric.to_metric_value(
-            mean=float(summary["mean_value"]),
-            sem=float(summary["sem_value"]),
-            replicate_values=[float(value) for value in summary["replicate_values"]],
-        )
-        return {metric.name: metric_value}
+        measurement = self._measurement_instance()
+        metric_value = measurement.metric_value_from_summary(summary)
+        return {measurement.metric.name: metric_value}

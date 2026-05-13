@@ -122,6 +122,38 @@ class ScalarMeasurement(Measurement, ABC):
 
     metric: ClassVar[MetricSpec]
 
+    def metric_value_from_summary(self, summary: Any) -> Any:
+        """Convert an aggregate summary into the configured comparison metric.
+
+        Parameters
+        ----------
+        summary : Any
+            Aggregated scalar measurement result. The default implementation
+            expects the dictionary schema produced by
+            :class:`ScalarMeasurementAnalysis`.
+
+        Returns
+        -------
+        Any
+            ``MetricValue`` instance from the analysis comparison framework.
+
+        Raises
+        ------
+        TypeError
+            Raised when the default dictionary aggregate schema is not supplied.
+        """
+
+        if not isinstance(summary, dict):
+            raise TypeError(
+                "ScalarMeasurement.metric_value_from_summary() expects a dict aggregate result, "
+                f"got {type(summary).__name__}."
+            )
+        return self.metric.to_metric_value(
+            mean=float(summary["mean_value"]),
+            sem=float(summary["sem_value"]),
+            replicate_values=[float(value) for value in summary["replicate_values"]],
+        )
+
     @abstractmethod
     def measure(
         self,

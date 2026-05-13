@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 from pydantic import BaseModel
@@ -199,6 +199,32 @@ def test_metric_spec_converts_to_metric_value() -> None:
     assert metric_value.name == "toy_value"
     assert metric_value.higher_is_better is False
     assert metric_value.direction_labels == ("lower", "unchanged", "higher")
+
+
+def test_scalar_measurement_metric_value_from_dict_summary() -> None:
+    """Scalar measurements should convert default dict aggregates to metrics."""
+
+    metric_value = ToyScalarMeasurement().metric_value_from_summary(
+        {
+            "mean_value": 2.0,
+            "sem_value": 0.5,
+            "replicate_values": [1, "2.5", 3.0],
+        }
+    )
+
+    assert isinstance(metric_value, MetricValue)
+    assert metric_value.name == "toy_value"
+    assert metric_value.mean == 2.0
+    assert metric_value.sem == 0.5
+    assert metric_value.replicate_values == [1.0, 2.5, 3.0]
+    assert metric_value.higher_is_better is False
+
+
+def test_scalar_measurement_metric_value_rejects_non_dict_summary() -> None:
+    """Default scalar metric extraction should require dict aggregates."""
+
+    with pytest.raises(TypeError, match="expects a dict aggregate result"):
+        ToyScalarMeasurement().metric_value_from_summary(object())
 
 
 def test_cache_identity_has_independent_payloads() -> None:
@@ -400,6 +426,41 @@ def test_scalar_measurement_analysis_run_replicate_and_aggregate(tmp_path) -> No
     assert list(metrics) == ["toy_value"]
     assert metrics["toy_value"].mean == 18.0
     assert metrics["toy_value"].replicate_values == [17.0, 19.0]
+
+
+def test_scalar_measurement_analysis_extract_metrics_delegates_to_measurement() -> None:
+    """Analysis metric extraction should use the measurement summary hook."""
+
+    class CustomSummaryMeasurement(ToyScalarMeasurement):
+        """Toy measurement with a custom aggregate summary schema."""
+
+        metric: ClassVar[MetricSpec] = MetricSpec(name="custom_summary_value")
+
+        def metric_value_from_summary(self, summary: Any) -> MetricValue:
+            """Extract a metric from a custom summary object."""
+
+            return self.metric.to_metric_value(
+                mean=float(summary.custom_mean),
+                sem=0.0,
+                replicate_values=[float(summary.custom_mean)],
+            )
+
+    class CustomSummaryAnalysis(ScalarMeasurementAnalysis):
+        """Toy scalar analysis using a custom summary hook."""
+
+        name: ClassVar[str] = "custom_summary"
+        Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
+        measurement: ClassVar[type[ScalarMeasurement]] = CustomSummaryMeasurement
+
+    class CustomSummary:
+        """Custom aggregate summary used by the measurement hook."""
+
+        custom_mean = 42.0
+
+    metrics = CustomSummaryAnalysis().extract_metrics(CustomSummary())
+
+    assert list(metrics) == ["custom_summary_value"]
+    assert metrics["custom_summary_value"].mean == 42.0
 
 
 def test_scalar_measurement_aggregate_rejects_missing_cache_identity(tmp_path) -> None:
