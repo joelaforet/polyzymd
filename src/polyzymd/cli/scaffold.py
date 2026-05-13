@@ -1,14 +1,16 @@
 """Scaffold generator for new analysis plugins.
 
 Creates the minimal file set needed for a new analysis plugin using Jinja
-templates stored as package resources. The generated package follows the
-analysis facade pattern: lifecycle wiring lives in ``__init__.py`` while
-trajectory logic lives in ``_runner.py``. Pydantic style scaffolds also place
-result models in ``_results.py``.
+templates stored as package resources. The default scaffold is a single-file
+measurement plugin. Advanced scaffolds keep the runner-backed package layout:
+lifecycle wiring lives in ``__init__.py`` while trajectory logic lives in
+``_runner.py``. Pydantic style scaffolds also place result models in
+``_results.py``.
 
 Usage::
 
     polyzymd new-analysis my_analysis
+    polyzymd new-analysis my_analysis --advanced
     polyzymd new-analysis my_analysis --style pydantic
     polyzymd new-analysis my_analysis --dry-run
     polyzymd new-analysis my_analysis --force
@@ -20,7 +22,7 @@ import keyword
 import re
 from pathlib import Path
 
-from polyzymd.cli._scaffold.models import VALID_STYLES, ScaffoldSpec
+from polyzymd.cli._scaffold.models import ADVANCED_STYLES, VALID_STYLES, ScaffoldSpec
 from polyzymd.cli._scaffold.renderer import render_scaffold
 
 # ---------------------------------------------------------------------------
@@ -121,7 +123,9 @@ def to_pascal_case(snake: str) -> str:
     return "".join(part.capitalize() for part in snake.split("_"))
 
 
-def _build_spec(name: str, class_name: str | None, style: str) -> ScaffoldSpec:
+def _build_spec(
+    name: str, class_name: str | None, style: str, *, advanced: bool = False
+) -> ScaffoldSpec:
     """Validate user inputs and build a scaffold render specification.
 
     Parameters
@@ -132,6 +136,9 @@ def _build_spec(name: str, class_name: str | None, style: str) -> ScaffoldSpec:
         Optional PascalCase class prefix.
     style : str
         Scaffold style name.
+    advanced : bool, optional
+        If True, use the runner-backed package scaffold. When no explicit
+        advanced style is requested, this selects the legacy ``"dict"`` style.
 
     Returns
     -------
@@ -143,8 +150,13 @@ def _build_spec(name: str, class_name: str | None, style: str) -> ScaffoldSpec:
     ValueError
         If any input is invalid.
     """
-    if style not in VALID_STYLES:
+    effective_style = "dict" if advanced and style == "measurement" else style
+    if effective_style not in VALID_STYLES:
         raise ValueError(f"Invalid style '{style}'. Choose from: {', '.join(VALID_STYLES)}")
+    if advanced and effective_style not in ADVANCED_STYLES:
+        raise ValueError(
+            "Advanced scaffolds require style 'dict' or 'pydantic', " f"got '{effective_style}'."
+        )
 
     name_error = validate_name(name, check_existing=True)
     if name_error:
@@ -155,7 +167,36 @@ def _build_spec(name: str, class_name: str | None, style: str) -> ScaffoldSpec:
     if cls_error:
         raise ValueError(cls_error)
 
-    return ScaffoldSpec(name=name, class_name=cls, style=style)
+    return ScaffoldSpec(name=name, class_name=cls, style=effective_style)
+
+
+def _check_layout_conflicts(spec: ScaffoldSpec, project_root: Path) -> None:
+    """Reject single-file/package layout collisions for a scaffold.
+
+    Parameters
+    ----------
+    spec : ScaffoldSpec
+        Validated scaffold rendering specification.
+    project_root : Path
+        Repository root directory containing ``src/`` and ``tests/``.
+
+    Raises
+    ------
+    FileExistsError
+        If the opposite plugin layout already exists.
+    """
+    analyses_root = project_root / "src" / "polyzymd" / "analyses"
+    module_path = analyses_root / f"{spec.name}.py"
+    package_path = analyses_root / spec.name
+
+    if spec.uses_measurement_api and package_path.exists():
+        raise FileExistsError(
+            f"Cannot create {module_path}: package layout {package_path} already exists."
+        )
+    if not spec.uses_measurement_api and module_path.exists():
+        raise FileExistsError(
+            f"Cannot create {package_path}: single-file layout {module_path} already exists."
+        )
 
 
 def generate_scaffold(
@@ -163,7 +204,8 @@ def generate_scaffold(
     project_root: Path,
     *,
     class_name: str | None = None,
-    style: str = "dict",
+    style: str = "measurement",
+    advanced: bool = False,
     force: bool = False,
     dry_run: bool = False,
 ) -> list[Path]:
@@ -179,8 +221,13 @@ def generate_scaffold(
         PascalCase class prefix. Auto-derived from *name* when omitted, by
         default None.
     style : str, optional
-        ``"dict"`` for plain-dict results or ``"pydantic"`` for typed result
-        models, by default ``"dict"``.
+        ``"measurement"`` for a single-file scalar measurement plugin,
+        ``"dict"`` for advanced plain-dict results, or ``"pydantic"`` for
+        advanced typed result models, by default ``"measurement"``.
+    advanced : bool, optional
+        Use the advanced runner-backed package scaffold. If ``style`` is left
+        as ``"measurement"``, this selects the legacy ``"dict"`` scaffold, by
+        default False.
     force : bool, optional
         Overwrite existing files, by default False.
     dry_run : bool, optional
@@ -198,7 +245,8 @@ def generate_scaffold(
     ValueError
         If the plugin name, class prefix, or style is invalid.
     """
-    spec = _build_spec(name=name, class_name=class_name, style=style)
+    spec = _build_spec(name=name, class_name=class_name, style=style, advanced=advanced)
+    _check_layout_conflicts(spec=spec, project_root=project_root)
     files = render_scaffold(spec=spec, project_root=project_root)
 
     created: list[Path] = []

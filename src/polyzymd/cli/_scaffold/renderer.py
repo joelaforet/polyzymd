@@ -56,8 +56,20 @@ def render_scaffold(spec: ScaffoldSpec, project_root: Path) -> dict[Path, str]:
     dict[Path, str]
         Mapping of output paths to rendered content.
     """
-    analyses_dir = project_root / "src" / "polyzymd" / "analyses" / spec.name
+    analyses_root = project_root / "src" / "polyzymd" / "analyses"
     tests_dir = project_root / "tests" / "analyses" / "plugins"
+
+    if spec.uses_measurement_api:
+        return {
+            analyses_root / f"{spec.name}.py": render_template("measurement_plugin.py.jinja", spec),
+            tests_dir
+            / f"test_{spec.name}.py": render_template(
+                "test_measurement_plugin.py.jinja",
+                spec,
+            ),
+        }
+
+    analyses_dir = analyses_root / spec.name
 
     files = {
         analyses_dir / "__init__.py": render_template("plugin_init.py.jinja", spec),

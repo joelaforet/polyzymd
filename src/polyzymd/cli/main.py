@@ -3073,8 +3073,14 @@ def info() -> None:
 @click.option(
     "--style",
     type=click.Choice(["dict", "pydantic"], case_sensitive=False),
-    default="dict",
-    help="Template style: 'dict' (default) for plain dicts, 'pydantic' for typed result models.",
+    default=None,
+    help="Advanced template style: 'dict' for plain dicts or 'pydantic' for typed result models.",
+)
+@click.option(
+    "--advanced",
+    is_flag=True,
+    default=False,
+    help="Create the runner-backed package scaffold instead of the simple measurement scaffold.",
 )
 @click.option(
     "--project-root",
@@ -3097,28 +3103,31 @@ def info() -> None:
 def new_analysis(
     name: str,
     class_name: str | None,
-    style: str,
+    style: str | None,
+    advanced: bool,
     project_root: str | None,
     force: bool,
     dry_run: bool,
 ) -> None:
-    """Scaffold a runner-backed analysis plugin.
+    """Scaffold an analysis plugin.
 
     NAME is the snake_case plugin name (e.g. 'solvent_shell').
 
-    Creates:
+    Default creates:
+
+    \b
+      src/polyzymd/analyses/<NAME>.py             — scalar measurement plugin
+      tests/analyses/plugins/test_<NAME>.py       — contributor-focused tests
+
+    Advanced mode creates:
 
     \b
       src/polyzymd/analyses/<NAME>/__init__.py    — analysis facade
       src/polyzymd/analyses/<NAME>/_runner.py     — trajectory runner
       src/polyzymd/analyses/<NAME>/_results.py    — pydantic result models (--style pydantic)
-      tests/analyses/plugins/test_<NAME>.py       — smoke tests
 
-    Styles:
-
-    \b
-      dict      Plain dicts for results (default, simplest)
-      pydantic  Typed Pydantic result models (better for complex analyses)
+    Passing --advanced uses the legacy dict style. Passing --style dict or
+    --style pydantic also selects advanced mode for backward compatibility.
 
     Run the generated tests with:
 
@@ -3154,11 +3163,13 @@ def new_analysis(
         root = Path(project_root)
 
     try:
+        effective_style = style or "measurement"
         created = generate_scaffold(
             name,
             root,
             class_name=class_name,
-            style=style,
+            style=effective_style,
+            advanced=advanced,
             force=force,
             dry_run=dry_run,
         )

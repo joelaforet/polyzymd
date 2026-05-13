@@ -133,14 +133,14 @@ class TestToPascalCase:
 
 
 class TestGenerateScaffold:
-    """Scaffold file generation using the default dict style."""
+    """Scaffold file generation using the default measurement style."""
 
-    def test_creates_three_files(self, tmp_path: Path):
+    def test_creates_two_files(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
         created = generate_scaffold("solvent_shell", tmp_path)
 
-        assert len(created) == 3
+        assert len(created) == 2
         for path in created:
             assert path.exists(), f"{path} was not created"
 
@@ -150,43 +150,37 @@ class TestGenerateScaffold:
         created = generate_scaffold("solvent_shell", tmp_path)
         names = {path.name for path in created}
 
-        assert names == {"__init__.py", "_runner.py", "test_solvent_shell.py"}
+        assert names == {"solvent_shell.py", "test_solvent_shell.py"}
 
-    def test_dict_style_facade_and_runner_content(self, tmp_path: Path):
+    def test_measurement_plugin_content(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
         generate_scaffold("solvent_shell", tmp_path)
-        plugin_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
-        init_text = (plugin_dir / "__init__.py").read_text(encoding="utf-8")
-        runner_text = (plugin_dir / "_runner.py").read_text(encoding="utf-8")
+        plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+        text = plugin_path.read_text(encoding="utf-8")
 
-        assert "class SolventShellAnalysis(Analysis):" in init_text
-        assert "class SolventShellReplicateRunner:" not in init_text
-        assert "from ._runner import SolventShellReplicateRunner" in init_text
-        assert 'name: ClassVar[str] = "solvent_shell"' in init_text
-        assert "class Settings(BaseModel):" in init_text
-        assert "def build_runner(" in init_text
-        assert "def summarize_replicate(" in init_text
-        assert "def run_replicate(" not in init_text
-        assert "def aggregate(" in init_text
-        assert "def extract_metrics(" in init_text
-        assert "def plot(self, ctx: PlotContext)" in init_text
-        assert "_build_plot_data" in init_text
-        assert "class SolventShellReplicateRunner:" in runner_text
-        assert "def run(" in runner_text
+        assert "class SolventShellSettings(BaseModel):" in text
+        assert "scale: float = Field(" in text
+        assert "class SolventShellMeasurement(ScalarMeasurement):" in text
+        assert "metric: ClassVar[MetricSpec] = MetricSpec(" in text
+        assert "def measure(" in text
+        assert "class SolventShellAnalysis(ScalarMeasurementAnalysis):" in text
+        assert 'name: ClassVar[str] = "solvent_shell"' in text
+        assert "Settings: ClassVar[type[BaseModel]] = SolventShellSettings" in text
+        assert "measurement: ClassVar[type[ScalarMeasurement]] = SolventShellMeasurement" in text
+        assert "def build_runner(" not in text
+        assert "def aggregate(" not in text
+        assert "def plot(" not in text
+        assert "._runner" not in text
 
-    def test_dict_style_uses_plain_dicts(self, tmp_path: Path):
+    def test_default_does_not_create_advanced_package_files(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
         generate_scaffold("solvent_shell", tmp_path)
-        plugin_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
-        init_text = (plugin_dir / "__init__.py").read_text(encoding="utf-8")
+        analyses_root = tmp_path / "src" / "polyzymd" / "analyses"
 
-        assert not (plugin_dir / "_results.py").exists()
-        assert "class SolventShellReplicateResult" not in init_text
-        assert "class SolventShellAggregatedResult" not in init_text
-        assert "AggregatedResultClass: ClassVar" not in init_text
-        assert "-> dict[str, Any]:" in init_text
+        assert (analyses_root / "solvent_shell.py").exists()
+        assert not (analyses_root / "solvent_shell").exists()
 
     def test_test_file_content(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -196,25 +190,25 @@ class TestGenerateScaffold:
         text = test_path.read_text(encoding="utf-8")
 
         assert "class TestDiscovery:" in text
-        assert "class TestRunnerBackedReplicate:" in text
-        assert "class TestAggregate:" in text
-        assert "class TestExtractMetrics:" in text
-        assert "class TestPlot:" in text
-        assert "test_run_replicate_uses_base_runner_dispatch" in text
-        assert '"replicates": list(cond.replicates)' in text
-        assert '"settings_fingerprint": analysis.aggregate_settings_fingerprint(settings)' in text
-        assert 'runner.__class__.__name__ == "SolventShellReplicateRunner"' in text
+        assert "class TestSettings:" in text
+        assert "class TestMeasurementLogic:" in text
+        assert "class TestMetricMetadata:" in text
+        assert "test_measure_counts_windowed_frames_with_scale" in text
+        assert "AggregateContext" not in text
+        assert "ReplicateContext" not in text
+        assert "PlotContext" not in text
 
     def test_custom_class_name(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
         generate_scaffold("density", tmp_path, class_name="MassDensity")
-        plugin_dir = tmp_path / "src" / "polyzymd" / "analyses" / "density"
+        plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "density.py"
 
-        assert "class MassDensityAnalysis(Analysis):" in (plugin_dir / "__init__.py").read_text(
+        assert "class MassDensitySettings(BaseModel):" in plugin_path.read_text(encoding="utf-8")
+        assert "class MassDensityMeasurement(ScalarMeasurement):" in plugin_path.read_text(
             encoding="utf-8"
         )
-        assert "class MassDensityReplicateRunner:" in (plugin_dir / "_runner.py").read_text(
+        assert "class MassDensityAnalysis(ScalarMeasurementAnalysis):" in plugin_path.read_text(
             encoding="utf-8"
         )
 
@@ -230,25 +224,58 @@ class TestGenerateScaffold:
 
         generate_scaffold("solvent_shell", tmp_path)
         created = generate_scaffold("solvent_shell", tmp_path, force=True)
-        assert len(created) == 3
+        assert len(created) == 2
 
     def test_dry_run_creates_no_files(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
         created = generate_scaffold("solvent_shell", tmp_path, dry_run=True)
-        assert len(created) == 3
+        assert len(created) == 2
         for path in created:
             assert not path.exists(), f"{path} should not exist in dry-run mode"
 
-    def test_default_style_is_dict(self, tmp_path: Path):
+    def test_default_style_is_measurement(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
         generate_scaffold("solvent_shell", tmp_path)
-        init_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell" / "__init__.py"
-        text = init_path.read_text(encoding="utf-8")
+        plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+        text = plugin_path.read_text(encoding="utf-8")
 
-        assert "Uses plain dicts for result containers" in text
-        assert "AggregatedResultClass: ClassVar" not in text
+        assert "ScalarMeasurementAnalysis" in text
+        assert "SolventShellReplicateRunner" not in text
+
+
+class TestGenerateScaffoldAdvancedDict:
+    """Scaffold file generation using the explicit advanced dict style."""
+
+    def test_style_dict_creates_runner_package(self, tmp_path: Path):
+        _prepare_project(tmp_path)
+
+        created = generate_scaffold("solvent_shell", tmp_path, style="dict")
+        plugin_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        init_text = (plugin_dir / "__init__.py").read_text(encoding="utf-8")
+        runner_text = (plugin_dir / "_runner.py").read_text(encoding="utf-8")
+
+        assert len(created) == 3
+        assert "class SolventShellAnalysis(Analysis):" in init_text
+        assert "from ._runner import SolventShellReplicateRunner" in init_text
+        assert "def build_runner(" in init_text
+        assert "def summarize_replicate(" in init_text
+        assert "def aggregate(" in init_text
+        assert "def plot(self, ctx: PlotContext)" in init_text
+        assert "class SolventShellReplicateRunner:" in runner_text
+        assert not (plugin_dir / "_results.py").exists()
+
+    def test_advanced_flag_defaults_to_dict_style(self, tmp_path: Path):
+        _prepare_project(tmp_path)
+
+        created = generate_scaffold("solvent_shell", tmp_path, advanced=True)
+        plugin_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
+
+        assert len(created) == 3
+        assert (plugin_dir / "__init__.py").exists()
+        assert (plugin_dir / "_runner.py").exists()
+        assert not (plugin_dir / "_results.py").exists()
 
 
 class TestGenerateScaffoldPydantic:
@@ -360,6 +387,7 @@ class TestStyleValidation:
     """Style parameter validation."""
 
     def test_valid_styles_constant(self):
+        assert "measurement" in VALID_STYLES
         assert "dict" in VALID_STYLES
         assert "pydantic" in VALID_STYLES
 
@@ -370,6 +398,26 @@ class TestStyleValidation:
             generate_scaffold("solvent_shell", tmp_path, style="bad_style")
 
 
+class TestLayoutCollisionChecks:
+    """Cross-layout collision behavior for module and package scaffolds."""
+
+    def test_measurement_refuses_existing_package_even_with_force(self, tmp_path: Path):
+        _prepare_project(tmp_path)
+        package_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        package_dir.mkdir()
+
+        with pytest.raises(FileExistsError, match="package layout"):
+            generate_scaffold("solvent_shell", tmp_path, force=True)
+
+    def test_advanced_refuses_existing_module_even_with_force(self, tmp_path: Path):
+        _prepare_project(tmp_path)
+        module_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+        module_path.write_text("", encoding="utf-8")
+
+        with pytest.raises(FileExistsError, match="single-file layout"):
+            generate_scaffold("solvent_shell", tmp_path, style="dict", force=True)
+
+
 class TestTemplateResources:
     """Jinja package-resource template behavior."""
 
@@ -378,9 +426,11 @@ class TestTemplateResources:
         names = {path.name for path in template_root.iterdir()}
 
         assert {
+            "measurement_plugin.py.jinja",
             "plugin_init.py.jinja",
             "runner.py.jinja",
             "results.py.jinja",
+            "test_measurement_plugin.py.jinja",
             "test_plugin.py.jinja",
         }.issubset(names)
 
@@ -391,12 +441,21 @@ class TestTemplateResources:
             env.from_string("{{ missing_value }}").render()
 
     def test_templates_render_with_sample_context(self):
+        measurement_spec = ScaffoldSpec(
+            name="strict_sample",
+            class_name="StrictSample",
+            style="measurement",
+        )
         dict_spec = ScaffoldSpec(name="strict_sample", class_name="StrictSample", style="dict")
         pydantic_spec = ScaffoldSpec(
             name="strict_sample",
             class_name="StrictSample",
             style="pydantic",
         )
+
+        for template_name in ("measurement_plugin.py.jinja", "test_measurement_plugin.py.jinja"):
+            rendered = render_template(template_name, measurement_spec)
+            assert "StrictSample" in rendered or "strict_sample" in rendered
 
         for template_name in ("plugin_init.py.jinja", "runner.py.jinja", "test_plugin.py.jinja"):
             rendered = render_template(template_name, dict_spec)
@@ -412,8 +471,10 @@ class TestGeneratedCodeQuality:
     @pytest.mark.parametrize(
         ("name", "style", "expected_count"),
         [
+            ("solvent_shell", "measurement", 2),
             ("solvent_shell", "dict", 3),
             ("solvent_shell", "pydantic", 4),
+            ("scaffold_pydantic_e2e", "measurement", 2),
             ("scaffold_pydantic_e2e", "dict", 3),
             ("scaffold_pydantic_e2e", "pydantic", 4),
         ],
@@ -470,7 +531,7 @@ class TestGeneratedPluginEndToEnd:
             self.replicate = replicate
             return TestGeneratedPluginEndToEnd.FakeUniverse()
 
-    def test_dict_scaffold_is_discoverable_and_comparable(
+    def test_measurement_scaffold_is_discoverable_and_measurable(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -479,19 +540,11 @@ class TestGeneratedPluginEndToEnd:
         _prepare_project(tmp_path)
 
         plugin_name = "scaffold_e2e"
-        generate_scaffold(plugin_name, tmp_path, style="dict")
+        generate_scaffold(plugin_name, tmp_path)
 
         import polyzymd.analyses as analyses_pkg
-        from polyzymd.analyses.base import (
-            AggregateContext,
-            AggregateValidationError,
-            ComparisonContext,
-            Condition,
-            PlotContext,
-            ReplicateContext,
-        )
+        from polyzymd.analyses.base import AggregateContext, Condition, ReplicateContext
         from polyzymd.analyses.discovery import clear_cache, get_analysis, list_analyses
-        from polyzymd.config.comparison import PlotSettings
 
         original_path = list(analyses_pkg.__path__)
         monkeypatch.setattr(analyses_pkg, "__path__", [*original_path, str(analyses_root)])
@@ -505,6 +558,8 @@ class TestGeneratedPluginEndToEnd:
             analysis = analysis_cls()
             settings = analysis_cls.Settings()
             assert "run_replicate" not in analysis_cls.__dict__
+            assert "build_runner" not in analysis_cls.__dict__
+            assert analysis_cls.measurement.metric.name == "scaffold_e2e_value"
 
             condition = Condition(
                 label="Scaffold Condition",
@@ -526,8 +581,10 @@ class TestGeneratedPluginEndToEnd:
             monkeypatch.setattr(analysis, "get_trajectory_window", lambda *args: self.FakeWindow())
             replicate_result = analysis.run_replicate(rep_ctx, replicate=1)
             assert isinstance(replicate_result, dict)
+            assert replicate_result["analysis"] == plugin_name
+            assert replicate_result["measurement"] == "scaffold_e2e_measurement"
+            assert replicate_result["metric"] == "scaffold_e2e_value"
             assert replicate_result["value"] == pytest.approx(2.0)
-            assert replicate_result["n_frames"] == 2
 
             agg_ctx = AggregateContext(
                 condition=condition,
@@ -538,66 +595,20 @@ class TestGeneratedPluginEndToEnd:
             )
             aggregated = analysis.aggregate(
                 agg_ctx,
-                results=[
-                    {"value": 1.0, "replicate": 1, "n_frames": 4},
-                    {"value": 3.0, "replicate": 2, "n_frames": 4},
-                ],
+                results=[replicate_result],
             )
             assert isinstance(aggregated, dict)
             assert aggregated["mean_value"] == pytest.approx(2.0)
-            assert aggregated["n_replicates"] == 2
+            assert aggregated["n_replicates"] == 1
 
             metrics = analysis.extract_metrics(aggregated)
-            assert "value" in metrics
-
-            compare_ctx = ComparisonContext(
-                name="scaffold-e2e",
-                conditions=[condition],
-                excluded_conditions=[],
-                control_label=None,
-                analysis_dirs={condition.label: tmp_path / "analysis_dir"},
-                results_dir=tmp_path / "results",
-                equilibration="0ns",
-                settings=settings,
-                recompute=True,
-                aggregated_results={condition.label: aggregated},
-            )
-            comparison = analysis.compare(compare_ctx)
-            assert comparison is not None
-            assert comparison.analysis_type == plugin_name
-            assert len(comparison.conditions) == 1
-            assert comparison.conditions[0].label == condition.label
-
-            stale_analysis_dir = tmp_path / "stale_analysis_dir"
-            stale_agg_dir = stale_analysis_dir / "aggregated"
-            stale_agg_dir.mkdir(parents=True)
-            (stale_agg_dir / "result.json").write_text(
-                '{"mean_value": 2.0, "sem_value": 0.1, "replicate_values": [1.0, 3.0], '
-                '"n_replicates": 2, "replicates": [1, 2], '
-                '"settings_fingerprint": "deadbeef"}',
-                encoding="utf-8",
-            )
-            plot_ctx = PlotContext(
-                conditions=[condition],
-                analysis_dirs={condition.label: stale_analysis_dir},
-                results_dir=tmp_path / "comparison" / plugin_name,
-                output_dir=tmp_path / "figures" / plugin_name,
-                settings=settings,
-                plot_settings=PlotSettings(),
-                equilibration="0ns",
-            )
-            with pytest.raises(AggregateValidationError, match="settings fingerprint mismatch"):
-                analysis.plot(plot_ctx)
+            assert "scaffold_e2e_value" in metrics
         finally:
             clear_cache()
-            for module_name in [
-                f"polyzymd.analyses.{plugin_name}",
-                f"polyzymd.analyses.{plugin_name}._runner",
-            ]:
-                sys.modules.pop(module_name, None)
-            plugin_dir = analyses_root / plugin_name
-            if plugin_dir.exists():
-                shutil.rmtree(plugin_dir)
+            sys.modules.pop(f"polyzymd.analyses.{plugin_name}", None)
+            plugin_path = analyses_root / f"{plugin_name}.py"
+            if plugin_path.exists():
+                plugin_path.unlink()
 
     def test_pydantic_result_models_are_importable_from_facade(
         self,
@@ -718,21 +729,17 @@ class TestNewAnalysisCLI:
         result = runner.invoke(cli, ["solvent_shell", "--project-root", str(self.root)])
         assert result.exit_code == 0, result.output
         assert "scaffolded successfully" in result.output
-        assert (
-            self.root / "src" / "polyzymd" / "analyses" / "solvent_shell" / "__init__.py"
-        ).exists()
-        assert (
-            self.root / "src" / "polyzymd" / "analyses" / "solvent_shell" / "_runner.py"
-        ).exists()
+        assert (self.root / "src" / "polyzymd" / "analyses" / "solvent_shell.py").exists()
+        assert not (self.root / "src" / "polyzymd" / "analyses" / "solvent_shell").exists()
 
-    def test_default_style_is_dict(self, runner: CliRunner, cli):
+    def test_default_style_is_measurement(self, runner: CliRunner, cli):
         result = runner.invoke(cli, ["solvent_shell", "--project-root", str(self.root)])
         assert result.exit_code == 0, result.output
-        plugin_dir = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell"
-        text = (plugin_dir / "__init__.py").read_text(encoding="utf-8")
-        assert "Uses plain dicts for result containers" in text
-        assert "AggregatedResultClass: ClassVar" not in text
-        assert not (plugin_dir / "_results.py").exists()
+        plugin_path = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+        text = plugin_path.read_text(encoding="utf-8")
+        assert "ScalarMeasurementAnalysis" in text
+        assert "class SolventShellMeasurement" in text
+        assert "SolventShellReplicateRunner" not in text
 
     def test_style_pydantic(self, runner: CliRunner, cli):
         result = runner.invoke(
@@ -755,6 +762,17 @@ class TestNewAnalysisCLI:
         init_path = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell" / "__init__.py"
         assert "Uses plain dicts for result containers" in init_path.read_text(encoding="utf-8")
 
+    def test_advanced_flag(self, runner: CliRunner, cli):
+        result = runner.invoke(
+            cli,
+            ["solvent_shell", "--advanced", "--project-root", str(self.root)],
+        )
+        assert result.exit_code == 0, result.output
+        plugin_dir = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        assert (plugin_dir / "__init__.py").exists()
+        assert (plugin_dir / "_runner.py").exists()
+        assert not (plugin_dir / "_results.py").exists()
+
     def test_invalid_style_rejected(self, runner: CliRunner, cli):
         result = runner.invoke(
             cli,
@@ -769,10 +787,10 @@ class TestNewAnalysisCLI:
             ["solvent_shell", "--project-root", str(self.root), "--dry-run"],
         )
         assert result.exit_code == 0, result.output
-        assert result.output.count("Would create") == 3
-        assert "src/polyzymd/analyses/solvent_shell/_runner.py" in result.output
-        init_path = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell" / "__init__.py"
-        assert not init_path.exists()
+        assert result.output.count("Would create") == 2
+        assert "src/polyzymd/analyses/solvent_shell.py" in result.output
+        plugin_path = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+        assert not plugin_path.exists()
 
     def test_invalid_name(self, runner: CliRunner, cli):
         result = runner.invoke(cli, ["BadName", "--project-root", str(self.root)])
@@ -806,11 +824,8 @@ class TestNewAnalysisCLI:
             ["density", "--class-name", "MassDensity", "--project-root", str(self.root)],
         )
         assert result.exit_code == 0, result.output
-        plugin_dir = self.root / "src" / "polyzymd" / "analyses" / "density"
-        assert "class MassDensityAnalysis(Analysis):" in (plugin_dir / "__init__.py").read_text(
-            encoding="utf-8"
-        )
-        assert "class MassDensityReplicateRunner:" in (plugin_dir / "_runner.py").read_text(
+        plugin_path = self.root / "src" / "polyzymd" / "analyses" / "density.py"
+        assert "class MassDensityAnalysis(ScalarMeasurementAnalysis):" in plugin_path.read_text(
             encoding="utf-8"
         )
 
@@ -833,9 +848,10 @@ class TestNewAnalysisCLI:
         assert result.exit_code == 0
         assert "tests/analyses/plugins/test_<NAME>.py" in result.output
 
-    def test_help_shows_facade_layout(self, runner: CliRunner, cli):
+    def test_help_shows_measurement_and_advanced_layouts(self, runner: CliRunner, cli):
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0
+        assert "src/polyzymd/analyses/<NAME>.py" in result.output
         assert "src/polyzymd/analyses/<NAME>/_runner.py" in result.output
         assert "src/polyzymd/analyses/<NAME>/_results.py" in result.output
 

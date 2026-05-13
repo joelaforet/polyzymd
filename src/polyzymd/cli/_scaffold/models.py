@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-VALID_STYLES = ("dict", "pydantic")
+VALID_STYLES = ("measurement", "dict", "pydantic")
+ADVANCED_STYLES = ("dict", "pydantic")
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,9 @@ class ScaffoldSpec:
     class_name : str
         PascalCase class prefix used for generated classes.
     style : str
-        Scaffold style, either ``"dict"`` or ``"pydantic"``.
+        Scaffold style. ``"measurement"`` creates the simple single-file
+        contributor path; ``"dict"`` and ``"pydantic"`` create the advanced
+        runner-backed package scaffold.
     """
 
     name: str
@@ -46,3 +49,14 @@ class ScaffoldSpec:
             True when ``style`` is ``"pydantic"``.
         """
         return self.style == "pydantic"
+
+    @property
+    def uses_measurement_api(self) -> bool:
+        """Return whether the scaffold should use the measurement API.
+
+        Returns
+        -------
+        bool
+            True when ``style`` is ``"measurement"``.
+        """
+        return self.style == "measurement"

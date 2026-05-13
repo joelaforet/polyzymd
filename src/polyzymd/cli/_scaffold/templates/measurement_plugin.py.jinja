@@ -1,0 +1,98 @@
+"""{{ spec.title }} scalar measurement analysis plugin."""
+
+from __future__ import annotations
+
+from typing import Any, ClassVar
+
+from pydantic import BaseModel, Field
+
+from polyzymd.analyses.base import MetricSpec, ScalarMeasurement, ScalarMeasurementAnalysis
+
+
+class {{ spec.class_name }}Settings(BaseModel):
+    """Settings for the {{ spec.name }} analysis."""
+
+    scale: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Scale factor applied to the placeholder frame-count measurement.",
+    )
+
+
+class {{ spec.class_name }}Measurement(ScalarMeasurement):
+    """Measure a simple scaled frame count from one trajectory."""
+
+    name: ClassVar[str] = "{{ spec.name }}_measurement"
+    version: ClassVar[str] = "1"
+    metric: ClassVar[MetricSpec] = MetricSpec(
+        name="{{ spec.name }}_value",
+        higher_is_better=True,
+        label="{{ spec.title }} value",
+        unit="frames",
+        direction_labels=("decreased", "unchanged", "increased"),
+    )
+
+    def measure(
+        self,
+        universe: Any,
+        settings: BaseModel,
+        *,
+        start: int | None = None,
+        stop: int | None = None,
+        step: int | None = None,
+    ) -> float:
+        """Return the scaled number of frames in the requested window.
+
+        Replace this placeholder with domain-specific measurement logic. The
+        scaffold keeps the frame-window behavior explicit so contributors can
+        test the science logic without exercising the full analysis framework.
+
+        Parameters
+        ----------
+        universe : Any
+            Trajectory universe with a ``trajectory`` object.
+        settings : BaseModel
+            Analysis settings. The scaffold expects ``{{ spec.class_name }}Settings``.
+        start : int or None, optional
+            First frame index included in the measurement.
+        stop : int or None, optional
+            Exclusive final frame index. If None, the trajectory length is used.
+        step : int or None, optional
+            Frame stride. If None, a stride of 1 is used.
+
+        Returns
+        -------
+        float
+            Scaled frame count for the requested window.
+
+        Raises
+        ------
+        TypeError
+            If ``settings`` is not a ``{{ spec.class_name }}Settings`` instance.
+        ValueError
+            If ``step`` is not positive or ``universe`` has no trajectory.
+        """
+        if not isinstance(settings, {{ spec.class_name }}Settings):
+            raise TypeError("settings must be a {{ spec.class_name }}Settings instance.")
+
+        trajectory = getattr(universe, "trajectory", None)
+        if trajectory is None:
+            raise ValueError("universe must expose a trajectory.")
+
+        total_frames = len(trajectory)
+        start_frame = 0 if start is None else start
+        stop_frame = total_frames if stop is None else min(stop, total_frames)
+        step_size = 1 if step is None else step
+        if step_size <= 0:
+            raise ValueError("step must be a positive integer.")
+
+        n_frames = len(range(start_frame, stop_frame, step_size))
+        return float(n_frames) * settings.scale
+
+
+class {{ spec.class_name }}Analysis(ScalarMeasurementAnalysis):
+    """{{ spec.title }} analysis backed by one scalar measurement."""
+
+    name: ClassVar[str] = "{{ spec.name }}"
+    Settings: ClassVar[type[BaseModel]] = {{ spec.class_name }}Settings
+    measurement: ClassVar[type[ScalarMeasurement]] = {{ spec.class_name }}Measurement
