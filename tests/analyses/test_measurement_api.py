@@ -89,7 +89,6 @@ class FakeUniverse:
 class FakeWindow:
     """Trajectory window with runner keyword arguments."""
 
-
     warning_message = None
 
     def run_kwargs(self) -> dict[str, int]:
