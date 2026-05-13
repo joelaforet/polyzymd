@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -171,6 +172,7 @@ def build_scalar_replicate_result(
     analysis: ScalarMeasurementAnalysis,
     settings: BaseModel,
     *,
+    replicate: int = 1,
     value: float = 17.0,
 ) -> dict[str, object]:
     """Build a serialized scalar replicate result for aggregation tests."""
@@ -180,7 +182,7 @@ def build_scalar_replicate_result(
         "analysis": analysis.name,
         "measurement": measurement.name,
         "metric": measurement.metric.name,
-        "replicate": 1,
+        "replicate": replicate,
         "value": value,
         "cache_identity": measurement.cache_identity(
             settings,
@@ -301,6 +303,23 @@ def test_scalar_measurement_analysis_rejects_invalid_measurement() -> None:
             name: ClassVar[str] = "invalid_measurement"
             Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
             measurement: ClassVar[object] = object()
+
+
+def test_scalar_measurement_analysis_rejects_abstract_measurement_class() -> None:
+    """Scalar measurement analyses should reject abstract measurement classes."""
+
+    class AbstractToyMeasurement(ScalarMeasurement):
+        """Abstract measurement with metric metadata but no implementation."""
+
+        name: ClassVar[str] = "abstract_toy_measurement"
+        metric: ClassVar[MetricSpec] = MetricSpec(name="abstract_toy_value")
+
+    with pytest.raises(TypeError, match="concrete ScalarMeasurement class"):
+
+        class AbstractMeasurementAnalysis(ScalarMeasurementAnalysis):
+            name: ClassVar[str] = "abstract_measurement"
+            Settings: ClassVar[type[BaseModel]] = ToyScalarSettings
+            measurement: ClassVar[type[ScalarMeasurement]] = AbstractToyMeasurement
 
 
 def test_scalar_measurement_analysis_requires_metric() -> None:
@@ -428,6 +447,92 @@ def test_scalar_measurement_analysis_run_replicate_and_aggregate(tmp_path) -> No
     assert metrics["toy_value"].replicate_values == [17.0, 19.0]
 
 
+def test_scalar_measurement_analysis_cache_hit_skips_loader(tmp_path) -> None:
+    """Compatible scalar canonical caches should avoid trajectory loading."""
+
+    condition = Condition(
+        label="Toy",
+        config_path=tmp_path / "config.yaml",
+        replicates=(1,),
+        sim_config=object(),
+    )
+    settings = ToyScalarSettings(offset=10.0)
+    result_path = tmp_path / "run_1" / "result.json"
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    cached_result = build_scalar_replicate_result(ToyScalarAnalysis(), settings)
+    result_path.write_text(json.dumps(cached_result))
+    replicate_ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="0ns",
+        recompute=False,
+        settings=settings,
+        result_path=result_path,
+    )
+
+    analysis = ToyScalarAnalysis()
+    analysis._trajectory_loader_factory = pytest.fail  # type: ignore[method-assign]
+
+    result = analysis.run_replicate(replicate_ctx, replicate=1)
+
+    assert result == cached_result
+
+
+@pytest.mark.parametrize(
+    ("mutation", "analysis_cls", "settings"),
+    [
+        ("identity", VersionedScalarAnalysis, ToyScalarSettings(offset=10.0)),
+        ("settings", ToyScalarAnalysis, ToyScalarSettings(offset=12.0)),
+        ("replicate", ToyScalarAnalysis, ToyScalarSettings(offset=10.0)),
+    ],
+)
+def test_scalar_measurement_analysis_stale_cache_recomputes(
+    tmp_path,
+    mutation: str,
+    analysis_cls: type[ScalarMeasurementAnalysis],
+    settings: ToyScalarSettings,
+) -> None:
+    """Stale scalar canonical caches should fall through to fresh computation."""
+
+    condition = Condition(
+        label="Toy",
+        config_path=tmp_path / "config.yaml",
+        replicates=(1,),
+        sim_config=object(),
+    )
+    result_path = tmp_path / "run_1" / "result.json"
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    cached_result = build_scalar_replicate_result(
+        ToyScalarAnalysis(),
+        ToyScalarSettings(offset=10.0),
+        replicate=2 if mutation == "replicate" else 1,
+        value=-1.0,
+    )
+    result_path.write_text(json.dumps(cached_result))
+    replicate_ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="0ns",
+        recompute=False,
+        settings=settings,
+        result_path=result_path,
+    )
+
+    analysis = analysis_cls()
+    analysis._trajectory_loader_factory = lambda: FakeLoader  # type: ignore[method-assign]
+    analysis.get_trajectory_window = lambda *args: FakeWindow()  # type: ignore[method-assign]
+
+    result = analysis.run_replicate(replicate_ctx, replicate=1)
+
+    assert result["replicate"] == 1
+    assert result["value"] == settings.offset + 7.0
+    assert result["value"] != cached_result["value"]
+
+
 def test_scalar_measurement_analysis_extract_metrics_delegates_to_measurement() -> None:
     """Analysis metric extraction should use the measurement summary hook."""
 
@@ -471,6 +576,26 @@ def test_scalar_measurement_aggregate_rejects_missing_cache_identity(tmp_path) -
     result.pop("cache_identity")
 
     with pytest.raises(ValueError, match="cache_identity is missing"):
+        ToyScalarAnalysis().aggregate(build_aggregate_context(tmp_path, settings), [result])
+
+
+def test_scalar_measurement_aggregate_rejects_empty_results(tmp_path) -> None:
+    """Aggregation should reject empty scalar replicate collections."""
+
+    with pytest.raises(ValueError, match="requires at least one result"):
+        ToyScalarAnalysis().aggregate(
+            build_aggregate_context(tmp_path, ToyScalarSettings(offset=10.0)),
+            [],
+        )
+
+
+def test_scalar_measurement_aggregate_rejects_wrong_replicate_id(tmp_path) -> None:
+    """Aggregation should reject scalar results with unexpected replicate IDs."""
+
+    settings = ToyScalarSettings(offset=10.0)
+    result = build_scalar_replicate_result(ToyScalarAnalysis(), settings, replicate=2)
+
+    with pytest.raises(ValueError, match="replicate mismatch"):
         ToyScalarAnalysis().aggregate(build_aggregate_context(tmp_path, settings), [result])
 
 

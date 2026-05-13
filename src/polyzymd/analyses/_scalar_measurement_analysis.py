@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import math
 import statistics
@@ -175,6 +176,10 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
                     f"{cls.__name__}.measurement must be a ScalarMeasurement instance or "
                     f"class, got {measurement!r}."
                 )
+            if inspect.isabstract(measurement):
+                raise TypeError(
+                    f"{cls.__name__}.measurement must be a concrete ScalarMeasurement class."
+                )
             cls._validate_metric_contract(measurement)
             return
         if not isinstance(measurement, ScalarMeasurement):
@@ -295,6 +300,72 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
             settings=ctx.settings,
         )
 
+    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
+        """Run one scalar replicate with canonical cache-hit validation.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            One-indexed replicate number.
+
+        Returns
+        -------
+        Any
+            Cached or freshly computed replicate result.
+        """
+
+        if not ctx.recompute and ctx.result_path is not None and ctx.result_path.exists():
+            cached = self._load_scalar_replicate_cache(ctx, replicate)
+            if cached is not None:
+                return cached
+        return super().run_replicate(ctx, replicate)
+
+    def _load_scalar_replicate_cache(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+    ) -> dict[str, Any] | None:
+        """Load a compatible canonical scalar replicate cache.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            One-indexed replicate number expected in the cache payload.
+
+        Returns
+        -------
+        dict[str, Any] or None
+            Compatible cached replicate result, or ``None`` when the existing
+            file is stale or incompatible.
+        """
+
+        if ctx.result_path is None:
+            return None
+        try:
+            cached = json.loads(ctx.result_path.read_text())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if not isinstance(cached, dict):
+            return None
+
+        measurement = self._measurement_instance()
+        cache_identity = measurement.cache_identity(ctx.settings, analysis_name=self.name)
+        try:
+            self._validate_replicate_result(
+                cached,
+                expected_cache_identity=cache_identity,
+                expected_measurement=measurement,
+                expected_replicate=replicate,
+                index=0,
+            )
+        except (TypeError, ValueError):
+            return None
+        return cached
+
     def summarize_replicate(
         self,
         ctx: ReplicateContext,
@@ -355,18 +426,28 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
             Serializable aggregate result payload.
         """
 
+        if not results:
+            raise ValueError(f"{type(self).__name__}.aggregate() requires at least one result.")
+
         measurement = self._measurement_instance()
         cache_identity = measurement.cache_identity(ctx.settings, analysis_name=self.name)
         for index, result in enumerate(results):
+            try:
+                expected_replicate = ctx.replicates[index]
+            except IndexError as exc:
+                raise ValueError(
+                    f"{type(self).__name__}.aggregate() received more results than replicate IDs."
+                ) from exc
             self._validate_replicate_result(
                 result,
                 expected_cache_identity=cache_identity,
                 expected_measurement=measurement,
+                expected_replicate=expected_replicate,
                 index=index,
             )
 
         values = [float(result["value"]) for result in results]
-        mean_value = statistics.mean(values) if values else math.nan
+        mean_value = statistics.mean(values)
         sem_value = statistics.stdev(values) / math.sqrt(len(values)) if len(values) > 1 else 0.0
         return {
             "analysis": self.name,
@@ -387,6 +468,7 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
         *,
         expected_cache_identity: CacheIdentity,
         expected_measurement: ScalarMeasurement,
+        expected_replicate: int,
         index: int,
     ) -> None:
         """Validate that a scalar replicate result matches the active identity.
@@ -399,6 +481,8 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
             Cache identity for the active analysis settings and measurement.
         expected_measurement : ScalarMeasurement
             Active measurement configured on this analysis instance.
+        expected_replicate : int
+            One-indexed replicate ID expected in the result payload.
         index : int
             Zero-based result index used in error messages.
 
@@ -429,6 +513,13 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
                     f"Stale scalar replicate result {index}: {field} mismatch "
                     f"({actual_value!r} != {expected_value!r})."
                 )
+
+        actual_replicate = result.get("replicate")
+        if actual_replicate != expected_replicate:
+            raise ValueError(
+                f"Stale scalar replicate result {index}: replicate mismatch "
+                f"({actual_replicate!r} != {expected_replicate!r})."
+            )
 
         raw_identity = result.get("cache_identity")
         if not isinstance(raw_identity, dict):
