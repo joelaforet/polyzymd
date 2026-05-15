@@ -12,6 +12,14 @@ from polyzymd.analyses.mda.base import (
     MDARunKwargs,
 )
 from polyzymd.analyses.mda.frame_selection import FrameSelection
+from polyzymd.analyses.mda.job import (
+    MDAAnalysisJob,
+    MDAAnalysisJobError,
+    MDABackendPolicy,
+    MDAFunctionAdapter,
+    MDAJobResult,
+    MDAUniversePolicy,
+)
 from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
 
 __all__ = [
@@ -20,6 +28,12 @@ __all__ = [
     "MDAnalysisExtensionError",
     "MDARunKwargs",
     "FrameSelection",
+    "MDAAnalysisJob",
+    "MDAAnalysisJobError",
+    "MDABackendPolicy",
+    "MDAFunctionAdapter",
+    "MDAJobResult",
+    "MDAUniversePolicy",
     "FileIdentity",
     "UniverseProvider",
     "UniverseProvenance",

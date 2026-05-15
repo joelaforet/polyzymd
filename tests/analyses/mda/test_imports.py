@@ -18,6 +18,14 @@ def test_public_facade_reexports_primitives() -> None:
         MDARunKwargs,
     )
     from polyzymd.analyses.mda.frame_selection import FrameSelection
+    from polyzymd.analyses.mda.job import (
+        MDAAnalysisJob,
+        MDAAnalysisJobError,
+        MDABackendPolicy,
+        MDAFunctionAdapter,
+        MDAJobResult,
+        MDAUniversePolicy,
+    )
     from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
 
     assert mda.MDA_EXTENSION_API_VERSION == MDA_EXTENSION_API_VERSION == "1"
@@ -25,6 +33,12 @@ def test_public_facade_reexports_primitives() -> None:
     assert mda.MDAnalysisExtensionError is MDAnalysisExtensionError
     assert mda.MDARunKwargs is MDARunKwargs
     assert mda.FrameSelection is FrameSelection
+    assert mda.MDAAnalysisJob is MDAAnalysisJob
+    assert mda.MDAAnalysisJobError is MDAAnalysisJobError
+    assert mda.MDABackendPolicy is MDABackendPolicy
+    assert mda.MDAFunctionAdapter is MDAFunctionAdapter
+    assert mda.MDAJobResult is MDAJobResult
+    assert mda.MDAUniversePolicy is MDAUniversePolicy
     assert mda.FileIdentity is FileIdentity
     assert mda.UniverseProvider is UniverseProvider
     assert mda.UniverseProvenance is UniverseProvenance
@@ -34,6 +48,12 @@ def test_public_facade_reexports_primitives() -> None:
         "MDAnalysisExtensionError",
         "MDARunKwargs",
         "FrameSelection",
+        "MDAAnalysisJob",
+        "MDAAnalysisJobError",
+        "MDABackendPolicy",
+        "MDAFunctionAdapter",
+        "MDAJobResult",
+        "MDAUniversePolicy",
         "FileIdentity",
         "UniverseProvider",
         "UniverseProvenance",
@@ -49,6 +69,7 @@ def test_import_does_not_load_heavy_simulation_modules() -> None:
     importlib.import_module("polyzymd.analyses.mda")
     importlib.import_module("polyzymd.analyses.mda.base")
     importlib.import_module("polyzymd.analyses.mda.frame_selection")
+    importlib.import_module("polyzymd.analyses.mda.job")
     importlib.import_module("polyzymd.analyses.mda.universe")
 
     for module_name in heavy_modules:
