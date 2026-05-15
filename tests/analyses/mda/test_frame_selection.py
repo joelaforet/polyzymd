@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from polyzymd.analyses.mda import FrameSelection
@@ -71,12 +72,52 @@ def test_frames_rejects_invalid_selectors(frames: object) -> None:
         FrameSelection(frames=frames)
 
 
+@pytest.mark.parametrize(
+    "frames",
+    [
+        [1.5],
+        [None],
+        ["0"],
+        [0, 1.5],
+        [True, 1],
+        np.array([1.5]),
+        np.array([None], dtype=object),
+        np.array(["0"]),
+    ],
+)
+def test_frames_rejects_non_integer_non_boolean_elements(frames: object) -> None:
+    """Explicit frames should contain only integer indices or boolean masks."""
+
+    with pytest.raises(ValueError, match="integer frame indices or boolean mask"):
+        FrameSelection(frames=frames)
+
+
+def test_numpy_integer_frame_indices_are_valid() -> None:
+    """Array-like integer frame selectors should remain valid."""
+
+    selection = FrameSelection(frames=np.array([0, 3, 8]), n_frames_total=10)
+
+    assert selection.run_kwargs() == {"frames": (np.int64(0), np.int64(3), np.int64(8))}
+    assert selection.n_frames_selected == 3
+
+
 def test_boolean_frame_mask_counts_selected_frames() -> None:
     """Boolean masks should record the number of selected frames."""
 
     selection = FrameSelection(frames=[True, False, True, False], n_frames_total=4)
 
     assert selection.run_kwargs() == {"frames": (True, False, True, False)}
+    assert selection.n_frames_selected == 2
+
+
+def test_numpy_boolean_frame_mask_counts_selected_frames() -> None:
+    """Array-like boolean masks should be validated as masks."""
+
+    selection = FrameSelection(frames=np.array([True, False, True, False]), n_frames_total=4)
+
+    assert selection.run_kwargs() == {
+        "frames": (np.bool_(True), np.bool_(False), np.bool_(True), np.bool_(False))
+    }
     assert selection.n_frames_selected == 2
 
 
@@ -87,11 +128,25 @@ def test_boolean_frame_mask_rejects_length_mismatch() -> None:
         FrameSelection(frames=[True, False], n_frames_total=3)
 
 
+def test_numpy_boolean_frame_mask_rejects_length_mismatch() -> None:
+    """Array-like boolean masks should match known trajectory length."""
+
+    with pytest.raises(ValueError, match="does not match trajectory length"):
+        FrameSelection(frames=np.array([True, False]), n_frames_total=3)
+
+
 def test_boolean_frame_mask_rejects_empty_selection() -> None:
     """Boolean masks should select at least one frame."""
 
     with pytest.raises(ValueError, match="select at least one frame"):
         FrameSelection(frames=[False, False], n_frames_total=2)
+
+
+def test_numpy_boolean_frame_mask_rejects_empty_selection() -> None:
+    """Array-like boolean masks should select at least one frame."""
+
+    with pytest.raises(ValueError, match="select at least one frame"):
+        FrameSelection(frames=np.array([False, False]), n_frames_total=2)
 
 
 def test_from_trajectory_window_preserves_window_values() -> None:

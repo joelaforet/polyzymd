@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sized
 from dataclasses import dataclass, field
+from operator import index
 from typing import TYPE_CHECKING, Any
 
 from polyzymd.analyses.mda.base import MDARunKwargs
@@ -29,6 +30,53 @@ def _is_scalar_frame_selector(frames: Any) -> bool:
     """
 
     return isinstance(frames, (bool, int, float, complex))
+
+
+def _is_boolean_frame_value(frame: Any) -> bool:
+    """Return whether a frame selector value is a boolean mask entry.
+
+    Parameters
+    ----------
+    frame : Any
+        Candidate element from an explicit ``frames`` selector.
+
+    Returns
+    -------
+    bool
+        ``True`` for Python booleans and NumPy-style boolean scalar values.
+    """
+
+    if isinstance(frame, bool):
+        return True
+    frame_type = type(frame)
+    return (
+        frame_type.__name__ == "bool_"
+        and frame_type.__module__.split(".", maxsplit=1)[0] == "numpy"
+    )
+
+
+def _is_integer_frame_value(frame: Any) -> bool:
+    """Return whether a frame selector value is an integer index.
+
+    Parameters
+    ----------
+    frame : Any
+        Candidate element from an explicit ``frames`` selector.
+
+    Returns
+    -------
+    bool
+        ``True`` when ``frame`` can be used as an integer index and is not a
+        boolean mask value.
+    """
+
+    if _is_boolean_frame_value(frame):
+        return False
+    try:
+        index(frame)
+    except TypeError:
+        return False
+    return True
 
 
 def _coerce_frames(frames: Any) -> tuple[Any, ...]:
@@ -57,7 +105,10 @@ def _coerce_frames(frames: Any) -> tuple[Any, ...]:
     if not isinstance(frames, Sized) or not isinstance(frames, Iterable):
         raise ValueError("frames must be a sized iterable sequence or boolean mask")
 
-    frozen_frames = tuple(frames)
+    try:
+        frozen_frames = tuple(frames)
+    except TypeError as exc:
+        raise ValueError("frames must be a sized iterable sequence or boolean mask") from exc
     if len(frozen_frames) == 0:
         raise ValueError("frames must contain at least one entry")
     return frozen_frames
@@ -84,8 +135,11 @@ def _selected_count_from_frames(frames: tuple[Any, ...], n_frames_total: int | N
         Raised when a boolean mask has the wrong length or selects no frames.
     """
 
-    is_bool_mask = all(isinstance(frame, bool) for frame in frames)
-    if not is_bool_mask:
+    is_bool_mask = all(_is_boolean_frame_value(frame) for frame in frames)
+    is_integer_indices = all(_is_integer_frame_value(frame) for frame in frames)
+    if not is_bool_mask and not is_integer_indices:
+        raise ValueError("frames must contain only integer frame indices or boolean mask values")
+    if is_integer_indices:
         return len(frames)
 
     if n_frames_total is not None and len(frames) != n_frames_total:
