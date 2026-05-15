@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol
@@ -12,8 +11,6 @@ if TYPE_CHECKING:
 
     from polyzymd.analyses.shared.loader import TrajectoryInfo
     from polyzymd.config.schema import SimulationConfig
-
-LOGGER = logging.getLogger(__name__)
 
 
 class _TrajectoryLoaderLike(Protocol):
@@ -155,7 +152,6 @@ class UniverseProvider:
     loader: _TrajectoryLoaderLike | None = None
     loader_factory: LoaderFactory | None = None
     _provenance_cache: dict[int, UniverseProvenance] = field(default_factory=dict, init=False)
-    _warned_gro_topologies: set[Path] = field(default_factory=set, init=False)
 
     def __post_init__(self) -> None:
         """Validate loader injection settings after dataclass construction."""
@@ -303,7 +299,6 @@ class UniverseProvider:
         if gro_warning is not None:
             if gro_warning not in warnings:
                 warnings.append(gro_warning)
-                self._log_gro_warning_once(info.topology_file, gro_warning)
 
         return UniverseProvenance(
             replicate=info.replicate,
@@ -382,19 +377,3 @@ class UniverseProvider:
         if not suffix_is_gro and not format_is_gro:
             return None
         return GRO_CHAIN_ID_WARNING_TEMPLATE.format(path=topology_path)
-
-    def _log_gro_warning_once(self, topology_path: Path, warning: str) -> None:
-        """Log a GRO chain-ID warning once for each topology path.
-
-        Parameters
-        ----------
-        topology_path : Path
-            GRO topology path that triggered the warning.
-        warning : str
-            Warning text to log.
-        """
-        path = Path(topology_path)
-        if path in self._warned_gro_topologies:
-            return
-        self._warned_gro_topologies.add(path)
-        LOGGER.warning(warning)

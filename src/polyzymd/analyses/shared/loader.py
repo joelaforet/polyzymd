@@ -32,6 +32,27 @@ if TYPE_CHECKING:
     from polyzymd.engines.base import SimulationEngine, TrajectoryLayout
 
 LOGGER = logging.getLogger(__name__)
+_WARNED_GRO_TOPOLOGY_PATHS: set[Path] = set()
+
+
+def _normalized_warning_path(path: Path) -> Path:
+    """Return a stable key for topology warning de-duplication.
+
+    Parameters
+    ----------
+    path : Path
+        Topology path to normalize.
+
+    Returns
+    -------
+    Path
+        Expanded and resolved path suitable for process-wide warning gating.
+    """
+    expanded = Path(path).expanduser()
+    try:
+        return expanded.resolve(strict=False)
+    except OSError:
+        return expanded.absolute()
 
 
 def _require_mdanalysis(feature_name: str = "trajectory analysis") -> None:
@@ -167,7 +188,6 @@ class TrajectoryLoader:
         self._engine_override = engine_override
         self._engine: SimulationEngine | None = None
         self._universe_cache: dict[int, "Universe"] = {}
-        self._warned_gro_topologies: set[Path] = set()
 
     # ------------------------------------------------------------------
     # Engine delegation helpers
@@ -313,8 +333,11 @@ class TrajectoryLoader:
             otherwise ``None``.
         """
         warning = self._gro_topology_warning(layout)
-        if warning is not None and layout.topology_path not in self._warned_gro_topologies:
-            self._warned_gro_topologies.add(layout.topology_path)
+        if warning is not None and layout.topology_path is not None:
+            topology_key = _normalized_warning_path(layout.topology_path)
+            if topology_key in _WARNED_GRO_TOPOLOGY_PATHS:
+                return warning
+            _WARNED_GRO_TOPOLOGY_PATHS.add(topology_key)
             LOGGER.warning(warning)
         return warning
 

@@ -295,14 +295,16 @@ def test_provenance_refresh_recomputes_metadata(tmp_path: Path) -> None:
     assert loader.info_calls == [2, 2]
 
 
-def test_gro_topology_warning_is_logged_once_and_recorded(tmp_path: Path, caplog) -> None:
-    """GRO inputs should warn once per topology and preserve provenance warnings."""
+def test_gro_topology_warning_is_recorded_without_provider_logging(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Provider fallback warnings should be recorded but not emitted."""
 
     info = _trajectory_info(tmp_path, topology_name="topology.gro", topology_format="gro")
     loader = FakeLoader(info)
     provider = UniverseProvider(FakeConfig(), loader=loader)
 
-    with caplog.at_level(logging.WARNING, logger="polyzymd.analyses.mda.universe"):
+    with caplog.at_level(logging.WARNING):
         first = provider.provenance_for(2)
         second = provider.provenance_for(2, refresh=True)
 
@@ -311,8 +313,7 @@ def test_gro_topology_warning_is_logged_once_and_recorded(tmp_path: Path, caplog
         for record in caplog.records
         if record.name == "polyzymd.analyses.mda.universe" and "GRO topology" in record.message
     ]
-    assert len(messages) == 1
-    assert "Prefer a PDB topology" in messages[0]
+    assert messages == []
     assert any("GRO topology" in warning for warning in first.warnings)
     assert any("GRO topology" in warning for warning in second.warnings)
 
@@ -329,21 +330,22 @@ def test_gro_warning_uses_topology_format_even_without_gro_suffix(tmp_path: Path
     assert any("GRO topology" in warning for warning in provenance.warnings)
 
 
-def test_real_gromacs_provider_warns_once_and_records_gro_provenance(
+def test_independent_real_gromacs_providers_warn_once_and_record_gro_provenance(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Real GROMACS provider path should emit one GRO warning per topology."""
+    """Independent real providers should emit one GRO warning per topology."""
 
     gromacs_dir = tmp_path / "run_1" / "gromacs"
     _write_file(gromacs_dir / "system.gro", b"GRO")
     _write_file(gromacs_dir / "prod.xtc", b"XTC")
-    provider = UniverseProvider.from_config(FakeGromacsConfig(tmp_path))
+    first_provider = UniverseProvider.from_config(FakeGromacsConfig(tmp_path))
+    second_provider = UniverseProvider.from_config(FakeGromacsConfig(tmp_path))
 
     with caplog.at_level(logging.WARNING):
-        first = provider.provenance_for(1)
-        second = provider.provenance_for(1, refresh=True)
-        third = provider.provenance_for(1, refresh=True)
+        first = first_provider.provenance_for(1)
+        second = second_provider.provenance_for(1)
+        refreshed = first_provider.provenance_for(1, refresh=True)
 
     gro_warning_records = [
         record
@@ -355,7 +357,7 @@ def test_real_gromacs_provider_warns_once_and_records_gro_provenance(
     assert first.topology.path == gromacs_dir / "system.gro"
     assert first.topology.format == "gro"
     assert second.topology.path == first.topology.path
-    assert third.topology.path == first.topology.path
+    assert refreshed.topology.path == first.topology.path
     assert any("GRO topology" in warning for warning in first.warnings)
     assert any("GRO topology" in warning for warning in second.warnings)
-    assert any("GRO topology" in warning for warning in third.warnings)
+    assert any("GRO topology" in warning for warning in refreshed.warnings)
