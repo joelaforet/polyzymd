@@ -114,6 +114,26 @@ def test_store_writes_and_reads_replicate_result_and_manifest(tmp_path: Path) ->
     assert store.read_manifest() == manifest
 
 
+@pytest.mark.parametrize(
+    "payload",
+    ["{not json", '{"artifact_type": "replicate", "analysis_name": "rmsd"}'],
+)
+def test_store_read_replicate_result_wraps_invalid_json_and_schema(
+    tmp_path: Path,
+    payload: str,
+) -> None:
+    """ArtifactStore should include artifact paths for invalid JSON or schema."""
+
+    store = ArtifactStore(tmp_path)
+    artifact_path = tmp_path / "result.json"
+    artifact_path.write_text(payload)
+
+    with pytest.raises(
+        ArtifactStoreError, match=r"Failed to validate replicate artifact .*result\.json"
+    ):
+        store.read_replicate_result()
+
+
 def test_store_writes_npz_sidecar_lazily_and_validates(tmp_path: Path) -> None:
     """NPZ writing should lazy-import NumPy and produce a valid relative sidecar ref."""
 

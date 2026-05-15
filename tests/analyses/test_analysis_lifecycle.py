@@ -22,6 +22,7 @@ from polyzymd.analyses.base import (
 from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda import MDAAnalysisJob, MDAReplicateJobContext, MDAUniversePolicy
 from polyzymd.analyses.mda.artifacts import ReplicateArtifact
+from polyzymd.analyses.mda.store import ArtifactStoreError
 from polyzymd.analyses.orchestrator import (
     finalize_comparison_from_disk,
     prepare_comparison_run,
@@ -540,6 +541,33 @@ def test_public_lifecycle_runs_mda_jobs_and_saves_artifact(tmp_path: Path) -> No
     assert saved.payload["jobs"][0]["results"]["value"] == 5.0
     assert "fake provenance warning" in saved.warnings
     assert (output_dir / "aggregated" / "result.json").exists()
+
+
+def test_aggregate_from_disk_reports_malformed_mda_artifact_context(tmp_path: Path) -> None:
+    """MDA artifact loading failures should include analysis, path, and replicate context."""
+
+    analysis = _MDAJobOnlyAnalysis()
+    condition = _condition(tmp_path, replicates=(1,))
+    output_dir = tmp_path / "analysis" / analysis.name
+    result_path = output_dir / "run_1" / "result.json"
+    result_path.parent.mkdir(parents=True)
+    result_path.write_text('{"artifact_type": "replicate", "analysis_name": "mda_job_lifecycle"}')
+
+    with pytest.raises(ArtifactStoreError) as exc_info:
+        AnalysisLifecycle(analysis).aggregate_condition_from_disk(
+            condition,
+            _LifecycleSettings(),
+            "10ns",
+            output_dir,
+            (1,),
+        )
+
+    message = str(exc_info.value)
+    assert "mda_job_lifecycle" in message
+    assert "condition='Cond'" in message
+    assert "replicate=1" in message
+    assert str(result_path) in message
+    assert "Failed to validate replicate artifact" in message
 
 
 def test_public_run_comparison_executes_full_lifecycle(

@@ -32,7 +32,7 @@ from polyzymd.analyses.exceptions import (
     ReplicateSkippedError,
 )
 from polyzymd.analyses.mda.artifacts import ReplicateArtifact
-from polyzymd.analyses.mda.store import ArtifactStore
+from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 
 if TYPE_CHECKING:
     from polyzymd.analyses.base import Analysis
@@ -366,7 +366,14 @@ class AnalysisLifecycle:
         missing_paths: list[Path] = []
         for rep in replicates:
             rep_dir = output_dir / f"run_{rep}"
-            result = self.analysis._load_replicate_result(rep_dir)
+            try:
+                result = self.analysis._load_replicate_result(rep_dir)
+            except ArtifactStoreError as exc:
+                expected_path = self.analysis.replicate_result_path(rep_dir)
+                raise ArtifactStoreError(
+                    f"{self.analysis.name}: failed to load replicate result for "
+                    f"condition='{condition.label}' replicate={rep} from {expected_path}: {exc}"
+                ) from exc
             if result is None:
                 expected_path = self.analysis.replicate_result_path(rep_dir)
                 missing_paths.append(expected_path)

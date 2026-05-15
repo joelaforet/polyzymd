@@ -95,12 +95,10 @@ def deserialize_replicate_result(analysis: Any, path: Path) -> Any:
             return result_cls.load(path)
         if hasattr(result_cls, "model_validate_json"):
             return result_cls.model_validate_json(path.read_text())
-    loaded = json.loads(path.read_text())
-    if isinstance(loaded, dict) and loaded.get("artifact_type") == "replicate":
-        from polyzymd.analyses.mda.artifacts import ReplicateArtifact
-
-        return ReplicateArtifact.model_validate(loaded)
-    return loaded
+    artifact = _try_load_mda_replicate_artifact(analysis, path.parent, path)
+    if artifact is not None:
+        return artifact
+    return json.loads(path.read_text())
 
 
 def load_replicate_result(analysis: Any, run_dir: Path) -> Any | None:
@@ -123,7 +121,142 @@ def load_replicate_result(analysis: Any, run_dir: Path) -> Any | None:
     result_path = analysis.replicate_result_path(run_dir)
     if not result_path.exists():
         return None
+    return _load_replicate_result_from_path(analysis, run_dir, result_path)
+
+
+def _load_replicate_result_from_path(analysis: Any, run_dir: Path, result_path: Path) -> Any:
+    """Load a replicate result with MDA artifact-store routing.
+
+    Parameters
+    ----------
+    analysis : Any
+        Analysis instance requesting the result.
+    run_dir : Path
+        Replicate output directory containing the result.
+    result_path : Path
+        Canonical replicate result path.
+
+    Returns
+    -------
+    Any
+        Loaded legacy result or MDA replicate artifact.
+    """
+
+    result_cls = type(analysis).ReplicateResultClass
+    if result_cls is not None:
+        return analysis._deserialize_replicate_result(result_path)
+    artifact = _try_load_mda_replicate_artifact(analysis, run_dir, result_path)
+    if artifact is not None:
+        return artifact
     return analysis._deserialize_replicate_result(result_path)
+
+
+def _try_load_mda_replicate_artifact(analysis: Any, run_dir: Path, result_path: Path) -> Any | None:
+    """Try loading an MDA replicate artifact through ``ArtifactStore``.
+
+    Parameters
+    ----------
+    analysis : Any
+        Analysis instance requesting the artifact.
+    run_dir : Path
+        Replicate output directory used as the artifact-store root.
+    result_path : Path
+        Candidate artifact path.
+
+    Returns
+    -------
+    Any or None
+        Loaded ``ReplicateArtifact`` when the file is an MDA artifact, otherwise
+        ``None`` so legacy JSON loading can continue.
+    """
+
+    from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
+
+    store = ArtifactStore(run_dir)
+    relative_path = _artifact_relative_path(run_dir, result_path)
+    try:
+        return store.read_replicate_result(relative_path)
+    except ArtifactStoreError as exc:
+        try:
+            loaded = json.loads(result_path.read_text())
+        except (OSError, json.JSONDecodeError) as parse_exc:
+            raise _artifact_load_error(analysis, run_dir, result_path, exc) from parse_exc
+        if isinstance(loaded, dict) and loaded.get("artifact_type") == "replicate":
+            raise _artifact_load_error(analysis, run_dir, result_path, exc) from exc
+    return None
+
+
+def _artifact_relative_path(run_dir: Path, result_path: Path) -> Path:
+    """Return the store-relative artifact path when possible.
+
+    Parameters
+    ----------
+    run_dir : Path
+        Artifact-store root.
+    result_path : Path
+        Candidate artifact path.
+
+    Returns
+    -------
+    Path
+        Path relative to ``run_dir``.
+    """
+
+    try:
+        return result_path.relative_to(run_dir)
+    except ValueError:
+        return Path(result_path.name)
+
+
+def _artifact_load_error(
+    analysis: Any, run_dir: Path, result_path: Path, exc: Exception
+) -> Exception:
+    """Build a contextual MDA artifact loading error.
+
+    Parameters
+    ----------
+    analysis : Any
+        Analysis instance requesting the artifact.
+    run_dir : Path
+        Replicate output directory.
+    result_path : Path
+        Artifact path that failed to load.
+    exc : Exception
+        Original artifact-store failure.
+
+    Returns
+    -------
+    Exception
+        Contextual artifact-store error.
+    """
+
+    from polyzymd.analyses.mda.store import ArtifactStoreError
+
+    replicate = _replicate_id_from_run_dir(run_dir)
+    return ArtifactStoreError(
+        f"{analysis.name}: failed to load MDA replicate artifact for replicate={replicate} "
+        f"from {result_path}: {exc}"
+    )
+
+
+def _replicate_id_from_run_dir(run_dir: Path) -> str:
+    """Extract a replicate ID from a canonical ``run_N`` directory name.
+
+    Parameters
+    ----------
+    run_dir : Path
+        Replicate output directory.
+
+    Returns
+    -------
+    str
+        Replicate ID text or ``"unknown"`` when the directory is non-standard.
+    """
+
+    name = run_dir.name
+    if name.startswith("run_") and name.removeprefix("run_").isdigit():
+        return name.removeprefix("run_")
+    return "unknown"
 
 
 def check_cache(

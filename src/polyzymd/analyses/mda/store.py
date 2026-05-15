@@ -6,6 +6,8 @@ import hashlib
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from pydantic import ValidationError
+
 from polyzymd.analyses.mda.artifacts import (
     ArtifactManifest,
     ArtifactSidecarRef,
@@ -77,6 +79,10 @@ class ArtifactStore:
         except OSError as exc:
             raise ArtifactStoreError(
                 f"Failed to read replicate artifact {resolved_path}: {exc}"
+            ) from exc
+        except ValidationError as exc:
+            raise ArtifactStoreError(
+                f"Failed to validate replicate artifact {resolved_path}: {exc}"
             ) from exc
 
     def write_manifest(

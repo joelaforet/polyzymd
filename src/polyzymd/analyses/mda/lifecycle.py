@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -296,14 +297,16 @@ def _job_result_payload(job: MDAJobResult, *, analysis_name: str) -> dict[str, A
 
     return {
         "name": job.name,
-        "results": _json_payload(job.results, analysis_name=analysis_name),
-        "run_kwargs": _json_payload(dict(job.run_kwargs), analysis_name=analysis_name),
+        "results": _json_payload(job.results, analysis_name=f"{analysis_name}.{job.name}"),
+        "run_kwargs": _json_payload(
+            dict(job.run_kwargs), analysis_name=f"{analysis_name}.{job.name}"
+        ),
         "frame_selection": _frame_selection_payload(job.frame_selection),
         "backend_policy": _json_payload(
-            job.backend_policy.run_kwargs(), analysis_name=analysis_name
+            job.backend_policy.run_kwargs(), analysis_name=f"{analysis_name}.{job.name}"
         ),
         "universe_policy": _json_payload(
-            job.universe_policy.as_dict(), analysis_name=analysis_name
+            job.universe_policy.as_dict(), analysis_name=f"{analysis_name}.{job.name}"
         ),
     }
 
@@ -353,17 +356,31 @@ def _json_payload(value: Any, *, analysis_name: str) -> Any:
         JSON-compatible primitive, list, or dictionary.
     """
 
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise PluginContractError(
+                f"{analysis_name}.build_mda_jobs() produced non-finite float result {value!r}; "
+                "add a collector in a future MDA lifecycle task"
+            )
+        return value
+    if isinstance(value, int):
         return value
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, BaseModel):
         return _json_payload(value.model_dump(mode="json"), analysis_name=analysis_name)
     if isinstance(value, Mapping):
-        return {
-            str(key): _json_payload(item, analysis_name=analysis_name)
-            for key, item in value.items()
-        }
+        payload = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise PluginContractError(
+                    f"{analysis_name}.build_mda_jobs() produced non-string mapping key "
+                    f"{key!r}; add a collector in a future MDA lifecycle task"
+                )
+            payload[key] = _json_payload(item, analysis_name=analysis_name)
+        return payload
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return [_json_payload(item, analysis_name=analysis_name) for item in value]
     raise PluginContractError(
