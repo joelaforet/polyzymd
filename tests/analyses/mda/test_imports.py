@@ -11,6 +11,15 @@ def test_public_facade_reexports_primitives() -> None:
     """The package facade should expose the stable extension-layer primitives."""
 
     from polyzymd.analyses import mda
+    from polyzymd.analyses.mda.artifacts import (
+        MDA_ARTIFACT_SCHEMA_VERSION,
+        ArtifactEnvelope,
+        ArtifactManifest,
+        ArtifactSidecarRef,
+        ComparisonArtifact,
+        ConditionArtifact,
+        ReplicateArtifact,
+    )
     from polyzymd.analyses.mda.base import (
         MDA_EXTENSION_API_VERSION,
         AnalysisBaseLike,
@@ -26,12 +35,22 @@ def test_public_facade_reexports_primitives() -> None:
         MDAJobResult,
         MDAUniversePolicy,
     )
+    from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
     from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
 
     assert mda.MDA_EXTENSION_API_VERSION == MDA_EXTENSION_API_VERSION == "1"
+    assert mda.MDA_ARTIFACT_SCHEMA_VERSION == MDA_ARTIFACT_SCHEMA_VERSION == "1"
     assert mda.AnalysisBaseLike is AnalysisBaseLike
     assert mda.MDAnalysisExtensionError is MDAnalysisExtensionError
     assert mda.MDARunKwargs is MDARunKwargs
+    assert mda.ArtifactEnvelope is ArtifactEnvelope
+    assert mda.ArtifactManifest is ArtifactManifest
+    assert mda.ArtifactSidecarRef is ArtifactSidecarRef
+    assert mda.ComparisonArtifact is ComparisonArtifact
+    assert mda.ConditionArtifact is ConditionArtifact
+    assert mda.ReplicateArtifact is ReplicateArtifact
+    assert mda.ArtifactStore is ArtifactStore
+    assert mda.ArtifactStoreError is ArtifactStoreError
     assert mda.FrameSelection is FrameSelection
     assert mda.MDAAnalysisJob is MDAAnalysisJob
     assert mda.MDAAnalysisJobError is MDAAnalysisJobError
@@ -44,9 +63,18 @@ def test_public_facade_reexports_primitives() -> None:
     assert mda.UniverseProvenance is UniverseProvenance
     assert set(mda.__all__) == {
         "MDA_EXTENSION_API_VERSION",
+        "MDA_ARTIFACT_SCHEMA_VERSION",
         "AnalysisBaseLike",
         "MDAnalysisExtensionError",
         "MDARunKwargs",
+        "ArtifactEnvelope",
+        "ArtifactManifest",
+        "ArtifactSidecarRef",
+        "ComparisonArtifact",
+        "ConditionArtifact",
+        "ReplicateArtifact",
+        "ArtifactStore",
+        "ArtifactStoreError",
         "FrameSelection",
         "MDAAnalysisJob",
         "MDAAnalysisJobError",
@@ -61,15 +89,17 @@ def test_public_facade_reexports_primitives() -> None:
 
 
 def test_import_does_not_load_heavy_simulation_modules() -> None:
-    """Importing the extension primitives should not import MDAnalysis or OpenMM."""
+    """Importing extension primitives should not import heavy optional modules."""
 
-    heavy_modules = ("MDAnalysis", "openmm", "openff", "parmed", "pdbfixer")
+    heavy_modules = ("MDAnalysis", "numpy", "openmm", "openff", "parmed", "pdbfixer")
     initially_loaded = {name for name in heavy_modules if name in sys.modules}
 
     importlib.import_module("polyzymd.analyses.mda")
+    importlib.import_module("polyzymd.analyses.mda.artifacts")
     importlib.import_module("polyzymd.analyses.mda.base")
     importlib.import_module("polyzymd.analyses.mda.frame_selection")
     importlib.import_module("polyzymd.analyses.mda.job")
+    importlib.import_module("polyzymd.analyses.mda.store")
     importlib.import_module("polyzymd.analyses.mda.universe")
 
     for module_name in heavy_modules:
