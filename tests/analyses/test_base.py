@@ -177,7 +177,7 @@ class TestAnalysisABC:
         with pytest.raises(
             TypeError,
             match=r"public plugins must implement both build_runner\(\) and "
-            r"summarize_replicate\(\).*direct run_replicate\(\) overrides are "
+            r"summarize_replicate\(\), or build_mda_jobs\(\).*direct run_replicate\(\) overrides are "
             r"advanced/internal only",
         ):
 
@@ -196,7 +196,7 @@ class TestAnalysisABC:
         with pytest.raises(
             TypeError,
             match=r"public plugins must implement both build_runner\(\) and "
-            r"summarize_replicate\(\)",
+            r"summarize_replicate\(\), or build_mda_jobs\(\)",
         ):
 
             class LegacyComputeOnlyAnalysis(Analysis):
@@ -297,6 +297,27 @@ class TestAnalysisABC:
 
                 def aggregate(self, ctx, results):
                     return {"dummy": True}
+
+    def test_mda_job_subclass_satisfies_compute_contract(self) -> None:
+        """MDA job-backed plugins should not need the legacy runner protocol."""
+
+        class MDAJobOnlyAnalysis(Analysis):
+            name: ClassVar[str] = "mda_job_only_contract"
+            Settings: ClassVar[type] = ToySettings
+
+            def build_mda_jobs(self, ctx):
+                """Return no jobs for contract-only validation."""
+
+                del ctx
+                return []
+
+            def aggregate(self, ctx, results):
+                """Return a simple aggregate result."""
+
+                del ctx, results
+                return {"dummy": True}
+
+        assert MDAJobOnlyAnalysis().name == "mda_job_only_contract"
 
     def test_run_replicate_delegates_to_runner_contract(self, toy_condition) -> None:
         """Base run_replicate should execute runner-backed plugins."""

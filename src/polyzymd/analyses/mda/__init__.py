@@ -29,6 +29,7 @@ from polyzymd.analyses.mda.job import (
     MDAJobResult,
     MDAUniversePolicy,
 )
+from polyzymd.analyses.mda.lifecycle import MDAReplicateJobContext
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
 
@@ -53,6 +54,7 @@ __all__ = [
     "MDAFunctionAdapter",
     "MDAJobResult",
     "MDAUniversePolicy",
+    "MDAReplicateJobContext",
     "FileIdentity",
     "UniverseProvider",
     "UniverseProvenance",

@@ -31,6 +31,8 @@ from polyzymd.analyses.exceptions import (
     ReplicateError,
     ReplicateSkippedError,
 )
+from polyzymd.analyses.mda.artifacts import ReplicateArtifact
+from polyzymd.analyses.mda.store import ArtifactStore
 
 if TYPE_CHECKING:
     from polyzymd.analyses.base import Analysis
@@ -319,7 +321,7 @@ class AnalysisLifecycle:
             ) from e
         _check_compute_result(result, "run_replicate", self.analysis.name)
         try:
-            self.analysis.save_result(result, result_path)
+            _save_replicate_result(self.analysis, result, output_dir, result_path)
         except OSError as save_err:
             raise ReplicateError(
                 f"{self.analysis.name}: failed to save replicate result for "
@@ -1241,6 +1243,34 @@ def _check_result_type(result: Any, method: str, analysis_name: str) -> None:
         f"{analysis_name}.{method}() returned {type(result).__name__}; "
         "expected dict, pydantic BaseModel, or None"
     )
+
+
+def _save_replicate_result(
+    analysis: Analysis, result: Any, output_dir: Path, result_path: Path
+) -> Path:
+    """Save one replicate result through the correct persistence backend.
+
+    Parameters
+    ----------
+    analysis : Analysis
+        Analysis instance that produced the result.
+    result : Any
+        Replicate result returned by the compute hook.
+    output_dir : Path
+        Replicate output directory used as the artifact-store root.
+    result_path : Path
+        Canonical result path expected by the public lifecycle.
+
+    Returns
+    -------
+    Path
+        Path written by the persistence backend.
+    """
+
+    if isinstance(result, ReplicateArtifact):
+        store = ArtifactStore(output_dir)
+        return store.write_replicate_result(result, result_path.relative_to(output_dir))
+    return analysis.save_result(result, result_path)
 
 
 def _check_compute_result(result: Any, method: str, analysis_name: str) -> None:

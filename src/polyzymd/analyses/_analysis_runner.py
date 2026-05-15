@@ -33,14 +33,49 @@ def run_replicate_default(analysis: Any, ctx: Any, replicate: int, *, base_cls: 
     """
     if not type(analysis).has_compute_stage:
         return None
+    result = analysis._run_replicate_via_mda_jobs(ctx, replicate)
+    if result is not _RUNNER_NOT_CONFIGURED:
+        return result
     result = analysis._run_replicate_via_runner(ctx, replicate)
     if result is not _RUNNER_NOT_CONFIGURED:
         return result
     raise NotImplementedError(
         f"{type(analysis).__name__} public plugins must implement "
-        "build_runner() + summarize_replicate() or set has_compute_stage = False; "
+        "build_mda_jobs(), build_runner() + summarize_replicate(), or set "
+        "has_compute_stage = False; "
         "direct run_replicate() overrides are advanced/internal only."
     )
+
+
+def run_replicate_via_mda_jobs(analysis: Any, ctx: Any, replicate: int, *, base_cls: type) -> Any:
+    """Execute the opt-in MDAnalysis job-backed replicate path.
+
+    Parameters
+    ----------
+    analysis : Any
+        Analysis instance.
+    ctx : Any
+        Replicate context.
+    replicate : int
+        Replicate number.
+    base_cls : type
+        Public facade class used for method identity checks.
+
+    Returns
+    -------
+    Any
+        Replicate artifact, or a sentinel when the subclass did not opt in.
+    """
+
+    if type(analysis).build_mda_jobs is base_cls.build_mda_jobs:
+        return _RUNNER_NOT_CONFIGURED
+
+    from polyzymd.analyses.mda.lifecycle import run_mda_replicate_jobs
+
+    result = run_mda_replicate_jobs(analysis, ctx, replicate)
+    if result is None:
+        return _RUNNER_NOT_CONFIGURED
+    return result
 
 
 def run_replicate_via_runner(analysis: Any, ctx: Any, replicate: int, *, base_cls: type) -> Any:

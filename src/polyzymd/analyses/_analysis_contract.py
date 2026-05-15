@@ -70,19 +70,22 @@ def validate_analysis_subclass(cls: type, *, base_cls: type, kwargs: dict[str, A
         )
 
     uses_run_replicate = cls.run_replicate is not base_cls.run_replicate
+    uses_mda_jobs = cls.build_mda_jobs is not base_cls.build_mda_jobs
     uses_runner_build = cls.build_runner is not base_cls.build_runner
     uses_runner_summary = cls.summarize_replicate is not base_cls.summarize_replicate
 
+    if uses_runner_build != uses_runner_summary:
+        raise TypeError(
+            f"Analysis subclass {cls.__name__} must implement both build_runner() and "
+            "summarize_replicate() when using the runner-based path."
+        )
+
     if cls.has_compute_stage and not uses_run_replicate:
-        if uses_runner_build != uses_runner_summary:
-            raise TypeError(
-                f"Analysis subclass {cls.__name__} must implement both build_runner() and "
-                "summarize_replicate() when using the runner-based path."
-            )
-        if not uses_runner_build:
+        if not uses_mda_jobs and not uses_runner_build:
             raise TypeError(
                 f"Analysis subclass {cls.__name__} public plugins must implement both "
-                "build_runner() and summarize_replicate() when has_compute_stage=True; "
+                "build_runner() and summarize_replicate(), or build_mda_jobs(), "
+                "when has_compute_stage=True; "
                 "direct run_replicate() overrides are advanced/internal only."
             )
 

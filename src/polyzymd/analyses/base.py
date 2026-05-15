@@ -60,7 +60,11 @@ from polyzymd.analyses._analysis_io import (
 from polyzymd.analyses._analysis_io import (
     save_result as _save_result_impl,
 )
-from polyzymd.analyses._analysis_runner import run_replicate_default, run_replicate_via_runner
+from polyzymd.analyses._analysis_runner import (
+    run_replicate_default,
+    run_replicate_via_mda_jobs,
+    run_replicate_via_runner,
+)
 from polyzymd.analyses._comparison_models import (
     ANOVAResult,
     BaseComparisonResult,
@@ -86,6 +90,7 @@ from polyzymd.analyses._measurement import CacheIdentity, Measurement, MetricSpe
 from polyzymd.analyses.exceptions import PluginContractError
 
 if TYPE_CHECKING:
+    from polyzymd.analyses.mda import MDAAnalysisJob, MDAReplicateJobContext
     from polyzymd.config.schema import SimulationConfig
 
 __all__ = [
@@ -244,6 +249,54 @@ class Analysis(ABC):
         """
         del ctx, replicate, universe, window
         return None
+
+    def build_mda_jobs(
+        self,
+        ctx: MDAReplicateJobContext,
+    ) -> Sequence[MDAAnalysisJob] | None:
+        """Build MDAnalysis-compatible jobs for one replicate.
+
+        Parameters
+        ----------
+        ctx : MDAReplicateJobContext
+            Framework-provided MDAnalysis job context with a loaded universe,
+            frame selection, universe policy, and artifact store.
+
+        Returns
+        -------
+        sequence of MDAAnalysisJob or None
+            Jobs to execute for the replicate, or ``None`` to decline the MDA
+            path and allow legacy fallback.
+        """
+
+        del ctx
+        return None
+
+    def _mda_universe_provider_factory(self) -> type[Any]:
+        """Return the universe-provider class used by the MDA job seam.
+
+        Returns
+        -------
+        type[Any]
+            Universe-provider class for the current simulation configuration.
+        """
+
+        from polyzymd.analyses.mda import UniverseProvider
+
+        return UniverseProvider
+
+    def _mda_artifact_store_factory(self) -> type[Any]:
+        """Return the artifact-store class used by the MDA job seam.
+
+        Returns
+        -------
+        type[Any]
+            Artifact-store class rooted at the replicate output directory.
+        """
+
+        from polyzymd.analyses.mda import ArtifactStore
+
+        return ArtifactStore
 
     def _trajectory_loader_factory(self) -> type[Any]:
         """Return the trajectory-loader class used by the runner seam.
@@ -479,6 +532,14 @@ class Analysis(ABC):
     ) -> Any:
         """Execute the opt-in runner-based replicate path."""
         return run_replicate_via_runner(self, ctx, replicate, base_cls=Analysis)
+
+    def _run_replicate_via_mda_jobs(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+    ) -> Any:
+        """Execute the opt-in MDAnalysis job-based replicate path."""
+        return run_replicate_via_mda_jobs(self, ctx, replicate, base_cls=Analysis)
 
     def _deserialize_result(self, path: Path) -> Any:
         """Load an aggregated result from a JSON file."""

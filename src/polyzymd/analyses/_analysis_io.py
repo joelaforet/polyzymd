@@ -95,7 +95,12 @@ def deserialize_replicate_result(analysis: Any, path: Path) -> Any:
             return result_cls.load(path)
         if hasattr(result_cls, "model_validate_json"):
             return result_cls.model_validate_json(path.read_text())
-    return json.loads(path.read_text())
+    loaded = json.loads(path.read_text())
+    if isinstance(loaded, dict) and loaded.get("artifact_type") == "replicate":
+        from polyzymd.analyses.mda.artifacts import ReplicateArtifact
+
+        return ReplicateArtifact.model_validate(loaded)
+    return loaded
 
 
 def load_replicate_result(analysis: Any, run_dir: Path) -> Any | None:

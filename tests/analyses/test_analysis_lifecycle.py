@@ -20,6 +20,8 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 from polyzymd.analyses.exceptions import PluginContractError
+from polyzymd.analyses.mda import MDAAnalysisJob, MDAReplicateJobContext, MDAUniversePolicy
+from polyzymd.analyses.mda.artifacts import ReplicateArtifact
 from polyzymd.analyses.orchestrator import (
     finalize_comparison_from_disk,
     prepare_comparison_run,
@@ -147,6 +149,168 @@ class _ContractReplicateAnalysis(_OrderAnalysis):
 
         del ctx, replicate
         raise PluginContractError("contract boom")
+
+
+class _FakeMDATrajectory:
+    """Minimal trajectory exposing a frame count."""
+
+    def __len__(self) -> int:
+        """Return the fake frame count."""
+
+        return 8
+
+
+class _FakeMDAUniverse:
+    """Minimal universe-like object for MDA lifecycle tests."""
+
+    trajectory = _FakeMDATrajectory()
+
+
+class _FakeMDAWindow:
+    """Trajectory window compatible with ``FrameSelection.from_trajectory_window``."""
+
+    start = 2
+    stop = 8
+    step = 2
+    equilibration_start = 2
+    equilibration_ps = 10.0
+    timestep_ps = 5.0
+    n_frames_total = 8
+    warning_message = None
+
+    def run_kwargs(self) -> dict[str, int]:
+        """Return MDAnalysis run keyword arguments."""
+
+        return {"start": self.start, "stop": self.stop, "step": self.step}
+
+
+class _FakeMDALoader:
+    """Loader seam used by the MDA lifecycle bridge."""
+
+    def __init__(self, sim_config: object) -> None:
+        """Store the simulation config."""
+
+        self.sim_config = sim_config
+
+    def load_universe(self, replicate: int) -> _FakeMDAUniverse:
+        """Return a fake universe for the requested replicate."""
+
+        assert replicate == 1
+        return _FakeMDAUniverse()
+
+
+class _FakeMDAProvenance:
+    """Tiny provenance object exposing the production ``as_dict`` shape."""
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return primitive provenance metadata."""
+
+        return {"warnings": ["fake provenance warning"], "loader_class": "_FakeMDALoader"}
+
+
+class _FakeMDAUniverseProvider:
+    """Universe provider that delegates loading to the injected loader."""
+
+    def __init__(self, config: object, *, loader: _FakeMDALoader) -> None:
+        """Store provider collaborators."""
+
+        self.config = config
+        self.loader = loader
+
+    @classmethod
+    def from_config(
+        cls,
+        config: object,
+        *,
+        loader: _FakeMDALoader,
+    ) -> "_FakeMDAUniverseProvider":
+        """Create the fake provider from a simulation config."""
+
+        return cls(config, loader=loader)
+
+    def load_universe(self, replicate: int) -> _FakeMDAUniverse:
+        """Load the universe through the fake loader."""
+
+        return self.loader.load_universe(replicate)
+
+    def provenance_for(self, replicate: int) -> _FakeMDAProvenance:
+        """Return fake provenance for the requested replicate."""
+
+        assert replicate == 1
+        return _FakeMDAProvenance()
+
+
+class _FakeMDAAnalysisBase:
+    """AnalysisBase-like object that records run kwargs."""
+
+    def __init__(self) -> None:
+        """Initialize empty results."""
+
+        self.results: dict[str, Any] = {}
+
+    def run(self, **kwargs: Any) -> "_FakeMDAAnalysisBase":
+        """Store deterministic results and return self."""
+
+        self.results = {"value": 5.0, "run_kwargs": dict(kwargs)}
+        return self
+
+
+class _MDAJobOnlyAnalysis(Analysis):
+    """Analysis that uses only the MDA job lifecycle hook."""
+
+    name: ClassVar[str] = "mda_job_lifecycle"
+    Settings: ClassVar[type] = _LifecycleSettings
+    min_replicates: ClassVar[int] = 1
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def _trajectory_loader_factory(self) -> type[_FakeMDALoader]:
+        """Return the fake trajectory loader."""
+
+        return _FakeMDALoader
+
+    def _mda_universe_provider_factory(self) -> type[_FakeMDAUniverseProvider]:
+        """Return the fake MDA universe provider."""
+
+        return _FakeMDAUniverseProvider
+
+    def get_trajectory_window(self, ctx, replicate, loader, universe) -> _FakeMDAWindow:
+        """Return a deterministic frame window."""
+
+        del ctx, replicate, loader, universe
+        return _FakeMDAWindow()
+
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> list[MDAAnalysisJob]:
+        """Build one fake MDAnalysis-compatible job."""
+
+        self.events.append(f"build_mda:{ctx.replicate}")
+        assert ctx.universe is not None
+        assert ctx.frame_selection.run_kwargs() == {"start": 2, "stop": 8, "step": 2}
+        assert isinstance(ctx.universe_policy, MDAUniversePolicy)
+        return [
+            MDAAnalysisJob(
+                name="fake_job",
+                analysis=_FakeMDAAnalysisBase(),
+                frame_selection=ctx.frame_selection,
+                universe_policy=ctx.universe_policy,
+            )
+        ]
+
+    def aggregate(
+        self, ctx: AggregateContext, results: Sequence[ReplicateArtifact]
+    ) -> dict[str, Any]:
+        """Aggregate the saved MDA replicate artifact payload."""
+
+        self.events.append("aggregate")
+        assert ctx.replicates == (1,)
+        artifact = results[0]
+        job = artifact.payload["jobs"][0]
+        return {
+            "mean_value": job["results"]["value"],
+            "run_kwargs": job["results"]["run_kwargs"],
+            "warnings": artifact.warnings,
+        }
 
 
 class _CondCfg:
@@ -348,6 +512,34 @@ def test_public_run_replicate_once_writes_canonical_result(tmp_path: Path) -> No
     assert result_path.exists()
     assert '"replicate": 3' in result_path.read_text()
     assert analysis.events == ["run:3"]
+
+
+def test_public_lifecycle_runs_mda_jobs_and_saves_artifact(tmp_path: Path) -> None:
+    """Public lifecycle should run MDA jobs without the old runner protocol."""
+
+    analysis = _MDAJobOnlyAnalysis()
+    condition = _condition(tmp_path, replicates=(1,))
+    output_dir = tmp_path / "analysis" / analysis.name
+
+    result = run_analysis(
+        analysis,
+        condition,
+        _LifecycleSettings(),
+        equilibration="10ns",
+        output_dir=output_dir,
+        recompute=False,
+    )
+
+    result_path = output_dir / "run_1" / "result.json"
+    saved = ReplicateArtifact.model_validate_json(result_path.read_text())
+    assert analysis.events == ["build_mda:1", "aggregate"]
+    assert result["mean_value"] == 5.0
+    assert result["run_kwargs"] == {"start": 2, "stop": 8, "step": 2}
+    assert saved.artifact_type == "replicate"
+    assert saved.payload["jobs"][0]["name"] == "fake_job"
+    assert saved.payload["jobs"][0]["results"]["value"] == 5.0
+    assert "fake provenance warning" in saved.warnings
+    assert (output_dir / "aggregated" / "result.json").exists()
 
 
 def test_public_run_comparison_executes_full_lifecycle(
