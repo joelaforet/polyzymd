@@ -97,8 +97,10 @@ class TestGromacsTopologySearch:
         layout = engine.resolve_trajectory_layout(tmp_path, replicate=1)
         assert layout.topology_path is None
 
-    def test_gro_topology_warns(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-        """GRO fallback emits a warning about missing chain IDs."""
+    def test_gro_topology_records_layout_metadata(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """GRO fallback records metadata without emitting loader-owned warnings."""
         (tmp_path / "system.gro").write_text("GRO")
 
         engine = _make_engine("system")
@@ -107,7 +109,7 @@ class TestGromacsTopologySearch:
 
         assert layout.topology_path is not None
         assert layout.topology_format == "gro"
-        assert "does not preserve chain IDs" in caplog.text
+        assert "GRO" not in caplog.text
 
 
 class TestGromacsTrajectorySearch:

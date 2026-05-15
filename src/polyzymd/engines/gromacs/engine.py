@@ -505,13 +505,6 @@ class GromacsEngine(SimulationEngine):
 
         if topology_path is not None:
             logger.info("Resolved topology for analysis: %s", topology_path.name)
-            if topology_format == "gro":
-                logger.warning(
-                    "Using GRO topology for analysis: %s. GRO format does not preserve chain IDs; "
-                    "chain-based selections (chainID A/B/C) will fail. Regenerate "
-                    "solvated_system.pdb to restore chain IDs.",
-                    topology_path.name,
-                )
 
         return TrajectoryLayout(
             topology_path=topology_path,

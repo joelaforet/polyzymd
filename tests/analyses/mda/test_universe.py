@@ -18,6 +18,59 @@ class FakeConfig:
     engine = "openmm"
 
 
+class FakeGromacsSettings:
+    """Minimal GROMACS settings for binary resolution in provider tests."""
+
+    gmx_binary = "gmx"
+    gpu = False
+
+
+class FakeOutputSettings:
+    """Minimal output settings for shared trajectory discovery."""
+
+    def __init__(self, scratch_directory: Path) -> None:
+        """Store the effective scratch directory.
+
+        Parameters
+        ----------
+        scratch_directory : Path
+            Scratch root containing replicate directories.
+        """
+        self.effective_scratch_directory = scratch_directory
+
+
+class FakeGromacsConfig:
+    """Minimal GROMACS simulation config for real provider/loader tests."""
+
+    engine = "gromacs"
+    gromacs = FakeGromacsSettings()
+
+    def __init__(self, scratch_directory: Path) -> None:
+        """Initialize the fake config with a scratch root.
+
+        Parameters
+        ----------
+        scratch_directory : Path
+            Scratch root containing replicate directories.
+        """
+        self.output = FakeOutputSettings(scratch_directory)
+
+    def get_working_directory(self, replicate: int) -> Path:
+        """Return the replicate working directory.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate index.
+
+        Returns
+        -------
+        Path
+            Replicate working directory.
+        """
+        return self.output.effective_scratch_directory / f"run_{replicate}"
+
+
 class FakeUniverse:
     """Sentinel universe returned by the fake loader."""
 
@@ -274,3 +327,35 @@ def test_gro_warning_uses_topology_format_even_without_gro_suffix(tmp_path: Path
     provenance = provider.provenance_for(2)
     assert provenance.topology.format == "gro"
     assert any("GRO topology" in warning for warning in provenance.warnings)
+
+
+def test_real_gromacs_provider_warns_once_and_records_gro_provenance(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Real GROMACS provider path should emit one GRO warning per topology."""
+
+    gromacs_dir = tmp_path / "run_1" / "gromacs"
+    _write_file(gromacs_dir / "system.gro", b"GRO")
+    _write_file(gromacs_dir / "prod.xtc", b"XTC")
+    provider = UniverseProvider.from_config(FakeGromacsConfig(tmp_path))
+
+    with caplog.at_level(logging.WARNING):
+        first = provider.provenance_for(1)
+        second = provider.provenance_for(1, refresh=True)
+        third = provider.provenance_for(1, refresh=True)
+
+    gro_warning_records = [
+        record
+        for record in caplog.records
+        if "GRO" in record.message and "chain" in record.message.lower()
+    ]
+    assert len(gro_warning_records) == 1
+    assert gro_warning_records[0].name == "polyzymd.analyses.shared.loader"
+    assert first.topology.path == gromacs_dir / "system.gro"
+    assert first.topology.format == "gro"
+    assert second.topology.path == first.topology.path
+    assert third.topology.path == first.topology.path
+    assert any("GRO topology" in warning for warning in first.warnings)
+    assert any("GRO topology" in warning for warning in second.warnings)
+    assert any("GRO topology" in warning for warning in third.warnings)
