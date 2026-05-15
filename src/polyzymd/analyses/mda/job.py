@@ -78,6 +78,17 @@ class MDABackendPolicy:
             kwargs["progressbar_kwargs"] = dict(self.progressbar_kwargs)
         return kwargs
 
+    def is_default(self) -> bool:
+        """Return whether the policy forwards no ``run()`` keyword arguments.
+
+        Returns
+        -------
+        bool
+            ``True`` when no backend, progress, or verbosity options are set.
+        """
+
+        return len(self.run_kwargs()) == 0
+
     @staticmethod
     def _validate_positive_count(value: int | None, *, field_name: str) -> None:
         """Validate an optional positive integer count.
@@ -263,6 +274,7 @@ class MDAAnalysisJob:
 
         if not isinstance(self.name, str) or not self.name:
             raise ValueError("name must be a non-empty string")
+        self._validate_collaborators()
         has_analysis = self.analysis is not None
         has_factory = self.analysis_factory is not None
         if has_analysis == has_factory:
@@ -271,6 +283,8 @@ class MDAAnalysisJob:
             raise TypeError("analysis must provide a callable run(**kwargs) method")
         if has_factory and not callable(self.analysis_factory):
             raise TypeError("analysis_factory must be callable")
+        if isinstance(self.analysis, MDAFunctionAdapter):
+            self._validate_function_backend_policy()
 
     @classmethod
     def from_function(
@@ -309,6 +323,10 @@ class MDAAnalysisJob:
             Job wrapping the function adapter.
         """
 
+        resolved_backend_policy = backend_policy or MDABackendPolicy()
+        if not resolved_backend_policy.is_default():
+            raise ValueError("Function-adapter jobs do not accept backend policy kwargs")
+
         return cls(
             name=name,
             analysis=MDAFunctionAdapter(
@@ -317,7 +335,7 @@ class MDAAnalysisJob:
                 function_kwargs=function_kwargs,
             ),
             frame_selection=frame_selection or FrameSelection(),
-            backend_policy=backend_policy or MDABackendPolicy(),
+            backend_policy=resolved_backend_policy,
             universe_policy=universe_policy or MDAUniversePolicy(),
         )
 
@@ -356,7 +374,7 @@ class MDAAnalysisJob:
         """
 
         analysis = self._resolve_analysis()
-        run_kwargs = self._build_run_kwargs()
+        run_kwargs = self._build_run_kwargs(analysis)
         try:
             run_return = analysis.run(**run_kwargs)
         except Exception as exc:
@@ -418,11 +436,15 @@ class MDAAnalysisJob:
             raise MDAAnalysisJobError(
                 f"MDAAnalysisJob '{self.name}' factory returned an object without run(**kwargs)"
             )
-        self.analysis = analysis
         return analysis
 
-    def _build_run_kwargs(self) -> dict[str, Any]:
+    def _build_run_kwargs(self, analysis: Any) -> dict[str, Any]:
         """Merge frame selection and backend policy keyword arguments.
+
+        Parameters
+        ----------
+        analysis : Any
+            Analysis object selected for this execution.
 
         Returns
         -------
@@ -430,7 +452,47 @@ class MDAAnalysisJob:
             Keyword arguments forwarded to ``analysis.run``.
         """
 
+        if isinstance(analysis, MDAFunctionAdapter):
+            self._validate_function_backend_policy()
+
         return {
             **self.frame_selection.run_kwargs(),
             **self.backend_policy.run_kwargs(),
         }
+
+    def _validate_collaborators(self) -> None:
+        """Validate policy collaborators supplied to the job.
+
+        Raises
+        ------
+        TypeError
+            Raised when a collaborator does not implement the expected concrete
+            extension-layer policy type.
+        """
+
+        if not isinstance(self.frame_selection, FrameSelection):
+            raise TypeError("frame_selection must be a FrameSelection instance")
+        if not isinstance(self.backend_policy, MDABackendPolicy):
+            raise TypeError("backend_policy must be an MDABackendPolicy instance")
+        if not isinstance(self.universe_policy, MDAUniversePolicy):
+            raise TypeError("universe_policy must be an MDAUniversePolicy instance")
+
+    def _validate_function_backend_policy(self) -> None:
+        """Reject backend policy kwargs for function-adapter jobs.
+
+        Raises
+        ------
+        MDAAnalysisJobError
+            Raised when a factory-backed function adapter is paired with a
+            non-default backend policy at execution time.
+        ValueError
+            Raised when a direct function-adapter job is constructed with a
+            non-default backend policy.
+        """
+
+        if self.backend_policy.is_default():
+            return
+        message = "Function-adapter jobs do not accept backend policy kwargs"
+        if self.analysis is None:
+            raise MDAAnalysisJobError(message)
+        raise ValueError(message)

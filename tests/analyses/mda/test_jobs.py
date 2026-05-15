@@ -167,24 +167,30 @@ def test_job_falls_back_to_original_analysis_when_run_return_has_no_results() ->
     assert result.results == {"source": "original"}
 
 
-def test_job_constructs_analysis_from_factory_once() -> None:
-    """Factories should build one AnalysisBase-like object per job execution."""
+def test_job_constructs_analysis_from_factory_for_each_run() -> None:
+    """Factories should build a fresh AnalysisBase-like object per execution."""
 
-    calls: list[str] = []
+    analyses: list[FakeAnalysis] = []
 
     def factory() -> FakeAnalysis:
         """Create a fake analysis and record construction."""
 
-        calls.append("called")
-        return FakeAnalysis(results={"value": 5})
+        analysis = FakeAnalysis(results={"value": len(analyses) + 1})
+        analyses.append(analysis)
+        return analysis
 
     job = MDAAnalysisJob(name="factory", analysis_factory=factory)
 
-    result = job.execute()
+    first = job.execute()
+    second = job.run()
 
-    assert calls == ["called"]
-    assert isinstance(job.analysis, FakeAnalysis)
-    assert result.results == {"value": 5}
+    assert len(analyses) == 2
+    assert first.analysis is analyses[0]
+    assert second.analysis is analyses[1]
+    assert first.results == {"value": 1}
+    assert second.results == {"value": 2}
+    assert job.analysis is None
+    assert job.result is second
 
 
 @pytest.mark.parametrize(
@@ -213,6 +219,25 @@ def test_job_rejects_empty_name() -> None:
 
     with pytest.raises(ValueError, match="non-empty"):
         MDAAnalysisJob(name="", analysis=FakeAnalysis())
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("frame_selection", object(), "FrameSelection"),
+        ("backend_policy", object(), "MDABackendPolicy"),
+        ("universe_policy", object(), "MDAUniversePolicy"),
+    ],
+)
+def test_job_rejects_invalid_policy_collaborators(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    """Invalid policy collaborators should fail at construction time."""
+
+    with pytest.raises(TypeError, match=message):
+        MDAAnalysisJob(name="bad-policy", analysis=FakeAnalysis(), **{field: value})
 
 
 def test_factory_runtime_contract_failure_is_job_error() -> None:
@@ -365,3 +390,50 @@ def test_from_function_creates_executable_job() -> None:
         "kwargs": {"frames": (0, 2, 4), "metric": "rg"},
     }
     assert job.results == result.results
+
+
+def test_function_job_rejects_backend_policy_kwargs() -> None:
+    """Function adapters should receive frame kwargs only, not backend kwargs."""
+
+    with pytest.raises(ValueError, match="Function-adapter jobs"):
+        MDAAnalysisJob.from_function(
+            "function-backend",
+            lambda universe, **kwargs: {"ok": True},
+            object(),
+            backend_policy=MDABackendPolicy(backend="multiprocessing", n_workers=2),
+        )
+
+
+def test_direct_function_adapter_job_rejects_backend_policy_kwargs() -> None:
+    """Direct function-adapter jobs should reject non-default backend policy."""
+
+    adapter = MDAFunctionAdapter(lambda universe, **kwargs: {"ok": True}, object())
+
+    with pytest.raises(ValueError, match="Function-adapter jobs"):
+        MDAAnalysisJob(
+            name="direct-function-backend",
+            analysis=adapter,
+            backend_policy=MDABackendPolicy(backend="multiprocessing"),
+        )
+
+
+def test_factory_function_adapter_job_rejects_backend_policy_at_runtime() -> None:
+    """Factory-backed function adapters should fail before backend kwargs are forwarded."""
+
+    calls: list[dict[str, Any]] = []
+
+    def function(universe: object, **kwargs: Any) -> dict[str, bool]:
+        """Record unexpected function calls."""
+
+        calls.append(dict(kwargs))
+        return {"ok": True}
+
+    job = MDAAnalysisJob(
+        name="factory-function-backend",
+        analysis_factory=lambda: MDAFunctionAdapter(function, object()),
+        backend_policy=MDABackendPolicy(backend="multiprocessing", n_workers=2),
+    )
+
+    with pytest.raises(MDAAnalysisJobError, match="Function-adapter jobs"):
+        job.run()
+    assert calls == []
