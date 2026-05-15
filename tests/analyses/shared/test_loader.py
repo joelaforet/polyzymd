@@ -210,6 +210,7 @@ class TestGromacsFlat:
 
         info = loader.get_trajectory_info(replicate=1)
         assert info.topology_file.suffix == ".pdb"
+        assert info.topology_format == "pdb"
 
     def test_finds_prod_xtc(self, tmp_path):
         run_dir = tmp_path / "run_1"
@@ -220,6 +221,7 @@ class TestGromacsFlat:
         info = loader.get_trajectory_info(replicate=1)
         assert len(info.trajectory_files) == 1
         assert info.trajectory_files[0].name == "prod.xtc"
+        assert info.trajectory_format == "xtc"
 
     def test_n_segments_is_one(self, tmp_path):
         run_dir = tmp_path / "run_1"
@@ -229,6 +231,18 @@ class TestGromacsFlat:
 
         info = loader.get_trajectory_info(replicate=1)
         assert info.n_segments == 1
+
+    def test_records_gro_warning_in_metadata(self, tmp_path):
+        """GRO topology warnings should be available to provenance wrappers."""
+        run_dir = tmp_path / "run_1"
+        _create_gromacs_flat(run_dir, use_gro=True)
+        config = _make_gromacs_config(tmp_path)
+        loader = TrajectoryLoader(config)
+
+        info = loader.get_trajectory_info(replicate=1)
+
+        assert info.topology_format == "gro"
+        assert any("GRO topology" in warning for warning in info.warnings)
 
 
 # ---------------------------------------------------------------------------

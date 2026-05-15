@@ -18,18 +18,25 @@ def test_public_facade_reexports_primitives() -> None:
         MDARunKwargs,
     )
     from polyzymd.analyses.mda.frame_selection import FrameSelection
+    from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
 
     assert mda.MDA_EXTENSION_API_VERSION == MDA_EXTENSION_API_VERSION == "1"
     assert mda.AnalysisBaseLike is AnalysisBaseLike
     assert mda.MDAnalysisExtensionError is MDAnalysisExtensionError
     assert mda.MDARunKwargs is MDARunKwargs
     assert mda.FrameSelection is FrameSelection
+    assert mda.FileIdentity is FileIdentity
+    assert mda.UniverseProvider is UniverseProvider
+    assert mda.UniverseProvenance is UniverseProvenance
     assert set(mda.__all__) == {
         "MDA_EXTENSION_API_VERSION",
         "AnalysisBaseLike",
         "MDAnalysisExtensionError",
         "MDARunKwargs",
         "FrameSelection",
+        "FileIdentity",
+        "UniverseProvider",
+        "UniverseProvenance",
     }
 
 
@@ -42,6 +49,7 @@ def test_import_does_not_load_heavy_simulation_modules() -> None:
     importlib.import_module("polyzymd.analyses.mda")
     importlib.import_module("polyzymd.analyses.mda.base")
     importlib.import_module("polyzymd.analyses.mda.frame_selection")
+    importlib.import_module("polyzymd.analyses.mda.universe")
 
     for module_name in heavy_modules:
         if module_name not in initially_loaded:

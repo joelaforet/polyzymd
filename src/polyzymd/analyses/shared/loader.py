@@ -74,6 +74,12 @@ class TrajectoryInfo:
         Base working directory for this replicate
     replicate : int
         Replicate number
+    topology_format : str or None, optional
+        Engine-reported topology format, when available.
+    trajectory_format : str or None, optional
+        Engine-reported trajectory format, when available.
+    warnings : list[str]
+        Discovery warnings that should be preserved in downstream provenance.
     """
 
     topology_file: Path
@@ -81,6 +87,9 @@ class TrajectoryInfo:
     n_segments: int = 0
     working_directory: Path = field(default_factory=Path)
     replicate: int = 1
+    topology_format: str | None = None
+    trajectory_format: str | None = None
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def n_trajectory_files(self) -> int:
@@ -263,8 +272,8 @@ class TrajectoryLoader:
             return int(match.group(1))
         return 1
 
-    def _warn_gro_topology(self, layout: "TrajectoryLayout") -> None:
-        """Emit a one-time warning when the resolved topology is a GRO file.
+    def _gro_topology_warning(self, layout: "TrajectoryLayout") -> str | None:
+        """Build the chain-ID warning for GRO topology layouts.
 
         GRO files do not reliably preserve chain identifiers, which can
         break chain-based selections (``chainid A/B/C``) used by many
@@ -274,20 +283,40 @@ class TrajectoryLoader:
         ----------
         layout : TrajectoryLayout
             Resolved layout from the engine.
+
+        Returns
+        -------
+        str or None
+            Actionable warning text when the layout uses a GRO topology,
+            otherwise ``None``.
         """
-        if (
-            layout.topology_path is not None
-            and layout.topology_format.lower() == "gro"
-            and layout.topology_path not in self._warned_gro_topologies
-        ):
+        if layout.topology_path is None or layout.topology_format.lower() != "gro":
+            return None
+        return (
+            f"Using GRO topology {layout.topology_path} — GRO files may not preserve "
+            "chain identifiers. Chain-based selections (chainid A/B/C) used by "
+            "analysis plugins may be unreliable. Prefer a PDB topology when available."
+        )
+
+    def _warn_gro_topology(self, layout: "TrajectoryLayout") -> str | None:
+        """Emit a one-time warning when the resolved topology is a GRO file.
+
+        Parameters
+        ----------
+        layout : TrajectoryLayout
+            Resolved layout from the engine.
+
+        Returns
+        -------
+        str or None
+            Actionable warning text when the layout uses a GRO topology,
+            otherwise ``None``.
+        """
+        warning = self._gro_topology_warning(layout)
+        if warning is not None and layout.topology_path not in self._warned_gro_topologies:
             self._warned_gro_topologies.add(layout.topology_path)
-            LOGGER.warning(
-                "Using GRO topology %s — GRO files may not preserve chain "
-                "identifiers.  Chain-based selections (chainid A/B/C) used "
-                "by analysis plugins may be unreliable.  Prefer a PDB "
-                "topology when available.",
-                layout.topology_path,
-            )
+            LOGGER.warning(warning)
+        return warning
 
     # ------------------------------------------------------------------
     # Public API
@@ -349,12 +378,20 @@ class TrajectoryLoader:
                 )
             )
 
+        warnings = []
+        gro_warning = self._gro_topology_warning(layout)
+        if gro_warning is not None:
+            warnings.append(gro_warning)
+
         return TrajectoryInfo(
             topology_file=layout.topology_path,
             trajectory_files=layout.trajectory_paths,
             n_segments=len(layout.trajectory_paths),
             working_directory=working_dir,
             replicate=replicate,
+            topology_format=layout.topology_format,
+            trajectory_format=layout.trajectory_format,
+            warnings=warnings,
         )
 
     def load_universe(

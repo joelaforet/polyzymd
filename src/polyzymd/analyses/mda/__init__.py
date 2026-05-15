@@ -12,6 +12,7 @@ from polyzymd.analyses.mda.base import (
     MDARunKwargs,
 )
 from polyzymd.analyses.mda.frame_selection import FrameSelection
+from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
 
 __all__ = [
     "MDA_EXTENSION_API_VERSION",
@@ -19,4 +20,7 @@ __all__ = [
     "MDAnalysisExtensionError",
     "MDARunKwargs",
     "FrameSelection",
+    "FileIdentity",
+    "UniverseProvider",
+    "UniverseProvenance",
 ]
