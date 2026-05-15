@@ -105,7 +105,7 @@ class TestValidateName:
         assert "keyword" in err
 
     def test_reject_reserved_name(self):
-        for reserved in ("base", "discovery", "orchestrator", "shared", "stats"):
+        for reserved in ("base", "discovery", "mda", "orchestrator", "shared", "stats"):
             err = validate_name(reserved, check_existing=False)
             assert err is not None
             assert "reserved" in err

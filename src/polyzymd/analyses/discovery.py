@@ -43,6 +43,7 @@ _SKIP_MODULES = frozenset(
         "discovery",
         "orchestrator",
         "exceptions",
+        "mda",
         "_results_base",
         "runner",
         "config",

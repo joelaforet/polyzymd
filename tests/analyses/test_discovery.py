@@ -165,13 +165,14 @@ class TestDiscovery:
         assert _is_concrete_analysis(str) is False
         assert _is_concrete_analysis(42) is False
 
-    def test_shared_not_listed_as_plugin(self):
+    def test_infrastructure_packages_not_listed_as_plugins(self):
         """Infrastructure package names should never be discovered as plugins."""
         from polyzymd.analyses.discovery import clear_cache, list_analyses
 
         clear_cache()
         analyses = list_analyses()
         assert "shared" not in analyses
+        assert "mda" not in analyses
 
     def test_broken_plugin_import_does_not_crash_discovery(self):
         """One bad plugin import should not block discovery of healthy plugins."""
@@ -223,6 +224,8 @@ class TestDiscoveryRobustness:
         package_prefix = "polyzymd.analyses."
         assert _should_skip_module("polyzymd.analyses.shared.loader", package_prefix) is True
         assert _should_skip_module("polyzymd.analyses.shared.statistics", package_prefix) is True
+        assert _should_skip_module("polyzymd.analyses.mda", package_prefix) is True
+        assert _should_skip_module("polyzymd.analyses.mda.base", package_prefix) is True
 
         assert _should_skip_module("polyzymd.analyses.rmsf", package_prefix) is False
         assert _should_skip_module("polyzymd.analyses.contacts", package_prefix) is False

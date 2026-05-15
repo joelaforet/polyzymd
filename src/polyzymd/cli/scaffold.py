@@ -37,6 +37,7 @@ _RESERVED_NAMES = frozenset(
         "cli",
         "config",
         "discovery",
+        "mda",
         "orchestrator",
         "runner",
         "shared",
