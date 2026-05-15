@@ -9,6 +9,17 @@ from typing import Any
 from polyzymd.analyses.mda.base import MDAnalysisExtensionError, MDARunKwargs
 from polyzymd.analyses.mda.frame_selection import FrameSelection
 
+MDA_BACKEND_RUN_CONTROL_KEYS = frozenset(
+    {
+        "backend",
+        "n_workers",
+        "n_parts",
+        "unsupported_backend",
+        "verbose",
+        "progressbar_kwargs",
+    }
+)
+
 
 class MDAAnalysisJobError(MDAnalysisExtensionError):
     """Runtime failure raised when an MDAnalysis job violates its contract."""
@@ -216,11 +227,41 @@ class MDAFunctionAdapter:
         -------
         MDAFunctionAdapter
             This adapter with ``results`` populated.
+
+        Raises
+        ------
+        MDAAnalysisJobError
+            Raised when MDAnalysis backend or run-control kwargs are supplied
+            directly to the function adapter.
         """
 
+        self._validate_frame_kwargs(frame_kwargs)
         value = self.function(self.universe, **frame_kwargs, **self.function_kwargs)
         self.results = self._normalize_result(value)
         return self
+
+    @staticmethod
+    def _validate_frame_kwargs(frame_kwargs: Mapping[str, Any]) -> None:
+        """Validate direct adapter ``run()`` keyword arguments.
+
+        Parameters
+        ----------
+        frame_kwargs : Mapping[str, Any]
+            Candidate frame-selection keyword arguments supplied to ``run()``.
+
+        Raises
+        ------
+        MDAAnalysisJobError
+            Raised when backend or run-control keyword arguments are supplied.
+        """
+
+        blocked_keys = sorted(MDA_BACKEND_RUN_CONTROL_KEYS.intersection(frame_kwargs))
+        if blocked_keys:
+            joined_keys = ", ".join(blocked_keys)
+            raise MDAAnalysisJobError(
+                "MDAFunctionAdapter.run() accepts only frame-selection kwargs; "
+                f"received backend/run-control kwargs: {joined_keys}"
+            )
 
     @staticmethod
     def _normalize_result(value: Any) -> dict[str, Any]:

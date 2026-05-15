@@ -368,6 +368,35 @@ def test_function_adapter_normalizes_scalar_result() -> None:
     assert adapter.results == {"value": 3.25}
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"backend": "multiprocessing"},
+        {"n_workers": 2},
+        {"n_parts": 2},
+        {"unsupported_backend": True},
+        {"verbose": True},
+        {"progressbar_kwargs": {"desc": "plain function"}},
+    ],
+)
+def test_function_adapter_rejects_backend_run_control_kwargs(kwargs: dict[str, Any]) -> None:
+    """Direct adapters should not forward MDAnalysis backend controls to functions."""
+
+    calls: list[dict[str, Any]] = []
+
+    def function(universe: object, **received_kwargs: Any) -> dict[str, bool]:
+        """Record calls that should never happen for invalid kwargs."""
+
+        calls.append(dict(received_kwargs))
+        return {"ok": True}
+
+    adapter = MDAFunctionAdapter(function, object())
+
+    with pytest.raises(MDAAnalysisJobError, match="backend/run-control"):
+        adapter.run(**kwargs)
+    assert calls == []
+
+
 def test_from_function_creates_executable_job() -> None:
     """Function jobs should use the same job executor contract."""
 
