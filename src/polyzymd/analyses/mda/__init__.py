@@ -11,10 +11,12 @@ from polyzymd.analyses.mda.base import (
     MDAnalysisExtensionError,
     MDARunKwargs,
 )
+from polyzymd.analyses.mda.frame_selection import FrameSelection
 
 __all__ = [
     "MDA_EXTENSION_API_VERSION",
     "AnalysisBaseLike",
     "MDAnalysisExtensionError",
     "MDARunKwargs",
+    "FrameSelection",
 ]
