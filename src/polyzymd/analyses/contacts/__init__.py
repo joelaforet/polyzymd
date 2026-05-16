@@ -639,17 +639,23 @@ class ContactsAnalysis(Analysis):
             return []
 
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
-        plot_functions = [
-            _plot_contact_fraction_profile,
-            _plot_cf_by_aa_class_bars,
-            _plot_cf_by_partition_bars,
-        ]
+        contacts_plot_settings = (ctx.plot_settings.model_extra or {}).get("contacts")
+        if contacts_plot_settings is None:
+            contacts_plot_settings = ctx.plot_settings.contacts
+        plot_functions = []
+        if contacts_plot_settings.generate_contact_fraction_profile:
+            plot_functions.append(_plot_contact_fraction_profile)
         if ctx.settings.compute_residence_times:
-            plot_functions[1:1] = [
-                _plot_residence_time_profile,
-                _plot_rt_by_aa_class_bars,
-                _plot_rt_by_partition_bars,
-            ]
+            if contacts_plot_settings.generate_residence_time_profile:
+                plot_functions.append(_plot_residence_time_profile)
+            if contacts_plot_settings.generate_rt_by_aa_class_bars:
+                plot_functions.append(_plot_rt_by_aa_class_bars)
+            if contacts_plot_settings.generate_rt_by_partition_bars:
+                plot_functions.append(_plot_rt_by_partition_bars)
+        if contacts_plot_settings.generate_cf_by_aa_class_bars:
+            plot_functions.append(_plot_cf_by_aa_class_bars)
+        if contacts_plot_settings.generate_cf_by_partition_bars:
+            plot_functions.append(_plot_cf_by_partition_bars)
 
         plots: list[Path] = []
         for plot_function in plot_functions:

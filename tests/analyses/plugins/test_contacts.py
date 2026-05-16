@@ -2298,7 +2298,7 @@ def _write_contacts_plot_artifact(
     return aggregated_dir / "result.json"
 
 
-def _contacts_plot_context(tmp_path, settings):
+def _contacts_plot_context(tmp_path, settings, plot_settings=None):
     """Build a contacts PlotContext for artifact-only plot tests."""
 
     from polyzymd.analyses.base import Condition, PlotContext
@@ -2316,7 +2316,7 @@ def _contacts_plot_context(tmp_path, settings):
         results_dir=tmp_path / "results",
         output_dir=tmp_path / "plots",
         settings=settings,
-        plot_settings=PlotSettings(),
+        plot_settings=plot_settings or PlotSettings(),
         equilibration="10ns",
     )
 
@@ -2365,6 +2365,42 @@ class TestPlot:
             "cf_by_aa_class_bars",
             "cf_by_partition_regions_bars",
         }
+
+    @pytest.mark.parametrize(
+        ("flag_name", "disabled_stem"),
+        [
+            ("generate_contact_fraction_profile", "contact_fraction_profile"),
+            ("generate_residence_time_profile", "residence_time_profile"),
+            ("generate_cf_by_aa_class_bars", "cf_by_aa_class_bars"),
+            ("generate_cf_by_partition_bars", "cf_by_partition_regions_bars"),
+            ("generate_rt_by_aa_class_bars", "rt_by_aa_class_bars"),
+            ("generate_rt_by_partition_bars", "rt_by_partition_regions_bars"),
+        ],
+    )
+    def test_plot_respects_disabled_plot_family_flags(self, tmp_path, flag_name, disabled_stem):
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.config.comparison import PlotSettings
+
+        settings = ContactsSettings(
+            protein_groups={"active_site": [1, 2], "surface": [3]},
+            protein_partitions={"regions": ["active_site", "surface"]},
+        )
+        plot_settings = PlotSettings(contacts={flag_name: False})
+        ctx = _contacts_plot_context(tmp_path, settings, plot_settings=plot_settings)
+        _write_contacts_plot_artifact(ctx.analysis_dirs["A"], settings)
+
+        paths = ContactsAnalysis().plot(ctx)
+
+        stems = {path.stem for path in paths}
+        assert disabled_stem not in stems
+        assert stems == {
+            "contact_fraction_profile",
+            "residence_time_profile",
+            "cf_by_aa_class_bars",
+            "cf_by_partition_regions_bars",
+            "rt_by_aa_class_bars",
+            "rt_by_partition_regions_bars",
+        } - {disabled_stem}
 
     def test_plot_rejects_tampered_profile_sidecar_without_fallback(self, tmp_path):
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
