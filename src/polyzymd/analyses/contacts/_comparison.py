@@ -232,12 +232,24 @@ def _validate_condition_residence_setting(
             f"contacts: condition {cond.label!r} aggregate lacks compute_residence_times "
             "metadata. Recompute contacts or clear stale aggregate result.json files."
         )
-    if bool(stored) != expected:
+    stored_bool = _strict_bool_metadata(stored, "compute_residence_times", cond)
+    if stored_bool != expected:
         raise ValueError(
             f"contacts: condition {cond.label!r} compute_residence_times mismatch: stored "
-            f"{bool(stored)!r}, expected {expected!r}. Recompute contacts or clear stale "
+            f"{stored_bool!r}, expected {expected!r}. Recompute contacts or clear stale "
             "aggregate result.json files."
         )
+
+
+def _strict_bool_metadata(value: Any, field: str, cond: Condition) -> bool:
+    """Return a metadata bool while rejecting ambiguous serialized values."""
+
+    if isinstance(value, bool):
+        return value
+    raise ValueError(
+        f"contacts: condition {cond.label!r} metadata field {field!r} must be a boolean, "
+        f"got {value!r}. Recompute contacts or clear stale aggregate result.json files."
+    )
 
 
 def _validate_condition_metric_integrity(artifact: ConditionArtifact, cond: Condition) -> None:
@@ -341,13 +353,21 @@ def _metric_float(value: Any, metric_name: str, field: str, cond: Condition) -> 
 def _metric_int(value: Any, metric_name: str, field: str, cond: Condition) -> int:
     """Coerce and validate one metric integer field."""
 
-    try:
-        return int(value)
-    except (TypeError, ValueError) as exc:
+    if isinstance(value, bool):
         raise ValueError(
             f"contacts: condition {cond.label!r} metric {metric_name!r} has invalid {field}. "
             "Recompute contacts."
-        ) from exc
+        )
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        float_value = float(value)
+        if np.isfinite(float_value) and float_value.is_integer():
+            return int(float_value)
+    raise ValueError(
+        f"contacts: condition {cond.label!r} metric {metric_name!r} has invalid {field}. "
+        "Recompute contacts."
+    )
 
 
 def _validate_condition_frame_selection(

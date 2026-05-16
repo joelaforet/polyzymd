@@ -1697,6 +1697,8 @@ class TestCompare:
             ("length", "length mismatch"),
             ("nonfinite", "non-finite values"),
             ("mean", "mean mismatch"),
+            ("n_nonintegral", "invalid n"),
+            ("n_bool", "invalid n"),
             ("replicate_keys", "replicate_metrics keys"),
         ],
     )
@@ -1714,6 +1716,10 @@ class TestCompare:
             aggregate.payload["metrics"]["coverage"]["values"][0] = float("nan")
         elif case == "mean":
             aggregate.payload["metrics"]["mean_contact_fraction"]["mean"] = 42.0
+        elif case == "n_nonintegral":
+            aggregate.payload["metrics"]["coverage"]["n"] = 2.9
+        elif case == "n_bool":
+            aggregate.payload["metrics"]["coverage"]["n"] = True
         elif case == "replicate_keys":
             aggregate.payload["replicate_metrics"].pop("2")
         condition = Condition(
@@ -1806,6 +1812,37 @@ class TestCompare:
         )
 
         with pytest.raises(ValueError, match="lacks compute_residence_times metadata"):
+            analysis.compare(ctx)
+
+    def test_compare_rejects_ambiguous_residence_time_setting_metadata(self, tmp_path):
+        """Comparison should reject stringified RT identity metadata."""
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings(compute_residence_times=True)
+        aggregate = _make_condition_artifact("StringRTMeta", settings, replicates=(1, 2))
+        aggregate.metadata["compute_residence_times"] = "False"
+        condition = Condition(
+            label="StringRTMeta",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="test",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"StringRTMeta": tmp_path / "StringRTMeta" / "contacts"},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=settings,
+            aggregated_results={"StringRTMeta": aggregate},
+            recompute=False,
+        )
+
+        with pytest.raises(ValueError, match="must be a boolean"):
             analysis.compare(ctx)
 
     def test_compare_rejects_legacy_aggregate_when_recompute_true(self, tmp_path):
