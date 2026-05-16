@@ -802,6 +802,13 @@ class SASAAnalysis(Analysis):
             comparable = []
             for summary in available.values():
                 run_summary = summary.get_run(run_label)
+                if run_summary.zero_atom_selection:
+                    LOGGER.warning(
+                        "Run '%s' in condition '%s' matched zero atoms; skipping comparison",
+                        run_label,
+                        summary.label,
+                    )
+                    continue
                 finite_values = [
                     value for value in run_summary.per_replicate_means if self._is_finite(value)
                 ]

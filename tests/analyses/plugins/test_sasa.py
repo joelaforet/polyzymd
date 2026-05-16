@@ -81,7 +81,7 @@ def _raw_sasa(
         return SASAComputationResult(
             atom_sasa_a2=np.empty((len(total), 0), dtype=np.float64),
             residue_sasa_a2=np.empty((len(total), 0), dtype=np.float64),
-            total_sasa_a2=np.full(len(total), np.nan, dtype=np.float64),
+            total_sasa_a2=np.zeros(len(total), dtype=np.float64),
             frames=frames,
             time_ns=frames.astype(np.float64) * 0.01,
             target_atom_indices=np.asarray([], dtype=np.int64),
@@ -381,6 +381,62 @@ def test_build_mda_jobs_subsamples_explicit_frames(monkeypatch: pytest.MonkeyPat
     assert jobs[0].frame_selection.run_kwargs() == {"frames": (0, 7)}
 
 
+def test_sasa_analysisbase_wrapper_bounds_coordinate_buffer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SASA wrapper should flush coordinates at ``chunk_size`` during iteration."""
+
+    import MDAnalysis as mda
+
+    import polyzymd.analyses.sasa._mda as sasa_mda
+
+    universe = mda.Universe.empty(
+        n_atoms=1,
+        n_residues=1,
+        atom_resindex=[0],
+        trajectory=True,
+    )
+    universe.add_TopologyAttr("name", ["C"])
+    universe.add_TopologyAttr("type", ["C"])
+    universe.add_TopologyAttr("element", ["C"])
+    universe.add_TopologyAttr("resname", ["ALA"])
+    universe.add_TopologyAttr("resid", [1])
+    universe.add_TopologyAttr("chainID", ["A"])
+    coordinates = np.zeros((5, 1, 3), dtype=np.float32)
+    universe.load_new(coordinates, order="fac")
+    chunk_sizes: list[int] = []
+
+    def fake_compute_chunk(**kwargs):
+        positions = kwargs["positions_angstrom"]
+        chunk_sizes.append(int(positions.shape[0]))
+        assert positions.shape[0] <= 2
+        return {
+            "atom_sasa_a2": np.ones((positions.shape[0], 1), dtype=np.float64),
+            "residue_sasa_a2": np.ones((positions.shape[0], 1), dtype=np.float64),
+            "total_sasa_a2": np.ones(positions.shape[0], dtype=np.float64),
+        }
+
+    monkeypatch.setattr(sasa_mda, "_mdtraj_topology_from_atom_group", lambda _atoms: object())
+    monkeypatch.setattr(sasa_mda, "_compute_sasa_chunk_from_positions", fake_compute_chunk)
+
+    analysis = sasa_mda.build_sasa_surface_area_analysis(
+        universe=universe,
+        run_label="protein",
+        target_selection="all",
+        context_selection="all",
+        probe_radius_nm=0.14,
+        n_sphere_points=100,
+        chunk_size=2,
+        timestep_ps=10.0,
+    )
+
+    analysis.run()
+
+    assert chunk_sizes == [2, 2, 1]
+    assert analysis.results.max_buffered_coordinate_frames == 2
+    assert analysis.results.total_sasa_a2.tolist() == pytest.approx([1.0] * 5)
+
+
 def test_sasa_collector_writes_npz_sidecar_only_for_arrays(tmp_path: Path) -> None:
     """Collector should keep large arrays in registered NPZ sidecars."""
 
@@ -406,7 +462,7 @@ def test_sasa_collector_writes_npz_sidecar_only_for_arrays(tmp_path: Path) -> No
 
 
 def test_sasa_collector_preserves_zero_selection_behavior(tmp_path: Path) -> None:
-    """Zero-selection runs should produce NaN summaries without crashing."""
+    """Zero-selection runs should produce artifact-safe missing summaries."""
 
     artifact = _collect_artifact(
         tmp_path,
@@ -417,8 +473,65 @@ def test_sasa_collector_preserves_zero_selection_behavior(tmp_path: Path) -> Non
 
     run_result = artifact.payload["run_results"][0]
     assert run_result["zero_atom_selection"] is True
-    assert np.isnan(run_result["mean_sasa"])
+    assert run_result["mean_sasa"] is None
+    assert run_result["missing_sasa_reason"] == "zero_atom_selection"
     assert run_result["n_target_atoms"] == 0
+    assert ArtifactStore(tmp_path / "run_1").read_replicate_result("result.json")
+
+
+def test_sasa_zero_selection_artifact_roundtrip_aggregate_compare(tmp_path: Path) -> None:
+    """Zero-selection artifacts should round-trip and be skipped during compare."""
+
+    settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid Z")])
+    analysis = SASAAnalysis()
+    condition_artifacts = {}
+    for condition_label in ("control", "treated"):
+        condition_root = tmp_path / condition_label
+        replicate_artifacts = [
+            _collect_artifact(
+                condition_root,
+                condition_label=condition_label,
+                replicate=replicate,
+                raw=_raw_sasa(total=[0.0, 0.0], zero=True),
+                settings=settings,
+            )
+            for replicate in (1, 2)
+        ]
+        reloaded_replicates = [
+            ArtifactStore(condition_root / f"run_{replicate}").read_replicate_result("result.json")
+            for replicate in (1, 2)
+        ]
+        aggregate = _aggregate_artifacts(
+            condition_root,
+            reloaded_replicates,
+            condition_label=condition_label,
+            settings=settings,
+        )
+        loaded_aggregate = ArtifactStore(condition_root / "aggregated").read_condition_result(
+            "result.json"
+        )
+        condition_artifacts[condition_label] = loaded_aggregate
+
+        replicate_json = (condition_root / "run_1" / "result.json").read_text()
+        aggregate_json = (condition_root / "aggregated" / "result.json").read_text()
+        assert "NaN" not in replicate_json
+        assert "NaN" not in aggregate_json
+        assert aggregate.payload["run_results"][0]["overall_mean"] is None
+        assert aggregate.payload["run_results"][0]["per_replicate_means"] == [None, None]
+        assert replicate_artifacts[0].payload["metrics"]["mean_sasa:protein"] is None
+
+    ctx = make_comparison_context(
+        name="sasa_compare",
+        conditions=[_make_condition("control"), _make_condition("treated")],
+        analysis_dirs={"control": tmp_path / "control", "treated": tmp_path / "treated"},
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label="control",
+        equilibration="10ns",
+        aggregated_results=condition_artifacts,
+    )
+
+    assert analysis.compare(ctx) is None
 
 
 def test_sasa_sidecar_hash_validation_rejects_tampering(tmp_path: Path) -> None:

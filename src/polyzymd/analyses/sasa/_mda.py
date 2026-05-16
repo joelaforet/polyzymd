@@ -122,9 +122,9 @@ def build_sasa_surface_area_analysis(
 ) -> Any:
     """Build an ``AnalysisBase`` wrapper around the MDTraj SASA kernel.
 
-    MDAnalysis owns frame iteration through ``AnalysisBase``. The wrapper only
-    buffers context coordinates emitted by ``_single_frame`` and evaluates
-    MDTraj Shrake-Rupley in chunks during ``_conclude``.
+    MDAnalysis owns frame iteration through ``AnalysisBase``. The wrapper keeps
+    only one bounded coordinate chunk in memory and evaluates MDTraj
+    Shrake-Rupley whenever that buffer reaches ``chunk_size``.
 
     Parameters
     ----------
@@ -154,7 +154,7 @@ def build_sasa_surface_area_analysis(
     from MDAnalysis.analysis.base import AnalysisBase
 
     class SASASurfaceAreaAnalysis(AnalysisBase):
-        """Collect selected coordinates and compute target SASA arrays."""
+        """Collect bounded coordinate chunks and compute target SASA arrays."""
 
         def __init__(self) -> None:
             target_atoms, target_indices = resolve_selection_indices(
@@ -184,26 +184,42 @@ def build_sasa_surface_area_analysis(
             self._context_indices = context_indices
             self._raw_timestep_ps = float(timestep_ps) if timestep_ps is not None else None
             self._zero_atom_selection = target_indices.size == 0 or context_indices.size == 0
+            self._chunk_size = int(chunk_size)
+            if self._chunk_size <= 0:
+                raise ValueError("chunk_size must be >= 1")
+            if not self._zero_atom_selection:
+                self._topology = _mdtraj_topology_from_atom_group(context_atoms)
+                self._target_local_indices = _target_local_indices(target_indices, context_indices)
+                self._residue_items = _residue_items(target_atoms, self._target_local_indices)
 
         def _prepare(self) -> None:
             """Initialize coordinate buffering for selected frames."""
 
-            self.results.positions_angstrom = []
+            self._position_chunk: list[NDArray[np.float32]] = []
+            self._atom_sasa_chunks: list[NDArray[np.float64]] = []
+            self._residue_sasa_chunks: list[NDArray[np.float64]] = []
+            self._total_sasa_chunks: list[NDArray[np.float64]] = []
+            self.results.max_buffered_coordinate_frames = 0
             self.results.run_label = run_label
             self.results.target_selection = target_selection
             self.results.context_selection = context_selection
             self.results.probe_radius_nm = float(probe_radius_nm)
             self.results.n_sphere_points = int(n_sphere_points)
-            self.results.chunk_size = int(chunk_size)
+            self.results.chunk_size = self._chunk_size
 
         def _single_frame(self) -> None:
-            """Append current context coordinates selected by AnalysisBase."""
+            """Append current context coordinates and flush full chunks."""
 
             if self._zero_atom_selection:
                 return
-            self.results.positions_angstrom.append(
+            self._position_chunk.append(
                 np.asarray(self._context_atoms.positions, dtype=np.float32).copy()
             )
+            self.results.max_buffered_coordinate_frames = max(
+                int(self.results.max_buffered_coordinate_frames), len(self._position_chunk)
+            )
+            if len(self._position_chunk) >= self._chunk_size:
+                self._flush_coordinate_chunk()
 
         def _conclude(self) -> None:
             """Compute raw SASA arrays and expose identity metadata."""
@@ -220,35 +236,58 @@ def build_sasa_surface_area_analysis(
                 )
                 return
 
-            positions = np.asarray(self.results.positions_angstrom, dtype=np.float32)
-            if positions.ndim != 3 or positions.shape[0] != frame_indices.size:
-                raise ValueError("SASA coordinate buffer does not match selected frame count")
-            raw = _compute_sasa_from_positions(
-                positions_angstrom=positions,
-                target_atoms=self._target_atoms,
-                context_atoms=self._context_atoms,
-                target_indices=self._target_indices,
-                context_indices=self._context_indices,
-                probe_radius_nm=probe_radius_nm,
-                n_sphere_points=n_sphere_points,
-                chunk_size=chunk_size,
+            self._flush_coordinate_chunk()
+            atom_sasa_a2 = _concatenate_sasa_chunks(
+                self._atom_sasa_chunks,
+                n_frames=int(frame_indices.size),
+                width=int(self._target_local_indices.size),
             )
-            self.results.atom_sasa_a2 = raw.atom_sasa_a2
-            self.results.residue_sasa_a2 = raw.residue_sasa_a2
-            self.results.total_sasa_a2 = raw.total_sasa_a2
+            residue_sasa_a2 = _concatenate_sasa_chunks(
+                self._residue_sasa_chunks,
+                n_frames=int(frame_indices.size),
+                width=len(self._residue_items),
+            )
+            total_sasa_a2 = _concatenate_sasa_vectors(
+                self._total_sasa_chunks, n_frames=int(frame_indices.size)
+            )
+            if atom_sasa_a2.shape[0] != frame_indices.size:
+                raise ValueError("SASA chunk output does not match selected frame count")
+            residue_identity = _residue_identity(self._residue_items)
+            self.results.atom_sasa_a2 = atom_sasa_a2
+            self.results.residue_sasa_a2 = residue_sasa_a2
+            self.results.total_sasa_a2 = total_sasa_a2
             self.results.frames = frame_indices
             self.results.time_ns = time_ns
             self.results.target_atom_indices = self._target_indices
             self.results.context_atom_indices = self._context_indices
-            self.results.residue_keys = raw.residue_keys
-            self.results.residue_chainids = raw.residue_chainids
-            self.results.residue_resids = raw.residue_resids
-            self.results.residue_resnames = raw.residue_resnames
+            self.results.residue_keys = residue_identity["residue_keys"]
+            self.results.residue_chainids = residue_identity["residue_chainids"]
+            self.results.residue_resids = residue_identity["residue_resids"]
+            self.results.residue_resnames = residue_identity["residue_resnames"]
             self.results.n_frames = int(frame_indices.size)
             self.results.n_target_atoms = int(self._target_indices.size)
             self.results.n_context_atoms = int(self._context_indices.size)
-            self.results.n_target_residues = len(raw.residue_keys)
+            self.results.n_target_residues = len(residue_identity["residue_keys"])
             self.results.zero_atom_selection = False
+
+        def _flush_coordinate_chunk(self) -> None:
+            """Compute SASA for the current bounded coordinate chunk."""
+
+            if not self._position_chunk:
+                return
+            positions = np.asarray(self._position_chunk, dtype=np.float32)
+            raw = _compute_sasa_chunk_from_positions(
+                positions_angstrom=positions,
+                topology=self._topology,
+                target_local_indices=self._target_local_indices,
+                residue_items=self._residue_items,
+                probe_radius_nm=probe_radius_nm,
+                n_sphere_points=n_sphere_points,
+            )
+            self._atom_sasa_chunks.append(raw["atom_sasa_a2"])
+            self._residue_sasa_chunks.append(raw["residue_sasa_a2"])
+            self._total_sasa_chunks.append(raw["total_sasa_a2"])
+            self._position_chunk.clear()
 
     return SASASurfaceAreaAnalysis()
 
@@ -542,18 +581,18 @@ def condition_artifact_to_legacy_result(artifact: ConditionArtifact) -> Any:
                 run_label=str(run_result["run_label"]),
                 target_selection=str(run_result["target_selection"]),
                 context_selection=str(run_result["context_selection"]),
-                overall_mean=float(run_result["overall_mean"]),
-                overall_sem=float(run_result["overall_sem"]),
-                overall_median=float(run_result["overall_median"]),
-                overall_min=float(run_result["overall_min"]),
-                overall_max=float(run_result["overall_max"]),
-                overall_final=float(run_result["overall_final"]),
-                per_replicate_means=list(run_result["per_replicate_means"]),
-                per_replicate_stds=list(run_result["per_replicate_stds"]),
-                per_replicate_medians=list(run_result["per_replicate_medians"]),
-                per_replicate_mins=list(run_result["per_replicate_mins"]),
-                per_replicate_maxs=list(run_result["per_replicate_maxs"]),
-                per_replicate_finals=list(run_result["per_replicate_finals"]),
+                overall_mean=_legacy_float(run_result.get("overall_mean")),
+                overall_sem=_legacy_float(run_result.get("overall_sem")),
+                overall_median=_legacy_float(run_result.get("overall_median")),
+                overall_min=_legacy_float(run_result.get("overall_min")),
+                overall_max=_legacy_float(run_result.get("overall_max")),
+                overall_final=_legacy_float(run_result.get("overall_final")),
+                per_replicate_means=_legacy_float_list(run_result["per_replicate_means"]),
+                per_replicate_stds=_legacy_float_list(run_result["per_replicate_stds"]),
+                per_replicate_medians=_legacy_float_list(run_result["per_replicate_medians"]),
+                per_replicate_mins=_legacy_float_list(run_result["per_replicate_mins"]),
+                per_replicate_maxs=_legacy_float_list(run_result["per_replicate_maxs"]),
+                per_replicate_finals=_legacy_float_list(run_result["per_replicate_finals"]),
                 n_target_atoms=int(run_result["n_target_atoms"]),
                 n_context_atoms=run_result.get("n_context_atoms"),
                 per_replicate_context_atom_counts=list(
@@ -696,6 +735,87 @@ def _compute_sasa_from_positions(
     )
 
 
+def _compute_sasa_chunk_from_positions(
+    *,
+    positions_angstrom: NDArray[np.float32],
+    topology: Any,
+    target_local_indices: NDArray[np.int64],
+    residue_items: Sequence[Any],
+    probe_radius_nm: float,
+    n_sphere_points: int,
+) -> dict[str, NDArray[np.float64]]:
+    """Run MDTraj Shrake-Rupley for one bounded coordinate chunk.
+
+    Parameters
+    ----------
+    positions_angstrom : ndarray of float32
+        Context coordinates for at most ``chunk_size`` selected frames.
+    topology : Any
+        MDTraj topology for the context atom group.
+    target_local_indices : ndarray of int64
+        Context-local indices of target atoms.
+    residue_items : sequence
+        Residue identity keys paired with context-local atom indices.
+    probe_radius_nm : float
+        Shrake-Rupley probe radius in nm.
+    n_sphere_points : int
+        Number of Shrake-Rupley sphere points.
+
+    Returns
+    -------
+    dict[str, ndarray]
+        Atom, residue, and total SASA arrays for the input chunk.
+    """
+
+    import mdtraj as md
+
+    n_frames = int(positions_angstrom.shape[0])
+    atom_sasa_target_a2 = np.empty((n_frames, target_local_indices.size), dtype=np.float64)
+    residue_sasa_a2 = np.empty((n_frames, len(residue_items)), dtype=np.float64)
+    total_sasa_a2 = np.empty(n_frames, dtype=np.float64)
+    positions_nm = positions_angstrom.astype(np.float32, copy=False) / 10.0
+    mdtraj_traj = md.Trajectory(xyz=positions_nm, topology=topology)
+    atom_sasa_nm2 = np.asarray(
+        md.shrake_rupley(
+            mdtraj_traj,
+            mode="atom",
+            probe_radius=probe_radius_nm,
+            n_sphere_points=n_sphere_points,
+        ),
+        dtype=np.float64,
+    )
+    atom_sasa_target_chunk = atom_sasa_nm2[:, target_local_indices] * NM2_TO_A2
+    atom_sasa_target_a2[:, :] = atom_sasa_target_chunk
+    for idx, (_, atom_locals) in enumerate(residue_items):
+        residue_sasa_a2[:, idx] = np.sum(atom_sasa_nm2[:, atom_locals], axis=1) * NM2_TO_A2
+    total_sasa_a2[:] = np.sum(atom_sasa_target_chunk, axis=1)
+    return {
+        "atom_sasa_a2": atom_sasa_target_a2,
+        "residue_sasa_a2": residue_sasa_a2,
+        "total_sasa_a2": total_sasa_a2,
+    }
+
+
+def _concatenate_sasa_chunks(
+    chunks: Sequence[NDArray[np.float64]], *, n_frames: int, width: int
+) -> NDArray[np.float64]:
+    """Concatenate two-dimensional SASA chunks with an empty-frame fallback."""
+
+    if chunks:
+        return np.concatenate(chunks, axis=0).astype(np.float64, copy=False)
+    return np.empty((n_frames, width), dtype=np.float64)
+
+
+def _concatenate_sasa_vectors(
+    chunks: Sequence[NDArray[np.float64]], *, n_frames: int
+) -> NDArray[np.float64]:
+    """Concatenate one-dimensional SASA chunks with an empty-frame fallback."""
+
+    if chunks:
+        return np.concatenate(chunks, axis=0).astype(np.float64, copy=False)
+    return np.empty(n_frames, dtype=np.float64)
+
+
 def _mdtraj_topology_from_atom_group(atom_group: Any) -> Any:
     """Build an MDTraj topology from an MDAnalysis atom group."""
 
@@ -749,20 +869,20 @@ def _record_zero_selection_results(
 
     if target_indices.size == 0:
         LOGGER.warning(
-            "Run '%s' target selection matched zero atoms (%r); returning NaN SASA metrics",
+            "Run '%s' target selection matched zero atoms (%r); returning missing SASA metrics",
             results.run_label,
             results.target_selection,
         )
     if context_indices.size == 0:
         LOGGER.warning(
-            "Run '%s' context selection matched zero atoms (%r); returning NaN SASA metrics",
+            "Run '%s' context selection matched zero atoms (%r); returning missing SASA metrics",
             results.run_label,
             results.context_selection,
         )
     n_frames = int(frame_indices.size)
     results.atom_sasa_a2 = np.empty((n_frames, target_indices.size), dtype=np.float64)
     results.residue_sasa_a2 = np.empty((n_frames, 0), dtype=np.float64)
-    results.total_sasa_a2 = np.full(n_frames, np.nan, dtype=np.float64)
+    results.total_sasa_a2 = np.zeros(n_frames, dtype=np.float64)
     results.frames = frame_indices
     results.time_ns = time_ns
     results.target_atom_indices = target_indices
@@ -812,18 +932,23 @@ def _summarize_raw_sasa(
 
     from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
 
-    total = np.asarray(raw.total_sasa_a2, dtype=np.float64)
-    finite_total = total[np.isfinite(total)]
     zero_atom = raw.target_atom_indices.size == 0 or raw.context_atom_indices.size == 0
-    if finite_total.size:
+    total = np.asarray(raw.total_sasa_a2, dtype=np.float64)
+    finite_total = total[np.isfinite(total)] if not zero_atom else np.asarray([], dtype=np.float64)
+    missing_sasa_reason: str | None = None
+    if zero_atom:
+        missing_sasa_reason = "zero_atom_selection"
+        mean_sasa = std_sasa = median_sasa = min_sasa = max_sasa = final_sasa = None
+    elif finite_total.size:
         mean_sasa = float(np.mean(finite_total))
         std_sasa = float(np.std(finite_total, ddof=0))
         median_sasa = float(np.median(finite_total))
         min_sasa = float(np.min(finite_total))
         max_sasa = float(np.max(finite_total))
-        final_sasa = float(total[-1]) if np.isfinite(total[-1]) else float("nan")
+        final_sasa = _json_float_or_none(total[-1])
     else:
-        mean_sasa = std_sasa = median_sasa = min_sasa = max_sasa = final_sasa = float("nan")
+        missing_sasa_reason = "no_finite_sasa_samples"
+        mean_sasa = std_sasa = median_sasa = min_sasa = max_sasa = final_sasa = None
 
     sem_sasa: float | None = None
     correlation_time: float | None = None
@@ -832,7 +957,7 @@ def _summarize_raw_sasa(
     statistical_inefficiency: float | None = None
     autocorrelation_warning: str | None = None
     effective_timestep_ps = _effective_timestep_ps(raw_timestep_ps, frame_stride)
-    if finite_total.size >= 20:
+    if finite_total.size >= 20 and std_sasa is not None:
         try:
             tau = estimate_correlation_time(
                 finite_total,
@@ -864,6 +989,7 @@ def _summarize_raw_sasa(
         "max_sasa": max_sasa,
         "final_sasa": final_sasa,
         "sem_sasa": sem_sasa,
+        "missing_sasa_reason": missing_sasa_reason,
         "correlation_time": correlation_time,
         "correlation_time_unit": correlation_time_unit,
         "n_independent_frames": n_independent_frames,
@@ -895,20 +1021,20 @@ def _aggregate_run_payload(
     """Aggregate one SASA run across replicate entries and sidecars."""
 
     del condition_label
-    per_means = np.asarray([float(entry["mean_sasa"]) for entry in entries], dtype=np.float64)
-    per_stds = [float(entry["std_sasa"]) for entry in entries]
-    per_medians = [float(entry["median_sasa"]) for entry in entries]
-    per_mins = [float(entry["min_sasa"]) for entry in entries]
-    per_maxs = [float(entry["max_sasa"]) for entry in entries]
-    per_finals = [float(entry["final_sasa"]) for entry in entries]
-    finite_means = per_means[np.isfinite(per_means)]
+    per_means = [_json_float_or_none(entry.get("mean_sasa")) for entry in entries]
+    per_stds = [_json_float_or_none(entry.get("std_sasa")) for entry in entries]
+    per_medians = [_json_float_or_none(entry.get("median_sasa")) for entry in entries]
+    per_mins = [_json_float_or_none(entry.get("min_sasa")) for entry in entries]
+    per_maxs = [_json_float_or_none(entry.get("max_sasa")) for entry in entries]
+    per_finals = [_json_float_or_none(entry.get("final_sasa")) for entry in entries]
+    finite_means = np.asarray([value for value in per_means if value is not None], dtype=np.float64)
     if finite_means.size:
         mean_stats = compute_sem(finite_means)
-        overall_mean = mean_stats.mean
-        overall_sem = mean_stats.sem
+        overall_mean = _json_float_or_none(mean_stats.mean)
+        overall_sem = _json_float_or_none(mean_stats.sem)
     else:
-        overall_mean = float("nan")
-        overall_sem = float("nan")
+        overall_mean = None
+        overall_sem = None
 
     residue_matrix: list[NDArray[np.float64]] = []
     residue_keys: list[str] = []
@@ -947,11 +1073,11 @@ def _aggregate_run_payload(
         "n_replicates": len(replicates),
         "overall_mean": overall_mean,
         "overall_sem": overall_sem,
-        "overall_median": float(np.nanmean(np.asarray(per_medians, dtype=np.float64))),
-        "overall_min": float(np.nanmin(np.asarray(per_mins, dtype=np.float64))),
-        "overall_max": float(np.nanmax(np.asarray(per_maxs, dtype=np.float64))),
-        "overall_final": float(np.nanmean(np.asarray(per_finals, dtype=np.float64))),
-        "per_replicate_means": [float(value) for value in per_means.tolist()],
+        "overall_median": _mean_optional_values(per_medians),
+        "overall_min": _min_optional_values(per_mins),
+        "overall_max": _max_optional_values(per_maxs),
+        "overall_final": _mean_optional_values(per_finals),
+        "per_replicate_means": per_means,
         "per_replicate_stds": per_stds,
         "per_replicate_medians": per_medians,
         "per_replicate_mins": per_mins,
@@ -1316,10 +1442,61 @@ def _safe_label(run_label: str) -> str:
     return "_".join(part for part in safe.split("_") if part) or "run"
 
 
-def _replicate_metrics(run_payloads: Sequence[Mapping[str, Any]]) -> dict[str, float]:
+def _json_float_or_none(value: Any) -> float | None:
+    """Return a finite float or ``None`` for artifact-safe missing values."""
+
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def _legacy_float(value: Any) -> float:
+    """Return a float for legacy result models, preserving missing values as NaN."""
+
+    numeric = _json_float_or_none(value)
+    return float("nan") if numeric is None else numeric
+
+
+def _legacy_float_list(values: Sequence[Any]) -> list[float]:
+    """Return floats for legacy result models from artifact-safe values."""
+
+    return [_legacy_float(value) for value in values]
+
+
+def _mean_optional_values(values: Sequence[float | None]) -> float | None:
+    """Return the mean of finite values or ``None`` when none exist."""
+
+    finite = [float(value) for value in values if value is not None]
+    if not finite:
+        return None
+    return _json_float_or_none(np.mean(np.asarray(finite, dtype=np.float64)))
+
+
+def _min_optional_values(values: Sequence[float | None]) -> float | None:
+    """Return the minimum finite value or ``None`` when none exist."""
+
+    finite = [float(value) for value in values if value is not None]
+    return min(finite) if finite else None
+
+
+def _max_optional_values(values: Sequence[float | None]) -> float | None:
+    """Return the maximum finite value or ``None`` when none exist."""
+
+    finite = [float(value) for value in values if value is not None]
+    return max(finite) if finite else None
+
+
+def _replicate_metrics(run_payloads: Sequence[Mapping[str, Any]]) -> dict[str, float | None]:
     """Return scalar replicate metrics keyed by run label."""
 
-    return {_metric_key(str(run["run_label"])): float(run["mean_sasa"]) for run in run_payloads}
+    return {
+        _metric_key(str(run["run_label"])): _json_float_or_none(run.get("mean_sasa"))
+        for run in run_payloads
+    }
 
 
 def _condition_metrics(run_results: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -1327,16 +1504,19 @@ def _condition_metrics(run_results: Sequence[Mapping[str, Any]]) -> dict[str, di
 
     metrics: dict[str, dict[str, Any]] = {}
     for run in run_results:
-        values = [float(value) for value in run["per_replicate_means"]]
-        finite = [value for value in values if math.isfinite(value)]
-        std = float(np.std(finite, ddof=1)) if len(finite) > 1 else 0.0
+        values = [_json_float_or_none(value) for value in run["per_replicate_means"]]
+        finite = [value for value in values if value is not None]
+        if len(finite) > 1:
+            std = _json_float_or_none(np.std(finite, ddof=1))
+        else:
+            std = 0.0 if finite else None
         metrics[_metric_key(str(run["run_label"]))] = {
             "name": _metric_key(str(run["run_label"])),
             "values": values,
-            "mean": float(run["overall_mean"]),
-            "sem": float(run["overall_sem"]),
+            "mean": _json_float_or_none(run.get("overall_mean")),
+            "sem": _json_float_or_none(run.get("overall_sem")),
             "std": std,
-            "n": len(values),
+            "n": len(finite),
             **SASA_METRIC_METADATA,
         }
     return metrics
@@ -1344,14 +1524,14 @@ def _condition_metrics(run_results: Sequence[Mapping[str, Any]]) -> dict[str, di
 
 def _condition_replicate_metrics(
     run_results: Sequence[Mapping[str, Any]], replicates: Sequence[int]
-) -> dict[str, dict[str, float]]:
+) -> dict[str, dict[str, float | None]]:
     """Return per-replicate metric payloads for condition artifacts."""
 
     by_replicate = {str(int(replicate)): {} for replicate in replicates}
     for run in run_results:
         metric_key = _metric_key(str(run["run_label"]))
         for replicate, value in zip(replicates, run["per_replicate_means"], strict=True):
-            by_replicate[str(int(replicate))][metric_key] = float(value)
+            by_replicate[str(int(replicate))][metric_key] = _json_float_or_none(value)
     return by_replicate
 
 
