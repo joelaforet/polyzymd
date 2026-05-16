@@ -15,9 +15,11 @@ from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.mda import (
     ArtifactStore,
     FrameSelection,
+    MDAAnalysisJob,
     MDABackendPolicy,
     MDACollectorContext,
     MDAJobResult,
+    MDAReplicateJobContext,
     MDAUniversePolicy,
     ReplicateArtifact,
 )
@@ -30,7 +32,11 @@ from polyzymd.analyses.rmsd._comparison_results import (
     RMSDRunSummary,
 )
 from polyzymd.analyses.rmsd._formatters import format_rmsd_comparison
-from polyzymd.analyses.rmsd._mda import condition_artifact_to_legacy_result
+from polyzymd.analyses.rmsd._mda import (
+    _build_rmsd_analysis,
+    _sidecar_filename,
+    condition_artifact_to_legacy_result,
+)
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
 from polyzymd.analyses.rmsd._plotters import _resolve_npz_sidecar_path
 from polyzymd.analyses.rmsd._results import (
@@ -182,6 +188,67 @@ def _make_replicate_artifact(
             "equilibration_time": 10.0,
             "equilibration_unit": "ns",
         },
+    )
+
+
+def _make_rmsd_collector_context(
+    *,
+    condition: Condition,
+    tmp_path: Path,
+    settings: RMSDSettings,
+    frame_selection: FrameSelection,
+    replicate: int = 1,
+) -> tuple[MDACollectorContext, ArtifactStore]:
+    """Create an RMSD collector context and artifact store for tests."""
+
+    replicate_ctx = make_replicate_context(
+        condition=condition,
+        replicate=replicate,
+        output_dir=tmp_path / f"run_{replicate}",
+        settings=settings,
+        equilibration="10ns",
+    )
+    store = ArtifactStore(replicate_ctx.output_dir)
+    return (
+        MDACollectorContext(
+            analysis_name="rmsd",
+            replicate_context=replicate_ctx,
+            frame_selection=frame_selection,
+            universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=replicate),
+            artifact_store=store,
+            settings_fingerprint=_settings_hash(settings),
+        ),
+        store,
+    )
+
+
+def _make_rmsd_job_result(
+    *,
+    condition: Condition,
+    frame_selection: FrameSelection,
+    run: RMSDRunSettings,
+    rmsd_table: np.ndarray,
+    analysis_obj: object | None = None,
+) -> MDAJobResult:
+    """Create a completed RMSD MDA job result for collector tests."""
+
+    if analysis_obj is None:
+        analysis_obj = SimpleNamespace(
+            _polyzymd_rmsd_metadata={"reference_frame": 1, "reference_file": None}
+        )
+
+    return MDAJobResult(
+        name=run.label,
+        analysis=analysis_obj,
+        results=SimpleNamespace(rmsd=np.asarray(rmsd_table, dtype=np.float64)),
+        run_kwargs=frame_selection.run_kwargs(),
+        frame_selection=frame_selection,
+        backend_policy=MDABackendPolicy(),
+        universe_policy=MDAUniversePolicy(
+            condition_label=condition.label,
+            replicate=1,
+            metadata={"rmsd_run": run.model_dump(mode="json")},
+        ),
     )
 
 
@@ -394,8 +461,6 @@ def test_settings_cache_tag_changes_with_settings() -> None:
 
 def test_build_mda_jobs_uses_one_job_per_run(condition: Condition, tmp_path: Path) -> None:
     """RMSD should expose MDAnalysis-native jobs instead of legacy runners."""
-    from polyzymd.analyses.mda import MDAReplicateJobContext
-
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
     replicate_ctx = make_replicate_context(
@@ -427,7 +492,7 @@ def test_build_mda_jobs_uses_one_job_per_run(condition: Condition, tmp_path: Pat
 def test_mda_collector_writes_replicate_artifact_sidecar(
     condition: Condition, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """RMSD collector should map RMSD.results.rmsd to artifact payload and NPZ."""
+    """RMSD collector should preserve MDAnalysis time values in NPZ sidecars."""
     monkeypatch.setattr("polyzymd.analyses.rmsd._mda.compute_config_hash", lambda _cfg: "hash123")
     monkeypatch.setattr(
         "polyzymd.analyses.shared.convergence.find_convergence_time",
@@ -443,44 +508,22 @@ def test_mda_collector_writes_replicate_artifact_sidecar(
         ),
     )
     settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
-    replicate_ctx = make_replicate_context(
-        condition=condition,
-        replicate=1,
-        output_dir=tmp_path / "run_1",
-        settings=settings,
-        equilibration="10ns",
-    )
-    store = ArtifactStore(replicate_ctx.output_dir)
     frame_selection = FrameSelection(
         start=1000, stop=1003, step=1, n_frames_total=2000, timestep_ps=10.0
     )
-    collector_ctx = MDACollectorContext(
-        analysis_name="rmsd",
-        replicate_context=replicate_ctx,
+    collector_ctx, store = _make_rmsd_collector_context(
+        condition=condition,
+        tmp_path=tmp_path,
+        settings=settings,
         frame_selection=frame_selection,
-        universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=1),
-        artifact_store=store,
-        settings_fingerprint=_settings_hash(settings),
     )
-    analysis_obj = SimpleNamespace(
-        _polyzymd_rmsd_metadata={"reference_frame": 1, "reference_file": None}
-    )
-    job = MDAJobResult(
-        name="protein_backbone",
-        analysis=analysis_obj,
-        results=SimpleNamespace(
-            rmsd=np.asarray(
-                [[1000.0, 0.0, 1.0], [1001.0, 10.0, 1.2], [1002.0, 20.0, 1.4]],
-                dtype=np.float64,
-            )
-        ),
-        run_kwargs=frame_selection.run_kwargs(),
+    job = _make_rmsd_job_result(
+        condition=condition,
         frame_selection=frame_selection,
-        backend_policy=MDABackendPolicy(),
-        universe_policy=MDAUniversePolicy(
-            condition_label=condition.label,
-            replicate=1,
-            metadata={"rmsd_run": settings.runs[0].model_dump(mode="json")},
+        run=settings.runs[0],
+        rmsd_table=np.asarray(
+            [[1000.0, 5.0, 1.0], [1001.0, 25.0, 1.2], [1002.0, 50.0, 1.4]],
+            dtype=np.float64,
         ),
     )
 
@@ -488,10 +531,183 @@ def test_mda_collector_writes_replicate_artifact_sidecar(
 
     assert artifact.payload["metrics"]["protein_backbone.mean_rmsd"] == pytest.approx(1.2)
     assert artifact.metadata["settings_fingerprint"] == _settings_hash(settings)
-    assert artifact.sidecars[0].path == "sidecars/rmsd_protein_backbone_timeseries.npz"
+    assert artifact.sidecars[0].path == (f"sidecars/{_sidecar_filename('protein_backbone', 0)}")
     with np.load(store.resolve_sidecar(artifact.sidecars[0])) as payload:
         assert payload["rmsd_values"].tolist() == pytest.approx([1.0, 1.2, 1.4])
+        assert payload["time_ns"].tolist() == pytest.approx([0.005, 0.025, 0.05])
         assert float(payload["raw_timestep_ps"]) == pytest.approx(10.0)
+        assert float(payload["effective_timestep_ps"]) == pytest.approx(22.5)
+
+
+def test_mda_collector_uses_collision_proof_sidecar_names(
+    condition: Condition, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RMSD sidecar names should not collide after label sanitization."""
+    monkeypatch.setattr("polyzymd.analyses.rmsd._mda.compute_config_hash", lambda _cfg: "hash123")
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.convergence.find_convergence_time",
+        lambda *args, **kwargs: SimpleNamespace(
+            window_start_times_ns=[],
+            window_mean_values=[],
+            slope_times_ns=[],
+            slopes=[],
+            converged=False,
+            assessable=False,
+            convergence_time_ns=None,
+            message="Too few frames",
+        ),
+    )
+    settings = RMSDSettings(
+        runs=[
+            RMSDRunSettings(label="a-b"),
+            RMSDRunSettings(label="a_b"),
+        ]
+    )
+    frame_selection = FrameSelection(start=0, stop=2, step=1, n_frames_total=2, timestep_ps=5.0)
+    collector_ctx, store = _make_rmsd_collector_context(
+        condition=condition,
+        tmp_path=tmp_path,
+        settings=settings,
+        frame_selection=frame_selection,
+    )
+    jobs = [
+        _make_rmsd_job_result(
+            condition=condition,
+            frame_selection=frame_selection,
+            run=run,
+            rmsd_table=np.asarray([[0.0, 0.0, 0.0], [1.0, 5.0, 1.0]], dtype=np.float64),
+        )
+        for run in settings.runs
+    ]
+
+    artifact = RMSDAnalysis().build_mda_collector(collector_ctx)(collector_ctx, jobs)
+
+    sidecar_paths = [sidecar.path for sidecar in artifact.sidecars]
+    assert sidecar_paths == [
+        f"sidecars/{_sidecar_filename('a-b', 0)}",
+        f"sidecars/{_sidecar_filename('a_b', 1)}",
+    ]
+    assert len(set(sidecar_paths)) == 2
+    for sidecar in artifact.sidecars:
+        assert store.resolve_sidecar(sidecar).exists()
+
+
+def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
+    condition: Condition, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real MDAnalysis RMSD jobs should feed aggregation and comparison artifacts."""
+    import MDAnalysis as mda
+    from MDAnalysis.coordinates.memory import MemoryReader
+
+    condition = make_condition(label=condition.label, replicates=(1,))
+    monkeypatch.setattr("polyzymd.analyses.rmsd._mda.compute_config_hash", lambda _cfg: "hash123")
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.convergence.find_convergence_time",
+        lambda *args, **kwargs: SimpleNamespace(
+            window_start_times_ns=[],
+            window_mean_values=[],
+            slope_times_ns=[],
+            slopes=[],
+            converged=False,
+            assessable=False,
+            convergence_time_ns=None,
+            message="Too few frames",
+        ),
+    )
+    universe = mda.Universe.empty(
+        4,
+        n_residues=4,
+        atom_resindex=np.arange(4),
+        trajectory=True,
+    )
+    universe.add_TopologyAttr("names", ["A1", "A2", "A3", "A4"])
+    universe.add_TopologyAttr("masses", [12.0, 12.0, 12.0, 12.0])
+    universe.add_TopologyAttr("resnames", ["TST", "TST", "TST", "TST"])
+    universe.add_TopologyAttr("resids", [1, 2, 3, 4])
+    coords = np.asarray(
+        [
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 2.0]],
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 4.0]],
+        ],
+        dtype=np.float32,
+    )
+    universe.load_new(coords, format=MemoryReader, dt=5.0)
+    frame_selection = FrameSelection(start=0, stop=3, step=1, n_frames_total=3, timestep_ps=10.0)
+    run = RMSDRunSettings(
+        label="moving_atom",
+        selection="name A4",
+        alignment_selection="name A1 A2 A3",
+        centroid_selection="name A1 A2 A3",
+        reference_mode="frame",
+        reference_frame=0,
+    )
+    settings = RMSDSettings(runs=[run])
+    mda_analysis = _build_rmsd_analysis(
+        universe=universe,
+        run=run,
+        frame_selection=frame_selection,
+    )
+    job = MDAAnalysisJob(
+        name=run.label,
+        analysis=mda_analysis,
+        frame_selection=frame_selection,
+        universe_policy=MDAUniversePolicy(
+            condition_label=condition.label,
+            replicate=1,
+            metadata={"rmsd_run": run.model_dump(mode="json")},
+        ),
+    )
+
+    completed = job.run()
+
+    assert completed.results.rmsd[:, 1].tolist() == pytest.approx([0.0, 5.0, 10.0])
+    assert completed.results.rmsd[:, 2].tolist() == pytest.approx([0.0, 1.0, 3.0])
+
+    collector_ctx, store = _make_rmsd_collector_context(
+        condition=condition,
+        tmp_path=tmp_path,
+        settings=settings,
+        frame_selection=frame_selection,
+    )
+    artifact = RMSDAnalysis().build_mda_collector(collector_ctx)(collector_ctx, [completed])
+    run_payload = artifact.payload["runs"][0]
+    assert run_payload["mean_rmsd"] == pytest.approx(4.0 / 3.0)
+    assert run_payload["npz_path"] == f"sidecars/{_sidecar_filename('moving_atom', 0)}"
+    with np.load(store.resolve_sidecar(artifact.sidecars[0])) as payload:
+        assert payload["rmsd_values"].tolist() == pytest.approx([0.0, 1.0, 3.0])
+        assert payload["time_ns"].tolist() == pytest.approx([0.0, 0.005, 0.01])
+        assert float(payload["effective_timestep_ps"]) == pytest.approx(5.0)
+
+    analysis = RMSDAnalysis()
+    settings_hash = _settings_hash(settings)
+    aggregate_ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1,),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    aggregated = condition_artifact_to_legacy_result(analysis.aggregate(aggregate_ctx, [artifact]))
+    assert aggregated.run_results[0].overall_mean == pytest.approx(4.0 / 3.0)
+    assert aggregated.settings_fingerprint == settings_hash
+
+    comparison_ctx = make_comparison_context(
+        name="synthetic_rmsd",
+        conditions=[condition],
+        analysis_dirs={condition.label: tmp_path / "rmsd"},
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label=condition.label,
+        equilibration="10ns",
+        recompute=False,
+        aggregated_results={condition.label: aggregated},
+    )
+    comparison = analysis.compare(comparison_ctx)
+
+    assert comparison is not None
+    assert comparison.n_runs == 1
+    assert comparison.conditions[0].run_summaries[0].mean_rmsd == pytest.approx(4.0 / 3.0)
 
 
 def test_plotter_resolves_npz_from_replicate_artifact(tmp_path: Path) -> None:

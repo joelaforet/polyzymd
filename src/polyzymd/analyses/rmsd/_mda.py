@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Mapping, Sequence
+from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -103,8 +104,8 @@ class RMSDArtifactCollector:
         sidecars: list[ArtifactSidecarRef] = []
         metrics: dict[str, float] = {}
 
-        for job in completed_jobs:
-            run_payload, run_sidecar = _collect_run(ctx, job)
+        for job_index, job in enumerate(completed_jobs):
+            run_payload, run_sidecar = _collect_run(ctx, job, job_index=job_index)
             run_payloads.append(run_payload)
             sidecars.append(run_sidecar)
             metrics[f"{job.name}.mean_rmsd"] = run_payload["mean_rmsd"]
@@ -519,7 +520,7 @@ def _build_mean_position_analysis(atoms: Any) -> Any:
 
 
 def _collect_run(
-    ctx: MDACollectorContext, job: MDAJobResult
+    ctx: MDACollectorContext, job: MDAJobResult, *, job_index: int
 ) -> tuple[dict[str, Any], ArtifactSidecarRef]:
     """Collect one completed RMSD job into summary and sidecar payloads."""
 
@@ -536,9 +537,10 @@ def _collect_run(
 
     raw_timestep_ps = float(ctx.frame_selection.timestep_ps or 1.0)
     frame_stride = int(ctx.frame_selection.step or 1)
-    effective_timestep_ps = raw_timestep_ps * float(frame_stride)
     frames = np.asarray(rmsd_table[:, 0], dtype=np.int64)
-    time_ns = (frames.astype(np.float64) * raw_timestep_ps) / 1000.0
+    time_ps = _time_ps_from_rmsd_table(rmsd_table, job_name=job.name)
+    time_ns = time_ps / 1000.0
+    effective_timestep_ps = _effective_timestep_ps(time_ps, raw_timestep_ps, frame_stride)
     stats = _summarize_rmsd_values(rmsd_values)
 
     sem_rmsd: float | None = None
@@ -572,7 +574,7 @@ def _collect_run(
         sustained_for_ns=float(run_settings["convergence_sustained_for_ns"]),
     )
     sidecar = ctx.artifact_store.write_npz_sidecar(
-        Path("sidecars") / f"rmsd_{_safe_label(job.name)}_timeseries.npz",
+        Path("sidecars") / _sidecar_filename(job.name, job_index),
         rmsd_values=rmsd_values,
         time_ns=time_ns,
         frames=frames,
@@ -650,6 +652,60 @@ def _summarize_rmsd_values(rmsd_values: NDArray[np.float64]) -> dict[str, float]
         "max_rmsd": float(np.max(rmsd_values)),
         "final_rmsd": float(rmsd_values[-1]),
     }
+
+
+def _time_ps_from_rmsd_table(
+    rmsd_table: NDArray[np.float64], *, job_name: str
+) -> NDArray[np.float64]:
+    """Return MDAnalysis-reported time values in picoseconds.
+
+    Parameters
+    ----------
+    rmsd_table : NDArray[np.float64]
+        ``RMSD.results.rmsd`` table with MDAnalysis frame, time, and RMSD columns.
+    job_name : str
+        Job label used in diagnostics.
+
+    Returns
+    -------
+    NDArray[np.float64]
+        Time values from the MDAnalysis results table in picoseconds.
+    """
+
+    time_ps = np.asarray(rmsd_table[:, 1], dtype=np.float64)
+    if time_ps.ndim != 1 or len(time_ps) == 0 or not np.all(np.isfinite(time_ps)):
+        raise ValueError(f"RMSD job '{job_name}' produced invalid results.rmsd time values")
+    return time_ps
+
+
+def _effective_timestep_ps(
+    time_ps: NDArray[np.float64], raw_timestep_ps: float, frame_stride: int
+) -> float:
+    """Estimate effective sample spacing from MDAnalysis time values.
+
+    Parameters
+    ----------
+    time_ps : NDArray[np.float64]
+        MDAnalysis-reported time values in picoseconds.
+    raw_timestep_ps : float
+        Fallback raw trajectory timestep in picoseconds.
+    frame_stride : int
+        Frame stride used for the job.
+
+    Returns
+    -------
+    float
+        Median spacing in picoseconds when available, otherwise the legacy
+        raw timestep multiplied by frame stride.
+    """
+
+    if len(time_ps) < 2:
+        return float(raw_timestep_ps) * float(frame_stride)
+    deltas = np.diff(time_ps)
+    finite_positive = deltas[np.isfinite(deltas) & (deltas > 0.0)]
+    if finite_positive.size == 0:
+        return float(raw_timestep_ps) * float(frame_stride)
+    return float(np.median(finite_positive))
 
 
 def _slice_bounds(frame_selection: FrameSelection) -> tuple[int, int, int]:
@@ -769,3 +825,24 @@ def _safe_label(value: str) -> str:
     """Return a filesystem-safe label token."""
 
     return value.replace(" ", "_").replace("-", "_").replace("/", "_").lower()
+
+
+def _sidecar_filename(run_label: str, job_index: int) -> str:
+    """Return a collision-proof sidecar filename for one RMSD run.
+
+    Parameters
+    ----------
+    run_label : str
+        Original user-facing run label.
+    job_index : int
+        Zero-based job order from the completed job sequence.
+
+    Returns
+    -------
+    str
+        Stable sidecar filename including job order, sanitized label, and a hash
+        of the original label.
+    """
+
+    label_hash = sha256(run_label.encode("utf-8")).hexdigest()[:12]
+    return f"rmsd_{job_index:03d}_{_safe_label(run_label)}_{label_hash}_timeseries.npz"
