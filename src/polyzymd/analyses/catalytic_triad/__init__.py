@@ -19,9 +19,11 @@ from pydantic import BaseModel, Field, field_validator
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
+    ANOVAResult,
     BasePlotSettings,
-    MDACollectorContext,
-    MDAReplicateJobContext,
+    ComparisonResult,
+    ConditionSummary,
+    PairwiseResult,
     PlotContext,
     ScalarMeasurementAnalysis,
 )
@@ -37,7 +39,14 @@ from polyzymd.analyses.catalytic_triad._plotters import (
     plot_triad_threshold_bars_from_data,
 )
 from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
-from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
+from polyzymd.analyses.exceptions import PluginContractError
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    ComparisonArtifact,
+    MDACollectorContext,
+    MDAReplicateJobContext,
+    ReplicateArtifact,
+)
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 logger = logging.getLogger("polyzymd.analyses.catalytic_triad")
@@ -189,6 +198,79 @@ class CatalyticTriadAnalysis(ScalarMeasurementAnalysis):
         del ctx
         return TriadArtifactCollector()
 
+    def run_replicate(self, ctx: Any, replicate: int) -> Any:
+        """Run one catalytic-triad replicate through the MDA artifact path.
+
+        Parameters
+        ----------
+        ctx : Any
+            Framework-provided replicate context.
+        replicate : int
+            One-indexed replicate number.
+
+        Returns
+        -------
+        Any
+            Canonical replicate artifact produced by the MDAnalysis lifecycle.
+        """
+
+        result = Analysis.run_replicate(self, ctx, replicate)
+        if isinstance(result, ReplicateArtifact):
+            target_path = ctx.result_path or ctx.output_dir / "result.json"
+            ArtifactStore(target_path.parent).write_replicate_result(result, target_path.name)
+        return result
+
+    def build_runner(self, ctx: Any, replicate: int, universe: Any, window: Any) -> Any:
+        """Disable the inherited scalar-measurement runner path.
+
+        Parameters
+        ----------
+        ctx : Any
+            Framework-provided replicate context.
+        replicate : int
+            One-indexed replicate number.
+        universe : Any
+            Loaded trajectory universe.
+        window : Any
+            Resolved trajectory window.
+
+        Raises
+        ------
+        PluginContractError
+            Always raised because catalytic-triad computation must run through
+            canonical MDAnalysis jobs and artifacts.
+        """
+
+        del ctx, replicate, universe, window
+        raise PluginContractError(
+            "CatalyticTriadAnalysis uses the MDAnalysis artifact lifecycle only. "
+            "The inherited scalar-measurement runner fallback is disabled; configure "
+            "build_mda_jobs() successfully or recompute after clearing stale caches."
+        )
+
+    def _run_replicate_via_runner(self, ctx: Any, replicate: int) -> Any:
+        """Fail closed instead of falling back to the scalar measurement runner.
+
+        Parameters
+        ----------
+        ctx : Any
+            Framework-provided replicate context.
+        replicate : int
+            One-indexed replicate number.
+
+        Raises
+        ------
+        PluginContractError
+            Always raised when the MDAnalysis job path was unavailable.
+        """
+
+        del ctx, replicate
+        raise PluginContractError(
+            "CatalyticTriadAnalysis could not run the MDAnalysis job path, and the inherited "
+            "scalar-measurement runner fallback is disabled. Recompute with valid catalytic-triad "
+            "MDAnalysis job settings or clear stale caches before retrying."
+        )
+
     def _deserialize_result(self, path: Path) -> Any:
         """Load only canonical condition artifacts for catalytic-triad aggregates."""
 
@@ -272,12 +354,17 @@ class CatalyticTriadAnalysis(ScalarMeasurementAnalysis):
         str
             Formatted output.
         """
-        from polyzymd.analyses.base import ComparisonResult
         from polyzymd.analyses.stats import format_scalar_comparison
 
-        if isinstance(result, ComparisonResult):
+        comparison_result = result
+        if isinstance(result, ComparisonArtifact):
+            if output_format == "json":
+                return result.model_dump_json(indent=2)
+            comparison_result = _comparison_artifact_to_result(result)
+
+        if isinstance(comparison_result, ComparisonResult):
             return format_scalar_comparison(
-                result,
+                comparison_result,
                 title="Catalytic Triad Comparison",
                 metric_label="Simultaneous Contact",
                 metric_unit="%",
@@ -336,3 +423,46 @@ class CatalyticTriadAnalysis(ScalarMeasurementAnalysis):
         rep_str = Analysis._format_replicate_range(replicates)
         name_safe = first_result.triad_name.replace(" ", "_").replace("/", "-")
         return f"triad_{name_safe}_{rep_str}_{eq_str}.json"
+
+
+def _comparison_artifact_to_result(artifact: ComparisonArtifact) -> ComparisonResult:
+    """Adapt a canonical comparison artifact for scalar CLI formatting.
+
+    Parameters
+    ----------
+    artifact : ComparisonArtifact
+        MDAnalysis comparison artifact generated from condition artifacts.
+
+    Returns
+    -------
+    ComparisonResult
+        Legacy scalar comparison model consumed by the shared formatter.
+    """
+
+    payload = artifact.payload
+    statistical_parameters = payload.get("statistical_parameters", {})
+    if not isinstance(statistical_parameters, dict):
+        statistical_parameters = {}
+    anova_payload = payload.get("anova") or []
+    return ComparisonResult(
+        analysis_type=artifact.analysis_name,
+        name=str(artifact.metadata.get("project_name", artifact.analysis_name)),
+        control_label=artifact.effective_control or artifact.control_label,
+        fdr_alpha=statistical_parameters.get("fdr_alpha"),
+        ttest_method=str(statistical_parameters.get("ttest_method", "student")),
+        posthoc_method=str(statistical_parameters.get("posthoc_method", "ttest_bh")),
+        conditions=[
+            ConditionSummary.model_validate(summary)
+            for summary in payload.get("condition_summaries", [])
+        ],
+        pairwise_comparisons=[
+            PairwiseResult.model_validate(pairwise)
+            for pairwise in payload.get("pairwise_comparisons", [])
+        ],
+        anova=[ANOVAResult.model_validate(entry) for entry in anova_payload] or None,
+        ranking=list(payload.get("ranking", [])),
+        rankings_by_metric=payload.get("rankings_by_metric"),
+        equilibration_time=str(statistical_parameters.get("equilibration", "0ns")),
+        created_at=str(artifact.metadata.get("created_at", "")),
+        polyzymd_version=str(artifact.metadata.get("polyzymd_version", "")),
+    )

@@ -9,7 +9,16 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from polyzymd.analyses.base import AggregateContext, Condition, MetricValue, PlotContext
+from polyzymd.analyses._analysis_runner import _RUNNER_NOT_CONFIGURED
+from polyzymd.analyses.base import (
+    AggregateContext,
+    ComparisonContext,
+    Condition,
+    MetricValue,
+    PlotContext,
+    PluginContractError,
+    ReplicateContext,
+)
 from polyzymd.analyses.catalytic_triad import (
     CatalyticTriadAnalysis,
     CatalyticTriadSettings,
@@ -26,6 +35,7 @@ from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
 from polyzymd.analyses.distances._mda import DistancePairPayload, DistancesRunnerPayload
 from polyzymd.analyses.mda import (
     ArtifactStore,
+    ComparisonArtifact,
     FrameSelection,
     MDACollectorContext,
     MDAJobResult,
@@ -106,7 +116,6 @@ def _collector_context(
             stop=4,
             step=1,
             n_frames_total=4,
-            n_frames_selected=4,
             timestep_ps=10.0,
         ),
         universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=replicate),
@@ -253,6 +262,43 @@ class TestTriadMDACollector:
 class TestTriadAggregationAndComparison:
     """Tests for artifact aggregation and scalar comparison compatibility."""
 
+    def test_mda_not_configured_does_not_fall_back_to_scalar_runner(
+        self,
+        triad_analysis: CatalyticTriadAnalysis,
+        condition: Condition,
+        tmp_path: Path,
+        default_settings: CatalyticTriadSettings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A missing MDA job path should fail closed before scalar runner execution."""
+
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="10ns",
+            recompute=True,
+            settings=default_settings,
+        )
+        monkeypatch.setattr(
+            triad_analysis,
+            "_run_replicate_via_mda_jobs",
+            lambda *_args: _RUNNER_NOT_CONFIGURED,
+        )
+
+        with pytest.raises(PluginContractError, match="scalar-measurement runner fallback"):
+            triad_analysis.run_replicate(ctx, replicate=1)
+
+    def test_direct_scalar_runner_path_is_disabled(
+        self,
+        triad_analysis: CatalyticTriadAnalysis,
+    ) -> None:
+        """Direct calls to the inherited runner seam should also be rejected."""
+
+        with pytest.raises(PluginContractError, match="artifact lifecycle only"):
+            triad_analysis.build_runner(object(), 1, object(), object())
+
     def test_aggregate_requires_replicate_artifacts(
         self,
         triad_analysis: CatalyticTriadAnalysis,
@@ -318,9 +364,191 @@ class TestTriadAggregationAndComparison:
         assert artifact.artifact_type == "condition"
         assert (tmp_path / "aggregated" / "result.json").exists()
         assert artifact.payload["metrics"][SIMULTANEOUS_CONTACT_METRIC]["values"] == [50.0, 100.0]
+        assert artifact.payload["metric_metadata"][SIMULTANEOUS_CONTACT_METRIC] == {
+            "label": "Simultaneous Contact",
+            "unit": "%",
+            "higher_is_better": True,
+            "direction_labels": ("worsening", "unchanged", "improving"),
+        }
         assert legacy.overall_simultaneous_contact == pytest.approx(0.75)
         assert legacy.per_replicate_simultaneous == [0.5, 1.0]
         assert legacy.get_pair_labels() == ["Asp133-His156", "His156-Ser77"]
+
+    def test_compare_condition_artifacts_preserves_triad_metadata(
+        self,
+        triad_analysis: CatalyticTriadAnalysis,
+        condition: Condition,
+        tmp_path: Path,
+        default_settings: CatalyticTriadSettings,
+    ) -> None:
+        """Real condition artifacts should compare through the MDA artifact engine."""
+
+        control = Condition(
+            label="No Polymer",
+            config_path=Path("/fake/control.yaml"),
+            replicates=(1, 2),
+            sim_config=condition.sim_config,
+        )
+        peg = Condition(
+            label="PEG",
+            config_path=Path("/fake/peg.yaml"),
+            replicates=(1, 2),
+            sim_config=condition.sim_config,
+        )
+        control_base = tmp_path / "control" / "catalytic_triad"
+        peg_base = tmp_path / "peg" / "catalytic_triad"
+        control_artifact = triad_analysis.aggregate(
+            AggregateContext(
+                condition=control,
+                replicates=(1, 2),
+                output_dir=control_base / "aggregated",
+                equilibration="10ns",
+                settings=default_settings,
+            ),
+            [
+                _replicate_artifact(
+                    control_base,
+                    control,
+                    default_settings,
+                    np.asarray([[3.0, 3.8, 3.1, 3.2], [3.1, 3.0, 3.7, 3.2]]),
+                    replicate=1,
+                ),
+                _replicate_artifact(
+                    control_base,
+                    control,
+                    default_settings,
+                    np.asarray([[3.0, 3.2, 3.1, 3.8], [3.1, 3.0, 3.2, 3.2]]),
+                    replicate=2,
+                ),
+            ],
+        )
+        peg_artifact = triad_analysis.aggregate(
+            AggregateContext(
+                condition=peg,
+                replicates=(1, 2),
+                output_dir=peg_base / "aggregated",
+                equilibration="10ns",
+                settings=default_settings,
+            ),
+            [
+                _replicate_artifact(
+                    peg_base,
+                    peg,
+                    default_settings,
+                    np.asarray([[3.0, 3.2, 3.1, 3.8], [3.1, 3.0, 3.2, 3.2]]),
+                    replicate=1,
+                ),
+                _replicate_artifact(
+                    peg_base,
+                    peg,
+                    default_settings,
+                    np.asarray([[3.0, 3.2, 3.1, 3.2], [3.1, 3.0, 3.2, 3.2]]),
+                    replicate=2,
+                ),
+            ],
+        )
+        ctx = ComparisonContext(
+            name="triad-project",
+            conditions=[control, peg],
+            excluded_conditions=[],
+            control_label="No Polymer",
+            analysis_dirs={"No Polymer": control_base, "PEG": peg_base},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=default_settings,
+            fdr_alpha=0.05,
+            ttest_method="welch",
+            posthoc_method="ttest_bh",
+            aggregated_results={"No Polymer": control_artifact, "PEG": peg_artifact},
+        )
+
+        comparison = triad_analysis.compare(ctx)
+
+        assert isinstance(comparison, ComparisonArtifact)
+        assert comparison.payload["ranking"] == ["PEG", "No Polymer"]
+        metadata = comparison.payload["metric_metadata"][SIMULTANEOUS_CONTACT_METRIC]
+        assert metadata["label"] == "Simultaneous Contact"
+        assert metadata["unit"] == "%"
+        assert metadata["higher_is_better"] is True
+        assert metadata["direction_labels"] == ["worsening", "unchanged", "improving"]
+        assert comparison.payload["pairwise_comparisons"][0]["direction"] == "improving"
+
+    def test_format_accepts_comparison_artifact(
+        self,
+        triad_analysis: CatalyticTriadAnalysis,
+    ) -> None:
+        """ComparisonArtifact output should use triad-specific scalar formatting."""
+
+        comparison = ComparisonArtifact(
+            analysis_name="catalytic_triad",
+            conditions=["No Polymer", "PEG"],
+            control_label="No Polymer",
+            effective_control="No Polymer",
+            payload={
+                "condition_summaries": [
+                    {
+                        "label": "No Polymer",
+                        "n_replicates": 2,
+                        "simultaneous_contact_fraction_mean": 62.5,
+                        "simultaneous_contact_fraction_sem": 12.5,
+                        "simultaneous_contact_fraction_replicate_values": [50.0, 75.0],
+                    },
+                    {
+                        "label": "PEG",
+                        "n_replicates": 2,
+                        "simultaneous_contact_fraction_mean": 87.5,
+                        "simultaneous_contact_fraction_sem": 12.5,
+                        "simultaneous_contact_fraction_replicate_values": [75.0, 100.0],
+                    },
+                ],
+                "pairwise_comparisons": [
+                    {
+                        "condition_a": "No Polymer",
+                        "condition_b": "PEG",
+                        "metric": SIMULTANEOUS_CONTACT_METRIC,
+                        "t_statistic": 1.0,
+                        "p_value": 0.5,
+                        "p_value_adjusted": 0.5,
+                        "posthoc_method": "ttest_bh",
+                        "cohens_d": 1.0,
+                        "effect_size_interpretation": "large",
+                        "direction": "improving",
+                        "significant": False,
+                        "percent_change": 40.0,
+                        "testable": True,
+                    }
+                ],
+                "anova": [],
+                "ranking": ["PEG", "No Polymer"],
+                "rankings_by_metric": {SIMULTANEOUS_CONTACT_METRIC: ["PEG", "No Polymer"]},
+                "metric_metadata": {
+                    SIMULTANEOUS_CONTACT_METRIC: {
+                        "label": "Simultaneous Contact",
+                        "unit": "%",
+                        "higher_is_better": True,
+                        "direction_labels": ["worsening", "unchanged", "improving"],
+                    }
+                },
+                "statistical_parameters": {
+                    "fdr_alpha": 0.05,
+                    "ttest_method": "welch",
+                    "posthoc_method": "ttest_bh",
+                    "control_label": "No Polymer",
+                    "effective_control": "No Polymer",
+                    "equilibration": "10ns",
+                },
+            },
+        )
+
+        formatted = triad_analysis.format(comparison, "text")
+        json_formatted = triad_analysis.format(comparison, "json")
+
+        assert "Catalytic Triad Comparison" in formatted
+        assert "Simultaneous Contact" in formatted
+        assert "PEG" in formatted
+        assert "artifact_type" not in formatted
+        assert '"artifact_type": "comparison"' in json_formatted
+        assert '"metric_metadata"' in json_formatted
 
     def test_extract_metrics_preserves_percent_scaling(
         self, triad_analysis: CatalyticTriadAnalysis

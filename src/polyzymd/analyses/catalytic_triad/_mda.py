@@ -46,6 +46,12 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 SIMULTANEOUS_CONTACT_METRIC = "simultaneous_contact_fraction"
+SIMULTANEOUS_CONTACT_METADATA = {
+    "label": "Simultaneous Contact",
+    "unit": "%",
+    "higher_is_better": True,
+    "direction_labels": ("worsening", "unchanged", "improving"),
+}
 
 
 def build_triad_jobs(
@@ -290,6 +296,7 @@ def aggregate_triad_artifacts(
             "per_replicate_simultaneous": legacy_result.per_replicate_simultaneous,
             "metrics": metrics,
             "replicate_metrics": replicate_metrics,
+            "metric_metadata": {SIMULTANEOUS_CONTACT_METRIC: SIMULTANEOUS_CONTACT_METADATA},
             "n_replicates": legacy_result.n_replicates,
         },
         provenance={
@@ -549,6 +556,7 @@ def _condition_metrics(
         legacy_result.overall_simultaneous_contact * 100.0,
         legacy_result.sem_simultaneous_contact * 100.0,
     )
+    metric.update(SIMULTANEOUS_CONTACT_METADATA)
     replicate_metrics = {
         str(replicate): {SIMULTANEOUS_CONTACT_METRIC: value}
         for replicate, value in zip(legacy_result.replicates, values, strict=True)
