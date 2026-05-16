@@ -1482,6 +1482,89 @@ class TestCompare:
         assert result.ranking_by_pair["Inner duplicate"] == ["Control"]
         assert result.ranking_by_pair["Outer duplicate"] == ["Control"]
 
+    def test_compare_remaps_duplicate_legacy_auto_labels_by_index(self, tmp_path):
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+            _make_pair_label,
+        )
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        selection_a = "resid 10 and name CA"
+        selection_b = "resid 20 and name CA"
+        auto_label = _make_pair_label(selection_a, selection_b)
+        analysis = DistancesAnalysis()
+        settings = DistancesSettings(
+            pairs=[
+                DistancePairSettings(
+                    label=auto_label,
+                    selection_a=selection_a,
+                    selection_b=selection_b,
+                    threshold=3.0,
+                ),
+                DistancePairSettings(
+                    label="Distinct duplicate",
+                    selection_a=selection_a,
+                    selection_b=selection_b,
+                    threshold=5.0,
+                ),
+            ]
+        )
+        condition = Condition(
+            label="Control",
+            config_path=Path("/tmp/Control/config.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="duplicate_legacy_auto_labels",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label="Control",
+            analysis_dirs={"Control": tmp_path / "Control" / "distances"},
+            results_dir=tmp_path / "results",
+            equilibration="100ns",
+            settings=settings,
+            recompute=False,
+        )
+        aggregate = MagicMock()
+        aggregate.config_hash = "unknown"
+        aggregate.equilibration_time = 100.0
+        aggregate.equilibration_unit = "ns"
+        aggregate.settings_fingerprint = settings_fingerprint(settings)
+        aggregate.replicates = [1, 2, 3]
+        aggregate.n_replicates = 3
+        aggregate.pair_results = []
+        for threshold, offset in ((3.0, 0.0), (5.0, 1.0)):
+            pair_result = MagicMock()
+            pair_result.pair_label = auto_label
+            pair_result.selection1 = selection_a
+            pair_result.selection2 = selection_b
+            pair_result.threshold = threshold
+            pair_result.overall_mean = 4.0 + offset
+            pair_result.overall_sem = 0.1
+            pair_result.overall_fraction_below = 0.5 - offset * 0.1
+            pair_result.sem_fraction_below = 0.02
+            pair_result.per_replicate_means = [4.0 + offset, 4.1 + offset, 3.9 + offset]
+            pair_result.per_replicate_fractions_below = [0.5, 0.55, 0.45]
+            aggregate.pair_results.append(pair_result)
+
+        with patch.object(analysis, "_load_aggregated_result", return_value=aggregate):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        summary = result.conditions[0]
+        assert [pair.label for pair in summary.pair_summaries] == [
+            auto_label,
+            "Distinct duplicate",
+        ]
+        assert summary.get_pair(auto_label).threshold == pytest.approx(3.0)
+        assert summary.get_pair("Distinct duplicate").threshold == pytest.approx(5.0)
+        assert result.ranking_by_pair[auto_label] == ["Control"]
+        assert result.ranking_by_pair["Distinct duplicate"] == ["Control"]
+
 
 # ---------------------------------------------------------------------------
 # _compare_pair

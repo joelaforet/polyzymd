@@ -1215,11 +1215,10 @@ class DistancesAnalysis(Analysis):
 
             pair_summaries = []
             for pair_index, pr in enumerate(agg_result.pair_results):
-                user_label = (
-                    pr.pair_label
-                    if pr.pair_label in pair_labels
-                    else pair_labels[pair_index] if pair_index < len(pair_labels) else pr.pair_label
-                )
+                expected_label = pair_labels[pair_index] if pair_index < len(pair_labels) else None
+                user_label = pr.pair_label if pr.pair_label == expected_label else expected_label
+                if user_label is None:
+                    user_label = pr.pair_label
                 pair_summaries.append(
                     DistancePairSummary(
                         label=user_label,
