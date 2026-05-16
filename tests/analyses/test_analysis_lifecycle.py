@@ -820,6 +820,45 @@ def test_default_mda_aggregation_from_disk_uses_artifacts_only(tmp_path: Path) -
     assert loaded.payload == result.payload
 
 
+def test_default_mda_aggregation_from_disk_records_partial_success(tmp_path: Path) -> None:
+    """Default MDA aggregation should preserve skipped replicate provenance."""
+
+    analysis = _MetricArtifactAnalysis()
+    condition = _condition(tmp_path, replicates=(1, 2, 3))
+    settings = _LifecycleSettings()
+    output_dir = tmp_path / "analysis" / analysis.name
+    settings_fp = analysis.aggregate_settings_fingerprint(settings)
+    for replicate, value in ((1, 1.0), (3, 1.4)):
+        artifact = ReplicateArtifact(
+            analysis_name=analysis.name,
+            condition_label=condition.label,
+            replicate=replicate,
+            payload={"metrics": {"mean_value": value}},
+            provenance={"frame_selection": {"start": 0, "stop": 4, "step": 1}},
+            metadata={"settings_fingerprint": settings_fp},
+        )
+        ArtifactStore(output_dir / f"run_{replicate}").write_replicate_result(artifact)
+
+    result = AnalysisLifecycle(analysis).aggregate_condition_from_disk(
+        condition,
+        settings,
+        "10ns",
+        output_dir,
+        (1, 2, 3),
+    )
+
+    assert isinstance(result, ConditionArtifact)
+    assert result.replicates == [1, 3]
+    assert result.skipped_replicates == [
+        {
+            "replicate": 2,
+            "reason": "missing artifact",
+            "path": str(output_dir / "run_2" / "result.json"),
+        }
+    ]
+    assert result.payload["metrics"]["mean_value"]["mean"] == pytest.approx(1.2)
+
+
 def test_public_run_comparison_executes_full_lifecycle(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

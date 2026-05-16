@@ -192,6 +192,29 @@ def test_disk_helper_loads_artifacts_and_records_source_hashes(tmp_path: Path) -
     assert len(condition.source_replicates[0]["artifact"]["sha256"]) == 64
 
 
+def test_disk_helper_rejects_unexpected_discovered_artifacts(tmp_path: Path) -> None:
+    """Disk aggregation should reject extra run_N artifacts outside the request."""
+
+    analysis_dir = tmp_path / "analysis" / "PEG" / "rmsd"
+    for replicate in (1, 2, 3):
+        store = ArtifactStore(analysis_dir / f"run_{replicate}")
+        store.write_replicate_result(_artifact(replicate))
+
+    with pytest.raises(MDAAggregationError, match="unexpected replicate artifact"):
+        aggregate_replicate_artifacts_from_disk(analysis_dir, _context((1, 2)))
+
+
+def test_disk_helper_rejects_embedded_replicate_id_mismatch(tmp_path: Path) -> None:
+    """Disk aggregation should reject artifacts whose payload identity lies."""
+
+    analysis_dir = tmp_path / "analysis" / "PEG" / "rmsd"
+    ArtifactStore(analysis_dir / "run_1").write_replicate_result(_artifact(1))
+    ArtifactStore(analysis_dir / "run_2").write_replicate_result(_artifact(1))
+
+    with pytest.raises(MDAAggregationError, match="embedded replicate ID mismatch"):
+        aggregate_replicate_artifacts_from_disk(analysis_dir, _context((1, 2)))
+
+
 def test_disk_helper_validates_sidecars_and_partial_missing(tmp_path: Path) -> None:
     """Disk aggregation should validate sidecars and record missing partial inputs."""
 
@@ -219,3 +242,33 @@ def test_disk_helper_validates_sidecars_and_partial_missing(tmp_path: Path) -> N
             "path": str(analysis_dir / "run_2" / "result.json"),
         }
     ]
+
+
+def test_disk_helper_allow_partial_records_stale_sidecars(tmp_path: Path) -> None:
+    """Partial disk aggregation should skip stale sidecars and enforce minimum replicates."""
+
+    analysis_dir = tmp_path / "analysis" / "PEG" / "rmsd"
+    stale_store = ArtifactStore(analysis_dir / "run_1")
+    sidecar_path = stale_store.root / "arrays" / "values.txt"
+    sidecar_path.parent.mkdir(parents=True)
+    sidecar_path.write_text("fresh")
+    sidecar = stale_store.register_sidecar("arrays/values.txt")
+    stale_store.write_replicate_result(_artifact(1, sidecars=[sidecar]))
+    sidecar_path.write_text("stale")
+    ArtifactStore(analysis_dir / "run_2").write_replicate_result(_artifact(2))
+
+    partial = aggregate_replicate_artifacts_from_disk(
+        analysis_dir,
+        _context((1, 2), allow_partial=True, min_replicates=1),
+    )
+
+    assert partial.replicates == [2]
+    assert partial.skipped_replicates[0]["replicate"] == 1
+    assert partial.skipped_replicates[0]["path"] == str(analysis_dir / "run_1" / "result.json")
+    assert "stale sidecar" in partial.skipped_replicates[0]["reason"]
+
+    with pytest.raises(MDAAggregationError, match="need at least 2"):
+        aggregate_replicate_artifacts_from_disk(
+            analysis_dir,
+            _context((1, 2), allow_partial=True, min_replicates=2),
+        )

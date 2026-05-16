@@ -256,7 +256,17 @@ class Analysis(ABC):
                 expected_replicates=tuple(ctx.condition.replicates),
                 settings_fingerprint=settings_fingerprint,
                 min_replicates=self.min_replicates,
+                allow_partial=set(ctx.replicates) != set(ctx.condition.replicates),
                 artifact_stores=artifact_stores,
+                skipped_replicates=[
+                    {
+                        "replicate": int(replicate),
+                        "reason": "missing artifact",
+                        "path": str(ctx.output_dir.parent / f"run_{replicate}" / "result.json"),
+                    }
+                    for replicate in ctx.condition.replicates
+                    if replicate not in set(ctx.replicates)
+                ],
             )
             return aggregate_replicate_artifacts(results, aggregation_ctx, policy)
         raise NotImplementedError(

@@ -166,13 +166,13 @@ def aggregate_replicate_artifacts(
     """
 
     metric_policy = policy or ExplicitReplicateMetricPolicy()
-    normalized = _validate_artifact_set(artifacts, ctx)
+    normalized, validation_skips = _validate_artifact_set(artifacts, ctx)
     frame_selection = _validate_artifact_provenance(normalized, ctx)
     replicate_metrics = _extract_replicate_metrics(normalized, metric_policy)
     metric_summaries = _summarize_metrics(replicate_metrics, ctx)
     replicate_ids = [artifact.replicate for artifact in normalized]
     source_replicates = list(ctx.source_replicates) or _source_replicates_from_artifacts(normalized)
-    skipped_replicates = _skipped_replicates(normalized, ctx)
+    skipped_replicates = _skipped_replicates(normalized, ctx, validation_skips)
     metadata: dict[str, Any] = {
         "n_replicates": len(replicate_ids),
         "metric_policy": type(metric_policy).__name__,
@@ -231,17 +231,19 @@ def aggregate_replicate_artifacts_from_disk(
     stores: dict[int, ArtifactStore] = {}
     sources: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = [dict(entry) for entry in ctx.skipped_replicates]
+    discovered_paths = _discover_replicate_artifact_paths(analysis_dir, artifact_path)
+    _reject_unexpected_discovered_replicates(discovered_paths, ctx)
     for replicate in ctx.expected_replicates:
         run_dir = analysis_dir / f"run_{replicate}"
         store = ArtifactStore(run_dir)
-        result_path = run_dir / artifact_path
-        if not result_path.exists():
+        result_path = discovered_paths.get(replicate)
+        if result_path is None:
             _record_or_raise_skip(
                 ctx,
                 skipped,
                 replicate=replicate,
                 reason="missing artifact",
-                path=result_path,
+                path=run_dir / artifact_path,
             )
             continue
         try:
@@ -253,6 +255,22 @@ def aggregate_replicate_artifacts_from_disk(
                 skipped,
                 replicate=replicate,
                 reason=f"stale or invalid artifact: {exc}",
+                path=result_path,
+            )
+            continue
+        if artifact.replicate != replicate:
+            raise MDAAggregationError(
+                f"{ctx.analysis_name}: embedded replicate ID mismatch for {result_path}: "
+                f"directory is run_{replicate}, artifact declares replicate {artifact.replicate}"
+            )
+        try:
+            _validate_artifact_sidecars(artifact, replace(ctx, artifact_stores={replicate: store}))
+        except MDAAggregationError as exc:
+            _record_or_raise_skip(
+                ctx,
+                skipped,
+                replicate=replicate,
+                reason=f"stale sidecar: {exc}",
                 path=result_path,
             )
             continue
@@ -290,12 +308,13 @@ def _validate_metric_scalar(
 def _validate_artifact_set(
     artifacts: Sequence[ReplicateArtifact],
     ctx: MDAAggregationContext,
-) -> list[ReplicateArtifact]:
+) -> tuple[list[ReplicateArtifact], list[dict[str, Any]]]:
     """Validate artifact identity, duplicate, missing, and sidecar provenance."""
 
     expected = set(ctx.expected_replicates)
     seen: set[int] = set()
     normalized: list[ReplicateArtifact] = []
+    skipped: list[dict[str, Any]] = []
     for artifact in artifacts:
         if not isinstance(artifact, ReplicateArtifact):
             raise MDAAggregationError(
@@ -320,7 +339,13 @@ def _validate_artifact_set(
             raise MDAAggregationError(f"Duplicate replicate artifact {artifact.replicate}")
         seen.add(artifact.replicate)
         _validate_settings_fingerprint(artifact, ctx)
-        _validate_artifact_sidecars(artifact, ctx)
+        try:
+            _validate_artifact_sidecars(artifact, ctx)
+        except MDAAggregationError as exc:
+            if not ctx.allow_partial:
+                raise
+            skipped.append({"replicate": artifact.replicate, "reason": str(exc)})
+            continue
         normalized.append(artifact)
     missing = [replicate for replicate in ctx.expected_replicates if replicate not in seen]
     if missing and not ctx.allow_partial:
@@ -333,7 +358,7 @@ def _validate_artifact_set(
             f"{ctx.analysis_name}: only {len(normalized)} replicate artifact(s) available, "
             f"need at least {ctx.min_replicates}"
         )
-    return sorted(normalized, key=lambda artifact: artifact.replicate)
+    return sorted(normalized, key=lambda artifact: artifact.replicate), skipped
 
 
 def _validate_settings_fingerprint(artifact: ReplicateArtifact, ctx: MDAAggregationContext) -> None:
@@ -480,10 +505,12 @@ def _source_replicates_from_artifacts(
 def _skipped_replicates(
     artifacts: Sequence[ReplicateArtifact],
     ctx: MDAAggregationContext,
+    validation_skips: Sequence[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     """Return explicit skipped-replicate provenance for partial aggregation."""
 
     skipped = [dict(entry) for entry in ctx.skipped_replicates]
+    skipped.extend(dict(entry) for entry in validation_skips)
     if not ctx.allow_partial:
         return skipped
     existing = {int(entry["replicate"]) for entry in skipped if "replicate" in entry}
@@ -492,6 +519,47 @@ def _skipped_replicates(
         if replicate not in present and replicate not in existing:
             skipped.append({"replicate": replicate, "reason": "missing artifact"})
     return skipped
+
+
+def _discover_replicate_artifact_paths(
+    analysis_dir: Path,
+    artifact_path: str | Path,
+) -> dict[int, Path]:
+    """Discover canonical replicate artifact files under ``run_N`` directories."""
+
+    if not analysis_dir.exists():
+        return {}
+    discovered: dict[int, Path] = {}
+    for child in sorted(analysis_dir.iterdir()):
+        if not child.is_dir() or not child.name.startswith("run_"):
+            continue
+        replicate_text = child.name.removeprefix("run_")
+        candidate_path = child / artifact_path
+        if not candidate_path.exists():
+            continue
+        if not replicate_text.isdigit() or int(replicate_text) < 1:
+            raise MDAAggregationError(
+                f"Found replicate artifact in malformed run directory {child}; expected run_N"
+            )
+        discovered[int(replicate_text)] = candidate_path
+    return discovered
+
+
+def _reject_unexpected_discovered_replicates(
+    discovered_paths: Mapping[int, Path],
+    ctx: MDAAggregationContext,
+) -> None:
+    """Reject discovered run directories outside the requested replicate set."""
+
+    expected = set(ctx.expected_replicates)
+    unexpected = sorted(replicate for replicate in discovered_paths if replicate not in expected)
+    if not unexpected:
+        return
+    details = ", ".join(str(discovered_paths[replicate]) for replicate in unexpected)
+    raise MDAAggregationError(
+        f"{ctx.analysis_name}: unexpected replicate artifact(s) for {unexpected}; "
+        f"expected {list(ctx.expected_replicates)}. Unexpected path(s): {details}"
+    )
 
 
 def _combined_warnings(artifacts: Sequence[ReplicateArtifact]) -> list[str]:
