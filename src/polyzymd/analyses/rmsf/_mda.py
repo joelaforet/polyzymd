@@ -6,6 +6,7 @@ import hashlib
 import logging
 import math
 from collections.abc import Mapping, Sequence
+from operator import index as operator_index
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -479,7 +480,8 @@ def prepare_rmsf_profile_input(
         Prepared atom group, selected frames, reference positions, and metadata.
     """
 
-    start, stop, step = _slice_bounds(frame_selection)
+    alignment_start, alignment_stop, alignment_step = _alignment_bounds(frame_selection)
+    frames = _selected_frames_from_frame_selection(frame_selection)
     _validate_reference_settings(settings)
     atoms = universe.select_atoms(settings.selection)
     if len(atoms) == 0:
@@ -509,19 +511,19 @@ def prepare_rmsf_profile_input(
     ref_frame_idx = align_trajectory(
         universe,
         alignment_config,
-        start_frame=start,
-        stop_frame=stop,
-        step_frame=step,
+        start_frame=alignment_start,
+        stop_frame=alignment_stop,
+        step_frame=alignment_step,
     )
-    frames = np.arange(start, stop, step, dtype=np.int64)
     autocorrelation_metadata = _autocorrelation_metadata(
         universe=universe,
         atoms=atoms,
         frames=frames,
         timestep_ps=float(frame_selection.timestep_ps or 1.0),
-        step=step,
-        start=start,
-        stop=stop,
+        step=alignment_step,
+        start=alignment_start,
+        stop=alignment_stop,
+        explicit_frame_selection=frame_selection.frames is not None,
     )
     selected_frames = np.asarray(autocorrelation_metadata["selected_frames"], dtype=np.int64)
     reference_positions = _external_reference_positions(universe, atoms, settings)
@@ -1047,6 +1049,7 @@ def _autocorrelation_metadata(
     step: int,
     start: int,
     stop: int,
+    explicit_frame_selection: bool = False,
 ) -> dict[str, Any]:
     """Return independent-frame metadata for variance-based RMSF."""
 
@@ -1059,7 +1062,14 @@ def _autocorrelation_metadata(
         "warning": None,
         "n_frames_window": int(frames.size),
         "selected_frames": frames.tolist(),
+        "explicit_frame_selection": explicit_frame_selection,
     }
+    if explicit_frame_selection:
+        metadata["warning"] = (
+            "RMSF autocorrelation subsampling is skipped for explicit frame selections; "
+            "the provided frames are preserved exactly."
+        )
+        return metadata
     if frames.size <= AUTOCORRELATION_FRAME_THRESHOLD:
         return metadata
 
@@ -1163,18 +1173,23 @@ def _selected_frame_selection(base: FrameSelection, frames: NDArray[np.int64]) -
     )
 
 
-def _slice_bounds(frame_selection: FrameSelection) -> tuple[int, int, int]:
-    """Return start, stop, and step bounds for RMSF preparation."""
+def _selected_frames_from_frame_selection(frame_selection: FrameSelection) -> NDArray[np.int64]:
+    """Return exact frame indices selected for RMSF analysis."""
 
     if frame_selection.frames is not None:
-        frame_array = np.asarray(frame_selection.frames, dtype=np.int64)
-        if frame_array.size == 0:
-            raise ValueError("RMSF frame selection cannot be empty")
-        if frame_array.size > 1:
-            step = int(max(1, np.min(np.diff(np.sort(frame_array)))))
-        else:
-            step = 1
-        return int(np.min(frame_array)), int(np.max(frame_array)) + 1, step
+        return _explicit_frame_indices(frame_selection)
+    if frame_selection.n_frames_total is None:
+        raise ValueError("RMSF jobs require known total frame count")
+    start, stop, step = _alignment_bounds(frame_selection)
+    return np.arange(start, stop, step, dtype=np.int64)
+
+
+def _alignment_bounds(frame_selection: FrameSelection) -> tuple[int, int, int]:
+    """Return slice bounds used only for pre-RMSF alignment/reference helpers."""
+
+    if frame_selection.frames is not None:
+        frame_array = _explicit_frame_indices(frame_selection)
+        return int(np.min(frame_array)), int(np.max(frame_array)) + 1, 1
     if frame_selection.n_frames_total is None:
         raise ValueError("RMSF jobs require known total frame count")
     return (
@@ -1186,6 +1201,70 @@ def _slice_bounds(frame_selection: FrameSelection) -> tuple[int, int, int]:
         ),
         1 if frame_selection.step is None else int(frame_selection.step),
     )
+
+
+def _explicit_frame_indices(frame_selection: FrameSelection) -> NDArray[np.int64]:
+    """Normalize an explicit frame selector to exact integer frame indices."""
+
+    frames = frame_selection.frames
+    if frames is None:
+        raise ValueError("RMSF explicit frame indices require FrameSelection.frames")
+    raw_frames = tuple(frames)
+    if not raw_frames:
+        raise ValueError("RMSF frame selection cannot be empty")
+    if all(_is_boolean_frame_value(frame) for frame in raw_frames):
+        if (
+            frame_selection.n_frames_total is not None
+            and len(raw_frames) != frame_selection.n_frames_total
+        ):
+            raise ValueError(
+                "RMSF boolean frame mask length "
+                f"{len(raw_frames)} does not match trajectory length "
+                f"{frame_selection.n_frames_total}"
+            )
+        frame_array = np.asarray(raw_frames, dtype=bool)
+        selected = np.flatnonzero(frame_array).astype(np.int64)
+    else:
+        if not all(_is_integer_frame_value(frame) for frame in raw_frames):
+            raise ValueError("RMSF explicit frames must be integer indices or a boolean mask")
+        selected = np.asarray([operator_index(frame) for frame in raw_frames], dtype=np.int64)
+
+    if selected.size == 0:
+        raise ValueError("RMSF frame selection cannot be empty")
+    if np.any(selected < 0):
+        raise ValueError("RMSF explicit frame indices must be non-negative")
+    if frame_selection.n_frames_total is not None and np.any(
+        selected >= frame_selection.n_frames_total
+    ):
+        raise ValueError(
+            "RMSF explicit frame indices must be within trajectory range "
+            f"[0, {frame_selection.n_frames_total})"
+        )
+    return selected
+
+
+def _is_boolean_frame_value(frame: Any) -> bool:
+    """Return whether a frame selector value is boolean-like."""
+
+    if isinstance(frame, bool):
+        return True
+    frame_type = type(frame)
+    return (
+        frame_type.__name__ == "bool_"
+        and frame_type.__module__.split(".", maxsplit=1)[0] == "numpy"
+    )
+
+
+def _is_integer_frame_value(frame: Any) -> bool:
+    """Return whether a frame selector value is integer-like."""
+
+    if _is_boolean_frame_value(frame):
+        return False
+    try:
+        operator_index(frame)
+    except TypeError:
+        return False
+    return True
 
 
 def _profile_statistics(rmsf_values: NDArray[np.float64]) -> dict[str, float]:

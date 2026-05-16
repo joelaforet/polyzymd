@@ -307,6 +307,74 @@ class TestRMSFMDAJobs:
         assert jobs[0].frame_selection.frames == tuple(range(20))
         assert jobs[0].universe_policy.metadata["rmsf_profile_version"] == "1"
 
+    def test_build_mda_jobs_preserves_noncontiguous_explicit_frames(
+        self, condition: Condition
+    ) -> None:
+        """Explicit non-contiguous frame indices should reach AnalysisBase unchanged."""
+
+        explicit_frames = [1, 4, 9]
+        analysis = RMSFAnalysis()
+        ctx = SimpleNamespace(
+            universe=FakeUniverse(n_frames=12),
+            settings=RMSFSettings(reference_mode="average"),
+            frame_selection=FrameSelection(
+                frames=explicit_frames,
+                n_frames_total=12,
+                timestep_ps=10.0,
+            ),
+            replicate_context=SimpleNamespace(condition=condition),
+            replicate=1,
+            universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=1),
+        )
+        with (
+            patch("polyzymd.analyses.rmsf._mda.align_trajectory", return_value=None) as align_mock,
+            patch("polyzymd.analyses.rmsf._mda.RMSFProfileAnalysis", FakeProfileAnalysis),
+        ):
+            jobs = analysis.build_mda_jobs(ctx)
+
+        assert jobs is not None
+        assert len(jobs) == 1
+        assert jobs[0].frame_selection.frames == tuple(explicit_frames)
+        metadata = jobs[0].universe_policy.metadata["autocorrelation_metadata"]
+        assert metadata["selected_frames"] == explicit_frames
+        assert metadata["explicit_frame_selection"] is True
+        align_mock.assert_called_once()
+        assert align_mock.call_args.kwargs == {
+            "start_frame": 1,
+            "stop_frame": 10,
+            "step_frame": 1,
+        }
+
+    def test_build_mda_jobs_preserves_boolean_explicit_frame_mask(
+        self, condition: Condition
+    ) -> None:
+        """Explicit boolean masks should be converted to exact selected frames."""
+
+        frame_mask = [False, True, False, True, False]
+        analysis = RMSFAnalysis()
+        ctx = SimpleNamespace(
+            universe=FakeUniverse(n_frames=5),
+            settings=RMSFSettings(reference_mode="average"),
+            frame_selection=FrameSelection(
+                frames=frame_mask,
+                n_frames_total=5,
+                timestep_ps=10.0,
+            ),
+            replicate_context=SimpleNamespace(condition=condition),
+            replicate=1,
+            universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=1),
+        )
+        with (
+            patch("polyzymd.analyses.rmsf._mda.align_trajectory", return_value=None),
+            patch("polyzymd.analyses.rmsf._mda.RMSFProfileAnalysis", FakeProfileAnalysis),
+        ):
+            jobs = analysis.build_mda_jobs(ctx)
+
+        assert jobs is not None
+        assert jobs[0].frame_selection.frames == (1, 3)
+        metadata = jobs[0].universe_policy.metadata["autocorrelation_metadata"]
+        assert metadata["selected_frames"] == [1, 3]
+
     def test_prepare_rejects_empty_selection(self, condition: Condition) -> None:
         """Empty atom selections should fail with actionable diagnostics."""
 
