@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from polyzymd.analyses.exceptions import PluginContractError
-from polyzymd.analyses.mda.artifacts import ReplicateArtifact
+from polyzymd.analyses.mda.artifacts import ReplicateArtifact, raw_mdanalysis_results_path
 from polyzymd.analyses.mda.frame_selection import FrameSelection
 from polyzymd.analyses.mda.job import MDAAnalysisJob, MDAJobResult, MDAUniversePolicy
 from polyzymd.analyses.mda.plugin import MDACollectorContext
@@ -352,6 +352,12 @@ def _validate_collected_artifact(
         raise PluginContractError(
             f"{ctx.analysis_name}.build_mda_collector() returned artifact identity "
             f"{actual_identity!r}; expected {expected_identity!r}"
+        )
+    raw_path = raw_mdanalysis_results_path(artifact)
+    if raw_path is not None:
+        raise PluginContractError(
+            f"{ctx.analysis_name}.build_mda_collector() returned raw MDAnalysis Results "
+            f"at {raw_path}; map Results to JSON primitives or sidecars before persistence"
         )
     for sidecar in artifact.sidecars:
         try:

@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 MDA_ARTIFACT_SCHEMA_VERSION: str = "1"
 _RAW_MDA_RESULTS_MODULE = "MDAnalysis.analysis.results"
@@ -113,7 +113,11 @@ def _raw_mdanalysis_results_path(value: Any, *, path: str, seen: set[int]) -> st
     ):
         seen.add(value_id)
     if isinstance(value, BaseModel):
-        return _raw_mdanalysis_results_path(vars(value), path=path, seen=seen)
+        model_data: dict[str, Any] = dict(vars(value))
+        model_extra = getattr(value, "model_extra", None)
+        if isinstance(model_extra, Mapping):
+            model_data.update(model_extra)
+        return _raw_mdanalysis_results_path(model_data, path=path, seen=seen)
     if isinstance(value, Mapping):
         for key, item in value.items():
             key_path = _raw_mdanalysis_results_path(key, path=f"{path}.<key>", seen=seen)
@@ -173,6 +177,24 @@ class ArtifactSidecarRef(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Sidecar-specific metadata")
 
     model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_raw_results_anywhere(cls, value: Any) -> Any:
+        """Reject raw MDAnalysis results across sidecar fields and extras.
+
+        Parameters
+        ----------
+        value : Any
+            Candidate model input.
+
+        Returns
+        -------
+        Any
+            Original input when valid.
+        """
+
+        return reject_raw_mdanalysis_results(value, field_name="sidecar reference")
 
     @field_validator("path")
     @classmethod
@@ -253,6 +275,24 @@ class ArtifactManifest(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_raw_results_anywhere(cls, value: Any) -> Any:
+        """Reject raw MDAnalysis results across manifest fields and extras.
+
+        Parameters
+        ----------
+        value : Any
+            Candidate model input.
+
+        Returns
+        -------
+        Any
+            Original input when valid.
+        """
+
+        return reject_raw_mdanalysis_results(value, field_name="manifest")
+
     @field_validator("schema_version")
     @classmethod
     def _validate_schema_version(cls, value: str) -> str:
@@ -308,6 +348,24 @@ class ArtifactEnvelope(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_raw_results_anywhere(cls, value: Any) -> Any:
+        """Reject raw MDAnalysis results across artifact fields and extras.
+
+        Parameters
+        ----------
+        value : Any
+            Candidate model input.
+
+        Returns
+        -------
+        Any
+            Original input when valid.
+        """
+
+        return reject_raw_mdanalysis_results(value, field_name="artifact")
 
     @field_validator("schema_version")
     @classmethod

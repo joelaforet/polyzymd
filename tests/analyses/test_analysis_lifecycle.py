@@ -311,6 +311,30 @@ class _RawResultsCollector:
         )
 
 
+class _BypassingRawExtraCollector:
+    """Collector that bypasses Pydantic validation with a raw extra field."""
+
+    def __call__(
+        self,
+        ctx: MDACollectorContext,
+        completed_jobs: Sequence[Any],
+    ) -> ReplicateArtifact:
+        """Return an artifact with raw Results stored in an extra field."""
+
+        del completed_jobs
+        return ReplicateArtifact.model_construct(
+            analysis_name=ctx.analysis_name,
+            condition_label=ctx.condition_label,
+            replicate=ctx.replicate,
+            payload={"jobs": [], "n_jobs": 0},
+            sidecars=[],
+            provenance={},
+            metadata={},
+            warnings=[],
+            raw=_FakeMDAnalysisResults(value=99.0),
+        )
+
+
 class _MDAJobOnlyAnalysis(Analysis):
     """Analysis that uses only the MDA job lifecycle hook."""
 
@@ -400,6 +424,18 @@ class _CustomCollectorMDAAnalysis(_RawResultsMDAAnalysis):
 
         assert ctx.analysis_name == self.name
         return _RawResultsCollector()
+
+
+class _BypassingRawExtraCollectorMDAAnalysis(_MDAJobOnlyAnalysis):
+    """MDA analysis whose collector returns raw Results in model extras."""
+
+    name: ClassVar[str] = "bypassing_raw_extra_collector_mda_lifecycle"
+
+    def build_mda_collector(self, ctx: MDACollectorContext) -> _BypassingRawExtraCollector:
+        """Return the bypassing collector."""
+
+        assert ctx.analysis_name == self.name
+        return _BypassingRawExtraCollector()
 
 
 class _CondCfg:
@@ -671,6 +707,26 @@ def test_public_lifecycle_default_collector_rejects_raw_results(tmp_path: Path) 
             output_dir=tmp_path / "analysis" / analysis.name,
             recompute=False,
         )
+
+
+def test_public_lifecycle_rejects_collector_raw_extra_before_save(tmp_path: Path) -> None:
+    """Lifecycle validation should catch collector artifacts with raw Results extras."""
+
+    analysis = _BypassingRawExtraCollectorMDAAnalysis()
+    condition = _condition(tmp_path, replicates=(1,))
+    output_dir = tmp_path / "analysis" / analysis.name
+
+    with pytest.raises(PluginContractError, match="raw MDAnalysis Results"):
+        run_analysis(
+            analysis,
+            condition,
+            _LifecycleSettings(),
+            equilibration="10ns",
+            output_dir=output_dir,
+            recompute=False,
+        )
+
+    assert not (output_dir / "run_1" / "result.json").exists()
 
 
 def test_aggregate_from_disk_reports_malformed_mda_artifact_context(tmp_path: Path) -> None:

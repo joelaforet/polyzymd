@@ -130,12 +130,59 @@ def test_sidecar_and_manifest_metadata_reject_raw_mdanalysis_results() -> None:
         ArtifactManifest(analysis_name="rmsd", provenance={"raw": FakeMDAnalysisResults(value=1)})
 
 
+def test_artifact_extra_fields_reject_raw_mdanalysis_results() -> None:
+    """Allowed future extension fields should still reject raw Results."""
+
+    with pytest.raises(ValidationError, match="raw MDAnalysis Results"):
+        ReplicateArtifact(
+            analysis_name="rmsd",
+            condition_label="PEG",
+            replicate=1,
+            raw=FakeMDAnalysisResults(value=1),
+        )
+    with pytest.raises(ValidationError, match="raw MDAnalysis Results"):
+        ConditionArtifact(
+            analysis_name="rmsd",
+            condition_label="PEG",
+            raw=FakeMDAnalysisResults(value=1),
+        )
+    with pytest.raises(ValidationError, match="raw MDAnalysis Results"):
+        ComparisonArtifact(analysis_name="rmsd", raw=FakeMDAnalysisResults(value=1))
+
+
+def test_sidecar_and_manifest_extra_fields_reject_raw_mdanalysis_results() -> None:
+    """Sidecar and manifest extension fields should reject raw Results."""
+
+    with pytest.raises(ValidationError, match="raw MDAnalysis Results"):
+        ArtifactSidecarRef(
+            path="arrays/raw.npz",
+            sha256=VALID_SHA256,
+            size_bytes=0,
+            raw=FakeMDAnalysisResults(value=1),
+        )
+    with pytest.raises(ValidationError, match="raw MDAnalysis Results"):
+        ArtifactManifest(analysis_name="rmsd", raw=FakeMDAnalysisResults(value=1))
+
+
 def test_raw_mdanalysis_results_path_reports_nested_location() -> None:
     """The raw-results helper should report a useful nested path."""
 
     path = raw_mdanalysis_results_path({"outer": [{"inner": FakeMDAnalysisResults()}]})
 
     assert path == "$.outer[0].inner"
+
+
+def test_raw_mdanalysis_results_path_detects_model_extra_bypass() -> None:
+    """The raw-results helper should inspect Pydantic model extras."""
+
+    artifact = ReplicateArtifact.model_construct(
+        analysis_name="rmsd",
+        condition_label="PEG",
+        replicate=1,
+        raw=FakeMDAnalysisResults(value=1),
+    )
+
+    assert raw_mdanalysis_results_path(artifact) == "$.raw"
 
 
 @pytest.mark.parametrize("bad_path", ["/abs/file.npz", "../file.npz", "safe/../file.npz"])
