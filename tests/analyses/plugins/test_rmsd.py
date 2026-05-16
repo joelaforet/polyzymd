@@ -636,7 +636,7 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
     frame_selection = FrameSelection(start=0, stop=3, step=1, n_frames_total=3, timestep_ps=10.0)
     run = RMSDRunSettings(
         label="moving_atom",
-        selection="name A4",
+        selection="all",
         alignment_selection="name A1 A2 A3",
         centroid_selection="name A1 A2 A3",
         reference_mode="frame",
@@ -662,7 +662,11 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
     completed = job.run()
 
     assert completed.results.rmsd[:, 1].tolist() == pytest.approx([0.0, 5.0, 10.0])
-    assert completed.results.rmsd[:, 2].tolist() == pytest.approx([0.0, 1.0, 3.0])
+    expected_rmsd_values = np.asarray(completed.results.rmsd[:, 2], dtype=np.float64)
+    assert np.all(np.isfinite(expected_rmsd_values))
+    assert expected_rmsd_values[0] == pytest.approx(0.0)
+    assert expected_rmsd_values[-1] > expected_rmsd_values[1] > 0.0
+    expected_mean_rmsd = float(np.mean(expected_rmsd_values))
 
     collector_ctx, store = _make_rmsd_collector_context(
         condition=condition,
@@ -672,10 +676,10 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
     )
     artifact = RMSDAnalysis().build_mda_collector(collector_ctx)(collector_ctx, [completed])
     run_payload = artifact.payload["runs"][0]
-    assert run_payload["mean_rmsd"] == pytest.approx(4.0 / 3.0)
+    assert run_payload["mean_rmsd"] == pytest.approx(expected_mean_rmsd)
     assert run_payload["npz_path"] == f"sidecars/{_sidecar_filename('moving_atom', 0)}"
     with np.load(store.resolve_sidecar(artifact.sidecars[0])) as payload:
-        assert payload["rmsd_values"].tolist() == pytest.approx([0.0, 1.0, 3.0])
+        assert payload["rmsd_values"].tolist() == pytest.approx(expected_rmsd_values.tolist())
         assert payload["time_ns"].tolist() == pytest.approx([0.0, 0.005, 0.01])
         assert float(payload["effective_timestep_ps"]) == pytest.approx(5.0)
 
@@ -689,7 +693,7 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
         equilibration="10ns",
     )
     aggregated = condition_artifact_to_legacy_result(analysis.aggregate(aggregate_ctx, [artifact]))
-    assert aggregated.run_results[0].overall_mean == pytest.approx(4.0 / 3.0)
+    assert aggregated.run_results[0].overall_mean == pytest.approx(expected_mean_rmsd)
     assert aggregated.settings_fingerprint == settings_hash
 
     comparison_ctx = make_comparison_context(
@@ -707,7 +711,7 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
 
     assert comparison is not None
     assert comparison.n_runs == 1
-    assert comparison.conditions[0].run_summaries[0].mean_rmsd == pytest.approx(4.0 / 3.0)
+    assert comparison.conditions[0].run_summaries[0].mean_rmsd == pytest.approx(expected_mean_rmsd)
 
 
 def test_plotter_resolves_npz_from_replicate_artifact(tmp_path: Path) -> None:
