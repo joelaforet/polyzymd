@@ -8,7 +8,6 @@ and exposes plotting/formatting hooks.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
@@ -21,88 +20,27 @@ from polyzymd.analyses.base import (
     BasePlotSettings,
     ComparisonContext,
     PlotContext,
-    ReplicateContext,
+)
+from polyzymd.analyses.mda import ConditionArtifact, ReplicateArtifact
+from polyzymd.analyses.rmsd._mda import (
+    RMSDArtifactCollector,
+    aggregate_rmsd_artifacts,
+    build_rmsd_jobs,
+    condition_artifact_to_legacy_result,
 )
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
-from polyzymd.analyses.rmsd._results import RMSDAggregatedResult, RMSDResult
-from polyzymd.analyses.rmsd._runner import RMSDReplicateRunner, compute_rmsd_run
-from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
-from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
+from polyzymd.analyses.rmsd._results import RMSDAggregatedResult
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
 )
-from polyzymd.analyses.shared.statistics import compute_sem
 
 if TYPE_CHECKING:
+    from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext
     from polyzymd.analyses.rmsd._comparison_results import RMSDComparisonResult
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class _RMSDTrajectoryWindow:
-    """RMSD trajectory window that carries loader-derived file metadata.
-
-    This keeps summarize-time metadata lookup on the same loader seam used by
-    the base runner orchestration.
-    """
-
-    start: int
-    stop: int
-    step: int
-    equilibration_start: int
-    n_frames_total: int
-    n_frames_selected: int
-    timestep_ps: float
-    equilibration_ps: float
-    warning_message: str | None = None
-    trajectory_files: tuple[Path, ...] = ()
-
-    @classmethod
-    def from_window(
-        cls,
-        window: Any,
-        trajectory_files: Sequence[Path],
-    ) -> _RMSDTrajectoryWindow:
-        """Build an RMSD window wrapper from the shared trajectory window.
-
-        Parameters
-        ----------
-        window : Any
-            Shared trajectory window returned by the centralized resolver.
-        trajectory_files : Sequence[Path]
-            Trajectory files resolved by the existing loader instance.
-
-        Returns
-        -------
-        _RMSDTrajectoryWindow
-            RMSD window wrapper that preserves run arguments and file metadata.
-        """
-
-        return cls(
-            start=window.start,
-            stop=window.stop,
-            step=window.step,
-            equilibration_start=window.equilibration_start,
-            n_frames_total=window.n_frames_total,
-            n_frames_selected=window.n_frames_selected,
-            timestep_ps=window.timestep_ps,
-            equilibration_ps=window.equilibration_ps,
-            warning_message=window.warning_message,
-            trajectory_files=tuple(trajectory_files),
-        )
-
-    def run_kwargs(self) -> dict[str, int]:
-        """Return keyword arguments for the runner ``run()`` call.
-
-        Returns
-        -------
-        dict[str, int]
-            ``start``, ``stop``, and ``step`` values for ``run()``.
-        """
-
-        return {"start": self.start, "stop": self.stop, "step": self.step}
 
 
 class RMSDRunSettings(BaseModel):
@@ -253,7 +191,7 @@ class RMSDAnalysis(Analysis):
     Settings: ClassVar[type] = RMSDSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RMSDPlotSettings
     AggregatedResultClass: ClassVar[type] = RMSDAggregatedResult
-    ReplicateResultClass: ClassVar[type | None] = RMSDResult
+    ReplicateResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
 
@@ -305,7 +243,11 @@ class RMSDAnalysis(Analysis):
             Raised when the aggregated result is missing a settings
             fingerprint or was computed with different settings.
         """
-        if isinstance(result, dict):
+        if isinstance(result, ConditionArtifact):
+            result = condition_artifact_to_legacy_result(result)
+        elif isinstance(result, dict) and result.get("artifact_type") == "condition":
+            result = condition_artifact_to_legacy_result(ConditionArtifact.model_validate(result))
+        elif isinstance(result, dict):
             result = RMSDAggregatedResult.model_validate(result)
 
         if not isinstance(result, RMSDAggregatedResult):
@@ -417,124 +359,6 @@ class RMSDAnalysis(Analysis):
         )
 
     @staticmethod
-    def _validate_aggregate_input_completeness(
-        ctx: AggregateContext,
-        results: Sequence[Any],
-        configured_run_labels: Sequence[str],
-    ) -> None:
-        """Validate that aggregation inputs cover all configured replicates and runs.
-
-        Parameters
-        ----------
-        ctx : AggregateContext
-            Framework-provided aggregation context.
-        results : Sequence[Any]
-            Per-replicate RMSD results.
-        configured_run_labels : Sequence[str]
-            Run labels defined in the RMSD settings.
-
-        Raises
-        ------
-        ValueError
-            Raised when configured replicates or runs are missing from the
-            aggregation inputs.
-        """
-        expected_replicates = sorted(ctx.replicates)
-        observed_replicates = sorted(
-            result.replicate for result in results if getattr(result, "replicate", None) is not None
-        )
-        if observed_replicates != expected_replicates:
-            raise ValueError(
-                f"RMSD aggregation for condition '{ctx.condition.label}' is incomplete. Expected "
-                f"replicate results for {expected_replicates}, found {observed_replicates}. "
-                "Recompute missing replicates or clear stale caches before aggregating."
-            )
-
-        for run_label in configured_run_labels:
-            missing_replicates: list[int] = []
-            duplicate_replicates: list[int] = []
-            for result in results:
-                replicate = getattr(result, "replicate", None)
-                matches = [
-                    run_result
-                    for run_result in result.run_results
-                    if run_result.run_label == run_label
-                ]
-                if not matches:
-                    if replicate is not None:
-                        missing_replicates.append(replicate)
-                    continue
-                if len(matches) > 1 and replicate is not None:
-                    duplicate_replicates.append(replicate)
-
-            if missing_replicates:
-                raise ValueError(
-                    f"Configured RMSD run '{run_label}' is missing replicate entries in condition "
-                    f"'{ctx.condition.label}'. Missing replicates: {sorted(missing_replicates)}. "
-                    "Recompute missing replicates or clear stale caches before aggregating."
-                )
-
-            if duplicate_replicates:
-                raise ValueError(
-                    f"Configured RMSD run '{run_label}' has duplicate replicate entries in "
-                    f"condition '{ctx.condition.label}' for replicates "
-                    f"{sorted(duplicate_replicates)}. Clear stale caches and recompute before "
-                    "aggregating."
-                )
-
-    @staticmethod
-    def _order_results_by_replicate(
-        ctx: AggregateContext,
-        results: Sequence[Any],
-    ) -> list[Any]:
-        """Return aggregate inputs ordered to match ``ctx.replicates``.
-
-        Parameters
-        ----------
-        ctx : AggregateContext
-            Framework-provided aggregation context.
-        results : Sequence[Any]
-            Per-replicate RMSD results that already passed completeness checks.
-
-        Returns
-        -------
-        list[Any]
-            Replicate results in the declared replicate order.
-
-        Raises
-        ------
-        ValueError
-            Raised when a replicate identifier is missing or duplicated while
-            normalizing the aggregate inputs.
-        """
-        ordered_results: dict[int, Any] = {}
-        for result in results:
-            replicate = getattr(result, "replicate", None)
-            if replicate is None:
-                raise ValueError(
-                    f"RMSD aggregation for condition '{ctx.condition.label}' encountered a "
-                    "replicate result without a replicate identifier while normalizing "
-                    "aggregate inputs."
-                )
-            if replicate in ordered_results:
-                raise ValueError(
-                    f"RMSD aggregation for condition '{ctx.condition.label}' encountered "
-                    f"duplicate replicate {replicate} while normalizing aggregate inputs."
-                )
-            ordered_results[replicate] = result
-
-        missing_replicates = [
-            replicate for replicate in ctx.replicates if replicate not in ordered_results
-        ]
-        if missing_replicates:
-            raise ValueError(
-                f"RMSD aggregation for condition '{ctx.condition.label}' cannot order aggregate "
-                f"inputs because replicates {missing_replicates} are missing."
-            )
-
-        return [ordered_results[replicate] for replicate in ctx.replicates]
-
-    @staticmethod
     def _validate_aggregated_result_completeness(
         condition: Any,
         agg_result: RMSDAggregatedResult,
@@ -623,387 +447,75 @@ class RMSDAnalysis(Analysis):
                     "condition or clear stale caches before comparing."
                 )
 
-    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Run RMSD for all configured runs for a single replicate.
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[Any] | None:
+        """Build MDAnalysis-native RMSD jobs for one replicate.
 
         Parameters
         ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            1-indexed replicate number.
+        ctx : MDAReplicateJobContext
+            Framework-provided MDAnalysis job context.
 
         Returns
         -------
-        RMSDResult
-            Per-replicate RMSD result containing all run outputs.
+        sequence of MDAAnalysisJob
+            One RMSD job per configured run.
         """
 
-        settings = ctx.settings
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        eq_str = f"eq{eq_value:g}{eq_unit}"
-        settings_tag = self._make_settings_cache_tag(settings)
-        result_file = ctx.output_dir / f"rmsd_{eq_str}_{settings_tag}.json"
+        return build_rmsd_jobs(ctx, ctx.settings.runs)
 
-        cached = self._check_cache(
-            RMSDResult,
-            result_file,
-            recompute=ctx.recompute,
-            sim_config=ctx.sim_config,
-            settings=ctx.settings,
-        )
-        if cached is not None:
-            return cached
-
-        result = super().run_replicate(ctx, replicate)
-        result.save(result_file)
-        logger.info("Saved RMSD result to %s", result_file)
-        return result
-
-    def _trajectory_loader_factory(self) -> type[Any]:
-        """Return the RMSD loader class for the shared runner seam.
-
-        Returns
-        -------
-        type[Any]
-            Loader class patched by RMSD unit tests.
-        """
-
-        return TrajectoryLoader
-
-    def get_trajectory_window(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        loader: Any,
-        universe: Any,
-    ) -> Any:
-        """Resolve the RMSD window and retain trajectory file metadata.
+    def build_mda_collector(self, ctx: MDACollectorContext) -> Any:
+        """Build the RMSD artifact collector.
 
         Parameters
         ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            Replicate number.
-        loader : Any
-            Trajectory loader already constructed for this replicate.
-        universe : Any
-            Loaded universe for the replicate.
+        ctx : MDACollectorContext
+            Framework-provided collector context.
 
         Returns
         -------
-        Any
-            Shared trajectory window augmented with trajectory file metadata.
+        RMSDArtifactCollector
+            Collector that maps MDAnalysis RMSD results to artifacts.
         """
 
-        window = super().get_trajectory_window(ctx, replicate, loader, universe)
-        traj_info = loader.get_trajectory_info(replicate)
-        return _RMSDTrajectoryWindow.from_window(window, traj_info.trajectory_files)
-
-    def build_runner(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        universe: Any,
-        window: Any,
-    ) -> Any:
-        """Build the runner-backed RMSD execution object.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            Replicate number.
-        universe : Any
-            Loaded universe for the replicate.
-        window : Any
-            Resolved trajectory window.
-
-        Returns
-        -------
-        Any
-            Runner object compatible with the trajectory seam.
-        """
-
-        return RMSDReplicateRunner(
-            sim_config=ctx.sim_config,
-            replicate=replicate,
-            runs=list(ctx.settings.runs),
-            loader_factory=self._trajectory_loader_factory(),
-            n_frames_total=len(universe.trajectory),
-            timestep_ps=window.timestep_ps,
-        )
-
-    def summarize_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        runner: Any,
-        window: Any,
-    ) -> Any:
-        """Serialize runner output into the legacy RMSD result schema.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            Replicate number.
-        runner : Any
-            Executed RMSD runner.
-        window : Any
-            Resolved trajectory window.
-
-        Returns
-        -------
-        RMSDResult
-            Cache-compatible per-replicate RMSD result.
-        """
-        import numpy as np
-
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.rmsd._results import RMSDResult, RMSDRunResult
-
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        eq_str = f"eq{eq_value:g}{eq_unit}"
-        settings_tag = self._make_settings_cache_tag(ctx.settings)
-        config_hash = compute_config_hash(ctx.sim_config)
-        trajectory_files = getattr(window, "trajectory_files", ())
-
-        run_results: list[RMSDRunResult] = []
-        for payload in runner.results.run_payloads:
-            npz_filename = f"rmsd_{payload.run_label}_{eq_str}_{settings_tag}_timeseries.npz"
-            npz_path = ctx.output_dir / npz_filename
-            np.savez_compressed(
-                npz_path,
-                rmsd_values=payload.rmsd_values,
-                time_ns=payload.time_ns,
-                frames=payload.frames,
-                convergence_window_start_ns=np.asarray(
-                    payload.convergence_result.window_start_times_ns,
-                    dtype=np.float64,
-                ),
-                convergence_window_mean_rmsd=np.asarray(
-                    payload.convergence_result.window_mean_values,
-                    dtype=np.float64,
-                ),
-                convergence_slope_time_ns=np.asarray(
-                    payload.convergence_result.slope_times_ns,
-                    dtype=np.float64,
-                ),
-                convergence_slope=np.asarray(payload.convergence_result.slopes, dtype=np.float64),
-                convergence_converged=np.asarray(
-                    payload.convergence_result.converged,
-                    dtype=np.bool_,
-                ),
-                convergence_time_ns=np.asarray(
-                    (
-                        np.nan
-                        if payload.convergence_result.convergence_time_ns is None
-                        else payload.convergence_result.convergence_time_ns
-                    ),
-                    dtype=np.float64,
-                ),
-                raw_timestep_ps=np.asarray(payload.raw_timestep_ps, dtype=np.float64),
-                frame_stride=np.asarray(payload.frame_stride, dtype=np.int64),
-                effective_timestep_ps=np.asarray(payload.effective_timestep_ps, dtype=np.float64),
-            )
-            run_results.append(
-                RMSDRunResult(
-                    config_hash=config_hash,
-                    polyzymd_version=get_polyzymd_version(),
-                    replicate=replicate,
-                    equilibration_time=eq_value,
-                    equilibration_unit=eq_unit,
-                    selection_string=payload.selection,
-                    correlation_time=payload.correlation_time,
-                    n_independent_frames=payload.n_independent_frames,
-                    run_label=payload.run_label,
-                    selection=payload.selection,
-                    alignment_selection=payload.alignment_selection,
-                    reference_mode=payload.reference_mode,
-                    reference_frame=payload.reference_frame,
-                    reference_file=payload.reference_file,
-                    mean_rmsd=payload.mean_rmsd,
-                    std_rmsd=payload.std_rmsd,
-                    median_rmsd=payload.median_rmsd,
-                    min_rmsd=payload.min_rmsd,
-                    max_rmsd=payload.max_rmsd,
-                    final_rmsd=payload.final_rmsd,
-                    sem_rmsd=payload.sem_rmsd,
-                    correlation_time_unit=payload.correlation_time_unit,
-                    statistical_inefficiency=payload.statistical_inefficiency,
-                    autocorrelation_warning=payload.autocorrelation_warning,
-                    converged=payload.convergence_result.converged,
-                    convergence_assessable=payload.convergence_result.assessable,
-                    convergence_time_ns=payload.convergence_result.convergence_time_ns,
-                    convergence_message=payload.convergence_result.message,
-                    n_frames_total=runner.results.n_frames_total,
-                    n_frames_used=window.n_frames_selected,
-                    npz_path=str(npz_path),
-                    time_unit="ns",
-                    timestep_ps=payload.effective_timestep_ps,
-                    raw_timestep_ps=payload.raw_timestep_ps,
-                    frame_stride=payload.frame_stride,
-                )
-            )
-
-        return RMSDResult(
-            config_hash=config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=replicate,
-            equilibration_time=eq_value,
-            equilibration_unit=eq_unit,
-            selection_string="; ".join(run.selection for run in ctx.settings.runs),
-            run_results=run_results,
-            settings_fingerprint=settings_tag,
-            n_frames_total=runner.results.n_frames_total,
-            n_frames_used=window.n_frames_selected,
-            trajectory_files=[str(path) for path in trajectory_files],
-        )
+        del ctx
+        return RMSDArtifactCollector()
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
-        """Aggregate RMSD results across replicates for one condition.
+        """Aggregate RMSD replicate artifacts across one condition.
 
         Parameters
         ----------
         ctx : AggregateContext
             Framework-provided aggregation context.
-        results : Sequence[RMSDResult]
-            Per-replicate RMSD results.
+        results : Sequence[ReplicateArtifact]
+            Per-replicate RMSD artifacts.
 
         Returns
         -------
-        RMSDAggregatedResult
-            Aggregated RMSD result for all configured runs.
+        ConditionArtifact
+            Aggregated RMSD condition artifact.
         """
-        import numpy as np
-
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.rmsd._results import RMSDAggregatedResult, RMSDRunAggregatedResult
 
         if not results:
             raise ValueError(
                 f"RMSD aggregation for condition '{ctx.condition.label}' requires at least one "
-                "replicate result. No replicate inputs were provided."
+                "replicate artifact. No replicate inputs were provided."
             )
-
-        run_labels = [run.label for run in ctx.settings.runs]
-        self._validate_aggregate_input_completeness(ctx, results, run_labels)
-        ordered_results = self._order_results_by_replicate(ctx, results)
-        first = ordered_results[0]
-        replicate_order = list(ctx.replicates)
-
-        if len(ctx.replicates) == 1:
-            logger.warning(
-                "Only one replicate available for RMSD aggregation in condition '%s'; "
-                "replicate-level SEM is reported as 0.0",
-                ctx.condition.label,
-            )
-
-        aggregated_runs: list[RMSDRunAggregatedResult] = []
-        for run_label in run_labels:
-            run_entries = []
-            for result in ordered_results:
-                matches = [
-                    run_result
-                    for run_result in result.run_results
-                    if run_result.run_label == run_label
-                ]
-                if len(matches) != 1:
-                    raise ValueError(
-                        f"Configured RMSD run '{run_label}' has invalid aggregate inputs in "
-                        f"condition '{ctx.condition.label}'. Expected one entry per replicate, "
-                        f"found {len(matches)} for replicate {result.replicate}."
-                    )
-                run_entries.append(matches[0])
-
-            per_means = [entry.mean_rmsd for entry in run_entries]
-            per_stds = [entry.std_rmsd for entry in run_entries]
-            per_medians = [entry.median_rmsd for entry in run_entries]
-            per_convergence_times = [entry.convergence_time_ns for entry in run_entries]
-            per_assessable = [entry.convergence_assessable for entry in run_entries]
-
-            n_converged = sum(time is not None for time in per_convergence_times)
-            n_assessable = sum(per_assessable)
-            convergence_fraction = (
-                float(n_converged) / float(n_assessable) if n_assessable > 0 else 0.0
-            )
-            all_converged = n_assessable > 0 and n_converged == n_assessable
-            finite_convergence_times = [time for time in per_convergence_times if time is not None]
-            mean_convergence_time_ns = (
-                float(np.mean(np.asarray(finite_convergence_times, dtype=np.float64)))
-                if finite_convergence_times
-                else None
-            )
-            median_convergence_time_ns = (
-                float(np.median(np.asarray(finite_convergence_times, dtype=np.float64)))
-                if finite_convergence_times
-                else None
-            )
-
-            mean_stats = compute_sem(per_means)
-            overall_median = float(np.median(np.asarray(per_medians, dtype=np.float64)))
-
-            template = run_entries[0]
-            aggregated_runs.append(
-                RMSDRunAggregatedResult(
-                    config_hash=first.config_hash,
-                    polyzymd_version=get_polyzymd_version(),
-                    replicate=None,
-                    equilibration_time=first.equilibration_time,
-                    equilibration_unit=first.equilibration_unit,
-                    selection_string=template.selection,
-                    replicates=replicate_order,
-                    n_replicates=len(replicate_order),
-                    run_label=run_label,
-                    selection=template.selection,
-                    alignment_selection=template.alignment_selection,
-                    overall_mean=mean_stats.mean,
-                    overall_sem=mean_stats.sem,
-                    overall_median=overall_median,
-                    per_replicate_means=per_means,
-                    per_replicate_stds=per_stds,
-                    per_replicate_medians=per_medians,
-                    per_replicate_convergence_times_ns=per_convergence_times,
-                    per_replicate_convergence_assessable=per_assessable,
-                    n_converged_replicates=n_converged,
-                    n_assessable_replicates=n_assessable,
-                    convergence_fraction=convergence_fraction,
-                    all_converged=all_converged,
-                    mean_convergence_time_ns=mean_convergence_time_ns,
-                    median_convergence_time_ns=median_convergence_time_ns,
-                )
-            )
-
-        agg_result = RMSDAggregatedResult(
-            config_hash=first.config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=None,
-            equilibration_time=first.equilibration_time,
-            equilibration_unit=first.equilibration_unit,
-            selection_string=first.selection_string,
-            replicates=replicate_order,
-            n_replicates=len(replicate_order),
-            run_results=aggregated_runs,
+        if not all(isinstance(result, ReplicateArtifact) for result in results):
+            raise TypeError("RMSD aggregation expects MDAnalysis ReplicateArtifact inputs")
+        target_path = ctx.result_path or ctx.output_dir / "result.json"
+        aggregated = aggregate_rmsd_artifacts(
+            condition_label=ctx.condition.label,
+            replicates=ctx.replicates,
+            settings=ctx.settings,
+            equilibration=ctx.equilibration,
+            output_dir=ctx.output_dir,
+            result_path=target_path,
+            artifacts=results,
             settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
-            source_result_files=[],
         )
-
-        target_path = ctx.result_path
-        if target_path is None:
-            settings_tag = self._make_settings_cache_tag(ctx.settings)
-            target_path = ctx.output_dir / self._make_aggregated_filename(
-                ctx.replicates,
-                first,
-                settings_tag,
-            )
-        self.save_result(agg_result, target_path)
-        logger.info("Saved aggregated RMSD result to %s", target_path)
-
-        return agg_result
+        logger.info("Saved aggregated RMSD artifact to %s", target_path)
+        return aggregated
 
     def compare(self, ctx: ComparisonContext) -> Any:
         """Compare RMSD runs across conditions.
@@ -1219,46 +731,6 @@ class RMSDAnalysis(Analysis):
 
         return format_rmsd_comparison(result, output_format)
 
-    def _compute_single_run(
-        self,
-        *,
-        ctx: ReplicateContext,
-        replicate: int,
-        run: RMSDRunSettings,
-        loader: TrajectoryLoader,
-        config_hash: str,
-        eq_value: float,
-        eq_unit: str,
-        eq_str: str,
-        settings_tag: str,
-        start_frame: int,
-        n_frames_total: int,
-        n_frames_used: int,
-        timestep_ps: float,
-    ) -> Any:
-        """Compatibility shim for one RMSD run.
-
-        This helper remains for focused unit tests while delegating the actual
-        trajectory-native work to ``rmsd._runner``.
-        """
-
-        del ctx, config_hash, eq_value, eq_unit, eq_str, settings_tag, n_frames_used
-        universe = loader.load_universe(replicate, cache=False)
-        try:
-            return compute_rmsd_run(
-                universe=universe,
-                run=run,
-                start=start_frame,
-                stop=n_frames_total,
-                step=1,
-                timestep_ps=timestep_ps,
-            )
-        except ValueError as exc:
-            if "selection matched no atoms" not in str(exc):
-                raise
-            logger.warning("%s", exc)
-            return None
-
     @staticmethod
     def _compare_run(
         *,
@@ -1349,17 +821,6 @@ class RMSDAnalysis(Analysis):
             get_p_value=lambda result: result.p_value if result.testable else None,
             set_corrected=lambda result, bh: _set_corrected(result, bh),
         )
-
-    @staticmethod
-    def _make_aggregated_filename(
-        replicates: tuple[int, ...] | Sequence[int],
-        first_result: Any,
-        settings_tag: str,
-    ) -> str:
-        """Generate an aggregated RMSD filename."""
-        eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
-        rep_str = Analysis._format_replicate_range(replicates)
-        return f"rmsd_{rep_str}_{eq_str}_{settings_tag}.json"
 
     @staticmethod
     def _deserialize_comparison(path: Path) -> RMSDComparisonResult | None:

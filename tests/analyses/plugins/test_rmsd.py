@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import json
-import sys
-import types
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 from polyzymd.analyses.base import Condition, PlotContext
 from polyzymd.analyses.discovery import get_analysis
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    FrameSelection,
+    MDABackendPolicy,
+    MDACollectorContext,
+    MDAJobResult,
+    MDAUniversePolicy,
+    ReplicateArtifact,
+)
 from polyzymd.analyses.rmsd import RMSDAnalysis, RMSDRunSettings, RMSDSettings
 from polyzymd.analyses.rmsd._comparison_results import (
     RMSDComparisonResult,
@@ -23,6 +30,7 @@ from polyzymd.analyses.rmsd._comparison_results import (
     RMSDRunSummary,
 )
 from polyzymd.analyses.rmsd._formatters import format_rmsd_comparison
+from polyzymd.analyses.rmsd._mda import condition_artifact_to_legacy_result
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
 from polyzymd.analyses.rmsd._plotters import _resolve_npz_sidecar_path
 from polyzymd.analyses.rmsd._results import (
@@ -31,17 +39,13 @@ from polyzymd.analyses.rmsd._results import (
     RMSDRunAggregatedResult,
     RMSDRunResult,
 )
-from polyzymd.analyses.rmsd._runner import RMSDRunnerPayload, RMSDRunPayload, compute_rmsd_run
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.config.comparison import PlotSettings
 from tests._support.analysis_testkit import (
-    FakeAtomGroup,
-    FakeUniverse,
     make_aggregate_context,
     make_comparison_context,
     make_condition,
     make_replicate_context,
-    patch_trajectory_loader,
 )
 
 
@@ -94,6 +98,90 @@ def _make_run_result(
         npz_path=f"/fake/{run_label}_rep{replicate}.npz",
         time_unit="ns",
         timestep_ps=10.0,
+    )
+
+
+def _make_run_payload(
+    replicate: int,
+    run_label: str,
+    mean_rmsd: float,
+    convergence_time_ns: float | None = None,
+    convergence_assessable: bool = True,
+) -> dict[str, object]:
+    """Create a run payload stored inside an RMSD replicate artifact."""
+
+    return {
+        "run_label": run_label,
+        "selection": (
+            "protein and name CA" if run_label == "protein_backbone" else "segid C and backbone"
+        ),
+        "alignment_selection": (
+            "protein and name CA" if run_label == "protein_backbone" else "segid C and backbone"
+        ),
+        "reference_mode": "centroid",
+        "reference_frame": 1,
+        "reference_file": None,
+        "mean_rmsd": mean_rmsd,
+        "std_rmsd": 0.2,
+        "median_rmsd": mean_rmsd,
+        "min_rmsd": mean_rmsd - 0.3,
+        "max_rmsd": mean_rmsd + 0.3,
+        "final_rmsd": mean_rmsd + 0.1,
+        "sem_rmsd": 0.1,
+        "converged": convergence_time_ns is not None,
+        "convergence_assessable": convergence_assessable,
+        "convergence_time_ns": convergence_time_ns,
+        "convergence_message": "test convergence",
+        "n_frames_total": 100,
+        "n_frames_used": 90,
+        "npz_path": f"sidecars/{run_label}_rep{replicate}.npz",
+        "time_unit": "ns",
+        "timestep_ps": 10.0,
+        "raw_timestep_ps": 10.0,
+        "frame_stride": 1,
+    }
+
+
+def _make_replicate_artifact(
+    replicate: int,
+    run_payloads: list[dict[str, object]],
+    *,
+    condition_label: str = "Test Condition",
+    settings_hash: str = "hash12345",
+) -> ReplicateArtifact:
+    """Create an RMSD replicate artifact for aggregation tests."""
+
+    metrics = {
+        f"{payload['run_label']}.mean_rmsd": float(payload["mean_rmsd"]) for payload in run_payloads
+    }
+    return ReplicateArtifact(
+        analysis_name="rmsd",
+        condition_label=condition_label,
+        replicate=replicate,
+        payload={
+            "runs": run_payloads,
+            "metrics": metrics,
+            "replicate_metrics": metrics,
+            "n_runs": len(run_payloads),
+            "n_frames_total": 100,
+            "n_frames_used": 90,
+        },
+        provenance={
+            "frame_selection": {
+                "start": 10,
+                "stop": 100,
+                "step": 1,
+                "n_frames_total": 100,
+                "n_frames_selected": 90,
+            }
+        },
+        metadata={
+            "settings_fingerprint": settings_hash,
+            "config_hash": "hash123",
+            "polyzymd_version": "1.2.1",
+            "equilibration_time": 10.0,
+            "equilibration_unit": "ns",
+        },
     )
 
 
@@ -304,375 +392,136 @@ def test_settings_cache_tag_changes_with_settings() -> None:
     assert tag_a != tag_b
 
 
-def test_run_replicate_cache_filename_includes_settings_tag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """run_replicate should include settings tag in cache filename."""
+def test_build_mda_jobs_uses_one_job_per_run(condition: Condition, tmp_path: Path) -> None:
+    """RMSD should expose MDAnalysis-native jobs instead of legacy runners."""
+    from polyzymd.analyses.mda import MDAReplicateJobContext
+
     analysis = RMSDAnalysis()
-    settings = RMSDSettings(runs=[RMSDRunSettings(label="run_a")])
-    sim_config = MagicMock()
-    condition = make_condition(label="Control", replicates=(1,), sim_config=sim_config)
-    ctx = make_replicate_context(
+    settings = RMSDSettings(runs=_make_run_settings())
+    replicate_ctx = make_replicate_context(
         condition=condition,
         replicate=1,
         output_dir=tmp_path / "run_1",
         settings=settings,
         equilibration="10ns",
-        recompute=False,
     )
-    ctx.output_dir.mkdir(parents=True, exist_ok=True)
+    frame_selection = FrameSelection(
+        start=10, stop=100, step=2, n_frames_total=120, timestep_ps=10.0
+    )
+    mda_ctx = MDAReplicateJobContext(
+        replicate_context=replicate_ctx,
+        universe=object(),
+        frame_selection=frame_selection,
+        universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=1),
+        artifact_store=ArtifactStore(tmp_path / "run_1"),
+    )
 
-    captured: dict[str, Path] = {}
+    jobs = analysis.build_mda_jobs(mda_ctx)
 
-    def fake_check_cache(result_class, result_path, recompute, sim_config, settings=None):
-        del result_class, recompute, sim_config, settings
-        captured["result_path"] = result_path
-        return {"cached": True}
-
-    monkeypatch.setattr(analysis, "_check_cache", fake_check_cache)
-
-    result = analysis.run_replicate(ctx, replicate=1)
-
-    expected_tag = analysis._make_settings_cache_tag(settings)
-    assert result == {"cached": True}
-    assert captured["result_path"].name == f"rmsd_eq10ns_{expected_tag}.json"
-
-
-def test_aggregated_cache_filename_includes_settings_tag() -> None:
-    """Aggregated cache filename should include settings fingerprint."""
-    analysis = RMSDAnalysis()
-    settings = RMSDSettings(runs=[RMSDRunSettings(label="run_a")])
-    settings_tag = analysis._make_settings_cache_tag(settings)
-    first_result = MagicMock(equilibration_time=10.0, equilibration_unit="ns")
-
-    filename = analysis._make_aggregated_filename((1, 2, 3), first_result, settings_tag)
-
-    assert filename == f"rmsd_reps1-3_eq10ns_{settings_tag}.json"
+    assert jobs is not None
+    assert [job.name for job in jobs] == ["protein_backbone", "polymer_core"]
+    assert all(job.analysis_factory is not None for job in jobs)
+    assert all(job.universe_policy.metadata["fresh_universe_per_run"] is True for job in jobs)
 
 
-def test_summarize_replicate_writes_npz_sidecar(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_mda_collector_writes_replicate_artifact_sidecar(
+    condition: Condition, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """summarize_replicate should preserve legacy NPZ sidecar naming."""
-    import numpy as np
-
-    analysis = RMSDAnalysis()
-    settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
-    condition = make_condition(label="Control", replicates=(1,), sim_config=MagicMock())
-    ctx = make_replicate_context(
-        condition=condition,
-        replicate=1,
-        output_dir=tmp_path / "run_1",
-        settings=settings,
-        equilibration="10ns",
-        recompute=True,
-    )
-    ctx.output_dir.mkdir(parents=True, exist_ok=True)
-
-    monkeypatch.setattr(
-        "polyzymd.analyses.rmsd.compute_config_hash",
-        lambda _sim_config: "hash123",
-    )
-    monkeypatch.setattr(
-        "polyzymd.analyses._results_base.get_polyzymd_version",
-        lambda: "1.2.1",
-    )
-
-    convergence = SimpleNamespace(
-        window_start_times_ns=[0.0],
-        window_mean_values=[1.2],
-        slope_times_ns=[5.0],
-        slopes=[0.0],
-        converged=True,
-        assessable=True,
-        convergence_time_ns=5.0,
-        message="Converged at 5 ns",
-    )
-    payload = RMSDRunPayload(
-        run_label="protein_backbone",
-        selection="protein and name CA",
-        alignment_selection="protein and name CA",
-        reference_mode="centroid",
-        reference_frame=1,
-        reference_file=None,
-        rmsd_values=np.asarray([1.0, 1.2], dtype=np.float64),
-        frames=np.asarray([1000, 1001], dtype=np.int64),
-        time_ns=np.asarray([10.0, 10.01], dtype=np.float64),
-        raw_timestep_ps=10.0,
-        frame_stride=3,
-        effective_timestep_ps=30.0,
-        mean_rmsd=1.1,
-        std_rmsd=0.1,
-        median_rmsd=1.1,
-        min_rmsd=1.0,
-        max_rmsd=1.2,
-        final_rmsd=1.2,
-        sem_rmsd=0.05,
-        correlation_time=20.0,
-        correlation_time_unit="ps",
-        n_independent_frames=2,
-        statistical_inefficiency=1.0,
-        autocorrelation_warning=None,
-        convergence_result=convergence,
-    )
-    runner = MagicMock(results=RMSDRunnerPayload(n_frames_total=1200, run_payloads=[payload]))
-    window = SimpleNamespace(
-        n_frames_selected=200,
-        timestep_ps=10.0,
-        trajectory_files=(Path("/fake/traj.dcd"),),
-    )
-
-    result = analysis.summarize_replicate(ctx, 1, runner, window)
-
-    expected_tag = analysis._make_settings_cache_tag(settings)
-    expected_npz = ctx.output_dir / f"rmsd_protein_backbone_eq10ns_{expected_tag}_timeseries.npz"
-    assert expected_npz.exists()
-    assert result.run_results[0].npz_path == str(expected_npz)
-    assert result.run_results[0].timestep_ps == pytest.approx(30.0)
-    assert result.run_results[0].raw_timestep_ps == pytest.approx(10.0)
-    assert result.run_results[0].frame_stride == 3
-    with np.load(expected_npz) as payload:
-        assert float(payload["raw_timestep_ps"]) == pytest.approx(10.0)
-        assert int(payload["frame_stride"]) == 3
-        assert float(payload["effective_timestep_ps"]) == pytest.approx(30.0)
-
-
-def test_compute_rmsd_run_uses_effective_timestep_for_autocorrelation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """RMSD autocorrelation should use raw timestep multiplied by frame stride."""
-    import numpy as np
-
-    from polyzymd.analyses.rmsd import _runner as runner_module
-
-    captured: dict[str, float] = {}
-
-    class _FakeRMSD:
-        def __init__(self, *args, **kwargs) -> None:
-            self.results = SimpleNamespace(rmsd=np.empty((0, 3), dtype=np.float64))
-
-        def run(self, *, start: int, stop: int, step: int):
-            del start, stop, step
-            self.results.rmsd = np.column_stack(
-                [
-                    np.arange(20, dtype=np.float64),
-                    np.zeros(20, dtype=np.float64),
-                    np.linspace(1.0, 2.0, 20, dtype=np.float64),
-                ]
-            )
-            return self
-
-    fake_mdanalysis = types.ModuleType("MDAnalysis")
-    fake_mdanalysis.__path__ = []
-    fake_analysis_module = types.ModuleType("MDAnalysis.analysis")
-    fake_analysis_module.__path__ = []
-    fake_rms_module = types.ModuleType("MDAnalysis.analysis.rms")
-    fake_rms_module.RMSD = _FakeRMSD
-    fake_analysis_module.rms = fake_rms_module
-    fake_mdanalysis.analysis = fake_analysis_module
-    monkeypatch.setitem(sys.modules, "MDAnalysis", fake_mdanalysis)
-    monkeypatch.setitem(sys.modules, "MDAnalysis.analysis", fake_analysis_module)
-    monkeypatch.setitem(sys.modules, "MDAnalysis.analysis.rms", fake_rms_module)
-    monkeypatch.setattr(runner_module, "align_trajectory", lambda *args, **kwargs: 0)
-    monkeypatch.setattr(
-        runner_module,
-        "_build_reference_structure",
-        lambda **kwargs: (MagicMock(), MagicMock()),
-    )
+    """RMSD collector should map RMSD.results.rmsd to artifact payload and NPZ."""
+    monkeypatch.setattr("polyzymd.analyses.rmsd._mda.compute_config_hash", lambda _cfg: "hash123")
     monkeypatch.setattr(
         "polyzymd.analyses.shared.convergence.find_convergence_time",
         lambda *args, **kwargs: SimpleNamespace(
-            window_start_times_ns=[],
-            window_mean_values=[],
-            slope_times_ns=[],
-            slopes=[],
-            converged=False,
-            assessable=False,
-            convergence_time_ns=None,
-            message="not assessed",
+            window_start_times_ns=[0.0],
+            window_mean_values=[1.1],
+            slope_times_ns=[1.0],
+            slopes=[0.0],
+            converged=True,
+            assessable=True,
+            convergence_time_ns=1.0,
+            message="Converged at 1 ns",
         ),
     )
-
-    def _fake_estimate_correlation_time(_series, **kwargs):
-        captured["timestep"] = kwargs["timestep"]
-        return SimpleNamespace(
-            tau=1.0,
-            tau_unit="ps",
-            n_independent=20,
-            statistical_inefficiency=1.0,
-            warning=None,
-        )
-
-    monkeypatch.setattr(
-        "polyzymd.analyses.shared.autocorrelation.estimate_correlation_time",
-        _fake_estimate_correlation_time,
-    )
-
-    atom_group = MagicMock()
-    atom_group.__len__.return_value = 5
-    universe = MagicMock()
-    universe.select_atoms.return_value = atom_group
-
-    payload = compute_rmsd_run(
-        universe=universe,
-        run=RMSDRunSettings(label="protein_backbone"),
-        start=0,
-        stop=60,
-        step=3,
-        timestep_ps=10.0,
-    )
-
-    assert captured["timestep"] == pytest.approx(30.0)
-    assert payload.time_ns[1] == pytest.approx(0.03)
-    assert payload.raw_timestep_ps == pytest.approx(10.0)
-    assert payload.frame_stride == 3
-    assert payload.effective_timestep_ps == pytest.approx(30.0)
-
-
-def test_run_replicate_raises_before_writing_partial_results(
-    condition: Condition,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """run_replicate should fail before writing partial outputs for invalid runs."""
-    analysis = RMSDAnalysis()
-    settings = RMSDSettings(
-        runs=[
-            RMSDRunSettings(label="protein_backbone", selection="protein and name CA"),
-            RMSDRunSettings(label="missing", selection="resname SBM"),
-        ]
-    )
-    output_dir = tmp_path / "run_1"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    ctx = make_replicate_context(
+    settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    replicate_ctx = make_replicate_context(
         condition=condition,
         replicate=1,
-        output_dir=output_dir,
+        output_dir=tmp_path / "run_1",
         settings=settings,
         equilibration="10ns",
     )
-
-    universe = FakeUniverse(
-        n_frames=1200,
-        selection_map={
-            "protein and name CA": FakeAtomGroup(n_atoms=5),
-            "resname SBM": FakeAtomGroup(n_atoms=0),
-        },
+    store = ArtifactStore(replicate_ctx.output_dir)
+    frame_selection = FrameSelection(
+        start=1000, stop=1003, step=1, n_frames_total=2000, timestep_ps=10.0
     )
-    patch_trajectory_loader(monkeypatch, "polyzymd.analyses.shared.loader", universe=universe)
-    patch_trajectory_loader(monkeypatch, "polyzymd.analyses.rmsd", universe=universe)
+    collector_ctx = MDACollectorContext(
+        analysis_name="rmsd",
+        replicate_context=replicate_ctx,
+        frame_selection=frame_selection,
+        universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=1),
+        artifact_store=store,
+        settings_fingerprint=_settings_hash(settings),
+    )
+    analysis_obj = SimpleNamespace(
+        _polyzymd_rmsd_metadata={"reference_frame": 1, "reference_file": None}
+    )
+    job = MDAJobResult(
+        name="protein_backbone",
+        analysis=analysis_obj,
+        results=SimpleNamespace(
+            rmsd=np.asarray(
+                [[1000.0, 0.0, 1.0], [1001.0, 10.0, 1.2], [1002.0, 20.0, 1.4]],
+                dtype=np.float64,
+            )
+        ),
+        run_kwargs=frame_selection.run_kwargs(),
+        frame_selection=frame_selection,
+        backend_policy=MDABackendPolicy(),
+        universe_policy=MDAUniversePolicy(
+            condition_label=condition.label,
+            replicate=1,
+            metadata={"rmsd_run": settings.runs[0].model_dump(mode="json")},
+        ),
+    )
 
-    def fake_compute_rmsd_run(**kwargs):
-        run = kwargs["run"]
-        if run.label == "missing":
-            raise ValueError(f"Run '{run.label}' selection matched no atoms: {run.selection!r}")
-        return SimpleNamespace(
-            run_label=run.label,
-            selection=run.selection,
-            alignment_selection=run.alignment_selection,
-            reference_mode=run.reference_mode,
-            reference_frame=1,
-            reference_file=run.reference_file,
-            rmsd_values=[],
-            frames=[],
-            time_ns=[],
-            mean_rmsd=1.0,
-            std_rmsd=0.1,
-            median_rmsd=1.0,
-            min_rmsd=0.9,
-            max_rmsd=1.1,
-            final_rmsd=1.0,
-            sem_rmsd=0.05,
-            correlation_time=None,
-            correlation_time_unit=None,
-            n_independent_frames=None,
-            statistical_inefficiency=None,
-            autocorrelation_warning=None,
-            convergence_result=SimpleNamespace(
-                window_start_times_ns=[],
-                window_mean_values=[],
-                slope_times_ns=[],
-                slopes=[],
-                converged=False,
-                assessable=False,
-                convergence_time_ns=None,
-                message="not assessed",
-            ),
-        )
+    artifact = RMSDAnalysis().build_mda_collector(collector_ctx)(collector_ctx, [job])
 
-    monkeypatch.setattr("polyzymd.analyses.rmsd._runner.compute_rmsd_run", fake_compute_rmsd_run)
-
-    with pytest.raises(ValueError, match="selection matched no atoms"):
-        analysis.run_replicate(ctx, 1)
-
-    assert list(output_dir.iterdir()) == []
+    assert artifact.payload["metrics"]["protein_backbone.mean_rmsd"] == pytest.approx(1.2)
+    assert artifact.metadata["settings_fingerprint"] == _settings_hash(settings)
+    assert artifact.sidecars[0].path == "sidecars/rmsd_protein_backbone_timeseries.npz"
+    with np.load(store.resolve_sidecar(artifact.sidecars[0])) as payload:
+        assert payload["rmsd_values"].tolist() == pytest.approx([1.0, 1.2, 1.4])
+        assert float(payload["raw_timestep_ps"]) == pytest.approx(10.0)
 
 
-def test_plotter_resolves_npz_with_specific_settings_tag(tmp_path: Path) -> None:
-    """Plotter should resolve the matching tagged JSON, not newest by mtime."""
+def test_plotter_resolves_npz_from_replicate_artifact(tmp_path: Path) -> None:
+    """Plotter should resolve NPZ paths from canonical MDA artifacts."""
     run_dir = tmp_path / "rmsd" / "run_1"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    npz_old = run_dir / "old.npz"
-    npz_new = run_dir / "new.npz"
-    npz_old.write_bytes(b"old")
-    npz_new.write_bytes(b"new")
-
-    old_result = RMSDResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=1,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA",
-        run_results=[
-            _make_run_result(replicate=1, run_label="protein_backbone", mean_rmsd=1.2).model_copy(
-                update={"npz_path": str(npz_old)}
-            )
-        ],
-        n_frames_total=100,
-        n_frames_used=90,
-        trajectory_files=["/fake/traj.dcd"],
+    store = ArtifactStore(run_dir)
+    sidecar = store.write_npz_sidecar(
+        "sidecars/rmsd_protein_backbone_timeseries.npz",
+        rmsd_values=np.asarray([1.0, 1.2], dtype=np.float64),
+        time_ns=np.asarray([0.0, 0.01], dtype=np.float64),
     )
-    new_result = RMSDResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=1,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA",
-        run_results=[
-            _make_run_result(replicate=1, run_label="protein_backbone", mean_rmsd=1.2).model_copy(
-                update={"npz_path": str(npz_new)}
-            )
+    artifact = _make_replicate_artifact(
+        1,
+        [
+            _make_run_payload(1, "protein_backbone", 1.1)
+            | {"npz_path": sidecar.path, "sidecar": sidecar.model_dump(mode="json")}
         ],
-        n_frames_total=100,
-        n_frames_used=90,
-        trajectory_files=["/fake/traj.dcd"],
+        condition_label="Control",
     )
-
-    old_json = run_dir / "rmsd_eq10ns_oldtag00.json"
-    new_json = run_dir / "rmsd_eq10ns_newtag00.json"
-    old_result.save(old_json)
-    new_result.save(new_json)
-
-    old_stat = old_json.stat()
-    new_stat = new_json.stat()
-    old_json.touch()
-    new_json.touch()
-    old_json.touch()
-
-    assert old_json.stat().st_mtime >= new_json.stat().st_mtime
-    assert old_stat.st_size > 0 and new_stat.st_size > 0
+    store.write_replicate_result(artifact)
 
     resolved = _resolve_npz_sidecar_path(
         tmp_path / "rmsd",
         "protein_backbone",
         1,
-        "rmsd_eq10ns_newtag00.json",
     )
 
-    assert resolved == npz_new
+    assert resolved == store.resolve_sidecar(sidecar)
 
 
 def test_rmsd_external_reference_requires_file() -> None:
@@ -985,9 +834,10 @@ def test_rmsd_plot_settings_defaults() -> None:
 def test_aggregate_single_replicate(
     condition: Condition, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """aggregate should handle a single replicate and log SEM warning."""
+    """aggregate should handle a single artifact and log SEM warning."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
     ctx = make_aggregate_context(
         condition=condition,
         replicates=(1,),
@@ -995,27 +845,20 @@ def test_aggregate_single_replicate(
         settings=settings,
         equilibration="10ns",
     )
-    result = RMSDResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=1,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA; segid C and backbone",
-        run_results=[
-            _make_run_result(1, "protein_backbone", 1.2),
-            _make_run_result(1, "polymer_core", 2.0),
-        ],
-        n_frames_total=100,
-        n_frames_used=90,
-        trajectory_files=["/fake/traj.dcd"],
+    artifact = _make_replicate_artifact(
+        1,
+        [_make_run_payload(1, "protein_backbone", 1.2), _make_run_payload(1, "polymer_core", 2.0)],
+        condition_label=condition.label,
+        settings_hash=settings_hash,
     )
 
     with caplog.at_level("WARNING"):
-        aggregated = analysis.aggregate(ctx, [result])
+        aggregated = analysis.aggregate(ctx, [artifact])
 
-    assert aggregated.n_replicates == 1
-    assert len(aggregated.run_results) == 2
+    legacy = condition_artifact_to_legacy_result(aggregated)
+    assert aggregated.replicates == [1]
+    assert legacy.n_replicates == 1
+    assert len(legacy.run_results) == 2
     assert "Only one replicate available for RMSD aggregation" in caplog.text
 
 
@@ -1023,6 +866,7 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
     """aggregate should compute expected means and preserve run structure."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
     ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2, 3),
@@ -1031,22 +875,17 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
         equilibration="10ns",
     )
     results = [
-        RMSDResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=rep,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA; segid C and backbone",
-            run_results=[
-                _make_run_result(
+        _make_replicate_artifact(
+            rep,
+            [
+                _make_run_payload(
                     rep,
                     "protein_backbone",
                     1.0 + 0.1 * rep,
                     convergence_time_ns=(20.0 + 10.0 * rep) if rep < 3 else None,
                     convergence_assessable=True,
                 ),
-                _make_run_result(
+                _make_run_payload(
                     rep,
                     "polymer_core",
                     2.0 + 0.05 * rep,
@@ -1054,14 +893,13 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
                     convergence_assessable=True,
                 ),
             ],
-            n_frames_total=100,
-            n_frames_used=90,
-            trajectory_files=["/fake/traj.dcd"],
+            condition_label=condition.label,
+            settings_hash=settings_hash,
         )
         for rep in (1, 2, 3)
     ]
 
-    aggregated = analysis.aggregate(ctx, results)
+    aggregated = condition_artifact_to_legacy_result(analysis.aggregate(ctx, results))
 
     assert aggregated.n_replicates == 3
     backbone = next(run for run in aggregated.run_results if run.run_label == "protein_backbone")
@@ -1080,6 +918,7 @@ def test_aggregate_orders_complete_out_of_order_inputs(
     """aggregate should align per-replicate arrays to declared replicate order."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    settings_hash = _settings_hash(settings)
     ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2, 3),
@@ -1088,24 +927,16 @@ def test_aggregate_orders_complete_out_of_order_inputs(
         equilibration="10ns",
     )
     results = [
-        RMSDResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=rep,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
-            run_results=[
-                _make_run_result(rep, "protein_backbone", mean_rmsd=1.0 + 0.1 * rep),
-            ],
-            n_frames_total=100,
-            n_frames_used=90,
-            trajectory_files=["/fake/traj.dcd"],
+        _make_replicate_artifact(
+            rep,
+            [_make_run_payload(rep, "protein_backbone", mean_rmsd=1.0 + 0.1 * rep)],
+            condition_label=condition.label,
+            settings_hash=settings_hash,
         )
         for rep in (3, 1, 2)
     ]
 
-    aggregated = analysis.aggregate(ctx, results)
+    aggregated = condition_artifact_to_legacy_result(analysis.aggregate(ctx, results))
 
     backbone = aggregated.run_results[0]
     assert backbone.replicates == [1, 2, 3]
@@ -1127,7 +958,7 @@ def test_aggregate_empty_results_raises(condition: Condition, tmp_path: Path) ->
 
     with pytest.raises(
         ValueError,
-        match=r"RMSD aggregation for condition '.+' requires at least one replicate result",
+        match=r"RMSD aggregation for condition '.+' requires at least one replicate artifact",
     ):
         analysis.aggregate(ctx, [])
 
@@ -1136,6 +967,7 @@ def test_aggregate_missing_configured_run_raises(condition: Condition, tmp_path:
     """aggregate should fail when a configured run is missing for any replicate."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
     ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2, 3),
@@ -1144,53 +976,33 @@ def test_aggregate_missing_configured_run_raises(condition: Condition, tmp_path:
         equilibration="10ns",
     )
     results = [
-        RMSDResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=1,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA; segid C and backbone",
-            run_results=[
-                _make_run_result(1, "protein_backbone", 1.1),
-                _make_run_result(1, "polymer_core", 2.1),
+        _make_replicate_artifact(
+            1,
+            [
+                _make_run_payload(1, "protein_backbone", 1.1),
+                _make_run_payload(1, "polymer_core", 2.1),
             ],
-            n_frames_total=100,
-            n_frames_used=90,
-            trajectory_files=["/fake/traj.dcd"],
+            condition_label=condition.label,
+            settings_hash=settings_hash,
         ),
-        RMSDResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=2,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
-            run_results=[
-                _make_run_result(2, "protein_backbone", 1.2),
-            ],
-            n_frames_total=100,
-            n_frames_used=90,
-            trajectory_files=["/fake/traj.dcd"],
+        _make_replicate_artifact(
+            2,
+            [_make_run_payload(2, "protein_backbone", 1.2)],
+            condition_label=condition.label,
+            settings_hash=settings_hash,
         ),
-        RMSDResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=3,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA; segid C and backbone",
-            run_results=[
-                _make_run_result(3, "protein_backbone", 1.3),
-                _make_run_result(3, "polymer_core", 2.3),
+        _make_replicate_artifact(
+            3,
+            [
+                _make_run_payload(3, "protein_backbone", 1.3),
+                _make_run_payload(3, "polymer_core", 2.3),
             ],
-            n_frames_total=100,
-            n_frames_used=90,
-            trajectory_files=["/fake/traj.dcd"],
+            condition_label=condition.label,
+            settings_hash=settings_hash,
         ),
     ]
 
-    with pytest.raises(ValueError, match="Configured RMSD run 'polymer_core' is missing"):
+    with pytest.raises(ValueError, match="missing configured run"):
         analysis.aggregate(ctx, results)
 
 
@@ -1198,6 +1010,7 @@ def test_aggregate_overall_median_uses_median(condition: Condition, tmp_path: Pa
     """aggregate should compute overall_median using np.median."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    settings_hash = _settings_hash(settings)
     ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2, 3),
@@ -1207,55 +1020,23 @@ def test_aggregate_overall_median_uses_median(condition: Condition, tmp_path: Pa
     )
 
     results = [
-        RMSDResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=1,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
-            run_results=[
-                _make_run_result(1, "protein_backbone", mean_rmsd=2.0),
+        _make_replicate_artifact(
+            rep,
+            [
+                _make_run_result(
+                    replicate=rep,
+                    run_label="protein_backbone",
+                    mean_rmsd=(2.0 if rep < 3 else 101.0),
+                ).model_dump()
+                | {"median_rmsd": {1: 1.0, 2: 2.0, 3: 100.0}[rep]}
             ],
-            n_frames_total=100,
-            n_frames_used=90,
-            trajectory_files=["/fake/traj.dcd"],
-        ),
-        RMSDResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=2,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
-            run_results=[
-                _make_run_result(2, "protein_backbone", mean_rmsd=2.0),
-            ],
-            n_frames_total=100,
-            n_frames_used=90,
-            trajectory_files=["/fake/traj.dcd"],
-        ),
-        RMSDResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=3,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
-            run_results=[
-                _make_run_result(3, "protein_backbone", mean_rmsd=101.0),
-            ],
-            n_frames_total=100,
-            n_frames_used=90,
-            trajectory_files=["/fake/traj.dcd"],
-        ),
+            condition_label=condition.label,
+            settings_hash=settings_hash,
+        )
+        for rep in (1, 2, 3)
     ]
 
-    results[0].run_results[0].median_rmsd = 1.0
-    results[1].run_results[0].median_rmsd = 2.0
-    results[2].run_results[0].median_rmsd = 100.0
-
-    aggregated = analysis.aggregate(ctx, results)
+    aggregated = condition_artifact_to_legacy_result(analysis.aggregate(ctx, results))
     backbone = next(run for run in aggregated.run_results if run.run_label == "protein_backbone")
     assert backbone.overall_median == pytest.approx(2.0)
 
