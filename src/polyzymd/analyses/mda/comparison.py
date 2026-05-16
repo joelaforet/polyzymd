@@ -46,6 +46,16 @@ class MDAComparisonContext:
         object.__setattr__(self, "expected_condition_labels", labels)
 
 
+@dataclass(frozen=True)
+class _DerivedMetricStatistics:
+    """Statistics derived directly from replicate-level metric values."""
+
+    values: list[float]
+    mean: float
+    std: float
+    sem: float
+
+
 def compare_condition_artifacts(
     artifacts: Sequence[ConditionArtifact],
     ctx: MDAComparisonContext,
@@ -206,7 +216,7 @@ def _build_metric_values(
                 name=metric_key,
                 mean=summary.mean,
                 sem=summary.sem,
-                replicate_values=list(summary.values),
+                replicate_values=summary.values,
                 higher_is_better=metadata.get("higher_is_better", True),
                 direction_labels=metadata.get(
                     "direction_labels", ("decreased", "unchanged", "increased")
@@ -239,7 +249,7 @@ def _validated_aggregated_metric(
     artifact: ConditionArtifact,
     ctx: MDAComparisonContext,
     metric_key: str,
-) -> AggregatedMetric:
+) -> _DerivedMetricStatistics:
     """Validate one raw metric payload with the aggregation schema.
 
     Parameters
@@ -255,8 +265,8 @@ def _validated_aggregated_metric(
 
     Returns
     -------
-    AggregatedMetric
-        Validated aggregate metric schema.
+    _DerivedMetricStatistics
+        Metric statistics derived from validated replicate values.
     """
 
     if not isinstance(raw_metric, Mapping):
@@ -306,7 +316,95 @@ def _validated_aggregated_metric(
             f"got n={summary.n}, len(values)={len(summary.values)}, "
             f"len(replicates)={len(artifact.replicates)}"
         )
-    return summary
+    derived = _derive_metric_statistics(summary.values)
+    _validate_stored_statistic_matches(
+        summary.mean,
+        derived.mean,
+        statistic_name="mean",
+        artifact=artifact,
+        ctx=ctx,
+        metric_key=metric_key,
+    )
+    _validate_stored_statistic_matches(
+        summary.std,
+        derived.std,
+        statistic_name="std",
+        artifact=artifact,
+        ctx=ctx,
+        metric_key=metric_key,
+    )
+    _validate_stored_statistic_matches(
+        summary.sem,
+        derived.sem,
+        statistic_name="sem",
+        artifact=artifact,
+        ctx=ctx,
+        metric_key=metric_key,
+    )
+    return derived
+
+
+def _derive_metric_statistics(values: Sequence[float]) -> _DerivedMetricStatistics:
+    """Derive comparison statistics from replicate-level values.
+
+    Parameters
+    ----------
+    values : sequence of float
+        Replicate-level metric values from an ``AggregatedMetric`` payload.
+
+    Returns
+    -------
+    _DerivedMetricStatistics
+        Mean, sample standard deviation, and SEM derived from ``values``.
+    """
+
+    derived_values = [float(value) for value in values]
+    mean = sum(derived_values) / len(derived_values)
+    if len(derived_values) == 1:
+        std = 0.0
+    else:
+        std = math.sqrt(
+            sum((value - mean) ** 2 for value in derived_values) / (len(derived_values) - 1)
+        )
+    sem = std / math.sqrt(len(derived_values))
+    return _DerivedMetricStatistics(values=derived_values, mean=mean, std=std, sem=sem)
+
+
+def _validate_stored_statistic_matches(
+    stored: float,
+    derived: float,
+    *,
+    statistic_name: str,
+    artifact: ConditionArtifact,
+    ctx: MDAComparisonContext,
+    metric_key: str,
+) -> None:
+    """Reject stale aggregate statistics that disagree with replicate values.
+
+    Parameters
+    ----------
+    stored : float
+        Statistic stored in the condition artifact.
+    derived : float
+        Statistic recalculated from ``AggregatedMetric.values``.
+    statistic_name : str
+        Name used in diagnostics.
+    artifact : ConditionArtifact
+        Source condition artifact.
+    ctx : MDAComparisonContext
+        Comparison context used for diagnostics.
+    metric_key : str
+        Metric key.
+    """
+
+    if math.isclose(stored, derived, rel_tol=1e-9, abs_tol=1e-12):
+        return
+    raise MDAComparisonError(
+        f"{ctx.analysis_name}: condition {artifact.condition_label!r} metric {metric_key!r} "
+        f"stored {statistic_name}={stored!r} does not match value-derived "
+        f"{statistic_name}={derived!r}; recompute the analysis or clear stale aggregate "
+        "result.json files"
+    )
 
 
 def _validate_finite_scalar(
