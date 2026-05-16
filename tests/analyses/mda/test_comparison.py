@@ -76,7 +76,7 @@ def _artifact(
 ) -> ConditionArtifact:
     """Build a condition artifact with one AggregatedMetric payload."""
 
-    replicate_ids = replicates or list(range(1, len(values) + 1))
+    replicate_ids = replicates if replicates is not None else list(range(1, len(values) + 1))
     mean = sum(values) / len(values)
     if len(values) == 1:
         std = 0.0
@@ -113,7 +113,9 @@ def _context(
     *,
     analysis_name: str = "rmsd",
     expected_condition_labels: tuple[str, ...] = ("Control", "PEG"),
+    expected_replicates_by_condition: dict[str, tuple[int, ...]] | None = None,
     effective_control: str | None = "Control",
+    min_replicates: int = 1,
 ) -> MDAComparisonContext:
     """Build a deterministic MDA comparison context."""
 
@@ -121,10 +123,12 @@ def _context(
         analysis_name=analysis_name,
         project_name="project",
         expected_condition_labels=expected_condition_labels,
+        expected_replicates_by_condition=expected_replicates_by_condition,
         control_label="Control",
         effective_control=effective_control,
         equilibration="10ns",
         settings_fingerprint="settings-1",
+        min_replicates=min_replicates,
         fdr_alpha=0.1,
         ttest_method="welch",
         posthoc_method="ttest_bh",
@@ -269,6 +273,59 @@ def test_compare_condition_artifacts_rejects_stale_aggregated_statistics(
 
 
 @pytest.mark.parametrize(
+    ("artifact", "ctx", "match"),
+    [
+        (
+            _artifact("Control", [1.0], replicates=[]),
+            _context(expected_replicates_by_condition={"Control": (1, 2), "PEG": (1, 2)}),
+            "no replicates",
+        ),
+        (
+            _artifact("Control", [1.0], replicates=[1]),
+            _context(
+                expected_replicates_by_condition={"Control": (1, 2), "PEG": (1, 2)},
+                min_replicates=2,
+            ),
+            "below required minimum 2",
+        ),
+        (
+            _artifact("Control", [1.0, 2.0], replicates=[2, 4]),
+            _context(expected_replicates_by_condition={"Control": (1, 2, 3), "PEG": (1, 2)}),
+            r"unexpected replicate IDs \[4\]",
+        ),
+    ],
+)
+def test_compare_condition_artifacts_rejects_bad_replicate_identity(
+    artifact: ConditionArtifact,
+    ctx: MDAComparisonContext,
+    match: str,
+) -> None:
+    """MDA comparison should reject stale or insufficient replicate sets."""
+
+    artifacts = [artifact, _artifact("PEG", [2.0, 3.0], replicates=[1, 2])]
+
+    with pytest.raises(MDAComparisonError, match=match):
+        compare_condition_artifacts(artifacts, ctx)
+
+
+def test_compare_condition_artifacts_accepts_expected_replicate_subset() -> None:
+    """MDA comparison should accept valid partial aggregate replicate subsets."""
+
+    artifacts = [
+        _artifact("Control", [1.0, 3.0], replicates=[1, 3]),
+        _artifact("PEG", [2.0, 4.0], replicates=[1, 2]),
+    ]
+    ctx = _context(
+        expected_replicates_by_condition={"Control": (1, 2, 3), "PEG": (1, 2, 3)},
+        min_replicates=2,
+    )
+
+    result = compare_condition_artifacts(artifacts, ctx)
+
+    assert result.provenance["source_replicates"] == {"Control": [1, 3], "PEG": [1, 2]}
+
+
+@pytest.mark.parametrize(
     ("artifacts", "match"),
     [
         ([_artifact("Control", [1.0]), _artifact("Control", [1.1])], "duplicate"),
@@ -339,6 +396,37 @@ def test_default_compare_dispatches_all_mda_artifacts(tmp_path: Path) -> None:
     assert isinstance(result, ComparisonArtifact)
     assert result.payload["statistical_parameters"]["fdr_alpha"] == 0.2
     assert result.payload["statistical_parameters"]["ttest_method"] == "welch"
+
+
+def test_default_compare_rejects_mda_artifact_replicates_outside_active_condition(
+    tmp_path: Path,
+) -> None:
+    """Default MDA compare should validate artifacts against active condition replicates."""
+
+    analysis = _ArtifactDefaultCompareAnalysis()
+    conditions = [_condition("Control", tmp_path), _condition("PEG", tmp_path)]
+    ctx = ComparisonContext(
+        name="project",
+        conditions=conditions,
+        excluded_conditions=[],
+        control_label="Control",
+        analysis_dirs={label: tmp_path / label for label in ("Control", "PEG")},
+        results_dir=tmp_path / "comparison",
+        equilibration="10ns",
+        settings=_Settings(),
+        aggregated_results={
+            "Control": _artifact(
+                "Control",
+                [1.0, 1.1, 0.9],
+                analysis_name=analysis.name,
+                replicates=[4, 5, 6],
+            ),
+            "PEG": _artifact("PEG", [1.4, 1.5, 1.6], analysis_name=analysis.name),
+        },
+    )
+
+    with pytest.raises(MDAComparisonError, match=r"active replicates are \[1, 2, 3\]"):
+        analysis.compare(ctx)
 
 
 def test_default_compare_keeps_legacy_extract_metrics_path(tmp_path: Path) -> None:

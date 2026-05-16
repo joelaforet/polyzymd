@@ -89,10 +89,14 @@ def default_compare(analysis: Any, ctx: Any) -> BaseModel | None:
                 analysis_name=analysis.name,
                 project_name=ctx.name,
                 expected_condition_labels=[condition.label for condition in ctx.conditions],
+                expected_replicates_by_condition={
+                    condition.label: condition.replicates for condition in ctx.conditions
+                },
                 control_label=ctx.control_label,
                 effective_control=ctx.effective_control,
                 equilibration=ctx.equilibration,
                 settings_fingerprint=analysis.aggregate_settings_fingerprint(ctx.settings),
+                min_replicates=analysis.min_replicates,
                 fdr_alpha=getattr(ctx, "fdr_alpha", 0.05),
                 ttest_method=getattr(ctx, "ttest_method", "student"),
                 posthoc_method=getattr(ctx, "posthoc_method", "ttest_bh"),

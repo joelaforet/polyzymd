@@ -24,26 +24,52 @@ class MDAComparisonContext:
     analysis_name: str
     project_name: str
     expected_condition_labels: Sequence[str] | None = None
+    expected_replicates_by_condition: Mapping[str, Sequence[int]] | None = None
     control_label: str | None = None
     effective_control: str | None = None
     equilibration: str = "0ns"
     settings_fingerprint: str | None = None
+    min_replicates: int = 1
     fdr_alpha: float = 0.05
     ttest_method: str = "student"
     posthoc_method: str = "ttest_bh"
 
     def __post_init__(self) -> None:
-        """Normalize expected condition labels and reject ambiguous inputs."""
+        """Normalize expected identity inputs and reject ambiguous values."""
 
-        if self.expected_condition_labels is None:
-            return
-        labels = tuple(self.expected_condition_labels)
-        duplicates = sorted({label for label in labels if labels.count(label) > 1})
-        if duplicates:
-            raise MDAComparisonError(
-                "Expected condition labels must be unique; " f"duplicates: {', '.join(duplicates)}"
-            )
-        object.__setattr__(self, "expected_condition_labels", labels)
+        if self.min_replicates < 1:
+            raise MDAComparisonError("min_replicates must be at least 1")
+        if self.expected_condition_labels is not None:
+            labels = tuple(self.expected_condition_labels)
+            duplicates = sorted({label for label in labels if labels.count(label) > 1})
+            if duplicates:
+                raise MDAComparisonError(
+                    "Expected condition labels must be unique; "
+                    f"duplicates: {', '.join(duplicates)}"
+                )
+            object.__setattr__(self, "expected_condition_labels", labels)
+        if self.expected_replicates_by_condition is not None:
+            normalized: dict[str, tuple[int, ...]] = {}
+            for label, replicates in self.expected_replicates_by_condition.items():
+                if not isinstance(label, str):
+                    raise MDAComparisonError(
+                        f"Expected replicate mapping keys must be condition labels, got {label!r}"
+                    )
+                replicate_tuple = tuple(int(replicate) for replicate in replicates)
+                duplicate_replicates = sorted(
+                    {
+                        replicate
+                        for replicate in replicate_tuple
+                        if replicate_tuple.count(replicate) > 1
+                    }
+                )
+                if duplicate_replicates:
+                    raise MDAComparisonError(
+                        f"Expected replicates for condition {label!r} must be unique; "
+                        f"duplicates: {duplicate_replicates}"
+                    )
+                normalized[label] = replicate_tuple
+            object.__setattr__(self, "expected_replicates_by_condition", normalized)
 
 
 @dataclass(frozen=True)
@@ -165,6 +191,50 @@ def _validate_artifact_identity(artifact: ConditionArtifact, ctx: MDAComparisonC
     if len(set(artifact.replicates)) != len(artifact.replicates):
         raise MDAComparisonError(
             f"{ctx.analysis_name}: condition {artifact.condition_label!r} has duplicate replicates"
+        )
+    _validate_artifact_replicates(artifact, ctx)
+
+
+def _validate_artifact_replicates(
+    artifact: ConditionArtifact,
+    ctx: MDAComparisonContext,
+) -> None:
+    """Validate condition artifact replicate identity against active inputs.
+
+    Parameters
+    ----------
+    artifact : ConditionArtifact
+        Candidate condition artifact.
+    ctx : MDAComparisonContext
+        Expected replicate identity and minimum replicate policy.
+    """
+
+    replicate_ids = tuple(int(replicate) for replicate in artifact.replicates)
+    if not replicate_ids:
+        raise MDAComparisonError(
+            f"{ctx.analysis_name}: condition {artifact.condition_label!r} has no replicates"
+        )
+    if len(replicate_ids) < ctx.min_replicates:
+        raise MDAComparisonError(
+            f"{ctx.analysis_name}: condition {artifact.condition_label!r} has "
+            f"{len(replicate_ids)} replicate(s), below required minimum {ctx.min_replicates}. "
+            "Recompute the analysis or clear stale aggregate result.json files."
+        )
+    if ctx.expected_replicates_by_condition is None:
+        return
+    expected = ctx.expected_replicates_by_condition.get(artifact.condition_label)
+    if expected is None:
+        raise MDAComparisonError(
+            f"{ctx.analysis_name}: condition {artifact.condition_label!r} has no active "
+            "replicate request in the comparison context"
+        )
+    expected_set = set(expected)
+    unexpected = sorted(set(replicate_ids) - expected_set)
+    if unexpected:
+        raise MDAComparisonError(
+            f"{ctx.analysis_name}: condition {artifact.condition_label!r} contains unexpected "
+            f"replicate IDs {unexpected}; active replicates are {list(expected)}. Recompute the "
+            "analysis or clear stale aggregate result.json files."
         )
 
 
