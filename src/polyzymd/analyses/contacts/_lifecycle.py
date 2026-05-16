@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Sequence
 
-from polyzymd.analyses.base import AggregateContext, Analysis, ReplicateContext
+from polyzymd.analyses.base import AggregateContext, ReplicateContext
 from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
 from polyzymd.analyses.contacts._identity import (
     CONTACTS_SETTINGS_FINGERPRINT_DOMAIN,
@@ -13,8 +13,6 @@ from polyzymd.analyses.contacts._identity import (
     normalize_polymer_types,
 )
 from polyzymd.analyses.contacts._results import ContactResult
-from polyzymd.analyses.contacts._runner import ContactsReplicateRunner, build_contact_grouping
-from polyzymd.analyses.exceptions import ReplicateSkippedError
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
 
@@ -63,90 +61,6 @@ def align_replicate_results(results: Sequence[Any], replicates: Sequence[int]) -
     return [by_replicate[replicate] for replicate in requested]
 
 
-def run_replicate(analysis: Any, ctx: ReplicateContext, replicate: int) -> Any:
-    """Run contacts for a single replicate.
-
-    Parameters
-    ----------
-    analysis : Any
-        Contacts facade instance used for cache, path, and save hooks.
-    ctx : ReplicateContext
-        Framework-provided context.
-    replicate : int
-        1-indexed replicate number.
-
-    Returns
-    -------
-    Any
-        Per-replicate contact result.
-    """
-
-    result_file = analysis._replicate_sidecar_path(
-        ctx.output_dir,
-        ctx.settings,
-        ctx.equilibration,
-        replicate,
-    )
-    canonical_file = ctx.result_path or ctx.output_dir / "result.json"
-    result_candidates = ()
-    if not ctx.recompute:
-        result_candidates = analysis._replicate_cache_candidates(
-            ctx.output_dir,
-            ctx.settings,
-            ctx.equilibration,
-            replicate,
-            result_path=ctx.result_path,
-        )
-
-    for candidate in result_candidates:
-        cached = analysis._load_cache_candidate(
-            ContactResult,
-            candidate,
-            recompute=ctx.recompute,
-            sim_config=ctx.sim_config,
-            settings=None,
-        )
-        if (
-            cached is not None
-            and analysis._cache_matches_window(cached, ctx.equilibration)
-            and analysis._cache_matches_replicate_id(cached, replicate, source=candidate)
-            and analysis._cache_matches_contacts_settings(cached, ctx.settings, source=candidate)
-        ):
-            if (
-                ctx.result_path is not None
-                and candidate != ctx.result_path
-                and not ctx.result_path.exists()
-            ):
-                analysis._attach_contacts_identity_metadata(cached, ctx.settings)
-                analysis.save_result(cached, ctx.result_path)
-            if candidate == canonical_file and not result_file.exists():
-                analysis._attach_contacts_identity_metadata(cached, ctx.settings)
-                cached.save(result_file)
-            return cached
-
-    try:
-        result = Analysis.run_replicate(analysis, ctx, replicate)
-    except FileNotFoundError as e:
-        logger.warning(f"  Skipping replicate {replicate}: trajectory data not found. {e}")
-        raise ReplicateSkippedError(
-            f"No trajectory data found for replicate {replicate}: {e}"
-        ) from e
-    except (ValueError, OSError, IndexError) as e:
-        logger.debug("Full traceback:", exc_info=True)
-        logger.warning(f"  Skipping replicate {replicate}: analysis failed with error: {e}")
-        raise ReplicateSkippedError(
-            f"Contacts analysis failed for replicate {replicate}: {type(e).__name__}: {e}"
-        ) from e
-
-    ctx.output_dir.mkdir(parents=True, exist_ok=True)
-    analysis._attach_contacts_identity_metadata(result, ctx.settings)
-    result.save(result_file)
-    if ctx.result_path is not None:
-        analysis.save_result(result, ctx.result_path)
-    logger.info(f"  Saved: {result_file}")
-    return result
-
-
 def get_trajectory_window(
     ctx: ReplicateContext,
     replicate: int,
@@ -190,121 +104,6 @@ def get_trajectory_window(
         n_frames_total=len(universe.trajectory),
         timestep_ps=timestep_ps,
     )
-
-
-def build_runner(
-    analysis: Any,
-    ctx: ReplicateContext,
-    replicate: int,
-    universe: Any,
-    window: Any,
-) -> Any:
-    """Build the runner-backed contacts execution object.
-
-    Parameters
-    ----------
-    analysis : Any
-        Contacts facade instance used for selection helpers.
-    ctx : ReplicateContext
-        Framework-provided context.
-    replicate : int
-        Replicate ID accepted for lifecycle signature compatibility.
-    universe : Any
-        Loaded trajectory universe.
-    window : Any
-        Resolved trajectory window accepted for signature compatibility.
-
-    Returns
-    -------
-    Any
-        Runner-backed contacts execution object.
-    """
-
-    import polyzymd.analyses.contacts as contacts_facade
-    from polyzymd.analyses.shared.selectors import MDAnalysisSelector
-
-    del replicate, window
-    settings = ctx.settings
-    polymer_selection = analysis._effective_polymer_selection(settings)
-    return ContactsReplicateRunner(
-        universe=universe,
-        target_selector=MDAnalysisSelector(settings.protein_selection),
-        query_selector=MDAnalysisSelector(polymer_selection),
-        cutoff=settings.cutoff,
-        grouping=build_contact_grouping(settings.grouping),
-        analyzer_cls=contacts_facade.ParallelContactAnalyzer,
-    )
-
-
-def summarize_replicate(
-    analysis: Any,
-    ctx: ReplicateContext,
-    replicate: int,
-    runner: Any,
-    window: Any,
-) -> Any:
-    """Attach framework metadata to the runner-produced contact result.
-
-    Parameters
-    ----------
-    analysis : Any
-        Contacts facade instance used for selection helpers.
-    ctx : ReplicateContext
-        Framework-provided context.
-    replicate : int
-        Replicate ID.
-    runner : Any
-        Runner-backed contacts execution object.
-    window : Any
-        Resolved trajectory window.
-
-    Returns
-    -------
-    Any
-        Contact result with framework metadata attached.
-    """
-
-    from polyzymd.analyses._results_base import get_polyzymd_version
-    from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
-    from polyzymd.analyses.shared.loader import parse_time_string
-
-    result = runner.results
-    eq_value, eq_unit = parse_time_string(ctx.equilibration)
-
-    result.config_hash = compute_config_hash(ctx.sim_config)
-    result.polyzymd_version = get_polyzymd_version()
-    result.replicate = replicate
-    result.equilibration_time = eq_value
-    result.equilibration_unit = eq_unit
-    polymer_selection = analysis._effective_polymer_selection(ctx.settings)
-    result.selection_string = f"{ctx.settings.protein_selection} : {polymer_selection}"
-    result.start_frame = window.start
-    result.timestep_ps = float(window.timestep_ps) * window.step
-
-    metadata = dict(getattr(result, "metadata", {}) or {})
-    contact_settings_fp = contacts_settings_fingerprint(ctx.settings)
-    compute_residence_times = bool(ctx.settings.compute_residence_times)
-    metadata["settings_fingerprint"] = contact_settings_fp
-    metadata["contacts_settings_fingerprint"] = contact_settings_fp
-    metadata["legacy_full_settings_fingerprint"] = settings_fingerprint(ctx.settings)
-    metadata["settings_fingerprint_domain"] = CONTACTS_SETTINGS_FINGERPRINT_DOMAIN
-    metadata["compute_residence_times"] = compute_residence_times
-    metadata["residence_times_computed"] = compute_residence_times
-    metadata["protein_selection"] = ctx.settings.protein_selection
-    metadata["polymer_selection"] = ctx.settings.polymer_selection
-    metadata["effective_polymer_selection"] = polymer_selection
-    metadata["polymer_types_filter"] = normalize_polymer_types(ctx.settings.polymer_types)
-    metadata["grouping"] = ctx.settings.grouping
-    metadata["cutoff"] = float(ctx.settings.cutoff)
-    metadata["criteria_cutoff"] = float(ctx.settings.cutoff)
-    result.metadata = metadata
-
-    has_stats = getattr(result, "has_per_residue_statistics", None)
-    compute_stats = getattr(result, "compute_per_residue_statistics", None)
-    if callable(has_stats) and callable(compute_stats) and not has_stats():
-        compute_stats()
-
-    return result
 
 
 def aggregate(analysis: Any, ctx: AggregateContext, results: Sequence[Any]) -> Any:

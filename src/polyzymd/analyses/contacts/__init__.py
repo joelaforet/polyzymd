@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, ClassVar, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence, cast
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
@@ -46,8 +46,14 @@ from polyzymd.analyses.contacts import _lifecycle as _contacts_lifecycle
 from polyzymd.analyses.contacts import _plotting as _contacts_plotting
 from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
 from polyzymd.analyses.contacts._identity import (
+    contacts_detection_fingerprint,
     contacts_settings_fingerprint,
     contacts_settings_fingerprint_candidates,
+)
+from polyzymd.analyses.contacts._mda import (
+    ContactsArtifactCollector,
+    artifact_to_contact_result,
+    build_contacts_jobs,
 )
 from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
 from polyzymd.analyses.contacts._plotters import (
@@ -59,13 +65,12 @@ from polyzymd.analyses.contacts._plotters import (
     _plot_rt_by_partition_bars,
 )
 from polyzymd.analyses.contacts._results import ContactResult
-from polyzymd.analyses.contacts._runner import (
-    ContactsReplicateRunner,
-    ParallelContactAnalyzer,
-    build_contact_grouping,
-)
+from polyzymd.analyses.mda import MDAAnalysisJob, ReplicateArtifact
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
+
+if TYPE_CHECKING:
+    from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext
 
 
 # Default cutoff matching the existing settings module
@@ -243,7 +248,7 @@ class ContactsAnalysis(Analysis):
     """Contacts analysis: polymer-protein contacts from MD trajectories.
 
     This plugin delegates trajectory-native contact detection to the contacts
-    runner seam, while keeping aggregation, comparison, plotting, and
+    MDAnalysis job seam, while keeping aggregation, comparison, plotting, and
     downstream orchestration in the plugin class.
 
     The ``compare()`` method is **fully overridden** because:
@@ -265,7 +270,7 @@ class ContactsAnalysis(Analysis):
     Settings: ClassVar[type] = ContactsSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = ContactsPlotSettings
     AggregatedResultClass: ClassVar[type] = AggregatedContactResult
-    ReplicateResultClass: ClassVar[type | None] = ContactResult
+    ReplicateResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 1
@@ -288,7 +293,18 @@ class ContactsAnalysis(Analysis):
 
         if settings is None:
             return None
-        return contacts_settings_fingerprint(settings)
+        return contacts_detection_fingerprint(settings)
+
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[MDAAnalysisJob] | None:
+        """Build the sparse contacts MDAnalysis job for one replicate."""
+
+        return build_contacts_jobs(ctx, cast(ContactsSettings, ctx.settings))
+
+    def build_mda_collector(self, ctx: MDACollectorContext) -> Any:
+        """Build the contacts artifact collector."""
+
+        del ctx
+        return ContactsArtifactCollector()
 
     @staticmethod
     def _replicate_sidecar_path(
@@ -627,15 +643,6 @@ class ContactsAnalysis(Analysis):
             allow_replicate_subset=allow_replicate_subset,
         )
 
-    def run_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-    ) -> Any:
-        """Run contacts for a single replicate."""
-
-        return _contacts_lifecycle.run_replicate(self, ctx, replicate)
-
     def get_trajectory_window(
         self,
         ctx: ReplicateContext,
@@ -647,28 +654,6 @@ class ContactsAnalysis(Analysis):
 
         return _contacts_lifecycle.get_trajectory_window(ctx, replicate, loader, universe)
 
-    def build_runner(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        universe: Any,
-        window: Any,
-    ) -> Any:
-        """Build the runner-backed contacts execution object."""
-
-        return _contacts_lifecycle.build_runner(self, ctx, replicate, universe, window)
-
-    def summarize_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        runner: Any,
-        window: Any,
-    ) -> Any:
-        """Attach framework metadata to the runner-produced contact result."""
-
-        return _contacts_lifecycle.summarize_replicate(self, ctx, replicate, runner, window)
-
     def aggregate(
         self,
         ctx: AggregateContext,
@@ -676,6 +661,18 @@ class ContactsAnalysis(Analysis):
     ) -> Any:
         """Aggregate contact results across replicates for one condition."""
 
+        if results and all(isinstance(result, ReplicateArtifact) for result in results):
+            settings_fingerprint = self.aggregate_settings_fingerprint(ctx.settings)
+            converted = [
+                artifact_to_contact_result(
+                    cast(ReplicateArtifact, result),
+                    run_dir=ctx.output_dir.parent
+                    / f"run_{cast(ReplicateArtifact, result).replicate}",
+                    settings_fingerprint=settings_fingerprint,
+                )
+                for result in results
+            ]
+            return _contacts_lifecycle.aggregate(self, ctx, converted)
         return _contacts_lifecycle.aggregate(self, ctx, results)
 
     # === filter_conditions() — exclude no-polymer conditions ===

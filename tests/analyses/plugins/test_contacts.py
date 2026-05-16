@@ -326,11 +326,6 @@ class TestSettings:
         assert len(disabled_candidates) == 1
 
 
-# ---------------------------------------------------------------------------
-# run_replicate
-# ---------------------------------------------------------------------------
-
-
 def _make_mock_contact_result(replicate: int = 1):
     """Create a mock ContactResult."""
     mock = MagicMock()
@@ -357,660 +352,243 @@ def _make_hashable_sim_config(tmp_path: Path):
     )
 
 
-def _make_mdanalysis_exception_modules() -> dict[str, ModuleType]:
-    """Build minimal MDAnalysis exception modules for fragment tests."""
-
-    mdanalysis_module = ModuleType("MDAnalysis")
-    exceptions_module = ModuleType("MDAnalysis.exceptions")
-
-    class NoDataError(Exception):
-        pass
-
-    exceptions_module.NoDataError = NoDataError
-    mdanalysis_module.exceptions = exceptions_module
-    return {
-        "MDAnalysis": mdanalysis_module,
-        "MDAnalysis.exceptions": exceptions_module,
-    }
+# ---------------------------------------------------------------------------
+# MDAnalysis sparse contact detection
+# ---------------------------------------------------------------------------
 
 
-class TestRunReplicate:
-    """run_replicate delegates to ParallelContactAnalyzer."""
+def _make_contact_universe(coords=None, dimensions=None):
+    """Build a tiny MDAnalysis universe for sparse contact tests."""
 
-    def test_delegates_to_analyzer(self, tmp_path):
-        from polyzymd.analyses.base import Condition, ReplicateContext
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+    import MDAnalysis as mda
+    import numpy as np
 
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-
-        mock_sim_config = _make_hashable_sim_config(tmp_path)
-        cond = Condition(
-            label="test",
-            config_path=Path("/tmp/config.yaml"),
-            replicates=(1, 2, 3),
-            sim_config=mock_sim_config,
+    if coords is None:
+        coords = np.asarray(
+            [
+                [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                [[0.0, 0.0, 0.0], [8.0, 0.0, 0.0]],
+            ],
+            dtype=np.float32,
         )
-        output_dir = tmp_path / "run_1"
-        ctx = ReplicateContext(
-            condition=cond,
-            replicate=1,
-            sim_config=mock_sim_config,
-            output_dir=output_dir,
-            equilibration="10ns",
-            recompute=False,
-            settings=settings,
+    if dimensions is None:
+        dimensions = np.tile(np.asarray([20.0, 20.0, 20.0, 90.0, 90.0, 90.0]), (len(coords), 1))
+    universe = mda.Universe.empty(
+        2,
+        n_residues=2,
+        atom_resindex=[0, 1],
+        n_segments=2,
+        residue_segindex=[0, 1],
+        trajectory=True,
+    )
+    universe.add_TopologyAttr("names", ["CA", "C1"])
+    universe.add_TopologyAttr("types", ["C", "C"])
+    universe.add_TopologyAttr("resids", [1, 10])
+    universe.add_TopologyAttr("resnames", ["ALA", "PEG"])
+    universe.add_TopologyAttr("chainIDs", ["A", "C"])
+    universe.add_TopologyAttr("segids", ["A", "C"])
+    universe.load_new(coords, order="fac", dimensions=dimensions)
+    return universe
+
+
+def _make_contacts_collector_context(tmp_path, settings):
+    """Build a collector context for direct contact artifact tests."""
+
+    from polyzymd.analyses.base import Condition, ReplicateContext
+    from polyzymd.analyses.mda import ArtifactStore, FrameSelection, MDACollectorContext
+    from polyzymd.analyses.mda.job import MDAUniversePolicy
+
+    sim_config = _make_hashable_sim_config(tmp_path)
+    condition = Condition(
+        label="test",
+        config_path=tmp_path / "config.yaml",
+        replicates=(1,),
+        sim_config=sim_config,
+    )
+    replicate_ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=sim_config,
+        output_dir=tmp_path,
+        equilibration="0ns",
+        recompute=True,
+        settings=settings,
+        result_path=tmp_path / "result.json",
+    )
+    return MDACollectorContext(
+        analysis_name="contacts",
+        replicate_context=replicate_ctx,
+        frame_selection=FrameSelection(start=0, stop=2, step=1, timestep_ps=1.0, n_frames_total=2),
+        universe_policy=MDAUniversePolicy(condition_label="test", replicate=1),
+        artifact_store=ArtifactStore(tmp_path),
+        settings_fingerprint="contacts-test-fp",
+    )
+
+
+class TestContactsMDAArtifacts:
+    """Contacts detection uses sparse MDAnalysis event artifacts."""
+
+    def test_plugin_uses_mda_artifacts_without_runner_hook(self):
+        from polyzymd.analyses.base import Analysis
+        from polyzymd.analyses.contacts import ContactsAnalysis
+
+        assert ContactsAnalysis.ReplicateResultClass is None
+        assert ContactsAnalysis.build_runner is Analysis.build_runner
+        assert ContactsAnalysis.summarize_replicate is Analysis.summarize_replicate
+
+    def test_sparse_analysis_streams_contact_events(self):
+        from polyzymd.analyses.contacts._mda import build_contact_event_analysis
+
+        analysis = build_contact_event_analysis(
+            universe=_make_contact_universe(),
+            protein_selection="chainid A",
+            polymer_selection="chainid C",
+            cutoff=4.5,
+            grouping_mode="aa_class",
+            raw_timestep_ps=1.0,
         )
+        analysis.run(start=0, stop=2, step=1)
 
-        mock_result = _make_mock_contact_result(replicate=1)
+        assert analysis.results.event_start_sample_index.tolist() == [0]
+        assert analysis.results.event_start_frame.tolist() == [0]
+        assert analysis.results.event_duration_samples.tolist() == [1]
+        assert analysis.results.event_duration_ps.tolist() == [1.0]
+        assert analysis.results.protein_residue_index.tolist() == [0]
+        assert analysis.results.polymer_residue_index.tolist() == [0]
+        assert analysis.results.contact_sample_counts.tolist() == [1]
+        assert not hasattr(analysis.results, "contact_matrix")
 
-        with (
-            patch("polyzymd.analyses.contacts.ParallelContactAnalyzer") as MockAnalyzer,
-            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader,
-        ):
-            mock_universe = MagicMock()
-            mock_universe.trajectory.dt = 10.0
-            mock_universe.trajectory.__len__.return_value = 2000
-            MockLoader.return_value.load_universe.return_value = mock_universe
-            MockLoader.return_value.get_timestep.return_value = 10.0
+    def test_capped_distance_receives_timestep_box(self):
+        import numpy as np
 
-            MockAnalyzer.return_value.run.return_value = mock_result
+        from polyzymd.analyses.contacts._mda import build_contact_event_analysis
 
-            result = analysis.run_replicate(ctx, 1)
+        coords = np.asarray([[[0.2, 0.0, 0.0], [9.8, 0.0, 0.0]]], dtype=np.float32)
+        dims = np.asarray([[10.0, 10.0, 10.0, 90.0, 90.0, 90.0]])
+        captured_boxes = []
 
-        assert result is mock_result
-        MockAnalyzer.assert_called_once()
-        call_kwargs = MockAnalyzer.call_args[1]
-        assert call_kwargs["cutoff"] == 4.5
+        def _fake_capped_distance(*args, **kwargs):
+            captured_boxes.append(np.asarray(kwargs["box"], dtype=float).copy())
+            return np.asarray([[0, 0]], dtype=np.int64), np.asarray([0.4], dtype=float)
 
-    def test_returns_none_on_missing_trajectory(self, tmp_path):
-        from polyzymd.analyses.base import Condition, ReplicateContext
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.exceptions import ReplicateSkippedError
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-
-        mock_sim_config = _make_hashable_sim_config(tmp_path)
-        cond = Condition(
-            label="test",
-            config_path=Path("/tmp/config.yaml"),
-            replicates=(1,),
-            sim_config=mock_sim_config,
+        analysis = build_contact_event_analysis(
+            universe=_make_contact_universe(coords=coords, dimensions=dims),
+            protein_selection="chainid A",
+            polymer_selection="chainid C",
+            cutoff=0.5,
+            grouping_mode="none",
+            raw_timestep_ps=1.0,
         )
-        ctx = ReplicateContext(
-            condition=cond,
-            replicate=1,
-            sim_config=mock_sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=False,
-            settings=settings,
+        with patch("MDAnalysis.lib.distances.capped_distance", side_effect=_fake_capped_distance):
+            analysis.run(start=0, stop=1, step=1)
+
+        assert captured_boxes
+        np.testing.assert_allclose(captured_boxes[0], dims[0])
+
+    def test_zero_contact_output_keeps_identity_arrays(self):
+        from polyzymd.analyses.contacts._mda import build_contact_event_analysis
+
+        analysis = build_contact_event_analysis(
+            universe=_make_contact_universe(),
+            protein_selection="chainid A",
+            polymer_selection="chainid C",
+            cutoff=0.1,
+            grouping_mode="none",
+            raw_timestep_ps=1.0,
         )
+        analysis.run(start=0, stop=2, step=1)
 
-        with patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader:
-            MockLoader.return_value.load_universe.side_effect = FileNotFoundError("No trajectory")
-            with pytest.raises(ReplicateSkippedError, match="No trajectory data found"):
-                analysis.run_replicate(ctx, 1)
+        assert analysis.results.event_duration_samples.size == 0
+        assert analysis.results.n_frames_used == 2
+        assert [row.resid for row in analysis.results.protein_identity] == [1]
+        assert [row.resid for row in analysis.results.polymer_identity] == [10]
 
-    def test_cache_filename_includes_settings_fingerprint(self, tmp_path):
-        from polyzymd.analyses.base import Condition, ReplicateContext
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+    def test_collector_writes_summary_json_and_npz_sidecar(self, tmp_path):
+        import numpy as np
 
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings(cutoff=4.5)
-
-        mock_sim_config = _make_hashable_sim_config(tmp_path)
-        cond = Condition(
-            label="test",
-            config_path=Path("/tmp/config.yaml"),
-            replicates=(1,),
-            sim_config=mock_sim_config,
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.contacts._mda import (
+            ContactsArtifactCollector,
+            build_contact_event_analysis,
         )
-        ctx = ReplicateContext(
-            condition=cond,
-            replicate=1,
-            sim_config=mock_sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=False,
-            settings=settings,
-        )
-
-        mock_result = _make_mock_contact_result(replicate=1)
-        expected_fp = contacts_settings_fingerprint(settings)
-
-        with (
-            patch("polyzymd.analyses.contacts.ParallelContactAnalyzer") as MockAnalyzer,
-            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader,
-        ):
-            mock_universe = MagicMock()
-            mock_universe.trajectory.dt = 10.0
-            mock_universe.trajectory.__len__.return_value = 2000
-            MockLoader.return_value.load_universe.return_value = mock_universe
-            MockLoader.return_value.get_timestep.return_value = 10.0
-            MockAnalyzer.return_value.run.return_value = mock_result
-
-            analysis.run_replicate(ctx, 1)
-
-        save_path = mock_result.save.call_args[0][0]
-        assert f"_s{expected_fp}_" in str(save_path)
-
-    def test_compute_writes_canonical_and_legacy_paths(self, tmp_path):
-        from polyzymd.analyses.base import Condition, ReplicateContext
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._results import ContactResult
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-        sim_config = _make_hashable_sim_config(tmp_path)
-        condition = Condition(
-            label="test",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1,),
-            sim_config=sim_config,
-        )
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=True,
-            settings=settings,
-            result_path=tmp_path / "run_1" / "result.json",
-        )
-        result = ContactResult(
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="any_atom_4.5A",
-            criteria_cutoff=4.5,
-            metadata={},
-        )
-
-        with (
-            patch("polyzymd.analyses.contacts.ParallelContactAnalyzer") as MockAnalyzer,
-            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader,
-        ):
-            mock_universe = MagicMock()
-            mock_universe.trajectory.dt = 10.0
-            mock_universe.trajectory.__len__.return_value = 2000
-            MockLoader.return_value.load_universe.return_value = mock_universe
-            MockLoader.return_value.get_timestep.return_value = 10.0
-            MockAnalyzer.return_value.run.return_value = result
-
-            analysis.run_replicate(ctx, 1)
-
-        assert ctx.result_path.exists()
-        assert list(ctx.output_dir.glob("contacts_eq10ns_cut4.5_s*_rep1.json"))
-
-    def test_aggregate_writes_canonical_and_legacy_paths(self, tmp_path):
-        from polyzymd.analyses.base import AggregateContext, Condition
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-        sim_config = _make_hashable_sim_config(tmp_path)
-        condition = Condition(
-            label="test",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1, 2),
-            sim_config=sim_config,
-        )
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1, 2),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=settings,
-            result_path=tmp_path / "aggregated" / "result.json",
-        )
-        mock_agg = _make_mock_agg_result(n_replicates=2)
-
-        def _write_mock_agg(path):
-            path = Path(path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("{}")
-            return path
-
-        mock_agg.save.side_effect = _write_mock_agg
-
-        with patch(
-            "polyzymd.analyses.contacts._aggregator.aggregate_contact_results",
-            return_value=mock_agg,
-        ):
-            analysis.aggregate(ctx, [_make_mock_contact_result(1), _make_mock_contact_result(2)])
-
-        assert ctx.result_path.exists()
-        assert list(ctx.output_dir.glob("contacts_aggregated_eq10ns_cut4.5_s*_reps1-2.json"))
-
-    def test_cache_miss_when_cutoff_changes(self, tmp_path):
-        from polyzymd.analyses.base import Condition, ReplicateContext
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._results import ContactResult
-
-        analysis = ContactsAnalysis()
-        old_settings = ContactsSettings(cutoff=4.0)
-        new_settings = ContactsSettings(cutoff=4.5)
-        sim_config = _make_hashable_sim_config(tmp_path)
-        condition = Condition(
-            label="test",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1,),
-            sim_config=sim_config,
-        )
-        legacy_cache = analysis._replicate_sidecar_path(tmp_path / "run_1", old_settings, "10ns", 1)
-        ContactResult(
-            config_hash="stale",
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="any_atom_4.0A",
-            criteria_cutoff=4.0,
-            metadata={},
-        ).save(legacy_cache)
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=False,
-            settings=new_settings,
-        )
-        fresh_result = _make_mock_contact_result(replicate=1)
-
-        with (
-            patch("polyzymd.analyses.contacts.ParallelContactAnalyzer") as MockAnalyzer,
-            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader,
-        ):
-            mock_universe = MagicMock()
-            mock_universe.trajectory.dt = 10.0
-            mock_universe.trajectory.__len__.return_value = 2000
-            MockLoader.return_value.load_universe.return_value = mock_universe
-            MockLoader.return_value.get_timestep.return_value = 10.0
-            MockAnalyzer.return_value.run.return_value = fresh_result
-
-            result = analysis.run_replicate(ctx, 1)
-
-        assert result is fresh_result
-        MockAnalyzer.assert_called_once()
-
-    def test_canonical_cache_miss_when_cutoff_changes(self, tmp_path):
-        from polyzymd.analyses.base import Condition, ReplicateContext
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
-        from polyzymd.analyses.contacts._results import ContactResult
-
-        analysis = ContactsAnalysis()
-        old_settings = ContactsSettings(cutoff=4.0)
-        new_settings = ContactsSettings(cutoff=4.5)
-        sim_config = _make_hashable_sim_config(tmp_path)
-        condition = Condition(
-            label="test",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1,),
-            sim_config=sim_config,
-        )
-        canonical = tmp_path / "run_1" / "result.json"
-        ContactResult(
-            config_hash="stale",
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="any_atom_4.0A",
-            criteria_cutoff=4.0,
-            metadata={"settings_fingerprint": contacts_settings_fingerprint(old_settings)},
-        ).save(canonical)
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=False,
-            settings=new_settings,
-            result_path=canonical,
-        )
-        fresh_result = _make_mock_contact_result(replicate=1)
-
-        with (
-            patch("polyzymd.analyses.contacts.ParallelContactAnalyzer") as MockAnalyzer,
-            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader,
-        ):
-            mock_universe = MagicMock()
-            mock_universe.trajectory.dt = 10.0
-            mock_universe.trajectory.__len__.return_value = 2000
-            MockLoader.return_value.load_universe.return_value = mock_universe
-            MockLoader.return_value.get_timestep.return_value = 10.0
-            MockAnalyzer.return_value.run.return_value = fresh_result
-
-            result = analysis.run_replicate(ctx, 1)
-
-        assert result is fresh_result
-        MockAnalyzer.assert_called_once()
-
-    def test_cached_replicate_id_mismatch_is_rejected(self, tmp_path):
-        from polyzymd.analyses.base import Condition, ReplicateContext
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._results import ContactResult
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-        sim_config = _make_hashable_sim_config(tmp_path)
-        condition = Condition(
-            label="test",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1,),
-            sim_config=sim_config,
-        )
-        cache = analysis._replicate_sidecar_path(tmp_path / "run_1", settings, "10ns", 1)
-        stale = ContactResult(
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="any_atom_4.5A",
-            criteria_cutoff=4.5,
-            replicate=2,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-        )
-        stale.save(cache)
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=False,
-            settings=settings,
-        )
-        fresh_result = _make_mock_contact_result(replicate=1)
-
-        with (
-            patch("polyzymd.analyses.contacts.ParallelContactAnalyzer") as MockAnalyzer,
-            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader,
-        ):
-            mock_universe = MagicMock()
-            mock_universe.trajectory.dt = 10.0
-            mock_universe.trajectory.__len__.return_value = 2000
-            MockLoader.return_value.load_universe.return_value = mock_universe
-            MockLoader.return_value.get_timestep.return_value = 10.0
-            MockAnalyzer.return_value.run.return_value = fresh_result
-
-            result = analysis.run_replicate(ctx, 1)
-
-        assert result is fresh_result
-        MockAnalyzer.assert_called_once()
-
-    def test_canonical_cache_miss_when_equilibration_changes(self, tmp_path):
-        from polyzymd.analyses.base import Condition, ReplicateContext
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
-        from polyzymd.analyses.contacts._results import ContactResult
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-        sim_config = _make_hashable_sim_config(tmp_path)
-        condition = Condition(
-            label="test",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1,),
-            sim_config=sim_config,
-        )
-        canonical = tmp_path / "run_1" / "result.json"
-        ContactResult(
-            config_hash="stale",
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="any_atom_4.5A",
-            criteria_cutoff=4.5,
-            equilibration_time=0.0,
-            equilibration_unit="ns",
-            metadata={"settings_fingerprint": contacts_settings_fingerprint(settings)},
-        ).save(canonical)
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=False,
-            settings=settings,
-            result_path=canonical,
-        )
-        fresh_result = _make_mock_contact_result(replicate=1)
-
-        with (
-            patch("polyzymd.analyses.contacts.ParallelContactAnalyzer") as MockAnalyzer,
-            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader,
-        ):
-            mock_universe = MagicMock()
-            mock_universe.trajectory.dt = 10.0
-            mock_universe.trajectory.__len__.return_value = 2000
-            MockLoader.return_value.load_universe.return_value = mock_universe
-            MockLoader.return_value.get_timestep.return_value = 10.0
-            MockAnalyzer.return_value.run.return_value = fresh_result
-
-            result = analysis.run_replicate(ctx, 1)
-
-        assert result is fresh_result
-        MockAnalyzer.assert_called_once()
-
-    def test_compute_prefers_sidecar_over_canonical_cache(self, tmp_path):
-        from polyzymd.analyses.base import Condition, ReplicateContext
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
-        from polyzymd.analyses.contacts._results import ContactResult
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-        sim_config = _make_hashable_sim_config(tmp_path)
-        condition = Condition(
-            label="test",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1,),
-            sim_config=sim_config,
-        )
-        output_dir = tmp_path / "run_1"
-        canonical = output_dir / "result.json"
-        sidecar = analysis._replicate_sidecar_path(output_dir, settings, "10ns", 1)
-        ContactResult(
-            replicate=1,
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="canonical",
-            criteria_cutoff=4.5,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-        ).save(canonical)
-        ContactResult(
-            replicate=1,
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="sidecar",
-            criteria_cutoff=4.5,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            metadata={"settings_fingerprint": contacts_settings_fingerprint(settings)},
-        ).save(sidecar)
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=sim_config,
-            output_dir=output_dir,
-            equilibration="10ns",
-            recompute=False,
-            settings=settings,
-            result_path=canonical,
-        )
-
-        result = analysis.run_replicate(ctx, 1)
-
-        assert result.criteria_label == "sidecar"
-
-    def test_fingerprintless_canonical_not_copied_to_sidecar(self, tmp_path):
-        from polyzymd.analyses.base import Condition, ReplicateContext
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._results import ContactResult
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-        sim_config = _make_hashable_sim_config(tmp_path)
-        output_dir = tmp_path / "run_1"
-        canonical = output_dir / "result.json"
-        sidecar = analysis._replicate_sidecar_path(output_dir, settings, "10ns", 1)
-        ContactResult(
-            replicate=1,
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="canonical",
-            criteria_cutoff=4.5,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-        ).save(canonical)
-        condition = Condition(
-            label="test",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1,),
-            sim_config=sim_config,
-        )
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=sim_config,
-            output_dir=output_dir,
-            equilibration="10ns",
-            recompute=False,
-            settings=settings,
-            result_path=canonical,
-        )
-
-        with patch(
-            "polyzymd.analyses.base.Analysis._run_replicate_default",
-            side_effect=RuntimeError("should recompute"),
-        ):
-            with pytest.raises(RuntimeError, match="should recompute"):
-                analysis.run_replicate(ctx, 1)
-
-        assert not sidecar.exists()
-
-    def test_filename_only_sidecar_fingerprint_rejected(self, tmp_path):
-        from polyzymd.analyses.base import Condition, ReplicateContext
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._results import ContactResult
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-        sim_config = _make_hashable_sim_config(tmp_path)
-        output_dir = tmp_path / "run_1"
-        sidecar = analysis._replicate_sidecar_path(output_dir, settings, "10ns", 1)
-        ContactResult(
-            replicate=1,
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="sidecar",
-            criteria_cutoff=4.5,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-        ).save(sidecar)
-        condition = Condition(
-            label="test",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1,),
-            sim_config=sim_config,
-        )
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=sim_config,
-            output_dir=output_dir,
-            equilibration="10ns",
-            recompute=False,
-            settings=settings,
-        )
-
-        with patch(
-            "polyzymd.analyses.base.Analysis._run_replicate_default",
-            side_effect=RuntimeError("should recompute"),
-        ):
-            with pytest.raises(RuntimeError, match="should recompute"):
-                analysis.run_replicate(ctx, 1)
-
-    def test_disabled_residence_times_rejects_fingerprintless_legacy_cache(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._results import ContactResult
-
-        settings = ContactsSettings(compute_residence_times=False)
-        legacy = ContactResult(
-            replicate=1,
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="any_atom_4.5A",
-            criteria_cutoff=4.5,
-            selection_string="chainid A : chainid C",
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            metadata={"grouping": "aa_class"},
-        )
-
-        assert not ContactsAnalysis._cache_matches_contacts_settings(legacy, settings)
-
-    def test_enabled_residence_times_accepts_fingerprintless_legacy_cache(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._results import ContactResult
-
-        settings = ContactsSettings(compute_residence_times=True)
-        legacy = ContactResult(
-            replicate=1,
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="any_atom_4.5A",
-            criteria_cutoff=4.5,
-            selection_string="chainid A : chainid C",
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            metadata={"grouping": "aa_class"},
-        )
-
-        assert ContactsAnalysis._cache_matches_contacts_settings(legacy, settings)
-        assert legacy.metadata["compute_residence_times"] is True
-
-    def test_old_chain_default_cache_selection_is_rejected(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._results import ContactResult
+        from polyzymd.analyses.mda import FrameSelection, MDAAnalysisJob
 
         settings = ContactsSettings()
-        legacy = ContactResult(
-            replicate=1,
-            residue_contacts=[],
-            n_frames=10,
-            timestep_ps=10.0,
-            criteria_label="any_atom_4.5A",
-            criteria_cutoff=4.5,
-            selection_string="protein : chainID C",
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            metadata={"grouping": "aa_class"},
+        analysis = build_contact_event_analysis(
+            universe=_make_contact_universe(),
+            protein_selection="chainid A",
+            polymer_selection="chainid C",
+            cutoff=4.5,
+            grouping_mode="aa_class",
+            raw_timestep_ps=1.0,
+        )
+        job = MDAAnalysisJob(
+            name="contacts",
+            analysis=analysis,
+            frame_selection=FrameSelection(
+                start=0, stop=2, step=1, timestep_ps=1.0, n_frames_total=2
+            ),
+        )
+        completed = job.run()
+        artifact = ContactsArtifactCollector()(
+            _make_contacts_collector_context(tmp_path, settings), [completed]
         )
 
-        assert not ContactsAnalysis._cache_matches_contacts_settings(legacy, settings)
+        assert artifact.payload["n_contact_events"] == 1
+        assert artifact.payload["n_protein_residues"] == 1
+        assert artifact.payload["metrics"] == {"coverage": 1.0, "mean_contact_fraction": 0.5}
+        assert artifact.payload["event_sidecar"] == "sidecars/contact_events.npz"
+        assert "event_start_sample_index" not in artifact.model_dump(mode="json")["payload"]
+        with np.load(tmp_path / artifact.payload["event_sidecar"]) as data:
+            assert data["event_duration_samples"].tolist() == [1]
+            assert data["event_duration_ns"].tolist() == [0.001]
+            assert data["protein_resids"].tolist() == [1]
+            assert data["polymer_resids"].tolist() == [10]
+
+    def test_artifact_adapter_preserves_legacy_contact_semantics(self, tmp_path):
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.contacts._mda import (
+            ContactsArtifactCollector,
+            artifact_to_contact_result,
+            build_contact_event_analysis,
+        )
+        from polyzymd.analyses.mda import FrameSelection, MDAAnalysisJob
+
+        settings = ContactsSettings()
+        analysis = build_contact_event_analysis(
+            universe=_make_contact_universe(),
+            protein_selection="chainid A",
+            polymer_selection="chainid C",
+            cutoff=4.5,
+            grouping_mode="aa_class",
+            raw_timestep_ps=1.0,
+        )
+        job = MDAAnalysisJob(
+            name="contacts",
+            analysis=analysis,
+            frame_selection=FrameSelection(
+                start=0, stop=2, step=1, timestep_ps=1.0, n_frames_total=2
+            ),
+        )
+        artifact = ContactsArtifactCollector()(
+            _make_contacts_collector_context(tmp_path, settings), [job.run()]
+        )
+
+        result = artifact_to_contact_result(
+            artifact, run_dir=tmp_path, settings_fingerprint="contacts-test-fp"
+        )
+
+        assert result.n_frames == 2
+        assert result.coverage_fraction() == 1.0
+        assert result.mean_contact_fraction() == 0.5
+        assert result.residue_contacts[0].segment_contacts[0].events[0].start_frame == 0
 
 
-class TestParallelContactAnalyzerResidueIdentity:
-    """Ensure residue identity preserves chain-separated duplicate resid values."""
+class TestContactsSparseEventUtilities:
+    """Contacts-local helpers preserve legacy scientific semantics."""
 
     def test_build_atom_to_residue_map_distinguishes_duplicate_resids_by_chain(self):
-        from polyzymd.analyses.contacts import ParallelContactAnalyzer
+        from polyzymd.analyses.contacts._events import build_atom_to_residue_map
 
         class _Residue:
             def __init__(self, resid: int, resname: str, chain_id: str):
@@ -1024,228 +602,57 @@ class TestParallelContactAnalyzerResidueIdentity:
 
         residue_a = _Residue(1, "SBM", "C")
         residue_b = _Residue(1, "SBM", "D")
-        residues = [residue_a, residue_b]
         atoms = [_Atom(residue_a), _Atom(residue_b)]
 
-        atom_to_res = ParallelContactAnalyzer._build_atom_to_residue_map(atoms, residues)
+        atom_to_res = build_atom_to_residue_map(atoms, [residue_a, residue_b])
 
         assert atom_to_res.tolist() == [0, 1]
 
-    def test_run_keeps_duplicate_resids_distinct_across_chains(self):
-        import numpy as np
-
-        from polyzymd.analyses.contacts import ParallelContactAnalyzer
-
-        class _Residue:
-            def __init__(self, resid: int, resname: str, chain_id: str, ix: int):
-                self.resid = resid
-                self.resname = resname
-                self.chainID = chain_id
-                self.ix = ix
-
-        class _AtomGroup(list):
-            @property
-            def atoms(self):
-                return self
-
-            @property
-            def fragments(self):
-                return [self]
-
-        class _Fragment:
-            def __init__(self, residues):
-                self.residues = residues
-
-        class _QueryAtomGroup(_AtomGroup):
-            @property
-            def fragments(self):
-                return [_Fragment([query_residues[0]]), _Fragment([query_residues[1]])]
-
-        class _ResidueGroup(list):
-            def __init__(self, residues, atoms):
-                super().__init__(residues)
-                self.atoms = atoms
-
-        class _TargetAtom:
-            def __init__(self, residue):
-                self.residue = residue
-
-        class _QueryAtom:
-            def __init__(self, residue):
-                self.residue = residue
-
-        protein_residue = _Residue(10, "ALA", "A", ix=100)
-        query_residues = [
-            _Residue(1, "SBM", "C", ix=200),
-            _Residue(1, "SBM", "D", ix=201),
-        ]
-
-        target_atoms = _AtomGroup([_TargetAtom(protein_residue)])
-        query_atoms = _QueryAtomGroup(
-            [_QueryAtom(query_residues[0]), _QueryAtom(query_residues[1])]
-        )
-
-        selector_result_target = MagicMock()
-        selector_result_target.atoms = target_atoms
-        selector_result_target.residues = [protein_residue]
-        selector_result_query = MagicMock()
-        selector_result_query.atoms = query_atoms
-        selector_result_query.residues = _ResidueGroup(query_residues, query_atoms)
-
-        target_selector = MagicMock()
-        target_selector.select.return_value = selector_result_target
-        target_selector.label = "protein"
-        query_selector = MagicMock()
-        query_selector.select.return_value = selector_result_query
-        query_selector.label = "polymer"
-
-        analyzer = ParallelContactAnalyzer(
-            target_selector=target_selector,
-            query_selector=query_selector,
-            cutoff=4.5,
-        )
-
-        contact_matrix = np.array([[[1, 1]]], dtype=np.uint8)
-        fake_analysis = MagicMock()
-        fake_analysis.results.contact_matrix = contact_matrix
-        fake_analysis.run.return_value = None
-
-        universe = MagicMock()
-        universe.trajectory.dt = 10.0
-
-        with patch(
-            "polyzymd.analyses.contacts._runner._get_contact_analysis_base_cls"
-        ) as mock_factory:
-            mock_factory.return_value.return_value = fake_analysis
-            result = analyzer.run(universe, start=0, stop=1, step=1)
-
-        assert result.n_frames == 1
-        residue_contacts = result.residue_contacts[0].segment_contacts
-        assert len(residue_contacts) == 2
-        assert sorted(sc.polymer_chain_idx for sc in residue_contacts) == [0, 1]
-        assert [sc.polymer_resid for sc in residue_contacts] == [1, 1]
-
     def test_fragment_lookup_falls_back_without_bond_topology(self):
-        """No-bond topologies should be treated as one polymer fragment."""
-        from polyzymd.analyses.contacts._runner import _fragments_or_single
+        from polyzymd.analyses.contacts._events import fragments_or_single
 
-        modules = _make_mdanalysis_exception_modules()
-        no_data_error = modules["MDAnalysis.exceptions"].NoDataError
+        mdanalysis_module = ModuleType("MDAnalysis")
+        exceptions_module = ModuleType("MDAnalysis.exceptions")
 
-        class _AtomGroup:
-            @property
-            def fragments(self):
-                raise no_data_error("No bond information")
-
-        atoms = _AtomGroup()
-
-        with patch.dict("sys.modules", modules):
-            assert _fragments_or_single(atoms, context="test") == [atoms]
-
-    def test_fragment_lookup_propagates_unrelated_errors(self):
-        """Only MDAnalysis NoDataError should trigger the no-bond fallback."""
-        from polyzymd.analyses.contacts._runner import _fragments_or_single
-
-        class CustomFragmentError(RuntimeError):
+        class NoDataError(Exception):
             pass
 
+        exceptions_module.NoDataError = NoDataError
+        mdanalysis_module.exceptions = exceptions_module
+
         class _AtomGroup:
             @property
             def fragments(self):
-                raise CustomFragmentError("unexpected fragment failure")
+                raise NoDataError("No bond information")
 
-        with patch.dict("sys.modules", _make_mdanalysis_exception_modules()):
-            with pytest.raises(CustomFragmentError, match="unexpected fragment failure"):
-                _fragments_or_single(_AtomGroup(), context="test")
+        warnings = []
+        with patch.dict(
+            "sys.modules",
+            {"MDAnalysis": mdanalysis_module, "MDAnalysis.exceptions": exceptions_module},
+        ):
+            atoms = _AtomGroup()
+            assert fragments_or_single(atoms, context="test", warnings=warnings) == [atoms]
 
+        assert warnings == [
+            "test: topology has no bond information; treating the selected polymer as one fragment"
+        ]
 
-class TestContactsRunnerGrouping:
-    """Regression tests for settings grouping across the runner seam."""
-
-    def _make_context(self, tmp_path, settings):
-        """Build a replicate context for runner construction tests."""
-
-        from polyzymd.analyses.base import Condition, ReplicateContext
-
-        condition = Condition(
-            label="test",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1,),
-            sim_config=MagicMock(),
-        )
-        return ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="0ns",
-            recompute=False,
-            settings=settings,
-        )
-
-    def test_build_runner_threads_none_grouping(self, tmp_path):
-        """The ``none`` grouping should preserve residue-name labels."""
-
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-
-        analysis = ContactsAnalysis()
-        ctx = self._make_context(tmp_path, ContactsSettings(grouping="none"))
-
-        runner = analysis.build_runner(ctx, 1, MagicMock(), MagicMock())
-
-        assert runner.grouping.classify("ALA") == "ALA"
-
-    def test_build_runner_threads_secondary_structure_grouping(self, tmp_path):
-        """Secondary-structure grouping should use residue annotations."""
-
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-
-        analysis = ContactsAnalysis()
-        ctx = self._make_context(
-            tmp_path,
-            ContactsSettings(grouping="secondary_structure"),
-        )
-
-        runner = analysis.build_runner(ctx, 1, MagicMock(), MagicMock())
-
-        residue = SimpleNamespace(resname="ALA", secondary_structure="E")
-        assert runner.grouping.classify_residue(residue) == "sheet"
-
-    def test_build_runner_threads_aa_class_grouping(self, tmp_path):
-        """AA-class grouping should retain the default biochemical classes."""
-
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-
-        analysis = ContactsAnalysis()
-        ctx = self._make_context(tmp_path, ContactsSettings(grouping="aa_class"))
-
-        runner = analysis.build_runner(ctx, 1, MagicMock(), MagicMock())
-
-        assert runner.grouping.classify("ALA") == "nonpolar"
-
-    def test_build_runner_applies_polymer_types_to_query_selection(self, tmp_path):
-        """polymer_types should constrain the runner-backed polymer selection."""
-
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings(polymer_selection="chainid C", polymer_types=["SBM", "EGM"])
-        ctx = self._make_context(tmp_path, settings)
-
-        runner = analysis.build_runner(ctx, 1, MagicMock(), MagicMock())
-
-        assert runner.query_selector.selection == "(chainid C) and (resname SBM EGM)"
-
-    def test_settings_fingerprint_changes_with_polymer_types(self):
-        """polymer_types should participate in contacts cache identity."""
-
+    def test_detection_fingerprint_records_cutoff_and_detection_policy(self):
         from polyzymd.analyses.contacts import ContactsSettings
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+        from polyzymd.analyses.contacts._identity import (
+            CONTACTS_PBC_POLICY,
+            contacts_detection_fingerprint,
+            contacts_detection_identity_payload,
+        )
 
-        unfiltered = ContactsSettings(polymer_selection="chainid C")
-        filtered = ContactsSettings(polymer_selection="chainid C", polymer_types=["SBM"])
+        low = ContactsSettings(cutoff=4.0)
+        high = ContactsSettings(cutoff=4.5)
+        payload = contacts_detection_identity_payload(high)
 
-        assert settings_fingerprint(unfiltered) != settings_fingerprint(filtered)
+        assert contacts_detection_fingerprint(low) != contacts_detection_fingerprint(high)
+        assert payload["cutoff"] == {"value": 4.5, "units": "angstrom"}
+        assert payload["pbc_policy"] == CONTACTS_PBC_POLICY
+        assert payload["contact_semantics"] == "any_atom_residue_pair-v1"
 
 
 # ---------------------------------------------------------------------------
