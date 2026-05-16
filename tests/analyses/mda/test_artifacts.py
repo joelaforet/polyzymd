@@ -14,10 +14,17 @@ from polyzymd.analyses.mda.artifacts import (
     ComparisonArtifact,
     ConditionArtifact,
     ReplicateArtifact,
+    raw_mdanalysis_results_path,
 )
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 
 VALID_SHA256 = "0" * 64
+
+
+class FakeMDAnalysisResults(dict):
+    """Import-light stand-in for ``MDAnalysis.analysis.results.Results``."""
+
+    __module__ = "MDAnalysis.analysis.results"
 
 
 def test_replicate_artifact_json_roundtrip() -> None:
@@ -71,6 +78,64 @@ def test_condition_and_comparison_artifact_roundtrip() -> None:
 
     assert ConditionArtifact.model_validate_json(condition.model_dump_json()) == condition
     assert ComparisonArtifact.model_validate_json(comparison.model_dump_json()) == comparison
+
+
+@pytest.mark.parametrize(
+    ("field", "kwargs"),
+    [
+        ("payload", {"payload": {"raw": FakeMDAnalysisResults(value=1)}}),
+        ("provenance", {"provenance": {"raw": FakeMDAnalysisResults(value=1)}}),
+        ("metadata", {"metadata": {"raw": FakeMDAnalysisResults(value=1)}}),
+    ],
+)
+def test_replicate_artifacts_reject_raw_mdanalysis_results(
+    field: str,
+    kwargs: dict[str, object],
+) -> None:
+    """Artifact dictionaries should not accept raw MDAnalysis Results."""
+
+    with pytest.raises(ValidationError) as exc_info:
+        ReplicateArtifact(analysis_name="rmsd", condition_label="PEG", replicate=1, **kwargs)
+    message = str(exc_info.value)
+    assert field in message
+    assert "raw MDAnalysis Results" in message
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"payload": {"raw": FakeMDAnalysisResults(value=1)}},
+        {"provenance": {"raw": FakeMDAnalysisResults(value=1)}},
+        {"metadata": {"raw": FakeMDAnalysisResults(value=1)}},
+    ],
+)
+def test_replicate_artifact_raw_results_error_mentions_results(kwargs: dict[str, object]) -> None:
+    """Artifact raw-results errors should explain the mapping requirement."""
+
+    with pytest.raises(ValidationError, match="raw MDAnalysis Results"):
+        ReplicateArtifact(analysis_name="rmsd", condition_label="PEG", replicate=1, **kwargs)
+
+
+def test_sidecar_and_manifest_metadata_reject_raw_mdanalysis_results() -> None:
+    """Raw MDAnalysis Results should be rejected outside payload fields too."""
+
+    with pytest.raises(ValidationError, match="raw MDAnalysis Results"):
+        ArtifactSidecarRef(
+            path="arrays/raw.npz",
+            sha256=VALID_SHA256,
+            size_bytes=0,
+            metadata={"raw": FakeMDAnalysisResults(value=1)},
+        )
+    with pytest.raises(ValidationError, match="raw MDAnalysis Results"):
+        ArtifactManifest(analysis_name="rmsd", provenance={"raw": FakeMDAnalysisResults(value=1)})
+
+
+def test_raw_mdanalysis_results_path_reports_nested_location() -> None:
+    """The raw-results helper should report a useful nested path."""
+
+    path = raw_mdanalysis_results_path({"outer": [{"inner": FakeMDAnalysisResults()}]})
+
+    assert path == "$.outer[0].inner"
 
 
 @pytest.mark.parametrize("bad_path", ["/abs/file.npz", "../file.npz", "safe/../file.npz"])

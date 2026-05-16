@@ -30,6 +30,13 @@ from polyzymd.analyses.mda.job import (
     MDAUniversePolicy,
 )
 from polyzymd.analyses.mda.lifecycle import MDAReplicateJobContext
+from polyzymd.analyses.mda.plugin import (
+    MDAArtifactCollector,
+    MDACollectorContext,
+    StrictJSONMDAResultCollector,
+    frame_selection_payload,
+    strict_json_payload,
+)
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
 
@@ -55,6 +62,11 @@ __all__ = [
     "MDAJobResult",
     "MDAUniversePolicy",
     "MDAReplicateJobContext",
+    "MDAArtifactCollector",
+    "MDACollectorContext",
+    "StrictJSONMDAResultCollector",
+    "frame_selection_payload",
+    "strict_json_payload",
     "FileIdentity",
     "UniverseProvider",
     "UniverseProvenance",

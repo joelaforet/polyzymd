@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import logging
-import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,7 +14,8 @@ from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda.artifacts import ReplicateArtifact
 from polyzymd.analyses.mda.frame_selection import FrameSelection
 from polyzymd.analyses.mda.job import MDAAnalysisJob, MDAJobResult, MDAUniversePolicy
-from polyzymd.analyses.mda.store import ArtifactStore
+from polyzymd.analyses.mda.plugin import MDACollectorContext
+from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 
 if TYPE_CHECKING:
     from polyzymd.analyses._contexts import ReplicateContext
@@ -237,7 +237,7 @@ def _artifact_from_completed_jobs(
     ctx: MDAReplicateJobContext,
     completed_jobs: Sequence[MDAJobResult],
 ) -> ReplicateArtifact:
-    """Collect completed MDA job results into a replicate artifact.
+    """Collect completed MDA job results through the analysis collector.
 
     Parameters
     ----------
@@ -254,136 +254,110 @@ def _artifact_from_completed_jobs(
         Strict JSON-compatible artifact envelope.
     """
 
-    job_payloads = [_job_result_payload(job, analysis_name=analysis.name) for job in completed_jobs]
-    warnings = []
+    collector_ctx = _build_collector_context(analysis, ctx)
+    collector = analysis.build_mda_collector(collector_ctx)
+    if not callable(collector):
+        raise PluginContractError(
+            f"{analysis.name}.build_mda_collector() must return a callable collector, "
+            f"got {type(collector).__name__}"
+        )
+    artifact = collector(collector_ctx, tuple(completed_jobs))
+    _validate_collected_artifact(artifact, collector_ctx)
+    return artifact
+
+
+def _build_collector_context(analysis: Any, ctx: MDAReplicateJobContext) -> MDACollectorContext:
+    """Build collector context from a completed MDA replicate context.
+
+    Parameters
+    ----------
+    analysis : Any
+        Analysis instance that owns the jobs.
+    ctx : MDAReplicateJobContext
+        MDA replicate context used for execution.
+
+    Returns
+    -------
+    MDACollectorContext
+        Context passed to the artifact collector.
+    """
+
+    settings_fingerprint = analysis.aggregate_settings_fingerprint(ctx.settings)
+    return MDACollectorContext(
+        analysis_name=analysis.name,
+        replicate_context=ctx.replicate_context,
+        frame_selection=ctx.frame_selection,
+        universe_policy=ctx.universe_policy,
+        artifact_store=ctx.artifact_store,
+        settings_fingerprint=settings_fingerprint,
+        warnings=_collector_warnings(ctx),
+    )
+
+
+def _collector_warnings(ctx: MDAReplicateJobContext) -> tuple[str, ...]:
+    """Return warning messages known before collection.
+
+    Parameters
+    ----------
+    ctx : MDAReplicateJobContext
+        MDA replicate context used for execution.
+
+    Returns
+    -------
+    tuple of str
+        Warning messages from frame selection and universe provenance.
+    """
+
+    warnings: list[str] = []
     if ctx.frame_selection.warning_message:
         warnings.append(ctx.frame_selection.warning_message)
-    provenance = _json_payload(ctx.universe_policy.as_dict(), analysis_name=analysis.name)
-    provider_warnings = (
-        provenance.get("provenance", {}).get("warnings", []) if isinstance(provenance, dict) else []
-    )
+    policy = ctx.universe_policy.as_dict()
+    provenance = policy.get("provenance") if isinstance(policy, dict) else None
+    provider_warnings = provenance.get("warnings", []) if isinstance(provenance, dict) else []
     if isinstance(provider_warnings, list):
         warnings.extend(str(warning) for warning in provider_warnings)
-    return ReplicateArtifact(
-        analysis_name=analysis.name,
-        condition_label=ctx.replicate_context.condition.label,
-        replicate=ctx.replicate,
-        payload={"jobs": job_payloads, "n_jobs": len(job_payloads)},
-        provenance={
-            "source": "mda_job_lifecycle",
-            "frame_selection": _frame_selection_payload(ctx.frame_selection),
-            "universe_policy": provenance,
-        },
-        metadata={"result_kind": "mda_replicate_jobs"},
-        warnings=warnings,
-    )
+    return tuple(warnings)
 
 
-def _job_result_payload(job: MDAJobResult, *, analysis_name: str) -> dict[str, Any]:
-    """Serialize one completed job result to JSON-compatible primitives.
+def _validate_collected_artifact(
+    artifact: Any,
+    ctx: MDACollectorContext,
+) -> None:
+    """Validate collector output before lifecycle persistence.
 
     Parameters
     ----------
-    job : MDAJobResult
-        Completed job result reference.
-    analysis_name : str
-        Analysis name for diagnostics.
-
-    Returns
-    -------
-    dict[str, Any]
-        JSON-compatible job payload.
+    artifact : Any
+        Collector output to validate.
+    ctx : MDACollectorContext
+        Collector context with expected identity and artifact store.
     """
 
-    return {
-        "name": job.name,
-        "results": _json_payload(job.results, analysis_name=f"{analysis_name}.{job.name}"),
-        "run_kwargs": _json_payload(
-            dict(job.run_kwargs), analysis_name=f"{analysis_name}.{job.name}"
-        ),
-        "frame_selection": _frame_selection_payload(job.frame_selection),
-        "backend_policy": _json_payload(
-            job.backend_policy.run_kwargs(), analysis_name=f"{analysis_name}.{job.name}"
-        ),
-        "universe_policy": _json_payload(
-            job.universe_policy.as_dict(), analysis_name=f"{analysis_name}.{job.name}"
-        ),
+    if not isinstance(artifact, ReplicateArtifact):
+        raise PluginContractError(
+            f"{ctx.analysis_name}.build_mda_collector() returned {type(artifact).__name__}; "
+            "expected ReplicateArtifact"
+        )
+    expected_identity = {
+        "analysis_name": ctx.analysis_name,
+        "condition_label": ctx.condition_label,
+        "replicate": ctx.replicate,
     }
-
-
-def _frame_selection_payload(frame_selection: FrameSelection) -> dict[str, Any]:
-    """Serialize frame-selection provenance to primitive values.
-
-    Parameters
-    ----------
-    frame_selection : FrameSelection
-        Frame selection used for a job or replicate context.
-
-    Returns
-    -------
-    dict[str, Any]
-        JSON-compatible frame-selection metadata.
-    """
-
-    return {
-        "start": frame_selection.start,
-        "stop": frame_selection.stop,
-        "step": frame_selection.step,
-        "frames": _json_payload(frame_selection.frames, analysis_name="frame_selection"),
-        "equilibration": frame_selection.equilibration,
-        "equilibration_start": frame_selection.equilibration_start,
-        "equilibration_ps": frame_selection.equilibration_ps,
-        "timestep_ps": frame_selection.timestep_ps,
-        "n_frames_total": frame_selection.n_frames_total,
-        "n_frames_selected": frame_selection.n_frames_selected,
-        "warning_message": frame_selection.warning_message,
+    actual_identity = {
+        "analysis_name": artifact.analysis_name,
+        "condition_label": artifact.condition_label,
+        "replicate": artifact.replicate,
     }
-
-
-def _json_payload(value: Any, *, analysis_name: str) -> Any:
-    """Convert supported values to strict JSON-compatible primitives.
-
-    Parameters
-    ----------
-    value : Any
-        Candidate payload returned by an MDA job.
-    analysis_name : str
-        Analysis name for diagnostics.
-
-    Returns
-    -------
-    Any
-        JSON-compatible primitive, list, or dictionary.
-    """
-
-    if value is None or isinstance(value, (str, bool)):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
+    if actual_identity != expected_identity:
+        raise PluginContractError(
+            f"{ctx.analysis_name}.build_mda_collector() returned artifact identity "
+            f"{actual_identity!r}; expected {expected_identity!r}"
+        )
+    for sidecar in artifact.sidecars:
+        try:
+            ctx.artifact_store.validate_sidecar(sidecar)
+        except ArtifactStoreError as exc:
             raise PluginContractError(
-                f"{analysis_name}.build_mda_jobs() produced non-finite float result {value!r}; "
-                "add a collector in a future MDA lifecycle task"
-            )
-        return value
-    if isinstance(value, int):
-        return value
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, BaseModel):
-        return _json_payload(value.model_dump(mode="json"), analysis_name=analysis_name)
-    if isinstance(value, Mapping):
-        payload = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise PluginContractError(
-                    f"{analysis_name}.build_mda_jobs() produced non-string mapping key "
-                    f"{key!r}; add a collector in a future MDA lifecycle task"
-                )
-            payload[key] = _json_payload(item, analysis_name=analysis_name)
-        return payload
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_json_payload(item, analysis_name=analysis_name) for item in value]
-    raise PluginContractError(
-        f"{analysis_name}.build_mda_jobs() produced non-JSON-serializable "
-        f"{type(value).__name__} results; add a collector in a future MDA lifecycle task"
-    )
+                f"{ctx.analysis_name}.build_mda_collector() returned invalid sidecar "
+                f"{sidecar.path!r}: {exc}"
+            ) from exc

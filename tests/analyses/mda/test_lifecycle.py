@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from polyzymd.analyses.base import Condition, ReplicateContext
 from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda import ArtifactStore, FrameSelection, MDAReplicateJobContext
-from polyzymd.analyses.mda.lifecycle import _json_payload
+from polyzymd.analyses.mda.plugin import strict_json_payload
 
 
 class _Settings(BaseModel):
@@ -57,11 +57,11 @@ def test_json_payload_rejects_non_finite_float_results(value: float) -> None:
     """Generic MDA artifact collection should reject non-finite floats."""
 
     with pytest.raises(PluginContractError, match="example.fake_job.*non-finite float"):
-        _json_payload({"value": value}, analysis_name="example.fake_job")
+        strict_json_payload({"value": value}, analysis_name="example.fake_job")
 
 
 def test_json_payload_rejects_non_string_mapping_keys() -> None:
     """Generic MDA artifact collection should not coerce mapping keys."""
 
     with pytest.raises(PluginContractError, match="example.fake_job.*non-string mapping key"):
-        _json_payload({1: "value"}, analysis_name="example.fake_job")
+        strict_json_payload({1: "value"}, analysis_name="example.fake_job")

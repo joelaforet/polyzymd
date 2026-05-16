@@ -22,6 +22,7 @@ from polyzymd.analyses.base import (
 from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda import MDAAnalysisJob, MDAReplicateJobContext, MDAUniversePolicy
 from polyzymd.analyses.mda.artifacts import ReplicateArtifact
+from polyzymd.analyses.mda.plugin import MDACollectorContext
 from polyzymd.analyses.mda.store import ArtifactStoreError
 from polyzymd.analyses.orchestrator import (
     finalize_comparison_from_disk,
@@ -256,6 +257,60 @@ class _FakeMDAAnalysisBase:
         return self
 
 
+class _FakeMDAnalysisResults(dict):
+    """Import-light stand-in for ``MDAnalysis.analysis.results.Results``."""
+
+    __module__ = "MDAnalysis.analysis.results"
+
+
+class _FakeRawResultsMDAAnalysisBase:
+    """AnalysisBase-like object that exposes raw MDAnalysis-style Results."""
+
+    def __init__(self) -> None:
+        """Initialize empty results."""
+
+        self.results: _FakeMDAnalysisResults = _FakeMDAnalysisResults()
+
+    def run(self, **kwargs: Any) -> "_FakeRawResultsMDAAnalysisBase":
+        """Store deterministic raw results and return self."""
+
+        self.results = _FakeMDAnalysisResults(value=7.0, run_kwargs=dict(kwargs))
+        return self
+
+
+class _RawResultsCollector:
+    """Collector that maps fake raw Results to a replicate artifact."""
+
+    def __call__(
+        self,
+        ctx: MDACollectorContext,
+        completed_jobs: Sequence[Any],
+    ) -> ReplicateArtifact:
+        """Map fake raw results to JSON-safe artifact payloads."""
+
+        job = completed_jobs[0]
+        return ReplicateArtifact(
+            analysis_name=ctx.analysis_name,
+            condition_label=ctx.condition_label,
+            replicate=ctx.replicate,
+            payload={
+                "jobs": [
+                    {
+                        "name": job.name,
+                        "results": {
+                            "value": job.results["value"],
+                            "run_kwargs": dict(job.results["run_kwargs"]),
+                        },
+                    }
+                ],
+                "n_jobs": 1,
+            },
+            provenance={"source": "custom_test_collector"},
+            metadata={"result_kind": "mapped_raw_results"},
+            warnings=list(ctx.warnings),
+        )
+
+
 class _MDAJobOnlyAnalysis(Analysis):
     """Analysis that uses only the MDA job lifecycle hook."""
 
@@ -312,6 +367,39 @@ class _MDAJobOnlyAnalysis(Analysis):
             "run_kwargs": job["results"]["run_kwargs"],
             "warnings": artifact.warnings,
         }
+
+
+class _RawResultsMDAAnalysis(_MDAJobOnlyAnalysis):
+    """MDA analysis whose job exposes raw MDAnalysis-style Results."""
+
+    name: ClassVar[str] = "raw_mda_job_lifecycle"
+
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> list[MDAAnalysisJob]:
+        """Build one fake job with raw Results output."""
+
+        self.events.append(f"build_mda:{ctx.replicate}")
+        return [
+            MDAAnalysisJob(
+                name="raw_job",
+                analysis=_FakeRawResultsMDAAnalysisBase(),
+                frame_selection=ctx.frame_selection,
+                universe_policy=ctx.universe_policy,
+            )
+        ]
+
+
+class _CustomCollectorMDAAnalysis(_RawResultsMDAAnalysis):
+    """MDA analysis that maps raw Results through a custom collector."""
+
+    name: ClassVar[str] = "custom_collector_mda_lifecycle"
+
+    min_replicates: ClassVar[int] = 1
+
+    def build_mda_collector(self, ctx: MDACollectorContext) -> _RawResultsCollector:
+        """Return the custom raw-results collector."""
+
+        assert ctx.analysis_name == self.name
+        return _RawResultsCollector()
 
 
 class _CondCfg:
@@ -541,6 +629,48 @@ def test_public_lifecycle_runs_mda_jobs_and_saves_artifact(tmp_path: Path) -> No
     assert saved.payload["jobs"][0]["results"]["value"] == 5.0
     assert "fake provenance warning" in saved.warnings
     assert (output_dir / "aggregated" / "result.json").exists()
+
+
+def test_public_lifecycle_custom_collector_maps_raw_results(tmp_path: Path) -> None:
+    """Custom collectors should map raw MDAnalysis Results to artifacts."""
+
+    analysis = _CustomCollectorMDAAnalysis()
+    condition = _condition(tmp_path, replicates=(1,))
+    output_dir = tmp_path / "analysis" / analysis.name
+
+    result = run_analysis(
+        analysis,
+        condition,
+        _LifecycleSettings(),
+        equilibration="10ns",
+        output_dir=output_dir,
+        recompute=False,
+    )
+
+    saved = ReplicateArtifact.model_validate_json(
+        (output_dir / "run_1" / "result.json").read_text()
+    )
+    assert result["mean_value"] == 7.0
+    assert saved.payload["jobs"][0]["name"] == "raw_job"
+    assert saved.payload["jobs"][0]["results"]["value"] == 7.0
+    assert saved.metadata["result_kind"] == "mapped_raw_results"
+
+
+def test_public_lifecycle_default_collector_rejects_raw_results(tmp_path: Path) -> None:
+    """Default MDA collector should require explicit mapping for raw Results."""
+
+    analysis = _RawResultsMDAAnalysis()
+    condition = _condition(tmp_path, replicates=(1,))
+
+    with pytest.raises(PluginContractError, match="raw MDAnalysis Results"):
+        run_analysis(
+            analysis,
+            condition,
+            _LifecycleSettings(),
+            equilibration="10ns",
+            output_dir=tmp_path / "analysis" / analysis.name,
+            recompute=False,
+        )
 
 
 def test_aggregate_from_disk_reports_malformed_mda_artifact_context(tmp_path: Path) -> None:

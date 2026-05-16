@@ -90,7 +90,12 @@ from polyzymd.analyses._measurement import CacheIdentity, Measurement, MetricSpe
 from polyzymd.analyses.exceptions import PluginContractError
 
 if TYPE_CHECKING:
-    from polyzymd.analyses.mda import MDAAnalysisJob, MDAReplicateJobContext
+    from polyzymd.analyses.mda import (
+        MDAAnalysisJob,
+        MDAArtifactCollector,
+        MDACollectorContext,
+        MDAReplicateJobContext,
+    )
     from polyzymd.config.schema import SimulationConfig
 
 __all__ = [
@@ -271,6 +276,25 @@ class Analysis(ABC):
 
         del ctx
         return None
+
+    def build_mda_collector(self, ctx: MDACollectorContext) -> MDAArtifactCollector:
+        """Build the artifact collector for completed MDAnalysis jobs.
+
+        Parameters
+        ----------
+        ctx : MDACollectorContext
+            Framework-provided collector context for one replicate.
+
+        Returns
+        -------
+        MDAArtifactCollector
+            Collector that maps completed job results to a replicate artifact.
+        """
+
+        del ctx
+        from polyzymd.analyses.mda import StrictJSONMDAResultCollector
+
+        return StrictJSONMDAResultCollector()
 
     def _mda_universe_provider_factory(self) -> type[Any]:
         """Return the universe-provider class used by the MDA job seam.

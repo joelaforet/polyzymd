@@ -2,12 +2,134 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MDA_ARTIFACT_SCHEMA_VERSION: str = "1"
+_RAW_MDA_RESULTS_MODULE = "MDAnalysis.analysis.results"
+_RAW_MDA_RESULTS_GROUP_CLASS_NAME = "ResultsGroup"
+
+
+def is_raw_mdanalysis_results(value: Any) -> bool:
+    """Return whether a value is an MDAnalysis raw results container.
+
+    Detection is intentionally import-light and relies on module/class metadata
+    so artifact validation never imports MDAnalysis.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate value to inspect.
+
+    Returns
+    -------
+    bool
+        ``True`` when ``value`` looks like an MDAnalysis ``Results`` object.
+    """
+
+    value_type = type(value)
+    class_name = getattr(value_type, "__name__", "")
+    return getattr(value_type, "__module__", "") == _RAW_MDA_RESULTS_MODULE and (
+        class_name.endswith("Results") or class_name == _RAW_MDA_RESULTS_GROUP_CLASS_NAME
+    )
+
+
+def raw_mdanalysis_results_path(value: Any) -> str | None:
+    """Return the nested path to raw MDAnalysis results, if present.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate artifact field value.
+
+    Returns
+    -------
+    str or None
+        Human-readable nested path to the first raw results container, or
+        ``None`` when no raw results are present.
+    """
+
+    return _raw_mdanalysis_results_path(value, path="$", seen=set())
+
+
+def reject_raw_mdanalysis_results(value: Any, *, field_name: str) -> Any:
+    """Reject raw MDAnalysis ``Results`` objects in artifact fields.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate artifact field value.
+    field_name : str
+        Name used in validation diagnostics.
+
+    Returns
+    -------
+    Any
+        The original value when no raw results are found.
+
+    Raises
+    ------
+    ValueError
+        Raised when raw MDAnalysis results are found recursively.
+    """
+
+    raw_path = raw_mdanalysis_results_path(value)
+    if raw_path is not None:
+        raise ValueError(
+            f"{field_name} must not contain raw MDAnalysis Results at {raw_path}; "
+            "map Results to JSON primitives or sidecar artifacts first"
+        )
+    return value
+
+
+def _raw_mdanalysis_results_path(value: Any, *, path: str, seen: set[int]) -> str | None:
+    """Recursively find raw MDAnalysis results without importing MDAnalysis.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate value.
+    path : str
+        Current human-readable traversal path.
+    seen : set of int
+        Object IDs already visited to avoid cycles.
+
+    Returns
+    -------
+    str or None
+        Path to the first raw results object, if found.
+    """
+
+    if is_raw_mdanalysis_results(value):
+        return path
+    value_id = id(value)
+    if value_id in seen:
+        return None
+    if isinstance(value, (Mapping, Sequence, BaseModel)) and not isinstance(
+        value, (str, bytes, bytearray)
+    ):
+        seen.add(value_id)
+    if isinstance(value, BaseModel):
+        return _raw_mdanalysis_results_path(vars(value), path=path, seen=seen)
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            key_path = _raw_mdanalysis_results_path(key, path=f"{path}.<key>", seen=seen)
+            if key_path is not None:
+                return key_path
+            nested_path = f"{path}.{key}" if isinstance(key, str) else f"{path}[{key!r}]"
+            item_path = _raw_mdanalysis_results_path(item, path=nested_path, seen=seen)
+            if item_path is not None:
+                return item_path
+        return None
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for index, item in enumerate(value):
+            item_path = _raw_mdanalysis_results_path(item, path=f"{path}[{index}]", seen=seen)
+            if item_path is not None:
+                return item_path
+    return None
 
 
 def validate_artifact_relative_path(value: str) -> str:
@@ -69,6 +191,24 @@ class ArtifactSidecarRef(BaseModel):
         """
 
         return validate_artifact_relative_path(value)
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _reject_raw_results_metadata(cls, value: Any) -> Any:
+        """Reject raw MDAnalysis results in sidecar metadata.
+
+        Parameters
+        ----------
+        value : Any
+            Candidate sidecar metadata.
+
+        Returns
+        -------
+        Any
+            Original metadata when valid.
+        """
+
+        return reject_raw_mdanalysis_results(value, field_name="sidecar metadata")
 
     @field_validator("sha256")
     @classmethod
@@ -136,6 +276,24 @@ class ArtifactManifest(BaseModel):
             )
         return value
 
+    @field_validator("inputs", "provenance", "metadata", mode="before")
+    @classmethod
+    def _reject_raw_results_dicts(cls, value: Any) -> Any:
+        """Reject raw MDAnalysis results in manifest dictionaries.
+
+        Parameters
+        ----------
+        value : Any
+            Candidate manifest dictionary field.
+
+        Returns
+        -------
+        Any
+            Original value when valid.
+        """
+
+        return reject_raw_mdanalysis_results(value, field_name="manifest field")
+
 
 class ArtifactEnvelope(BaseModel):
     """Extensible JSON envelope for MDAnalysis extension-layer artifacts."""
@@ -173,6 +331,24 @@ class ArtifactEnvelope(BaseModel):
                 f"expected {MDA_ARTIFACT_SCHEMA_VERSION!r}"
             )
         return value
+
+    @field_validator("payload", "provenance", "metadata", mode="before")
+    @classmethod
+    def _reject_raw_results_dicts(cls, value: Any) -> Any:
+        """Reject raw MDAnalysis results in artifact dictionaries.
+
+        Parameters
+        ----------
+        value : Any
+            Candidate artifact dictionary field.
+
+        Returns
+        -------
+        Any
+            Original value when valid.
+        """
+
+        return reject_raw_mdanalysis_results(value, field_name="artifact field")
 
 
 class ReplicateArtifact(ArtifactEnvelope):
