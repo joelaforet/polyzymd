@@ -1213,14 +1213,13 @@ class DistancesAnalysis(Analysis):
                 allow_replicate_subset=True,
             )
 
-            # Map auto-generated pair labels to user-defined labels from settings
-            selection_to_label: dict[tuple[str, str], str] = {
-                (p.selection_a, p.selection_b): p.label for p in settings.pairs
-            }
-
             pair_summaries = []
-            for pr in agg_result.pair_results:
-                user_label = selection_to_label.get((pr.selection1, pr.selection2), pr.pair_label)
+            for pair_index, pr in enumerate(agg_result.pair_results):
+                user_label = (
+                    pr.pair_label
+                    if pr.pair_label in pair_labels
+                    else pair_labels[pair_index] if pair_index < len(pair_labels) else pr.pair_label
+                )
                 pair_summaries.append(
                     DistancePairSummary(
                         label=user_label,

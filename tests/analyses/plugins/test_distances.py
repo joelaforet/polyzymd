@@ -1400,6 +1400,88 @@ class TestCompare:
         # fraction_ranking_by_pair should be present since mock has fractions
         assert result.fraction_ranking_by_pair is not None
 
+    def test_compare_preserves_duplicate_selection_pair_labels_by_index(self, tmp_path):
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+        )
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        analysis = DistancesAnalysis()
+        settings = DistancesSettings(
+            pairs=[
+                DistancePairSettings(
+                    label="Inner duplicate",
+                    selection_a="resid 10 and name CA",
+                    selection_b="resid 20 and name CA",
+                    threshold=3.0,
+                ),
+                DistancePairSettings(
+                    label="Outer duplicate",
+                    selection_a="resid 10 and name CA",
+                    selection_b="resid 20 and name CA",
+                    threshold=5.0,
+                ),
+            ]
+        )
+        condition = Condition(
+            label="Control",
+            config_path=Path("/tmp/Control/config.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="duplicate_selection_labels",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label="Control",
+            analysis_dirs={"Control": tmp_path / "Control" / "distances"},
+            results_dir=tmp_path / "results",
+            equilibration="100ns",
+            settings=settings,
+            recompute=False,
+        )
+        aggregate = MagicMock()
+        aggregate.config_hash = "unknown"
+        aggregate.equilibration_time = 100.0
+        aggregate.equilibration_unit = "ns"
+        aggregate.settings_fingerprint = settings_fingerprint(settings)
+        aggregate.replicates = [1, 2, 3]
+        aggregate.n_replicates = 3
+        aggregate.pair_results = []
+        for label, threshold, offset in (
+            ("Inner duplicate", 3.0, 0.0),
+            ("Outer duplicate", 5.0, 1.0),
+        ):
+            pair_result = MagicMock()
+            pair_result.pair_label = label
+            pair_result.selection1 = "resid 10 and name CA"
+            pair_result.selection2 = "resid 20 and name CA"
+            pair_result.threshold = threshold
+            pair_result.overall_mean = 4.0 + offset
+            pair_result.overall_sem = 0.1
+            pair_result.overall_fraction_below = 0.5 - offset * 0.1
+            pair_result.sem_fraction_below = 0.02
+            pair_result.per_replicate_means = [4.0 + offset, 4.1 + offset, 3.9 + offset]
+            pair_result.per_replicate_fractions_below = [0.5, 0.55, 0.45]
+            aggregate.pair_results.append(pair_result)
+
+        with patch.object(analysis, "_load_aggregated_result", return_value=aggregate):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        summary = result.conditions[0]
+        assert [pair.label for pair in summary.pair_summaries] == [
+            "Inner duplicate",
+            "Outer duplicate",
+        ]
+        assert summary.get_pair("Inner duplicate").threshold == pytest.approx(3.0)
+        assert summary.get_pair("Outer duplicate").threshold == pytest.approx(5.0)
+        assert result.ranking_by_pair["Inner duplicate"] == ["Control"]
+        assert result.ranking_by_pair["Outer duplicate"] == ["Control"]
+
 
 # ---------------------------------------------------------------------------
 # _compare_pair
