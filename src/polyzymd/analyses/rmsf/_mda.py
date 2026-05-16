@@ -488,6 +488,13 @@ def prepare_rmsf_profile_input(
             f"RMSF selection {settings.selection!r} matched no atoms for condition "
             f"'{condition_label}' replicate {replicate}.\n\n{diagnostics}"
         )
+    _validate_external_reference_selections_before_alignment(
+        universe=universe,
+        settings=settings,
+        atoms=atoms,
+        condition_label=condition_label,
+        replicate=replicate,
+    )
 
     alignment_config = AlignmentConfig(
         enabled=True,
@@ -887,6 +894,45 @@ def _validate_reference_file_identity(artifact: ReplicateArtifact, settings: RMS
         )
 
 
+def _validate_external_reference_selections_before_alignment(
+    *,
+    universe: Any,
+    settings: RMSFSettings,
+    atoms: Any,
+    condition_label: str,
+    replicate: int,
+) -> None:
+    """Validate external-reference selections before alignment mutates coordinates."""
+
+    if settings.reference_mode != "external" or settings.reference_file is None:
+        return
+    ref_path = Path(settings.reference_file)
+    ref_universe = _load_external_reference_universe(ref_path)
+    selections = [
+        ("RMSF", settings.selection, atoms),
+        ("alignment", settings.alignment_selection, None),
+    ]
+    for purpose, selection, selected_atoms in selections:
+        trajectory_atoms = (
+            selected_atoms if selected_atoms is not None else universe.select_atoms(selection)
+        )
+        if len(trajectory_atoms) == 0:
+            diagnostics = get_selection_diagnostics(universe, selection)
+            raise ValueError(
+                f"RMSF external-reference {purpose.lower()} selection {selection!r} matched no "
+                f"trajectory atoms for condition '{condition_label}' replicate {replicate}.\n\n"
+                f"{diagnostics}"
+            )
+        ref_atoms = ref_universe.select_atoms(selection)
+        _validate_reference_selection_identity(
+            trajectory_atoms=trajectory_atoms,
+            reference_atoms=ref_atoms,
+            reference_path=ref_path,
+            selection=selection,
+            purpose=purpose,
+        )
+
+
 def _external_reference_positions(
     universe: Any,
     atoms: Any,
@@ -897,27 +943,26 @@ def _external_reference_positions(
     del universe
     if settings.reference_mode != "external" or settings.reference_file is None:
         return None
-    import MDAnalysis as mda
 
     ref_path = Path(settings.reference_file)
-    ref_universe = mda.Universe(str(ref_path))
+    ref_universe = _load_external_reference_universe(ref_path)
     ref_atoms = ref_universe.select_atoms(settings.selection)
-    if len(ref_atoms) == 0:
-        raise ValueError(
-            f"External RMSF reference {ref_path} has no atoms matching selection "
-            f"{settings.selection!r}."
-        )
-    if len(ref_atoms) != len(atoms):
-        raise ValueError(
-            f"External RMSF reference atom count ({len(ref_atoms)}) does not match trajectory "
-            f"selection ({len(atoms)}) for {settings.selection!r}."
-        )
     _validate_reference_selection_identity(
         trajectory_atoms=atoms,
         reference_atoms=ref_atoms,
         reference_path=ref_path,
+        selection=settings.selection,
+        purpose="RMSF",
     )
     return ref_atoms.positions.copy().astype(np.float64)
+
+
+def _load_external_reference_universe(reference_path: Path) -> Any:
+    """Load an external reference universe lazily."""
+
+    import MDAnalysis as mda
+
+    return mda.Universe(str(reference_path))
 
 
 def _validate_reference_selection_identity(
@@ -925,8 +970,21 @@ def _validate_reference_selection_identity(
     trajectory_atoms: Any,
     reference_atoms: Any,
     reference_path: Path,
+    selection: str,
+    purpose: str,
 ) -> None:
     """Validate external reference atom and residue identity/order."""
+
+    if len(reference_atoms) == 0:
+        raise ValueError(
+            f"External RMSF reference {reference_path} has no atoms matching {purpose.lower()} "
+            f"selection {selection!r}."
+        )
+    if len(reference_atoms) != len(trajectory_atoms):
+        raise ValueError(
+            f"External RMSF reference atom count ({len(reference_atoms)}) does not match "
+            f"trajectory {purpose.lower()} selection ({len(trajectory_atoms)}) for {selection!r}."
+        )
 
     trajectory_residues = residue_profile_identity(trajectory_atoms)
     reference_residues = residue_profile_identity(reference_atoms)
@@ -935,8 +993,8 @@ def _validate_reference_selection_identity(
         if trajectory_residues[field_name] != reference_residues[field_name]:
             raise ValueError(
                 f"External RMSF reference {reference_path} residue identity/order does not match "
-                "the trajectory selection. Use a reference with the same selected residues in "
-                "the same order."
+                f"the trajectory {purpose.lower()} selection {selection!r}. Use a reference "
+                "with the same selected residues in the same order."
             )
 
     trajectory_atom_keys = _atom_identity_keys(trajectory_atoms)
@@ -944,7 +1002,8 @@ def _validate_reference_selection_identity(
     if trajectory_atom_keys and reference_atom_keys and trajectory_atom_keys != reference_atom_keys:
         raise ValueError(
             f"External RMSF reference {reference_path} atom identity/order does not match the "
-            "trajectory selection. Use a reference with the same selected atoms in the same order."
+            f"trajectory {purpose.lower()} selection {selection!r}. Use a reference with the "
+            "same selected atoms in the same order."
         )
 
 

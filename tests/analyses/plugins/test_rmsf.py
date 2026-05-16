@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -445,6 +446,64 @@ class TestRMSFMDAJobs:
         assert external_reference_file_identity(ref_path) != original_identity
         assert RMSFAnalysis._make_settings_cache_tag(settings) != original_fingerprint
 
+    def test_external_reference_alignment_selection_identity_checked_before_alignment(
+        self,
+        condition: Condition,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """External references must match a distinct alignment selection before alignment."""
+
+        ref_path = tmp_path / "ref.pdb"
+        ref_path.write_text("HEADER TEST\n", encoding="utf-8")
+
+        class AlignmentUniverse(FakeUniverse):
+            """Fake universe with a separate alignment selection."""
+
+            def __init__(self, *, bad_alignment: bool = False) -> None:
+                super().__init__(n_atoms=3)
+                residue_names = ["RES1", "BAD", "RES3"] if bad_alignment else None
+                self.alignment_atoms = FakeAtoms(
+                    self,
+                    n_atoms=3,
+                    residue_names=residue_names,
+                )
+
+            def select_atoms(self, selection: str) -> FakeAtoms:
+                """Return a separate alignment group when requested."""
+
+                if selection == "alignment group":
+                    return self.alignment_atoms
+                return super().select_atoms(selection)
+
+        class FakeMDA:
+            """Fake MDAnalysis module with wrong alignment-selection identity."""
+
+            @staticmethod
+            def Universe(path: str) -> AlignmentUniverse:
+                del path
+                return AlignmentUniverse(bad_alignment=True)
+
+        monkeypatch.setitem(sys.modules, "MDAnalysis", FakeMDA)
+        with (
+            patch(
+                "polyzymd.analyses.rmsf._mda.align_trajectory",
+                side_effect=AssertionError("alignment should not run"),
+            ),
+            pytest.raises(ValueError, match="alignment selection"),
+        ):
+            prepare_rmsf_profile_input(
+                universe=AlignmentUniverse(),
+                settings=RMSFSettings(
+                    reference_mode="external",
+                    reference_file=str(ref_path),
+                    alignment_selection="alignment group",
+                ),
+                frame_selection=_frame_selection(),
+                condition_label=condition.label,
+                replicate=1,
+            )
+
 
 class TestRMSFArtifacts:
     """Replicate and condition artifact tests."""
@@ -742,6 +801,52 @@ class TestRMSFCompareFormatPlot:
 
         assert len(plots) == 1
         assert plots[0].name.startswith("rmsf_comparison")
+
+    def test_profile_plotter_does_not_load_reference_pdb_with_mdtraj(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Profile plotting should not load external reference files at plot time."""
+
+        from polyzymd.analyses.rmsf import _plotters
+        from polyzymd.config.comparison import PlotSettings
+
+        ref_path = tmp_path / "ref.pdb"
+        ref_path.write_text("HEADER TEST\n", encoding="utf-8")
+        real_import = builtins.__import__
+
+        def guard_mdtraj_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "mdtraj":
+                raise AssertionError("profile plotting should not import mdtraj")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", guard_mdtraj_import)
+        data = {
+            "__meta__": {"settings": {"reference_file": str(ref_path)}},
+            "Control": {
+                "aggregated_result": {
+                    "residue_ids": [1, 2, 3],
+                    "mean_rmsf_per_residue": [1.0, 1.5, 2.0],
+                    "sem_rmsf_per_residue": [0.1, 0.1, 0.1],
+                    "n_replicates": 2,
+                }
+            },
+        }
+
+        with patch(
+            "polyzymd.analyses.rmsf._plotters.save_figure",
+            side_effect=lambda fig, path, settings: path,
+        ):
+            plots = _plotters._plot_rmsf_profile(
+                data,
+                ["Control"],
+                tmp_path,
+                PlotSettings(),
+            )
+
+        assert len(plots) == 1
+        assert plots[0].name.startswith("rmsf_profile")
 
     def test_deserialize_rejects_legacy_json(self, tmp_path: Path) -> None:
         """Legacy aggregate files should not be loaded as RMSF MDA artifacts."""
