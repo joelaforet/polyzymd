@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -30,6 +31,7 @@ from polyzymd.analyses.rmsf._mda import (
     aggregate_rmsf_artifacts,
     build_rmsf_jobs,
     condition_artifact_to_legacy_result,
+    external_reference_file_identity,
 )
 from polyzymd.analyses.rmsf._plot_settings import RMSFPlotSettings
 from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison, _plot_rmsf_profile
@@ -112,17 +114,27 @@ class RMSFAnalysis(Analysis):
             Stable short settings fingerprint.
         """
 
-        if isinstance(settings, BaseModel):
-            return settings_fingerprint(settings)
-        normalized = RMSFSettings(
-            selection=settings.selection,
-            reference_mode=settings.reference_mode,
-            reference_frame=settings.reference_frame,
-            reference_file=settings.reference_file,
-            alignment_selection=settings.alignment_selection,
-            centroid_selection=settings.centroid_selection,
+        if isinstance(settings, RMSFSettings):
+            normalized = settings
+        elif isinstance(settings, BaseModel):
+            normalized = RMSFSettings.model_validate(settings.model_dump(mode="json"))
+        else:
+            normalized = RMSFSettings(
+                selection=settings.selection,
+                reference_mode=settings.reference_mode,
+                reference_frame=settings.reference_frame,
+                reference_file=settings.reference_file,
+                alignment_selection=settings.alignment_selection,
+                centroid_selection=settings.centroid_selection,
+            )
+        if normalized.reference_mode != "external":
+            return settings_fingerprint(normalized)
+        payload = normalized.model_dump(mode="json")
+        payload["reference_file_identity"] = external_reference_file_identity(
+            normalized.reference_file
         )
-        return settings_fingerprint(normalized)
+        serialized = json.dumps(payload, sort_keys=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:8]
 
     def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
         """Return the RMSF artifact settings fingerprint."""

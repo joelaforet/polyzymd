@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 from collections.abc import Mapping, Sequence
@@ -517,6 +518,11 @@ def prepare_rmsf_profile_input(
     )
     selected_frames = np.asarray(autocorrelation_metadata["selected_frames"], dtype=np.int64)
     reference_positions = _external_reference_positions(universe, atoms, settings)
+    reference_file_identity = (
+        external_reference_file_identity(settings.reference_file)
+        if settings.reference_mode == "external"
+        else None
+    )
     residue_profile = residue_profile_identity(atoms)
     return RMSFProfileInput(
         atoms=atoms,
@@ -527,7 +533,9 @@ def prepare_rmsf_profile_input(
             "reference_mode": settings.reference_mode,
             "reference_frame": ref_frame_idx + 1 if ref_frame_idx is not None else None,
             "reference_file": settings.reference_file,
+            "reference_file_identity": reference_file_identity,
             "external_reference_used": reference_positions is not None,
+            "trajectory_selection_identity": _selection_identity_payload(atoms),
         },
         alignment_metadata={
             "alignment_selection": settings.alignment_selection,
@@ -607,6 +615,47 @@ def residue_profile_identity(atoms: Any) -> dict[str, Any]:
         "identity_keys": identity_keys,
         "atom_counts_per_residue": atom_counts,
     }
+
+
+def external_reference_file_identity(reference_file: str | Path | None) -> dict[str, Any] | None:
+    """Return stable identity metadata for an external reference file.
+
+    Parameters
+    ----------
+    reference_file : str, Path, or None
+        Configured external reference path.
+
+    Returns
+    -------
+    dict or None
+        JSON-compatible path, size, and SHA-256 metadata, or ``None`` when no
+        reference file is configured.
+    """
+
+    if reference_file is None:
+        return None
+    path = Path(reference_file).expanduser()
+    resolved = path.resolve(strict=False)
+    identity: dict[str, Any] = {
+        "path": str(reference_file),
+        "resolved_path": str(resolved),
+        "exists": path.exists(),
+    }
+    if not path.exists():
+        return identity
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    stat = path.stat()
+    identity.update(
+        {
+            "size_bytes": int(stat.st_size),
+            "sha256": digest.hexdigest(),
+        }
+    )
+    return identity
 
 
 def artifact_to_rmsf_result(artifact: ReplicateArtifact) -> RMSFResult:
@@ -783,6 +832,7 @@ def _validate_and_order_artifacts(
             )
         if artifact.metadata.get("selection_string") != settings.selection:
             raise ValueError(f"RMSF replicate {artifact.replicate} selection mismatch")
+        _validate_reference_file_identity(artifact, settings)
         identity = tuple(_profile_identity_keys(artifact))
         if expected_identity is None:
             expected_identity = identity
@@ -821,6 +871,22 @@ def _validate_reference_settings(settings: RMSFSettings) -> None:
             )
 
 
+def _validate_reference_file_identity(artifact: ReplicateArtifact, settings: RMSFSettings) -> None:
+    """Validate cached external reference file identity against current contents."""
+
+    if settings.reference_mode != "external":
+        return
+    reference = _require_mapping(artifact.payload.get("reference"), "reference")
+    expected_identity = external_reference_file_identity(settings.reference_file)
+    stored_identity = reference.get("reference_file_identity")
+    if stored_identity != expected_identity:
+        raise ValueError(
+            f"RMSF replicate {artifact.replicate} reference file identity mismatch. "
+            "The configured external reference file changed after this artifact was cached; "
+            "recompute the condition or clear stale caches."
+        )
+
+
 def _external_reference_positions(
     universe: Any,
     atoms: Any,
@@ -846,7 +912,71 @@ def _external_reference_positions(
             f"External RMSF reference atom count ({len(ref_atoms)}) does not match trajectory "
             f"selection ({len(atoms)}) for {settings.selection!r}."
         )
+    _validate_reference_selection_identity(
+        trajectory_atoms=atoms,
+        reference_atoms=ref_atoms,
+        reference_path=ref_path,
+    )
     return ref_atoms.positions.copy().astype(np.float64)
+
+
+def _validate_reference_selection_identity(
+    *,
+    trajectory_atoms: Any,
+    reference_atoms: Any,
+    reference_path: Path,
+) -> None:
+    """Validate external reference atom and residue identity/order."""
+
+    trajectory_residues = residue_profile_identity(trajectory_atoms)
+    reference_residues = residue_profile_identity(reference_atoms)
+    residue_fields = ("identity_keys", "atom_counts_per_residue")
+    for field_name in residue_fields:
+        if trajectory_residues[field_name] != reference_residues[field_name]:
+            raise ValueError(
+                f"External RMSF reference {reference_path} residue identity/order does not match "
+                "the trajectory selection. Use a reference with the same selected residues in "
+                "the same order."
+            )
+
+    trajectory_atom_keys = _atom_identity_keys(trajectory_atoms)
+    reference_atom_keys = _atom_identity_keys(reference_atoms)
+    if trajectory_atom_keys and reference_atom_keys and trajectory_atom_keys != reference_atom_keys:
+        raise ValueError(
+            f"External RMSF reference {reference_path} atom identity/order does not match the "
+            "trajectory selection. Use a reference with the same selected atoms in the same order."
+        )
+
+
+def _selection_identity_payload(atoms: Any) -> dict[str, Any]:
+    """Return residue and atom identity metadata for a selected atom group."""
+
+    residue_identity = residue_profile_identity(atoms)
+    return {
+        "residue_identity_keys": residue_identity["identity_keys"],
+        "atom_counts_per_residue": residue_identity["atom_counts_per_residue"],
+        "atom_identity_keys": _atom_identity_keys(atoms),
+    }
+
+
+def _atom_identity_keys(atoms: Any) -> list[str]:
+    """Return selected atom identity keys in selection order when available."""
+
+    try:
+        iterator = iter(atoms)
+    except TypeError:
+        return []
+
+    keys: list[str] = []
+    for selected_index, atom in enumerate(iterator):
+        residue = getattr(atom, "residue", None)
+        residue_index = getattr(residue, "ix", "")
+        resid = getattr(residue, "resid", getattr(atom, "resid", ""))
+        resname = getattr(residue, "resname", getattr(atom, "resname", ""))
+        segid = getattr(getattr(residue, "segment", None), "segid", getattr(atom, "segid", ""))
+        atom_name = getattr(atom, "name", "")
+        keys.append(f"{selected_index}:{segid}:{residue_index}:{resid}:{resname}:{atom_name}")
+    return keys
 
 
 def _autocorrelation_metadata(

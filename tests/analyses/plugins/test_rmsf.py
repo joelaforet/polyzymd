@@ -29,6 +29,7 @@ from polyzymd.analyses.rmsf._mda import (
     RMSFArtifactCollector,
     aggregate_rmsf_artifacts,
     condition_artifact_to_legacy_result,
+    external_reference_file_identity,
     prepare_rmsf_profile_input,
 )
 
@@ -53,33 +54,69 @@ class FakeTrajectory:
 class FakeAtoms:
     """Small AtomGroup-like object with one atom per residue."""
 
-    def __init__(self, universe: FakeUniverse, n_atoms: int = 3) -> None:
+    def __init__(
+        self,
+        universe: FakeUniverse,
+        n_atoms: int = 3,
+        residue_ids: list[int] | None = None,
+        residue_names: list[str] | None = None,
+        atom_names: list[str] | None = None,
+        segids: list[str] | None = None,
+    ) -> None:
         self.universe = universe
         self.indices = np.arange(n_atoms, dtype=np.int64)
         self.positions = np.arange(n_atoms * 3, dtype=np.float64).reshape(n_atoms, 3)
-        self.residues = [
-            SimpleNamespace(
-                resid=index + 1,
-                resname=f"RES{index + 1}",
+        residue_ids = residue_ids or [index + 1 for index in range(n_atoms)]
+        residue_names = residue_names or [f"RES{index + 1}" for index in range(n_atoms)]
+        atom_names = atom_names or ["CA" for _ in range(n_atoms)]
+        segids = segids or ["A" for _ in range(n_atoms)]
+        self.residues = []
+        self._atoms = []
+        for index in range(n_atoms):
+            residue = SimpleNamespace(
+                resid=residue_ids[index],
+                resname=residue_names[index],
                 ix=index,
-                segment=SimpleNamespace(segid="A"),
+                segment=SimpleNamespace(segid=segids[index]),
                 atoms=SimpleNamespace(indices=np.asarray([index], dtype=np.int64)),
             )
-            for index in range(n_atoms)
-        ]
+            self.residues.append(residue)
+            self._atoms.append(
+                SimpleNamespace(name=atom_names[index], residue=residue, index=index)
+            )
 
     def __len__(self) -> int:
         """Return atom count."""
 
         return int(self.indices.size)
 
+    def __iter__(self):
+        """Iterate over fake selected atoms."""
+
+        return iter(self._atoms)
+
 
 class FakeUniverse:
     """Small Universe-like object for RMSF job tests."""
 
-    def __init__(self, n_frames: int = 20, n_atoms: int = 3) -> None:
+    def __init__(
+        self,
+        n_frames: int = 20,
+        n_atoms: int = 3,
+        residue_ids: list[int] | None = None,
+        residue_names: list[str] | None = None,
+        atom_names: list[str] | None = None,
+        segids: list[str] | None = None,
+    ) -> None:
         self.trajectory = FakeTrajectory(n_frames)
-        self.atoms = FakeAtoms(self, n_atoms)
+        self.atoms = FakeAtoms(
+            self,
+            n_atoms,
+            residue_ids=residue_ids,
+            residue_names=residue_names,
+            atom_names=atom_names,
+            segids=segids,
+        )
 
     def select_atoms(self, selection: str) -> FakeAtoms:
         """Return fake atoms unless the selection requests an empty group."""
@@ -337,6 +374,77 @@ class TestRMSFMDAJobs:
                 replicate=1,
             )
 
+    def test_external_reference_same_count_identity_mismatch_is_rejected(
+        self,
+        condition: Condition,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """External references must match trajectory residue identity and order."""
+
+        ref_path = tmp_path / "ref.pdb"
+        ref_path.write_text("HEADER TEST\n", encoding="utf-8")
+
+        class FakeMDA:
+            """Fake MDAnalysis module with same-count wrong residue identity."""
+
+            @staticmethod
+            def Universe(path: str) -> FakeUniverse:
+                del path
+                return FakeUniverse(n_atoms=3, residue_names=["RES1", "BAD", "RES3"])
+
+        monkeypatch.setitem(sys.modules, "MDAnalysis", FakeMDA)
+        with (
+            patch("polyzymd.analyses.rmsf._mda.align_trajectory", return_value=None),
+            pytest.raises(ValueError, match="residue identity/order"),
+        ):
+            prepare_rmsf_profile_input(
+                universe=FakeUniverse(n_atoms=3),
+                settings=RMSFSettings(reference_mode="external", reference_file=str(ref_path)),
+                frame_selection=_frame_selection(),
+                condition_label=condition.label,
+                replicate=1,
+            )
+
+    def test_external_reference_file_hash_enters_metadata_and_cache_identity(
+        self,
+        condition: Condition,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """External reference content should be recorded and affect cache identity."""
+
+        ref_path = tmp_path / "ref.pdb"
+        ref_path.write_text("HEADER ORIGINAL\n", encoding="utf-8")
+
+        class FakeMDA:
+            """Fake MDAnalysis module with matching reference identity."""
+
+            @staticmethod
+            def Universe(path: str) -> FakeUniverse:
+                del path
+                return FakeUniverse(n_atoms=3)
+
+        settings = RMSFSettings(reference_mode="external", reference_file=str(ref_path))
+        monkeypatch.setitem(sys.modules, "MDAnalysis", FakeMDA)
+        with patch("polyzymd.analyses.rmsf._mda.align_trajectory", return_value=None):
+            prepared = prepare_rmsf_profile_input(
+                universe=FakeUniverse(n_atoms=3),
+                settings=settings,
+                frame_selection=_frame_selection(),
+                condition_label=condition.label,
+                replicate=1,
+            )
+
+        original_identity = external_reference_file_identity(ref_path)
+        assert prepared.reference_metadata["reference_file_identity"] == original_identity
+        original_fingerprint = RMSFAnalysis._make_settings_cache_tag(settings)
+
+        ref_path.write_text("HEADER CHANGED\n", encoding="utf-8")
+
+        assert external_reference_file_identity(ref_path) != original_identity
+        assert RMSFAnalysis._make_settings_cache_tag(settings) != original_fingerprint
+
 
 class TestRMSFArtifacts:
     """Replicate and condition artifact tests."""
@@ -413,6 +521,55 @@ class TestRMSFArtifacts:
                 result_path=tmp_path / "aggregated" / "result.json",
                 artifacts=artifacts,
                 settings_fingerprint=RMSFAnalysis._make_settings_cache_tag(RMSFSettings()),
+            )
+
+    def test_aggregate_rejects_stale_external_reference_identity(
+        self,
+        condition: Condition,
+        tmp_path: Path,
+    ) -> None:
+        """Aggregation should reject artifacts from changed external reference contents."""
+
+        ref_path = tmp_path / "ref.pdb"
+        ref_path.write_text("HEADER ORIGINAL\n", encoding="utf-8")
+        original_identity = external_reference_file_identity(ref_path)
+        ref_path.write_text("HEADER CHANGED\n", encoding="utf-8")
+        settings = RMSFSettings(reference_mode="external", reference_file=str(ref_path))
+        current_fingerprint = RMSFAnalysis._make_settings_cache_tag(settings)
+        artifacts = [
+            _replicate_artifact(tmp_path, condition, 1, [1.0, 1.5, 2.0]),
+            _replicate_artifact(tmp_path, condition, 2, [2.0, 2.5, 3.0]),
+        ]
+        updated_artifacts = []
+        for artifact in artifacts:
+            reference = {
+                **artifact.payload["reference"],
+                "reference_mode": "external",
+                "reference_file": str(ref_path),
+                "reference_file_identity": original_identity,
+            }
+            updated_artifacts.append(
+                artifact.model_copy(
+                    update={
+                        "payload": {**artifact.payload, "reference": reference},
+                        "metadata": {
+                            **artifact.metadata,
+                            "settings_fingerprint": current_fingerprint,
+                        },
+                    }
+                )
+            )
+
+        with pytest.raises(ValueError, match="reference file identity mismatch"):
+            aggregate_rmsf_artifacts(
+                condition_label=condition.label,
+                replicates=condition.replicates,
+                settings=settings,
+                equilibration="0ns",
+                output_dir=tmp_path / "aggregated",
+                result_path=tmp_path / "aggregated" / "result.json",
+                artifacts=updated_artifacts,
+                settings_fingerprint=current_fingerprint,
             )
 
     def test_analysis_aggregate_rejects_legacy_inputs(
@@ -546,6 +703,45 @@ class TestRMSFCompareFormatPlot:
             plots = RMSFAnalysis().plot(ctx)
 
         assert plots == [tmp_path / "a.png", tmp_path / "b.png"]
+
+    def test_comparison_plotter_does_not_discover_legacy_json(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Comparison plotting should use provided artifact data only."""
+
+        from polyzymd.analyses.rmsf import _plotters
+        from polyzymd.analyses.shared import result_io
+        from polyzymd.config.comparison import PlotSettings
+
+        def fail_legacy_discovery(*args: object, **kwargs: object) -> None:
+            raise AssertionError("legacy comparison discovery should not be used")
+
+        monkeypatch.setattr(result_io, "find_comparison_result", fail_legacy_discovery)
+        data = {
+            "Control": {
+                "aggregated_result": {
+                    "overall_mean_rmsf": 1.5,
+                    "overall_sem_rmsf": 0.1,
+                    "per_replicate_mean_rmsf": [1.4, 1.6],
+                }
+            }
+        }
+
+        with patch(
+            "polyzymd.analyses.rmsf._plotters.save_figure",
+            side_effect=lambda fig, path, settings: path,
+        ):
+            plots = _plotters._plot_rmsf_comparison(
+                data,
+                ["Control"],
+                tmp_path,
+                PlotSettings(),
+            )
+
+        assert len(plots) == 1
+        assert plots[0].name.startswith("rmsf_comparison")
 
     def test_deserialize_rejects_legacy_json(self, tmp_path: Path) -> None:
         """Legacy aggregate files should not be loaded as RMSF MDA artifacts."""

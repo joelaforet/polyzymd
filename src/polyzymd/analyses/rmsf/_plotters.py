@@ -8,12 +8,10 @@ All functions are called exclusively from ``RMSFAnalysis.plot()``.
 from __future__ import annotations
 
 import logging
-from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
-from pydantic import ValidationError
 
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
@@ -26,11 +24,6 @@ from polyzymd.analyses.shared.plotting import (
 
 logger = logging.getLogger(__name__)
 
-_EXPECTED_COMPARISON_LOAD_ERRORS: tuple[type[Exception], ...] = (
-    OSError,
-    JSONDecodeError,
-    ValidationError,
-)
 _EXPECTED_MDTRAJ_IMPORT_ERRORS: tuple[type[Exception], ...] = (ImportError, OSError)
 _EXPECTED_REFERENCE_SS_LOAD_ERRORS: tuple[type[Exception], ...] = (
     OSError,
@@ -50,17 +43,9 @@ def _plot_rmsf_comparison(
     output_dir: Path,
     plot_settings: Any,
 ) -> list[Path]:
-    """Generate RMSF comparison bar chart.
+    """Generate an RMSF comparison bar chart from canonical aggregate data."""
 
-    Looks for a pre-computed comparison result JSON first. If not found,
-    falls back to loading aggregated RMSF results.
-    """
-    comparison_result = _find_rmsf_comparison_result(data, labels)
-
-    if comparison_result is not None:
-        return _plot_rmsf_comparison_from_result(comparison_result, output_dir, plot_settings)
-    else:
-        return _plot_rmsf_comparison_from_aggregated(data, labels, output_dir, plot_settings)
+    return _plot_rmsf_comparison_from_aggregated(data, labels, output_dir, plot_settings)
 
 
 def _plot_rmsf_profile(
@@ -164,123 +149,6 @@ def _plot_rmsf_profile(
 # ---------------------------------------------------------------------------
 
 
-def _find_rmsf_comparison_result(
-    data: dict[str, Any],
-    labels: Sequence[str],
-) -> Any | None:
-    """Try to find a pre-computed RMSF comparison result."""
-    from polyzymd.analyses.base import ComparisonResult
-    from polyzymd.analyses.rmsf._comparison_results import RMSFComparisonResult
-    from polyzymd.analyses.shared.result_io import find_comparison_result
-
-    def _try_load(path: Path) -> Any | None:
-        try:
-            return RMSFComparisonResult.load(path)
-        except _EXPECTED_COMPARISON_LOAD_ERRORS as e:
-            logger.debug(f"Could not load custom RMSF comparison result from {path}: {e}")
-
-        try:
-            result = ComparisonResult.load(path)
-            if result.analysis_type == "rmsf":
-                return result
-        except _EXPECTED_COMPARISON_LOAD_ERRORS as e:
-            logger.debug(f"Could not load generic RMSF comparison result from {path}: {e}")
-        return None
-
-    return find_comparison_result(
-        data,
-        labels,
-        glob_patterns=["rmsf_comparison*.json"],
-        loader=_try_load,
-        analysis_type="rmsf",
-        fallback_filenames=["rmsf_comparison.json", "comparison_result.json"],
-        log=logger,
-    )
-
-
-def _plot_rmsf_comparison_from_result(
-    result: Any,
-    output_dir: Path,
-    plot_settings: Any,
-) -> list[Path]:
-    """Generate horizontal bar chart from comparison result."""
-    import matplotlib.pyplot as plt
-
-    t = plot_settings.theme
-
-    # Get conditions sorted by RMSF (lowest first)
-    labels_sorted = getattr(result, "ranking", None) or [c.label for c in result.conditions]
-
-    plot_labels = []
-    means = []
-    sems = []
-    replicate_data: list[Any] = []
-
-    for label in labels_sorted:
-        cond = _get_condition_summary(result, label)
-        if cond is None:
-            continue
-
-        mean_val = _get_first_available_field(cond, "mean_rmsf", "mean_rmsf_mean")
-        if mean_val is None:
-            continue
-
-        sem_val = _get_first_available_field(cond, "sem_rmsf", "mean_rmsf_sem", default=0.0)
-        rep_vals = _get_first_available_field(
-            cond,
-            "replicate_values",
-            "mean_rmsf_replicate_values",
-            default=[],
-        )
-
-        plot_labels.append(label)
-        means.append(mean_val)
-        sems.append(sem_val)
-        replicate_data.append(rep_vals)
-
-    if not plot_labels:
-        logger.warning("No RMSF comparison data found")
-        return []
-
-    n = len(plot_labels)
-    means_arr = np.array(means)
-    sems_arr = np.array(sems)
-    positions = np.arange(n)
-    colors = get_colors(n, plot_settings)
-
-    fig, ax = plt.subplots(figsize=plot_settings.rmsf.figsize_comparison)
-
-    bar_height = 0.7
-    ax.barh(
-        positions,
-        means_arr,
-        color=colors,
-        edgecolor=t.bar_edgecolor,
-        linewidth=t.bar_linewidth,
-        height=bar_height,
-    )
-    _draw_sem_errorbars(ax, means_arr, positions, sems_arr, replicate_data, plot_settings)
-
-    scatter_replicate_values(
-        ax,
-        positions,
-        replicate_data,
-        plot_settings,
-        orientation="horizontal",
-        bar_width=bar_height,
-    )
-
-    ax.set_yticks(positions)
-    ax.set_yticklabels(plot_labels)
-    apply_axis_style(ax, plot_settings, title="RMSF Comparison", xlabel="Mean RMSF (Å)")
-    ax.invert_yaxis()
-
-    plt.tight_layout()
-
-    output_path = get_output_path(output_dir, "rmsf_comparison", plot_settings)
-    return [save_figure(fig, output_path, plot_settings)]
-
-
 def _plot_rmsf_comparison_from_aggregated(
     data: dict[str, Any],
     labels: Sequence[str],
@@ -379,34 +247,6 @@ def _plot_rmsf_comparison_from_aggregated(
 
     output_path = get_output_path(output_dir, "rmsf_comparison", plot_settings)
     return [save_figure(fig, output_path, plot_settings)]
-
-
-def _get_condition_summary(result: Any, label: str) -> Any | None:
-    """Return a condition summary from custom or generic comparison results.
-
-    Parameters
-    ----------
-    result : Any
-        Comparison result object.
-    label : str
-        Condition label to locate.
-
-    Returns
-    -------
-    Any or None
-        Matching condition summary, or ``None`` if no condition matches.
-    """
-    get_condition = getattr(result, "get_condition", None)
-    if callable(get_condition):
-        try:
-            return get_condition(label)
-        except KeyError:
-            return None
-
-    for condition in getattr(result, "conditions", []):
-        if getattr(condition, "label", None) == label:
-            return condition
-    return None
 
 
 def _draw_sem_errorbars(
