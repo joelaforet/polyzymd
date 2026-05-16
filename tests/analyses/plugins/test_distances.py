@@ -435,7 +435,7 @@ class TestDistanceResultFactories:
         """Create a representative runner payload for factory tests."""
         import numpy as np
 
-        from polyzymd.analyses.distances._runner import DistancePairPayload
+        from polyzymd.analyses.distances._mda import DistancePairPayload
 
         return DistancePairPayload(
             pair_label="pair0",
@@ -740,7 +740,7 @@ class TestRunReplicate:
         import numpy as np
 
         from polyzymd.analyses.distances import _mda as runner_module
-        from polyzymd.analyses.distances._runner import compute_distance_payloads
+        from polyzymd.analyses.distances._mda import compute_distance_payloads
 
         captured: dict[str, float] = {}
 

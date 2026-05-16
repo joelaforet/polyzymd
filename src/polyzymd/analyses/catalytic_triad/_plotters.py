@@ -962,8 +962,6 @@ def _pool_distances(
         - pair_labels: list of pair labels from first condition
         - threshold: contact threshold from first condition
     """
-    import json
-
     condition_distances: dict[str, dict[str, np.ndarray]] = {}
     pair_labels: list[str] = []
     threshold: float = 3.5
@@ -997,7 +995,7 @@ def _load_and_pool_replicate_distances(
     analysis_dir: Path,
     replicates: list[int],
 ) -> dict[str, Any] | None:
-    """Load triad results from replicates and pool distances.
+    """Load canonical triad artifacts from replicates and pool distances.
 
     Parameters
     ----------
@@ -1011,52 +1009,27 @@ def _load_and_pool_replicate_distances(
     dict or None
         {"distances": {pair_label: pooled_array}, "pair_labels": [...], "threshold": float}
     """
-    import json
+    from polyzymd.analyses.catalytic_triad._mda import load_replicate_distance_sidecar
 
     pooled_by_pair: dict[str, list[np.ndarray]] = {}
     pair_labels: list[str] = []
     threshold: float = 3.5
 
     for rep in replicates:
-        # Look for replicate result file
-        rep_dir = analysis_dir / f"run_{rep}"
-        result_file = rep_dir / "triad_result.json"
-
-        if not result_file.exists():
-            result_files = list(rep_dir.glob("triad_*.json"))
-            if result_files:
-                result_file = result_files[0]
-                logger.warning(
-                    f"Expected triad_result.json not found in {rep_dir}; "
-                    f"falling back to {result_file.name}"
-                )
-            else:
-                logger.debug(f"No triad result found in {rep_dir}")
-                continue
-
         try:
-            with open(result_file) as f:
-                result_data = json.load(f)
-
-            # Get threshold from first replicate
-            if "threshold" in result_data and not pair_labels:
-                threshold = result_data["threshold"]
-
-            # Extract pair results
-            pair_results = result_data.get("pair_results", [])
-            for pr in pair_results:
-                pair_label = pr.get("pair_label", "")
-                distances = pr.get("distances")
-
-                if pair_label and distances is not None:
-                    if pair_label not in pooled_by_pair:
-                        pooled_by_pair[pair_label] = []
-                        if pair_label not in pair_labels:
-                            pair_labels.append(pair_label)
-                    pooled_by_pair[pair_label].append(np.array(distances))
-
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
-            logger.warning(f"Failed to load {result_file}: {e}")
+            artifact, sidecar_path = load_replicate_distance_sidecar(analysis_dir, rep)
+            with np.load(sidecar_path) as npz_data:
+                matrix = np.asarray(npz_data["distance_matrix"], dtype=np.float64)
+                sidecar_labels = [str(label) for label in npz_data["pair_labels"].tolist()]
+            if not pair_labels:
+                pair_labels = sidecar_labels
+                threshold = float(artifact.payload.get("threshold", threshold))
+            for pair_idx, pair_label in enumerate(sidecar_labels):
+                if pair_label not in pooled_by_pair:
+                    pooled_by_pair[pair_label] = []
+                pooled_by_pair[pair_label].append(matrix[pair_idx])
+        except (OSError, KeyError, ValueError) as e:
+            logger.warning("Failed to load canonical triad artifact for replicate %s: %s", rep, e)
             continue
 
     if not pooled_by_pair:
@@ -1076,14 +1049,17 @@ def _load_aggregated_results(
     data: dict[str, Any],
     labels: Sequence[str],
 ) -> dict[str, Any]:
-    """Load aggregated triad results for each condition.
+    """Load canonical aggregated triad artifacts for each condition.
 
     Returns
     -------
     dict
         Mapping of label -> TriadAggregatedResult.
     """
-    from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
+    from polyzymd.analyses.catalytic_triad._mda import (
+        condition_artifact_to_legacy_result,
+        load_condition_artifact,
+    )
 
     results: dict[str, Any] = {}
 
@@ -1098,24 +1074,13 @@ def _load_aggregated_results(
 
         aggregated_dir = Path(aggregated_dir)
 
-        # Find aggregated result file
-        result_file = aggregated_dir / "triad_aggregated.json"
-        if not result_file.exists():
-            json_files = list(aggregated_dir.glob("triad_*.json"))
-            if json_files:
-                result_file = json_files[0]
-                logger.warning(
-                    f"Expected triad_aggregated.json not found in {aggregated_dir}; "
-                    f"falling back to {result_file.name}"
-                )
-            else:
-                logger.debug(f"No aggregated triad result in {aggregated_dir}")
-                continue
-
         try:
-            result = TriadAggregatedResult.load(result_file)
-            results[label] = result
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
-            logger.warning(f"Failed to load aggregated result {result_file}: {e}")
+            artifact = load_condition_artifact(aggregated_dir)
+            if artifact is None:
+                logger.debug("No canonical aggregated triad artifact in %s", aggregated_dir)
+                continue
+            results[label] = condition_artifact_to_legacy_result(artifact)
+        except (OSError, KeyError, ValueError) as e:
+            logger.warning("Failed to load canonical triad aggregate %s: %s", aggregated_dir, e)
 
     return results

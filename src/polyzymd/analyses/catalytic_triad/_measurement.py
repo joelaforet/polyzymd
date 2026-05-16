@@ -30,7 +30,7 @@ class TriadSimultaneousContactMeasurement(ScalarMeasurement):
         stop: int | None = None,
         step: int | None = None,
     ) -> float:
-        """Reject direct measurement because triad uses a custom pair-distance runner.
+        """Reject direct measurement because triad uses a composite MDA reducer.
 
         Parameters
         ----------
@@ -48,13 +48,13 @@ class TriadSimultaneousContactMeasurement(ScalarMeasurement):
         Raises
         ------
         NotImplementedError
-            Always raised because the catalytic-triad plugin keeps its legacy
-            pair-distance runner and aggregation lifecycle.
+            Always raised because the catalytic-triad plugin computes this
+            metric from pair-distance artifacts.
         """
 
         del universe, settings, start, stop, step
         raise NotImplementedError(
-            "Catalytic triad simultaneous contact is computed by the plugin runner."
+            "Catalytic triad simultaneous contact is computed from pair-distance artifacts."
         )
 
     def metric_value_from_summary(self, summary: Any) -> Any:
