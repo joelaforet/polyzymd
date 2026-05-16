@@ -771,20 +771,7 @@ class HydrogenBondsAnalysis(Analysis):
         if canonical.exists():
             return canonical
 
-        json_files = sorted(aggregated_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
-        if not json_files:
-            return None
-
-        chosen = json_files[-1]
-        logger.warning(
-            "%s: canonical result.json not found in %s — falling back to %s "
-            "(%d JSON file(s) present)",
-            self.name,
-            aggregated_dir,
-            chosen.name,
-            len(json_files),
-        )
-        return chosen
+        return None
 
     def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[Any] | None:
         """Build MDAnalysis-native hydrogen-bond jobs for one replicate.
@@ -989,31 +976,30 @@ class HydrogenBondsAnalysis(Analysis):
                 "Cannot aggregate hydrogen-bond results: no replicate results provided"
             )
 
-        artifact_inputs = all(isinstance(result, ReplicateArtifact) for result in results)
-        if artifact_inputs:
-            ordered_artifacts = validate_and_order_replicate_artifacts(
-                condition_label=ctx.condition.label,
-                replicates=ctx.replicates,
-                settings_fingerprint=_settings_hash(ctx.settings),
-                artifacts=results,
-                analysis_dir=ctx.output_dir.parent,
-            )
-            ordered_results = [
-                artifact_to_hydrogen_bond_result(
-                    artifact,
-                    settings_fingerprint=_settings_hash(ctx.settings),
-                    validate_sidecars=True,
-                    store_root=ctx.output_dir.parent,
-                )
-                for artifact in ordered_artifacts
-            ]
-        elif any(isinstance(result, ReplicateArtifact) for result in results):
+        if not all(isinstance(result, ReplicateArtifact) for result in results):
             raise TypeError(
-                "Hydrogen-bond aggregation expects either all ReplicateArtifact inputs or all "
-                "HydrogenBondResult inputs"
+                "Hydrogen-bond aggregation requires ReplicateArtifact inputs from the "
+                "MDAnalysis artifact lifecycle. Received legacy or non-artifact replicate "
+                "results; remove stale legacy caches or rerun with recompute=True before "
+                "aggregating."
             )
-        else:
-            ordered_results = _validate_aggregate_replicate_identity(ctx, results)
+
+        ordered_artifacts = validate_and_order_replicate_artifacts(
+            condition_label=ctx.condition.label,
+            replicates=ctx.replicates,
+            settings_fingerprint=_settings_hash(ctx.settings),
+            artifacts=results,
+            analysis_dir=ctx.output_dir.parent,
+        )
+        ordered_results = [
+            artifact_to_hydrogen_bond_result(
+                artifact,
+                settings_fingerprint=_settings_hash(ctx.settings),
+                validate_sidecars=True,
+                store_root=ctx.output_dir.parent,
+            )
+            for artifact in ordered_artifacts
+        ]
         self._validate_replicate_result_settings_identity(ctx, ordered_results)
 
         settings: HydrogenBondSettings = ctx.settings
@@ -1166,21 +1152,16 @@ class HydrogenBondsAnalysis(Analysis):
 
         target_path = ctx.result_path or (ctx.output_dir / "result.json")
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        if artifact_inputs:
-            artifact_result = aggregate_hydrogen_bond_artifacts(
-                condition_label=ctx.condition.label,
-                replicates=ctx.replicates,
-                output_dir=ctx.output_dir,
-                result_path=target_path,
-                artifacts=results,
-                legacy_result=agg_result,
-            )
-            logger.info("Saved aggregated hydrogen bond artifact to %s", target_path)
-            return artifact_result
-
-        self.save_result(agg_result, target_path)
-        logger.info("Saved aggregated hydrogen bond result to %s", target_path)
-        return agg_result
+        artifact_result = aggregate_hydrogen_bond_artifacts(
+            condition_label=ctx.condition.label,
+            replicates=ctx.replicates,
+            output_dir=ctx.output_dir,
+            result_path=target_path,
+            artifacts=ordered_artifacts,
+            legacy_result=agg_result,
+        )
+        logger.info("Saved aggregated hydrogen bond artifact to %s", target_path)
+        return artifact_result
 
     def _compute_composition(
         self,

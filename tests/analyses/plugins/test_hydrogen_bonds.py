@@ -33,6 +33,7 @@ from polyzymd.analyses.hydrogen_bonds import (
     _settings_hash,
 )
 from polyzymd.analyses.hydrogen_bonds._mda import (
+    HBOND_EVENT_COLUMNS,
     HydrogenBondMDAAnalysis,
     artifact_to_hydrogen_bond_result,
 )
@@ -47,7 +48,7 @@ from polyzymd.analyses.hydrogen_bonds._results import (
     ResidueRef,
     UndirectedResiduePairResult,
 )
-from polyzymd.analyses.mda import ConditionArtifact, ReplicateArtifact
+from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact, ReplicateArtifact
 from polyzymd.analyses.stats import (
     default_scalar_comparison,
     format_pct,
@@ -547,6 +548,21 @@ def test_load_aggregated_result_rejects_stale_settings_fingerprint(tmp_path: Pat
             settings=current_settings,
             condition_label="CondA",
         )
+
+
+def test_load_aggregated_result_ignores_noncanonical_json(tmp_path: Path) -> None:
+    """Aggregated loads should not fall back to arbitrary JSON files."""
+    analysis = HydrogenBondsAnalysis()
+    aggregated_dir = tmp_path / "aggregated"
+    aggregated_dir.mkdir()
+    HydrogenBondAggregatedResult(
+        settings_fingerprint=_settings_hash(HydrogenBondSettings()),
+        replicates=[1, 2],
+        n_replicates=2,
+        summaries=[_make_aggregated_summary("protein_polymer", 3.0, 0.2, [2.8, 3.2])],
+    ).save(aggregated_dir / "legacy_summary.json")
+
+    assert analysis._load_aggregated_result(aggregated_dir) is None
 
 
 def test_aggregated_summary_deserializes_legacy_std_unique_pairs_field() -> None:
@@ -1352,6 +1368,75 @@ def test_dynamic_selection_policy_recorded_in_artifact(tmp_path: Path) -> None:
     assert any("membership is evaluated once" in warning for warning in artifact.warnings)
 
 
+def test_dynamic_composition_warning_recorded_in_artifact(tmp_path: Path) -> None:
+    """Coordinate-dependent composition warnings should be artifact provenance."""
+
+    class MockHydrogenBondAnalysis:
+        def __init__(self, **kwargs) -> None:
+            del kwargs
+            self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
+
+        def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
+            del start, stop, step, verbose
+            self.results.hbonds = np.array([[0, 0, 10, 1, 2.8, 160.0]], dtype=float)
+
+    atoms = {
+        0: _MockAtom(0, "A", 10, "SER", 0),
+        1: _MockAtom(1, "C", 100, "OEG", 1),
+    }
+    universe = MagicMock()
+    universe.trajectory = [object(), object()]
+    universe.atoms = _MockAtomCollection(atoms)
+
+    def select_atoms(selection: str, updating: bool | None = None) -> _MockAtomGroup:
+        del updating
+        return {
+            "chainid A": _MockAtomGroup([0]),
+            "chainid C": _MockAtomGroup([1]),
+            "around 5.0 chainid A": _MockAtomGroup([0]),
+        }[selection]
+
+    universe.select_atoms.side_effect = select_atoms
+    condition = Condition(
+        label="test",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1,),
+        sim_config=MagicMock(),
+    )
+    settings = HydrogenBondSettings(
+        composition=HydrogenBondCompositionSettings(
+            partitions={"dynamic": "around 5.0 chainid A", "polymer": "chainid C"}
+        )
+    )
+    ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="0ns",
+        recompute=True,
+        settings=settings,
+    )
+    analysis = HydrogenBondsAnalysis()
+
+    with (
+        patch.dict(sys.modules, _make_mdanalysis_module(MockHydrogenBondAnalysis)),
+        patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
+    ):
+        mock_loader = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_loader.load_universe.return_value = universe
+        mock_loader.get_timestep.return_value = 10.0
+
+        artifact = analysis.run_replicate(ctx, 1)
+
+    assert isinstance(artifact, ReplicateArtifact)
+    expected = "Composition partition 'dynamic' uses coordinate-dependent selection"
+    assert any(expected in warning for warning in artifact.warnings)
+    assert any(expected in warning for warning in artifact.provenance["composition_warnings"])
+
+
 def test_composition_skips_unpartitioned_atoms() -> None:
     """Events with donor or acceptor outside partitions should be skipped."""
     analysis = HydrogenBondsAnalysis()
@@ -1625,6 +1710,62 @@ def _make_replicate_result(
     )
 
 
+def _make_replicate_artifact(
+    result: HydrogenBondResult,
+    ctx: AggregateContext,
+) -> ReplicateArtifact:
+    """Wrap a legacy assertion model in a valid hydrogen-bond artifact."""
+
+    store = ArtifactStore(ctx.output_dir.parent / f"run_{result.replicate}")
+    sidecar = store.write_npz_sidecar(
+        "sidecars/hydrogen_bond_events.npz",
+        hbonds=np.empty((0, 6), dtype=float),
+        metadata={"kind": "hydrogen_bond_events", "columns": list(HBOND_EVENT_COLUMNS)},
+    )
+    return ReplicateArtifact(
+        analysis_name="hydrogen_bonds",
+        condition_label=ctx.condition.label,
+        replicate=result.replicate,
+        payload={
+            "summaries": [summary.model_dump(mode="json") for summary in result.summaries],
+            "composition_entries": [
+                entry.model_dump(mode="json") for entry in result.composition_entries
+            ],
+            "metrics": {},
+            "replicate_metrics": {},
+            "n_frames_used": result.summaries[0].n_frames_used if result.summaries else 0,
+            "n_events": 0,
+            "event_sidecar": sidecar.path,
+        },
+        sidecars=[sidecar],
+        provenance={"source": "test_legacy_adapter"},
+        metadata={
+            "result_kind": "hydrogen_bonds_mda_replicate",
+            "settings_fingerprint": result.settings_fingerprint,
+            "config_hash": result.config_hash,
+            "polyzymd_version": result.polyzymd_version,
+            "equilibration_time": result.equilibration_time,
+            "equilibration_unit": result.equilibration_unit,
+            "selection_string": result.selection_string,
+            "timestep_ps": result.timestep_ps,
+            "raw_timestep_ps": result.raw_timestep_ps,
+            "frame_stride": result.frame_stride,
+            "event_columns": list(HBOND_EVENT_COLUMNS),
+        },
+    )
+
+
+def _aggregate_replicate_results(
+    analysis: HydrogenBondsAnalysis,
+    ctx: AggregateContext,
+    results: list[HydrogenBondResult],
+) -> HydrogenBondAggregatedResult:
+    """Aggregate legacy assertion models through the artifact-only lifecycle."""
+
+    artifacts = [_make_replicate_artifact(result, ctx) for result in results]
+    return _as_hydrogen_bond_aggregate(analysis.aggregate(ctx, artifacts))
+
+
 def _make_aggregate_context(
     tmp_path: Path,
     top_n_pairs: int = 15,
@@ -1658,7 +1799,7 @@ def test_aggregate_basic(tmp_path: Path) -> None:
         _make_replicate_result(3, 6.0, 0.60),
     ]
 
-    aggregated = analysis.aggregate(ctx, results)
+    aggregated = _aggregate_replicate_results(analysis, ctx, results)
 
     assert isinstance(aggregated, HydrogenBondAggregatedResult)
     assert aggregated.n_replicates == 3
@@ -1679,6 +1820,15 @@ def test_aggregate_basic(tmp_path: Path) -> None:
     assert ctx.result_path.exists()
 
 
+def test_aggregate_rejects_legacy_replicate_results(tmp_path: Path) -> None:
+    """aggregate should reject stale legacy replicate models after MDA migration."""
+    analysis = HydrogenBondsAnalysis()
+    ctx = _make_aggregate_context(tmp_path, replicates=(1,))
+
+    with pytest.raises(TypeError, match="ReplicateArtifact.*recompute=True"):
+        _ = analysis.aggregate(ctx, [_make_replicate_result(1, 2.0, 0.40)])
+
+
 def test_aggregate_propagates_timing_metadata(tmp_path: Path) -> None:
     """Hydrogen-bond aggregate should preserve replicate timing metadata."""
     analysis = HydrogenBondsAnalysis()
@@ -1690,7 +1840,7 @@ def test_aggregate_propagates_timing_metadata(tmp_path: Path) -> None:
         for rep in (1, 2)
     ]
 
-    aggregated = analysis.aggregate(ctx, results)
+    aggregated = _aggregate_replicate_results(analysis, ctx, results)
 
     assert aggregated.timestep_ps == pytest.approx(30.0)
     assert aggregated.raw_timestep_ps == pytest.approx(10.0)
@@ -1733,7 +1883,7 @@ def test_aggregate_pair_merging(tmp_path: Path) -> None:
             _make_undirected_pair(donor_a, acceptor_d, occupancy=0.2, events_per_frame=0.2),
         ],
     )
-    aggregated = analysis.aggregate(ctx, [rep1, rep2])
+    aggregated = _aggregate_replicate_results(analysis, ctx, [rep1, rep2])
     summary = aggregated.summaries[0]
 
     directed_by_pair = {
@@ -1805,7 +1955,7 @@ def test_aggregate_top_n_truncation(tmp_path: Path) -> None:
         ),
     ]
 
-    aggregated = analysis.aggregate(ctx, results)
+    aggregated = _aggregate_replicate_results(analysis, ctx, results)
     summary = aggregated.summaries[0]
 
     assert len(summary.directed_pairs) == 2
@@ -1817,8 +1967,11 @@ def test_aggregate_error_message_includes_replicate_details(tmp_path: Path) -> N
     """Aggregate mismatch errors should include expected replicate IDs."""
     analysis = HydrogenBondsAnalysis()
     ctx = _make_aggregate_context(tmp_path, replicates=(1, 2, 3))
-    with pytest.raises(ValueError, match=r"Expected replicate results for \[1, 2, 3\]"):
-        _ = analysis.aggregate(ctx, [_make_replicate_result(1, 1.0, 0.2)])
+    with pytest.raises(ValueError, match=r"missing \[2, 3\]"):
+        _ = analysis.aggregate(
+            ctx,
+            [_make_replicate_artifact(_make_replicate_result(1, 1.0, 0.2), ctx)],
+        )
 
 
 def test_aggregate_rejects_duplicate_replicate_ids(tmp_path: Path) -> None:
@@ -1834,9 +1987,12 @@ def test_aggregate_rejects_duplicate_replicate_ids(tmp_path: Path) -> None:
 
     with pytest.raises(
         ValueError,
-        match=r"missing replicates \[3\].*duplicate replicates \[2\]",
+        match=r"Duplicate hydrogen-bond artifact for replicate 2",
     ):
-        _ = analysis.aggregate(ctx, results)
+        _ = analysis.aggregate(
+            ctx,
+            [_make_replicate_artifact(result, ctx) for result in results],
+        )
 
 
 def test_aggregate_rejects_unexpected_replicate_ids(tmp_path: Path) -> None:
@@ -1852,9 +2008,12 @@ def test_aggregate_rejects_unexpected_replicate_ids(tmp_path: Path) -> None:
 
     with pytest.raises(
         ValueError,
-        match=r"missing replicates \[3\].*unexpected replicates \[4\]",
+        match=r"missing \[3\], unexpected \[4\]",
     ):
-        _ = analysis.aggregate(ctx, results)
+        _ = analysis.aggregate(
+            ctx,
+            [_make_replicate_artifact(result, ctx) for result in results],
+        )
 
 
 def test_aggregate_saves_result(tmp_path: Path) -> None:
@@ -1867,7 +2026,7 @@ def test_aggregate_saves_result(tmp_path: Path) -> None:
         _make_replicate_result(3, 1.4, 0.4),
     ]
 
-    _ = analysis.aggregate(ctx, results)
+    _ = _aggregate_replicate_results(analysis, ctx, results)
 
     assert ctx.result_path is not None
     assert ctx.result_path.exists()
@@ -1886,7 +2045,7 @@ def test_aggregate_rejects_missing_summary_in_one_replicate(tmp_path: Path) -> N
         ValueError,
         match=r"condition 'test'.*summary 'protein_polymer'.*replicate results \[2\]",
     ):
-        _ = analysis.aggregate(ctx, [rep1, rep2, rep3])
+        _ = _aggregate_replicate_results(analysis, ctx, [rep1, rep2, rep3])
 
 
 def test_aggregate_single_replicate(tmp_path: Path) -> None:
@@ -1894,7 +2053,11 @@ def test_aggregate_single_replicate(tmp_path: Path) -> None:
     analysis = HydrogenBondsAnalysis()
     ctx = _make_aggregate_context(tmp_path, replicates=(1,))
 
-    aggregated = analysis.aggregate(ctx, [_make_replicate_result(1, 3.5, 0.9)])
+    aggregated = _aggregate_replicate_results(
+        analysis,
+        ctx,
+        [_make_replicate_result(1, 3.5, 0.9)],
+    )
     summary = aggregated.summaries[0]
 
     assert summary.mean_hbonds_per_frame == pytest.approx(3.5)
@@ -1922,7 +2085,7 @@ def test_aggregate_zero_hbonds(tmp_path: Path) -> None:
         _make_replicate_result(2, 0.0, 0.0),
         _make_replicate_result(3, 0.0, 0.0),
     ]
-    aggregated = analysis.aggregate(ctx, results)
+    aggregated = _aggregate_replicate_results(analysis, ctx, results)
     summary = aggregated.summaries[0]
 
     assert summary.mean_hbonds_per_frame == pytest.approx(0.0)
@@ -1960,7 +2123,7 @@ def test_aggregate_pair_alignment(tmp_path: Path) -> None:
         ],
     )
 
-    aggregated = analysis.aggregate(ctx, [rep1, rep2, rep3])
+    aggregated = _aggregate_replicate_results(analysis, ctx, [rep1, rep2, rep3])
     summary = aggregated.summaries[0]
     directed_by_pair = {
         (pair.donor.label, pair.acceptor.label): pair for pair in summary.directed_pairs
@@ -3232,7 +3395,7 @@ def test_aggregate_undirected_pair_merging(tmp_path: Path) -> None:
         undirected_pairs=[_make_undirected_pair(("C", 100, "OEG"), ("A", 10, "SER"), 0.6, 0.6)],
     )
 
-    aggregated = analysis.aggregate(ctx, [rep1, rep2])
+    aggregated = _aggregate_replicate_results(analysis, ctx, [rep1, rep2])
     summary = aggregated.summaries[0]
     assert len(summary.undirected_pairs) == 1
     pair = summary.undirected_pairs[0]
@@ -3315,7 +3478,7 @@ def test_aggregate_all_summaries_present(tmp_path: Path) -> None:
         ],
     )
 
-    aggregated = analysis.aggregate(ctx, [rep1, rep2])
+    aggregated = _aggregate_replicate_results(analysis, ctx, [rep1, rep2])
     by_name = {summary.name: summary for summary in aggregated.summaries}
 
     assert by_name["protein_polymer"].per_replicate_mean_hbonds == pytest.approx([2.0, 4.0])
@@ -3831,7 +3994,7 @@ def test_unique_pairs_metric_and_aggregation(tmp_path: Path) -> None:
     results[1].summaries[0].mean_unique_pairs_per_frame = 3.0
     ctx = _make_aggregate_context(tmp_path, replicates=(1, 2))
 
-    aggregated = analysis.aggregate(ctx, results)
+    aggregated = _aggregate_replicate_results(analysis, ctx, results)
     summary = aggregated.summaries[0]
     assert hasattr(summary, "mean_unique_pairs_per_frame")
     assert summary.mean_unique_pairs_per_frame == pytest.approx(2.0)

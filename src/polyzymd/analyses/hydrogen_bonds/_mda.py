@@ -256,7 +256,7 @@ class HydrogenBondArtifactCollector:
             raise ValueError("hydrogen_bonds MDA job did not record a selection plan")
 
         events = normalize_hbond_events(job.results.hbonds)
-        summaries, composition_entries = summarize_hydrogen_bond_events(
+        summaries, composition_entries, composition_warnings = summarize_hydrogen_bond_events(
             plan=analysis.plan,
             settings=analysis.settings,
             universe=analysis.universe,
@@ -266,7 +266,7 @@ class HydrogenBondArtifactCollector:
         metrics = _replicate_metrics(summaries)
         eq_value, eq_unit = parse_time_string(ctx.replicate_context.equilibration)
         config_hash = compute_config_hash(ctx.replicate_context.sim_config)
-        warnings = [*ctx.warnings, *analysis.plan.warnings]
+        warnings = [*ctx.warnings, *analysis.plan.warnings, *composition_warnings]
 
         return ReplicateArtifact(
             analysis_name=ctx.analysis_name,
@@ -291,6 +291,7 @@ class HydrogenBondArtifactCollector:
                     ctx.universe_policy.as_dict(), analysis_name=ctx.analysis_name
                 ),
                 "dynamic_selection_policy": dynamic_selection_policy_payload(analysis.settings),
+                "composition_warnings": composition_warnings,
                 "update_selections": analysis.settings.update_selections,
             },
             metadata={
@@ -317,7 +318,7 @@ def summarize_hydrogen_bond_events(
     settings: HydrogenBondSettings,
     universe: Any,
     hbond_events: NDArray[np.float64],
-) -> tuple[list[HydrogenBondReplicateSummary], list[CompositionEntry]]:
+) -> tuple[list[HydrogenBondReplicateSummary], list[CompositionEntry], list[str]]:
     """Summarize raw MDAnalysis hydrogen-bond events for one replicate.
 
     Parameters
@@ -334,7 +335,8 @@ def summarize_hydrogen_bond_events(
     Returns
     -------
     tuple of list
-        Per-summary results and optional composition entries.
+        Per-summary results, optional composition entries, and warnings from
+        composition partition resolution.
     """
 
     summary_results_by_name = dict(plan.summary_results_by_name)
@@ -356,8 +358,9 @@ def summarize_hydrogen_bond_events(
             )
 
     composition_entries: list[CompositionEntry] = []
+    composition_warnings: list[str] = []
     if settings.composition is not None:
-        composition_entries = compute_composition(
+        composition_entries, composition_warnings = compute_composition_with_warnings(
             composition_settings=settings.composition,
             hbond_array=hbond_events,
             universe=universe,
@@ -366,7 +369,7 @@ def summarize_hydrogen_bond_events(
             allow_overlapping=settings.allow_overlapping_composition,
         )
     summaries = [summary_results_by_name[summary.name] for summary in settings.summaries]
-    return summaries, composition_entries
+    return summaries, composition_entries, composition_warnings
 
 
 def aggregate_hydrogen_bond_artifacts(
@@ -647,18 +650,63 @@ def compute_composition(
         Partition-pair composition entries.
     """
 
+    entries, _warnings = compute_composition_with_warnings(
+        composition_settings=composition_settings,
+        hbond_array=hbond_array,
+        universe=universe,
+        start_frame=start_frame,
+        n_frames=n_frames,
+        allow_overlapping=allow_overlapping,
+    )
+    return entries
+
+
+def compute_composition_with_warnings(
+    *,
+    composition_settings: HydrogenBondCompositionSettings,
+    hbond_array: NDArray[np.float64],
+    universe: Any,
+    start_frame: int,
+    n_frames: int,
+    allow_overlapping: bool = False,
+) -> tuple[list[CompositionEntry], list[str]]:
+    """Compute hydrogen-bond composition and return emitted warnings.
+
+    Parameters
+    ----------
+    composition_settings : HydrogenBondCompositionSettings
+        Partition selections used for composition reporting.
+    hbond_array : ndarray
+        Raw hydrogen-bond event table.
+    universe : Any
+        MDAnalysis universe used to resolve atom metadata.
+    start_frame : int
+        First analyzed frame index.
+    n_frames : int
+        Number of analyzed frames.
+    allow_overlapping : bool, optional
+        Whether overlapping partitions are allowed, by default False.
+
+    Returns
+    -------
+    tuple of list
+        Partition-pair composition entries and warning messages emitted while
+        resolving partition membership.
+    """
+
     partition_atoms: dict[str, set[int]] = {}
+    warnings: list[str] = []
     for partition_name, selection_str in composition_settings.partitions.items():
         selection_lower = selection_str.lower()
         for keyword in COORDINATE_DEPENDENT_SELECTION_KEYWORDS:
             if keyword in selection_lower:
-                LOGGER.warning(
+                message = (
                     "Composition partition '%s' uses coordinate-dependent selection '%s'. "
                     "Partition membership is evaluated once (not per-frame) and may not "
-                    "reflect dynamic behavior",
-                    partition_name,
-                    selection_str,
-                )
+                    "reflect dynamic behavior"
+                ) % (partition_name, selection_str)
+                LOGGER.warning("%s", message)
+                warnings.append(message)
                 break
 
         try:
@@ -666,7 +714,9 @@ def compute_composition(
         except TypeError:
             atom_group = universe.select_atoms(selection_str)
         if len(atom_group) == 0:
-            LOGGER.warning("Composition partition '%s' matched no atoms", partition_name)
+            message = f"Composition partition '{partition_name}' matched no atoms"
+            LOGGER.warning("%s", message)
+            warnings.append(message)
         partition_atoms[partition_name] = set(atom_group.indices.tolist())
 
     partition_names = list(partition_atoms.keys())
@@ -675,14 +725,13 @@ def compute_composition(
             overlap = partition_atoms[partition_a] & partition_atoms[partition_b]
             if overlap:
                 if allow_overlapping:
-                    LOGGER.warning(
+                    message = (
                         "Composition partitions '%s' and '%s' overlap by %d atoms. "
                         "Overlapping atoms will be counted in BOTH partitions; "
-                        "composition fractions may exceed 1.0.",
-                        partition_a,
-                        partition_b,
-                        len(overlap),
-                    )
+                        "composition fractions may exceed 1.0."
+                    ) % (partition_a, partition_b, len(overlap))
+                    LOGGER.warning("%s", message)
+                    warnings.append(message)
                 else:
                     raise ValueError(
                         f"Composition partitions '{partition_a}' and '{partition_b}' overlap "
@@ -740,7 +789,7 @@ def compute_composition(
             )
         )
 
-    return entries
+    return entries, warnings
 
 
 def normalize_hbond_events(value: Any) -> NDArray[np.float64]:
