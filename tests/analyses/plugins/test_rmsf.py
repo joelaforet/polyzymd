@@ -310,13 +310,13 @@ class TestRMSFMDAJobs:
     def test_build_mda_jobs_preserves_noncontiguous_explicit_frames(
         self, condition: Condition
     ) -> None:
-        """Explicit non-contiguous frame indices should reach AnalysisBase unchanged."""
+        """Supported modes should pass non-contiguous frame indices unchanged."""
 
         explicit_frames = [1, 4, 9]
         analysis = RMSFAnalysis()
         ctx = SimpleNamespace(
             universe=FakeUniverse(n_frames=12),
-            settings=RMSFSettings(reference_mode="average"),
+            settings=RMSFSettings(reference_mode="frame", reference_frame=1),
             frame_selection=FrameSelection(
                 frames=explicit_frames,
                 n_frames_total=12,
@@ -327,7 +327,7 @@ class TestRMSFMDAJobs:
             universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=1),
         )
         with (
-            patch("polyzymd.analyses.rmsf._mda.align_trajectory", return_value=None) as align_mock,
+            patch("polyzymd.analyses.rmsf._mda.align_trajectory", return_value=0),
             patch("polyzymd.analyses.rmsf._mda.RMSFProfileAnalysis", FakeProfileAnalysis),
         ):
             jobs = analysis.build_mda_jobs(ctx)
@@ -338,12 +338,6 @@ class TestRMSFMDAJobs:
         metadata = jobs[0].universe_policy.metadata["autocorrelation_metadata"]
         assert metadata["selected_frames"] == explicit_frames
         assert metadata["explicit_frame_selection"] is True
-        align_mock.assert_called_once()
-        assert align_mock.call_args.kwargs == {
-            "start_frame": 1,
-            "stop_frame": 10,
-            "step_frame": 1,
-        }
 
     def test_build_mda_jobs_preserves_boolean_explicit_frame_mask(
         self, condition: Condition
@@ -354,7 +348,7 @@ class TestRMSFMDAJobs:
         analysis = RMSFAnalysis()
         ctx = SimpleNamespace(
             universe=FakeUniverse(n_frames=5),
-            settings=RMSFSettings(reference_mode="average"),
+            settings=RMSFSettings(reference_mode="frame", reference_frame=1),
             frame_selection=FrameSelection(
                 frames=frame_mask,
                 n_frames_total=5,
@@ -374,6 +368,60 @@ class TestRMSFMDAJobs:
         assert jobs[0].frame_selection.frames == (1, 3)
         metadata = jobs[0].universe_policy.metadata["autocorrelation_metadata"]
         assert metadata["selected_frames"] == [1, 3]
+
+    def test_build_mda_jobs_rejects_explicit_frames_for_average_reference(
+        self, condition: Condition
+    ) -> None:
+        """Average reference mode should reject explicit selectors before alignment."""
+
+        analysis = RMSFAnalysis()
+        ctx = SimpleNamespace(
+            universe=FakeUniverse(n_frames=12),
+            settings=RMSFSettings(reference_mode="average"),
+            frame_selection=FrameSelection(
+                frames=[1, 4, 9],
+                n_frames_total=12,
+                timestep_ps=10.0,
+            ),
+            replicate_context=SimpleNamespace(condition=condition),
+            replicate=1,
+            universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=1),
+        )
+        with (
+            patch(
+                "polyzymd.analyses.rmsf._mda.align_trajectory",
+                side_effect=AssertionError("alignment should not run"),
+            ),
+            pytest.raises(ValueError, match="reference_mode='average'"),
+        ):
+            analysis.build_mda_jobs(ctx)
+
+    def test_build_mda_jobs_rejects_explicit_frames_for_centroid_reference(
+        self, condition: Condition
+    ) -> None:
+        """Centroid reference mode should reject explicit selectors before alignment."""
+
+        analysis = RMSFAnalysis()
+        ctx = SimpleNamespace(
+            universe=FakeUniverse(n_frames=12),
+            settings=RMSFSettings(reference_mode="centroid"),
+            frame_selection=FrameSelection(
+                frames=[1, 4, 9],
+                n_frames_total=12,
+                timestep_ps=10.0,
+            ),
+            replicate_context=SimpleNamespace(condition=condition),
+            replicate=1,
+            universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=1),
+        )
+        with (
+            patch(
+                "polyzymd.analyses.rmsf._mda.align_trajectory",
+                side_effect=AssertionError("alignment should not run"),
+            ),
+            pytest.raises(ValueError, match="reference_mode='centroid'"),
+        ):
+            analysis.build_mda_jobs(ctx)
 
     def test_prepare_rejects_empty_selection(self, condition: Condition) -> None:
         """Empty atom selections should fail with actionable diagnostics."""
@@ -593,6 +641,40 @@ class TestRMSFArtifacts:
         with np.load(sidecar_path) as data:
             np.testing.assert_allclose(data["rmsf_values"], [1.0, 1.5, 2.0])
             np.testing.assert_array_equal(data["selected_frames"], [0, 1, 2])
+
+    @pytest.mark.parametrize(
+        ("frames", "expected"),
+        [
+            (np.asarray([1, 4, 9], dtype=np.int64), [1, 4, 9]),
+            (np.asarray([False, True, False, True], dtype=np.bool_), [False, True, False, True]),
+        ],
+    )
+    def test_collector_serializes_numpy_explicit_frame_provenance(
+        self,
+        condition: Condition,
+        tmp_path: Path,
+        frames: np.ndarray,
+        expected: list[int | bool],
+    ) -> None:
+        """Replicate provenance should normalize NumPy frame selectors."""
+
+        base_ctx = _collector_context(tmp_path, condition, 1)
+        ctx = MDACollectorContext(
+            analysis_name=base_ctx.analysis_name,
+            replicate_context=base_ctx.replicate_context,
+            frame_selection=FrameSelection(
+                frames=frames,
+                n_frames_total=int(frames.size) if frames.dtype == np.bool_ else 12,
+                timestep_ps=10.0,
+            ),
+            universe_policy=base_ctx.universe_policy,
+            artifact_store=base_ctx.artifact_store,
+            settings_fingerprint=base_ctx.settings_fingerprint,
+        )
+
+        artifact = RMSFArtifactCollector()(ctx, [_job_result(ctx)])
+
+        assert artifact.provenance["frame_selection"]["frames"] == expected
 
     def test_aggregate_builds_condition_artifact(
         self, condition: Condition, tmp_path: Path

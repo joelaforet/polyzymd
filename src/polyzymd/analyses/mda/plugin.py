@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from operator import index as operator_index
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -201,7 +202,7 @@ def frame_selection_payload(frame_selection: FrameSelection) -> dict[str, Any]:
         "start": frame_selection.start,
         "stop": frame_selection.stop,
         "step": frame_selection.step,
-        "frames": strict_json_payload(frame_selection.frames, analysis_name="frame_selection"),
+        "frames": _frame_selector_payload(frame_selection.frames),
         "equilibration": frame_selection.equilibration,
         "equilibration_start": frame_selection.equilibration_start,
         "equilibration_ps": frame_selection.equilibration_ps,
@@ -210,6 +211,38 @@ def frame_selection_payload(frame_selection: FrameSelection) -> dict[str, Any]:
         "n_frames_selected": frame_selection.n_frames_selected,
         "warning_message": frame_selection.warning_message,
     }
+
+
+def _frame_selector_payload(frames: Any) -> list[int | bool] | None:
+    """Serialize explicit frame selectors to JSON-safe Python scalars."""
+
+    if frames is None:
+        return None
+    payload: list[int | bool] = []
+    for frame in frames:
+        if _is_boolean_frame_value(frame):
+            payload.append(bool(frame))
+        else:
+            try:
+                payload.append(operator_index(frame))
+            except TypeError as exc:
+                raise PluginContractError(
+                    "frame_selection.build_mda_jobs() produced non-integer explicit frame "
+                    f"selector {frame!r}; use integer indices or a boolean mask"
+                ) from exc
+    return payload
+
+
+def _is_boolean_frame_value(frame: Any) -> bool:
+    """Return whether a frame selector value is boolean-like."""
+
+    if isinstance(frame, bool):
+        return True
+    frame_type = type(frame)
+    return (
+        frame_type.__name__ == "bool_"
+        and frame_type.__module__.split(".", maxsplit=1)[0] == "numpy"
+    )
 
 
 def strict_json_payload(value: Any, *, analysis_name: str) -> Any:

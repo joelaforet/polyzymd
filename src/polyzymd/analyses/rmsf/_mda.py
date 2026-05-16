@@ -480,6 +480,7 @@ def prepare_rmsf_profile_input(
         Prepared atom group, selected frames, reference positions, and metadata.
     """
 
+    _validate_explicit_frame_reference_mode(frame_selection, settings)
     alignment_start, alignment_stop, alignment_step = _alignment_bounds(frame_selection)
     frames = _selected_frames_from_frame_selection(frame_selection)
     _validate_reference_settings(settings)
@@ -1170,6 +1171,24 @@ def _selected_frame_selection(base: FrameSelection, frames: NDArray[np.int64]) -
         timestep_ps=base.timestep_ps,
         n_frames_total=base.n_frames_total,
         warning_message=base.warning_message,
+    )
+
+
+def _validate_explicit_frame_reference_mode(
+    frame_selection: FrameSelection,
+    settings: RMSFSettings,
+) -> None:
+    """Reject explicit frames for reference modes that build references from slices."""
+
+    if frame_selection.frames is None:
+        return
+    if settings.reference_mode not in {"average", "centroid"}:
+        return
+    raise ValueError(
+        "RMSF explicit FrameSelection.frames is not supported with "
+        f"reference_mode={settings.reference_mode!r} because that reference mode builds the "
+        "alignment/reference structure from a contiguous trajectory slice. Use reference_mode "
+        "'frame' or 'external', or provide a start/stop/step slice selection."
     )
 
 
