@@ -192,6 +192,49 @@ def _collect_artifact(
     return artifact
 
 
+def _collect_multi_run_artifact(
+    tmp_path: Path,
+    *,
+    condition_label: str,
+    replicate: int,
+    raw_by_run: dict[str, SASAComputationResult],
+    settings: SASASettings,
+) -> ReplicateArtifact:
+    """Collect and persist a canonical multi-run SASA replicate artifact."""
+
+    condition = _make_condition(condition_label)
+    ctx = make_replicate_context(
+        condition=condition,
+        replicate=replicate,
+        output_dir=tmp_path / f"run_{replicate}",
+        settings=settings,
+        equilibration="10ns",
+        recompute=True,
+    )
+    frame_count = max(len(raw.total_sasa_a2) for raw in raw_by_run.values())
+    collector_ctx = MDACollectorContext(
+        analysis_name="sasa",
+        replicate_context=ctx,
+        frame_selection=FrameSelection(
+            start=0,
+            stop=frame_count,
+            step=1,
+            timestep_ps=10.0,
+            n_frames_total=frame_count,
+            equilibration="10ns",
+        ),
+        universe_policy=MDAUniversePolicy(condition_label=condition_label, replicate=replicate),
+        artifact_store=ArtifactStore(ctx.output_dir),
+        settings_fingerprint=SASAAnalysis._make_settings_cache_tag(settings),
+    )
+    completed_jobs = [
+        _job_result(raw, run_label=run_label) for run_label, raw in raw_by_run.items()
+    ]
+    artifact = SASAArtifactCollector()(collector_ctx, completed_jobs)
+    ArtifactStore(ctx.output_dir).write_replicate_result(artifact, "result.json")
+    return artifact
+
+
 def _aggregate_artifacts(
     tmp_path: Path,
     artifacts: list[ReplicateArtifact],
@@ -532,6 +575,69 @@ def test_sasa_zero_selection_artifact_roundtrip_aggregate_compare(tmp_path: Path
     )
 
     assert analysis.compare(ctx) is None
+
+
+def test_sasa_compare_mixed_finite_and_zero_selection_has_no_nan_leakage(
+    tmp_path: Path,
+) -> None:
+    """Comparison output should omit zero-selection runs without serializing NaN."""
+
+    settings = SASASettings(
+        runs=[
+            SASARunSettings(label="finite", target_selection="chainid A"),
+            SASARunSettings(label="empty", target_selection="chainid Z"),
+        ]
+    )
+    analysis = SASAAnalysis()
+    condition_artifacts = {}
+    for condition_label, offset in (("control", 0.0), ("treated", 10.0)):
+        condition_root = tmp_path / condition_label
+        for replicate in (1, 2):
+            _collect_multi_run_artifact(
+                condition_root,
+                condition_label=condition_label,
+                replicate=replicate,
+                raw_by_run={
+                    "finite": _raw_sasa(total=[10.0 + offset + replicate]),
+                    "empty": _raw_sasa(total=[0.0], zero=True),
+                },
+                settings=settings,
+            )
+        reloaded_replicates = [
+            ArtifactStore(condition_root / f"run_{replicate}").read_replicate_result("result.json")
+            for replicate in (1, 2)
+        ]
+        condition_artifacts[condition_label] = _aggregate_artifacts(
+            condition_root,
+            reloaded_replicates,
+            condition_label=condition_label,
+            settings=settings,
+        )
+
+    ctx = make_comparison_context(
+        name="sasa_compare",
+        conditions=[_make_condition("control"), _make_condition("treated")],
+        analysis_dirs={"control": tmp_path / "control", "treated": tmp_path / "treated"},
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label="control",
+        equilibration="10ns",
+        aggregated_results=condition_artifacts,
+    )
+
+    comparison = analysis.compare(ctx)
+    comparison_path = tmp_path / "comparison" / "result.json"
+    comparison.save(comparison_path)
+    comparison_json = comparison_path.read_text()
+
+    assert isinstance(comparison, SASAComparisonResult)
+    assert comparison.run_labels == ["finite"]
+    assert all(
+        [run.label for run in condition.run_summaries] == ["finite"]
+        for condition in comparison.conditions
+    )
+    assert "NaN" not in comparison_json
+    assert '"empty"' not in comparison_json
 
 
 def test_sasa_sidecar_hash_validation_rejects_tampering(tmp_path: Path) -> None:

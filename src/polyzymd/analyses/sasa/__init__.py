@@ -753,26 +753,48 @@ class SASAAnalysis(Analysis):
                 expected_replicates=condition.replicates,
                 allow_replicate_subset=True,
             )
-            agg_result = condition_artifact_to_legacy_result(agg_result)
-
-            run_summaries = [
-                SASARunSummary(
-                    label=run_result.run_label,
-                    target_selection=run_result.target_selection,
-                    context_selection=run_result.context_selection,
-                    mean_sasa=run_result.overall_mean,
-                    sem_sasa=run_result.overall_sem,
-                    per_replicate_means=run_result.per_replicate_means,
-                    zero_atom_selection=run_result.zero_atom_selection,
+            run_summaries = []
+            for run_result in agg_result.payload.get("run_results", []):
+                if bool(run_result.get("zero_atom_selection", False)):
+                    LOGGER.warning(
+                        "Run '%s' in condition '%s' matched zero atoms; omitting from "
+                        "comparison summaries",
+                        run_result.get("run_label"),
+                        condition.label,
+                    )
+                    continue
+                mean_sasa = self._finite_float_or_none(run_result.get("overall_mean"))
+                if mean_sasa is None:
+                    LOGGER.warning(
+                        "Run '%s' in condition '%s' has no finite SASA values; omitting from "
+                        "comparison summaries",
+                        run_result.get("run_label"),
+                        condition.label,
+                    )
+                    continue
+                sem_sasa = self._finite_float_or_none(run_result.get("overall_sem")) or 0.0
+                replicate_means = [
+                    float(value)
+                    for value in run_result.get("per_replicate_means", [])
+                    if self._is_finite(value)
+                ]
+                run_summaries.append(
+                    SASARunSummary(
+                        label=str(run_result["run_label"]),
+                        target_selection=str(run_result["target_selection"]),
+                        context_selection=str(run_result["context_selection"]),
+                        mean_sasa=mean_sasa,
+                        sem_sasa=sem_sasa,
+                        per_replicate_means=replicate_means,
+                        zero_atom_selection=False,
+                    )
                 )
-                for run_result in agg_result.run_results
-            ]
 
             summaries.append(
                 SASAConditionSummary(
                     label=condition.label,
                     config_path=str(condition.config_path),
-                    n_replicates=agg_result.n_replicates,
+                    n_replicates=len(agg_result.replicates),
                     run_summaries=run_summaries,
                 )
             )
@@ -1039,9 +1061,21 @@ class SASAAnalysis(Analysis):
             return False
 
     @staticmethod
-    def _is_finite(value: float) -> bool:
+    def _is_finite(value: Any) -> bool:
         """Return True when value is finite."""
-        return value == value and value not in (float("inf"), float("-inf"))
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return False
+        return numeric == numeric and numeric not in (float("inf"), float("-inf"))
+
+    @staticmethod
+    def _finite_float_or_none(value: Any) -> float | None:
+        """Return finite numeric values as floats and missing values as ``None``."""
+
+        if not SASAAnalysis._is_finite(value):
+            return None
+        return float(value)
 
     @staticmethod
     def _make_aggregated_filename(
