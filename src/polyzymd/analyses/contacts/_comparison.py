@@ -19,6 +19,8 @@ logger = logging.getLogger("polyzymd.analyses.contacts")
 NOT_TESTABLE_SINGLETON_NOTE = (
     "Inferential statistics require at least two replicates per condition."
 )
+CONTACTS_COMPARED_METRICS = ("coverage", "mean_contact_fraction")
+METRIC_STAT_TOLERANCE = 1e-12
 
 
 def compare(analysis: Any, ctx: ComparisonContext) -> Any:
@@ -205,6 +207,8 @@ def _validate_condition_artifact(
     if not stored_replicates:
         raise ValueError(f"contacts: condition {cond.label!r} has no successful replicates")
     _validate_condition_frame_selection(artifact, ctx, cond)
+    _validate_condition_residence_setting(artifact, ctx, cond)
+    _validate_condition_metric_integrity(artifact, cond)
     from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
 
     expected_fingerprint = contacts_detection_fingerprint(ctx.settings)
@@ -214,6 +218,136 @@ def _validate_condition_artifact(
             f"contacts: condition {cond.label!r} detection fingerprint mismatch; expected "
             f"{expected_fingerprint!r}, got {stored_fingerprint!r}. Recompute contacts."
         )
+
+
+def _validate_condition_residence_setting(
+    artifact: ConditionArtifact, ctx: ComparisonContext, cond: Condition
+) -> None:
+    """Validate residence-time aggregation identity for comparison."""
+
+    expected = bool(getattr(ctx.settings, "compute_residence_times", True))
+    stored = artifact.metadata.get("compute_residence_times")
+    if stored is None:
+        raise ValueError(
+            f"contacts: condition {cond.label!r} aggregate lacks compute_residence_times "
+            "metadata. Recompute contacts or clear stale aggregate result.json files."
+        )
+    if bool(stored) != expected:
+        raise ValueError(
+            f"contacts: condition {cond.label!r} compute_residence_times mismatch: stored "
+            f"{bool(stored)!r}, expected {expected!r}. Recompute contacts or clear stale "
+            "aggregate result.json files."
+        )
+
+
+def _validate_condition_metric_integrity(artifact: ConditionArtifact, cond: Condition) -> None:
+    """Validate compared metric vectors and replicate-level identity."""
+
+    expected_replicates = [int(replicate) for replicate in artifact.replicates]
+    expected_keys = {str(replicate) for replicate in expected_replicates}
+    replicate_metrics = artifact.payload.get("replicate_metrics")
+    if not isinstance(replicate_metrics, Mapping):
+        raise ValueError(
+            f"contacts: condition {cond.label!r} lacks replicate_metrics. Recompute contacts."
+        )
+    stored_keys = {str(key) for key in replicate_metrics}
+    if stored_keys != expected_keys:
+        raise ValueError(
+            f"contacts: condition {cond.label!r} replicate_metrics keys {sorted(stored_keys)} "
+            f"do not match artifact replicates {sorted(expected_keys)}. Recompute contacts."
+        )
+
+    metrics = artifact.payload.get("metrics")
+    if not isinstance(metrics, Mapping):
+        raise ValueError(f"contacts: condition {cond.label!r} lacks metrics. Recompute contacts.")
+    for metric_name in CONTACTS_COMPARED_METRICS:
+        metric = metrics.get(metric_name)
+        if not isinstance(metric, Mapping):
+            raise ValueError(
+                f"contacts: condition {cond.label!r} lacks metric {metric_name!r}. "
+                "Recompute contacts."
+            )
+        _validate_metric_summary(metric, metric_name, expected_replicates, cond)
+
+
+def _validate_metric_summary(
+    metric: Mapping[str, Any], metric_name: str, replicates: Sequence[int], cond: Condition
+) -> None:
+    """Validate one compared metric summary against replicate values."""
+
+    values = _metric_values(metric, metric_name, cond)
+    stored_n = _metric_int(metric.get("n"), metric_name, "n", cond)
+    expected_n = len(replicates)
+    if len(values) != expected_n or stored_n != expected_n:
+        raise ValueError(
+            f"contacts: condition {cond.label!r} metric {metric_name!r} length mismatch: "
+            f"len(values)={len(values)}, n={stored_n}, replicates={expected_n}. Recompute contacts."
+        )
+    mean = float(np.mean(values)) if values else 0.0
+    std = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+    sem = float(std / np.sqrt(len(values))) if len(values) > 1 else 0.0
+    expected_stats = {"mean": mean, "std": std, "sem": sem}
+    for stat_name, expected_value in expected_stats.items():
+        stored_value = _metric_float(metric.get(stat_name), metric_name, stat_name, cond)
+        if not np.isclose(
+            stored_value,
+            expected_value,
+            rtol=METRIC_STAT_TOLERANCE,
+            atol=METRIC_STAT_TOLERANCE,
+        ):
+            raise ValueError(
+                f"contacts: condition {cond.label!r} metric {metric_name!r} {stat_name} "
+                f"mismatch: stored {stored_value!r}, recomputed {expected_value!r}. "
+                "Recompute contacts."
+            )
+
+
+def _metric_values(metric: Mapping[str, Any], metric_name: str, cond: Condition) -> list[float]:
+    """Return finite replicate values from one metric summary."""
+
+    raw_values = metric.get("values")
+    if not isinstance(raw_values, Sequence) or isinstance(raw_values, (str, bytes, bytearray)):
+        raise ValueError(
+            f"contacts: condition {cond.label!r} metric {metric_name!r} lacks a values vector. "
+            "Recompute contacts."
+        )
+    values = [_metric_float(value, metric_name, "values", cond) for value in raw_values]
+    if not all(np.isfinite(values)):
+        raise ValueError(
+            f"contacts: condition {cond.label!r} metric {metric_name!r} contains non-finite "
+            "replicate values. Recompute contacts."
+        )
+    return values
+
+
+def _metric_float(value: Any, metric_name: str, field: str, cond: Condition) -> float:
+    """Coerce and validate one finite metric float."""
+
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"contacts: condition {cond.label!r} metric {metric_name!r} has invalid {field}. "
+            "Recompute contacts."
+        ) from exc
+    if not np.isfinite(result):
+        raise ValueError(
+            f"contacts: condition {cond.label!r} metric {metric_name!r} has non-finite "
+            f"{field}. Recompute contacts."
+        )
+    return result
+
+
+def _metric_int(value: Any, metric_name: str, field: str, cond: Condition) -> int:
+    """Coerce and validate one metric integer field."""
+
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"contacts: condition {cond.label!r} metric {metric_name!r} has invalid {field}. "
+            "Recompute contacts."
+        ) from exc
 
 
 def _validate_condition_frame_selection(

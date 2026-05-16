@@ -873,18 +873,27 @@ def _make_condition_artifact(
     replicates=(1, 2, 3),
     n_residues: int = 2,
     equilibration: str = "10ns",
+    compute_residence_times: bool | None = None,
+    include_residence_metadata: bool = True,
 ):
     """Create a condition artifact for contacts comparison tests."""
+
+    import numpy as np
 
     from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
     from polyzymd.analyses.mda import ConditionArtifact
 
+    residence_enabled = (
+        bool(settings.compute_residence_times)
+        if compute_residence_times is None
+        else bool(compute_residence_times)
+    )
     coverage_values = [1.0 for _ in replicates]
     contact_values = [0.25 + 0.05 * index for index, _rep in enumerate(replicates)]
 
     def metric(name, values):
-        mean = sum(values) / len(values)
-        std = 0.0 if len(values) == 1 else 0.05
+        mean = float(np.mean(values))
+        std = 0.0 if len(values) == 1 else float(np.std(values, ddof=1))
         sem = 0.0 if len(values) == 1 else std / (len(values) ** 0.5)
         return {
             "name": name,
@@ -895,39 +904,47 @@ def _make_condition_artifact(
             "n": len(values),
         }
 
+    payload = {
+        "metrics": {
+            "coverage": metric("coverage", coverage_values),
+            "mean_contact_fraction": metric("mean_contact_fraction", contact_values),
+        },
+        "replicate_metrics": {
+            str(rep): {"coverage": 1.0, "mean_contact_fraction": contact_values[index]}
+            for index, rep in enumerate(replicates)
+        },
+        "n_residues": n_residues,
+        "residue_stats": [
+            {
+                "protein_resid": index + 1,
+                "protein_resname": "ALA",
+                "protein_chain_id": "A",
+                "contact_fraction_mean": 0.5 - index * 0.1,
+            }
+            for index in range(n_residues)
+        ],
+    }
+    if residence_enabled:
+        payload["residence_time_by_polymer_type"] = {
+            "PEG": {
+                "mean_ns": 4.0,
+                "sem_ns": 1.0,
+                "n_events": 2,
+                "replicates_with_events": [replicates[0]],
+                "replicate_means_ns": [4.0],
+            }
+        }
+    metadata = {
+        "contacts_detection_fingerprint": contacts_detection_fingerprint(settings),
+        "equilibration": equilibration,
+    }
+    if include_residence_metadata:
+        metadata["compute_residence_times"] = residence_enabled
     return ConditionArtifact(
         analysis_name="contacts",
         condition_label=label,
         replicates=list(replicates),
-        payload={
-            "metrics": {
-                "coverage": metric("coverage", coverage_values),
-                "mean_contact_fraction": metric("mean_contact_fraction", contact_values),
-            },
-            "replicate_metrics": {
-                str(rep): {"coverage": 1.0, "mean_contact_fraction": contact_values[index]}
-                for index, rep in enumerate(replicates)
-            },
-            "n_residues": n_residues,
-            "residue_stats": [
-                {
-                    "protein_resid": index + 1,
-                    "protein_resname": "ALA",
-                    "protein_chain_id": "A",
-                    "contact_fraction_mean": 0.5 - index * 0.1,
-                }
-                for index in range(n_residues)
-            ],
-            "residence_time_by_polymer_type": {
-                "PEG": {
-                    "mean_ns": 4.0,
-                    "sem_ns": 1.0,
-                    "n_events": 2,
-                    "replicates_with_events": [replicates[0]],
-                    "replicate_means_ns": [4.0],
-                }
-            },
-        },
+        payload=payload,
         provenance={
             "frame_selection": {
                 "start": 0,
@@ -939,10 +956,7 @@ def _make_condition_artifact(
                 "timestep_ps": 1000.0,
             }
         },
-        metadata={
-            "contacts_detection_fingerprint": contacts_detection_fingerprint(settings),
-            "equilibration": equilibration,
-        },
+        metadata=metadata,
     )
 
 
@@ -1675,6 +1689,123 @@ class TestCompare:
         )
 
         with pytest.raises(ValueError, match="equilibration mismatch"):
+            analysis.compare(ctx)
+
+    @pytest.mark.parametrize(
+        ("case", "match"),
+        [
+            ("length", "length mismatch"),
+            ("nonfinite", "non-finite values"),
+            ("mean", "mean mismatch"),
+            ("replicate_keys", "replicate_metrics keys"),
+        ],
+    )
+    def test_compare_rejects_invalid_condition_metric_integrity(self, tmp_path, case, match):
+        """Comparison should reject stale or corrupted metric summaries."""
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings()
+        aggregate = _make_condition_artifact("Corrupt", settings, replicates=(1, 2))
+        if case == "length":
+            aggregate.payload["metrics"]["coverage"]["values"].append(0.5)
+        elif case == "nonfinite":
+            aggregate.payload["metrics"]["coverage"]["values"][0] = float("nan")
+        elif case == "mean":
+            aggregate.payload["metrics"]["mean_contact_fraction"]["mean"] = 42.0
+        elif case == "replicate_keys":
+            aggregate.payload["replicate_metrics"].pop("2")
+        condition = Condition(
+            label="Corrupt",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="test",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"Corrupt": tmp_path / "Corrupt" / "contacts"},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=settings,
+            aggregated_results={"Corrupt": aggregate},
+            recompute=False,
+        )
+
+        with pytest.raises(ValueError, match=match):
+            analysis.compare(ctx)
+
+    def test_compare_rejects_residence_time_setting_mismatch(self, tmp_path):
+        """Comparison should reject non-RT aggregates when RT is requested."""
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        analysis = ContactsAnalysis()
+        current_settings = ContactsSettings(compute_residence_times=True)
+        aggregate = _make_condition_artifact(
+            "NoRT",
+            current_settings,
+            replicates=(1, 2),
+            compute_residence_times=False,
+        )
+        condition = Condition(
+            label="NoRT",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="test",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"NoRT": tmp_path / "NoRT" / "contacts"},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=current_settings,
+            aggregated_results={"NoRT": aggregate},
+            recompute=False,
+        )
+
+        with pytest.raises(ValueError, match="compute_residence_times mismatch"):
+            analysis.compare(ctx)
+
+    def test_compare_rejects_missing_residence_time_setting_metadata(self, tmp_path):
+        """Comparison should reject aggregates missing RT identity metadata."""
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings()
+        aggregate = _make_condition_artifact(
+            "MissingRTMeta",
+            settings,
+            replicates=(1, 2),
+            include_residence_metadata=False,
+        )
+        condition = Condition(
+            label="MissingRTMeta",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="test",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"MissingRTMeta": tmp_path / "MissingRTMeta" / "contacts"},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=settings,
+            aggregated_results={"MissingRTMeta": aggregate},
+            recompute=False,
+        )
+
+        with pytest.raises(ValueError, match="lacks compute_residence_times metadata"):
             analysis.compare(ctx)
 
     def test_compare_rejects_legacy_aggregate_when_recompute_true(self, tmp_path):
