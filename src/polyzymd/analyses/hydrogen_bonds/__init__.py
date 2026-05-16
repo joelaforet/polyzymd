@@ -11,7 +11,7 @@ import json
 import logging
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, ClassVar, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field, ValidationError, model_validator
@@ -26,6 +26,15 @@ from polyzymd.analyses.base import (
     ReplicateContext,
     SlurmResourceHint,
 )
+from polyzymd.analyses.hydrogen_bonds._mda import (
+    HydrogenBondArtifactCollector,
+    aggregate_hydrogen_bond_artifacts,
+    artifact_to_hydrogen_bond_result,
+    build_hydrogen_bond_jobs,
+    compute_composition,
+    condition_artifact_to_legacy_result,
+    validate_and_order_replicate_artifacts,
+)
 from polyzymd.analyses.hydrogen_bonds._results import (
     AggregatedCompositionEntry,
     CompositionEntry,
@@ -39,13 +48,13 @@ from polyzymd.analyses.hydrogen_bonds._results import (
     UndirectedPairAggregate,
     UndirectedResiduePairResult,
 )
-from polyzymd.analyses.hydrogen_bonds._runner import (
-    HydrogenBondReplicateRunner,
-    compute_composition,
-)
-from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
-from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
+from polyzymd.analyses.mda import ArtifactStoreError, ConditionArtifact, ReplicateArtifact
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
+from polyzymd.analyses.shared.loader import TrajectoryLoader
 from polyzymd.analyses.shared.statistics import compute_sem
+
+if TYPE_CHECKING:
+    from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext
 
 logger = logging.getLogger("polyzymd.analyses.hydrogen_bonds")
 
@@ -511,7 +520,7 @@ class HydrogenBondsAnalysis(Analysis):
     has_compute_stage: ClassVar[bool] = True
     has_aggregate_stage: ClassVar[bool] = True
     slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(mem="16G")
-    ReplicateResultClass: ClassVar[type | None] = HydrogenBondResult
+    ReplicateResultClass: ClassVar[type | None] = None
     _defaults_warned: ClassVar[bool] = False
 
     @classmethod
@@ -609,7 +618,11 @@ class HydrogenBondsAnalysis(Analysis):
             aggregated result.
         """
 
-        if isinstance(result, dict):
+        if isinstance(result, ConditionArtifact):
+            result = condition_artifact_to_legacy_result(result)
+        elif isinstance(result, dict) and result.get("artifact_type") == "condition":
+            result = condition_artifact_to_legacy_result(ConditionArtifact.model_validate(result))
+        elif isinstance(result, dict):
             result = HydrogenBondAggregatedResult.model_validate(result)
 
         if not isinstance(result, HydrogenBondAggregatedResult):
@@ -685,7 +698,17 @@ class HydrogenBondsAnalysis(Analysis):
             replicate result.
         """
 
-        if isinstance(result, dict):
+        if isinstance(result, ReplicateArtifact):
+            result = artifact_to_hydrogen_bond_result(
+                result,
+                settings_fingerprint=_settings_hash(settings),
+            )
+        elif isinstance(result, dict) and result.get("artifact_type") == "replicate":
+            result = artifact_to_hydrogen_bond_result(
+                ReplicateArtifact.model_validate(result),
+                settings_fingerprint=_settings_hash(settings),
+            )
+        elif isinstance(result, dict):
             result = HydrogenBondResult.model_validate(result)
 
         if not isinstance(result, HydrogenBondResult):
@@ -763,23 +786,21 @@ class HydrogenBondsAnalysis(Analysis):
         )
         return chosen
 
-    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Run per-replicate hydrogen-bond analysis.
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[Any] | None:
+        """Build MDAnalysis-native hydrogen-bond jobs for one replicate.
 
         Parameters
         ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            Replicate index.
+        ctx : MDAReplicateJobContext
+            Framework-provided MDAnalysis job context.
 
         Returns
         -------
-        HydrogenBondResult
-            Per-replicate hydrogen-bond result.
+        sequence of MDAAnalysisJob
+            One job wrapping MDAnalysis ``HydrogenBondAnalysis``.
         """
-        settings: HydrogenBondSettings = ctx.settings
 
+        settings: HydrogenBondSettings = ctx.settings
         if (
             not self.__class__._defaults_warned
             and settings.groups == DEFAULT_GROUPS
@@ -793,24 +814,24 @@ class HydrogenBondsAnalysis(Analysis):
                 [summary.model_dump(mode="json") for summary in settings.summaries],
             )
             self.__class__._defaults_warned = True
+        return build_hydrogen_bond_jobs(ctx)
 
-        settings_hash = _settings_hash(settings)
-        cache_name = f"hbonds_eq{ctx.equilibration}_{settings_hash}.json"
-        result_file = ctx.output_dir / cache_name
-        cached = self._check_cache(
-            HydrogenBondResult,
-            result_file,
-            recompute=ctx.recompute,
-            sim_config=ctx.sim_config,
-            settings=ctx.settings,
-        )
-        if cached is not None:
-            return cached
+    def build_mda_collector(self, ctx: MDACollectorContext) -> Any:
+        """Build the hydrogen-bond artifact collector.
 
-        result = super().run_replicate(ctx, replicate)
-        result.save(result_file)
-        logger.info("Saved hydrogen bond result to %s", result_file)
-        return result
+        Parameters
+        ----------
+        ctx : MDACollectorContext
+            Framework-provided collector context.
+
+        Returns
+        -------
+        HydrogenBondArtifactCollector
+            Collector that maps raw MDAnalysis event tables to artifacts.
+        """
+
+        del ctx
+        return HydrogenBondArtifactCollector()
 
     def compare(self, ctx: ComparisonContext) -> Any:
         """Compare hydrogen-bond results across conditions.
@@ -947,81 +968,6 @@ class HydrogenBondsAnalysis(Analysis):
             timestep_ps=timestep_ps,
         )
 
-    def build_runner(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        universe: Any,
-        window: Any,
-    ) -> Any:
-        """Build the runner-backed hydrogen-bond execution object.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            Replicate number.
-        universe : Any
-            Loaded universe for the replicate.
-        window : Any
-            Resolved trajectory window.
-
-        Returns
-        -------
-        Any
-            Runner object compatible with the trajectory seam.
-        """
-
-        return HydrogenBondReplicateRunner(
-            universe=universe,
-            settings=ctx.settings,
-            condition_label=ctx.condition.label,
-            replicate=replicate,
-            timestep_ps=window.timestep_ps,
-        )
-
-    def summarize_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        runner: Any,
-        window: Any,
-    ) -> Any:
-        """Serialize runner output into the legacy hydrogen-bond result schema.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            Replicate number.
-        runner : Any
-            Executed hydrogen-bond runner.
-        window : Any
-            Resolved trajectory window.
-
-        Returns
-        -------
-        HydrogenBondResult
-            Cache-compatible per-replicate hydrogen-bond result.
-        """
-
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        return HydrogenBondResult(
-            config_hash=compute_config_hash(ctx.sim_config),
-            settings_fingerprint=_settings_hash(ctx.settings),
-            replicate=replicate,
-            equilibration_time=eq_value,
-            equilibration_unit=eq_unit,
-            selection_string=runner.results.selection_string,
-            timestep_ps=runner.results.timestep_ps,
-            raw_timestep_ps=runner.results.raw_timestep_ps,
-            frame_stride=runner.results.frame_stride,
-            summaries=runner.results.summaries,
-            composition_entries=runner.results.composition_entries,
-        )
-
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
         """Aggregate per-replicate hydrogen-bond results.
 
@@ -1038,7 +984,36 @@ class HydrogenBondsAnalysis(Analysis):
             Aggregated hydrogen-bond result for one condition.
         """
 
-        ordered_results = _validate_aggregate_replicate_identity(ctx, results)
+        if not results:
+            raise ValueError(
+                "Cannot aggregate hydrogen-bond results: no replicate results provided"
+            )
+
+        artifact_inputs = all(isinstance(result, ReplicateArtifact) for result in results)
+        if artifact_inputs:
+            ordered_artifacts = validate_and_order_replicate_artifacts(
+                condition_label=ctx.condition.label,
+                replicates=ctx.replicates,
+                settings_fingerprint=_settings_hash(ctx.settings),
+                artifacts=results,
+                analysis_dir=ctx.output_dir.parent,
+            )
+            ordered_results = [
+                artifact_to_hydrogen_bond_result(
+                    artifact,
+                    settings_fingerprint=_settings_hash(ctx.settings),
+                    validate_sidecars=True,
+                    store_root=ctx.output_dir.parent,
+                )
+                for artifact in ordered_artifacts
+            ]
+        elif any(isinstance(result, ReplicateArtifact) for result in results):
+            raise TypeError(
+                "Hydrogen-bond aggregation expects either all ReplicateArtifact inputs or all "
+                "HydrogenBondResult inputs"
+            )
+        else:
+            ordered_results = _validate_aggregate_replicate_identity(ctx, results)
         self._validate_replicate_result_settings_identity(ctx, ordered_results)
 
         settings: HydrogenBondSettings = ctx.settings
@@ -1189,10 +1164,20 @@ class HydrogenBondsAnalysis(Analysis):
             composition_entries=aggregated_composition,
         )
 
-        target_path = (
-            ctx.result_path if ctx.result_path is not None else (ctx.output_dir / "result.json")
-        )
+        target_path = ctx.result_path or (ctx.output_dir / "result.json")
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        if artifact_inputs:
+            artifact_result = aggregate_hydrogen_bond_artifacts(
+                condition_label=ctx.condition.label,
+                replicates=ctx.replicates,
+                output_dir=ctx.output_dir,
+                result_path=target_path,
+                artifacts=results,
+                legacy_result=agg_result,
+            )
+            logger.info("Saved aggregated hydrogen bond artifact to %s", target_path)
+            return artifact_result
+
         self.save_result(agg_result, target_path)
         logger.info("Saved aggregated hydrogen bond result to %s", target_path)
         return agg_result
@@ -1287,7 +1272,13 @@ class HydrogenBondsAnalysis(Analysis):
         dict[str, MetricValue]
             One metric per configured summary with mean H-bonds per frame.
         """
-        if isinstance(summary, dict):
+        if isinstance(summary, ConditionArtifact):
+            summaries = condition_artifact_to_legacy_result(summary).summaries
+        elif isinstance(summary, dict) and summary.get("artifact_type") == "condition":
+            summaries = condition_artifact_to_legacy_result(
+                ConditionArtifact.model_validate(summary)
+            ).summaries
+        elif isinstance(summary, dict):
             summaries = summary.get("summaries", [])
         elif isinstance(summary, HydrogenBondAggregatedResult):
             summaries = summary.summaries
@@ -1550,10 +1541,7 @@ class HydrogenBondsAnalysis(Analysis):
         condition_label: str | None = None,
         replicate: int | None = None,
     ) -> Any | None:
-        """Load replicate result from a run directory.
-
-        Overrides the base class to find custom-named cache files
-        (``hbonds_eq*.json``) when the canonical ``result.json`` is absent.
+        """Load a canonical replicate artifact or legacy result from a run directory.
 
         Parameters
         ----------
@@ -1570,89 +1558,28 @@ class HydrogenBondsAnalysis(Analysis):
 
         Returns
         -------
-        HydrogenBondResult or None
-            Deserialized replicate result, or ``None`` if no result file
-            is present.
+        ReplicateArtifact, HydrogenBondResult, or None
+            Deserialized canonical artifact/result, or ``None`` if no result
+            file is present.
         """
-        # Try canonical path first (base class behavior)
-        result = super()._load_replicate_result(run_dir)
-        if result is not None:
-            if settings is not None:
-                return self._coerce_and_validate_replicate_result(
-                    result,
-                    settings,
-                    condition_label=condition_label,
-                    replicate=replicate,
-                    source=self.replicate_result_path(run_dir),
-                )
-            return result
-
-        # Fall back to custom-named cache files
-        if not run_dir.exists():
-            return None
 
         try:
-            candidates = sorted(run_dir.glob("hbonds_eq*.json"))
-        except OSError:
+            result = super()._load_replicate_result(run_dir)
+        except ArtifactStoreError:
+            logger.debug("Could not load replicate result from %s", run_dir, exc_info=True)
             return None
-
-        if not candidates:
+        if result is None:
             return None
-
-        if len(candidates) > 1:
-            by_equilibration: dict[str, list[Path]] = {}
-            for path in candidates:
-                stem = path.stem
-                if not stem.startswith("hbonds_eq"):
-                    continue
-                remainder = stem[len("hbonds_eq") :]
-                eq_key = remainder.split("_", maxsplit=1)[0]
-                by_equilibration.setdefault(eq_key, []).append(path)
-
-            if len(by_equilibration) != 1:
-                logger.warning(
-                    "Multiple hydrogen-bond cache files in %s with different equilibration "
-                    "settings. Refusing ambiguous cache load; run with --recompute.",
-                    run_dir,
-                )
-                return None
-
-            only_eq, eq_candidates = next(iter(by_equilibration.items()))
-            if len(eq_candidates) != 1:
-                logger.warning(
-                    "Multiple hydrogen-bond cache files in %s for equilibration '%s'. "
-                    "Refusing ambiguous cache load; run with --recompute.",
-                    run_dir,
-                    only_eq,
-                )
-                return None
-
-            best = eq_candidates[0]
-        else:
-            best = candidates[0]
-
-        logger.debug("Loading replicate result from custom cache %s", best)
-        try:
-            result = self._deserialize_replicate_result(best)
-        except (
-            json.JSONDecodeError,
-            OSError,
-            PermissionError,
-            ValidationError,
-            KeyError,
-        ) as exc:
-            logger.debug("Failed to deserialize %s: %s", best, exc)
-            return None
-
         if settings is not None:
             return self._coerce_and_validate_replicate_result(
                 result,
                 settings,
                 condition_label=condition_label,
                 replicate=replicate,
-                source=best,
+                source=self.replicate_result_path(run_dir),
             )
-
+        if isinstance(result, dict) and result.get("artifact_type") != "replicate":
+            return HydrogenBondResult.model_validate(result)
         return result
 
     def _load_replicate_timeseries(

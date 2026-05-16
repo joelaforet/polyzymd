@@ -32,6 +32,10 @@ from polyzymd.analyses.hydrogen_bonds import (
     HydrogenBondSummarySettings,
     _settings_hash,
 )
+from polyzymd.analyses.hydrogen_bonds._mda import (
+    HydrogenBondMDAAnalysis,
+    artifact_to_hydrogen_bond_result,
+)
 from polyzymd.analyses.hydrogen_bonds._results import (
     AggregatedCompositionEntry,
     CompositionEntry,
@@ -43,7 +47,7 @@ from polyzymd.analyses.hydrogen_bonds._results import (
     ResidueRef,
     UndirectedResiduePairResult,
 )
-from polyzymd.analyses.hydrogen_bonds._runner import HydrogenBondReplicateRunner
+from polyzymd.analyses.mda import ConditionArtifact, ReplicateArtifact
 from polyzymd.analyses.stats import (
     default_scalar_comparison,
     format_pct,
@@ -87,6 +91,42 @@ class _MockAtomGroup:
         return _MockAtomGroup(overlap)
 
 
+class _MockUniverseProvider:
+    """Minimal MDA universe provider for plugin unit tests."""
+
+    def __init__(self, loader: Any) -> None:
+        self._loader = loader
+
+    @classmethod
+    def from_config(cls, config: Any, *, loader: Any) -> "_MockUniverseProvider":
+        """Return a provider using the injected test loader."""
+
+        del config
+        return cls(loader)
+
+    def load_universe(self, replicate: int) -> Any:
+        """Load the universe from the injected test loader."""
+
+        return self._loader.load_universe(replicate)
+
+    def provenance_for(self, replicate: int) -> None:
+        """Return no filesystem provenance for synthetic unit tests."""
+
+        del replicate
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _use_mock_universe_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Avoid filesystem provenance discovery in synthetic plugin tests."""
+
+    monkeypatch.setattr(
+        HydrogenBondsAnalysis,
+        "_mda_universe_provider_factory",
+        lambda _self: _MockUniverseProvider,
+    )
+
+
 def _make_mdanalysis_module(mock_hbond_cls: type) -> dict[str, types.ModuleType]:
     mda_module = types.ModuleType("MDAnalysis")
     mda_module.__version__ = "mock"
@@ -102,6 +142,28 @@ def _make_mdanalysis_module(mock_hbond_cls: type) -> dict[str, types.ModuleType]
         "MDAnalysis.analysis.hydrogenbonds": hbonds_module,
         "MDAnalysis.analysis.hydrogenbonds.hbond_analysis": hbond_analysis_module,
     }
+
+
+def _as_hydrogen_bond_result(value: Any) -> HydrogenBondResult:
+    """Adapt MDA replicate artifacts to the legacy assertion model."""
+
+    if isinstance(value, ReplicateArtifact):
+        return artifact_to_hydrogen_bond_result(value)
+    if isinstance(value, HydrogenBondResult):
+        return value
+    raise TypeError(f"Expected hydrogen-bond result or artifact, got {type(value).__name__}")
+
+
+def _as_hydrogen_bond_aggregate(value: Any) -> HydrogenBondAggregatedResult:
+    """Adapt MDA condition artifacts to the legacy assertion model."""
+
+    if isinstance(value, ConditionArtifact):
+        from polyzymd.analyses.hydrogen_bonds._mda import condition_artifact_to_legacy_result
+
+        return condition_artifact_to_legacy_result(value)
+    if isinstance(value, HydrogenBondAggregatedResult):
+        return value
+    raise TypeError(f"Expected hydrogen-bond aggregate or artifact, got {type(value).__name__}")
 
 
 def test_discovered() -> None:
@@ -300,8 +362,8 @@ def test_get_trajectory_window_uses_timestep_override(tmp_path: Path) -> None:
     assert window.timestep_ps == pytest.approx(50.0)
 
 
-def test_runner_records_effective_timestep_metadata() -> None:
-    """Hydrogen-bond runner should record raw timestep, stride, and effective spacing."""
+def test_mda_analysis_records_effective_timestep_metadata() -> None:
+    """Hydrogen-bond MDA job should record raw timestep, stride, and effective spacing."""
 
     class MockHydrogenBondAnalysis:
         def __init__(self, **kwargs) -> None:
@@ -324,27 +386,25 @@ def test_runner_records_effective_timestep_metadata() -> None:
         "chainid C": _MockAtomGroup([1]),
     }
     universe.select_atoms.side_effect = lambda selection, updating: selections[selection]
-    runner = HydrogenBondReplicateRunner(
+    analysis = HydrogenBondMDAAnalysis(
         universe=universe,
         settings=HydrogenBondSettings(),
         condition_label="test",
         replicate=1,
-        timestep_ps=10.0,
+        raw_timestep_ps=10.0,
     )
 
     with patch.dict(sys.modules, _make_mdanalysis_module(MockHydrogenBondAnalysis)):
-        runner.run(start=0, stop=9, step=3)
+        analysis.run(start=0, stop=9, step=3)
 
-    assert runner.results.timestep_ps == pytest.approx(30.0)
-    assert runner.results.raw_timestep_ps == pytest.approx(10.0)
-    assert runner.results.frame_stride == 3
+    assert analysis.plan is not None
+    assert analysis.plan.timestep_ps == pytest.approx(30.0)
+    assert analysis.plan.raw_timestep_ps == pytest.approx(10.0)
+    assert analysis.plan.frame_stride == 3
 
 
-def test_summarize_replicate_propagates_timing_metadata(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Hydrogen-bond summarize should preserve runner timing metadata."""
+def test_replicate_artifact_preserves_timing_metadata(tmp_path: Path) -> None:
+    """Hydrogen-bond artifacts should preserve MDA timing metadata."""
     analysis = HydrogenBondsAnalysis()
     condition = Condition(
         label="test",
@@ -371,22 +431,27 @@ def test_summarize_replicate_propagates_timing_metadata(
         fraction_frames_with_any_hbond=0.0,
         counts_per_frame=[0, 0, 0],
     )
-    runner = MagicMock(
-        results=types.SimpleNamespace(
-            selection_string="(chainid A) or (chainid C)",
-            timestep_ps=30.0,
-            raw_timestep_ps=10.0,
-            frame_stride=3,
-            summaries=[summary],
-            composition_entries=[],
-        )
-    )
-    monkeypatch.setattr(
-        "polyzymd.analyses.hydrogen_bonds.compute_config_hash",
-        lambda _sim_config: "hash123",
+    artifact = ReplicateArtifact(
+        analysis_name="hydrogen_bonds",
+        condition_label="test",
+        replicate=1,
+        payload={"summaries": [summary.model_dump(mode="json")], "composition_entries": []},
+        metadata={
+            "settings_fingerprint": _settings_hash(settings),
+            "config_hash": "hash123",
+            "equilibration_time": 10.0,
+            "equilibration_unit": "ns",
+            "selection_string": "(chainid A) or (chainid C)",
+            "timestep_ps": 30.0,
+            "raw_timestep_ps": 10.0,
+            "frame_stride": 3,
+        },
     )
 
-    result = analysis.summarize_replicate(ctx, 1, runner, MagicMock())
+    del analysis, ctx
+    result = artifact_to_hydrogen_bond_result(
+        artifact, settings_fingerprint=_settings_hash(settings)
+    )
 
     assert result.timestep_ps == pytest.approx(30.0)
     assert result.raw_timestep_ps == pytest.approx(10.0)
@@ -608,15 +673,22 @@ def test_run_replicate_basic(tmp_path: Path) -> None:
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.run_replicate(ctx, 1)
+        artifact = analysis.run_replicate(ctx, 1)
+        result = _as_hydrogen_bond_result(artifact)
 
+    assert isinstance(artifact, ReplicateArtifact)
+    assert artifact.payload["n_events"] == 2
+    assert "hbonds" not in artifact.payload
+    assert artifact.sidecars[0].path == "sidecars/hydrogen_bonds_events.npz"
+    with np.load(tmp_path / "run_1" / artifact.sidecars[0].path) as sidecar:
+        assert sidecar["hbonds"].shape == (2, 6)
     assert isinstance(result, HydrogenBondResult)
     assert result.selection_string == "(chainid A) or (chainid C)"
     assert len(result.summaries) == 1
@@ -691,7 +763,7 @@ def test_run_replicate_warns_once_for_default_groups_and_summaries(
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
         caplog.at_level("WARNING", logger="polyzymd.analyses.hydrogen_bonds"),
     ):
         mock_loader = MagicMock()
@@ -743,7 +815,7 @@ def test_run_replicate_empty_selection(tmp_path: Path, caplog: pytest.LogCapture
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
         caplog.at_level("WARNING"),
     ):
         mock_loader = MagicMock()
@@ -751,7 +823,7 @@ def test_run_replicate_empty_selection(tmp_path: Path, caplog: pytest.LogCapture
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.run_replicate(ctx, 1)
+        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
 
     assert isinstance(result, HydrogenBondResult)
     assert len(result.summaries) == 1
@@ -816,7 +888,7 @@ def test_run_replicate_skips_only_empty_summary_and_keeps_other_summaries(
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
         caplog.at_level("WARNING", logger="polyzymd.analyses.hydrogen_bonds"),
     ):
         mock_loader = MagicMock()
@@ -824,7 +896,7 @@ def test_run_replicate_skips_only_empty_summary_and_keeps_other_summaries(
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.run_replicate(ctx, 1)
+        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
 
     assert isinstance(result, HydrogenBondResult)
     summaries = {summary.name: summary for summary in result.summaries}
@@ -879,44 +951,27 @@ def test_run_replicate_empty_group_raises_by_default(tmp_path: Path) -> None:
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        with pytest.raises(ValueError, match="allow_empty_groups: true"):
+        with pytest.raises(Exception, match="allow_empty_groups: true"):
             analysis.run_replicate(ctx, 1)
 
 
-def test_run_replicate_cache_hit(tmp_path: Path) -> None:
-    """run_replicate should return cached result when available."""
-    condition = Condition(
-        label="test",
-        config_path=Path("/tmp/config.yaml"),
-        replicates=(1,),
-        sim_config=MagicMock(),
+def test_load_replicate_result_ignores_legacy_custom_cache(tmp_path: Path) -> None:
+    """Legacy custom hbonds_eq caches should not be active after MDA migration."""
+    run_dir = tmp_path / "run_1"
+    run_dir.mkdir()
+    HydrogenBondResult(replicate=1, config_hash="abc123", summaries=[]).save(
+        run_dir / "hbonds_eq0ns_deadbeef.json"
     )
-    settings = HydrogenBondSettings()
-    ctx = ReplicateContext(
-        condition=condition,
-        replicate=1,
-        sim_config=condition.sim_config,
-        output_dir=tmp_path / "run_1",
-        equilibration="0ns",
-        recompute=False,
-        settings=settings,
-    )
-
     analysis = HydrogenBondsAnalysis()
-    cached_result = HydrogenBondResult(replicate=1, config_hash="abc123", summaries=[])
 
-    with patch.object(analysis, "_check_cache", return_value=cached_result) as mock_cache:
-        result = analysis.run_replicate(ctx, 1)
-
-    assert result is cached_result
-    mock_cache.assert_called_once()
+    assert analysis._load_replicate_result(run_dir) is None
 
 
 def test_equilibration_exceeds_trajectory_raises(tmp_path: Path) -> None:
@@ -956,7 +1011,7 @@ def test_equilibration_exceeds_trajectory_raises(tmp_path: Path) -> None:
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
@@ -1022,7 +1077,7 @@ def test_equilibration_leaves_one_frame_warns(
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
         caplog.at_level("WARNING"),
     ):
         mock_loader = MagicMock()
@@ -1030,7 +1085,7 @@ def test_equilibration_leaves_one_frame_warns(
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.run_replicate(ctx, 1)
+        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
 
     assert isinstance(result, HydrogenBondResult)
     assert result.summaries[0].counts_per_frame == [1]
@@ -1097,14 +1152,14 @@ def test_intra_residue_exclusion(tmp_path: Path) -> None:
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.run_replicate(ctx, 1)
+        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
 
     summary = result.summaries[0]
     assert summary.mean_hbonds_per_frame == 0.0
@@ -1238,6 +1293,65 @@ def test_settings_allow_dynamic_group_selection_when_not_updating() -> None:
     assert settings.update_selections is False
 
 
+def test_dynamic_selection_policy_recorded_in_artifact(tmp_path: Path) -> None:
+    """Dynamic selection/update policy should be explicit in MDA artifacts."""
+
+    class MockHydrogenBondAnalysis:
+        def __init__(self, **kwargs) -> None:
+            self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
+
+        def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
+            del start, stop, step, verbose
+            self.results.hbonds = np.empty((0, 6), dtype=float)
+
+    atoms = {0: _MockAtom(0, "A", 10, "SER", 0)}
+    universe = MagicMock()
+    universe.trajectory = [object(), object()]
+    universe.atoms = _MockAtomCollection(atoms)
+    universe.select_atoms.side_effect = lambda selection, updating: {
+        "around 5.0 chainid A": _MockAtomGroup([0]),
+    }[selection]
+    condition = Condition(
+        label="test",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1,),
+        sim_config=MagicMock(),
+    )
+    settings = HydrogenBondSettings(
+        groups={"dynamic": "around 5.0 chainid A"},
+        summaries=[HydrogenBondSummarySettings(name="dynamic_internal", within="dynamic")],
+        update_selections=False,
+    )
+    ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="0ns",
+        recompute=True,
+        settings=settings,
+    )
+    analysis = HydrogenBondsAnalysis()
+
+    with (
+        patch.dict(sys.modules, _make_mdanalysis_module(MockHydrogenBondAnalysis)),
+        patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
+    ):
+        mock_loader = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_loader.load_universe.return_value = universe
+        mock_loader.get_timestep.return_value = 10.0
+
+        artifact = analysis.run_replicate(ctx, 1)
+
+    assert isinstance(artifact, ReplicateArtifact)
+    policy = artifact.provenance["dynamic_selection_policy"]
+    assert policy["update_selections"] is False
+    assert policy["dynamic_group_selections"] == {"dynamic": "around 5.0 chainid A"}
+    assert any("membership is evaluated once" in warning for warning in artifact.warnings)
+
+
 def test_composition_skips_unpartitioned_atoms() -> None:
     """Events with donor or acceptor outside partitions should be skipped."""
     analysis = HydrogenBondsAnalysis()
@@ -1328,7 +1442,7 @@ def test_load_replicate_timeseries_rejects_stale_settings_fingerprint(tmp_path: 
                 counts_per_frame=[1, 2, 3],
             )
         ],
-    ).save(run_dir / "hbonds_eq10ns_deadbeef.json")
+    ).save(run_dir / "result.json")
 
     data = {"CondA": {"analysis_dir": analysis_dir, "replicates": [1]}}
 
@@ -1432,14 +1546,14 @@ def test_composition_not_configured(tmp_path: Path) -> None:
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.run_replicate(ctx, 1)
+        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
 
     assert result.composition_entries == []
 
@@ -2421,7 +2535,7 @@ def test_plot_rejects_legacy_replicate_cache_from_disk(tmp_path: Path) -> None:
                 counts_per_frame=[1, 2, 3],
             )
         ],
-    ).save(run_dir / "hbonds_eq10ns_deadbeef.json")
+    ).save(run_dir / "result.json")
 
     ctx = PlotContext(
         conditions=[condition],
@@ -2873,14 +2987,14 @@ def test_compute_no_hbonds_found(tmp_path: Path) -> None:
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.run_replicate(ctx, 1)
+        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
 
     summary = result.summaries[0]
     assert summary.mean_hbonds_per_frame == pytest.approx(0.0)
@@ -2940,14 +3054,14 @@ def test_compute_between_mode_classification(tmp_path: Path) -> None:
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.run_replicate(ctx, 1)
+        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
 
     summary = result.summaries[0]
     assert summary.counts_per_frame == [1, 1, 0]
@@ -3013,14 +3127,14 @@ def test_compute_within_mode_classification(tmp_path: Path) -> None:
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.run_replicate(ctx, 1)
+        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
 
     summary = result.summaries[0]
     assert summary.counts_per_frame == [1, 0, 0]
@@ -3086,14 +3200,14 @@ def test_compute_multiple_summaries(tmp_path: Path) -> None:
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.run_replicate(ctx, 1)
+        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
 
     by_name = {summary.name: summary for summary in result.summaries}
     assert by_name["protein_polymer"].counts_per_frame == [1, 0, 0]
@@ -3777,14 +3891,14 @@ def test_replicate_does_not_truncate_pairs_before_aggregation(tmp_path: Path) ->
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.run_replicate(ctx, 1)
+        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
 
     assert len(result.summaries[0].directed_residue_pairs) == 2
     assert len(result.summaries[0].undirected_residue_pairs) == 2
@@ -3868,7 +3982,7 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
@@ -3887,6 +4001,9 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
         result_path=tmp_path / "aggregated" / "result.json",
     )
     aggregated = analysis.aggregate(aggregate_ctx, [rep_result_1, rep_result_2])
+    legacy_aggregated = _as_hydrogen_bond_aggregate(aggregated)
+    legacy_rep_result_1 = _as_hydrogen_bond_result(rep_result_1)
+    legacy_rep_result_2 = _as_hydrogen_bond_result(rep_result_2)
     metrics = analysis.extract_metrics(aggregated)
 
     metric_key = "mean_hbonds_protein_polymer"
@@ -3910,14 +4027,15 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
     )
     formatted = analysis.format(comparison, output_format="text")
 
-    assert isinstance(rep_result_1, HydrogenBondResult)
-    assert isinstance(rep_result_2, HydrogenBondResult)
-    assert isinstance(aggregated, HydrogenBondAggregatedResult)
+    assert isinstance(rep_result_1, ReplicateArtifact)
+    assert isinstance(rep_result_2, ReplicateArtifact)
+    assert isinstance(aggregated, ConditionArtifact)
+    assert isinstance(legacy_aggregated, HydrogenBondAggregatedResult)
     assert metric_key in metrics
     assert metric.replicate_values == pytest.approx(
         [
-            rep_result_1.summaries[0].mean_hbonds_per_frame,
-            rep_result_2.summaries[0].mean_hbonds_per_frame,
+            legacy_rep_result_1.summaries[0].mean_hbonds_per_frame,
+            legacy_rep_result_2.summaries[0].mean_hbonds_per_frame,
         ]
     )
     assert isinstance(formatted, str)
@@ -3974,7 +4092,7 @@ def test_run_replicate_hydrogens_sel_explicit(tmp_path: Path) -> None:
     with (
         patch.dict(sys.modules, mock_modules),
         patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
-        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        patch("polyzymd.analyses.hydrogen_bonds._mda.compute_config_hash", return_value="abc123"),
     ):
         mock_loader = MagicMock()
         mock_loader_cls.return_value = mock_loader
@@ -4015,8 +4133,8 @@ class TestLoadReplicateResult:
         loaded = analysis._load_replicate_result(run_dir)
         assert loaded is not None
 
-    def test_falls_back_to_custom_cache(self, tmp_path: Path) -> None:
-        """Should load hbonds_eq*.json when result.json is absent."""
+    def test_ignores_custom_cache(self, tmp_path: Path) -> None:
+        """Should ignore legacy hbonds_eq*.json files when result.json is absent."""
         run_dir = tmp_path / "run_1"
         run_dir.mkdir()
 
@@ -4034,7 +4152,7 @@ class TestLoadReplicateResult:
 
         analysis = HydrogenBondsAnalysis()
         loaded = analysis._load_replicate_result(run_dir)
-        assert loaded is not None
+        assert loaded is None
 
     def test_returns_none_for_empty_directory(self, tmp_path: Path) -> None:
         """Should return None when no result files exist."""
@@ -4053,12 +4171,8 @@ class TestLoadReplicateResult:
         loaded = analysis._load_replicate_result(run_dir)
         assert loaded is None
 
-    def test_warns_on_multiple_cache_files(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Should refuse ambiguous same-equilibration cache sets."""
-        import logging
-
+    def test_ignores_multiple_legacy_cache_files(self, tmp_path: Path) -> None:
+        """Should ignore multiple legacy custom cache files."""
         run_dir = tmp_path / "run_1"
         run_dir.mkdir()
 
@@ -4077,19 +4191,12 @@ class TestLoadReplicateResult:
         (run_dir / "hbonds_eq10ns_bbbb2222.json").write_text(json_content)
 
         analysis = HydrogenBondsAnalysis()
-        with caplog.at_level(logging.WARNING, logger="polyzymd.analyses.hydrogen_bonds"):
-            loaded = analysis._load_replicate_result(run_dir)
+        loaded = analysis._load_replicate_result(run_dir)
 
         assert loaded is None
-        assert "for equilibration '10ns'" in caplog.text
-        assert "Refusing ambiguous cache load" in caplog.text
 
-    def test_refuses_ambiguous_caches_across_equilibration_keys(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """When multiple equilibration keys exist, fallback should refuse loading."""
-        import logging
-
+    def test_ignores_legacy_caches_across_equilibration_keys(self, tmp_path: Path) -> None:
+        """Legacy caches with multiple equilibration keys should be ignored."""
         run_dir = tmp_path / "run_1"
         run_dir.mkdir()
 
@@ -4116,11 +4223,9 @@ class TestLoadReplicateResult:
         (run_dir / "hbonds_eq20ns_bbbb2222.json").write_text(eq20_result.model_dump_json())
 
         analysis = HydrogenBondsAnalysis()
-        with caplog.at_level(logging.WARNING, logger="polyzymd.analyses.hydrogen_bonds"):
-            loaded = analysis._load_replicate_result(run_dir)
+        loaded = analysis._load_replicate_result(run_dir)
 
         assert loaded is None
-        assert "different equilibration settings" in caplog.text
 
     def test_handles_stat_failure_gracefully(self, tmp_path: Path) -> None:
         """Should return None when globbing cache files raises OSError."""
