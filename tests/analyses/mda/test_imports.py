@@ -11,6 +11,15 @@ def test_public_facade_reexports_primitives() -> None:
     """The package facade should expose the stable extension-layer primitives."""
 
     from polyzymd.analyses import mda
+    from polyzymd.analyses.mda.aggregation import (
+        AggregatedMetric,
+        ExplicitReplicateMetricPolicy,
+        MDAAggregationContext,
+        MDAAggregationError,
+        ReplicateMetricPolicy,
+        aggregate_replicate_artifacts,
+        aggregate_replicate_artifacts_from_disk,
+    )
     from polyzymd.analyses.mda.artifacts import (
         MDA_ARTIFACT_SCHEMA_VERSION,
         ArtifactEnvelope,
@@ -51,6 +60,13 @@ def test_public_facade_reexports_primitives() -> None:
     assert mda.AnalysisBaseLike is AnalysisBaseLike
     assert mda.MDAnalysisExtensionError is MDAnalysisExtensionError
     assert mda.MDARunKwargs is MDARunKwargs
+    assert mda.AggregatedMetric is AggregatedMetric
+    assert mda.ExplicitReplicateMetricPolicy is ExplicitReplicateMetricPolicy
+    assert mda.MDAAggregationContext is MDAAggregationContext
+    assert mda.MDAAggregationError is MDAAggregationError
+    assert mda.ReplicateMetricPolicy is ReplicateMetricPolicy
+    assert mda.aggregate_replicate_artifacts is aggregate_replicate_artifacts
+    assert mda.aggregate_replicate_artifacts_from_disk is aggregate_replicate_artifacts_from_disk
     assert mda.ArtifactEnvelope is ArtifactEnvelope
     assert mda.ArtifactManifest is ArtifactManifest
     assert mda.ArtifactSidecarRef is ArtifactSidecarRef
@@ -81,6 +97,13 @@ def test_public_facade_reexports_primitives() -> None:
         "AnalysisBaseLike",
         "MDAnalysisExtensionError",
         "MDARunKwargs",
+        "AggregatedMetric",
+        "ExplicitReplicateMetricPolicy",
+        "MDAAggregationContext",
+        "MDAAggregationError",
+        "ReplicateMetricPolicy",
+        "aggregate_replicate_artifacts",
+        "aggregate_replicate_artifacts_from_disk",
         "ArtifactEnvelope",
         "ArtifactManifest",
         "ArtifactSidecarRef",
@@ -115,6 +138,7 @@ def test_import_does_not_load_heavy_simulation_modules() -> None:
     initially_loaded = {name for name in heavy_modules if name in sys.modules}
 
     importlib.import_module("polyzymd.analyses.mda")
+    importlib.import_module("polyzymd.analyses.mda.aggregation")
     importlib.import_module("polyzymd.analyses.mda.artifacts")
     importlib.import_module("polyzymd.analyses.mda.base")
     importlib.import_module("polyzymd.analyses.mda.frame_selection")

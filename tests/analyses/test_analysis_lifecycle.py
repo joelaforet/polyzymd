@@ -20,8 +20,13 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 from polyzymd.analyses.exceptions import PluginContractError
-from polyzymd.analyses.mda import MDAAnalysisJob, MDAReplicateJobContext, MDAUniversePolicy
-from polyzymd.analyses.mda.artifacts import ReplicateArtifact
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    MDAAnalysisJob,
+    MDAReplicateJobContext,
+    MDAUniversePolicy,
+)
+from polyzymd.analyses.mda.artifacts import ConditionArtifact, ReplicateArtifact
 from polyzymd.analyses.mda.plugin import MDACollectorContext
 from polyzymd.analyses.mda.store import ArtifactStoreError
 from polyzymd.analyses.orchestrator import (
@@ -438,6 +443,29 @@ class _BypassingRawExtraCollectorMDAAnalysis(_MDAJobOnlyAnalysis):
         return _BypassingRawExtraCollector()
 
 
+class _MetricArtifactAnalysis(Analysis):
+    """Analysis that relies on default MDA artifact aggregation."""
+
+    name: ClassVar[str] = "metric_artifact_lifecycle"
+    Settings: ClassVar[type] = _LifecycleSettings
+    min_replicates: ClassVar[int] = 2
+
+    def __init__(self) -> None:
+        self.loader_requests = 0
+
+    def _trajectory_loader_factory(self) -> type[Any]:
+        """Return a loader that must not be touched during disk aggregation."""
+
+        self.loader_requests += 1
+        raise AssertionError("trajectory loader should not be used for artifact aggregation")
+
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> list[MDAAnalysisJob]:
+        """Satisfy the MDA compute contract without being used in this test."""
+
+        del ctx
+        raise AssertionError("MDA jobs should not run during disk aggregation")
+
+
 class _CondCfg:
     """Small condition config stand-in for public wrapper tests."""
 
@@ -754,6 +782,42 @@ def test_aggregate_from_disk_reports_malformed_mda_artifact_context(tmp_path: Pa
     assert "replicate=1" in message
     assert str(result_path) in message
     assert "Failed to validate replicate artifact" in message
+
+
+def test_default_mda_aggregation_from_disk_uses_artifacts_only(tmp_path: Path) -> None:
+    """Default MDA aggregation should not load trajectories or universes."""
+
+    analysis = _MetricArtifactAnalysis()
+    condition = _condition(tmp_path, replicates=(1, 2))
+    settings = _LifecycleSettings()
+    output_dir = tmp_path / "analysis" / analysis.name
+    settings_fp = analysis.aggregate_settings_fingerprint(settings)
+    for replicate, value in ((1, 1.0), (2, 1.4)):
+        artifact = ReplicateArtifact(
+            analysis_name=analysis.name,
+            condition_label=condition.label,
+            replicate=replicate,
+            payload={"metrics": {"mean_value": value}},
+            provenance={"frame_selection": {"start": 0, "stop": 4, "step": 1}},
+            metadata={"settings_fingerprint": settings_fp},
+        )
+        ArtifactStore(output_dir / f"run_{replicate}").write_replicate_result(artifact)
+
+    result = AnalysisLifecycle(analysis).aggregate_condition_from_disk(
+        condition,
+        settings,
+        "10ns",
+        output_dir,
+        (1, 2),
+    )
+
+    assert isinstance(result, ConditionArtifact)
+    assert analysis.loader_requests == 0
+    assert result.payload["metrics"]["mean_value"]["mean"] == pytest.approx(1.2)
+    assert (output_dir / "aggregated" / "result.json").exists()
+    loaded = analysis._load_aggregated_result(output_dir / "aggregated")
+    assert isinstance(loaded, ConditionArtifact)
+    assert loaded.payload == result.payload
 
 
 def test_public_run_comparison_executes_full_lifecycle(

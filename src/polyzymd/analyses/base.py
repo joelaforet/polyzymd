@@ -95,6 +95,7 @@ if TYPE_CHECKING:
         MDAArtifactCollector,
         MDACollectorContext,
         MDAReplicateJobContext,
+        ReplicateMetricPolicy,
     )
     from polyzymd.config.schema import SimulationConfig
 
@@ -236,9 +237,49 @@ class Analysis(ABC):
         """
         if not type(self).has_aggregate_stage:
             return None
+        from polyzymd.analyses.mda import MDAAggregationContext, aggregate_replicate_artifacts
+        from polyzymd.analyses.mda.artifacts import ReplicateArtifact
+        from polyzymd.analyses.mda.store import ArtifactStore
+
+        if results and all(isinstance(result, ReplicateArtifact) for result in results):
+            settings_fingerprint = self.aggregate_settings_fingerprint(ctx.settings)
+            policy = self.build_mda_metric_policy(ctx)
+            artifact_stores = {
+                int(result.replicate): ArtifactStore(
+                    ctx.output_dir.parent / f"run_{result.replicate}"
+                )
+                for result in results
+            }
+            aggregation_ctx = MDAAggregationContext(
+                analysis_name=self.name,
+                condition_label=ctx.condition.label,
+                expected_replicates=tuple(ctx.condition.replicates),
+                settings_fingerprint=settings_fingerprint,
+                min_replicates=self.min_replicates,
+                artifact_stores=artifact_stores,
+            )
+            return aggregate_replicate_artifacts(results, aggregation_ctx, policy)
         raise NotImplementedError(
             f"{type(self).__name__} must implement aggregate() or set has_aggregate_stage = False."
         )
+
+    def build_mda_metric_policy(self, ctx: AggregateContext) -> ReplicateMetricPolicy | None:
+        """Build the metric policy used by default MDA artifact aggregation.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+
+        Returns
+        -------
+        ReplicateMetricPolicy or None
+            Custom replicate metric policy, or ``None`` to use the explicit
+            scalar metric policy.
+        """
+
+        del ctx
+        return None
 
     def build_runner(
         self,

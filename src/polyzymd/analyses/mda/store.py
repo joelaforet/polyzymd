@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from polyzymd.analyses.mda.artifacts import (
     ArtifactManifest,
     ArtifactSidecarRef,
+    ConditionArtifact,
     ReplicateArtifact,
     validate_artifact_relative_path,
 )
@@ -83,6 +84,50 @@ class ArtifactStore:
         except ValidationError as exc:
             raise ArtifactStoreError(
                 f"Failed to validate replicate artifact {resolved_path}: {exc}"
+            ) from exc
+
+    def write_condition_result(
+        self,
+        artifact: ConditionArtifact,
+        path: str | Path = "result.json",
+    ) -> Path:
+        """Write a condition artifact JSON file.
+
+        Parameters
+        ----------
+        artifact : ConditionArtifact
+            Condition artifact envelope to serialize.
+        path : str or Path, optional
+            Store-relative JSON path, by default ``"result.json"``.
+
+        Returns
+        -------
+        Path
+            Absolute path to the written JSON file.
+        """
+
+        return self._write_json_model(artifact, path)
+
+    def read_condition_result(self, path: str | Path = "result.json") -> ConditionArtifact:
+        """Read a condition artifact JSON file.
+
+        Parameters
+        ----------
+        path : str or Path, optional
+            Store-relative JSON path, by default ``"result.json"``.
+
+        Returns
+        -------
+        ConditionArtifact
+            Deserialized condition artifact.
+        """
+
+        resolved_path = self._resolve_relative_path(path)
+        try:
+            return ConditionArtifact.model_validate_json(resolved_path.read_text())
+        except (OSError, ValidationError) as exc:
+            raise ArtifactStoreError(
+                f"Failed to validate condition artifact {resolved_path}: {exc}"
             ) from exc
 
     def write_manifest(
@@ -253,6 +298,30 @@ class ArtifactStore:
                 f"Sidecar SHA-256 mismatch for {ref.path}: expected {ref.sha256}, got {actual_sha256}"
             )
         return resolved_path
+
+    def source_artifact_ref(self, path: str | Path = "result.json") -> dict[str, Any]:
+        """Return a hashed reference for an artifact JSON file.
+
+        Parameters
+        ----------
+        path : str or Path, optional
+            Store-relative artifact path, by default ``"result.json"``.
+
+        Returns
+        -------
+        dict[str, Any]
+            Relative path, SHA-256 digest, and size metadata for the artifact.
+        """
+
+        resolved_path = self._resolve_relative_path(path)
+        if not resolved_path.is_file():
+            raise ArtifactStoreError(f"Artifact source does not exist: {resolved_path}")
+        stat = resolved_path.stat()
+        return {
+            "path": self._relative_ref_for(resolved_path),
+            "sha256": self._sha256_file(resolved_path),
+            "size_bytes": stat.st_size,
+        }
 
     def _write_json_model(self, model: Any, path: str | Path) -> Path:
         """Write a Pydantic-like model to a store-relative JSON path.

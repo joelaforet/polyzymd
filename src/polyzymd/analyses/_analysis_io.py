@@ -65,13 +65,17 @@ def deserialize_result(analysis: Any, path: Path) -> Any:
     Any
         Deserialized result.
     """
+    text = path.read_text()
+    artifact = _try_load_mda_condition_artifact(analysis, path.parent, path, text)
+    if artifact is not None:
+        return artifact
     result_cls = type(analysis).AggregatedResultClass
     if result_cls is not None:
         if hasattr(result_cls, "load"):
             return result_cls.load(path)
         if hasattr(result_cls, "model_validate_json"):
-            return result_cls.model_validate_json(path.read_text())
-    return json.loads(path.read_text())
+            return result_cls.model_validate_json(text)
+    return json.loads(text)
 
 
 def deserialize_replicate_result(analysis: Any, path: Path) -> Any:
@@ -184,6 +188,51 @@ def _try_load_mda_replicate_artifact(analysis: Any, run_dir: Path, result_path: 
         if isinstance(loaded, dict) and loaded.get("artifact_type") == "replicate":
             raise _artifact_load_error(analysis, run_dir, result_path, exc) from exc
     return None
+
+
+def _try_load_mda_condition_artifact(
+    analysis: Any,
+    aggregated_dir: Path,
+    result_path: Path,
+    text: str | None = None,
+) -> Any | None:
+    """Try loading an MDA condition artifact through ``ArtifactStore``.
+
+    Parameters
+    ----------
+    analysis : Any
+        Analysis instance requesting the artifact.
+    aggregated_dir : Path
+        Aggregate output directory used as the artifact-store root.
+    result_path : Path
+        Candidate artifact path.
+    text : str or None, optional
+        Already-read JSON text for artifact-type probing.
+
+    Returns
+    -------
+    Any or None
+        Loaded ``ConditionArtifact`` when the file is an MDA condition artifact,
+        otherwise ``None`` so legacy JSON loading can continue.
+    """
+
+    try:
+        loaded = json.loads(text if text is not None else result_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(loaded, dict) or loaded.get("artifact_type") != "condition":
+        return None
+
+    from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
+
+    store = ArtifactStore(aggregated_dir)
+    relative_path = _artifact_relative_path(aggregated_dir, result_path)
+    try:
+        return store.read_condition_result(relative_path)
+    except ArtifactStoreError as exc:
+        raise ArtifactStoreError(
+            f"{analysis.name}: failed to load MDA condition artifact from {result_path}: {exc}"
+        ) from exc
 
 
 def _artifact_relative_path(run_dir: Path, result_path: Path) -> Path:
@@ -375,6 +424,14 @@ def save_result(result: Any, path: Path) -> Path:
         Saved path.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    from polyzymd.analyses.mda.artifacts import ConditionArtifact
+
+    if isinstance(result, ConditionArtifact):
+        from polyzymd.analyses.mda.store import ArtifactStore
+
+        return ArtifactStore(path.parent).write_condition_result(
+            result, path.relative_to(path.parent)
+        )
     if hasattr(result, "save"):
         return result.save(path)
     if hasattr(result, "model_dump_json"):

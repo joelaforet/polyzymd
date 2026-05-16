@@ -425,6 +425,8 @@ class ConditionArtifact(ArtifactEnvelope):
 
     condition_label: str
     replicates: list[int] = Field(default_factory=list)
+    source_replicates: list[dict[str, Any]] = Field(default_factory=list)
+    skipped_replicates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ComparisonArtifact(ArtifactEnvelope):

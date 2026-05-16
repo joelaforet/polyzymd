@@ -226,6 +226,27 @@ def test_store_writes_and_reads_replicate_result_and_manifest(tmp_path: Path) ->
     assert store.read_manifest() == manifest
 
 
+def test_store_writes_reads_condition_result_and_hashes_source(tmp_path: Path) -> None:
+    """ArtifactStore should roundtrip condition artifacts and hash JSON sources."""
+
+    store = ArtifactStore(tmp_path)
+    artifact = ConditionArtifact(
+        analysis_name="rg",
+        condition_label="Polymer",
+        replicates=[1, 2],
+        payload={"metrics": {"mean_rg": {"mean": 2.5}}},
+    )
+
+    result_path = store.write_condition_result(artifact)
+    source = store.source_artifact_ref("result.json")
+
+    assert result_path == tmp_path / "result.json"
+    assert store.read_condition_result() == artifact
+    assert source["path"] == "result.json"
+    assert len(source["sha256"]) == 64
+    assert source["size_bytes"] == result_path.stat().st_size
+
+
 @pytest.mark.parametrize(
     "payload",
     ["{not json", '{"artifact_type": "replicate", "analysis_name": "rmsd"}'],
@@ -244,6 +265,26 @@ def test_store_read_replicate_result_wraps_invalid_json_and_schema(
         ArtifactStoreError, match=r"Failed to validate replicate artifact .*result\.json"
     ):
         store.read_replicate_result()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["{not json", '{"artifact_type": "condition", "analysis_name": "rmsd"}'],
+)
+def test_store_read_condition_result_wraps_invalid_json_and_schema(
+    tmp_path: Path,
+    payload: str,
+) -> None:
+    """ArtifactStore should include condition artifact paths for invalid JSON or schema."""
+
+    store = ArtifactStore(tmp_path)
+    artifact_path = tmp_path / "result.json"
+    artifact_path.write_text(payload)
+
+    with pytest.raises(
+        ArtifactStoreError, match=r"Failed to validate condition artifact .*result\.json"
+    ):
+        store.read_condition_result()
 
 
 def test_store_writes_npz_sidecar_lazily_and_validates(tmp_path: Path) -> None:

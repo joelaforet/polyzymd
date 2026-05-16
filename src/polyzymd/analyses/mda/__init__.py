@@ -5,6 +5,15 @@ that wrap MDAnalysis ``AnalysisBase`` objects without importing MDAnalysis at
 module import time.
 """
 
+from polyzymd.analyses.mda.aggregation import (
+    AggregatedMetric,
+    ExplicitReplicateMetricPolicy,
+    MDAAggregationContext,
+    MDAAggregationError,
+    ReplicateMetricPolicy,
+    aggregate_replicate_artifacts,
+    aggregate_replicate_artifacts_from_disk,
+)
 from polyzymd.analyses.mda.artifacts import (
     MDA_ARTIFACT_SCHEMA_VERSION,
     ArtifactEnvelope,
@@ -46,6 +55,13 @@ __all__ = [
     "AnalysisBaseLike",
     "MDAnalysisExtensionError",
     "MDARunKwargs",
+    "AggregatedMetric",
+    "ExplicitReplicateMetricPolicy",
+    "MDAAggregationContext",
+    "MDAAggregationError",
+    "ReplicateMetricPolicy",
+    "aggregate_replicate_artifacts",
+    "aggregate_replicate_artifacts_from_disk",
     "ArtifactEnvelope",
     "ArtifactManifest",
     "ArtifactSidecarRef",
