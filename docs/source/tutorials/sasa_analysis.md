@@ -169,7 +169,7 @@ pixi run -e build polyzymd compare run sasa \
     -f comparison.yaml
 ```
 
-This runs the full pipeline sequentially: the runner-backed replicate stage for
+This runs the full pipeline sequentially: the per-replicate compute stage for
 every replicate, `aggregate` for every condition, then `compare` and `plot`.
 Expect this to take several minutes per replicate depending on trajectory length
 and system size.

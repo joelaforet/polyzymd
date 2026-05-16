@@ -341,7 +341,7 @@ plugins:
 pixi run -e build polyzymd compare run hydrogen_bonds
 ```
 
-This runs the full pipeline: the runner-backed replicate stage for every
+This runs the full pipeline: the per-replicate compute stage for every
 replicate, `aggregate` for every condition, then `compare` and `plot`.
 
 ### HPC execution

@@ -104,7 +104,7 @@ producing an independent trajectory.
 
 The pipeline processes data in this order:
 
-1. **Per-replicate**: the runner-backed replicate stage runs once for each
+1. **Per-replicate**: the compute stage runs once for each
    replicate of each condition. If you have 2 conditions with 3 replicates
    each, that is 6 replicate-stage calls.
 2. **Per-condition**: `aggregate` runs once per condition, combining the

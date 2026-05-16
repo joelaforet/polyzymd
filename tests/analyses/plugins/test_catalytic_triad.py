@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from polyzymd.analyses._analysis_runner import _RUNNER_NOT_CONFIGURED
 from polyzymd.analyses.base import (
     AggregateContext,
     ComparisonContext,
@@ -262,7 +261,7 @@ class TestTriadMDACollector:
 class TestTriadAggregationAndComparison:
     """Tests for artifact aggregation and scalar comparison compatibility."""
 
-    def test_mda_not_configured_does_not_fall_back_to_scalar_runner(
+    def test_mda_not_configured_fails_without_scalar_fallback(
         self,
         triad_analysis: CatalyticTriadAnalysis,
         condition: Condition,
@@ -270,7 +269,7 @@ class TestTriadAggregationAndComparison:
         default_settings: CatalyticTriadSettings,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A missing MDA job path should fail closed before scalar runner execution."""
+        """A missing MDA job path should fail closed before scalar fallback."""
 
         ctx = ReplicateContext(
             condition=condition,
@@ -281,23 +280,19 @@ class TestTriadAggregationAndComparison:
             recompute=True,
             settings=default_settings,
         )
-        monkeypatch.setattr(
-            triad_analysis,
-            "_run_replicate_via_mda_jobs",
-            lambda *_args: _RUNNER_NOT_CONFIGURED,
-        )
+        monkeypatch.setattr(triad_analysis, "build_mda_jobs", lambda *_args: None)
 
-        with pytest.raises(PluginContractError, match="scalar-measurement runner fallback"):
+        with pytest.raises(PluginContractError, match=r"build_mda_jobs\(\) returned None"):
             triad_analysis.run_replicate(ctx, replicate=1)
 
-    def test_direct_scalar_runner_path_is_disabled(
+    def test_direct_scalar_runner_path_is_removed(
         self,
         triad_analysis: CatalyticTriadAnalysis,
     ) -> None:
-        """Direct calls to the inherited runner seam should also be rejected."""
+        """The old runner hook should not exist on catalytic triad."""
 
-        with pytest.raises(PluginContractError, match="artifact lifecycle only"):
-            triad_analysis.build_runner(object(), 1, object(), object())
+        assert "build_runner" not in type(triad_analysis).__dict__
+        assert not hasattr(triad_analysis, "_run_replicate_via_runner")
 
     def test_aggregate_requires_replicate_artifacts(
         self,

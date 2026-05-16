@@ -119,7 +119,7 @@ don't provide as much *independent* information.
 
 $$\text{SEM} = \frac{\sigma}{\sqrt{N_{\text{eff}}}} = \frac{\sigma}{\sqrt{N/g}}$$
 
-This is the treatment used by runner-backed first-moment analyses such as
+This is the treatment used by first-moment analyses such as
 distances:
 
 ```python
@@ -194,7 +194,7 @@ our actual uncertainty.
 
 ### RMSF analysis
 
-The RMSF plugin **subsamples** to independent frames in its runner-backed
+The RMSF plugin **subsamples** to independent frames in its MDAnalysis-native
 replicate stage before computing fluctuations:
 
 ```python

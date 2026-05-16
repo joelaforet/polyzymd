@@ -6,9 +6,9 @@ adding new analysis types to PolyzyMD.
 New contributor analyses usually use the Measurement API: a single-file plugin
 subclasses `ScalarMeasurementAnalysis`, declares a `ScalarMeasurement`, and
 returns one scalar value per replicate from `measure()`. The framework handles
-the runner bridge, aggregation, cache identity, and default scalar comparison.
-Advanced runner-backed package plugins remain supported for multi-metric or
-custom result workflows.
+aggregation, cache identity, and default scalar comparison. Built-in
+trajectory-native plugins run through MDAnalysis-compatible jobs and canonical
+artifacts.
 
 ## Public API
 
@@ -50,12 +50,12 @@ private framework modules. Contributor plugins should import from
 Discovery supports both contributor-friendly single-file plugins such as
 `polyzymd.analyses.my_metric` and package plugins such as
 `polyzymd.analyses.contacts`. Use a package when the plugin needs private helper
-modules for runners, results, plotting, or formatting; use a single file for the
-default scalar measurement pattern.
+modules for MDAnalysis jobs, results, plotting, or formatting; use a single file
+for the default scalar measurement pattern.
 
 ### Context Objects
 
-- `ReplicateContext` — passed to runner-backed replicate hooks
+- `ReplicateContext` — passed to per-replicate compute hooks
 - `AggregateContext` — passed to `aggregate()`
 - `ComparisonContext` — passed to `compare()`
 - `PlotContext` — passed to `plot()`

@@ -433,8 +433,10 @@ class TestContactsMDAArtifacts:
         from polyzymd.analyses.contacts import ContactsAnalysis
 
         assert ContactsAnalysis.ReplicateResultClass is None
-        assert ContactsAnalysis.build_runner is Analysis.build_runner
-        assert ContactsAnalysis.summarize_replicate is Analysis.summarize_replicate
+        assert not hasattr(Analysis, "build_runner")
+        assert not hasattr(Analysis, "summarize_replicate")
+        assert "build_runner" not in ContactsAnalysis.__dict__
+        assert "summarize_replicate" not in ContactsAnalysis.__dict__
 
     def test_sparse_analysis_streams_contact_events(self):
         from polyzymd.analyses.contacts._mda import build_contact_event_analysis

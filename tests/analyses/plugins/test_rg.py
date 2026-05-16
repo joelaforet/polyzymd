@@ -300,7 +300,8 @@ def test_rg_plugin_discovered() -> None:
     assert cls is RgAnalysis
     assert RgAnalysis.name == "rg"
     assert RgAnalysis.min_replicates == 1
-    assert RgAnalysis.build_runner is Analysis.build_runner
+    assert not hasattr(Analysis, "build_runner")
+    assert "build_runner" not in RgAnalysis.__dict__
     assert RgAnalysis.ReplicateResultClass is None
 
 

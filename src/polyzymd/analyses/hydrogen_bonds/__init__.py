@@ -906,7 +906,7 @@ class HydrogenBondsAnalysis(Analysis):
         )
 
     def _trajectory_loader_factory(self) -> type[Any]:
-        """Return the hydrogen-bond loader class for the shared runner seam.
+        """Return the hydrogen-bond loader class for the MDA job lifecycle.
 
         Returns
         -------

@@ -79,8 +79,8 @@ trajectory-level work and ensemble-level work:
 - **Composition is preferred over mixins or deep inheritance** so trajectory-
   native plugins can provide small hooks instead of re-implementing the full
   framework lifecycle
-- **Advanced trajectory-native plugins can keep per-trajectory logic in
-  dedicated runner modules**
+- **Advanced trajectory-native plugins keep per-trajectory logic in
+  MDAnalysis-compatible job modules**
 - **Derived analyses stay outside `Analysis` unless they truly process
   trajectories**; post-processing of already-aggregated outputs should remain a
   higher-level PolyzyMD concern
@@ -93,11 +93,10 @@ measurement-backed:
 - declare a `ScalarMeasurement` with a `MetricSpec`
 - implement `measure(...)` to return one scalar per replicate
 
-Use `polyzymd new-analysis <name> --advanced` when a plugin needs the explicit
-runner-backed package lifecycle:
+Advanced packages use the explicit MDAnalysis job lifecycle:
 
-- implement `build_runner(...)` and `summarize_replicate(...)` for
-  trajectory-native replicate work
+- implement `build_mda_jobs(...)` and, when needed, `build_mda_collector(...)`
+  for trajectory-native replicate work
 - set `has_compute_stage = False` for compare-only plugins
 - implement `aggregate()` only when `has_aggregate_stage = True`
 
@@ -161,7 +160,8 @@ single files that subclass `ScalarMeasurementAnalysis`; advanced analyses can be
 packages that subclass `Analysis` directly. The framework discovers both shapes
 automatically via `pkgutil` — no registries, no decorators, no imports needed.
 Use `polyzymd new-analysis <name>` for the default single-file measurement
-scaffold, or add `--advanced` for the runner-backed package scaffold.
+scaffold. Advanced MDAnalysis-native package scaffolds are reserved for a
+follow-up update.
 
 ### Separation between per-condition and cross-condition work
 
@@ -172,8 +172,8 @@ contract. Public plugins usually:
 
 Advanced plugins can also:
 
-- use the runner-backed path with `build_runner(...)` and
-  `summarize_replicate(...)`
+- use the MDAnalysis job path with `build_mda_jobs(...)` and
+  `build_mda_collector(...)`
 - skip compute entirely with `has_compute_stage = False`
 
 Per-condition aggregation is likewise optional and is required only when
@@ -182,8 +182,8 @@ Per-condition aggregation is likewise optional and is required only when
 
 The important migration rule is that simple contributors should not reimplement
 the lifecycle. Measurement plugins provide `measure()` only; advanced
-runner-backed plugins let MDAnalysis own per-trajectory iteration through the
-runner while PolyzyMD owns replicate discovery, caching, ensemble aggregation,
+MDAnalysis-native plugins let MDAnalysis own per-trajectory iteration while
+PolyzyMD owns replicate discovery, caching, ensemble aggregation,
 cross-condition statistics, plotting, and CLI output.
 
 ## Where contributors usually need to look

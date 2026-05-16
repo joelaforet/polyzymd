@@ -59,23 +59,14 @@ def render_scaffold(spec: ScaffoldSpec, project_root: Path) -> dict[Path, str]:
     analyses_root = project_root / "src" / "polyzymd" / "analyses"
     tests_dir = project_root / "tests" / "analyses" / "plugins"
 
-    if spec.uses_measurement_api:
-        return {
-            analyses_root / f"{spec.name}.py": render_template("measurement_plugin.py.jinja", spec),
-            tests_dir
-            / f"test_{spec.name}.py": render_template(
-                "test_measurement_plugin.py.jinja",
-                spec,
-            ),
-        }
+    if not spec.uses_measurement_api:
+        raise ValueError("Only the measurement scaffold is available until P6-002.")
 
-    analyses_dir = analyses_root / spec.name
-
-    files = {
-        analyses_dir / "__init__.py": render_template("plugin_init.py.jinja", spec),
-        analyses_dir / "_runner.py": render_template("runner.py.jinja", spec),
-        tests_dir / f"test_{spec.name}.py": render_template("test_plugin.py.jinja", spec),
+    return {
+        analyses_root / f"{spec.name}.py": render_template("measurement_plugin.py.jinja", spec),
+        tests_dir
+        / f"test_{spec.name}.py": render_template(
+            "test_measurement_plugin.py.jinja",
+            spec,
+        ),
     }
-    if spec.uses_pydantic_results:
-        files[analyses_dir / "_results.py"] = render_template("results.py.jinja", spec)
-    return files

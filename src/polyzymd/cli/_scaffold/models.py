@@ -20,8 +20,8 @@ class ScaffoldSpec:
         PascalCase class prefix used for generated classes.
     style : str
         Scaffold style. ``"measurement"`` creates the simple single-file
-        contributor path; ``"dict"`` and ``"pydantic"`` create the advanced
-        runner-backed package scaffold.
+        contributor path; ``"dict"`` and ``"pydantic"`` are reserved for the
+        future MDAnalysis-native advanced package scaffold.
     """
 
     name: str

@@ -3080,7 +3080,7 @@ def info() -> None:
     "--advanced",
     is_flag=True,
     default=False,
-    help="Create the runner-backed package scaffold instead of the simple measurement scaffold.",
+    help="Request the future advanced MDAnalysis-native package scaffold.",
 )
 @click.option(
     "--project-root",
@@ -3119,15 +3119,9 @@ def new_analysis(
       src/polyzymd/analyses/<NAME>.py             — scalar measurement plugin
       tests/analyses/plugins/test_<NAME>.py       — contributor-focused tests
 
-    Advanced mode creates:
-
-    \b
-      src/polyzymd/analyses/<NAME>/__init__.py    — analysis facade
-      src/polyzymd/analyses/<NAME>/_runner.py     — trajectory runner
-      src/polyzymd/analyses/<NAME>/_results.py    — pydantic result models (--style pydantic)
-
-    Passing --advanced uses the legacy dict style. Passing --style dict or
-    --style pydantic also selects advanced mode for backward compatibility.
+    Advanced MDAnalysis-native package scaffolds are reserved for a follow-up
+    implementation. Passing --advanced, --style dict, or --style pydantic
+    currently fails rather than generating the removed runner template.
 
     Run the generated tests with:
 

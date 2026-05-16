@@ -70,8 +70,8 @@ plotting inline in `plot()` or extract it as complexity grows.
 
 `polyzymd.analyses.base` is the stable public facade for contributor imports.
 It re-exports context objects and comparison models while delegating
-implementation to private modules such as `_analysis_runner.py`,
-`_analysis_compare.py`, `_analysis_io.py`, `_analysis_contract.py`,
+implementation to private modules such as `_analysis_compare.py`,
+`_analysis_io.py`, `_analysis_contract.py`,
 `_contexts.py`, and `_comparison_models.py`. Contributors should import
 `Analysis`, `ReplicateContext`, `AggregateContext`, `ComparisonContext`,
 `PlotContext`, `MetricValue`, and `ComparisonResult` from
@@ -106,7 +106,7 @@ in `src/polyzymd/analyses/<name>/` and subclass `Analysis`:
 Key rules:
 
 - **Required class variables**: `name` (str) and `Settings` (Pydantic BaseModel)
-- **Lifecycle contract**: when `has_compute_stage=True`, use runner-backed `build_runner()` + `summarize_replicate()`; this keeps MDAnalysis-first per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow. For compare-only plugins, set `has_compute_stage=False`. `aggregate(ctx, results)` is required only when `has_aggregate_stage=True`
+- **Lifecycle contract**: when `has_compute_stage=True`, use MDAnalysis-compatible `build_mda_jobs()` and, when needed, `build_mda_collector()`; this keeps MDAnalysis-first per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow. For compare-only plugins, set `has_compute_stage=False`. `aggregate(ctx, results)` is required only when `has_aggregate_stage=True`
 - **Optional overrides**: `compare()`, `plot()`, `format()`, `extract_metrics()`, `filter_conditions()`
 - **Default compare path**: Implement `extract_metrics()` — the framework loads results automatically (via `AggregatedResultClass` or `json.loads()`) and does t-tests, ANOVA, ranking
 - **Custom compare path**: Override `compare()` entirely for multi-metric or entry-table analyses
@@ -146,14 +146,14 @@ When writing a new analysis plugin, **study existing implementations first**:
 **Anti-pattern to avoid:**
 ```python
 # WRONG: Inventing custom data passing, bypassing the context
-def build_runner(self, ctx, replicate, universe, window):
+def build_mda_jobs(self, ctx):
     config = SimulationConfig.from_yaml(self.custom_config_path)  # Don't do this!
 ```
 
 **Correct pattern:**
 ```python
 # RIGHT: Use the framework-provided context
-def build_runner(self, ctx, replicate, universe, window):
+def build_mda_jobs(self, ctx):
     sim_config = ctx.sim_config  # Already loaded by framework
     settings = ctx.settings       # Your Settings model, resolved from YAML
 ```
@@ -162,7 +162,7 @@ def build_runner(self, ctx, replicate, universe, window):
 
 | Method | When Called | Input | Output |
 |--------|-----------|-------|--------|
-| `build_runner()` + `summarize_replicate()` | Once per replicate per condition on the runner-backed compute path; MDAnalysis owns per-trajectory iteration there while PolyzyMD owns ensemble workflow | `ReplicateContext` + replicate int | Runner + summarized replicate result |
+| `build_mda_jobs()` + `build_mda_collector()` | Once per replicate per condition on the MDAnalysis job compute path; MDAnalysis owns per-trajectory iteration there while PolyzyMD owns ensemble workflow | `MDAReplicateJobContext` / collector context | Canonical replicate artifact |
 | `aggregate()` | Once per condition after all replicates, only when `has_aggregate_stage=True` | `AggregateContext` + list of replicate results | Aggregated model or dict |
 | `extract_metrics()` | During default `compare()` | Aggregated result | `dict[str, MetricValue]` |
 | `compare()` | Once per analysis (cross-condition) | `ComparisonContext` | `ComparisonResult` or custom Pydantic model |
@@ -175,7 +175,7 @@ def build_runner(self, ctx, replicate, universe, window):
 2. **Read `analyses/base.py`** — the class docstring defines the full contract
 3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
 4. **Study a matching example**: start with scaffold output (`polyzymd new-analysis <name>`), then use `rmsf/` for default compare with plots or `contacts/` for custom compare
-5. **Write your plugin** in `analyses/<name>/` — keep plugin and lifecycle wiring in `__init__.py`; for trajectory-native runner-backed plugins, isolate MDAnalysis runner logic in a dedicated module such as `_runner.py`, and extract plotting to `_plotters.py` as complexity grows
+5. **Write your plugin** in `analyses/<name>/` — keep plugin and lifecycle wiring in `__init__.py`; for trajectory-native plugins, isolate MDAnalysis job logic in a dedicated module such as `_mda.py`, and extract plotting to `_plotters.py` as complexity grows
 6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 
 ## Code Style

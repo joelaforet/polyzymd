@@ -680,7 +680,7 @@ polyzymd new-analysis NAME [OPTIONS]
 Options:
   --class-name TEXT                 PascalCase class prefix
   --style [dict|pydantic]           Advanced package style
-  --advanced                        Create the runner-backed package scaffold
+  --advanced                        Request the future advanced MDAnalysis-native package scaffold
   --project-root DIRECTORY          Repository root
   --force                           Overwrite existing files
   --dry-run                         Print paths without writing files
@@ -692,8 +692,9 @@ By default, the command creates a single-file scalar measurement plugin at
 replicate while the framework handles the runner bridge, aggregation, cache
 identity, and default scalar comparison.
 
-Use `--advanced` when you need a runner-backed package plugin with explicit
-`build_runner()`, `summarize_replicate()`, `aggregate()`, and `extract_metrics()`
+`--advanced`, `--style dict`, and `--style pydantic` currently fail rather than
+generating the removed runner template. Use the default scalar measurement
+scaffold until the MDAnalysis-native advanced scaffold is implemented.
 hooks. Passing `--style dict` or `--style pydantic` also selects advanced package
 scaffolding for backward compatibility. The `pydantic` style adds `_results.py`
 typed result models; the `dict` style uses plain dictionaries.

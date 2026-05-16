@@ -56,7 +56,7 @@ directed acyclic graph (DAG) of SLURM jobs:
                 └─────────────────────┘
 ```
 
-**Replicate jobs** each run the runner-backed replicate stage for one
+**Replicate jobs** each run the per-replicate compute stage for one
 (condition, replicate) pair. **Aggregate jobs** wait for all replicates of their
 condition to finish, then run `aggregate()`. The **finalize job** waits for all
 aggregate jobs, then runs the cross-condition comparison and generates plots.

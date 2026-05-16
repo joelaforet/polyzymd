@@ -668,7 +668,7 @@ def test_public_run_replicate_once_writes_canonical_result(tmp_path: Path) -> No
 
 
 def test_public_lifecycle_runs_mda_jobs_and_saves_artifact(tmp_path: Path) -> None:
-    """Public lifecycle should run MDA jobs without the old runner protocol."""
+    """Public lifecycle should run MDA jobs and save artifacts."""
 
     analysis = _MDAJobOnlyAnalysis()
     condition = _condition(tmp_path, replicates=(1,))

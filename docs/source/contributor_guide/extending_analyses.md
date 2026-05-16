@@ -2,12 +2,13 @@
 
 This guide shows the supported contributor workflow for adding a new analysis
 plugin. The default path is now a **single-file scalar measurement plugin**:
-your code measures one scalar value per replicate, and PolyzyMD handles the
-runner bridge, aggregation, cache identity, default scalar comparison, CLI
+your code measures one scalar value per replicate, and PolyzyMD handles
+aggregation, cache identity, default scalar comparison, CLI
 wiring, and discovery.
 
-Use the advanced runner-backed scaffold only when one scalar measurement is not
-enough for the science you need to express.
+Advanced MDAnalysis-native scaffolds are reserved for a follow-up update. Model
+advanced plugins on built-ins that construct MDAnalysis-compatible jobs and
+artifacts.
 
 ## Start with the measurement scaffold
 
@@ -41,8 +42,8 @@ from polyzymd.analyses.base import MetricSpec, ScalarMeasurement, ScalarMeasurem
 `polyzymd.analyses.base` is the stable contributor surface. It re-exports the
 measurement API, the `Analysis` base class, lifecycle contexts, metric models,
 and comparison result models while implementation details remain private. Do not
-import from modules such as `_measurement.py`, `_analysis_runner.py`,
-`_contexts.py`, or `_comparison_models.py` in contributor plugins.
+import from modules such as `_measurement.py`, `_contexts.py`, or
+`_comparison_models.py` in contributor plugins.
 
 ## Minimal scalar measurement plugin
 
@@ -125,14 +126,14 @@ analysis lifecycle:
 | Lifecycle concern | Handled by PolyzyMD |
 |-------------------|---------------------|
 | Trajectory loading | The framework creates the `TrajectoryLoader` from the run context |
-| Runner bridge | The scalar adapter wraps `measure()` in a runner-compatible object |
+| Replicate execution | The scalar adapter invokes `measure()` with the resolved frame window |
 | Replicate result | The adapter stores analysis, measurement, metric, replicate, value, and cache identity |
 | Aggregation | Replicate scalar values become mean, SEM, replicate values, and counts |
 | Cache identity | Measurement name, version, metric, settings, and analysis name are fingerprinted |
 | Comparison | The default scalar comparison path builds rankings, pairwise tests, and ANOVA where applicable |
 
-You usually do not implement `build_runner()`, `summarize_replicate()`,
-`aggregate()`, or `extract_metrics()` for scalar measurement plugins.
+You usually do not implement `build_mda_jobs()`, `aggregate()`, or
+`extract_metrics()` for scalar measurement plugins.
 
 ## Measurement metadata and cache identity
 
@@ -168,11 +169,12 @@ Common examples are:
 Validate selections on representative topologies because available attributes
 depend on the trajectory topology.
 
-## Advanced runner-backed scaffolds
+## Advanced MDAnalysis-native plugins
 
-Use the advanced scaffold when your plugin needs multi-metric outputs,
-per-frame/per-residue tables, custom result models, sidecar files, or a
-trajectory runner that cannot be expressed as one scalar `measure()` call.
+Use an advanced package when your plugin needs multi-metric outputs,
+per-frame/per-residue tables, custom result models, sidecar files, or
+MDAnalysis-compatible jobs that cannot be expressed as one scalar `measure()`
+call.
 
 ```bash
 pixi run -e build polyzymd new-analysis solvent_shell --advanced
@@ -180,30 +182,30 @@ pixi run -e build polyzymd new-analysis solvent_shell --style dict
 pixi run -e build polyzymd new-analysis solvent_shell --style pydantic
 ```
 
-`--advanced` creates the runner-backed package scaffold. If no style is given,
-it uses the plain-dict advanced style. Passing `--style dict` or
-`--style pydantic` also selects advanced package scaffolding for backward
-compatibility.
+`--advanced`, `--style dict`, and `--style pydantic` no longer generate the old
+runner package. They intentionally fail until the MDAnalysis-native advanced
+template lands.
 
-Advanced packages create files such as:
+Advanced packages use files such as:
 
 ```text
 src/polyzymd/analyses/<name>/__init__.py
-src/polyzymd/analyses/<name>/_runner.py
+src/polyzymd/analyses/<name>/_mda.py
 src/polyzymd/analyses/<name>/_results.py  # pydantic style only
 ```
 
-Advanced plugins implement the runner-backed lifecycle:
+Advanced plugins implement the MDAnalysis job lifecycle:
 
 | Hook | Purpose |
 |------|---------|
-| `build_runner(ctx, replicate, universe, window)` | Construct a trajectory runner for one replicate |
-| `summarize_replicate(ctx, replicate, runner, window)` | Convert executed runner output into a dict or Pydantic result |
+| `build_mda_jobs(ctx)` | Construct MDAnalysis-compatible jobs for one replicate |
+| `build_mda_collector(ctx)` | Convert completed job outputs into a canonical artifact |
 | `aggregate(ctx, results)` | Combine replicate results for one condition |
 | `extract_metrics(summary)` | Expose scalar metrics for the default comparison path |
 
-Keep the inherited per-replicate dispatch unless you need plugin-specific cache
-or sidecar behavior. Compare-only plugins can set `has_compute_stage = False`.
+Keep the inherited per-replicate dispatch unless you need an explicit
+`run_replicate()` override for advanced/internal behavior. Compare-only plugins
+can set `has_compute_stage = False`.
 
 ## Pydantic result models
 

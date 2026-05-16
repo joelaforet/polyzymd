@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import logging
 import math
 import statistics
 from abc import ABC
@@ -14,6 +15,8 @@ from pydantic import BaseModel, ValidationError
 
 from polyzymd.analyses._measurement import CacheIdentity, MetricSpec, ScalarMeasurement
 from polyzymd.analyses.base import AggregateContext, Analysis, MetricValue, ReplicateContext
+
+logger = logging.getLogger("polyzymd.analyses")
 
 
 class _EmptyScalarMeasurementSettings(BaseModel):
@@ -47,68 +50,6 @@ class _MeasurementClassVarContract:
         raise AttributeError(
             f"{owner_name}.measurement must be defined as a ScalarMeasurement instance or class."
         )
-
-
-class _ScalarMeasurementRunner:
-    """Runner bridge that adapts a scalar measurement to the runner seam."""
-
-    def __init__(
-        self,
-        *,
-        measurement: ScalarMeasurement,
-        universe: Any,
-        settings: BaseModel,
-    ) -> None:
-        """Initialize the runner bridge.
-
-        Parameters
-        ----------
-        measurement : ScalarMeasurement
-            Scalar measurement strategy to execute.
-        universe : Any
-            Trajectory universe supplied by the analysis framework.
-        settings : BaseModel
-            Resolved analysis settings.
-        """
-
-        self.measurement = measurement
-        self.universe = universe
-        self.settings = settings
-        self.results: dict[str, float] = {}
-
-    def run(
-        self,
-        *,
-        start: int | None = None,
-        stop: int | None = None,
-        step: int | None = None,
-    ) -> _ScalarMeasurementRunner:
-        """Execute the scalar measurement over the requested frame window.
-
-        Parameters
-        ----------
-        start : int or None, optional
-            First frame index included in the trajectory window.
-        stop : int or None, optional
-            Exclusive final frame index for the trajectory window.
-        step : int or None, optional
-            Frame stride for the trajectory window.
-
-        Returns
-        -------
-        _ScalarMeasurementRunner
-            This runner with populated ``results``.
-        """
-
-        value = self.measurement.measure(
-            self.universe,
-            self.settings,
-            start=start,
-            stop=stop,
-            step=step,
-        )
-        self.results = {"value": float(value)}
-        return self
 
 
 class ScalarMeasurementAnalysis(Analysis, ABC):
@@ -267,39 +208,6 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
         canonical = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:8]
 
-    def build_runner(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        universe: Any,
-        window: Any,
-    ) -> _ScalarMeasurementRunner:
-        """Build a runner bridge for one scalar measurement replicate.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            One-indexed replicate number.
-        universe : Any
-            Loaded trajectory universe.
-        window : Any
-            Resolved trajectory window.
-
-        Returns
-        -------
-        _ScalarMeasurementRunner
-            Runner bridge compatible with the analysis framework.
-        """
-
-        del replicate, window
-        return _ScalarMeasurementRunner(
-            measurement=self._measurement_instance(),
-            universe=universe,
-            settings=ctx.settings,
-        )
-
     def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
         """Run one scalar replicate with canonical cache-hit validation.
 
@@ -320,7 +228,18 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
             cached = self._load_scalar_replicate_cache(ctx, replicate)
             if cached is not None:
                 return cached
-        return super().run_replicate(ctx, replicate)
+        loader = self._trajectory_loader_factory()(ctx.sim_config)
+        universe = loader.load_universe(replicate)
+        window = self.get_trajectory_window(ctx, replicate, loader, universe)
+        if getattr(window, "warning_message", None):
+            logger.warning(
+                "%s: %s [condition=%s, replicate=%d]",
+                self.name,
+                window.warning_message,
+                ctx.condition.label,
+                replicate,
+            )
+        return self._run_scalar_measurement(ctx, replicate, universe, window)
 
     def _load_scalar_replicate_cache(
         self,
@@ -366,14 +285,14 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
             return None
         return cached
 
-    def summarize_replicate(
+    def _run_scalar_measurement(
         self,
         ctx: ReplicateContext,
         replicate: int,
-        runner: _ScalarMeasurementRunner,
+        universe: Any,
         window: Any,
     ) -> dict[str, Any]:
-        """Convert runner output into a plain replicate result.
+        """Execute the configured scalar measurement for one replicate.
 
         Parameters
         ----------
@@ -381,8 +300,8 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
             Framework-provided replicate context.
         replicate : int
             One-indexed replicate number.
-        runner : _ScalarMeasurementRunner
-            Executed scalar measurement runner.
+        universe : Any
+            Loaded trajectory universe supplied by the framework loader.
         window : Any
             Resolved trajectory window.
 
@@ -392,14 +311,26 @@ class ScalarMeasurementAnalysis(Analysis, ABC):
             Serializable per-replicate result payload.
         """
 
-        del window
         measurement = self._measurement_instance()
+        run_kwargs = window.run_kwargs()
+        if "frames" in run_kwargs:
+            raise ValueError(
+                f"{type(self).__name__} scalar measurements do not support explicit frame "
+                "selectors; implement build_mda_jobs() for explicit-frame analyses."
+            )
+        value = measurement.measure(
+            universe,
+            ctx.settings,
+            start=run_kwargs.get("start"),
+            stop=run_kwargs.get("stop"),
+            step=run_kwargs.get("step"),
+        )
         return {
             "analysis": self.name,
             "measurement": measurement.name,
             "metric": measurement.metric.name,
             "replicate": replicate,
-            "value": float(runner.results["value"]),
+            "value": float(value),
             "cache_identity": measurement.cache_identity(
                 ctx.settings,
                 analysis_name=self.name,

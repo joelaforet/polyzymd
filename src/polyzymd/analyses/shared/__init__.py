@@ -32,7 +32,7 @@ selections
 diagnostics
     Selection diagnostics, equilibration validation.
 window
-    Centralized trajectory window resolution for runner-based analyses.
+    Centralized trajectory window resolution for MDAnalysis job lifecycles.
 config_hash
     Config hashing for cache validation.
 constants

@@ -105,9 +105,9 @@ When adding a new analysis plugin in `analyses/`, write tests that cover:
 1. **Discovery**: Plugin is found by `list_analyses()` and `get_analysis()`
 2. **Class variables**: `name` and `Settings` are set correctly
 3. **Settings validation**: Pydantic model validates/rejects correctly
-4. **Runner-backed replicate stage**: `build_runner()` constructs the runner,
-   `summarize_replicate()` returns the expected structure, and base
-   `run_replicate()` dispatch works with fake loader/window objects
+4. **MDAnalysis job replicate stage**: `build_mda_jobs()` constructs jobs,
+   `build_mda_collector()` maps completed jobs when needed, and base
+   `run_replicate()` dispatch works with fake MDA job objects
 5. **aggregate()**: Combines replicate results correctly (no mocks needed)
 6. **extract_metrics()**: Returns correct `MetricValue` instances (if using default compare)
 7. **_deserialize_result()**: Loads JSON back correctly (if using default compare)
@@ -153,7 +153,7 @@ class TestMyPluginDiscovery:
 
 
 class TestMyPluginReplicateStage:
-    """Test the runner-backed replicate stage with small fakes."""
+    """Test the MDAnalysis job replicate stage with small fakes."""
 
     class FakeTrajectory:
         def __len__(self) -> int:

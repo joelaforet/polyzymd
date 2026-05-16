@@ -30,15 +30,15 @@ src/polyzymd/
 
 New analysis types are added as **packages in `analyses/<name>/`**. All existing
 plugins are packages (no single-file plugins exist). New compute-stage plugins
-use `build_runner()` + `summarize_replicate()` for MDAnalysis-first trajectory
-iteration. Keep PolyzyMD lifecycle orchestration in the plugin package and
-isolate MDAnalysis trajectory logic in a dedicated runner module such as
-`_runner.py`.
+use `build_mda_jobs()` and, when needed, `build_mda_collector()` for
+MDAnalysis-first trajectory iteration. Keep PolyzyMD lifecycle orchestration in
+the plugin package and isolate MDAnalysis trajectory logic in a dedicated module
+such as `_mda.py`.
 
 `polyzymd.analyses.base` is the stable public API facade for contributors. It
 re-exports `Analysis`, lifecycle context objects, metric descriptors, and
 comparison models while delegating implementation to private modules such as
-`_analysis_runner.py`, `_analysis_compare.py`, `_analysis_io.py`,
+`_analysis_compare.py`, `_analysis_io.py`,
 `_analysis_contract.py`, `_contexts.py`, and `_comparison_models.py`. Do not
 import these private modules from contributor plugins; import public symbols
 from `polyzymd.analyses.base`.
@@ -131,7 +131,7 @@ class AnalysisConfig(BaseModel):
 1. Run `polyzymd new-analysis <name>` to scaffold the plugin, OR create `src/polyzymd/analyses/<name>/` manually
 2. Subclass `Analysis` with `name` and `Settings`
 3. Choose the lifecycle mode:
-   - Runner-backed plugin: implement `build_runner()` + `summarize_replicate()` when `has_compute_stage=True`; MDAnalysis owns per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow
+   - MDAnalysis-native plugin: implement `build_mda_jobs()` and, when needed, `build_mda_collector()` when `has_compute_stage=True`; MDAnalysis owns per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow
    - Compare-only plugin: set `has_compute_stage=False`
 4. Implement `aggregate()` only when `has_aggregate_stage=True`
 5. For default comparison: implement `extract_metrics()`

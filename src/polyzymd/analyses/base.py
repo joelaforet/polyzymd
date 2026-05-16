@@ -60,11 +60,6 @@ from polyzymd.analyses._analysis_io import (
 from polyzymd.analyses._analysis_io import (
     save_result as _save_result_impl,
 )
-from polyzymd.analyses._analysis_runner import (
-    run_replicate_default,
-    run_replicate_via_mda_jobs,
-    run_replicate_via_runner,
-)
 from polyzymd.analyses._comparison_models import (
     ANOVAResult,
     BaseComparisonResult,
@@ -214,7 +209,13 @@ class Analysis(ABC):
         Any
             Per-replicate result, or ``None`` when compute is disabled.
         """
-        return run_replicate_default(self, ctx, replicate, base_cls=Analysis)
+        if type(self).build_mda_jobs is Analysis.build_mda_jobs:
+            raise NotImplementedError(
+                f"{type(self).__name__} public plugins must implement build_mda_jobs() "
+                "or override run_replicate() when has_compute_stage=True; set "
+                "has_compute_stage = False for compare-only plugins."
+            )
+        return self._run_replicate_via_mda_jobs(ctx, replicate)
 
     def aggregate(
         self,
@@ -283,21 +284,6 @@ class Analysis(ABC):
         del ctx
         return None
 
-    def build_runner(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        universe: Any,
-        window: Any,
-    ) -> Any | None:
-        """Build a trajectory-native runner for one replicate.
-
-        The base implementation returns ``None`` to indicate that the plugin is
-        not runner-backed.
-        """
-        del ctx, replicate, universe, window
-        return None
-
     def build_mda_jobs(
         self,
         ctx: MDAReplicateJobContext,
@@ -313,8 +299,8 @@ class Analysis(ABC):
         Returns
         -------
         sequence of MDAAnalysisJob or None
-            Jobs to execute for the replicate, or ``None`` to decline the MDA
-            path and allow legacy fallback.
+            Jobs to execute for the replicate. ``None`` is valid only for
+            non-compute plugins and is rejected for compute-stage plugins.
         """
 
         del ctx
@@ -366,7 +352,7 @@ class Analysis(ABC):
         return ArtifactStore
 
     def _trajectory_loader_factory(self) -> type[Any]:
-        """Return the trajectory-loader class used by the runner seam.
+        """Return the trajectory-loader class used by the MDA job lifecycle.
 
         Returns
         -------
@@ -384,7 +370,7 @@ class Analysis(ABC):
         loader: Any,
         universe: Any,
     ) -> Any:
-        """Resolve the frame window for a runner-based replicate analysis.
+        """Resolve the frame window for a replicate analysis.
 
         Parameters
         ----------
@@ -409,19 +395,6 @@ class Analysis(ABC):
             replicate=replicate,
             equilibration=ctx.equilibration,
             n_frames_total=len(universe.trajectory),
-        )
-
-    def summarize_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        runner: Any,
-        window: Any,
-    ) -> Any:
-        """Convert runner output into a PolyzyMD replicate result."""
-        del ctx, replicate, runner, window
-        raise PluginContractError(
-            f"{type(self).__name__} must implement summarize_replicate() when using build_runner()."
         )
 
     def filter_conditions(
@@ -592,21 +565,28 @@ class Analysis(ABC):
         """
         return load_aggregated_result(self, aggregated_dir)
 
-    def _run_replicate_via_runner(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-    ) -> Any:
-        """Execute the opt-in runner-based replicate path."""
-        return run_replicate_via_runner(self, ctx, replicate, base_cls=Analysis)
-
     def _run_replicate_via_mda_jobs(
         self,
         ctx: ReplicateContext,
         replicate: int,
     ) -> Any:
         """Execute the opt-in MDAnalysis job-based replicate path."""
-        return run_replicate_via_mda_jobs(self, ctx, replicate, base_cls=Analysis)
+        if type(self).build_mda_jobs is Analysis.build_mda_jobs:
+            raise PluginContractError(
+                f"{type(self).__name__} must implement build_mda_jobs() for the default "
+                "compute path, override run_replicate(), or set has_compute_stage = False."
+            )
+
+        from polyzymd.analyses.mda.lifecycle import run_mda_replicate_jobs
+
+        result = run_mda_replicate_jobs(self, ctx, replicate)
+        if result is None:
+            raise PluginContractError(
+                f"{type(self).__name__}.build_mda_jobs() returned None for a compute-stage "
+                "plugin. Return a sequence of MDAAnalysisJob objects, override run_replicate(), "
+                "or set has_compute_stage = False."
+            )
+        return result
 
     def _deserialize_result(self, path: Path) -> Any:
         """Load an aggregated result from a JSON file."""

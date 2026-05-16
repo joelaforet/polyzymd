@@ -396,7 +396,7 @@ def test_scalar_measurement_fingerprint_includes_measurement_version() -> None:
 
 
 def test_scalar_measurement_analysis_run_replicate_and_aggregate(tmp_path) -> None:
-    """Scalar measurement adapter should execute and aggregate via the runner seam."""
+    """Scalar measurement adapter should execute and aggregate directly."""
 
     condition = Condition(
         label="Toy",

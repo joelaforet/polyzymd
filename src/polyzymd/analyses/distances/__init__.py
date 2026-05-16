@@ -520,8 +520,8 @@ class DistanceCalculator:
     - Calculate distributions and statistics
 
     This compatibility façade preserves the legacy public API while delegating
-    trajectory-native work to the same runner-backed compute kernel used by the
-    plugin path.
+    trajectory-native work to the same MDAnalysis-compatible pair-distance
+    kernel used by the plugin path.
 
     Parameters
     ----------

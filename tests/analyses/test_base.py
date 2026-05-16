@@ -172,13 +172,12 @@ class TestAnalysisABC:
         assert hasattr(AbstractMiddle, "__abstractmethods__")
 
     def test_concrete_subclass_requires_compute_contract(self) -> None:
-        """Concrete plugins must provide a replicate entry point or runner contract."""
+        """Concrete plugins must provide a replicate entry point or MDA jobs."""
 
         with pytest.raises(
             TypeError,
-            match=r"public plugins must implement both build_runner\(\) and "
-            r"summarize_replicate\(\), or build_mda_jobs\(\).*direct run_replicate\(\) overrides are "
-            r"advanced/internal only",
+            match=r"public plugins must implement build_mda_jobs\(\) or override "
+            r"run_replicate\(\) when has_compute_stage=True",
         ):
 
             class BadComputeContractAnalysis(Analysis):
@@ -195,8 +194,8 @@ class TestAnalysisABC:
 
         with pytest.raises(
             TypeError,
-            match=r"public plugins must implement both build_runner\(\) and "
-            r"summarize_replicate\(\), or build_mda_jobs\(\)",
+            match=r"public plugins must implement build_mda_jobs\(\) or override "
+            r"run_replicate\(\)",
         ):
 
             class LegacyComputeOnlyAnalysis(Analysis):
@@ -280,26 +279,32 @@ class TestAnalysisABC:
 
         assert result == ToyResult(value=3.0, replicate=2)
 
-    def test_runner_subclass_requires_complete_runner_contract(self) -> None:
-        """Runner-backed plugins must implement summarize_replicate()."""
+    def test_runner_hooks_are_rejected(self) -> None:
+        """Removed runner hooks should fail with migration guidance."""
 
         with pytest.raises(
             TypeError,
-            match=r"must implement both build_runner\(\) and summarize_replicate\(\)",
+            match=r"defines removed runner hook\(s\): build_runner.*Implement build_mda_jobs",
         ):
 
-            class IncompleteRunnerAnalysis(Analysis):
-                name: ClassVar[str] = "incomplete_runner"
+            class RemovedRunnerHookAnalysis(Analysis):
+                name: ClassVar[str] = "removed_runner_hook"
                 Settings: ClassVar[type] = ToySettings
 
                 def build_runner(self, ctx, replicate, universe, window):
+                    """Legacy hook that should be rejected."""
+
+                    del ctx, replicate, universe, window
                     return object()
 
                 def aggregate(self, ctx, results):
+                    """Return a simple aggregate result."""
+
+                    del ctx, results
                     return {"dummy": True}
 
     def test_mda_job_subclass_satisfies_compute_contract(self) -> None:
-        """MDA job-backed plugins should not need the legacy runner protocol."""
+        """MDA job-backed plugins should satisfy the compute contract."""
 
         class MDAJobOnlyAnalysis(Analysis):
             name: ClassVar[str] = "mda_job_only_contract"
@@ -318,110 +323,6 @@ class TestAnalysisABC:
                 return {"dummy": True}
 
         assert MDAJobOnlyAnalysis().name == "mda_job_only_contract"
-
-    def test_run_replicate_delegates_to_runner_contract(self, toy_condition) -> None:
-        """Base run_replicate should execute runner-backed plugins."""
-
-        class FakeTrajectory:
-            """Minimal trajectory with a frame count."""
-
-            def __len__(self) -> int:
-                """Return the fake frame count."""
-
-                return 5
-
-        class FakeUniverse:
-            """Minimal universe exposing a trajectory."""
-
-            trajectory = FakeTrajectory()
-
-        class FakeLoader:
-            """Loader seam used by the runner path."""
-
-            def __init__(self, sim_config: object) -> None:
-                """Store the provided simulation configuration."""
-
-                self.sim_config = sim_config
-
-            def load_universe(self, replicate: int) -> FakeUniverse:
-                """Return a fake universe for the requested replicate."""
-
-                assert replicate == 2
-                return FakeUniverse()
-
-        class FakeWindow:
-            """Trajectory window with runner keyword arguments."""
-
-            warning_message = None
-
-            def run_kwargs(self) -> dict[str, int]:
-                """Return fake runner keyword arguments."""
-
-                return {"start": 1, "stop": 4, "step": 1}
-
-        class FakeRunner:
-            """Runner object compatible with the framework seam."""
-
-            def __init__(self) -> None:
-                """Initialize empty results."""
-
-                self.results: dict[str, int] = {}
-
-            def run(self, **kwargs: int) -> "FakeRunner":
-                """Record runner keyword arguments and return self."""
-
-                self.results = kwargs
-                return self
-
-        class RunnerBackedAnalysis(Analysis):
-            """Analysis that uses the runner-backed replicate seam."""
-
-            name: ClassVar[str] = "runner_backed"
-            Settings: ClassVar[type] = ToySettings
-
-            def _trajectory_loader_factory(self) -> type[FakeLoader]:
-                """Return the fake loader class."""
-
-                return FakeLoader
-
-            def get_trajectory_window(self, ctx, replicate, loader, universe) -> FakeWindow:
-                """Return a fake window for the runner call."""
-
-                del ctx, replicate, loader, universe
-                return FakeWindow()
-
-            def build_runner(self, ctx, replicate, universe, window) -> FakeRunner:
-                """Build the fake runner."""
-
-                del ctx, replicate, universe, window
-                return FakeRunner()
-
-            def summarize_replicate(self, ctx, replicate, runner, window) -> dict[str, int]:
-                """Summarize the fake runner results."""
-
-                del ctx, window
-                return {"replicate": replicate, "start": runner.results["start"]}
-
-            def aggregate(self, ctx, results):
-                """Return a simple aggregate result."""
-
-                del ctx, results
-                return {"dummy": True}
-
-        ctx = ReplicateContext(
-            condition=toy_condition,
-            replicate=2,
-            sim_config=toy_condition.sim_config,
-            output_dir=Path("/tmp/run_2"),
-            equilibration="10ns",
-            recompute=False,
-            settings=ToySettings(),
-        )
-
-        assert RunnerBackedAnalysis().run_replicate(ctx, replicate=2) == {
-            "replicate": 2,
-            "start": 1,
-        }
 
     def test_compare_only_subclass_can_disable_compute_stage(self) -> None:
         """Compare-only plugins should remain valid with compute disabled."""

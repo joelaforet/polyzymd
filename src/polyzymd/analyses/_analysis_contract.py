@@ -13,8 +13,12 @@ _LEGACY_LIFECYCLE_HOOKS = (
     "compare",
     "plot",
     "filter_conditions",
+)
+
+_REMOVED_RUNNER_HOOKS = (
     "build_runner",
     "summarize_replicate",
+    "_run_replicate_via_runner",
 )
 
 _BUILTIN_PLUGIN_MODULE_PREFIXES = (
@@ -69,24 +73,23 @@ def validate_analysis_subclass(cls: type, *, base_cls: type, kwargs: dict[str, A
             "when has_compute_stage=False."
         )
 
-    uses_run_replicate = cls.run_replicate is not base_cls.run_replicate
-    uses_mda_jobs = cls.build_mda_jobs is not base_cls.build_mda_jobs
-    uses_runner_build = cls.build_runner is not base_cls.build_runner
-    uses_runner_summary = cls.summarize_replicate is not base_cls.summarize_replicate
-
-    if uses_runner_build != uses_runner_summary:
+    removed_hooks = [name for name in _REMOVED_RUNNER_HOOKS if name in cls.__dict__]
+    if removed_hooks:
         raise TypeError(
-            f"Analysis subclass {cls.__name__} must implement both build_runner() and "
-            "summarize_replicate() when using the runner-based path."
+            f"Analysis subclass {cls.__name__} defines removed runner hook(s): "
+            f"{', '.join(removed_hooks)}. Implement build_mda_jobs() for the "
+            "MDAnalysis job lifecycle or override run_replicate() explicitly."
         )
 
+    uses_run_replicate = cls.run_replicate is not base_cls.run_replicate
+    uses_mda_jobs = cls.build_mda_jobs is not base_cls.build_mda_jobs
+
     if cls.has_compute_stage and not uses_run_replicate:
-        if not uses_mda_jobs and not uses_runner_build:
+        if not uses_mda_jobs:
             raise TypeError(
-                f"Analysis subclass {cls.__name__} public plugins must implement both "
-                "build_runner() and summarize_replicate(), or build_mda_jobs(), "
-                "when has_compute_stage=True; "
-                "direct run_replicate() overrides are advanced/internal only."
+                f"Analysis subclass {cls.__name__} public plugins must implement "
+                "build_mda_jobs() or override run_replicate() when has_compute_stage=True; "
+                "set has_compute_stage=False for compare-only plugins."
             )
 
     _warn_on_direct_lifecycle_overrides(cls)
@@ -109,8 +112,8 @@ def _warn_on_direct_lifecycle_overrides(cls: type) -> None:
     warnings.warn(
         f"{cls.__name__} directly defines analysis lifecycle hook(s): "
         f"{', '.join(hooks)}. Direct lifecycle overrides remain supported for "
-        "Feature Cycle 1 but are deprecated; prefer measurement strategy adapters "
-        "for new simple analyses.",
+        "advanced/internal integrations; prefer build_mda_jobs() for trajectory-native "
+        "compute-stage plugins.",
         DeprecationWarning,
         stacklevel=3,
     )

@@ -39,7 +39,6 @@ from polyzymd.analyses.catalytic_triad._plotters import (
     plot_triad_threshold_bars_from_data,
 )
 from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
-from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda import (
     ArtifactStore,
     ComparisonArtifact,
@@ -219,57 +218,6 @@ class CatalyticTriadAnalysis(ScalarMeasurementAnalysis):
             target_path = ctx.result_path or ctx.output_dir / "result.json"
             ArtifactStore(target_path.parent).write_replicate_result(result, target_path.name)
         return result
-
-    def build_runner(self, ctx: Any, replicate: int, universe: Any, window: Any) -> Any:
-        """Disable the inherited scalar-measurement runner path.
-
-        Parameters
-        ----------
-        ctx : Any
-            Framework-provided replicate context.
-        replicate : int
-            One-indexed replicate number.
-        universe : Any
-            Loaded trajectory universe.
-        window : Any
-            Resolved trajectory window.
-
-        Raises
-        ------
-        PluginContractError
-            Always raised because catalytic-triad computation must run through
-            canonical MDAnalysis jobs and artifacts.
-        """
-
-        del ctx, replicate, universe, window
-        raise PluginContractError(
-            "CatalyticTriadAnalysis uses the MDAnalysis artifact lifecycle only. "
-            "The inherited scalar-measurement runner fallback is disabled; configure "
-            "build_mda_jobs() successfully or recompute after clearing stale caches."
-        )
-
-    def _run_replicate_via_runner(self, ctx: Any, replicate: int) -> Any:
-        """Fail closed instead of falling back to the scalar measurement runner.
-
-        Parameters
-        ----------
-        ctx : Any
-            Framework-provided replicate context.
-        replicate : int
-            One-indexed replicate number.
-
-        Raises
-        ------
-        PluginContractError
-            Always raised when the MDAnalysis job path was unavailable.
-        """
-
-        del ctx, replicate
-        raise PluginContractError(
-            "CatalyticTriadAnalysis could not run the MDAnalysis job path, and the inherited "
-            "scalar-measurement runner fallback is disabled. Recompute with valid catalytic-triad "
-            "MDAnalysis job settings or clear stale caches before retrying."
-        )
 
     def _deserialize_result(self, path: Path) -> Any:
         """Load only canonical condition artifacts for catalytic-triad aggregates."""

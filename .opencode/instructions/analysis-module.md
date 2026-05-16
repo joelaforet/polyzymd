@@ -7,7 +7,6 @@ The analysis system lives in the `analyses/` package:
 ```
 src/polyzymd/analyses/
 ├── base.py                 # Public facade: Analysis, contexts, result models
-├── _analysis_runner.py     # Internal runner-backed replicate dispatch
 ├── _analysis_compare.py    # Internal default comparison implementation
 ├── _analysis_io.py         # Internal result paths, cache, serialization helpers
 ├── _analysis_contract.py   # Internal plugin contract validation
@@ -46,7 +45,7 @@ src/polyzymd/analyses/
 │   ├── _aggregator.py      #   Internal aggregation logic
 │   ├── _formatters.py      #   Internal CLI formatting
 │   ├── _identity.py        #   Internal settings fingerprints
-│   ├── _runner.py          #   Internal trajectory runner and analyzer
+│   ├── _mda.py             #   Internal MDAnalysis job helpers
 │   └── _paths.py           #   Internal result path helpers
 ```
 
@@ -60,11 +59,11 @@ Each plugin is a self-contained package. All established plugins extract
 plotting functions into a `_plotters.py` module to keep `__init__.py` focused
 on Analysis lifecycle wiring. Contacts is larger, so `ContactsAnalysis` stays
 public in `contacts/__init__.py` while cache, filtering, lifecycle, comparison,
-plotting, result, and runner helpers live in private `contacts/_*.py` modules.
+plotting, result, and MDAnalysis helpers live in private `contacts/_*.py` modules.
 These modules are implementation details, not
-contributor API. Public contributor plugins use the runner-backed lifecycle;
+contributor API. Public contributor plugins use the MDAnalysis job lifecycle;
 trajectory-native plugins should isolate MDAnalysis trajectory logic in a
-dedicated module such as `_runner.py`.
+dedicated module such as `_mda.py`.
 
 ### How to Add a New Analysis
 
@@ -72,10 +71,10 @@ dedicated module such as `_runner.py`.
    create `src/polyzymd/analyses/<name>/` sub-package manually
 2. Define a `Settings` class (Pydantic v2 `BaseModel`)
 3. Subclass `Analysis` and choose the lifecycle mode for your plugin
-4. When `has_compute_stage=True`, implement `build_runner()` +
-   `summarize_replicate()` for the MDAnalysis-first runner path; keep lifecycle
-   wiring in `__init__.py` and put runner logic in a dedicated module such as
-   `_runner.py`
+4. When `has_compute_stage=True`, implement `build_mda_jobs()` and, when
+   needed, `build_mda_collector()` for the MDAnalysis job path; keep lifecycle
+   wiring in `__init__.py` and put job logic in a dedicated module such as
+   `_mda.py`
 5. If the plugin is compare-only, set `has_compute_stage=False`
 6. Implement `aggregate()` only when `has_aggregate_stage=True`
 7. Done — framework discovers it via `pkgutil` (no registries, no imports)
@@ -94,12 +93,12 @@ Required hooks depend on the plugin mode:
 
 | Hook | When Used | Signature / Notes |
 |------|-----------|-------------------|
-| `build_runner()` + `summarize_replicate()` | Public compute-stage plugins with `has_compute_stage=True` | MDAnalysis owns per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow |
+| `build_mda_jobs()` + `build_mda_collector()` | Public compute-stage plugins with `has_compute_stage=True` | MDAnalysis owns per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow |
 | `run_replicate()` | Advanced/internal cache or sidecar wrappers only | Framework entry point used by the orchestrator; new contributor plugins should not override it |
 | `aggregate()` | Only when `has_aggregate_stage=True` | `(ctx: AggregateContext, results: Sequence[Any]) -> Any` |
 
 Compare-only or no-compute plugins set `has_compute_stage=False` and skip the
-runner-backed compute path.
+MDAnalysis job compute path.
 
 ### Optional Overrides
 
@@ -160,7 +159,7 @@ Plugins receive framework-provided context objects — never load configs yourse
 
 | Context | Passed To | Key Attributes |
 |---------|-----------|----------------|
-| `ReplicateContext` | `build_runner()`, `summarize_replicate()`, advanced `run_replicate()` wrappers | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
+| `ReplicateContext` | advanced `run_replicate()` wrappers and lower-level context access | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
 | `AggregateContext` | `aggregate()` | `.condition`, `.replicates`, `.output_dir`, `.settings`, `.result_path` |
 | `ComparisonContext` | `compare()` | `.conditions`, `.analysis_dirs`, `.results_dir`, `.effective_control`, `.settings` |
 | `PlotContext` | `plot()` | `.conditions`, `.analysis_dirs`, `.output_dir`, `.settings`, `.plot_settings` |
@@ -178,8 +177,8 @@ pattern).
 
 ### Return Types: Pydantic Models vs Dicts
 
-Lifecycle hooks must return a Pydantic `BaseModel` instance or a plain `dict`
-(`summarize_replicate()`, plus `aggregate()` when used). `compare()` may also
+Lifecycle hooks must return a Pydantic `BaseModel` instance, a canonical
+artifact, or a plain `dict` (`aggregate()` when used). `compare()` may also
 return `None` when no comparison result is produced. Invalid return types are
 enforced as plugin contract failures and raise `PluginContractError`.
 

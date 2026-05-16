@@ -13,7 +13,8 @@ PolyzyMD, understand the codebase, or add new capabilities.
 ## Extension Workflows
 
 - **[Extend the Analysis Framework](extending_analyses.md)** —
-  how to add a new scalar measurement analysis or advanced runner-backed plugin,
+  how to add a new scalar measurement analysis and understand advanced
+  MDAnalysis-native plugins,
   including comparison, formatting, and plotting
 
 ## Contributor Mindset
