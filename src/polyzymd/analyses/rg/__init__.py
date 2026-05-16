@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Sequence
@@ -22,109 +21,32 @@ from polyzymd.analyses.base import (
     BasePlotSettings,
     ComparisonContext,
     PlotContext,
-    ReplicateContext,
+)
+from polyzymd.analyses.mda import ConditionArtifact, ReplicateArtifact
+from polyzymd.analyses.rg._mda import (
+    RgArtifactCollector,
+    aggregate_rg_artifacts,
+    build_rg_jobs,
+    condition_artifact_to_legacy_result,
 )
 from polyzymd.analyses.rg._plot_settings import RgPlotSettings
-from polyzymd.analyses.rg._results import RgAggregatedResult, RgResult
-from polyzymd.analyses.rg._runner import RgReplicateRunner, compute_rg_run
-from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
-from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
+from polyzymd.analyses.rg._results import RgAggregatedResult
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
     filter_summaries_with_run,
 )
-from polyzymd.analyses.shared.statistics import compute_sem
 
 if TYPE_CHECKING:
+    from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext
     from polyzymd.analyses.rg._comparison_results import RgComparisonResult
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class _RgTrajectoryWindow:
-    """Rg trajectory window that carries loader-derived file metadata.
-
-    This keeps summarize-time metadata lookup on the same loader seam used by
-    the base runner orchestration.
-    """
-
-    start: int
-    stop: int
-    step: int
-    equilibration_start: int
-    n_frames_total: int
-    n_frames_selected: int
-    timestep_ps: float
-    equilibration_ps: float
-    warning_message: str | None = None
-    trajectory_files: tuple[Path, ...] = ()
-
-    @classmethod
-    def from_window(
-        cls,
-        window: Any,
-        trajectory_files: Sequence[Path],
-    ) -> _RgTrajectoryWindow:
-        """Build an Rg window wrapper from the shared trajectory window.
-
-        Parameters
-        ----------
-        window : Any
-            Shared trajectory window returned by the centralized resolver.
-        trajectory_files : Sequence[Path]
-            Trajectory files resolved by the existing loader instance.
-
-        Returns
-        -------
-        _RgTrajectoryWindow
-            Rg window wrapper that preserves run arguments and file metadata.
-        """
-
-        return cls(
-            start=window.start,
-            stop=window.stop,
-            step=window.step,
-            equilibration_start=window.equilibration_start,
-            n_frames_total=window.n_frames_total,
-            n_frames_selected=window.n_frames_selected,
-            timestep_ps=window.timestep_ps,
-            equilibration_ps=window.equilibration_ps,
-            warning_message=window.warning_message,
-            trajectory_files=tuple(trajectory_files),
-        )
-
-    def run_kwargs(self) -> dict[str, int]:
-        """Return keyword arguments for the runner ``run()`` call.
-
-        Returns
-        -------
-        dict[str, int]
-            ``start``, ``stop``, and ``step`` values for ``run()``.
-        """
-
-        return {"start": self.start, "stop": self.stop, "step": self.step}
-
-
 class RgRunSettings(BaseModel):
-    """Settings for a single Rg run.
-
-    Attributes
-    ----------
-    label : str
-        Human-readable run label.
-    selection : str
-        MDAnalysis selection used for Rg calculation.
-    calculation_mode : Literal["selection", "fragments"]
-        Rg calculation mode for either whole-selection or per-fragment reduction.
-    fragment_weighting : Literal["equal", "mass"]
-        Fragment reduction weighting scheme when fragment mode is enabled.
-    save_fragment_distribution : bool
-        Whether to save per-fragment Rg distribution data in NPZ sidecar output.
-    histogram_bins : int
-        Number of histogram bins used for fragment distribution summaries.
-    """
+    """Settings for a single Rg run."""
 
     label: str = Field(..., description="Human-readable run label")
     selection: str = Field(..., description="MDAnalysis selection for Rg calculation")
@@ -164,13 +86,7 @@ class RgRunSettings(BaseModel):
 
 
 class RgSettings(BaseModel):
-    """Top-level Rg settings.
-
-    Attributes
-    ----------
-    runs : list[RgRunSettings]
-        Named Rg runs to compute.
-    """
+    """Top-level Rg settings."""
 
     runs: list[RgRunSettings] = Field(
         default_factory=list,
@@ -203,7 +119,7 @@ class RgAnalysis(Analysis):
     Settings: ClassVar[type] = RgSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RgPlotSettings
     AggregatedResultClass: ClassVar[type] = RgAggregatedResult
-    ReplicateResultClass: ClassVar[type | None] = RgResult
+    ReplicateResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
 
@@ -256,7 +172,11 @@ class RgAnalysis(Analysis):
             Raised when the aggregated result is missing a settings
             fingerprint or was computed with different settings.
         """
-        if isinstance(result, dict):
+        if isinstance(result, ConditionArtifact):
+            result = condition_artifact_to_legacy_result(result)
+        elif isinstance(result, dict) and result.get("artifact_type") == "condition":
+            result = condition_artifact_to_legacy_result(ConditionArtifact.model_validate(result))
+        elif isinstance(result, dict):
             result = RgAggregatedResult.model_validate(result)
 
         if not isinstance(result, RgAggregatedResult):
@@ -311,21 +231,7 @@ class RgAnalysis(Analysis):
         canonical = self.aggregate_result_path(aggregated_dir)
         if canonical.exists():
             return canonical
-
-        json_files = sorted(aggregated_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
-        if not json_files:
-            return None
-
-        chosen = json_files[-1]
-        logger.warning(
-            "%s: canonical result.json not found in %s — falling back to %s "
-            "(%d JSON file(s) present)",
-            self.name,
-            aggregated_dir,
-            chosen.name,
-            len(json_files),
-        )
-        return chosen
+        return None
 
     def _load_aggregated_result(
         self,
@@ -707,558 +613,79 @@ class RgAnalysis(Analysis):
             required_outputs.append("fragment distributions")
         return " and ".join(required_outputs)
 
-    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Run Rg for all configured runs for a single replicate.
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[Any] | None:
+        """Build MDAnalysis-native Rg jobs for one replicate.
 
         Parameters
         ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            1-indexed replicate number.
+        ctx : MDAReplicateJobContext
+            Framework-provided MDAnalysis job context.
 
         Returns
         -------
-        RgResult
-            Per-replicate Rg result containing all run outputs.
-        """
-        settings = ctx.settings
-
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        eq_str = f"eq{eq_value:g}{eq_unit}"
-        settings_tag = self._make_settings_cache_tag(settings)
-        result_file = ctx.output_dir / f"rg_{eq_str}_{settings_tag}.json"
-
-        cached = self._check_cache(
-            RgResult,
-            result_file,
-            recompute=ctx.recompute,
-            sim_config=ctx.sim_config,
-            settings=ctx.settings,
-        )
-        if cached is not None:
-            return cached
-
-        result = super().run_replicate(ctx, replicate)
-        result.save(result_file)
-        logger.info("Saved Rg result to %s", result_file)
-        return result
-
-    def _trajectory_loader_factory(self) -> type[Any]:
-        """Return the Rg loader class for the shared runner seam.
-
-        Returns
-        -------
-        type[Any]
-            Loader class patched by Rg unit tests.
+        sequence of MDAAnalysisJob
+            One custom AnalysisBase job per configured Rg run.
         """
 
-        return TrajectoryLoader
+        return build_rg_jobs(ctx, ctx.settings.runs)
 
-    def get_trajectory_window(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        loader: Any,
-        universe: Any,
-    ) -> Any:
-        """Resolve the Rg window and retain trajectory file metadata.
+    def build_mda_collector(self, ctx: MDACollectorContext) -> Any:
+        """Build the Rg artifact collector.
 
         Parameters
         ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            Replicate number.
-        loader : Any
-            Trajectory loader already constructed for this replicate.
-        universe : Any
-            Loaded universe for the replicate.
+        ctx : MDACollectorContext
+            Framework-provided collector context.
 
         Returns
         -------
-        Any
-            Shared trajectory window augmented with trajectory file metadata.
+        RgArtifactCollector
+            Collector that maps custom MDAnalysis Rg results to artifacts.
         """
 
-        window = super().get_trajectory_window(ctx, replicate, loader, universe)
-        traj_info = loader.get_trajectory_info(replicate)
-        return _RgTrajectoryWindow.from_window(window, traj_info.trajectory_files)
-
-    def build_runner(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        universe: Any,
-        window: Any,
-    ) -> Any:
-        """Build the runner-backed Rg execution object.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            Replicate number.
-        universe : Any
-            Loaded universe for the replicate.
-        window : Any
-            Resolved trajectory window.
-
-        Returns
-        -------
-        Any
-            Runner object compatible with the trajectory seam.
-        """
-
-        return RgReplicateRunner(
-            sim_config=ctx.sim_config,
-            replicate=replicate,
-            runs=list(ctx.settings.runs),
-            loader_factory=self._trajectory_loader_factory(),
-            n_frames_total=len(universe.trajectory),
-            timestep_ps=window.timestep_ps,
-        )
-
-    def summarize_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        runner: Any,
-        window: Any,
-    ) -> Any:
-        """Serialize runner output into the legacy Rg result schema.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            Replicate number.
-        runner : Any
-            Executed Rg runner.
-        window : Any
-            Resolved trajectory window.
-
-        Returns
-        -------
-        RgResult
-            Cache-compatible per-replicate Rg result.
-        """
-        import numpy as np
-
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.rg._results import RgResult, RgRunResult, RgSkippedRunResult
-
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        eq_str = f"eq{eq_value:g}{eq_unit}"
-        settings_tag = self._make_settings_cache_tag(ctx.settings)
-        config_hash = compute_config_hash(ctx.sim_config)
-        trajectory_files = getattr(window, "trajectory_files", ())
-
-        run_results: list[RgRunResult] = []
-        for payload in runner.results.run_payloads:
-            npz_filename = f"rg_{payload.run_label}_{eq_str}_{settings_tag}_timeseries.npz"
-            npz_path = ctx.output_dir / npz_filename
-            npz_data: dict[str, np.ndarray] = {
-                "rg_values": payload.rg_values,
-                "time_ns": payload.time_ns,
-                "frames": payload.frames,
-                "raw_timestep_ps": np.asarray(payload.raw_timestep_ps, dtype=np.float64),
-                "frame_stride": np.asarray(payload.frame_stride, dtype=np.int64),
-                "effective_timestep_ps": np.asarray(
-                    payload.effective_timestep_ps,
-                    dtype=np.float64,
-                ),
-            }
-            if payload.fragment_rg_values is not None:
-                npz_data["fragment_rg_values"] = payload.fragment_rg_values
-            if payload.fragment_counts_per_frame is not None:
-                npz_data["fragment_counts_per_frame"] = payload.fragment_counts_per_frame
-            if payload.fragment_masses is not None:
-                npz_data["fragment_masses"] = payload.fragment_masses
-            np.savez_compressed(npz_path, **npz_data)
-
-            run_results.append(
-                RgRunResult(
-                    config_hash=config_hash,
-                    polyzymd_version=get_polyzymd_version(),
-                    replicate=replicate,
-                    equilibration_time=eq_value,
-                    equilibration_unit=eq_unit,
-                    selection_string=payload.selection,
-                    correlation_time=payload.correlation_time,
-                    n_independent_frames=payload.n_independent_frames,
-                    run_label=payload.run_label,
-                    selection=payload.selection,
-                    calculation_mode=payload.calculation_mode,
-                    fragment_weighting=payload.fragment_weighting,
-                    mean_rg=payload.mean_rg,
-                    std_rg=payload.std_rg,
-                    median_rg=payload.median_rg,
-                    min_rg=payload.min_rg,
-                    max_rg=payload.max_rg,
-                    final_rg=payload.final_rg,
-                    sem_rg=payload.sem_rg,
-                    correlation_time_unit=payload.correlation_time_unit,
-                    statistical_inefficiency=payload.statistical_inefficiency,
-                    autocorrelation_warning=payload.autocorrelation_warning,
-                    n_frames_total=runner.results.n_frames_total,
-                    n_frames_used=window.n_frames_selected,
-                    npz_path=str(npz_path),
-                    time_unit="ns",
-                    timestep_ps=payload.effective_timestep_ps,
-                    raw_timestep_ps=payload.raw_timestep_ps,
-                    frame_stride=payload.frame_stride,
-                    **payload.frag_metadata,
-                )
-            )
-
-        skipped_runs = [
-            RgSkippedRunResult(
-                run_label=payload.run_label,
-                selection=payload.selection,
-                replicate=payload.replicate,
-                reason=payload.reason,
-                reason_code=payload.reason_code,
-            )
-            for payload in getattr(runner.results, "skipped_run_payloads", [])
-        ]
-
-        return RgResult(
-            config_hash=config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=replicate,
-            equilibration_time=eq_value,
-            equilibration_unit=eq_unit,
-            selection_string="; ".join(run.selection for run in ctx.settings.runs),
-            run_results=run_results,
-            skipped_runs=skipped_runs,
-            settings_fingerprint=settings_tag,
-            n_frames_total=runner.results.n_frames_total,
-            n_frames_used=window.n_frames_selected,
-            trajectory_files=[str(path) for path in trajectory_files],
-        )
+        del ctx
+        return RgArtifactCollector()
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
-        """Aggregate Rg results across replicates for one condition.
+        """Aggregate Rg replicate artifacts across one condition.
 
         Parameters
         ----------
         ctx : AggregateContext
             Framework-provided aggregation context.
-        results : Sequence[RgResult]
-            Per-replicate Rg results.
+        results : Sequence[ReplicateArtifact]
+            Per-replicate Rg artifacts.
 
         Returns
         -------
-        RgAggregatedResult
-            Aggregated Rg result for all configured runs.
+        ConditionArtifact
+            Aggregated Rg condition artifact.
         """
-        import numpy as np
 
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.rg._results import RgAggregatedResult, RgRunAggregatedResult
-
-        run_labels = [run.label for run in ctx.settings.runs]
-        self._validate_aggregate_input_completeness(ctx, results, run_labels)
-        ordered_results = self._order_results_by_replicate(ctx, results)
-        replicate_order = list(ctx.replicates)
-
-        first = ordered_results[0]
-
-        if len(ctx.replicates) == 1:
-            logger.warning(
-                "Only one replicate available for Rg aggregation in condition '%s'; "
-                "replicate-level SEM is reported as 0.0",
-                ctx.condition.label,
+        if not results:
+            raise ValueError(
+                f"Rg aggregation for condition '{ctx.condition.label}' requires at least one "
+                "replicate artifact. No replicate inputs were provided."
             )
-
-        aggregated_runs: list[RgRunAggregatedResult] = []
-        skipped_runs = [
-            skipped_run
-            for result in ordered_results
-            for skipped_run in getattr(result, "skipped_runs", [])
-        ]
-        for run in ctx.settings.runs:
-            run_label = run.label
-            run_entries = []
-            run_replicates: list[int] = []
-            for result in ordered_results:
-                matches = [
-                    run_result
-                    for run_result in result.run_results
-                    if run_result.run_label == run_label
-                ]
-                if len(matches) > 1:
-                    raise ValueError(
-                        f"Configured Rg run '{run_label}' has invalid aggregate inputs in "
-                        f"condition '{ctx.condition.label}'. Expected at most one entry per replicate, "
-                        f"found {len(matches)} for replicate {result.replicate}."
-                    )
-                if not matches:
-                    if self._has_skip_provenance(result, run_label):
-                        continue
-                    raise ValueError(
-                        f"Configured Rg run '{run_label}' has invalid aggregate inputs in "
-                        f"condition '{ctx.condition.label}'. Missing replicate "
-                        f"{result.replicate} without skip provenance."
-                    )
-                run_entries.append(matches[0])
-                run_replicates.append(int(result.replicate))
-
-            if not run_entries:
-                logger.info(
-                    "Skipping Rg aggregation for run '%s' in condition '%s' because all "
-                    "replicates recorded empty-selection skips",
-                    run_label,
-                    ctx.condition.label,
-                )
-                continue
-
-            per_means = [entry.mean_rg for entry in run_entries]
-            per_stds = [entry.std_rg for entry in run_entries]
-            per_medians = [entry.median_rg for entry in run_entries]
-
-            mean_stats = compute_sem(per_means)
-            overall_median = float(np.median(np.asarray(per_medians, dtype=np.float64)))
-
-            template = run_entries[0]
-
-            per_replicate_mean_fragments_per_frame: list[float] | None = None
-            overall_mean_fragments_per_frame: float | None = None
-            fragment_histogram_edges: list[float] | None = None
-            fragment_histogram_density_mean: list[float] | None = None
-            fragment_histogram_density_sem: list[float] | None = None
-            reduced_histogram_edges: list[float] | None = None
-            reduced_histogram_density_mean: list[float] | None = None
-            reduced_histogram_density_sem: list[float] | None = None
-
-            all_reduced_rg_per_rep: list[np.ndarray] = []
-            all_fragment_rg_per_rep: list[np.ndarray] = []
-            requires_fragment_distribution = (
-                run.calculation_mode == "fragments" and run.save_fragment_distribution
+        if not all(isinstance(result, ReplicateArtifact) for result in results):
+            raise TypeError(
+                "Rg aggregation expects MDAnalysis ReplicateArtifact inputs. Legacy Rg "
+                "replicate caches are incompatible with the MDAnalysis artifact lifecycle; "
+                "recompute the condition or clear stale caches before aggregating."
             )
-            required_sidecar_outputs = self._describe_sidecar_aggregation_contract(run)
-            missing_sidecar_replicates = [
-                replicate
-                for replicate, entry in zip(run_replicates, run_entries, strict=True)
-                if entry.npz_path is None
-            ]
-            if missing_sidecar_replicates:
-                raise ValueError(
-                    f"Rg aggregation for run '{run_label}' in condition "
-                    f"'{ctx.condition.label}' requires NPZ sidecar metadata for "
-                    f"{required_sidecar_outputs} in replicates "
-                    f"{missing_sidecar_replicates}. Recompute those replicates or clear "
-                    "stale caches before aggregating."
-                )
-
-            for replicate, entry in zip(run_replicates, run_entries, strict=True):
-                npz_path_value = entry.npz_path
-                if npz_path_value is None:
-                    raise ValueError(
-                        f"Rg aggregation for run '{run_label}' in condition "
-                        f"'{ctx.condition.label}' is missing NPZ sidecar metadata for "
-                        f"replicate {replicate}."
-                    )
-                npz_path = Path(npz_path_value)
-                if not npz_path.exists():
-                    raise ValueError(
-                        f"Rg aggregation for run '{run_label}' in condition "
-                        f"'{ctx.condition.label}' expected NPZ sidecar {npz_path} for "
-                        f"replicate {replicate}, but the file is missing. Recompute that "
-                        "replicate or clear stale caches before aggregating."
-                    )
-
-                with np.load(npz_path) as npz_data:
-                    if "rg_values" not in npz_data:
-                        raise ValueError(
-                            f"Rg aggregation for run '{run_label}' in condition "
-                            f"'{ctx.condition.label}' expected 'rg_values' in NPZ sidecar "
-                            f"{npz_path} for replicate {replicate}."
-                        )
-
-                    reduced_values = np.asarray(npz_data["rg_values"], dtype=np.float64)
-                    if reduced_values.size == 0:
-                        raise ValueError(
-                            f"Rg aggregation for run '{run_label}' in condition "
-                            f"'{ctx.condition.label}' found empty reduced-series data in "
-                            f"NPZ sidecar {npz_path} for replicate {replicate}."
-                        )
-                    all_reduced_rg_per_rep.append(reduced_values)
-
-                    if requires_fragment_distribution:
-                        if "fragment_rg_values" not in npz_data:
-                            raise ValueError(
-                                f"Rg aggregation for run '{run_label}' in condition "
-                                f"'{ctx.condition.label}' expected 'fragment_rg_values' in "
-                                f"NPZ sidecar {npz_path} for replicate {replicate}."
-                            )
-
-                        fragment_values = np.asarray(
-                            npz_data["fragment_rg_values"],
-                            dtype=np.float64,
-                        )
-                        if fragment_values.size == 0:
-                            raise ValueError(
-                                f"Rg aggregation for run '{run_label}' in condition "
-                                f"'{ctx.condition.label}' found empty fragment distribution "
-                                f"data in NPZ sidecar {npz_path} for replicate {replicate}."
-                            )
-                        all_fragment_rg_per_rep.append(fragment_values)
-
-            if template.calculation_mode == "fragments":
-                missing_fragment_metrics = [
-                    replicate
-                    for replicate, entry in zip(run_replicates, run_entries, strict=True)
-                    if entry.mean_fragments_per_frame is None
-                ]
-                if missing_fragment_metrics:
-                    raise ValueError(
-                        f"Rg aggregation for run '{run_label}' in condition "
-                        f"'{ctx.condition.label}' is missing mean_fragments_per_frame for "
-                        f"replicates {missing_fragment_metrics}. Recompute those replicates or "
-                        "clear stale caches before aggregating."
-                    )
-
-                per_replicate_mean_fragments_per_frame = [
-                    float(entry.mean_fragments_per_frame) for entry in run_entries
-                ]
-                overall_mean_fragments_per_frame = float(
-                    np.mean(
-                        np.asarray(
-                            per_replicate_mean_fragments_per_frame,
-                            dtype=np.float64,
-                        )
-                    )
-                )
-
-                if all_fragment_rg_per_rep:
-                    pooled_fragment_rg = np.concatenate(all_fragment_rg_per_rep)
-                    fragment_min = float(np.min(pooled_fragment_rg))
-                    fragment_max = float(np.max(pooled_fragment_rg))
-                    if fragment_min == fragment_max:
-                        fragment_min -= 1.0e-6
-                        fragment_max += 1.0e-6
-
-                    fragment_edges = np.linspace(
-                        fragment_min,
-                        fragment_max,
-                        run.histogram_bins + 1,
-                        dtype=np.float64,
-                    )
-                    fragment_densities = np.asarray(
-                        [
-                            np.histogram(rep_data, bins=fragment_edges, density=True)[0]
-                            for rep_data in all_fragment_rg_per_rep
-                        ],
-                        dtype=np.float64,
-                    )
-                    fragment_histogram_edges = fragment_edges.tolist()
-                    fragment_histogram_density_mean = np.mean(fragment_densities, axis=0).tolist()
-                    if len(all_fragment_rg_per_rep) > 1:
-                        fragment_histogram_density_sem = (
-                            np.std(fragment_densities, axis=0, ddof=1)
-                            / np.sqrt(len(all_fragment_rg_per_rep))
-                        ).tolist()
-                    else:
-                        fragment_histogram_density_sem = [
-                            0.0 for _ in range(len(fragment_histogram_density_mean))
-                        ]
-
-            # --- Reduced-series histogram (both selection and fragment modes) ---
-            if all_reduced_rg_per_rep:
-                pooled_reduced_rg = np.concatenate(all_reduced_rg_per_rep)
-                reduced_min = float(np.min(pooled_reduced_rg))
-                reduced_max = float(np.max(pooled_reduced_rg))
-                if reduced_min == reduced_max:
-                    reduced_min -= 1.0e-6
-                    reduced_max += 1.0e-6
-
-                reduced_edges = np.linspace(
-                    reduced_min,
-                    reduced_max,
-                    run.histogram_bins + 1,
-                    dtype=np.float64,
-                )
-                reduced_densities = np.asarray(
-                    [
-                        np.histogram(rep_data, bins=reduced_edges, density=True)[0]
-                        for rep_data in all_reduced_rg_per_rep
-                    ],
-                    dtype=np.float64,
-                )
-                reduced_histogram_edges = reduced_edges.tolist()
-                reduced_histogram_density_mean = np.mean(reduced_densities, axis=0).tolist()
-                if len(all_reduced_rg_per_rep) > 1:
-                    reduced_histogram_density_sem = (
-                        np.std(reduced_densities, axis=0, ddof=1)
-                        / np.sqrt(len(all_reduced_rg_per_rep))
-                    ).tolist()
-                else:
-                    reduced_histogram_density_sem = [
-                        0.0 for _ in range(len(reduced_histogram_density_mean))
-                    ]
-
-            aggregated_runs.append(
-                RgRunAggregatedResult(
-                    config_hash=first.config_hash,
-                    polyzymd_version=get_polyzymd_version(),
-                    replicate=None,
-                    equilibration_time=first.equilibration_time,
-                    equilibration_unit=first.equilibration_unit,
-                    selection_string=template.selection,
-                    replicates=run_replicates,
-                    n_replicates=len(run_replicates),
-                    run_label=run_label,
-                    selection=template.selection,
-                    overall_mean=mean_stats.mean,
-                    overall_sem=mean_stats.sem,
-                    overall_median=overall_median,
-                    per_replicate_means=per_means,
-                    per_replicate_stds=per_stds,
-                    per_replicate_medians=per_medians,
-                    calculation_mode=template.calculation_mode,
-                    fragment_weighting=template.fragment_weighting,
-                    overall_mean_fragments_per_frame=overall_mean_fragments_per_frame,
-                    per_replicate_mean_fragments_per_frame=per_replicate_mean_fragments_per_frame,
-                    fragment_histogram_edges=fragment_histogram_edges,
-                    fragment_histogram_density_mean=fragment_histogram_density_mean,
-                    fragment_histogram_density_sem=fragment_histogram_density_sem,
-                    reduced_histogram_edges=reduced_histogram_edges,
-                    reduced_histogram_density_mean=reduced_histogram_density_mean,
-                    reduced_histogram_density_sem=reduced_histogram_density_sem,
-                )
-            )
-
-        agg_result = RgAggregatedResult(
-            config_hash=first.config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=None,
-            equilibration_time=first.equilibration_time,
-            equilibration_unit=first.equilibration_unit,
-            selection_string=first.selection_string,
-            replicates=replicate_order,
-            n_replicates=len(replicate_order),
-            run_results=aggregated_runs,
-            skipped_runs=skipped_runs,
+        target_path = ctx.result_path or ctx.output_dir / "result.json"
+        aggregated = aggregate_rg_artifacts(
+            condition_label=ctx.condition.label,
+            replicates=ctx.replicates,
+            settings=ctx.settings,
+            equilibration=ctx.equilibration,
+            output_dir=ctx.output_dir,
+            result_path=target_path,
+            artifacts=results,
             settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
-            source_result_files=[],
         )
-
-        target_path = ctx.result_path
-        if target_path is None:
-            settings_tag = self._make_settings_cache_tag(ctx.settings)
-            target_path = ctx.output_dir / self._make_aggregated_filename(
-                ctx.replicates,
-                first,
-                settings_tag,
-            )
-        self.save_result(agg_result, target_path)
-        logger.info("Saved aggregated Rg result to %s", target_path)
-
-        return agg_result
+        logger.info("Saved aggregated Rg artifact to %s", target_path)
+        return aggregated
 
     def compare(self, ctx: ComparisonContext) -> Any:
         """Compare Rg runs across conditions.
@@ -1486,43 +913,6 @@ class RgAnalysis(Analysis):
             return super().format(result, output_format)
 
         return format_rg_comparison(result, output_format)
-
-    def _compute_single_run(
-        self,
-        *,
-        ctx: ReplicateContext,
-        replicate: int,
-        run: RgRunSettings,
-        loader: TrajectoryLoader,
-        config_hash: str,
-        eq_value: float,
-        eq_unit: str,
-        eq_str: str,
-        settings_tag: str,
-        start_frame: int,
-        n_frames_total: int,
-        n_frames_used: int,
-        timestep_ps: float,
-    ) -> Any:
-        """Compatibility shim for one Rg run.
-
-        This helper remains for focused unit tests while delegating the actual
-        trajectory-native work to ``rg._runner``. Empty selections now fail
-        immediately so the replicate exits before any partial result files are
-        written.
-        """
-
-        del ctx, config_hash, eq_value, eq_unit, eq_str, settings_tag, n_frames_used
-        universe = loader.load_universe(replicate, cache=False)
-        return compute_rg_run(
-            universe=universe,
-            run=run,
-            replicate=replicate,
-            start=start_frame,
-            stop=n_frames_total,
-            step=1,
-            timestep_ps=timestep_ps,
-        )
 
     @staticmethod
     def _has_run_summary(summary: Any, run_label: str) -> bool:

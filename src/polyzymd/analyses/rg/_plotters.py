@@ -7,15 +7,10 @@ All functions are called exclusively from ``RgAnalysis.plot()``.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import ValidationError
-
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
-from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
@@ -55,7 +50,6 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
     import numpy as np
 
     plot_settings = _get_plot_settings(ctx)
-    result_json_name = _make_replicate_result_filename(ctx)
 
     replicates_by_condition = {
         condition.label: list(condition.replicates) for condition in ctx.conditions
@@ -82,7 +76,6 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
                 condition_dir,
                 run_label,
                 replicates,
-                result_json_name,
             )
             if rg_matrix.size == 0 or time_ns.size == 0:
                 logger.warning(
@@ -330,7 +323,7 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
                 continue
 
             run_payload = None
-            for candidate in aggregated_payload.get("run_results", []):
+            for candidate in aggregated_payload.get("runs", []):
                 if candidate.get("run_label") == run_label:
                     run_payload = candidate
                     break
@@ -520,7 +513,6 @@ def _load_replicate_timeseries(
     condition_dir: Path,
     run_label: str,
     replicates: list[int],
-    result_json_name: str,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load Rg NPZ sidecars for one condition and run.
 
@@ -546,7 +538,7 @@ def _load_replicate_timeseries(
     traces: list[np.ndarray] = []
 
     for replicate in replicates:
-        npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate, result_json_name)
+        npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate)
         if npz_path is None:
             continue
 
@@ -596,9 +588,8 @@ def _resolve_npz_sidecar_path(
     condition_dir: Path,
     run_label: str,
     replicate: int,
-    result_json_name: str,
 ) -> Path | None:
-    """Resolve a run NPZ sidecar via per-replicate result metadata.
+    """Resolve a run NPZ sidecar via canonical artifact metadata.
 
     Parameters
     ----------
@@ -608,89 +599,70 @@ def _resolve_npz_sidecar_path(
         Rg run label.
     replicate : int
         Replicate index.
-    result_json_name : str
-        Expected per-replicate Rg result JSON filename.
 
     Returns
     -------
     Path | None
         NPZ sidecar path from metadata, or ``None`` when unavailable.
     """
-    from polyzymd.analyses.rg._results import RgResult
+    from polyzymd.analyses.mda import ArtifactStore
 
     run_dir = condition_dir / f"run_{replicate}"
     if not run_dir.exists():
         logger.warning("Missing Rg run directory: %s", run_dir)
         return None
 
-    result_path = run_dir / result_json_name
+    result_path = run_dir / "result.json"
     if not result_path.exists():
-        prefix = result_json_name.rsplit("_", maxsplit=1)[0] + "_"
-        legacy_matches = sorted(path for path in run_dir.glob(f"{prefix}*.json") if path.exists())
-        if legacy_matches:
-            logger.warning(
-                "Found Rg cache files with legacy/non-canonical tags (%s) but expected %s; "
-                "recompute Rg to refresh cache naming",
-                ", ".join(str(path.name) for path in legacy_matches),
-                result_path.name,
-            )
-        logger.warning("Missing Rg per-replicate result JSON %s", result_path)
+        logger.warning("Missing canonical Rg replicate artifact %s", result_path)
         return None
 
     try:
-        result = RgResult.load(result_path)
-    except (OSError, ValueError, ValidationError) as exc:
-        logger.warning("Failed to load Rg result JSON %s: %s", result_path, exc)
+        artifact = ArtifactStore(run_dir).read_replicate_result("result.json")
+    except Exception as exc:
+        logger.warning("Failed to load Rg replicate artifact %s: %s", result_path, exc)
         return None
 
-    run_result = next((entry for entry in result.run_results if entry.run_label == run_label), None)
+    run_result = next(
+        (
+            entry
+            for entry in artifact.payload.get("runs", [])
+            if isinstance(entry, dict) and entry.get("run_label") == run_label
+        ),
+        None,
+    )
     if run_result is None:
         logger.warning(
-            "Run '%s' not found in Rg result JSON %s",
+            "Run '%s' not found in Rg replicate artifact %s",
             run_label,
             result_path,
         )
         return None
 
-    if run_result.npz_path is None:
+    sidecar_payload = run_result.get("sidecar")
+    if not isinstance(sidecar_payload, dict):
         logger.warning(
-            "Missing npz_path metadata for run '%s' in %s",
+            "Missing sidecar metadata for run '%s' in %s",
             run_label,
             result_path,
         )
         return None
 
-    npz_path = Path(run_result.npz_path)
-    if not npz_path.is_absolute():
-        npz_path = (run_dir / npz_path).resolve()
-    if not npz_path.exists():
-        logger.warning("Missing Rg NPZ sidecar from metadata path: %s", npz_path)
+    try:
+        from polyzymd.analyses.mda import ArtifactSidecarRef
+
+        npz_path = ArtifactStore(run_dir).validate_sidecar(
+            ArtifactSidecarRef.model_validate(sidecar_payload)
+        )
+    except Exception as exc:
+        logger.warning("Invalid Rg NPZ sidecar metadata for %s: %s", result_path, exc)
         return None
 
     return npz_path
 
 
-def _make_replicate_result_filename(ctx: PlotContext) -> str:
-    """Build the per-replicate Rg result filename for this plot request.
-
-    Parameters
-    ----------
-    ctx : PlotContext
-        Framework-provided plot context.
-
-    Returns
-    -------
-    str
-        Expected per-replicate Rg JSON filename.
-    """
-    eq_value, eq_unit = parse_time_string(ctx.equilibration)
-    eq_str = f"eq{eq_value:g}{eq_unit}"
-    settings_tag = settings_fingerprint(ctx.settings)
-    return f"rg_{eq_str}_{settings_tag}.json"
-
-
 def _load_condition_aggregated(condition_dir: Path) -> dict | None:
-    """Load the latest condition-level aggregated Rg JSON payload.
+    """Load the canonical condition-level aggregated Rg artifact payload.
 
     Parameters
     ----------
@@ -700,44 +672,23 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
     Returns
     -------
     dict | None
-        Parsed JSON payload, or ``None`` when no aggregated file is available.
+        Parsed artifact payload, or ``None`` when no aggregate artifact is available.
     """
+    from polyzymd.analyses.mda import ArtifactStore
+
     agg_dir = condition_dir / "aggregated"
     if not agg_dir.exists():
         return None
 
-    # Try the canonical path first (framework default: result.json)
     canonical = agg_dir / "result.json"
-    if canonical.exists():
-        try:
-            return json.loads(canonical.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.warning("Failed to load aggregated Rg JSON %s: %s", canonical, exc)
-            return None
-
-    # Fallback search priority:
-    # 1) current native filenames (tagged and untagged)
-    # 2) legacy rg_aggregated_*.json
-    # 3) legacy rg_result_aggregated_*.json
-    pattern_families = [
-        "rg_reps*_eq*.json",
-        "rg_aggregated_*.json",
-        "rg_result_aggregated_*.json",
-    ]
-
-    for pattern in pattern_families:
-        matches = [path for path in agg_dir.glob(pattern) if path.is_file()]
-        if not matches:
-            continue
-
-        newest = max(matches, key=lambda path: path.stat().st_mtime)
-        try:
-            return json.loads(newest.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.warning("Failed to load aggregated Rg JSON %s: %s", newest, exc)
-            return None
-
-    return None
+    if not canonical.exists():
+        return None
+    try:
+        artifact = ArtifactStore(agg_dir).read_condition_result("result.json")
+    except Exception as exc:
+        logger.warning("Failed to load aggregated Rg artifact %s: %s", canonical, exc)
+        return None
+    return artifact.payload
 
 
 def _get_plot_settings(ctx: PlotContext) -> RgPlotSettings:
