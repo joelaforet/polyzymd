@@ -1,1685 +1,556 @@
-"""Tests for the RMSF analysis plugin.
-
-Tests the RMSFAnalysis class: discovery, settings, run_replicate,
-aggregate, extract_metrics, AggregatedResultClass, inlined plotting,
-and the full lifecycle via the orchestrator.
-
-Heavy dependencies (MDAnalysis, trajectories) are mocked.
-"""
+"""Tests for the MDAnalysis-native RMSF analysis plugin."""
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
-from polyzymd.analyses.base import (
-    AggregateContext,
-    AggregateValidationError,
-    ComparisonContext,
-    ComparisonResult,
-    Condition,
-    ConditionSummary,
-    MetricValue,
-    PlotContext,
-    ReplicateContext,
+from polyzymd.analyses.base import AggregateContext, ComparisonContext, Condition, PlotContext
+from polyzymd.analyses.discovery import clear_cache, get_analysis, list_analyses
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    ComparisonArtifact,
+    ConditionArtifact,
+    FrameSelection,
+    MDABackendPolicy,
+    MDACollectorContext,
+    MDAJobResult,
+    MDAUniversePolicy,
+    ReplicateArtifact,
 )
 from polyzymd.analyses.rmsf import RMSFAnalysis, RMSFSettings
-from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
-from polyzymd.analyses.rmsf._runner import RMSFReplicateRunner
+from polyzymd.analyses.rmsf._mda import (
+    MEAN_RMSF_METRIC,
+    RMSFArtifactCollector,
+    aggregate_rmsf_artifacts,
+    condition_artifact_to_legacy_result,
+    prepare_rmsf_profile_input,
+)
 
-# ============================================================================
-# Fixtures
-# ============================================================================
+
+class FakeTrajectory:
+    """Small trajectory-like object for RMSF job tests."""
+
+    def __init__(self, n_frames: int = 20) -> None:
+        self.n_frames = n_frames
+
+    def __len__(self) -> int:
+        """Return frame count."""
+
+        return self.n_frames
+
+    def __getitem__(self, index: int) -> SimpleNamespace:
+        """Return a timestep-like object."""
+
+        return SimpleNamespace(frame=index)
+
+
+class FakeAtoms:
+    """Small AtomGroup-like object with one atom per residue."""
+
+    def __init__(self, universe: FakeUniverse, n_atoms: int = 3) -> None:
+        self.universe = universe
+        self.indices = np.arange(n_atoms, dtype=np.int64)
+        self.positions = np.arange(n_atoms * 3, dtype=np.float64).reshape(n_atoms, 3)
+        self.residues = [
+            SimpleNamespace(
+                resid=index + 1,
+                resname=f"RES{index + 1}",
+                ix=index,
+                segment=SimpleNamespace(segid="A"),
+                atoms=SimpleNamespace(indices=np.asarray([index], dtype=np.int64)),
+            )
+            for index in range(n_atoms)
+        ]
+
+    def __len__(self) -> int:
+        """Return atom count."""
+
+        return int(self.indices.size)
+
+
+class FakeUniverse:
+    """Small Universe-like object for RMSF job tests."""
+
+    def __init__(self, n_frames: int = 20, n_atoms: int = 3) -> None:
+        self.trajectory = FakeTrajectory(n_frames)
+        self.atoms = FakeAtoms(self, n_atoms)
+
+    def select_atoms(self, selection: str) -> FakeAtoms:
+        """Return fake atoms unless the selection requests an empty group."""
+
+        if "NONE" in selection:
+            return FakeAtoms(self, 0)
+        return self.atoms
+
+
+class FakeProfileAnalysis:
+    """AnalysisBase-like fake used to avoid importing MDAnalysis in tests."""
+
+    def __init__(self, atoms: FakeAtoms, reference_positions: np.ndarray | None = None) -> None:
+        self.atoms = atoms
+        self.reference_positions = reference_positions
+        self.results = SimpleNamespace(rmsf_values=np.asarray([1.0, 1.5, 2.0], dtype=np.float64))
+
+    def run(self, **kwargs: object) -> FakeProfileAnalysis:
+        """Record run kwargs and return self."""
+
+        self.run_kwargs = kwargs
+        return self
 
 
 @pytest.fixture
-def rmsf_analysis():
-    """Return a fresh RMSFAnalysis instance."""
-    return RMSFAnalysis()
-
-
-@pytest.fixture
-def default_settings():
-    """Return default RMSFSettings."""
-    return RMSFSettings()
-
-
-@pytest.fixture
-def condition():
+def condition() -> Condition:
     """Return a Condition test object."""
+
     return Condition(
-        label="No Polymer",
+        label="Control",
         config_path=Path("/fake/config.yaml"),
-        replicates=(1, 2, 3),
+        replicates=(1, 2),
         sim_config=MagicMock(),
     )
 
 
-def _make_mock_rmsf_result(replicate: int, mean_rmsf: float = 1.5) -> MagicMock:
-    """Create a mock RMSFResult with realistic fields."""
-    result = MagicMock()
-    result.replicate = replicate
-    result.rmsf_values = [1.0, 1.5, 2.0, 1.2, 1.8]
-    result.residue_ids = [1, 2, 3, 4, 5]
-    result.residue_names = ["ALA", "GLY", "VAL", "LEU", "ILE"]
-    result.mean_rmsf = mean_rmsf
-    result.std_rmsf = 0.35
-    result.min_rmsf = 1.0
-    result.max_rmsf = 2.0
-    result.config_hash = "abc123"
-    result.equilibration_time = 10.0
-    result.equilibration_unit = "ns"
-    result.selection_string = "protein and name CA"
-    result.n_independent_frames = 50
-    result.settings_fingerprint = RMSFAnalysis._make_settings_cache_tag(RMSFSettings())
-    return result
+def _frame_selection(n_frames: int = 20) -> FrameSelection:
+    """Return a simple frame selection."""
 
-
-def _make_aggregated_rmsf_result(
-    *,
-    replicates: tuple[int, ...] = (1, 2, 3),
-    per_replicate_mean_rmsf: list[float] | None = None,
-    settings: RMSFSettings | None = None,
-    settings_fingerprint: str | None = None,
-) -> RMSFAggregatedResult:
-    """Create a minimal aggregated RMSF result for comparison tests."""
-    active_settings = settings or RMSFSettings()
-    replicate_values = per_replicate_mean_rmsf or [1.2, 1.3, 1.4][: len(replicates)]
-    if settings_fingerprint is None:
-        settings_fingerprint = RMSFAnalysis._make_settings_cache_tag(active_settings)
-
-    return RMSFAggregatedResult(
-        config_hash="abc123",
-        polyzymd_version="1.2.1",
-        replicate=None,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string=active_settings.selection,
-        replicates=list(replicates),
-        n_replicates=len(replicates),
-        residue_ids=[1, 2, 3],
-        residue_names=["ALA", "GLY", "VAL"],
-        mean_rmsf_per_residue=[1.0, 1.2, 1.4],
-        sem_rmsf_per_residue=[0.1, 0.1, 0.1],
-        per_replicate_mean_rmsf=replicate_values,
-        overall_mean_rmsf=float(np.mean(replicate_values)),
-        overall_sem_rmsf=0.05,
-        overall_min_rmsf=1.0,
-        overall_max_rmsf=1.4,
-        settings_fingerprint=settings_fingerprint,
-        source_result_files=[],
+    return FrameSelection(
+        start=0,
+        stop=n_frames,
+        step=1,
+        equilibration="0ns",
+        equilibration_start=0,
+        equilibration_ps=0.0,
+        timestep_ps=10.0,
+        n_frames_total=n_frames,
     )
 
 
-# ============================================================================
-# Test: Discovery
-# ============================================================================
+def _collector_context(
+    tmp_path: Path, condition: Condition, replicate: int = 1
+) -> MDACollectorContext:
+    """Return an MDA collector context."""
 
-
-class TestRMSFDiscovery:
-    """Test that RMSFAnalysis is auto-discovered by the plugin system."""
-
-    def test_discovery_finds_rmsf(self):
-        from polyzymd.analyses.discovery import clear_cache, list_analyses
-
-        clear_cache()
-        analyses = list_analyses()
-        assert "rmsf" in analyses
-        assert analyses["rmsf"] is RMSFAnalysis
-
-    def test_get_analysis_returns_rmsf(self):
-        from polyzymd.analyses.discovery import clear_cache, get_analysis
-
-        clear_cache()
-        cls = get_analysis("rmsf")
-        assert cls is RMSFAnalysis
-
-
-# ============================================================================
-# Test: Class variables and Settings
-# ============================================================================
-
-
-class TestRMSFClassVars:
-    """Test class variables and settings."""
-
-    def test_name(self, rmsf_analysis):
-        assert rmsf_analysis.name == "rmsf"
-
-    def test_aliases_empty(self, rmsf_analysis):
-        assert rmsf_analysis.aliases == ()
-
-    def test_dependencies_empty(self, rmsf_analysis):
-        assert rmsf_analysis.dependencies == ()
-
-    def test_min_replicates(self, rmsf_analysis):
-        assert rmsf_analysis.min_replicates == 1
-
-    def test_repr(self, rmsf_analysis):
-        assert repr(rmsf_analysis) == "<RMSFAnalysis(name='rmsf')>"
-
-
-def test_build_runner_returns_runner_instance(rmsf_analysis, condition) -> None:
-    """build_runner should return the dedicated RMSF runner."""
-    ctx = ReplicateContext(
+    replicate_context = SimpleNamespace(
         condition=condition,
-        replicate=1,
+        replicate=replicate,
         sim_config=condition.sim_config,
-        output_dir=Path("/tmp/run_1"),
+        output_dir=tmp_path / f"run_{replicate}",
         equilibration="0ns",
-        recompute=True,
+        result_path=tmp_path / f"run_{replicate}" / "result.json",
         settings=RMSFSettings(),
     )
-    universe = MagicMock()
-    window = MagicMock(timestep_ps=10.0)
-
-    runner = rmsf_analysis.build_runner(ctx, 1, universe, window)
-
-    assert isinstance(runner, RMSFReplicateRunner)
-
-
-class TestRMSFSettings:
-    """Test RMSFSettings validation and defaults."""
-
-    def test_defaults(self):
-        s = RMSFSettings()
-        assert s.selection == "protein and name CA"
-        assert s.reference_mode == "centroid"
-        assert s.reference_frame is None
-        assert s.reference_file is None
-
-    def test_custom_selection(self):
-        s = RMSFSettings(selection="protein and name N")
-        assert s.selection == "protein and name N"
-
-    def test_frame_mode(self):
-        s = RMSFSettings(reference_mode="frame", reference_frame=500)
-        assert s.reference_mode == "frame"
-        assert s.reference_frame == 500
-
-    def test_external_mode(self):
-        s = RMSFSettings(reference_mode="external", reference_file="/path/to/ref.pdb")
-        assert s.reference_mode == "external"
-
-    def test_invalid_reference_mode(self):
-        with pytest.raises(ValueError, match="reference_mode must be one of"):
-            RMSFSettings(reference_mode="invalid")
-
-    def test_average_mode(self):
-        s = RMSFSettings(reference_mode="average")
-        assert s.reference_mode == "average"
+    replicate_context.output_dir.mkdir(parents=True, exist_ok=True)
+    return MDACollectorContext(
+        analysis_name="rmsf",
+        replicate_context=replicate_context,
+        frame_selection=_frame_selection(),
+        universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=replicate),
+        artifact_store=ArtifactStore(replicate_context.output_dir),
+        settings_fingerprint=RMSFAnalysis._make_settings_cache_tag(RMSFSettings()),
+    )
 
 
-# ============================================================================
-# Test: run_replicate
-# ============================================================================
+def _job_result(ctx: MDACollectorContext, rmsf_values: list[float] | None = None) -> MDAJobResult:
+    """Return a completed fake RMSF job result."""
+
+    values = np.asarray(rmsf_values or [1.0, 1.5, 2.0], dtype=np.float64)
+    profile = {
+        "residue_ids": [1, 2, 3],
+        "residue_indices": [0, 1, 2],
+        "residue_names": ["ALA", "GLY", "SER"],
+        "identity_keys": ["A:0:1:ALA", "A:1:2:GLY", "A:2:3:SER"],
+        "atom_counts_per_residue": [1, 1, 1],
+    }
+    policy = MDAUniversePolicy(
+        condition_label=ctx.condition_label,
+        replicate=ctx.replicate,
+        metadata={
+            "residue_profile": profile,
+            "reference_metadata": {
+                "reference_mode": "centroid",
+                "reference_frame": 1,
+                "reference_file": None,
+            },
+            "alignment_metadata": {
+                "alignment_selection": "protein and name CA",
+                "centroid_selection": "protein",
+            },
+            "autocorrelation_metadata": {
+                "autocorrelation_analyzed": False,
+                "correlation_time": None,
+                "correlation_time_unit": None,
+                "n_independent_frames": None,
+                "selected_frames": [0, 1, 2],
+                "n_frames_window": 3,
+            },
+        },
+    )
+    return MDAJobResult(
+        name="rmsf_profile",
+        analysis=SimpleNamespace(),
+        results=SimpleNamespace(rmsf_values=values),
+        run_kwargs={"frames": (0, 1, 2)},
+        frame_selection=FrameSelection(frames=[0, 1, 2], n_frames_total=20, timestep_ps=10.0),
+        backend_policy=MDABackendPolicy(),
+        universe_policy=policy,
+    )
 
 
-class TestRunReplicate:
-    """Test RMSFAnalysis.run_replicate performs inline RMSF computation."""
+def _replicate_artifact(
+    tmp_path: Path,
+    condition: Condition,
+    replicate: int,
+    rmsf_values: list[float],
+) -> ReplicateArtifact:
+    """Collect and persist a synthetic RMSF replicate artifact."""
 
-    def _make_mock_universe(self, n_frames: int = 200, n_atoms: int = 5):
-        """Create a mock MDAnalysis Universe for RMSF tests."""
-        import numpy as np
+    ctx = _collector_context(tmp_path, condition, replicate)
+    artifact = RMSFArtifactCollector()(ctx, [_job_result(ctx, rmsf_values)])
+    ArtifactStore(ctx.output_dir).write_replicate_result(artifact, "result.json")
+    return artifact
 
-        mock_u = MagicMock()
 
-        # Mock trajectory
-        mock_traj = MagicMock()
-        mock_traj.__len__ = MagicMock(return_value=n_frames)
-        # Make trajectory iterable (for slicing and iteration)
-        mock_frames = []
-        for i in range(n_frames):
-            ts = MagicMock()
-            ts.frame = i
-            mock_frames.append(ts)
-        mock_traj.__getitem__ = MagicMock(
-            side_effect=lambda x: mock_frames[x] if isinstance(x, int) else mock_frames
-        )
-        mock_traj.__iter__ = MagicMock(return_value=iter(mock_frames))
-        mock_u.trajectory = mock_traj
+class TestRMSFDiscoveryAndSettings:
+    """Discovery and settings tests."""
 
-        # Mock atom selection
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=n_atoms)
-        # Each call to .positions returns random positions
-        mock_atoms.positions = np.random.rand(n_atoms, 3).astype(np.float32)
-        mock_atoms.indices = np.arange(n_atoms)
+    def test_discovery_finds_rmsf(self) -> None:
+        """RMSF should be discoverable."""
 
-        # Mock residues
-        mock_residues = []
-        for i in range(n_atoms):
-            res = MagicMock()
-            res.resid = i + 1
-            res.resname = "ALA"
-            mock_residues.append(res)
-        mock_atoms.residues = mock_residues
+        clear_cache()
+        assert list_analyses()["rmsf"] is RMSFAnalysis
+        assert get_analysis("rmsf") is RMSFAnalysis
 
-        mock_u.select_atoms = MagicMock(return_value=mock_atoms)
+    def test_class_uses_mda_artifacts(self) -> None:
+        """RMSF should no longer expose a legacy replicate result class."""
 
-        return mock_u
+        assert RMSFAnalysis.ReplicateResultClass is None
+        assert RMSFAnalysis.AggregatedResultClass is not None
 
-    @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
-    @patch("polyzymd.analyses.shared.window.validate_equilibration_time", return_value=(True, ""))
-    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
-    @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
-    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
-    def test_computes_rmsf_inline(
-        self,
-        MockLoader,
-        mock_hash,
-        mock_validate_hash,
-        mock_eq_validate,
-        mock_align,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """Test that run_replicate performs RMSF calculation inline."""
-        import numpy as np
-
-        # Setup mock loader
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-
-        mock_u = self._make_mock_universe(n_frames=200, n_atoms=5)
-        mock_loader_inst.load_universe.return_value = mock_u
-
-        traj_info = MagicMock()
-        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
-        mock_loader_inst.get_trajectory_info.return_value = traj_info
-        mock_loader_inst.get_timestep.return_value = 10.0  # 10 ps
+    def test_settings_defaults_and_validation(self) -> None:
+        """Settings should retain established defaults and mode validation."""
 
         settings = RMSFSettings()
-        ctx = ReplicateContext(
-            condition=condition,
+        assert settings.selection == "protein and name CA"
+        assert settings.reference_mode == "centroid"
+        with pytest.raises(ValueError, match="reference_mode must be one of"):
+            RMSFSettings(reference_mode="bad")
+
+
+class TestRMSFMDAJobs:
+    """Tests for RMSF MDA job construction and validation."""
+
+    def test_build_mda_jobs_returns_profile_job(self, condition: Condition) -> None:
+        """build_mda_jobs should produce one explicit-frame MDA job."""
+
+        analysis = RMSFAnalysis()
+        ctx = SimpleNamespace(
+            universe=FakeUniverse(),
+            settings=RMSFSettings(reference_mode="average"),
+            frame_selection=_frame_selection(),
+            replicate_context=SimpleNamespace(condition=condition),
             replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="0ns",
-            recompute=False,
-            settings=settings,
+            universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=1),
         )
-
-        # Patch _compute_rmsf and _compute_rmsd_timeseries to avoid real iteration
         with (
-            patch(
-                "polyzymd.analyses.rmsf._compute_rmsf",
-                return_value=np.array([1.0, 1.5, 2.0, 1.2, 1.8]),
-            ),
-            patch(
-                "polyzymd.analyses.rmsf._compute_rmsd_timeseries", return_value=np.random.rand(100)
-            ),
-            patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
+            patch("polyzymd.analyses.rmsf._mda.align_trajectory", return_value=None),
+            patch("polyzymd.analyses.rmsf._mda.RMSFProfileAnalysis", FakeProfileAnalysis),
         ):
-            result = rmsf_analysis.run_replicate(ctx, 1)
+            jobs = analysis.build_mda_jobs(ctx)
 
-        # Verify result has RMSF data
-        assert result.replicate == 1
-        assert len(result.rmsf_values) == 5
-        assert result.selection_string == "protein and name CA"
-        # Verify the loader was used (not the old calculator)
-        MockLoader.assert_called_once_with(condition.sim_config)
-        mock_loader_inst.load_universe.assert_called_once_with(1)
+        assert jobs is not None
+        assert len(jobs) == 1
+        assert jobs[0].name == "rmsf_profile"
+        assert jobs[0].frame_selection.frames == tuple(range(20))
+        assert jobs[0].universe_policy.metadata["rmsf_profile_version"] == "1"
 
-    @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
-    @patch("polyzymd.analyses.shared.window.validate_equilibration_time", return_value=(True, ""))
-    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
-    @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
-    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
-    def test_passes_custom_settings(
-        self,
-        MockLoader,
-        mock_hash,
-        mock_validate_hash,
-        mock_eq_validate,
-        mock_align,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """Custom settings (selection, reference_mode) are used by the inline computation."""
-        import numpy as np
-
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-        mock_u = self._make_mock_universe(n_frames=200, n_atoms=5)
-        mock_loader_inst.load_universe.return_value = mock_u
-
-        traj_info = MagicMock()
-        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
-        mock_loader_inst.get_trajectory_info.return_value = traj_info
-        mock_loader_inst.get_timestep.return_value = 10.0
-
-        settings = RMSFSettings(
-            selection="backbone",
-            reference_mode="average",
-        )
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=2,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_2",
-            equilibration="0ns",
-            recompute=True,
-            settings=settings,
-        )
+    def test_prepare_rejects_empty_selection(self, condition: Condition) -> None:
+        """Empty atom selections should fail with actionable diagnostics."""
 
         with (
+            patch("polyzymd.analyses.rmsf._mda.align_trajectory", return_value=None),
             patch(
-                "polyzymd.analyses.rmsf._compute_rmsf",
-                return_value=np.array([1.0, 1.5, 2.0, 1.2, 1.8]),
+                "polyzymd.analyses.rmsf._mda.get_selection_diagnostics",
+                return_value="selection details",
             ),
-            patch(
-                "polyzymd.analyses.rmsf._compute_rmsd_timeseries", return_value=np.random.rand(100)
-            ),
-            patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
+            pytest.raises(ValueError, match="matched no atoms"),
         ):
-            result = rmsf_analysis.run_replicate(ctx, 2)
+            prepare_rmsf_profile_input(
+                universe=FakeUniverse(),
+                settings=RMSFSettings(selection="NONE"),
+                frame_selection=_frame_selection(),
+                condition_label=condition.label,
+                replicate=1,
+            )
 
-        # Verify custom selection was used
-        mock_u.select_atoms.assert_called_with("backbone")
-        # Verify alignment was called with average mode
-        mock_align.assert_called_once()
-        call_args = mock_align.call_args
-        alignment_config = call_args[0][1]
-        assert alignment_config.reference_mode == "average"
-
-    @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
-    @patch("polyzymd.analyses.shared.window.validate_equilibration_time", return_value=(True, ""))
-    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
-    @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
-    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
-    def test_handles_legacy_settings(
-        self,
-        MockLoader,
-        mock_hash,
-        mock_validate_hash,
-        mock_eq_validate,
-        mock_align,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """Legacy settings objects (e.g. MagicMock with attrs) should work via getattr."""
-        import numpy as np
-
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-        mock_u = self._make_mock_universe(n_frames=200, n_atoms=5)
-        mock_loader_inst.load_universe.return_value = mock_u
-
-        traj_info = MagicMock()
-        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
-        mock_loader_inst.get_trajectory_info.return_value = traj_info
-        mock_loader_inst.get_timestep.return_value = 10.0
-
-        # Simulate legacy settings with same attributes
-        legacy_settings = MagicMock()
-        legacy_settings.selection = "protein and name CA"
-        legacy_settings.reference_mode = "average"
-        legacy_settings.reference_frame = None
-        legacy_settings.reference_file = None
-        legacy_settings.alignment_selection = "protein and name CA"
-        legacy_settings.centroid_selection = "protein"
-
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="0ns",
-            recompute=False,
-            settings=legacy_settings,
-        )
-
-        with (
-            patch(
-                "polyzymd.analyses.rmsf._compute_rmsf",
-                return_value=np.array([1.0, 1.5, 2.0, 1.2, 1.8]),
-            ),
-            patch(
-                "polyzymd.analyses.rmsf._compute_rmsd_timeseries", return_value=np.random.rand(100)
-            ),
-            patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
-        ):
-            result = rmsf_analysis.run_replicate(ctx, 1)
-
-        # Verify it completed successfully with legacy settings
-        assert result.replicate == 1
-        assert result.selection_string == "protein and name CA"
-
-    def test_uses_settings_sensitive_cache_filename(self, rmsf_analysis, condition, tmp_path):
-        """run_replicate should key caches by equilibration and settings fingerprint."""
-        settings = RMSFSettings(selection="backbone")
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="0ns",
-            recompute=False,
-            settings=settings,
-        )
-        expected_tag = RMSFAnalysis._make_settings_cache_tag(settings)
-        cached_result = MagicMock()
-
-        with patch.object(
-            rmsf_analysis, "_check_cache", return_value=cached_result
-        ) as mock_check_cache:
-            result = rmsf_analysis.run_replicate(ctx, 1)
-
-        assert result is cached_result
-        cache_path = mock_check_cache.call_args.args[1]
-        assert cache_path.name == f"rmsf_eq0ns_{expected_tag}.json"
-
-
-class TestRunReplicateNegativePaths:
-    """Test RMSFAnalysis.run_replicate error and failure paths."""
-
-    @staticmethod
-    def _make_nonempty_mock_universe(n_frames: int = 100, n_atoms: int = 5) -> MagicMock:
-        """Create a mock Universe with a non-empty selection."""
-        mock_u = MagicMock()
-        mock_u.trajectory.__len__ = MagicMock(return_value=n_frames)
-
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=n_atoms)
-        mock_u.select_atoms = MagicMock(return_value=mock_atoms)
-        return mock_u
-
-    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
-    def test_raises_when_selection_is_empty(
-        self,
-        MockLoader,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """An empty atom selection should raise ValueError with diagnostics."""
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-
-        mock_u = MagicMock()
-        mock_u.trajectory.__len__ = MagicMock(return_value=100)
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=0)
-        mock_u.select_atoms = MagicMock(return_value=mock_atoms)
-        mock_loader_inst.load_universe.return_value = mock_u
-        mock_loader_inst.get_timestep.return_value = 10.0
-
-        traj_info = MagicMock()
-        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
-        mock_loader_inst.get_trajectory_info.return_value = traj_info
-
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="0ns",
-            recompute=True,
-            settings=RMSFSettings(selection="protein and name ZZ"),
-        )
-
-        with patch(
-            "polyzymd.analyses.rmsf.get_selection_diagnostics",
-            return_value="Selection diagnostics",
-        ):
-            with pytest.raises(ValueError, match="matched no atoms"):
-                rmsf_analysis.run_replicate(ctx, 1)
-
-    @patch("polyzymd.analyses.shared.window.validate_equilibration_time")
-    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
-    def test_raises_when_equilibration_invalid(
-        self,
-        MockLoader,
-        mock_validate_equilibration,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """Invalid equilibration time should raise the validation message."""
-        mock_validate_equilibration.return_value = (
-            False,
-            "Equilibration time exceeds trajectory length",
-        )
-
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-        mock_loader_inst.load_universe.return_value = self._make_nonempty_mock_universe(n_frames=20)
-
-        traj_info = MagicMock()
-        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
-        mock_loader_inst.get_trajectory_info.return_value = traj_info
-        mock_loader_inst.get_timestep.return_value = 10.0
-
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=True,
-            settings=RMSFSettings(),
-        )
-
-        with pytest.raises(ValueError, match="Equilibration time exceeds trajectory length"):
-            rmsf_analysis.run_replicate(ctx, 1)
-
-    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
-    def test_propagates_file_not_found_from_loader(
-        self,
-        MockLoader,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """FileNotFoundError from trajectory loading should propagate."""
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-        mock_loader_inst.load_universe.side_effect = FileNotFoundError("Missing trajectory file")
-
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=True,
-            settings=RMSFSettings(),
-        )
-
-        with pytest.raises(FileNotFoundError, match="Missing trajectory file"):
-            rmsf_analysis.run_replicate(ctx, 1)
-
-    def test_raises_when_frame_mode_missing_reference_frame(
-        self,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """Frame reference mode requires an explicit reference_frame."""
-        settings = RMSFSettings(reference_mode="frame", reference_frame=None)
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=True,
-            settings=settings,
-        )
-
-        with pytest.raises(ValueError, match="reference_frame is required"):
-            rmsf_analysis.run_replicate(ctx, 1)
-
-    def test_raises_when_external_reference_file_missing(
-        self,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """External reference mode should reject nonexistent reference files."""
-        settings = RMSFSettings(
-            reference_mode="external",
-            reference_file=str(tmp_path / "does_not_exist.pdb"),
-        )
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=True,
-            settings=settings,
-        )
+    def test_missing_external_reference_file_is_rejected(
+        self, condition: Condition, tmp_path: Path
+    ) -> None:
+        """External reference mode should validate file existence before analysis."""
 
         with pytest.raises(ValueError, match="reference_file does not exist"):
-            rmsf_analysis.run_replicate(ctx, 1)
+            prepare_rmsf_profile_input(
+                universe=FakeUniverse(),
+                settings=RMSFSettings(
+                    reference_mode="external",
+                    reference_file=str(tmp_path / "missing.pdb"),
+                ),
+                frame_selection=_frame_selection(),
+                condition_label=condition.label,
+                replicate=1,
+            )
 
+    def test_external_reference_selection_mismatch_is_rejected(
+        self,
+        condition: Condition,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """External references must match trajectory selection atom counts."""
 
-# ============================================================================
-# Test: aggregate
-# ============================================================================
+        ref_path = tmp_path / "ref.pdb"
+        ref_path.write_text("HEADER TEST\n", encoding="utf-8")
 
+        class FakeMDA:
+            """Fake MDAnalysis module with mismatched reference selection."""
 
-class TestAggregate:
-    """Test RMSFAnalysis.aggregate."""
+            @staticmethod
+            def Universe(path: str) -> FakeUniverse:
+                del path
+                return FakeUniverse(n_atoms=2)
 
-    def test_rejects_empty_results(self, rmsf_analysis, condition, tmp_path):
-        """aggregate should fail loudly when no replicate payloads are provided."""
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1, 2),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=RMSFSettings(),
-        )
-
-        with pytest.raises(ValueError, match="requires at least one replicate result"):
-            rmsf_analysis.aggregate(ctx, [])
-
-    def test_rejects_misidentified_replicates(self, rmsf_analysis, condition, tmp_path):
-        """aggregate should reject missing or unexpected replicate identities."""
-        results = [_make_mock_rmsf_result(rep) for rep in (1, 2, 4)]
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1, 2, 3),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=RMSFSettings(),
-        )
-
-        with pytest.raises(
-            ValueError,
-            match=r"missing replicates \[3\].*unexpected replicates \[4\]",
+        monkeypatch.setitem(sys.modules, "MDAnalysis", FakeMDA)
+        with (
+            patch("polyzymd.analyses.rmsf._mda.align_trajectory", return_value=None),
+            pytest.raises(ValueError, match="atom count"),
         ):
-            rmsf_analysis.aggregate(ctx, results)
+            prepare_rmsf_profile_input(
+                universe=FakeUniverse(n_atoms=3),
+                settings=RMSFSettings(reference_mode="external", reference_file=str(ref_path)),
+                frame_selection=_frame_selection(),
+                condition_label=condition.label,
+                replicate=1,
+            )
 
-    def test_rejects_legacy_replicate_results_missing_settings_fingerprint(
+
+class TestRMSFArtifacts:
+    """Replicate and condition artifact tests."""
+
+    def test_collector_writes_profile_sidecar_and_variance_metadata(
         self,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """aggregate should fail loudly on legacy replicate caches without settings fingerprints."""
-        results = [_make_mock_rmsf_result(rep) for rep in (1, 2, 3)]
-        for result in results:
-            result.settings_fingerprint = None
-            result.settings_fp = None
+        condition: Condition,
+        tmp_path: Path,
+    ) -> None:
+        """Collector should keep arrays in NPZ and mark RMSF variance-based."""
 
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1, 2, 3),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=RMSFSettings(),
-        )
+        ctx = _collector_context(tmp_path, condition, 1)
+        artifact = RMSFArtifactCollector()(ctx, [_job_result(ctx)])
 
-        with pytest.raises(ValueError, match="missing settings fingerprints"):
-            rmsf_analysis.aggregate(ctx, results)
+        assert artifact.payload["metrics"] == {MEAN_RMSF_METRIC: pytest.approx(1.5)}
+        assert artifact.sidecars[0].metadata["kind"] == "rmsf_residue_profile"
+        assert artifact.metadata["statistical_policy"]["metric_classification"] == "variance_based"
+        sidecar_path = ArtifactStore(ctx.output_dir).validate_sidecar(artifact.sidecars[0])
+        with np.load(sidecar_path) as data:
+            np.testing.assert_allclose(data["rmsf_values"], [1.0, 1.5, 2.0])
+            np.testing.assert_array_equal(data["selected_frames"], [0, 1, 2])
 
-    def test_aggregates_results(self, rmsf_analysis, condition, tmp_path):
-        """Test aggregate produces an RMSFAggregatedResult with correct stats."""
-        results = [_make_mock_rmsf_result(i, mean_rmsf=1.0 + 0.1 * i) for i in range(1, 4)]
-        agg_dir = tmp_path / "aggregated"
+    def test_aggregate_builds_condition_artifact(
+        self, condition: Condition, tmp_path: Path
+    ) -> None:
+        """Aggregation should compute residue means, SEM, and replicate metrics."""
 
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1, 2, 3),
-            output_dir=agg_dir,
-            equilibration="10ns",
-            settings=RMSFSettings(),
-        )
-
-        # Patch only get_polyzymd_version (non-essential) and let real functions run
-        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
-            result = rmsf_analysis.aggregate(ctx, results)
-
-        # Verify the result has correct attributes
-        assert result.n_replicates == 3
-        assert result.replicates == [1, 2, 3]
-        assert len(result.mean_rmsf_per_residue) == 5
-        assert len(result.sem_rmsf_per_residue) == 5
-        assert len(result.per_replicate_mean_rmsf) == 3
-        assert result.overall_mean_rmsf == pytest.approx(1.2, abs=0.01)  # mean of 1.1, 1.2, 1.3
-
-    def test_aggregates_single_replicate_with_zero_sem(self, rmsf_analysis, condition, tmp_path):
-        """Single-replicate RMSF should aggregate without fabricating uncertainty."""
-        result_payload = _make_mock_rmsf_result(1, mean_rmsf=1.1)
-        agg_dir = tmp_path / "aggregated"
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1,),
-            output_dir=agg_dir,
-            equilibration="10ns",
-            settings=RMSFSettings(),
-        )
-
-        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
-            result = rmsf_analysis.aggregate(ctx, [result_payload])
-
-        assert result.n_replicates == 1
-        assert result.replicates == [1]
-        assert result.per_replicate_mean_rmsf == [1.1]
-        assert result.overall_mean_rmsf == pytest.approx(1.1)
-        assert result.overall_sem_rmsf == 0.0
-        assert result.sem_rmsf_per_residue == [0.0] * len(result.mean_rmsf_per_residue)
-
-    def test_aggregate_saves_result_file(self, rmsf_analysis, condition, tmp_path):
-        """Verify aggregated result is saved to the output directory."""
-        results = [_make_mock_rmsf_result(i, mean_rmsf=1.5) for i in range(1, 3)]
-        agg_dir = tmp_path / "aggregated"
-
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1, 2),
-            output_dir=agg_dir,
-            equilibration="10ns",
-            settings=RMSFSettings(),
-        )
-
-        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
-            rmsf_analysis.aggregate(ctx, results)
-
-        # Check that a file was saved
-        json_files = list(agg_dir.glob("*.json"))
-        assert len(json_files) == 1
-        assert "rmsf_reps1-2_eq10ns.json" in json_files[0].name
-
-    def test_aggregate_uses_correct_replicate_means(self, rmsf_analysis, condition, tmp_path):
-        """Verify that per_replicate_mean_rmsf contains the correct values."""
-        results = [_make_mock_rmsf_result(i, mean_rmsf=1.0 + 0.1 * i) for i in range(1, 4)]
-
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1, 2, 3),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=RMSFSettings(),
-        )
-
-        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
-            result = rmsf_analysis.aggregate(ctx, results)
-
-        assert result.per_replicate_mean_rmsf == [1.1, 1.2, 1.3]
-
-    def test_aggregate_orders_complete_results_by_declared_replicates(
-        self,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """aggregate should align per-replicate outputs to ``ctx.replicates`` order."""
-        results = [
-            _make_mock_rmsf_result(3, mean_rmsf=1.3),
-            _make_mock_rmsf_result(1, mean_rmsf=1.1),
-            _make_mock_rmsf_result(2, mean_rmsf=1.2),
+        artifacts = [
+            _replicate_artifact(tmp_path, condition, 1, [1.0, 1.5, 2.0]),
+            _replicate_artifact(tmp_path, condition, 2, [2.0, 2.5, 3.0]),
         ]
+        result = aggregate_rmsf_artifacts(
+            condition_label=condition.label,
+            replicates=condition.replicates,
+            settings=RMSFSettings(),
+            equilibration="0ns",
+            output_dir=tmp_path / "aggregated",
+            result_path=tmp_path / "aggregated" / "result.json",
+            artifacts=artifacts,
+            settings_fingerprint=RMSFAnalysis._make_settings_cache_tag(RMSFSettings()),
+        )
+
+        assert isinstance(result, ConditionArtifact)
+        assert result.payload["mean_rmsf_per_residue"] == pytest.approx([1.5, 2.0, 2.5])
+        assert result.payload["sem_rmsf_per_residue"] == pytest.approx([0.5, 0.5, 0.5])
+        assert result.payload["per_replicate_mean_rmsf"] == pytest.approx([1.5, 2.5])
+        assert result.payload["metric_metadata"][MEAN_RMSF_METRIC]["higher_is_better"] is False
+        assert (tmp_path / "aggregated" / "result.json").exists()
+
+    def test_aggregate_rejects_residue_identity_mismatch(
+        self,
+        condition: Condition,
+        tmp_path: Path,
+    ) -> None:
+        """Residue identity must be consistent across replicates."""
+
+        artifacts = [
+            _replicate_artifact(tmp_path, condition, 1, [1.0, 1.5, 2.0]),
+            _replicate_artifact(tmp_path, condition, 2, [2.0, 2.5, 3.0]),
+        ]
+        profile = dict(artifacts[1].payload["profile"])
+        profile["identity_keys"] = ["A:0:1:ALA", "A:1:2:GLY", "A:9:9:BAD"]
+        artifacts[1] = artifacts[1].model_copy(
+            update={"payload": {**artifacts[1].payload, "profile": profile}}
+        )
+
+        with pytest.raises(ValueError, match="residue identity mismatch"):
+            aggregate_rmsf_artifacts(
+                condition_label=condition.label,
+                replicates=condition.replicates,
+                settings=RMSFSettings(),
+                equilibration="0ns",
+                output_dir=tmp_path / "aggregated",
+                result_path=tmp_path / "aggregated" / "result.json",
+                artifacts=artifacts,
+                settings_fingerprint=RMSFAnalysis._make_settings_cache_tag(RMSFSettings()),
+            )
+
+    def test_analysis_aggregate_rejects_legacy_inputs(
+        self, condition: Condition, tmp_path: Path
+    ) -> None:
+        """Legacy replicate payloads should fail with recompute guidance."""
 
         ctx = AggregateContext(
             condition=condition,
-            replicates=(1, 2, 3),
+            replicates=condition.replicates,
             output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
+            equilibration="0ns",
             settings=RMSFSettings(),
         )
-
-        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
-            result = rmsf_analysis.aggregate(ctx, results)
-
-        assert result.replicates == [1, 2, 3]
-        assert result.per_replicate_mean_rmsf == [1.1, 1.2, 1.3]
-        assert result.per_replicate_mean_rmsf != [1.3, 1.1, 1.2]
+        with pytest.raises(TypeError, match="Legacy RMSF replicate caches"):
+            RMSFAnalysis().aggregate(ctx, [MagicMock(), MagicMock()])
 
 
-# ============================================================================
-# Test: extract_metrics
-# ============================================================================
+class TestRMSFCompareFormatPlot:
+    """Comparison, formatting, and plotting tests."""
 
+    def _condition_artifact(self, condition: Condition, tmp_path: Path) -> ConditionArtifact:
+        """Create and save a condition artifact."""
 
-class TestExtractMetrics:
-    """Test RMSFAnalysis.extract_metrics for default comparison pipeline."""
-
-    def test_returns_mean_rmsf_metric(self, rmsf_analysis):
-        summary = MagicMock()
-        summary.overall_mean_rmsf = 1.45
-        summary.overall_sem_rmsf = 0.08
-        summary.per_replicate_mean_rmsf = [1.4, 1.5, 1.45]
-
-        metrics = rmsf_analysis.extract_metrics(summary)
-
-        assert "mean_rmsf" in metrics
-        m = metrics["mean_rmsf"]
-        assert isinstance(m, MetricValue)
-        assert m.name == "mean_rmsf"
-        assert m.mean == 1.45
-        assert m.sem == 0.08
-        assert m.replicate_values == [1.4, 1.5, 1.45]
-        assert m.higher_is_better is False
-        assert m.direction_labels == ("stabilizing", "unchanged", "destabilizing")
-
-    def test_returns_single_metric(self, rmsf_analysis):
-        """RMSF should return exactly one metric."""
-        summary = MagicMock()
-        summary.overall_mean_rmsf = 1.0
-        summary.overall_sem_rmsf = 0.05
-        summary.per_replicate_mean_rmsf = [1.0, 1.0]
-
-        metrics = rmsf_analysis.extract_metrics(summary)
-        assert len(metrics) == 1
-
-    def test_single_replicate_metric_uses_zero_sem(self, rmsf_analysis):
-        """Single-replicate metrics should expose the lone value and zero SEM."""
-        summary = MagicMock()
-        summary.overall_mean_rmsf = 1.1
-        summary.overall_sem_rmsf = 0.0
-        summary.per_replicate_mean_rmsf = [1.1]
-
-        metric = rmsf_analysis.extract_metrics(summary)["mean_rmsf"]
-
-        assert metric.mean == 1.1
-        assert metric.sem == 0.0
-        assert metric.replicate_values == [1.1]
-
-
-class TestCompare:
-    """Test RMSF compare fail-loud completeness checks."""
-
-    def test_compare_requires_aggregated_results_for_all_conditions(self, rmsf_analysis, tmp_path):
-        """compare should fail when any configured condition lacks aggregated output."""
-        control = Condition(
-            label="Control",
-            config_path=Path("/fake/control.yaml"),
-            replicates=(1, 2, 3),
-            sim_config=MagicMock(),
-        )
-        treated = Condition(
-            label="Treated",
-            config_path=Path("/fake/treated.yaml"),
-            replicates=(1, 2, 3),
-            sim_config=MagicMock(),
-        )
-
-        ctx = ComparisonContext(
-            name="rmsf_compare",
-            conditions=[control, treated],
-            excluded_conditions=[],
-            control_label="Control",
-            analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
-            results_dir=tmp_path / "comparison",
-            equilibration="10ns",
+        artifacts = [
+            _replicate_artifact(tmp_path, condition, 1, [1.0, 1.5, 2.0]),
+            _replicate_artifact(tmp_path, condition, 2, [2.0, 2.5, 3.0]),
+        ]
+        return aggregate_rmsf_artifacts(
+            condition_label=condition.label,
+            replicates=condition.replicates,
             settings=RMSFSettings(),
-            recompute=False,
-            aggregated_results={
-                "Control": _make_aggregated_rmsf_result().model_copy(
-                    update={"config_hash": "unknown"}
-                )
-            },
+            equilibration="0ns",
+            output_dir=tmp_path / "aggregated",
+            result_path=tmp_path / "aggregated" / "result.json",
+            artifacts=artifacts,
+            settings_fingerprint=RMSFAnalysis._make_settings_cache_tag(RMSFSettings()),
         )
 
-        with pytest.raises(
-            ValueError,
-            match="RMSF comparison requires an aggregated result for condition 'Treated'",
-        ):
-            rmsf_analysis.compare(ctx)
-
-    def test_compare_rejects_incomplete_aggregated_replicate_coverage(
+    def test_default_compare_returns_comparison_artifact(
         self,
-        rmsf_analysis,
-        tmp_path,
-    ):
-        """compare should fail when an aggregated RMSF result omits configured replicates."""
-        control = Condition(
-            label="Control",
-            config_path=Path("/fake/control.yaml"),
-            replicates=(1, 2, 3),
-            sim_config=MagicMock(),
-        )
-        treated = Condition(
-            label="Treated",
-            config_path=Path("/fake/treated.yaml"),
-            replicates=(1, 2, 3),
-            sim_config=MagicMock(),
-        )
+        condition: Condition,
+        tmp_path: Path,
+    ) -> None:
+        """RMSF should use the MDA condition-artifact comparison path."""
 
-        ctx = ComparisonContext(
-            name="rmsf_compare",
-            conditions=[control, treated],
-            excluded_conditions=[],
-            control_label="Control",
-            analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
-            results_dir=tmp_path / "comparison",
-            equilibration="10ns",
-            settings=RMSFSettings(),
-            recompute=False,
-            aggregated_results={
-                "Control": _make_aggregated_rmsf_result(replicates=(1, 2)).model_copy(
-                    update={"config_hash": "unknown"}
-                ),
-                "Treated": _make_aggregated_rmsf_result(replicates=(1, 2, 3)).model_copy(
-                    update={"config_hash": "unknown"}
-                ),
-            },
-        )
-
-        with pytest.raises(
-            ValueError,
-            match="Aggregated RMSF result for condition 'Control' has incomplete replicate coverage",
-        ):
-            rmsf_analysis.compare(ctx)
-
-    def test_compare_rejects_stale_settings_fingerprint(self, rmsf_analysis, tmp_path):
-        """compare should reject stale aggregate settings identity."""
-
-        condition = Condition(
-            label="Control",
-            config_path=Path("/fake/control.yaml"),
-            replicates=(1, 2, 3),
-            sim_config=MagicMock(),
-        )
-        stale = _make_aggregated_rmsf_result(settings_fingerprint="deadbeef").model_copy(
-            update={"config_hash": "unknown"}
-        )
+        artifact = self._condition_artifact(condition, tmp_path / "control")
         ctx = ComparisonContext(
             name="rmsf_compare",
             conditions=[condition],
             excluded_conditions=[],
             control_label=None,
-            analysis_dirs={"Control": tmp_path / "control"},
+            analysis_dirs={condition.label: tmp_path / "control"},
             results_dir=tmp_path / "comparison",
-            equilibration="10ns",
+            equilibration="0ns",
             settings=RMSFSettings(),
-            recompute=False,
-            aggregated_results={"Control": stale},
+            aggregated_results={condition.label: artifact},
         )
 
-        with pytest.raises(AggregateValidationError, match="settings fingerprint mismatch"):
-            rmsf_analysis.compare(ctx)
+        result = RMSFAnalysis().compare(ctx)
 
+        assert isinstance(result, ComparisonArtifact)
+        assert result.payload["metric_metadata"][MEAN_RMSF_METRIC]["higher_is_better"] is False
+        policy = result.payload["metric_metadata"][MEAN_RMSF_METRIC]["statistical_policy"]
+        assert policy["metric_classification"] == "variance_based"
 
-# ============================================================================
-# Test: AggregatedResultClass and _deserialize_result
-# ============================================================================
+    def test_compare_rejects_legacy_aggregate(self, condition: Condition, tmp_path: Path) -> None:
+        """In-memory legacy aggregates should fail loudly."""
 
+        ctx = ComparisonContext(
+            name="rmsf_compare",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={condition.label: tmp_path},
+            results_dir=tmp_path / "comparison",
+            equilibration="0ns",
+            settings=RMSFSettings(),
+            aggregated_results={condition.label: MagicMock()},
+        )
+        with pytest.raises(TypeError, match="Legacy RMSF aggregate inputs"):
+            RMSFAnalysis().compare(ctx)
 
-class TestDeserializeResult:
-    """Test RMSFAnalysis.AggregatedResultClass and _deserialize_result."""
+    def test_format_accepts_comparison_artifact(self, condition: Condition, tmp_path: Path) -> None:
+        """CLI formatting should handle ComparisonArtifact output."""
 
-    def test_aggregated_result_class_set(self, rmsf_analysis):
-        """AggregatedResultClass should be RMSFAggregatedResult."""
-        from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
+        artifact = self._condition_artifact(condition, tmp_path / "control")
+        ctx = ComparisonContext(
+            name="rmsf_compare",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={condition.label: tmp_path / "control"},
+            results_dir=tmp_path / "comparison",
+            equilibration="0ns",
+            settings=RMSFSettings(),
+            aggregated_results={condition.label: artifact},
+        )
+        result = RMSFAnalysis().compare(ctx)
 
-        assert rmsf_analysis.AggregatedResultClass is RMSFAggregatedResult
+        text = RMSFAnalysis().format(result, "text")
 
-    def test_loads_aggregated_result(self, rmsf_analysis, tmp_path):
-        """Test that _deserialize_result loads via RMSFAggregatedResult.load()."""
-        mock_loaded = MagicMock()
-        with patch.object(
-            rmsf_analysis.AggregatedResultClass, "load", return_value=mock_loaded
-        ) as mock_load:
-            result = rmsf_analysis._deserialize_result(tmp_path / "test.json")
+        assert "RMSF Comparison" in text
+        assert "Mean RMSF" in text
 
-            mock_load.assert_called_once_with(tmp_path / "test.json")
-            assert result is mock_loaded
+    def test_plot_loads_condition_artifacts_only(
+        self, condition: Condition, tmp_path: Path
+    ) -> None:
+        """plot() should load canonical artifacts and pass profile data to plotters."""
 
-
-# ============================================================================
-# Test: filter_conditions (default behavior)
-# ============================================================================
-
-
-class TestFilterConditions:
-    """RMSF applies to all conditions — filter should keep all."""
-
-    def test_keeps_all_conditions(self, rmsf_analysis):
-        conditions = [
-            Condition(
-                label=f"Cond {i}",
-                config_path=Path(f"/fake/config_{i}.yaml"),
-                replicates=(1, 2),
-                sim_config=MagicMock(),
-            )
-            for i in range(4)
-        ]
-
-        filtered = rmsf_analysis.filter_conditions(conditions)
-        assert len(filtered) == 4
-
-
-# ============================================================================
-# Test: _make_aggregated_filename
-# ============================================================================
-
-
-class TestMakeAggregatedFilename:
-    """Test backward-compatible filename generation."""
-
-    def test_contiguous_replicates(self):
-        result = MagicMock()
-        result.equilibration_time = 10.0
-        result.equilibration_unit = "ns"
-
-        filename = RMSFAnalysis._make_aggregated_filename((1, 2, 3, 4, 5), result)
-        assert filename == "rmsf_reps1-5_eq10ns.json"
-
-    def test_non_contiguous_replicates(self):
-        result = MagicMock()
-        result.equilibration_time = 100.0
-        result.equilibration_unit = "ns"
-
-        filename = RMSFAnalysis._make_aggregated_filename((1, 3, 5), result)
-        assert filename == "rmsf_reps1_3_5_eq100ns.json"
-
-    def test_single_pair(self):
-        result = MagicMock()
-        result.equilibration_time = 0.0
-        result.equilibration_unit = "ns"
-
-        filename = RMSFAnalysis._make_aggregated_filename((1, 2), result)
-        assert filename == "rmsf_reps1-2_eq0ns.json"
-
-    def test_single_replicate(self):
-        """Single-replicate aggregate filenames should remain cache-compatible."""
-        result = MagicMock()
-        result.equilibration_time = 10.0
-        result.equilibration_unit = "ns"
-
-        filename = RMSFAnalysis._make_aggregated_filename((1,), result)
-        assert filename == "rmsf_reps1-1_eq10ns.json"
-
-
-# ============================================================================
-# Test: plot
-# ============================================================================
-
-
-class TestRMSFComparisonDots:
-    """Test replicate dot overlays on RMSF comparison plots."""
-
-    def test_plot_rejects_stale_aggregated_result(self, rmsf_analysis, tmp_path):
-        """plot should reject aggregate caches with stale settings fingerprints."""
+        artifact = self._condition_artifact(condition, tmp_path / "analysis" / "rmsf")
+        assert condition_artifact_to_legacy_result(artifact).overall_mean_rmsf == pytest.approx(2.0)
 
         from polyzymd.config.comparison import PlotSettings
 
-        condition = Condition(
-            label="Control",
-            config_path=Path("/fake/control.yaml"),
-            replicates=(1, 2, 3),
-            sim_config=MagicMock(),
-        )
-        analysis_dir = tmp_path / "analysis" / "control" / "rmsf"
-        stale = _make_aggregated_rmsf_result(settings_fingerprint="deadbeef").model_copy(
-            update={"config_hash": "unknown"}
-        )
-        stale.save(analysis_dir / "aggregated" / "result.json")
         ctx = PlotContext(
             conditions=[condition],
-            analysis_dirs={"Control": analysis_dir},
+            analysis_dirs={condition.label: tmp_path / "analysis" / "rmsf"},
             results_dir=tmp_path / "comparison" / "rmsf",
             output_dir=tmp_path / "figures" / "rmsf",
             settings=RMSFSettings(),
             plot_settings=PlotSettings(),
-            equilibration="10ns",
+            equilibration="0ns",
         )
-
-        with pytest.raises(AggregateValidationError, match="settings fingerprint mismatch"):
-            rmsf_analysis.plot(ctx)
-
-    @staticmethod
-    def _plot_settings(**theme_overrides):
-        """Return plot settings with optional theme overrides."""
-        from polyzymd.config.comparison import PlotSettings
-
-        return PlotSettings(theme=theme_overrides) if theme_overrides else PlotSettings()
-
-    @staticmethod
-    def _aggregated_plot_entry(payload: dict) -> dict[str, dict]:
-        """Return plot data containing a prevalidated aggregate payload."""
-
-        return {"Control": {"aggregated_result": payload}}
-
-    def test_aggregated_fallback_draws_per_replicate_dots(self, tmp_path):
-        """Aggregated fallback should draw dots from per_replicate_mean_rmsf."""
-        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_aggregated
-
-        data = self._aggregated_plot_entry(
-            {
-                "overall_mean_rmsf": 0.0,
-                "overall_sem_rmsf": 0.0,
-                "per_replicate_mean_rmsf": [0.0, 1.2, 1.4],
-            },
-        )
-
-        with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
-            _plot_rmsf_comparison_from_aggregated(
-                data,
-                ["Control"],
-                tmp_path / "figures",
-                self._plot_settings(),
-            )
-
-        mock_scatter.assert_called_once()
-        np.testing.assert_allclose(mock_scatter.call_args.args[1], [0.0, 1.2, 1.4])
-
-    def test_aggregated_fallback_omits_errorbar_for_single_replicate(self, tmp_path):
-        """Single-replicate RMSF comparison plots should not draw SEM error bars."""
-        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_aggregated
-
-        data = self._aggregated_plot_entry(
-            {
-                "overall_mean_rmsf": 1.2,
-                "overall_sem_rmsf": 0.0,
-                "per_replicate_mean_rmsf": [1.2],
-            },
-        )
-
-        with patch("matplotlib.axes.Axes.errorbar", autospec=True) as mock_errorbar:
-            _plot_rmsf_comparison_from_aggregated(
-                data,
-                ["Control"],
-                tmp_path / "figures",
-                self._plot_settings(),
-            )
-
-        mock_errorbar.assert_not_called()
-
-    def test_aggregated_fallback_draws_errorbar_for_multiple_replicates(self, tmp_path):
-        """Multi-replicate RMSF comparison plots should retain SEM error bars."""
-        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_aggregated
-
-        data = self._aggregated_plot_entry(
-            {
-                "overall_mean_rmsf": 1.2,
-                "overall_sem_rmsf": 0.1,
-                "per_replicate_mean_rmsf": [1.1, 1.3],
-            },
-        )
-
-        with patch("matplotlib.axes.Axes.errorbar", autospec=True) as mock_errorbar:
-            _plot_rmsf_comparison_from_aggregated(
-                data,
-                ["Control"],
-                tmp_path / "figures",
-                self._plot_settings(),
-            )
-
-        mock_errorbar.assert_called_once()
-
-    def test_generic_comparison_result_draws_metric_replicate_dots(self, tmp_path):
-        """Generic default comparison results should provide replicate dots."""
-        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison
-
-        result = ComparisonResult(
-            analysis_type="rmsf",
-            name="test",
-            conditions=[
-                ConditionSummary(
-                    label="Control",
-                    n_replicates=3,
-                    mean_rmsf_mean=1.2,
-                    mean_rmsf_sem=0.1,
-                    mean_rmsf_replicate_values=[1.0, 1.2, 1.4],
-                )
-            ],
-            ranking=["Control"],
-        )
-        result_path = tmp_path / "comparison" / "rmsf" / "result.json"
-        result.save(result_path)
-        data = {"__meta__": {"comparison_result_path": result_path}}
-
-        with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
-            _plot_rmsf_comparison(
-                data,
-                ["Control"],
-                tmp_path / "figures",
-                self._plot_settings(),
-            )
-
-        mock_scatter.assert_called_once()
-        np.testing.assert_allclose(mock_scatter.call_args.args[1], [1.0, 1.2, 1.4])
-
-    def test_unexpected_custom_comparison_load_error_propagates(self, tmp_path):
-        """Unexpected RMSF comparison load errors should not trigger fallback plotting."""
-        from polyzymd.analyses.rmsf._plotters import _find_rmsf_comparison_result
-
-        result_path = tmp_path / "comparison" / "rmsf" / "result.json"
-        result_path.parent.mkdir(parents=True)
-        result_path.write_text("{}")
-        data = {"__meta__": {"comparison_result_path": result_path}}
-
         with (
             patch(
-                "polyzymd.analyses.rmsf._comparison_results.RMSFComparisonResult.load",
-                side_effect=RuntimeError("custom loader regression"),
+                "polyzymd.analyses.rmsf._plot_rmsf_comparison", return_value=[tmp_path / "a.png"]
             ),
-            pytest.raises(RuntimeError, match="custom loader regression"),
+            patch("polyzymd.analyses.rmsf._plot_rmsf_profile", return_value=[tmp_path / "b.png"]),
         ):
-            _find_rmsf_comparison_result(data, ["Control"])
+            plots = RMSFAnalysis().plot(ctx)
 
-    def test_missing_replicate_values_do_not_draw_dots(self, tmp_path):
-        """Missing replicate values should not fail or call scatter."""
-        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_result
+        assert plots == [tmp_path / "a.png", tmp_path / "b.png"]
 
-        result = ComparisonResult(
-            analysis_type="rmsf",
-            name="test",
-            conditions=[
-                ConditionSummary(
-                    label="Control",
-                    n_replicates=3,
-                    mean_rmsf_mean=1.2,
-                    mean_rmsf_sem=0.1,
-                )
-            ],
-            ranking=["Control"],
-        )
+    def test_deserialize_rejects_legacy_json(self, tmp_path: Path) -> None:
+        """Legacy aggregate files should not be loaded as RMSF MDA artifacts."""
 
-        with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
-            _plot_rmsf_comparison_from_result(
-                result,
-                tmp_path / "figures",
-                self._plot_settings(),
-            )
-
-        mock_scatter.assert_not_called()
-
-    def test_non_finite_replicate_values_are_filtered(self, tmp_path):
-        """NaN and infinite replicate values should be filtered before scatter."""
-        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_result
-
-        result = ComparisonResult(
-            analysis_type="rmsf",
-            name="test",
-            conditions=[
-                ConditionSummary(
-                    label="Control",
-                    n_replicates=5,
-                    mean_rmsf_mean=1.2,
-                    mean_rmsf_sem=0.1,
-                    mean_rmsf_replicate_values=[1.0, np.nan, np.inf, -np.inf, 1.4],
-                )
-            ],
-            ranking=["Control"],
-        )
-
-        with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
-            _plot_rmsf_comparison_from_result(
-                result,
-                tmp_path / "figures",
-                self._plot_settings(),
-            )
-
-        mock_scatter.assert_called_once()
-        np.testing.assert_allclose(mock_scatter.call_args.args[1], [1.0, 1.4])
-
-    def test_theme_dot_settings_are_honored(self, tmp_path):
-        """Replicate dots should use theme dot colour, size, and alpha."""
-        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_result
-
-        result = ComparisonResult(
-            analysis_type="rmsf",
-            name="test",
-            conditions=[
-                ConditionSummary(
-                    label="Control",
-                    n_replicates=2,
-                    mean_rmsf_mean=1.2,
-                    mean_rmsf_sem=0.1,
-                    mean_rmsf_replicate_values=[1.1, 1.3],
-                )
-            ],
-            ranking=["Control"],
-        )
-
-        with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
-            _plot_rmsf_comparison_from_result(
-                result,
-                tmp_path / "figures",
-                self._plot_settings(dot_color="#123456", dot_size=37, dot_alpha=0.42),
-            )
-
-        mock_scatter.assert_called_once()
-        assert mock_scatter.call_args.kwargs["color"] == "#123456"
-        assert mock_scatter.call_args.kwargs["s"] == 37
-        assert mock_scatter.call_args.kwargs["alpha"] == 0.42
-
-
-class TestRMSFReferenceSS:
-    """Test reference secondary-structure loading for RMSF plots."""
-
-    @staticmethod
-    def _reference_data(tmp_path: Path) -> dict:
-        """Return plot data with an existing reference PDB path."""
-        reference_path = tmp_path / "reference.pdb"
-        reference_path.write_text("HEADER    TEST REFERENCE\n")
-        return {"__meta__": {"settings": {"reference_file": str(reference_path)}}}
-
-    def test_expected_mdtraj_load_error_returns_none(self, tmp_path, monkeypatch):
-        """Bad reference files should skip SS annotation without failing plots."""
-        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
-
-        fake_mdtraj = MagicMock()
-        fake_mdtraj.load.side_effect = ValueError("bad reference PDB")
-        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
-
-        assert _load_reference_ss(self._reference_data(tmp_path)) is None
-
-    def test_expected_reference_dssp_error_returns_none(self, tmp_path, monkeypatch):
-        """Known DSSP validation failures should skip SS annotation."""
-        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
-
-        fake_traj = MagicMock()
-        fake_traj.topology.select.return_value = [0]
-        fake_traj.atom_slice.return_value = MagicMock()
-
-        fake_mdtraj = MagicMock()
-        fake_mdtraj.load.return_value = fake_traj
-        fake_mdtraj.compute_dssp.side_effect = ValueError("DSSP validation failed")
-        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
-
-        assert _load_reference_ss(self._reference_data(tmp_path)) is None
-
-    def test_unexpected_reference_load_runtime_error_propagates(self, tmp_path, monkeypatch):
-        """Runtime errors while loading references should expose regressions."""
-        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
-
-        fake_mdtraj = MagicMock()
-        fake_mdtraj.load.side_effect = RuntimeError("mdtraj loader regression")
-        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
-
-        with pytest.raises(RuntimeError, match="mdtraj loader regression"):
-            _load_reference_ss(self._reference_data(tmp_path))
-
-    def test_unexpected_atom_slice_runtime_error_propagates(self, tmp_path, monkeypatch):
-        """Runtime errors while slicing references should expose regressions."""
-        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
-
-        fake_traj = MagicMock()
-        fake_traj.topology.select.return_value = [0]
-        fake_traj.atom_slice.side_effect = RuntimeError("atom slice regression")
-
-        fake_mdtraj = MagicMock()
-        fake_mdtraj.load.return_value = fake_traj
-        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
-
-        with pytest.raises(RuntimeError, match="atom slice regression"):
-            _load_reference_ss(self._reference_data(tmp_path))
-
-    def test_unexpected_dssp_runtime_error_propagates(self, tmp_path, monkeypatch):
-        """Runtime errors while computing DSSP should expose regressions."""
-        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
-
-        fake_traj = MagicMock()
-        fake_traj.topology.select.return_value = [0]
-        fake_traj.atom_slice.return_value = MagicMock()
-
-        fake_mdtraj = MagicMock()
-        fake_mdtraj.load.return_value = fake_traj
-        fake_mdtraj.compute_dssp.side_effect = RuntimeError("DSSP regression")
-        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
-
-        with pytest.raises(RuntimeError, match="DSSP regression"):
-            _load_reference_ss(self._reference_data(tmp_path))
-
-    def test_unexpected_reference_ss_error_propagates(self, tmp_path, monkeypatch):
-        """Unexpected programming errors should not be swallowed."""
-        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
-
-        fake_traj = MagicMock()
-        fake_traj.topology.select.side_effect = AttributeError("topology regression")
-
-        fake_mdtraj = MagicMock()
-        fake_mdtraj.load.return_value = fake_traj
-        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
-
-        with pytest.raises(AttributeError, match="topology regression"):
-            _load_reference_ss(self._reference_data(tmp_path))
-
-
-class TestPlot:
-    """Test RMSFAnalysis.plot calls inlined private plotting functions."""
-
-    def test_plot_returns_empty_on_no_conditions(self, rmsf_analysis, tmp_path):
-        from polyzymd.config.comparison import PlotSettings
-
-        ctx = PlotContext(
-            conditions=[],
-            analysis_dirs={},
-            results_dir=tmp_path / "comparison",
-            output_dir=tmp_path / "figures",
-            settings=RMSFSettings(),
-            plot_settings=PlotSettings(),
-        )
-
-        plots = rmsf_analysis.plot(ctx)
-        assert plots == []
-
-    @patch("polyzymd.analyses.rmsf._plot_rmsf_profile")
-    @patch("polyzymd.analyses.rmsf._plot_rmsf_comparison")
-    def test_plot_delegates_to_private_functions(
-        self,
-        mock_comp_plot,
-        mock_prof_plot,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        from polyzymd.config.comparison import PlotSettings
-
-        # Setup mock returns
-        mock_comp_plot.return_value = [tmp_path / "figures" / "rmsf_comparison.png"]
-        mock_prof_plot.return_value = [tmp_path / "figures" / "rmsf_profile.png"]
-
-        analysis_dir = tmp_path / "analysis" / "no_polymer" / "rmsf"
-        analysis_dir.mkdir(parents=True)
-
-        ctx = PlotContext(
-            conditions=[condition],
-            analysis_dirs={"No Polymer": analysis_dir},
-            results_dir=tmp_path / "comparison",
-            output_dir=tmp_path / "figures",
-            settings=RMSFSettings(),
-            plot_settings=PlotSettings(),
-        )
-
-        with patch("polyzymd.config.comparison.PlotSettings") as MockPlotSettings:
-            MockPlotSettings.return_value = MagicMock()
-            plots = rmsf_analysis.plot(ctx)
-
-        assert len(plots) == 2
-        mock_comp_plot.assert_called_once()
-        mock_prof_plot.assert_called_once()
-
-    @patch("polyzymd.analyses.rmsf._plot_rmsf_profile", side_effect=Exception("plot error"))
-    @patch("polyzymd.analyses.rmsf._plot_rmsf_comparison", side_effect=Exception("plot error"))
-    def test_plot_propagates_exceptions(
-        self,
-        mock_comp_plot,
-        mock_prof_plot,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """Plotting failures should propagate to orchestrator."""
-        from polyzymd.config.comparison import PlotSettings
-
-        analysis_dir = tmp_path / "analysis" / "no_polymer" / "rmsf"
-        analysis_dir.mkdir(parents=True)
-
-        ctx = PlotContext(
-            conditions=[condition],
-            analysis_dirs={"No Polymer": analysis_dir},
-            results_dir=tmp_path / "comparison",
-            output_dir=tmp_path / "figures",
-            settings=RMSFSettings(),
-            plot_settings=PlotSettings(),
-        )
-
-        with patch("polyzymd.config.comparison.PlotSettings") as MockPlotSettings:
-            MockPlotSettings.return_value = MagicMock()
-            with pytest.raises(Exception, match="plot error"):
-                rmsf_analysis.plot(ctx)
-
-
-# ============================================================================
-# Test: Full lifecycle via orchestrator (mocked compute)
-# ============================================================================
-
-
-class TestRMSFLifecycle:
-    """Test the full compute -> aggregate -> compare lifecycle.
-
-    Uses the orchestrator's run_analysis() and verifies the data flow
-    through the RMSF plugin. Heavy deps are mocked.
-    """
-
-    @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
-    @patch("polyzymd.analyses.shared.window.validate_equilibration_time", return_value=(True, ""))
-    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
-    @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
-    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
-    def test_run_analysis_lifecycle(
-        self,
-        MockLoader,
-        mock_hash,
-        mock_validate_hash,
-        mock_eq_validate,
-        mock_align,
-        rmsf_analysis,
-        condition,
-        tmp_path,
-    ):
-        """Test run_replicate -> aggregate via run_analysis()."""
-        import numpy as np
-
-        from polyzymd.analyses.orchestrator import run_analysis
-
-        # Create a fresh mock loader instance for each call
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-
-        # Track which replicate we're on so we can vary mean_rmsf
-        call_count = {"n": 0}
-        rmsf_by_rep = {
-            1: [1.0, 1.2, 1.4, 1.0, 0.9],
-            2: [1.1, 1.3, 1.5, 1.1, 1.0],
-            3: [1.2, 1.4, 1.6, 1.2, 1.1],
-        }
-
-        def make_mock_universe(*args, **kwargs):
-            """Return a mock Universe with 200 frames and 5 atoms."""
-            mock_u = MagicMock()
-            mock_traj = MagicMock()
-            mock_traj.__len__ = MagicMock(return_value=200)
-            mock_frames = [MagicMock(frame=i) for i in range(200)]
-            mock_traj.__getitem__ = MagicMock(
-                side_effect=lambda x: mock_frames[x] if isinstance(x, int) else mock_frames
-            )
-            mock_traj.__iter__ = MagicMock(return_value=iter(mock_frames))
-            mock_u.trajectory = mock_traj
-
-            mock_atoms = MagicMock()
-            mock_atoms.__len__ = MagicMock(return_value=5)
-            mock_atoms.positions = np.random.rand(5, 3).astype(np.float32)
-            mock_atoms.indices = np.arange(5)
-            mock_residues = []
-            for i in range(5):
-                res = MagicMock()
-                res.resid = i + 1
-                res.resname = "ALA"
-                mock_residues.append(res)
-            mock_atoms.residues = mock_residues
-            mock_u.select_atoms = MagicMock(return_value=mock_atoms)
-            return mock_u
-
-        mock_loader_inst.load_universe = MagicMock(side_effect=make_mock_universe)
-
-        traj_info = MagicMock()
-        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
-        mock_loader_inst.get_trajectory_info.return_value = traj_info
-        mock_loader_inst.get_timestep.return_value = 10.0
-
-        # _compute_rmsf returns different values per call to vary per-replicate means
-        rmsf_values_sequence = [
-            np.array(rmsf_by_rep[1]),
-            np.array(rmsf_by_rep[2]),
-            np.array(rmsf_by_rep[3]),
-        ]
-        rmsf_call_idx = {"n": 0}
-
-        def mock_compute_rmsf(*args, **kwargs):
-            idx = rmsf_call_idx["n"]
-            rmsf_call_idx["n"] += 1
-            return rmsf_values_sequence[idx]
-
-        with (
-            patch("polyzymd.analyses.rmsf._compute_rmsf", side_effect=mock_compute_rmsf),
-            patch(
-                "polyzymd.analyses.rmsf._compute_rmsd_timeseries",
-                return_value=np.random.rand(100),
-            ),
-            patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
-        ):
-            output_dir = tmp_path / "analysis" / "no_polymer" / "rmsf"
-            result = run_analysis(
-                rmsf_analysis,
-                condition,
-                settings=RMSFSettings(),
-                equilibration="0ns",
-                output_dir=output_dir,
-            )
-
-        # Verify we got an aggregated result
-        assert result.n_replicates == 3
-        # Per-replicate means should match np.mean of each rmsf array
-        expected_means = [float(np.mean(rmsf_by_rep[r])) for r in (1, 2, 3)]
-        for actual, expected in zip(result.per_replicate_mean_rmsf, expected_means):
-            assert actual == pytest.approx(expected, abs=0.01)
-        # Loader should have been called 3 times (once per replicate)
-        assert MockLoader.call_count == 3
-
-    def test_extract_metrics_feeds_default_compare(self, rmsf_analysis):
-        """Verify extract_metrics output is compatible with default_scalar_comparison."""
-        from polyzymd.analyses.stats import default_scalar_comparison
-
-        # Simulate two conditions with extracted metrics
-        metrics_by_condition = {}
-        for label, mean, sem, vals in [
-            ("No Polymer", 1.8, 0.12, [1.7, 1.9, 1.8]),
-            ("100% SBMA", 1.3, 0.08, [1.25, 1.35, 1.3]),
-        ]:
-            summary = MagicMock()
-            summary.overall_mean_rmsf = mean
-            summary.overall_sem_rmsf = sem
-            summary.per_replicate_mean_rmsf = vals
-            metrics_by_condition[label] = rmsf_analysis.extract_metrics(summary)
-
-        # Run default comparison — should not crash
-        result = default_scalar_comparison(
-            analysis_name="rmsf",
-            project_name="test_project",
-            metrics_by_condition=metrics_by_condition,
-            control_label="No Polymer",
-            equilibration="10ns",
-        )
-
-        assert result.analysis_type == "rmsf"
-        assert len(result.conditions) == 2
-        assert len(result.pairwise_comparisons) >= 1
-        # Ranking: lower RMSF first (100% SBMA should rank before No Polymer)
-        assert result.ranking[0] == "100% SBMA"
-
-
-class TestAggregatePerResidue:
-    """Tests for _aggregate_per_residue cross-chain correctness."""
-
-    def test_duplicate_resid_across_chains_not_merged(self):
-        """Residues with same resid in different chains must stay separate."""
-        from polyzymd.analyses.rmsf import _aggregate_per_residue
-
-        mock_atoms = MagicMock()
-        mock_atoms.indices = np.array([0, 1, 2, 3])
-
-        res_a = MagicMock()
-        res_a.resid = 1
-        res_a.atoms.indices = np.array([0, 1])
-
-        res_b = MagicMock()
-        res_b.resid = 1
-        res_b.atoms.indices = np.array([2, 3])
-
-        mock_atoms.residues = [res_a, res_b]
-
-        atom_rmsf = np.array([1.0, 2.0, 10.0, 20.0])
-
-        result = _aggregate_per_residue(mock_atoms, atom_rmsf)
-        assert len(result) == 2
-        np.testing.assert_allclose(result[0], 1.5)
-        np.testing.assert_allclose(result[1], 15.0)
+        path = tmp_path / "result.json"
+        path.write_text('{"analysis_type": "rmsf_aggregated"}', encoding="utf-8")
+        with pytest.raises(ValueError, match="not a canonical MDAnalysis condition artifact"):
+            RMSFAnalysis()._deserialize_result(path)

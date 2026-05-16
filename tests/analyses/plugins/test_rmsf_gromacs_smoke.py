@@ -2,7 +2,7 @@
 
 This test keeps :class:`TrajectoryLoader` and :class:`GromacsEngine` real,
 creates a minimal on-disk GROMACS-like layout, and patches only MDAnalysis
-Universe construction plus heavy RMSF compute helpers.
+Universe construction plus the AnalysisBase-compatible RMSF profile object.
 """
 
 from __future__ import annotations
@@ -59,9 +59,20 @@ class TestRMSFGromacsSmoke:
         fake_mda = install_fake_mdanalysis()
         fake_mda.Universe = MagicMock(side_effect=_mock_universe_ctor)
 
-        rmsf_values = [
-            np.array([1.00, 1.10, 1.20, 1.30, 1.40], dtype=np.float64),
-            np.array([1.50, 1.60, 1.70, 1.80, 1.90], dtype=np.float64),
+        class FakeRMSFProfileAnalysis:
+            """AnalysisBase-compatible fake returning predetermined RMSF values."""
+
+            def __init__(self, values: np.ndarray) -> None:
+                self.results = MagicMock()
+                self.results.rmsf_values = values
+
+            def run(self, **kwargs: object) -> "FakeRMSFProfileAnalysis":
+                self.run_kwargs = kwargs
+                return self
+
+        fake_jobs = [
+            FakeRMSFProfileAnalysis(np.array([1.00, 1.10, 1.20, 1.30, 1.40])),
+            FakeRMSFProfileAnalysis(np.array([1.50, 1.60, 1.70, 1.80, 1.90])),
         ]
 
         original_resolve = GromacsEngine.resolve_trajectory_layout
@@ -74,14 +85,13 @@ class TestRMSFGromacsSmoke:
                 autospec=True,
                 wraps=original_resolve,
             ) as resolve_spy,
-            patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0),
-            patch("polyzymd.analyses.shared.config_hash.validate_config_hash"),
-            patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="smoke123"),
-            patch("polyzymd.analyses.rmsf._compute_rmsf", side_effect=rmsf_values),
+            patch("polyzymd.analyses.rmsf._mda.align_trajectory", return_value=0),
+            patch("polyzymd.analyses.rmsf._mda.compute_config_hash", return_value="smoke123"),
             patch(
-                "polyzymd.analyses.rmsf._compute_rmsd_timeseries",
-                return_value=np.linspace(0.0, 1.0, 120, dtype=np.float64),
+                "polyzymd.analyses.rmsf._mda.compute_rmsd_timeseries",
+                return_value=np.linspace(0.0, 1.0, 200, dtype=np.float64),
             ),
+            patch("polyzymd.analyses.rmsf._mda.RMSFProfileAnalysis", side_effect=fake_jobs),
             patch(
                 "polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.3.0-test"
             ),
@@ -121,8 +131,12 @@ class TestRMSFGromacsSmoke:
 
         assert result_1.replicate == 1
         assert result_2.replicate == 2
-        assert result_1.trajectory_files == [str(tmp_path / "run_1" / "gromacs" / "prod.xtc")]
-        assert result_2.trajectory_files == [str(tmp_path / "run_2" / "gromacs" / "prod.xtc")]
+        assert result_1.artifact_type == "replicate"
+        assert result_2.artifact_type == "replicate"
+        assert 0 < result_1.payload["frame_metadata"]["n_frames_used"] <= 200
+        assert 0 < result_2.payload["frame_metadata"]["n_frames_used"] <= 200
 
-        assert aggregate_result.n_replicates == 2
-        assert aggregate_result.per_replicate_mean_rmsf == [1.2, 1.7]
+        assert aggregate_result.artifact_type == "condition"
+        assert aggregate_result.payload["n_replicates"] == 2
+        assert aggregate_result.payload["per_replicate_mean_rmsf"] == [1.2, 1.7]
+        assert aggregate_result.payload["mean_rmsf_per_residue"] == [1.25, 1.35, 1.45, 1.55, 1.65]

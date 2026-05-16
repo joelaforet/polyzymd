@@ -174,10 +174,15 @@ def make_mock_universe(
     residues: list[MagicMock] = []
     for idx in range(residue_count):
         residue = MagicMock()
+        residue.ix = idx
         residue.resid = resolved_residue_ids[idx % len(resolved_residue_ids)]
         residue.resname = resolved_residue_names[idx % len(resolved_residue_names)]
         residue.segid = resolved_chain_ids[idx % len(resolved_chain_ids)]
         residue.chainID = resolved_chain_ids[idx % len(resolved_chain_ids)]
+        residue.segment = MagicMock()
+        residue.segment.segid = residue.segid
+        residue.atoms = MagicMock()
+        residue.atoms.indices = np.asarray([idx % n_atoms], dtype=np.int64)
         residues.append(residue)
 
     atoms.residues = residues
