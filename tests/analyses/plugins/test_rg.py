@@ -763,6 +763,26 @@ def test_plotters_fail_on_corrupted_canonical_artifacts(tmp_path) -> None:
         _load_condition_aggregated(tmp_path / "control")
 
 
+def test_plotters_fail_on_completed_run_without_sidecar_metadata(tmp_path) -> None:
+    """Completed Rg run payloads without sidecar metadata should be hard failures."""
+
+    settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
+    artifact = _replicate_artifact(
+        tmp_path / "control",
+        condition_label="Control",
+        replicate=1,
+        settings=settings,
+    )
+    artifact.payload["runs"][0].pop("sidecar")
+    ArtifactStore(tmp_path / "control" / "run_1").write_replicate_result(artifact)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Completed Rg run 'protein_rg'.*missing valid NPZ sidecar metadata",
+    ):
+        _load_replicate_timeseries(tmp_path / "control", "protein_rg", [1])
+
+
 def test_plot_rejects_legacy_aggregated_result_from_disk(tmp_path) -> None:
     """plot should fail loudly when aggregated Rg cache lacks artifact identity."""
 

@@ -602,7 +602,14 @@ def _resolve_npz_sidecar_path(
     Returns
     -------
     Path | None
-        NPZ sidecar path from metadata, or ``None`` when unavailable.
+        NPZ sidecar path from metadata, or ``None`` when the replicate or
+        requested run is not available.
+
+    Raises
+    ------
+    ValueError
+        Raised when a completed Rg run payload exists but lacks valid
+        canonical sidecar metadata.
     """
     from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
 
@@ -639,12 +646,11 @@ def _resolve_npz_sidecar_path(
 
     sidecar_payload = run_result.get("sidecar")
     if not isinstance(sidecar_payload, dict):
-        logger.warning(
-            "Missing sidecar metadata for run '%s' in %s",
-            run_label,
-            result_path,
+        raise ValueError(
+            f"Completed Rg run '{run_label}' in canonical artifact {result_path} is missing "
+            "valid NPZ sidecar metadata. Recompute the replicate or clear the corrupted "
+            "artifact before plotting."
         )
-        return None
 
     from pydantic import ValidationError
 
