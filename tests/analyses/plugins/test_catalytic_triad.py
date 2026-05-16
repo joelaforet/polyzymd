@@ -280,7 +280,10 @@ class TestTriadAggregationAndComparison:
             recompute=True,
             settings=default_settings,
         )
-        monkeypatch.setattr(triad_analysis, "build_mda_jobs", lambda *_args: None)
+        monkeypatch.setattr(
+            "polyzymd.analyses.mda.lifecycle.run_mda_replicate_jobs",
+            lambda *_args: None,
+        )
 
         with pytest.raises(PluginContractError, match=r"build_mda_jobs\(\) returned None"):
             triad_analysis.run_replicate(ctx, replicate=1)
