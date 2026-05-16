@@ -119,7 +119,7 @@ def build_distance_jobs(
         universe=ctx.universe,
         pairs=settings.get_pair_selections(),
         thresholds=settings.get_pair_thresholds(),
-        pair_label_func=_lazy_pair_label,
+        pair_labels=settings.get_pair_labels(),
     )
     metadata = {
         **ctx.universe_policy.metadata,
@@ -195,7 +195,8 @@ def resolve_distance_pairs(
     universe: Any,
     pairs: Sequence[tuple[str, str]],
     thresholds: Sequence[float | None],
-    pair_label_func: Callable[[str, str], str],
+    pair_label_func: Callable[[str, str], str] | None = None,
+    pair_labels: Sequence[str] | None = None,
 ) -> list[PairDistanceSpec]:
     """Resolve and validate configured distance-pair selections."""
 
@@ -205,8 +206,17 @@ def resolve_distance_pairs(
     )
     from polyzymd.analyses.shared.selections import parse_selection_string
 
+    if pair_labels is not None and len(pair_labels) != len(pairs):
+        raise ValueError(
+            f"Distances pair label count {len(pair_labels)} does not match pair count {len(pairs)}"
+        )
+    if pair_labels is None and pair_label_func is None:
+        raise ValueError("Either pair_labels or pair_label_func must be provided")
+
     resolved_pairs: list[PairDistanceSpec] = []
-    for (selection1, selection2), threshold in zip(pairs, thresholds, strict=True):
+    for pair_index, ((selection1, selection2), threshold) in enumerate(
+        zip(pairs, thresholds, strict=True)
+    ):
         parsed1 = parse_selection_string(selection1)
         parsed2 = parse_selection_string(selection2)
         atoms1 = universe.select_atoms(parsed1.selection)
@@ -217,7 +227,11 @@ def resolve_distance_pairs(
         if len(atoms2) == 0:
             diagnostics = get_selection_diagnostics(universe, selection2)
             raise ValueError(f"Selection '{selection2}' matched no atoms.\n\n{diagnostics}")
-        pair_label = pair_label_func(selection1, selection2)
+        pair_label = (
+            str(pair_labels[pair_index])
+            if pair_labels is not None
+            else str(pair_label_func(selection1, selection2))
+        )
         warn_if_multi_chain_selection(atoms1, selection1, f"for distance pair '{pair_label}'")
         warn_if_multi_chain_selection(atoms2, selection2, f"for distance pair '{pair_label}'")
         resolved_pairs.append(
@@ -709,7 +723,12 @@ def _validate_and_order_artifacts(
                 f"Distances artifact replicate {artifact.replicate} has settings fingerprint "
                 f"{artifact.metadata.get('settings_fingerprint')}, expected {settings_fingerprint}"
             )
-        _validate_pair_payloads(artifact, expected_pairs, expected_thresholds)
+        _validate_pair_payloads(
+            artifact,
+            expected_pairs,
+            expected_thresholds,
+            expected_labels=settings.get_pair_labels(),
+        )
         for sidecar in artifact.sidecars:
             ArtifactStore(analysis_dir / f"run_{artifact.replicate}").validate_sidecar(sidecar)
         by_replicate[int(artifact.replicate)] = artifact
@@ -727,6 +746,7 @@ def _validate_pair_payloads(
     artifact: ReplicateArtifact,
     expected_pairs: Sequence[tuple[str, str]],
     expected_thresholds: Sequence[float | None],
+    expected_labels: Sequence[str] | None = None,
 ) -> None:
     """Validate pair payloads against active settings."""
 
@@ -736,13 +756,16 @@ def _validate_pair_payloads(
             f"Distances replicate {artifact.replicate} has {len(pairs)} pairs, "
             f"expected {len(expected_pairs)}"
         )
-    for idx, (payload, (selection_a, selection_b), threshold) in enumerate(
-        zip(pairs, expected_pairs, expected_thresholds, strict=True), start=1
+    labels = expected_labels if expected_labels is not None else [None] * len(expected_pairs)
+    for idx, (payload, (selection_a, selection_b), threshold, label) in enumerate(
+        zip(pairs, expected_pairs, expected_thresholds, labels, strict=True), start=1
     ):
         if payload.get("selection1") != selection_a or payload.get("selection2") != selection_b:
             raise ValueError(
                 f"Distances replicate {artifact.replicate} pair {idx} selection mismatch"
             )
+        if label is not None and payload.get("pair_label") != label:
+            raise ValueError(f"Distances replicate {artifact.replicate} pair {idx} label mismatch")
         if payload.get("threshold") != threshold:
             raise ValueError(
                 f"Distances replicate {artifact.replicate} pair {idx} threshold mismatch"
@@ -895,18 +918,16 @@ def _pair_specs_from_settings(settings: DistancesSettings) -> list[PairDistanceS
 
     return [
         PairDistanceSpec(
-            label=_lazy_pair_label(selection_a, selection_b),
-            selection_a=selection_a,
-            selection_b=selection_b,
+            label=pair.label,
+            selection_a=pair.selection_a,
+            selection_b=pair.selection_b,
             atoms_a=None,
             atoms_b=None,
             mode_a=None,
             mode_b=None,
             threshold=threshold,
         )
-        for (selection_a, selection_b), threshold in zip(
-            settings.get_pair_selections(), settings.get_pair_thresholds(), strict=True
-        )
+        for pair, threshold in zip(settings.pairs, settings.get_pair_thresholds(), strict=True)
     ]
 
 

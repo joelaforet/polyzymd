@@ -1114,10 +1114,7 @@ class DistancesAnalysis(Analysis):
                 start=1,
             ):
                 mismatch_parts: list[str] = []
-                expected_pair_label = _make_pair_label(
-                    pair_setting.selection_a,
-                    pair_setting.selection_b,
-                )
+                expected_pair_label = pair_setting.label
                 if pair_result.pair_label != expected_pair_label:
                     mismatch_parts.append(
                         f"label {pair_result.pair_label!r} != {expected_pair_label!r}"

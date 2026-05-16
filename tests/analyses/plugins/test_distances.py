@@ -340,7 +340,6 @@ def _make_distance_artifacts(tmp_path, condition_label, settings, n_reps: int = 
     """Create canonical distance replicate artifacts with NPZ sidecars."""
     import numpy as np
 
-    from polyzymd.analyses.distances import _make_pair_label
     from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
     from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
@@ -362,9 +361,7 @@ def _make_distance_artifacts(tmp_path, condition_label, settings, n_reps: int = 
             matrix_rows.append(distances)
             pair_payloads.append(
                 {
-                    "pair_label": _make_pair_label(
-                        pair_setting.selection_a, pair_setting.selection_b
-                    ),
+                    "pair_label": pair_setting.label,
                     "selection1": pair_setting.selection_a,
                     "selection2": pair_setting.selection_b,
                     "mean_distance": float(np.mean(distances)),
@@ -395,6 +392,7 @@ def _make_distance_artifacts(tmp_path, condition_label, settings, n_reps: int = 
             distance_matrix=np.vstack(matrix_rows),
             frames=np.asarray([0, 1], dtype=np.int64),
             time_ns=np.asarray([0.0, 0.01], dtype=np.float64),
+            pair_labels=np.asarray([pair.label for pair in settings.pairs]),
             metadata={"kind": "distance_matrix"},
         )
         artifact = ReplicateArtifact(
@@ -674,7 +672,14 @@ class TestRunReplicate:
 
         analysis = DistancesAnalysis()
         settings = DistancesSettings(
-            pairs=[DistancePairSettings(label="P1", selection_a="sel_a", selection_b="sel_b")]
+            pairs=[
+                DistancePairSettings(
+                    label="Configured Label",
+                    selection_a="sel_a",
+                    selection_b="sel_b",
+                    threshold=3.2,
+                )
+            ]
         )
         mock_sim_config = MagicMock()
         cond = Condition(
@@ -813,7 +818,14 @@ class TestRunReplicate:
         from polyzymd.analyses.mda.job import MDABackendPolicy, MDAJobResult, MDAUniversePolicy
 
         settings = DistancesSettings(
-            pairs=[DistancePairSettings(label="P1", selection_a="sel_a", selection_b="sel_b")]
+            pairs=[
+                DistancePairSettings(
+                    label="Configured Label",
+                    selection_a="sel_a",
+                    selection_b="sel_b",
+                    threshold=3.2,
+                )
+            ]
         )
         condition = Condition(
             label="test",
@@ -857,9 +869,16 @@ class TestRunReplicate:
 
         assert result.replicate == 1
         assert result.payload["n_frames_used"] == 3
+        assert result.payload["pairs"][0]["pair_label"] == "Configured Label"
         assert result.payload["pairs"][0]["mean_distance"] == pytest.approx(3.2)
+        assert result.payload["pairs"][0]["fraction_below_threshold"] == pytest.approx(1.0 / 3.0)
         assert "distances" not in result.payload["pairs"][0]
         assert result.sidecars[0].metadata["kind"] == "distance_matrix"
+        sidecar_path = ArtifactStore(tmp_path / "run_1").validate_sidecar(result.sidecars[0])
+        with np.load(sidecar_path) as npz_data:
+            assert npz_data["distance_matrix"].shape == (1, 3)
+            assert npz_data["pair_labels"].tolist() == ["Configured Label"]
+            assert npz_data["thresholds"].tolist() == pytest.approx([3.2])
 
 
 # ---------------------------------------------------------------------------
@@ -968,6 +987,7 @@ class TestAggregate:
         assert result is not None
         assert result.metadata["n_replicates"] == 3
         assert len(result.payload["pair_results"]) == 2
+        assert [pair["pair_label"] for pair in result.payload["pair_results"]] == ["P0", "P1"]
         assert result.metadata["settings_fingerprint"] == settings_fingerprint(settings)
 
         stale = result.model_copy(
