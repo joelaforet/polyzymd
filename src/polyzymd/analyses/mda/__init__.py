@@ -29,6 +29,11 @@ from polyzymd.analyses.mda.base import (
     MDAnalysisExtensionError,
     MDARunKwargs,
 )
+from polyzymd.analyses.mda.comparison import (
+    MDAComparisonContext,
+    MDAComparisonError,
+    compare_condition_artifacts,
+)
 from polyzymd.analyses.mda.frame_selection import FrameSelection
 from polyzymd.analyses.mda.job import (
     MDAAnalysisJob,
@@ -70,6 +75,9 @@ __all__ = [
     "ReplicateArtifact",
     "ArtifactStore",
     "ArtifactStoreError",
+    "MDAComparisonContext",
+    "MDAComparisonError",
+    "compare_condition_artifacts",
     "FrameSelection",
     "MDAAnalysisJob",
     "MDAAnalysisJobError",

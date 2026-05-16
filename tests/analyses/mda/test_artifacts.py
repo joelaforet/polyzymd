@@ -247,6 +247,24 @@ def test_store_writes_reads_condition_result_and_hashes_source(tmp_path: Path) -
     assert source["size_bytes"] == result_path.stat().st_size
 
 
+def test_store_writes_reads_comparison_result(tmp_path: Path) -> None:
+    """ArtifactStore should roundtrip comparison artifacts."""
+
+    store = ArtifactStore(tmp_path)
+    artifact = ComparisonArtifact(
+        analysis_name="rg",
+        conditions=["Control", "Polymer"],
+        control_label="Control",
+        effective_control="Control",
+        payload={"ranking": ["Polymer", "Control"]},
+    )
+
+    result_path = store.write_comparison_result(artifact)
+
+    assert result_path == tmp_path / "result.json"
+    assert store.read_comparison_result() == artifact
+
+
 @pytest.mark.parametrize(
     "payload",
     ["{not json", '{"artifact_type": "replicate", "analysis_name": "rmsd"}'],

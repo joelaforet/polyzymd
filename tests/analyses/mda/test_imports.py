@@ -35,6 +35,11 @@ def test_public_facade_reexports_primitives() -> None:
         MDAnalysisExtensionError,
         MDARunKwargs,
     )
+    from polyzymd.analyses.mda.comparison import (
+        MDAComparisonContext,
+        MDAComparisonError,
+        compare_condition_artifacts,
+    )
     from polyzymd.analyses.mda.frame_selection import FrameSelection
     from polyzymd.analyses.mda.job import (
         MDAAnalysisJob,
@@ -75,6 +80,9 @@ def test_public_facade_reexports_primitives() -> None:
     assert mda.ReplicateArtifact is ReplicateArtifact
     assert mda.ArtifactStore is ArtifactStore
     assert mda.ArtifactStoreError is ArtifactStoreError
+    assert mda.MDAComparisonContext is MDAComparisonContext
+    assert mda.MDAComparisonError is MDAComparisonError
+    assert mda.compare_condition_artifacts is compare_condition_artifacts
     assert mda.FrameSelection is FrameSelection
     assert mda.MDAAnalysisJob is MDAAnalysisJob
     assert mda.MDAAnalysisJobError is MDAAnalysisJobError
@@ -112,6 +120,9 @@ def test_public_facade_reexports_primitives() -> None:
         "ReplicateArtifact",
         "ArtifactStore",
         "ArtifactStoreError",
+        "MDAComparisonContext",
+        "MDAComparisonError",
+        "compare_condition_artifacts",
         "FrameSelection",
         "MDAAnalysisJob",
         "MDAAnalysisJobError",
@@ -141,6 +152,7 @@ def test_import_does_not_load_heavy_simulation_modules() -> None:
     importlib.import_module("polyzymd.analyses.mda.aggregation")
     importlib.import_module("polyzymd.analyses.mda.artifacts")
     importlib.import_module("polyzymd.analyses.mda.base")
+    importlib.import_module("polyzymd.analyses.mda.comparison")
     importlib.import_module("polyzymd.analyses.mda.frame_selection")
     importlib.import_module("polyzymd.analyses.mda.job")
     importlib.import_module("polyzymd.analyses.mda.lifecycle")

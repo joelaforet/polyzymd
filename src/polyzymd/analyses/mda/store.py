@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from polyzymd.analyses.mda.artifacts import (
     ArtifactManifest,
     ArtifactSidecarRef,
+    ComparisonArtifact,
     ConditionArtifact,
     ReplicateArtifact,
     validate_artifact_relative_path,
@@ -128,6 +129,50 @@ class ArtifactStore:
         except (OSError, ValidationError) as exc:
             raise ArtifactStoreError(
                 f"Failed to validate condition artifact {resolved_path}: {exc}"
+            ) from exc
+
+    def write_comparison_result(
+        self,
+        artifact: ComparisonArtifact,
+        path: str | Path = "result.json",
+    ) -> Path:
+        """Write a comparison artifact JSON file.
+
+        Parameters
+        ----------
+        artifact : ComparisonArtifact
+            Comparison artifact envelope to serialize.
+        path : str or Path, optional
+            Store-relative JSON path, by default ``"result.json"``.
+
+        Returns
+        -------
+        Path
+            Absolute path to the written JSON file.
+        """
+
+        return self._write_json_model(artifact, path)
+
+    def read_comparison_result(self, path: str | Path = "result.json") -> ComparisonArtifact:
+        """Read a comparison artifact JSON file.
+
+        Parameters
+        ----------
+        path : str or Path, optional
+            Store-relative JSON path, by default ``"result.json"``.
+
+        Returns
+        -------
+        ComparisonArtifact
+            Deserialized comparison artifact.
+        """
+
+        resolved_path = self._resolve_relative_path(path)
+        try:
+            return ComparisonArtifact.model_validate_json(resolved_path.read_text())
+        except (OSError, ValidationError) as exc:
+            raise ArtifactStoreError(
+                f"Failed to validate comparison artifact {resolved_path}: {exc}"
             ) from exc
 
     def write_manifest(

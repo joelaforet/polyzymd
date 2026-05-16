@@ -424,12 +424,18 @@ def save_result(result: Any, path: Path) -> Path:
         Saved path.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    from polyzymd.analyses.mda.artifacts import ConditionArtifact
+    from polyzymd.analyses.mda.artifacts import ComparisonArtifact, ConditionArtifact
 
     if isinstance(result, ConditionArtifact):
         from polyzymd.analyses.mda.store import ArtifactStore
 
         return ArtifactStore(path.parent).write_condition_result(
+            result, path.relative_to(path.parent)
+        )
+    if isinstance(result, ComparisonArtifact):
+        from polyzymd.analyses.mda.store import ArtifactStore
+
+        return ArtifactStore(path.parent).write_comparison_result(
             result, path.relative_to(path.parent)
         )
     if hasattr(result, "save"):

@@ -9,6 +9,12 @@ from pydantic import BaseModel
 
 from polyzymd.analyses._comparison_models import MetricValue
 from polyzymd.analyses.exceptions import PluginContractError
+from polyzymd.analyses.mda.artifacts import ConditionArtifact
+from polyzymd.analyses.mda.comparison import (
+    MDAComparisonContext,
+    MDAComparisonError,
+    compare_condition_artifacts,
+)
 
 logger = logging.getLogger("polyzymd.analyses")
 
@@ -28,9 +34,7 @@ def default_compare(analysis: Any, ctx: Any) -> BaseModel | None:
     BaseModel | None
         Comparison result, or ``None`` if no metrics are available.
     """
-    from polyzymd.analyses.stats import default_scalar_comparison
-
-    metrics_by_condition: dict[str, dict[str, MetricValue]] = {}
+    summaries_by_condition: dict[str, tuple[Any, Any, str | None]] = {}
     for condition in ctx.conditions:
         summary = ctx.aggregated_results.get(condition.label)
         source: str | None = f"comparison context for {condition.label}"
@@ -54,6 +58,51 @@ def default_compare(analysis: Any, ctx: Any) -> BaseModel | None:
                 )
                 continue
 
+        summaries_by_condition[condition.label] = (condition, summary, source)
+
+    if not summaries_by_condition:
+        logger.warning("%s: no conditions have metrics — skipping comparison.", analysis.name)
+        return None
+
+    condition_artifacts = [
+        summary
+        for _, summary, _ in summaries_by_condition.values()
+        if isinstance(summary, ConditionArtifact)
+    ]
+    if condition_artifacts:
+        if len(condition_artifacts) != len(summaries_by_condition):
+            artifact_labels = [artifact.condition_label for artifact in condition_artifacts]
+            legacy_labels = [
+                label
+                for label, (_, summary, _) in summaries_by_condition.items()
+                if not isinstance(summary, ConditionArtifact)
+            ]
+            raise MDAComparisonError(
+                f"{analysis.name}: mixed MDA condition artifacts and legacy aggregate results "
+                f"cannot be compared together; MDA labels={artifact_labels}, "
+                f"legacy labels={legacy_labels}. Recompute this analysis or clear stale "
+                "aggregate result.json files before comparing."
+            )
+        return compare_condition_artifacts(
+            condition_artifacts,
+            MDAComparisonContext(
+                analysis_name=analysis.name,
+                project_name=ctx.name,
+                expected_condition_labels=[condition.label for condition in ctx.conditions],
+                control_label=ctx.control_label,
+                effective_control=ctx.effective_control,
+                equilibration=ctx.equilibration,
+                settings_fingerprint=analysis.aggregate_settings_fingerprint(ctx.settings),
+                fdr_alpha=getattr(ctx, "fdr_alpha", 0.05),
+                ttest_method=getattr(ctx, "ttest_method", "student"),
+                posthoc_method=getattr(ctx, "posthoc_method", "ttest_bh"),
+            ),
+        )
+
+    from polyzymd.analyses.stats import default_scalar_comparison
+
+    metrics_by_condition: dict[str, dict[str, MetricValue]] = {}
+    for condition, summary, source in summaries_by_condition.values():
         summary = analysis.validate_aggregated_result(
             summary,
             condition=condition,
