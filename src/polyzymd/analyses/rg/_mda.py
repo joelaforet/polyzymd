@@ -80,6 +80,7 @@ class RgRunPayload:
     fragment_rg_values: NDArray[np.float64] | None = None
     fragment_counts_per_frame: NDArray[np.int64] | None = None
     fragment_masses: NDArray[np.float64] | None = None
+    fragment_topology: dict[str, Any] | None = None
     frag_metadata: dict[str, float | int] = field(default_factory=dict)
 
 
@@ -139,6 +140,18 @@ def build_rg_jobs(
     jobs: list[MDAAnalysisJob] = []
     for run in runs:
         run_payload = run.model_dump(mode="json")
+        metadata = {
+            **ctx.universe_policy.metadata,
+            "rg_run": run_payload,
+            "pbc_policy": pbc_policy_payload(),
+        }
+        if run.calculation_mode == "fragments":
+            metadata["fragment_topology"] = fragment_topology_payload(
+                run_label=run.label,
+                selection=run.selection,
+                fragment_weighting=run.fragment_weighting,
+                save_fragment_distribution=run.save_fragment_distribution,
+            )
         jobs.append(
             MDAAnalysisJob(
                 name=run.label,
@@ -153,11 +166,7 @@ def build_rg_jobs(
                     condition_label=ctx.replicate_context.condition.label,
                     replicate=ctx.replicate,
                     provenance=ctx.universe_policy.provenance,
-                    metadata={
-                        **ctx.universe_policy.metadata,
-                        "rg_run": run_payload,
-                        "pbc_policy": pbc_policy_payload(),
-                    },
+                    metadata=metadata,
                 ),
             )
         )
@@ -188,6 +197,8 @@ def build_rg_analysis(
 
     from MDAnalysis.analysis.base import AnalysisBase
 
+    fragment_errors = _fragment_resolution_errors()
+
     class RgMDAAnalysis(AnalysisBase):
         """Collect selection or fragment Rg values over one trajectory."""
 
@@ -210,6 +221,7 @@ def build_rg_analysis(
             self.results.fragment_counts_per_frame = []
             self.results.fragment_rg_values = []
             self.results.fragment_masses = None
+            self.results.fragment_topology = None
             self.results.warnings = list(self._warnings)
             self.results.skipped_run = None
             if len(self._atom_group) == 0:
@@ -231,9 +243,17 @@ def build_rg_analysis(
                 return
 
             self._warnings.append(RG_FRAGMENT_POLICY_WARNING)
+            fragment_topology = fragment_topology_payload(
+                run_label=self._run.label,
+                selection=self._run.selection,
+                fragment_weighting=self._run.fragment_weighting,
+                save_fragment_distribution=self._run.save_fragment_distribution,
+            )
             try:
                 fragments = list(self._atom_group.fragments)
-            except Exception as exc:  # pragma: no cover - depends on MDAnalysis topology internals
+            except (
+                fragment_errors
+            ) as exc:  # pragma: no cover - depends on MDAnalysis topology internals
                 message = (
                     f"Run '{self._run.label}' could not resolve MDAnalysis fragments "
                     f"({type(exc).__name__}: {exc}); using the full selection as one fragment"
@@ -241,6 +261,8 @@ def build_rg_analysis(
                 LOGGER.warning(message)
                 self._warnings.append(message)
                 fragments = []
+                fragment_topology["fallback_used"] = True
+                fragment_topology["fallback_reason"] = message
             if not fragments:
                 message = (
                     f"Run '{self._run.label}' has no topology fragments; using the full "
@@ -249,6 +271,8 @@ def build_rg_analysis(
                 LOGGER.warning(message)
                 self._warnings.append(message)
                 fragments = [self._atom_group]
+                fragment_topology["fallback_used"] = True
+                fragment_topology.setdefault("fallback_reason", message)
             if len(fragments) == 1:
                 message = (
                     f"Run '{self._run.label}' selection produced one fragment; fragment mode "
@@ -256,7 +280,10 @@ def build_rg_analysis(
                 )
                 LOGGER.warning(message)
                 self._warnings.append(message)
+                fragment_topology["single_fragment"] = True
             self._fragments = fragments
+            fragment_topology["n_topology_fragments"] = len(fragments)
+            self.results.fragment_topology = fragment_topology
             if self._run.fragment_weighting == "mass":
                 self._fragment_masses = np.asarray(
                     [fragment.total_mass() for fragment in fragments], dtype=np.float64
@@ -300,6 +327,7 @@ def build_rg_analysis(
                 self.results.rg_values = np.asarray([], dtype=np.float64)
                 self.results.fragment_counts_per_frame = None
                 self.results.fragment_rg_values = None
+                self.results.fragment_topology = None
                 return
             self.results.rg_values = np.asarray(self.results.rg_values, dtype=np.float64)
             if self._run.calculation_mode == "fragments":
@@ -316,6 +344,7 @@ def build_rg_analysis(
             else:
                 self.results.fragment_counts_per_frame = None
                 self.results.fragment_rg_values = None
+                self.results.fragment_topology = None
 
     return RgMDAAnalysis()
 
@@ -386,6 +415,7 @@ class RgArtifactCollector:
                     ctx.universe_policy.as_dict(), analysis_name=ctx.analysis_name
                 ),
                 "pbc_policy": pbc_policy_payload(),
+                "fragment_topology": _fragment_topology_by_run(run_payloads),
             },
             metadata={
                 "result_kind": "rg_mda_replicate",
@@ -479,6 +509,7 @@ def aggregate_rg_artifacts(
             "source": "rg_replicate_artifact_aggregation",
             "frame_selection": ordered_artifacts[0].provenance.get("frame_selection"),
             "pbc_policy": pbc_policy_payload(),
+            "fragment_topology": _aggregate_fragment_topology(ordered_artifacts),
         },
         metadata={
             "result_kind": "rg_mda_condition",
@@ -595,6 +626,67 @@ def pbc_policy_payload() -> dict[str, Any]:
         "make_whole": False,
         "warning": RG_PBC_POLICY_WARNING,
     }
+
+
+def fragment_topology_payload(
+    *,
+    run_label: str,
+    selection: str,
+    fragment_weighting: str | None,
+    save_fragment_distribution: bool,
+) -> dict[str, Any]:
+    """Return structured fragment-topology provenance for one Rg run.
+
+    Parameters
+    ----------
+    run_label : str
+        Configured run label.
+    selection : str
+        MDAnalysis atom selection.
+    fragment_weighting : str | None
+        Fragment reduction weighting policy.
+    save_fragment_distribution : bool
+        Whether per-fragment Rg distributions are persisted.
+
+    Returns
+    -------
+    dict[str, Any]
+        JSON-compatible topology assumptions and runtime fragment metadata.
+    """
+
+    return {
+        "run_label": run_label,
+        "selection": selection,
+        "calculation_mode": "fragments",
+        "fragment_source": "MDAnalysis AtomGroup.fragments",
+        "requires_topology_bonds": True,
+        "assumes_fragment_definitions_are_scientifically_meaningful": True,
+        "fallback_when_unavailable": "full_selection_as_single_fragment",
+        "fallback_used": False,
+        "single_fragment": False,
+        "n_topology_fragments": None,
+        "fragment_weighting": fragment_weighting,
+        "save_fragment_distribution": bool(save_fragment_distribution),
+        "warning": RG_FRAGMENT_POLICY_WARNING,
+    }
+
+
+def _fragment_resolution_errors() -> tuple[type[BaseException], ...]:
+    """Return expected exception classes for missing MDAnalysis fragment topology.
+
+    Returns
+    -------
+    tuple[type[BaseException], ...]
+        Exception classes that represent absent or unusable fragment topology.
+    """
+
+    errors: list[type[BaseException]] = [AttributeError, ValueError, TypeError, LookupError]
+    try:
+        from MDAnalysis.exceptions import NoDataError
+    except ImportError:
+        return tuple(errors)
+    errors.append(NoDataError)
+    return tuple(errors)
 
 
 def mdanalysis_version() -> str:
@@ -749,6 +841,8 @@ def _collect_run(
         "frame_stride": run_payload.frame_stride,
         **run_payload.frag_metadata,
     }
+    if run_payload.fragment_topology is not None:
+        payload["fragment_topology"] = run_payload.fragment_topology
     return payload, sidecar
 
 
@@ -815,6 +909,12 @@ def _payload_from_analysis(
     fragment_masses = getattr(results, "fragment_masses", None)
     if fragment_masses is not None:
         fragment_masses = np.asarray(fragment_masses, dtype=np.float64)
+    fragment_topology = getattr(results, "fragment_topology", None)
+    if fragment_topology is not None:
+        fragment_topology = strict_json_payload(
+            fragment_topology,
+            analysis_name="rg",
+        )
 
     frag_metadata: dict[str, float | int] = {}
     if fragment_rg_values is not None and fragment_rg_values.size > 0:
@@ -866,6 +966,7 @@ def _payload_from_analysis(
         fragment_rg_values=fragment_rg_values,
         fragment_counts_per_frame=fragment_counts,
         fragment_masses=fragment_masses,
+        fragment_topology=fragment_topology,
         frag_metadata=frag_metadata,
     )
 
@@ -1199,6 +1300,59 @@ def _condition_metrics(
         for replicate, value in zip(run.replicates, values, strict=True):
             replicate_metrics.setdefault(str(replicate), {})[metric_name] = value
     return metrics, replicate_metrics
+
+
+def _fragment_topology_by_run(run_payloads: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Collect structured fragment-topology provenance from run payloads."""
+
+    by_run: dict[str, Any] = {}
+    for payload in run_payloads:
+        topology = payload.get("fragment_topology")
+        run_label = payload.get("run_label")
+        if isinstance(run_label, str) and isinstance(topology, Mapping):
+            by_run[run_label] = strict_json_payload(topology, analysis_name="rg")
+    return by_run
+
+
+def _aggregate_fragment_topology(artifacts: Sequence[ReplicateArtifact]) -> dict[str, Any]:
+    """Aggregate per-replicate fragment-topology provenance by run label."""
+
+    by_run: dict[str, dict[str, Any]] = {}
+    for artifact in artifacts:
+        for payload in artifact.payload.get("runs", []):
+            if not isinstance(payload, Mapping):
+                continue
+            topology = payload.get("fragment_topology")
+            run_label = payload.get("run_label")
+            if not isinstance(run_label, str) or not isinstance(topology, Mapping):
+                continue
+            run_entry = by_run.setdefault(
+                run_label,
+                {
+                    "run_label": run_label,
+                    "fragment_source": topology.get("fragment_source"),
+                    "requires_topology_bonds": topology.get("requires_topology_bonds"),
+                    "assumes_fragment_definitions_are_scientifically_meaningful": topology.get(
+                        "assumes_fragment_definitions_are_scientifically_meaningful"
+                    ),
+                    "fallback_when_unavailable": topology.get("fallback_when_unavailable"),
+                    "warning": topology.get("warning"),
+                    "per_replicate": [],
+                },
+            )
+            run_entry["per_replicate"].append(
+                {
+                    "replicate": int(artifact.replicate),
+                    "n_topology_fragments": topology.get("n_topology_fragments"),
+                    "fallback_used": bool(topology.get("fallback_used", False)),
+                    "single_fragment": bool(topology.get("single_fragment", False)),
+                    "fragment_weighting": topology.get("fragment_weighting"),
+                    "save_fragment_distribution": bool(
+                        topology.get("save_fragment_distribution", False)
+                    ),
+                }
+            )
+    return by_run
 
 
 def _run_settings_from_job(job: MDAJobResult) -> Mapping[str, Any]:

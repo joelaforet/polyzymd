@@ -547,8 +547,7 @@ def _load_replicate_timeseries(
                 rg_values = np.asarray(payload["rg_values"], dtype=np.float64)
                 time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
         except (OSError, ValueError, KeyError) as exc:
-            logger.warning("Failed to load Rg NPZ sidecar %s: %s", npz_path, exc)
-            continue
+            raise ValueError(f"Failed to load required Rg NPZ sidecar {npz_path}: {exc}") from exc
 
         if rg_values.ndim != 1 or time_ns.ndim != 1:
             logger.warning("Unexpected NPZ shape for %s; expected 1D arrays", npz_path)
@@ -605,7 +604,7 @@ def _resolve_npz_sidecar_path(
     Path | None
         NPZ sidecar path from metadata, or ``None`` when unavailable.
     """
-    from polyzymd.analyses.mda import ArtifactStore
+    from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
 
     run_dir = condition_dir / f"run_{replicate}"
     if not run_dir.exists():
@@ -619,9 +618,8 @@ def _resolve_npz_sidecar_path(
 
     try:
         artifact = ArtifactStore(run_dir).read_replicate_result("result.json")
-    except Exception as exc:
-        logger.warning("Failed to load Rg replicate artifact %s: %s", result_path, exc)
-        return None
+    except ArtifactStoreError:
+        raise
 
     run_result = next(
         (
@@ -648,15 +646,17 @@ def _resolve_npz_sidecar_path(
         )
         return None
 
-    try:
-        from polyzymd.analyses.mda import ArtifactSidecarRef
+    from pydantic import ValidationError
 
-        npz_path = ArtifactStore(run_dir).validate_sidecar(
-            ArtifactSidecarRef.model_validate(sidecar_payload)
-        )
-    except Exception as exc:
-        logger.warning("Invalid Rg NPZ sidecar metadata for %s: %s", result_path, exc)
-        return None
+    from polyzymd.analyses.mda import ArtifactSidecarRef
+
+    try:
+        sidecar = ArtifactSidecarRef.model_validate(sidecar_payload)
+    except ValidationError as exc:
+        raise ValueError(
+            f"Invalid Rg NPZ sidecar metadata for run '{run_label}' in {result_path}: {exc}"
+        ) from exc
+    npz_path = ArtifactStore(run_dir).validate_sidecar(sidecar)
 
     return npz_path
 
@@ -674,7 +674,7 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
     dict | None
         Parsed artifact payload, or ``None`` when no aggregate artifact is available.
     """
-    from polyzymd.analyses.mda import ArtifactStore
+    from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
 
     agg_dir = condition_dir / "aggregated"
     if not agg_dir.exists():
@@ -685,9 +685,8 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
         return None
     try:
         artifact = ArtifactStore(agg_dir).read_condition_result("result.json")
-    except Exception as exc:
-        logger.warning("Failed to load aggregated Rg artifact %s: %s", canonical, exc)
-        return None
+    except ArtifactStoreError:
+        raise
     return artifact.payload
 
 

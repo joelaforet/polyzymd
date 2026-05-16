@@ -13,7 +13,12 @@ import pytest
 from polyzymd.analyses._analysis_lifecycle import AnalysisLifecycle
 from polyzymd.analyses.base import Analysis, PlotContext
 from polyzymd.analyses.discovery import get_analysis
-from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact, ReplicateArtifact
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    ArtifactStoreError,
+    ConditionArtifact,
+    ReplicateArtifact,
+)
 from polyzymd.analyses.rg import RgAnalysis, RgRunSettings, RgSettings
 from polyzymd.analyses.rg._comparison_results import (
     RgComparisonResult,
@@ -443,6 +448,104 @@ def test_run_replicate_persists_artifact_and_empty_selection_skip(
     assert persisted.sidecars[0].path.startswith("sidecars/rg_000_protein_rg_")
 
 
+def test_fragment_mode_lifecycle_records_structured_topology_provenance(
+    fake_mdanalysis: None,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fragment-mode execution should emit warning and structured provenance."""
+
+    analysis = RgAnalysis()
+    settings = RgSettings(
+        runs=[
+            RgRunSettings(
+                label="polymer/frags",
+                selection="polymer",
+                calculation_mode="fragments",
+                fragment_weighting="mass",
+            )
+        ]
+    )
+    condition = make_condition(label="Control", replicates=(1,))
+    output_dir = tmp_path / "run_1"
+    universe = _FakeUniverse(n_frames=3, dt=10.0)
+    frag_a = _FakeAtomGroup(universe, [1.0, 2.0, 3.0], masses=2.0)
+    frag_b = _FakeAtomGroup(universe, [3.0, 4.0, 5.0], masses=1.0)
+    universe.selection_map["polymer"] = _FakeAtomGroup(
+        universe,
+        [0.0, 0.0, 0.0],
+        fragments=[frag_a, frag_b],
+    )
+
+    class _Provider:
+        @classmethod
+        def from_config(cls, *_args: Any, **_kwargs: Any) -> _Provider:
+            return cls()
+
+        def load_universe(self, _replicate: int) -> _FakeUniverse:
+            return universe
+
+        def provenance_for(self, _replicate: int) -> dict[str, Any]:
+            return {"warnings": []}
+
+    class _Loader:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def get_timestep(self, _replicate: int, unit: str = "ps") -> float:
+            """Return a fixed timestep for frame-window resolution."""
+
+            del unit
+            return 10.0
+
+    monkeypatch.setattr(analysis, "_mda_universe_provider_factory", lambda: _Provider)
+    monkeypatch.setattr(analysis, "_trajectory_loader_factory", lambda: _Loader)
+    monkeypatch.setattr("polyzymd.analyses.rg._mda.compute_config_hash", lambda _config: "hash123")
+
+    artifact = AnalysisLifecycle(analysis).run_replicate_once(
+        condition,
+        settings,
+        "0ns",
+        output_dir,
+        1,
+        recompute=True,
+    )
+
+    assert isinstance(artifact, ReplicateArtifact)
+    assert RG_FRAGMENT_POLICY_WARNING in artifact.warnings
+    run_payload = artifact.payload["runs"][0]
+    assert run_payload["run_label"] == "polymer/frags"
+    assert run_payload["calculation_mode"] == "fragments"
+    assert run_payload["fragment_topology"]["fragment_source"] == ("MDAnalysis AtomGroup.fragments")
+    assert run_payload["fragment_topology"]["requires_topology_bonds"] is True
+    assert run_payload["fragment_topology"]["fallback_used"] is False
+    assert run_payload["fragment_topology"]["n_topology_fragments"] == 2
+    assert artifact.provenance["fragment_topology"]["polymer/frags"]["n_topology_fragments"] == 2
+
+    aggregate_ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1,),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="0ns",
+    )
+    aggregate = analysis.aggregate(aggregate_ctx, [artifact])
+
+    aggregate_topology = aggregate.provenance["fragment_topology"]["polymer/frags"]
+    assert aggregate_topology["fragment_source"] == "MDAnalysis AtomGroup.fragments"
+    assert aggregate_topology["requires_topology_bonds"] is True
+    assert aggregate_topology["per_replicate"] == [
+        {
+            "replicate": 1,
+            "n_topology_fragments": 2,
+            "fallback_used": False,
+            "single_fragment": False,
+            "fragment_weighting": "mass",
+            "save_fragment_distribution": True,
+        }
+    ]
+
+
 def test_aggregate_rejects_legacy_inputs(tmp_path) -> None:
     """Rg aggregation should reject legacy RgResult inputs with recompute guidance."""
 
@@ -642,6 +745,24 @@ def test_plotters_load_canonical_artifacts_only(tmp_path) -> None:
     assert aggregate_payload["runs"][0]["run_label"] == "protein_rg"
 
 
+def test_plotters_fail_on_corrupted_canonical_artifacts(tmp_path) -> None:
+    """Rg plot helpers should fail loudly for corrupted canonical artifacts."""
+
+    run_dir = tmp_path / "control" / "run_1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "result.json").write_text("not-json", encoding="utf-8")
+
+    with pytest.raises(ArtifactStoreError, match="Failed to validate replicate artifact"):
+        _load_replicate_timeseries(tmp_path / "control", "protein_rg", [1])
+
+    agg_dir = tmp_path / "control" / "aggregated"
+    agg_dir.mkdir()
+    (agg_dir / "result.json").write_text("not-json", encoding="utf-8")
+
+    with pytest.raises(ArtifactStoreError, match="Failed to validate condition artifact"):
+        _load_condition_aggregated(tmp_path / "control")
+
+
 def test_plot_rejects_legacy_aggregated_result_from_disk(tmp_path) -> None:
     """plot should fail loudly when aggregated Rg cache lacks artifact identity."""
 
@@ -696,8 +817,8 @@ def test_plot_rejects_legacy_aggregated_result_from_disk(tmp_path) -> None:
         analysis.plot(plot_ctx)
 
 
-def test_condition_artifact_records_pbc_and_fragment_assumptions(tmp_path) -> None:
-    """Aggregates should preserve explicit PBC and fragment-topology provenance."""
+def test_condition_artifact_records_pbc_policy(tmp_path) -> None:
+    """Aggregates should preserve explicit PBC provenance."""
 
     settings = _settings()
     artifact = _replicate_artifact(
@@ -715,7 +836,6 @@ def test_condition_artifact_records_pbc_and_fragment_assumptions(tmp_path) -> No
             }
         ],
     )
-    artifact.warnings.append(RG_FRAGMENT_POLICY_WARNING)
     ctx = make_aggregate_context(
         condition=make_condition(label="Control", replicates=(1,)),
         replicates=(1,),
@@ -728,4 +848,3 @@ def test_condition_artifact_records_pbc_and_fragment_assumptions(tmp_path) -> No
 
     assert aggregate.provenance["pbc_policy"]["coordinates"] == "as_loaded"
     assert RG_PBC_POLICY_WARNING in aggregate.warnings
-    assert RG_FRAGMENT_POLICY_WARNING in aggregate.warnings

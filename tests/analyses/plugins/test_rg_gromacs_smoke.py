@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 
@@ -17,7 +17,6 @@ from tests._support.gromacs_smoke import (
     create_gromacs_layout,
     make_condition,
     make_gromacs_config,
-    make_mock_universe,
 )
 
 
@@ -42,6 +41,58 @@ class _SmokeAnalysisBase:
         return self
 
 
+class _SmokeAtomGroup:
+    """Explicit atom-group fake for the Rg GROMACS smoke test."""
+
+    def __init__(self, n_atoms: int, rg_value: float) -> None:
+        self.n_atoms = n_atoms
+        self.indices = np.arange(n_atoms, dtype=np.int64)
+        self._rg_value = float(rg_value)
+
+    def __len__(self) -> int:
+        """Return the number of atoms in the fake selection."""
+
+        return self.n_atoms
+
+    def radius_of_gyration(self) -> float:
+        """Return the configured Rg value."""
+
+        return self._rg_value
+
+
+class _SmokeUniverse:
+    """Explicit universe fake returned by the fake MDAnalysis module."""
+
+    def __init__(self, n_frames: int = 5, dt_ps: float = 10.0, rg_value: float = 15.0) -> None:
+        self.trajectory = _SmokeTrajectory(n_frames=n_frames, dt_ps=dt_ps)
+        self._selection = _SmokeAtomGroup(n_atoms=20, rg_value=rg_value)
+
+    def select_atoms(self, _selection: str) -> _SmokeAtomGroup:
+        """Return the single fake atom group for any selection."""
+
+        return self._selection
+
+
+class _SmokeTrajectory:
+    """Explicit trajectory fake with MDAnalysis-like frame metadata."""
+
+    def __init__(self, n_frames: int, dt_ps: float) -> None:
+        self._n_frames = n_frames
+        self.dt = dt_ps
+        self.time = 0.0
+
+    def __len__(self) -> int:
+        """Return the number of frames."""
+
+        return self._n_frames
+
+    def __getitem__(self, index: int) -> SimpleNamespace:
+        """Return one frame namespace."""
+
+        self.time = float(index) * self.dt
+        return SimpleNamespace(frame=int(index), time=self.time)
+
+
 class TestRgGromacsSmoke:
     """Smoke test for Rg with GROMACS trajectory layout."""
 
@@ -55,11 +106,10 @@ class TestRgGromacsSmoke:
         settings = RgSettings(
             runs=[RgRunSettings(label="protein_rg", selection="protein and name CA")]
         )
-        universe = make_mock_universe(n_frames=5, n_atoms=20)
-        universe.select_atoms.return_value.radius_of_gyration = MagicMock(return_value=15.0)
+        universe = _SmokeUniverse(n_frames=5, rg_value=15.0)
         fake_mda = ModuleType("MDAnalysis")
         fake_mda.__version__ = "test-mda"
-        fake_mda.Universe = MagicMock(return_value=universe)
+        fake_mda.Universe = lambda *_args, **_kwargs: universe
         fake_analysis = ModuleType("MDAnalysis.analysis")
         fake_base = ModuleType("MDAnalysis.analysis.base")
         fake_base.AnalysisBase = _SmokeAnalysisBase
