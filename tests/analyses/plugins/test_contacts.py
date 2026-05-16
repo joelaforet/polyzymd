@@ -744,23 +744,203 @@ def _make_valid_agg_result(settings, n_replicates: int = 2, n_residues: int = 2)
     )
 
 
-class TestAggregate:
-    """aggregate delegates to aggregate_contact_results."""
+def _write_contacts_replicate_artifact(
+    analysis_dir: Path,
+    settings,
+    *,
+    condition_label: str = "test",
+    replicate: int = 1,
+    contact_fractions: list[float] | None = None,
+    event_durations_ns: list[tuple[int, str, float]] | None = None,
+):
+    """Write a synthetic contacts replicate artifact and event sidecar."""
 
-    def test_aggregate_delegates(self, tmp_path):
+    import numpy as np
+
+    from polyzymd.analyses.contacts._identity import (
+        CONTACT_SEMANTICS_VERSION,
+        CONTACTS_PBC_POLICY,
+        contacts_detection_fingerprint,
+        contacts_detection_identity_payload,
+    )
+    from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
+
+    fractions = contact_fractions or [0.5, 0.0]
+    events = event_durations_ns or []
+    run_dir = analysis_dir / f"run_{replicate}"
+    store = ArtifactStore(run_dir)
+    protein_resids = np.arange(1, len(fractions) + 1, dtype=np.int64)
+    protein_resnames = np.asarray(["ALA", "ASP"][: len(fractions)], dtype="U16")
+    protein_groups = np.asarray(["nonpolar", "charged"][: len(fractions)], dtype="U32")
+    polymer_resnames = np.asarray(["PEG"], dtype="U16")
+    start_indices = np.arange(len(events), dtype=np.int64)
+    durations_ns = np.asarray([event[2] for event in events], dtype=np.float64)
+    protein_indices = np.asarray([event[0] for event in events], dtype=np.int64)
+    sidecar = store.write_npz_sidecar(
+        "sidecars/contact_events.npz",
+        event_start_sample_index=start_indices,
+        event_start_frame=start_indices,
+        event_duration_samples=np.ones(len(events), dtype=np.int64),
+        event_duration_ps=durations_ns * 1000.0,
+        event_duration_ns=durations_ns,
+        protein_residue_index=protein_indices,
+        polymer_residue_index=np.zeros(len(events), dtype=np.int64),
+        polymer_chain_index=np.zeros(len(events), dtype=np.int64),
+        frame_indices=np.arange(10, dtype=np.int64),
+        time_ps=np.arange(10, dtype=np.float64) * 1000.0,
+        protein_resids=protein_resids,
+        protein_resnames=protein_resnames,
+        protein_groups=protein_groups,
+        protein_chainids=np.asarray(["A"] * len(fractions), dtype="U16"),
+        polymer_resids=np.asarray([10], dtype=np.int64),
+        polymer_resnames=polymer_resnames,
+        polymer_chain_indices=np.asarray([0], dtype=np.int64),
+        polymer_chainids=np.asarray(["C"], dtype="U16"),
+        metadata={"kind": "contact_events"},
+    )
+    detection = contacts_detection_identity_payload(settings)
+    coverage = sum(value > 0 for value in fractions) / len(fractions)
+    artifact = ReplicateArtifact(
+        analysis_name="contacts",
+        condition_label=condition_label,
+        replicate=replicate,
+        payload={
+            "metrics": {
+                "coverage": coverage,
+                "mean_contact_fraction": sum(fractions) / len(fractions),
+            },
+            "replicate_metrics": {
+                "coverage": coverage,
+                "mean_contact_fraction": sum(fractions) / len(fractions),
+            },
+            "n_frames_total": 10,
+            "n_frames_used": 10,
+            "n_contact_events": len(events),
+            "n_contacted_residues": sum(value > 0 for value in fractions),
+            "n_protein_residues": len(fractions),
+            "n_polymer_residues": 1,
+            "event_sidecar": sidecar.path,
+            "criteria_cutoff": settings.cutoff,
+            "contact_semantics": CONTACT_SEMANTICS_VERSION,
+            "pbc_policy": CONTACTS_PBC_POLICY,
+            "polymer_types": ["PEG"],
+            "protein_residues": [
+                {
+                    "protein_residue_index": index,
+                    "protein_resid": index + 1,
+                    "protein_resname": str(protein_resnames[index]),
+                    "protein_chain_id": "A",
+                    "protein_group": str(protein_groups[index]),
+                    "contact_fraction": fraction,
+                    "event_count": sum(event[0] == index for event in events),
+                    "polymer_type_contact_fractions": {"PEG": fraction},
+                }
+                for index, fraction in enumerate(fractions)
+            ],
+        },
+        sidecars=[sidecar],
+        provenance={
+            "frame_selection": {
+                "start": 0,
+                "stop": 10,
+                "step": 1,
+                "n_frames_total": 10,
+                "timestep_ps": 1000.0,
+            },
+            "detection_identity": detection,
+            "protein_selection": detection["protein_selection"],
+            "polymer_selection": detection["polymer_selection"],
+            "effective_polymer_selection": detection["effective_polymer_selection"],
+            "grouping": detection["grouping"],
+        },
+        metadata={
+            "settings_fingerprint": contacts_detection_fingerprint(settings),
+            "contacts_detection_fingerprint": contacts_detection_fingerprint(settings),
+            "time_axis_policy": "regular_selected_time_axis",
+        },
+    )
+    store.write_replicate_result(artifact)
+    return artifact
+
+
+def _make_condition_artifact(label: str, settings, replicates=(1, 2, 3), n_residues: int = 2):
+    """Create a condition artifact for contacts comparison tests."""
+
+    from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
+    from polyzymd.analyses.mda import ConditionArtifact
+
+    coverage_values = [1.0 for _ in replicates]
+    contact_values = [0.25 + 0.05 * index for index, _rep in enumerate(replicates)]
+
+    def metric(name, values):
+        mean = sum(values) / len(values)
+        std = 0.0 if len(values) == 1 else 0.05
+        sem = 0.0 if len(values) == 1 else std / (len(values) ** 0.5)
+        return {
+            "name": name,
+            "values": list(values),
+            "mean": mean,
+            "sem": sem,
+            "std": std,
+            "n": len(values),
+        }
+
+    return ConditionArtifact(
+        analysis_name="contacts",
+        condition_label=label,
+        replicates=list(replicates),
+        payload={
+            "metrics": {
+                "coverage": metric("coverage", coverage_values),
+                "mean_contact_fraction": metric("mean_contact_fraction", contact_values),
+            },
+            "replicate_metrics": {
+                str(rep): {"coverage": 1.0, "mean_contact_fraction": contact_values[index]}
+                for index, rep in enumerate(replicates)
+            },
+            "n_residues": n_residues,
+            "residue_stats": [
+                {
+                    "protein_resid": index + 1,
+                    "protein_resname": "ALA",
+                    "protein_chain_id": "A",
+                    "contact_fraction_mean": 0.5 - index * 0.1,
+                }
+                for index in range(n_residues)
+            ],
+            "residence_time_by_polymer_type": {
+                "PEG": {
+                    "mean_ns": 4.0,
+                    "sem_ns": 1.0,
+                    "n_events": 2,
+                    "replicates_with_events": [replicates[0]],
+                    "replicate_means_ns": [4.0],
+                }
+            },
+        },
+        metadata={"contacts_detection_fingerprint": contacts_detection_fingerprint(settings)},
+    )
+
+
+class TestAggregate:
+    """aggregate consumes contacts replicate artifacts only."""
+
+    def test_aggregate_artifacts_writes_condition_artifact(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact
+        from polyzymd.analyses.mda.aggregation import MDAAggregationError
 
         analysis = ContactsAnalysis()
         settings = ContactsSettings()
-        output_dir = tmp_path / "aggregated"
-
-        mock_sim_config = _make_hashable_sim_config(tmp_path)
+        analysis_dir = tmp_path / "contacts"
+        output_dir = analysis_dir / "aggregated"
+        sim_config = _make_hashable_sim_config(tmp_path)
         cond = Condition(
             label="test",
-            config_path=Path("/tmp/config.yaml"),
+            config_path=tmp_path / "config.yaml",
             replicates=(1, 2, 3),
-            sim_config=mock_sim_config,
+            sim_config=sim_config,
         )
         ctx = AggregateContext(
             condition=cond,
@@ -769,23 +949,23 @@ class TestAggregate:
             equilibration="10ns",
             settings=settings,
         )
+        artifacts = [
+            _write_contacts_replicate_artifact(
+                analysis_dir,
+                settings,
+                replicate=replicate,
+                contact_fractions=[0.5, 0.0 if replicate == 3 else 0.2],
+            )
+            for replicate in (1, 2, 3)
+        ]
 
-        mock_results = [_make_mock_contact_result(i) for i in range(1, 4)]
-        mock_agg = _make_mock_agg_result(n_replicates=3)
+        result = analysis.aggregate(ctx, artifacts)
 
-        with patch(
-            "polyzymd.analyses.contacts._aggregator.aggregate_contact_results",
-            return_value=mock_agg,
-        ) as mock_fn:
-            result = analysis.aggregate(ctx, mock_results)
-
-        mock_fn.assert_called_once()
-        assert mock_fn.call_args.kwargs["compute_residence_times"] is True
-        assert result is mock_agg
-        assert mock_agg.metadata["compute_residence_times"] is True
-        assert mock_agg.metadata["residence_times_computed"] is True
-        assert mock_agg.metadata["settings_fingerprint_domain"] == "contacts-v2"
-        mock_agg.save.assert_called_once()
+        assert isinstance(result, ConditionArtifact)
+        assert (output_dir / "result.json").exists()
+        assert ArtifactStore(output_dir).validate_sidecar(result.sidecars[0]).exists()
+        assert result.payload["metrics"]["coverage"]["values"] == [1.0, 1.0, 0.5]
+        assert result.payload["metrics"]["mean_contact_fraction"]["n"] == 3
 
     def test_aggregate_passes_disabled_residence_time_setting(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition
@@ -793,12 +973,47 @@ class TestAggregate:
 
         analysis = ContactsAnalysis()
         settings = ContactsSettings(compute_residence_times=False)
-        mock_sim_config = _make_hashable_sim_config(tmp_path)
+        analysis_dir = tmp_path / "contacts"
+        sim_config = _make_hashable_sim_config(tmp_path)
         cond = Condition(
             label="test",
-            config_path=Path("/tmp/config.yaml"),
+            config_path=tmp_path / "config.yaml",
             replicates=(1, 2),
-            sim_config=mock_sim_config,
+            sim_config=sim_config,
+        )
+        ctx = AggregateContext(
+            condition=cond,
+            replicates=(1, 2),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="10ns",
+            settings=settings,
+        )
+        artifacts = [
+            _write_contacts_replicate_artifact(
+                analysis_dir,
+                settings,
+                replicate=replicate,
+                event_durations_ns=[(0, "PEG", 5.0)],
+            )
+            for replicate in (1, 2)
+        ]
+
+        result = analysis.aggregate(ctx, artifacts)
+
+        assert result.payload["residence_time_by_polymer_type"] == {}
+        assert result.metadata["compute_residence_times"] is False
+
+    def test_aggregate_rejects_legacy_contact_results(self, tmp_path):
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings()
+        cond = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=_make_hashable_sim_config(tmp_path),
         )
         ctx = AggregateContext(
             condition=cond,
@@ -807,508 +1022,106 @@ class TestAggregate:
             equilibration="10ns",
             settings=settings,
         )
-        mock_agg = _make_mock_agg_result(n_replicates=2)
 
-        with patch(
-            "polyzymd.analyses.contacts._aggregator.aggregate_contact_results",
-            return_value=mock_agg,
-        ) as mock_fn:
+        with pytest.raises(ValueError, match="ReplicateArtifact inputs"):
             analysis.aggregate(ctx, [_make_mock_contact_result(1), _make_mock_contact_result(2)])
 
-        assert mock_fn.call_args.kwargs["compute_residence_times"] is False
-        assert mock_agg.metadata["compute_residence_times"] is False
-        assert mock_agg.metadata["residence_times_computed"] is False
-
-    def test_aggregate_rejects_replicate_id_mismatch(self, tmp_path):
+    def test_aggregate_rejects_sidecar_hash_mismatch(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda.aggregation import MDAAggregationError
 
-        analysis = ContactsAnalysis()
         settings = ContactsSettings()
-        mock_sim_config = _make_hashable_sim_config(tmp_path)
-        cond = Condition(
-            label="test",
-            config_path=Path("/tmp/config.yaml"),
-            replicates=(1, 2),
-            sim_config=mock_sim_config,
-        )
-        ctx = AggregateContext(
-            condition=cond,
-            replicates=(1, 2),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=settings,
-        )
-
-        with pytest.raises(ValueError, match="replicate IDs do not match"):
-            analysis.aggregate(ctx, [_make_mock_contact_result(1), _make_mock_contact_result(3)])
-
-    def test_aggregate_saves_file(self, tmp_path):
-        from polyzymd.analyses.base import AggregateContext, Condition
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-        output_dir = tmp_path / "aggregated"
-
-        mock_sim_config = _make_hashable_sim_config(tmp_path)
-        cond = Condition(
-            label="test",
-            config_path=Path("/tmp/config.yaml"),
-            replicates=(1, 3),
-            sim_config=mock_sim_config,
-        )
-        ctx = AggregateContext(
-            condition=cond,
-            replicates=(1, 3),
-            output_dir=output_dir,
-            equilibration="10ns",
-            settings=settings,
-        )
-
-        mock_results = [_make_mock_contact_result(1), _make_mock_contact_result(3)]
-        mock_agg = _make_mock_agg_result(n_replicates=2)
-
-        with patch(
-            "polyzymd.analyses.contacts._aggregator.aggregate_contact_results",
-            return_value=mock_agg,
-        ):
-            analysis.aggregate(ctx, mock_results)
-
-        # Confirm the sidecar path encodes the exact replicate set
-        save_call = mock_agg.save.call_args[0][0]
-        assert "reps1_3" in str(save_call)
-
-    def test_aggregate_rejects_stale_config_hash_cache(self, tmp_path):
-        from polyzymd.analyses.base import AggregateContext, Condition
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-        sim_config = _make_hashable_sim_config(tmp_path)
-        cond = Condition(
-            label="test",
-            config_path=Path("/tmp/config.yaml"),
-            replicates=(1, 2),
-            sim_config=sim_config,
-        )
-        ctx = AggregateContext(
-            condition=cond,
-            replicates=(1, 2),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=settings,
-        )
-        stale = AggregatedContactResult(
-            config_hash="stale-config",
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            metadata={"settings_fingerprint": settings_fingerprint(settings)},
-            n_replicates=2,
-            criteria_cutoff=4.5,
-            coverage_mean=9.9,
-            mean_contact_fraction=9.9,
-        )
-        cache_path = analysis._aggregated_sidecar_path(
-            ctx.output_dir,
-            settings,
-            ctx.equilibration,
-            ctx.replicates,
-        )
-        stale.save(cache_path)
-        fresh = _make_mock_agg_result(n_replicates=2)
-
-        with patch(
-            "polyzymd.analyses.contacts._aggregator.aggregate_contact_results",
-            return_value=fresh,
-        ):
-            result = analysis.aggregate(
-                ctx, [_make_mock_contact_result(1), _make_mock_contact_result(2)]
-            )
-
-        assert result is fresh
-
-    def test_aggregate_prefers_sidecar_over_canonical_cache(self, tmp_path):
-        from polyzymd.analyses.base import AggregateContext, Condition
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-        sim_config = _make_hashable_sim_config(tmp_path)
+        analysis_dir = tmp_path / "contacts"
+        artifact = _write_contacts_replicate_artifact(analysis_dir, settings, replicate=1)
+        (analysis_dir / "run_1" / artifact.payload["event_sidecar"]).write_bytes(b"stale")
         condition = Condition(
             label="test",
             config_path=tmp_path / "config.yaml",
-            replicates=(1, 2),
-            sim_config=sim_config,
+            replicates=(1,),
+            sim_config=_make_hashable_sim_config(tmp_path),
         )
         ctx = AggregateContext(
             condition=condition,
-            replicates=(1, 2),
-            output_dir=tmp_path / "aggregated",
+            replicates=(1,),
+            output_dir=analysis_dir / "aggregated",
             equilibration="10ns",
             settings=settings,
-            result_path=tmp_path / "aggregated" / "result.json",
-        )
-        metadata = {"settings_fingerprint": settings_fingerprint(settings), "replicates": [1, 2]}
-        canonical = AggregatedContactResult(
-            n_replicates=2,
-            replicates=[1, 2],
-            total_frames_per_replicate=[10, 10],
-            criteria_cutoff=4.5,
-            coverage_mean=9.0,
-            mean_contact_fraction=9.0,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            metadata=metadata,
-        )
-        sidecar = canonical.model_copy(update={"coverage_mean": 0.2})
-        canonical.save(ctx.result_path)
-        sidecar.save(
-            analysis._aggregated_sidecar_path(
-                ctx.output_dir,
-                settings,
-                ctx.equilibration,
-                ctx.replicates,
-            )
         )
 
-        result = analysis.aggregate(ctx, [])
-
-        assert result.coverage_mean == pytest.approx(0.2)
-
-    def test_aggregate_rejects_replicate_set_mismatch_cache(self, tmp_path):
-        from polyzymd.analyses.base import AggregateContext, Condition
-        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
-
-        analysis = ContactsAnalysis()
-        settings = ContactsSettings()
-        sim_config = _make_hashable_sim_config(tmp_path)
-        condition = Condition(
-            label="test",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1, 2, 3),
-            sim_config=sim_config,
-        )
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1, 2, 3),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=settings,
-            result_path=tmp_path / "aggregated" / "result.json",
-        )
-        AggregatedContactResult(
-            n_replicates=2,
-            replicates=[1, 2],
-            criteria_cutoff=4.5,
-            coverage_mean=9.0,
-            mean_contact_fraction=9.0,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            metadata={"settings_fingerprint": settings_fingerprint(settings), "replicates": [1, 2]},
-        ).save(ctx.result_path)
-        fresh = _make_mock_agg_result(n_replicates=3)
-
-        with patch(
-            "polyzymd.analyses.contacts._aggregator.aggregate_contact_results",
-            return_value=fresh,
-        ):
-            result = analysis.aggregate(
-                ctx,
-                [
-                    _make_mock_contact_result(1),
-                    _make_mock_contact_result(2),
-                    _make_mock_contact_result(3),
-                ],
-            )
-
-        assert result is fresh
-        assert fresh.replicates == [1, 2, 3]
+        with pytest.raises(MDAAggregationError, match="invalid event sidecar|stale sidecar"):
+            ContactsAnalysis().aggregate(ctx, [artifact])
 
 
 class TestAggregatePolymerTypeCoverage:
-    """Regression tests for polymer-type per-replicate aggregation."""
+    """Regression tests for polymer-type and RT artifact aggregation."""
+
+    def test_includes_zero_contact_replicates_in_polymer_type_vectors(self, tmp_path):
+        result = self._aggregate(tmp_path=tmp_path)
+        residue = result.payload["residue_stats"][0]
+
+        assert residue["by_polymer_type_per_replicate"]["PEG"] == [0.5, 0.3, 0.0]
+        assert residue["by_polymer_type"]["PEG"]["mean"] == pytest.approx((0.5 + 0.3) / 3.0)
+
+    def test_sparse_residence_time_vectors_record_replicate_identity(self, tmp_path):
+        result = self._aggregate(tmp_path=tmp_path, events=[[(0, "PEG", 5.0)], [], []])
+        residue = result.payload["residue_stats"][0]
+
+        assert residue["residence_time_by_polymer_type"]["PEG"]["replicate_means_ns"] == [5.0]
+        assert residue["residence_time_by_polymer_type"]["PEG"]["replicates_with_events"] == [1]
+
+    def test_residence_time_summaries_are_computed_by_default(self, tmp_path):
+        result = self._aggregate(
+            tmp_path=tmp_path, events=[[(0, "PEG", 5.0)], [(0, "PEG", 3.0)], []]
+        )
+
+        summary = result.payload["residence_time_by_polymer_type"]["PEG"]
+        assert summary["mean_ns"] == pytest.approx(4.0)
+        assert summary["replicates_with_events"] == [1, 2]
+        assert summary["n_events"] == 2
+
+    def test_residence_time_summaries_empty_when_disabled(self, tmp_path):
+        result = self._aggregate(
+            tmp_path=tmp_path,
+            settings_kwargs={"compute_residence_times": False},
+            events=[[(0, "PEG", 5.0)], [(0, "PEG", 3.0)], []],
+        )
+
+        assert result.payload["residence_time_by_polymer_type"] == {}
 
     @staticmethod
-    def _make_residence_time_results():
-        """Create minimal contact results with PEG events in two replicates."""
+    def _aggregate(tmp_path, settings_kwargs=None, events=None):
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
 
-        from polyzymd.analyses.contacts._results import (
-            ContactEvent,
-            ContactResult,
-            PolymerSegmentContacts,
-            ResidueContactData,
-        )
-
-        return [
-            ContactResult(
-                residue_contacts=[
-                    ResidueContactData(
-                        protein_resid=1,
-                        protein_resname="ALA",
-                        protein_group="nonpolar",
-                        segment_contacts=[
-                            PolymerSegmentContacts(
-                                polymer_resname="PEG",
-                                polymer_resid=1,
-                                polymer_chain_idx=0,
-                                events=[ContactEvent(start_frame=0, duration=5)],
-                            )
-                        ],
-                        statistical_inefficiency=1.0,
-                        n_effective=10.0,
-                    )
-                ],
-                n_frames=10,
-                criteria_label="distance",
-                criteria_cutoff=4.5,
-                replicate=1,
-            ),
-            ContactResult(
-                residue_contacts=[
-                    ResidueContactData(
-                        protein_resid=1,
-                        protein_resname="ALA",
-                        protein_group="nonpolar",
-                        segment_contacts=[
-                            PolymerSegmentContacts(
-                                polymer_resname="PEG",
-                                polymer_resid=1,
-                                polymer_chain_idx=0,
-                                events=[ContactEvent(start_frame=0, duration=3)],
-                            )
-                        ],
-                        statistical_inefficiency=1.0,
-                        n_effective=10.0,
-                    )
-                ],
-                n_frames=10,
-                criteria_label="distance",
-                criteria_cutoff=4.5,
-                replicate=2,
-            ),
+        settings = ContactsSettings(**(settings_kwargs or {}))
+        analysis_dir = tmp_path / "contacts"
+        event_sets = events or [[(0, "PEG", 5.0)], [(0, "PEG", 3.0)], []]
+        fractions = [[0.5, 0.0], [0.3, 0.0], [0.0, 0.0]]
+        artifacts = [
+            _write_contacts_replicate_artifact(
+                analysis_dir,
+                settings,
+                replicate=replicate,
+                contact_fractions=fractions[index],
+                event_durations_ns=event_sets[index],
+            )
+            for index, replicate in enumerate((1, 2, 3))
         ]
-
-    def test_includes_zero_contact_replicates_in_polymer_type_vectors(self):
-        from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
-        from polyzymd.analyses.contacts._results import (
-            ContactEvent,
-            ContactResult,
-            PolymerSegmentContacts,
-            ResidueContactData,
+        condition = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2, 3),
+            sim_config=_make_hashable_sim_config(tmp_path),
         )
-
-        rep1 = ContactResult(
-            residue_contacts=[
-                ResidueContactData(
-                    protein_resid=1,
-                    protein_resname="ALA",
-                    protein_group="nonpolar",
-                    segment_contacts=[
-                        PolymerSegmentContacts(
-                            polymer_resname="PEG",
-                            polymer_resid=1,
-                            polymer_chain_idx=0,
-                            events=[ContactEvent(start_frame=0, duration=5)],
-                        )
-                    ],
-                    statistical_inefficiency=1.0,
-                    n_effective=10.0,
-                )
-            ],
-            n_frames=10,
-            criteria_label="distance",
-            criteria_cutoff=4.5,
-            replicate=1,
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2, 3),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="10ns",
+            settings=settings,
         )
-        rep2 = ContactResult(
-            residue_contacts=[
-                ResidueContactData(
-                    protein_resid=1,
-                    protein_resname="ALA",
-                    protein_group="nonpolar",
-                    segment_contacts=[
-                        PolymerSegmentContacts(
-                            polymer_resname="PEG",
-                            polymer_resid=1,
-                            polymer_chain_idx=0,
-                            events=[ContactEvent(start_frame=0, duration=3)],
-                        )
-                    ],
-                    statistical_inefficiency=1.0,
-                    n_effective=10.0,
-                )
-            ],
-            n_frames=10,
-            criteria_label="distance",
-            criteria_cutoff=4.5,
-            replicate=2,
-        )
-        rep3 = ContactResult(
-            residue_contacts=[
-                ResidueContactData(
-                    protein_resid=1,
-                    protein_resname="ALA",
-                    protein_group="nonpolar",
-                    segment_contacts=[],
-                    statistical_inefficiency=1.0,
-                    n_effective=10.0,
-                )
-            ],
-            n_frames=10,
-            criteria_label="distance",
-            criteria_cutoff=4.5,
-            replicate=3,
-        )
-
-        aggregated = aggregate_contact_results([rep1, rep2, rep3])
-        residue = aggregated.residue_stats[0]
-
-        assert residue.by_polymer_type_per_replicate["PEG"] == [0.5, 0.3, 0.0]
-        assert residue.by_polymer_type["PEG"][0] == pytest.approx((0.5 + 0.3 + 0.0) / 3.0)
-
-    def test_sparse_residence_time_vectors_record_replicate_identity(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
-        from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
-        from polyzymd.analyses.contacts._results import (
-            ContactEvent,
-            ContactResult,
-            PolymerSegmentContacts,
-            ResidueContactData,
-        )
-
-        rep1 = ContactResult(
-            residue_contacts=[
-                ResidueContactData(
-                    protein_resid=1,
-                    protein_resname="ALA",
-                    protein_group="nonpolar",
-                    segment_contacts=[
-                        PolymerSegmentContacts(
-                            polymer_resname="PEG",
-                            polymer_resid=1,
-                            polymer_chain_idx=0,
-                            events=[ContactEvent(start_frame=0, duration=5)],
-                        )
-                    ],
-                    statistical_inefficiency=1.0,
-                    n_effective=10.0,
-                )
-            ],
-            n_frames=10,
-            criteria_label="distance",
-            criteria_cutoff=4.5,
-            replicate=1,
-        )
-        rep2 = ContactResult(
-            residue_contacts=[
-                ResidueContactData(
-                    protein_resid=1,
-                    protein_resname="ALA",
-                    protein_group="nonpolar",
-                    segment_contacts=[],
-                    statistical_inefficiency=1.0,
-                    n_effective=10.0,
-                )
-            ],
-            n_frames=10,
-            criteria_label="distance",
-            criteria_cutoff=4.5,
-            replicate=2,
-        )
-
-        aggregated = aggregate_contact_results([rep1, rep2])
-        residue = aggregated.residue_stats[0]
-
-        assert residue.residence_time_by_polymer_type_per_replicate["PEG"] == [5.0]
-        assert residue.residence_time_by_polymer_type_replicates["PEG"] == [1]
-        assert ContactsAnalysis()._cache_matches_replicates(aggregated, (1, 2))
-
-    def test_residence_time_summaries_are_computed_by_default(self):
-        from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
-
-        aggregated = aggregate_contact_results(self._make_residence_time_results())
-        residue = aggregated.residue_stats[0]
-
-        assert aggregated.residence_time_by_polymer_type["PEG"][0] == pytest.approx(4.0)
-        assert aggregated.residence_time_by_polymer_type_replicates["PEG"] == [1, 2]
-        assert residue.residence_time_by_polymer_type["PEG"][0] == pytest.approx(4.0)
-        assert residue.residence_time_by_polymer_type_replicates["PEG"] == [1, 2]
-
-    def test_residence_time_summaries_empty_when_disabled(self):
-        from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
-
-        aggregated = aggregate_contact_results(
-            self._make_residence_time_results(),
-            compute_residence_times=False,
-        )
-        residue = aggregated.residue_stats[0]
-
-        assert aggregated.residence_time_by_polymer_type == {}
-        assert aggregated.residence_time_by_polymer_type_replicates == {}
-        assert residue.residence_time_by_polymer_type == {}
-        assert residue.residence_time_by_polymer_type_per_replicate == {}
-        assert residue.residence_time_by_polymer_type_replicates == {}
-
-    def test_sparse_residence_time_mismatched_identity_is_rejected(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
-        from polyzymd.analyses.contacts._aggregator import (
-            AggregatedContactResult,
-            AggregatedResidueStats,
-        )
-
-        aggregated = AggregatedContactResult(
-            n_replicates=2,
-            replicates=[1, 2],
-            total_frames_per_replicate=[10, 10],
-            residue_stats=[
-                AggregatedResidueStats(
-                    protein_resid=1,
-                    protein_resname="ALA",
-                    contact_fraction_per_replicate=[0.5, 0.0],
-                    residence_time_by_polymer_type_per_replicate={"PEG": [5.0, 7.0]},
-                    residence_time_by_polymer_type_replicates={"PEG": [1]},
-                )
-            ],
-        )
-
-        assert not ContactsAnalysis()._cache_matches_replicates(aggregated, (1, 2))
-
-    def test_sparse_residence_time_expands_to_aggregate_replicate_order(self):
-        from polyzymd.analyses.contacts._aggregator import (
-            AggregatedContactResult,
-            AggregatedResidueStats,
-        )
-
-        aggregated = AggregatedContactResult(
-            n_replicates=2,
-            replicates=[1, 3],
-            total_frames_per_replicate=[10, 10],
-            timestep_ps=1000.0,
-            residue_stats=[
-                AggregatedResidueStats(
-                    protein_resid=1,
-                    protein_resname="ALA",
-                    protein_group="nonpolar",
-                    contact_fraction_per_replicate=[0.0, 0.5],
-                    residence_time_by_polymer_type_per_replicate={"PEG": [7.0]},
-                    residence_time_by_polymer_type_replicates={"PEG": [3]},
-                )
-            ],
-        )
-
-        assert aggregated.subset_residence_time_per_replicate(
-            [1], polymer_type="PEG", units="frames"
-        ) == [0.0, 7.0]
-        assert aggregated.group_residence_time_per_replicate(
-            polymer_type="PEG", units="frames"
-        ) == {"nonpolar": [0.0, 7.0]}
+        return ContactsAnalysis().aggregate(ctx, artifacts)
 
 
 # ---------------------------------------------------------------------------
@@ -1579,6 +1392,7 @@ class TestCompare:
         from polyzymd.analyses.contacts import ContactsSettings
 
         labels = ["Control", "Treatment A", "Treatment B"][:n_conditions]
+        settings = ContactsSettings()
         conditions = []
         for label in labels:
             mock_sim = MagicMock()
@@ -1605,7 +1419,11 @@ class TestCompare:
             analysis_dirs=analysis_dirs,
             results_dir=tmp_path / "results",
             equilibration="10ns",
-            settings=ContactsSettings(),
+            settings=settings,
+            aggregated_results={
+                label: _make_condition_artifact(label, settings, replicates=(1, 2, 3))
+                for label in labels
+            },
             recompute=False,
         )
 
@@ -1686,6 +1504,7 @@ class TestCompare:
 
         analysis = ContactsAnalysis()
         ctx = self._make_ctx(tmp_path, n_conditions=3, control="Control")
+        ctx.aggregated_results.pop("Control")
         mock_agg_results = {
             "Treatment A": _make_mock_agg_result(3, 5),
             "Treatment B": _make_mock_agg_result(3, 5),
@@ -1768,6 +1587,9 @@ class TestCompare:
             results_dir=tmp_path / "results",
             equilibration="10ns",
             settings=ContactsSettings(),
+            aggregated_results={
+                "Only": _make_condition_artifact("Only", ContactsSettings(), replicates=(1, 2))
+            },
             recompute=False,
         )
 
@@ -1795,7 +1617,7 @@ class TestCompare:
         )
         analysis_dir = tmp_path / "Finalized" / "contacts"
         analysis_dir.mkdir(parents=True)
-        aggregate = _make_valid_agg_result(settings)
+        aggregate = _make_condition_artifact("Finalized", settings, replicates=(1, 2))
         ctx = ComparisonContext(
             name="test",
             conditions=[condition],
@@ -1816,7 +1638,7 @@ class TestCompare:
         assert result.conditions[0].label == "Finalized"
         load_mock.assert_not_called()
 
-    def test_compare_loads_existing_aggregate_when_recompute_true(self, tmp_path):
+    def test_compare_rejects_legacy_aggregate_when_recompute_true(self, tmp_path):
         """Comparison-stage reads should not suppress valid aggregate JSON files."""
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
@@ -1845,13 +1667,11 @@ class TestCompare:
             recompute=True,
         )
 
-        result = analysis.compare(ctx)
+        with pytest.raises(ValueError, match="canonical ConditionArtifact"):
+            analysis.compare(ctx)
 
-        assert result is not None
-        assert result.conditions[0].label == "Cached"
-
-    def test_compare_loads_validated_root_level_legacy_aggregate(self, tmp_path):
-        """Comparison loading should find legacy contacts aggregates in the analysis root."""
+    def test_compare_ignores_root_level_legacy_aggregate(self, tmp_path):
+        """Comparison loading should not scan root-level legacy contacts aggregates."""
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
 
@@ -1881,8 +1701,7 @@ class TestCompare:
 
         result = analysis.compare(ctx)
 
-        assert result is not None
-        assert result.conditions[0].label == "LegacyRoot"
+        assert result is None
 
     def test_compare_excluded_conditions_recorded(self, tmp_path):
         from polyzymd.analyses.base import ComparisonContext, Condition
@@ -1924,6 +1743,10 @@ class TestCompare:
             results_dir=tmp_path / "results",
             equilibration="10ns",
             settings=ContactsSettings(),
+            aggregated_results={
+                label: _make_condition_artifact(label, ContactsSettings(), replicates=(1, 2, 3))
+                for label in ["A", "B"]
+            },
             recompute=False,
         )
 
@@ -1960,11 +1783,7 @@ class TestCompare:
         """Finalize should accept aggregates that record successful replicate subsets."""
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._aggregator import (
-            AggregatedContactResult,
-            AggregatedResidueStats,
-        )
-        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+        from polyzymd.analyses.mda import ArtifactStore
 
         analysis = ContactsAnalysis()
         settings = ContactsSettings()
@@ -1977,30 +1796,9 @@ class TestCompare:
         analysis_dir = tmp_path / "Subset" / "contacts"
         agg_dir = analysis_dir / "aggregated"
         agg_dir.mkdir(parents=True)
-        AggregatedContactResult(
-            n_replicates=2,
-            replicates=[1, 2],
-            residue_stats=[
-                AggregatedResidueStats(
-                    protein_resid=1,
-                    protein_resname="ALA",
-                    contact_fraction_mean=0.5,
-                    contact_fraction_per_replicate=[0.4, 0.6],
-                )
-            ],
-            total_frames_per_replicate=[10, 10],
-            criteria_cutoff=4.5,
-            coverage_mean=1.0,
-            coverage_sem=0.0,
-            mean_contact_fraction=0.5,
-            mean_contact_fraction_sem=0.1,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            metadata={
-                "settings_fingerprint": contacts_settings_fingerprint(settings),
-                "replicates": [1, 2],
-            },
-        ).save(agg_dir / "result.json")
+        ArtifactStore(agg_dir).write_condition_result(
+            _make_condition_artifact("Subset", settings, replicates=(1, 2))
+        )
         ctx = ComparisonContext(
             name="test",
             conditions=[condition],
@@ -2022,11 +1820,7 @@ class TestCompare:
         """Finalize should accept one successful replicate for smoke-test comparisons."""
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.contacts._aggregator import (
-            AggregatedContactResult,
-            AggregatedResidueStats,
-        )
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+        from polyzymd.analyses.mda import ArtifactStore
 
         analysis = ContactsAnalysis()
         settings = ContactsSettings()
@@ -2039,27 +1833,9 @@ class TestCompare:
         analysis_dir = tmp_path / "Subset" / "contacts"
         agg_dir = analysis_dir / "aggregated"
         agg_dir.mkdir(parents=True)
-        AggregatedContactResult(
-            n_replicates=1,
-            replicates=[1],
-            residue_stats=[
-                AggregatedResidueStats(
-                    protein_resid=1,
-                    protein_resname="ALA",
-                    contact_fraction_mean=0.5,
-                    contact_fraction_per_replicate=[0.5],
-                )
-            ],
-            total_frames_per_replicate=[10],
-            criteria_cutoff=4.5,
-            coverage_mean=1.0,
-            coverage_sem=0.0,
-            mean_contact_fraction=0.5,
-            mean_contact_fraction_sem=0.0,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            metadata={"settings_fingerprint": settings_fingerprint(settings), "replicates": [1]},
-        ).save(agg_dir / "result.json")
+        ArtifactStore(agg_dir).write_condition_result(
+            _make_condition_artifact("Subset", settings, replicates=(1,))
+        )
         ctx = ComparisonContext(
             name="test",
             conditions=[condition],

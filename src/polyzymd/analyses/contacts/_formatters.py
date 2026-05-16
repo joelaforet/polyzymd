@@ -111,14 +111,14 @@ def format_contacts_console_table(
         lines.append(SINGLE_REPLICATE_SEM_NOTE)
     lines.append("")
 
-    # Residence Time by Polymer Type summary
+    # Residence time by polymer type is descriptive, not inferential
     # Collect all polymer types across conditions
     all_polymer_types: set[str] = set()
     for cond in result.conditions:
         all_polymer_types.update(cond.residence_time_by_polymer_type.keys())
 
     if all_polymer_types:
-        lines.append("Residence Time by Polymer Type (frames)")
+        lines.append("Residence Time by Polymer Type (ns, event-conditioned)")
         lines.append("-" * 80)
         # Build header with polymer types
         header_parts = [f"{'Condition':<25}"]
@@ -132,7 +132,9 @@ def format_contacts_console_table(
             row_parts = [f"{cond.label:<25}"]
             for ptype in sorted_types:
                 if ptype in cond.residence_time_by_polymer_type:
-                    mean, sem = cond.residence_time_by_polymer_type[ptype]
+                    rt_summary = cond.residence_time_by_polymer_type[ptype]
+                    mean = rt_summary.mean_ns
+                    sem = rt_summary.sem_ns
                     sem_str = format_sem_value(sem, cond.n_replicates, precision=1)
                     row_parts.append(f"{mean:>5.1f}±{sem_str:<4}")
                 else:

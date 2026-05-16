@@ -23,6 +23,7 @@ References
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar
 
 import numpy as np
@@ -30,8 +31,25 @@ from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 
 from polyzymd.analyses._results_base import BaseAnalysisResult
+from polyzymd.analyses.base import AggregateContext
 from polyzymd.analyses.contacts._results import ContactResult
+from polyzymd.analyses.mda import (
+    ArtifactSidecarRef,
+    ArtifactStore,
+    ConditionArtifact,
+    ReplicateArtifact,
+)
+from polyzymd.analyses.mda.aggregation import AggregatedMetric, MDAAggregationError
+from polyzymd.analyses.mda.store import ArtifactStoreError
 from polyzymd.analyses.shared.statistics import compute_sem as _compute_sem_stat
+
+CONTACT_PROFILE_SIDECAR = "sidecars/contact_profiles.npz"
+CONTACTS_AGGREGATION_POLICY_VERSION = "contacts-condition-aggregation-v1"
+CONTACTS_LEGACY_RECOMPUTE_GUIDANCE = (
+    "Contacts aggregation now requires MDAnalysis ReplicateArtifact inputs. "
+    "Legacy ContactResult/AggregatedContactResult caches are not compatible; rerun contacts "
+    "with recompute enabled or clear stale contacts caches."
+)
 
 
 class AggregatedResidueStats(BaseModel):
@@ -854,234 +872,156 @@ def compute_mad(values: list[float], scale: float = 1.4826) -> tuple[float, floa
     return median, scaled_mad
 
 
-def aggregate_contact_results(
-    results: list[ContactResult],
-    use_median: bool = False,
-    compute_residence_times: bool = True,
-) -> AggregatedContactResult:
-    """Aggregate multiple ContactResults into summary statistics.
+def aggregate_contact_artifacts(
+    artifacts: Sequence[ReplicateArtifact],
+    ctx: AggregateContext,
+) -> ConditionArtifact:
+    """Aggregate contacts replicate artifacts into a condition artifact.
 
     Parameters
     ----------
-    results : list[ContactResult]
-        Contact results from multiple replicates. Must have per-residue
-        statistical inefficiency computed (schema_version >= "1.1.0").
-    use_median : bool
-        If True, use median +/- MAD instead of mean +/- SEM.
-        Default False (use mean +/- SEM).
-    compute_residence_times : bool
-        If True, compute aggregate residence-time summaries from contact
-        events. If False, leave residence-time summary maps empty while keeping
-        contact events available in per-replicate results.
+    artifacts : sequence of ReplicateArtifact
+        Canonical contacts replicate artifacts produced by the MDAnalysis sparse
+        event detector.
+    ctx : AggregateContext
+        Framework-provided aggregation context.
+
+    Returns
+    -------
+    ConditionArtifact
+        Canonical condition artifact with replicate-level metrics and a profile sidecar.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when legacy inputs or stale/mismatched artifacts are supplied.
+    """
+
+    normalized = _validate_contacts_artifacts(artifacts, ctx)
+    loaded = [_LoadedContactArtifact.from_artifact(artifact, ctx) for artifact in normalized]
+    _validate_loaded_compatibility(loaded, ctx)
+
+    replicate_ids = [item.artifact.replicate for item in loaded]
+    coverage_values = [float(item.artifact.payload["metrics"]["coverage"]) for item in loaded]
+    contact_values = [
+        float(item.artifact.payload["metrics"]["mean_contact_fraction"]) for item in loaded
+    ]
+    residue_rows = _aggregate_residue_rows(loaded)
+    polymer_types = _polymer_types(loaded)
+    residence_summary = (
+        _aggregate_residence_times(loaded, polymer_types)
+        if bool(getattr(ctx.settings, "compute_residence_times", True))
+        else {}
+    )
+    profile_sidecar = _write_profile_sidecar(ctx, loaded, residue_rows, polymer_types)
+    metrics = {
+        "coverage": _aggregated_metric("coverage", coverage_values).model_dump(),
+        "mean_contact_fraction": _aggregated_metric(
+            "mean_contact_fraction", contact_values
+        ).model_dump(),
+    }
+    metric_metadata = {
+        "coverage": {
+            "label": "Coverage",
+            "unit": "fraction",
+            "higher_is_better": True,
+            "direction_labels": ["decreased", "unchanged", "increased"],
+        },
+        "mean_contact_fraction": {
+            "label": "Mean contact fraction",
+            "unit": "fraction",
+            "higher_is_better": True,
+            "direction_labels": ["decreased", "unchanged", "increased"],
+        },
+    }
+    replicate_metrics = {
+        str(item.artifact.replicate): dict(item.artifact.payload["metrics"]) for item in loaded
+    }
+    artifact = ConditionArtifact(
+        analysis_name="contacts",
+        condition_label=ctx.condition.label,
+        replicates=replicate_ids,
+        payload={
+            "metrics": metrics,
+            "metric_metadata": metric_metadata,
+            "replicate_metrics": replicate_metrics,
+            "n_replicates": len(loaded),
+            "n_residues": len(residue_rows),
+            "n_protein_residues": len(residue_rows),
+            "n_polymer_residues": int(loaded[0].data["polymer_resids"].size),
+            "total_frames_per_replicate": [
+                int(item.artifact.payload.get("n_frames_used", item.data["frame_indices"].size))
+                for item in loaded
+            ],
+            "criteria_cutoff": float(getattr(ctx.settings, "cutoff", 0.0)),
+            "polymer_types": polymer_types,
+            "residue_stats": residue_rows,
+            "residence_time_by_polymer_type": residence_summary,
+            "profile_sidecar": profile_sidecar.path,
+        },
+        sidecars=[profile_sidecar],
+        provenance={
+            "source": "contacts_replicate_artifact_aggregation",
+            "aggregation_policy": CONTACTS_AGGREGATION_POLICY_VERSION,
+            "residence_time_policy": "event_conditioned_physical_ns-v1",
+            "frame_selection": loaded[0].artifact.provenance.get("frame_selection"),
+            "detection_identity": loaded[0].artifact.provenance.get("detection_identity"),
+            "profile_sidecar": profile_sidecar.path,
+        },
+        metadata={
+            "result_kind": "contacts_mda_condition",
+            "settings_fingerprint": loaded[0].artifact.metadata.get("settings_fingerprint"),
+            "contacts_detection_fingerprint": loaded[0].artifact.metadata.get(
+                "contacts_detection_fingerprint"
+            ),
+            "contacts_condition_fingerprint": _contacts_condition_fingerprint(loaded[0].artifact),
+            "aggregation_policy_version": CONTACTS_AGGREGATION_POLICY_VERSION,
+            "compute_residence_times": bool(getattr(ctx.settings, "compute_residence_times", True)),
+            "equilibration": ctx.equilibration,
+        },
+        source_replicates=_source_replicates(loaded),
+        warnings=_combined_artifact_warnings([item.artifact for item in loaded]),
+    )
+    ArtifactStore(ctx.output_dir).write_condition_result(artifact)
+    return artifact
+
+
+def aggregate_contact_results(
+    results: Sequence[ContactResult],
+    use_median: bool = False,
+    compute_residence_times: bool = True,
+) -> AggregatedContactResult:
+    """Reject legacy contacts aggregation inputs.
+
+    Parameters
+    ----------
+    results : sequence of ContactResult
+        Legacy per-replicate contact results.
+    use_median : bool, optional
+        Legacy parameter retained only for diagnostic compatibility.
+    compute_residence_times : bool, optional
+        Legacy parameter retained only for diagnostic compatibility.
 
     Returns
     -------
     AggregatedContactResult
-        Aggregated statistics across replicates
+        This function no longer returns a legacy aggregate.
 
     Raises
     ------
-    ValueError
-        If results list is empty, results are incompatible, or results
-        are missing per-residue statistics
+    MDAAggregationError
+        Always raised with recompute guidance.
     """
-    if not results:
-        raise ValueError("Cannot aggregate empty results list")
 
-    # Validate compatibility
-    first = results[0]
-    for i, r in enumerate(results[1:], start=2):
-        if r.criteria_label != first.criteria_label:
-            raise ValueError(
-                f"Incompatible criteria: replicate 1 has '{first.criteria_label}', "
-                f"replicate {i} has '{r.criteria_label}'"
-            )
-        if r.n_protein_residues != first.n_protein_residues:
-            raise ValueError(
-                f"Incompatible residue counts: replicate 1 has {first.n_protein_residues}, "
-                f"replicate {i} has {r.n_protein_residues}"
-            )
-
-    # Validate that all results have per-residue statistics
-    for i, r in enumerate(results, start=1):
-        if not r.has_per_residue_statistics():
-            raise ValueError(
-                f"Replicate {i} is missing per-residue statistical inefficiency. "
-                f"Re-run contact analysis to compute per-residue statistics "
-                f"(requires schema_version >= 1.1.0)."
-            )
-
-    agg_func = compute_mad if use_median else compute_sem
-
-    # Build residue lookup for each replicate
-    residue_lookups = []
-    for r in results:
-        lookup = {rc.protein_resid: rc for rc in r.residue_contacts}
-        residue_lookups.append(lookup)
-
-    # Aggregate per-residue statistics
-    residue_stats = []
-    for rc in first.residue_contacts:
-        resid = rc.protein_resid
-
-        # Collect contact fractions and per-residue g across replicates
-        fractions_per_rep = []
-        g_per_rep = []
-        n_eff_per_rep = []
-        by_polymer_type_per_rep: dict[str, list[float]] = {}
-        rt_by_polymer_type_per_rep: dict[str, list[float]] = {}
-        rt_by_polymer_type_replicates: dict[str, list[int]] = {}
-        type_fracs_per_rep: list[dict[str, float]] = []
-
-        for i, r in enumerate(results):
-            replicate_id = int(r.replicate) if r.replicate is not None else i + 1
-            rc_rep = residue_lookups[i].get(resid)
-            if rc_rep is None:
-                fractions_per_rep.append(0.0)
-                g_per_rep.append(1.0)  # Default g=1 for missing residue
-                n_eff_per_rep.append(float(r.n_frames))
-                type_fracs_per_rep.append({})
-                continue
-
-            frac = rc_rep.contact_fraction(r.n_frames)
-            fractions_per_rep.append(frac)
-
-            # Collect per-residue statistical inefficiency
-            g_per_rep.append(rc_rep.statistical_inefficiency)
-            n_eff_per_rep.append(rc_rep.n_effective)
-
-            # Per polymer type
-            type_fracs = rc_rep.contacts_by_polymer_type(r.n_frames)
-            type_fracs_per_rep.append(type_fracs)
-
-            if compute_residence_times:
-                rt_stats = rc_rep.residence_time_by_polymer_type()
-                for ptype, stats in rt_stats.items():
-                    if stats["n_events"] > 0:
-                        if ptype not in rt_by_polymer_type_per_rep:
-                            rt_by_polymer_type_per_rep[ptype] = []
-                            rt_by_polymer_type_replicates[ptype] = []
-                        rt_by_polymer_type_per_rep[ptype].append(stats["mean_frames"])
-                        rt_by_polymer_type_replicates[ptype].append(replicate_id)
-
-        all_polymer_types = sorted(
-            {
-                polymer_type
-                for rep_type_fracs in type_fracs_per_rep
-                for polymer_type in rep_type_fracs
-            }
-        )
-        by_polymer_type_per_rep = {
-            polymer_type: [0.0] * len(type_fracs_per_rep) for polymer_type in all_polymer_types
-        }
-        for rep_idx, rep_type_fracs in enumerate(type_fracs_per_rep):
-            for polymer_type, polymer_frac in rep_type_fracs.items():
-                by_polymer_type_per_rep[polymer_type][rep_idx] = polymer_frac
-
-        mean, sem = agg_func(fractions_per_rep)
-        g_mean, g_sem = agg_func(g_per_rep)
-        n_eff_mean, n_eff_sem = agg_func(n_eff_per_rep)
-
-        # Aggregate by polymer type
-        by_polymer_type = {}
-        for ptype, pfracs in by_polymer_type_per_rep.items():
-            pm, ps = agg_func(pfracs)
-            by_polymer_type[ptype] = (pm, ps)
-
-        # Aggregate per-residue residence time by polymer type
-        rt_by_polymer_type: dict[str, tuple[float, float]] = {}
-        for ptype, rt_vals in rt_by_polymer_type_per_rep.items():
-            rt_m, rt_s = agg_func(rt_vals)
-            rt_by_polymer_type[ptype] = (rt_m, rt_s)
-
-        residue_stats.append(
-            AggregatedResidueStats(
-                protein_resid=resid,
-                protein_resname=rc.protein_resname,
-                protein_group=rc.protein_group,
-                contact_fraction_mean=mean,
-                contact_fraction_sem=sem,
-                contact_fraction_per_replicate=fractions_per_rep,
-                statistical_inefficiency_mean=g_mean,
-                statistical_inefficiency_sem=g_sem,
-                n_effective_mean=n_eff_mean,
-                n_effective_sem=n_eff_sem,
-                by_polymer_type=by_polymer_type,
-                by_polymer_type_per_replicate=by_polymer_type_per_rep,
-                residence_time_by_polymer_type=rt_by_polymer_type,
-                residence_time_by_polymer_type_per_replicate=rt_by_polymer_type_per_rep,
-                residence_time_by_polymer_type_replicates=rt_by_polymer_type_replicates,
-            )
-        )
-
-    # Aggregate global statistics
-    coverage_per_rep = [r.coverage_fraction() for r in results]
-    coverage_mean, coverage_sem = agg_func(coverage_per_rep)
-
-    mean_frac_per_rep = [r.mean_contact_fraction() for r in results]
-    mean_frac_mean, mean_frac_sem = agg_func(mean_frac_per_rep)
-
-    # Aggregate by AA group
-    group_fracs_per_rep: dict[str, list[float]] = {}
-    for r in results:
-        for group, frac in r.contact_fractions_by_group().items():
-            if group not in group_fracs_per_rep:
-                group_fracs_per_rep[group] = []
-            group_fracs_per_rep[group].append(frac)
-
-    group_stats = {}
-    for group, fracs in group_fracs_per_rep.items():
-        gm, gs = agg_func(fracs)
-        group_stats[group] = (gm, gs)
-
-    # Aggregate residence time statistics by polymer type
-    # residence_time_summary() now returns {polymer_type: {stats...}}
-    residence_time_by_polymer_type_per_rep: dict[str, list[float]] = {}
-    residence_time_by_polymer_type_replicates: dict[str, list[int]] = {}
-    if compute_residence_times:
-        for i, r in enumerate(results):
-            replicate_id = int(r.replicate) if r.replicate is not None else i + 1
-            summary: dict[str, dict[str, float]] = r.residence_time_summary()
-            for ptype, stats in summary.items():
-                if stats["total_events"] > 0:
-                    if ptype not in residence_time_by_polymer_type_per_rep:
-                        residence_time_by_polymer_type_per_rep[ptype] = []
-                        residence_time_by_polymer_type_replicates[ptype] = []
-                    residence_time_by_polymer_type_per_rep[ptype].append(stats["mean_frames"])
-                    residence_time_by_polymer_type_replicates[ptype].append(replicate_id)
-
-    # Aggregate to mean +/- SEM per polymer type
-    residence_time_by_polymer_type: dict[str, tuple[float, float]] = {}
-    for ptype, rt_values in residence_time_by_polymer_type_per_rep.items():
-        rt_mean, rt_sem = agg_func(rt_values)
-        residence_time_by_polymer_type[ptype] = (rt_mean, rt_sem)
-
-    return AggregatedContactResult(
-        residue_stats=residue_stats,
-        n_replicates=len(results),
-        replicates=[int(r.replicate) for r in results if r.replicate is not None],
-        total_frames_per_replicate=[r.n_frames for r in results],
-        timestep_ps=first.timestep_ps,
-        criteria_label=first.criteria_label,
-        criteria_cutoff=first.criteria_cutoff,
-        coverage_mean=coverage_mean,
-        coverage_sem=coverage_sem,
-        mean_contact_fraction=mean_frac_mean,
-        mean_contact_fraction_sem=mean_frac_sem,
-        group_stats=group_stats,
-        residence_time_by_polymer_type=residence_time_by_polymer_type,
-        residence_time_by_polymer_type_replicates=residence_time_by_polymer_type_replicates,
-        metadata={
-            "aggregation_method": "median_mad" if use_median else "mean_sem",
-        },
-    )
+    del results, use_median, compute_residence_times
+    raise MDAAggregationError(CONTACTS_LEGACY_RECOMPUTE_GUIDANCE)
 
 
 def load_and_aggregate(
     paths: list[str],
     use_median: bool = False,
 ) -> AggregatedContactResult:
-    """Load multiple result files and aggregate.
+    """Reject legacy path-based contacts aggregation.
 
     Parameters
     ----------
@@ -1094,5 +1034,430 @@ def load_and_aggregate(
     -------
     AggregatedContactResult
     """
-    results = [ContactResult.load(p) for p in paths]
-    return aggregate_contact_results(results, use_median=use_median)
+    del paths, use_median
+    raise MDAAggregationError(CONTACTS_LEGACY_RECOMPUTE_GUIDANCE)
+
+
+class _LoadedContactArtifact:
+    """Contacts replicate artifact plus validated event sidecar arrays."""
+
+    def __init__(self, artifact: ReplicateArtifact, data: Mapping[str, Any]) -> None:
+        """Create a loaded artifact container."""
+
+        self.artifact = artifact
+        self.data = data
+
+    @classmethod
+    def from_artifact(
+        cls, artifact: ReplicateArtifact, ctx: AggregateContext
+    ) -> "_LoadedContactArtifact":
+        """Load one artifact through the artifact store and validate its sidecar."""
+
+        from polyzymd.analyses.contacts._mda import load_contact_events_sidecar
+
+        run_dir = ctx.output_dir.parent / f"run_{artifact.replicate}"
+        try:
+            data = load_contact_events_sidecar(artifact, run_dir)
+        except (ArtifactStoreError, OSError, ValueError) as exc:
+            raise MDAAggregationError(
+                f"contacts: invalid event sidecar for replicate {artifact.replicate}: {exc}. "
+                "Recompute contacts or clear stale caches."
+            ) from exc
+        return cls(artifact=artifact, data=data)
+
+
+def _validate_contacts_artifacts(
+    artifacts: Sequence[ReplicateArtifact], ctx: AggregateContext
+) -> list[ReplicateArtifact]:
+    """Validate contact artifact identity before loading sidecars."""
+
+    if not artifacts:
+        raise MDAAggregationError("contacts: cannot aggregate empty replicate artifact list")
+    requested = tuple(int(replicate) for replicate in ctx.replicates)
+    requested_set = set(requested)
+    by_replicate: dict[int, ReplicateArtifact] = {}
+    expected_fingerprint = None
+    if ctx.settings is not None:
+        from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
+
+        expected_fingerprint = contacts_detection_fingerprint(ctx.settings)
+    for item in artifacts:
+        if not isinstance(item, ReplicateArtifact):
+            raise MDAAggregationError(CONTACTS_LEGACY_RECOMPUTE_GUIDANCE)
+        if item.analysis_name != "contacts":
+            raise MDAAggregationError(
+                f"contacts: artifact for replicate {item.replicate} has analysis "
+                f"{item.analysis_name!r}; expected 'contacts'"
+            )
+        if item.condition_label != ctx.condition.label:
+            raise MDAAggregationError(
+                f"contacts: artifact condition mismatch for replicate {item.replicate}: "
+                f"stored {item.condition_label!r}, expected {ctx.condition.label!r}"
+            )
+        if item.replicate not in requested_set:
+            raise MDAAggregationError(
+                f"contacts: unexpected replicate artifact {item.replicate}; requested {list(requested)}"
+            )
+        if item.replicate in by_replicate:
+            raise MDAAggregationError(f"contacts: duplicate replicate artifact {item.replicate}")
+        if expected_fingerprint is not None:
+            stored_fingerprint = item.metadata.get("contacts_detection_fingerprint")
+            if stored_fingerprint != expected_fingerprint:
+                raise MDAAggregationError(
+                    f"contacts: detection fingerprint mismatch for replicate {item.replicate}: "
+                    f"stored {stored_fingerprint!r}, expected {expected_fingerprint!r}. Recompute "
+                    "contacts or clear stale caches."
+                )
+        _validate_artifact_detection_payload(item, ctx)
+        by_replicate[item.replicate] = item
+    missing = [replicate for replicate in requested if replicate not in by_replicate]
+    if missing:
+        raise MDAAggregationError(
+            f"contacts: missing replicate artifact(s) for {missing}; recompute contacts"
+        )
+    return [by_replicate[replicate] for replicate in requested]
+
+
+def _validate_artifact_detection_payload(
+    artifact: ReplicateArtifact, ctx: AggregateContext
+) -> None:
+    """Validate cutoff, selections, grouping, PBC, and contact semantics."""
+
+    from polyzymd.analyses.contacts._identity import (
+        CONTACT_SEMANTICS_VERSION,
+        CONTACTS_PBC_POLICY,
+        contacts_detection_identity_payload,
+    )
+
+    expected = contacts_detection_identity_payload(ctx.settings)
+    checks = {
+        "criteria_cutoff": (artifact.payload.get("criteria_cutoff"), expected["cutoff"]["value"]),
+        "contact_semantics": (
+            artifact.payload.get("contact_semantics"),
+            CONTACT_SEMANTICS_VERSION,
+        ),
+        "pbc_policy": (artifact.payload.get("pbc_policy"), CONTACTS_PBC_POLICY),
+        "protein_selection": (
+            artifact.provenance.get("protein_selection"),
+            expected["protein_selection"],
+        ),
+        "polymer_selection": (
+            artifact.provenance.get("polymer_selection"),
+            expected["polymer_selection"],
+        ),
+        "effective_polymer_selection": (
+            artifact.provenance.get("effective_polymer_selection"),
+            expected["effective_polymer_selection"],
+        ),
+        "grouping": (artifact.provenance.get("grouping"), expected["grouping"]),
+    }
+    for label, (stored, expected_value) in checks.items():
+        if stored != expected_value:
+            raise MDAAggregationError(
+                f"contacts: {label} mismatch for replicate {artifact.replicate}: "
+                f"stored {stored!r}, expected {expected_value!r}. Recompute contacts."
+            )
+
+
+def _validate_loaded_compatibility(
+    loaded: Sequence[_LoadedContactArtifact], ctx: AggregateContext
+) -> None:
+    """Validate frame, time, residue, and sidecar metadata compatibility."""
+
+    first = loaded[0]
+    first_frame_selection = first.artifact.provenance.get("frame_selection")
+    first_time_policy = first.artifact.metadata.get("time_axis_policy")
+    first_identity = _protein_identity(first.data)
+    for item in loaded[1:]:
+        if item.artifact.provenance.get("frame_selection") != first_frame_selection:
+            raise MDAAggregationError(
+                f"contacts: frame-selection provenance mismatch for replicate {item.artifact.replicate}"
+            )
+        if item.artifact.metadata.get("time_axis_policy") != first_time_policy:
+            raise MDAAggregationError(
+                f"contacts: time-axis policy mismatch for replicate {item.artifact.replicate}"
+            )
+        if _protein_identity(item.data) != first_identity:
+            raise MDAAggregationError(
+                f"contacts: protein residue identity/order mismatch for replicate "
+                f"{item.artifact.replicate}"
+            )
+    del ctx
+
+
+def _protein_identity(data: Mapping[str, Any]) -> tuple[tuple[int, str, str, str], ...]:
+    """Return chain-safe protein residue identity from a sidecar."""
+
+    resids = np.asarray(data["protein_resids"], dtype=np.int64)
+    resnames = [str(value) for value in np.asarray(data["protein_resnames"]).tolist()]
+    groups = [str(value) for value in np.asarray(data["protein_groups"]).tolist()]
+    chainids = [str(value) for value in np.asarray(data.get("protein_chainids", [])).tolist()]
+    if not chainids:
+        chainids = [""] * len(resids)
+    return tuple(
+        (int(resid), resname, group, chainid)
+        for resid, resname, group, chainid in zip(resids, resnames, groups, chainids, strict=True)
+    )
+
+
+def _polymer_types(loaded: Sequence[_LoadedContactArtifact]) -> list[str]:
+    """Return sorted polymer residue names seen in payloads or sidecars."""
+
+    polymer_types: set[str] = set()
+    for item in loaded:
+        polymer_types.update(str(value) for value in item.artifact.payload.get("polymer_types", []))
+        polymer_types.update(
+            str(value) for value in np.asarray(item.data["polymer_resnames"]).tolist()
+        )
+    return sorted(polymer_type for polymer_type in polymer_types if polymer_type)
+
+
+def _aggregate_residue_rows(loaded: Sequence[_LoadedContactArtifact]) -> list[dict[str, Any]]:
+    """Aggregate bounded per-residue summaries across replicates."""
+
+    residue_count = len(_protein_identity(loaded[0].data))
+    rows_by_replicate = [_rows_by_index(item.artifact) for item in loaded]
+    residue_rows: list[dict[str, Any]] = []
+    polymer_types = _polymer_types(loaded)
+    rt_by_residue = _aggregate_residue_residence_times(loaded, polymer_types)
+    for residue_index in range(residue_count):
+        first_row = rows_by_replicate[0][residue_index]
+        fractions = [
+            float(rows[residue_index].get("contact_fraction", 0.0)) for rows in rows_by_replicate
+        ]
+        by_type_per_replicate = {
+            polymer_type: [
+                float(
+                    rows[residue_index]
+                    .get("polymer_type_contact_fractions", {})
+                    .get(polymer_type, 0.0)
+                )
+                for rows in rows_by_replicate
+            ]
+            for polymer_type in polymer_types
+        }
+        residue_rows.append(
+            {
+                "protein_residue_index": int(residue_index),
+                "protein_resid": int(first_row["protein_resid"]),
+                "protein_resname": str(first_row["protein_resname"]),
+                "protein_chain_id": str(first_row.get("protein_chain_id", "")),
+                "protein_group": str(first_row.get("protein_group", "unknown")),
+                "contact_fraction_mean": compute_sem(fractions)[0],
+                "contact_fraction_sem": compute_sem(fractions)[1],
+                "contact_fraction_per_replicate": fractions,
+                "by_polymer_type": {
+                    polymer_type: {
+                        "mean": compute_sem(values)[0],
+                        "sem": compute_sem(values)[1],
+                    }
+                    for polymer_type, values in by_type_per_replicate.items()
+                },
+                "by_polymer_type_per_replicate": by_type_per_replicate,
+                "residence_time_by_polymer_type": rt_by_residue.get(residue_index, {}),
+            }
+        )
+    return residue_rows
+
+
+def _rows_by_index(artifact: ReplicateArtifact) -> dict[int, Mapping[str, Any]]:
+    """Return protein summary rows keyed by residue index."""
+
+    rows: dict[int, Mapping[str, Any]] = {}
+    for row in artifact.payload.get("protein_residues", []):
+        if not isinstance(row, Mapping):
+            raise MDAAggregationError(
+                f"contacts: replicate {artifact.replicate} has malformed protein residue row"
+            )
+        index = int(row.get("protein_residue_index", len(rows)))
+        rows[index] = row
+    return rows
+
+
+def _aggregate_residence_times(
+    loaded: Sequence[_LoadedContactArtifact], polymer_types: Sequence[str]
+) -> dict[str, dict[str, Any]]:
+    """Aggregate global event-conditioned residence times in ns by polymer type."""
+
+    values_by_type: dict[str, list[tuple[int, float]]] = {
+        polymer_type: [] for polymer_type in polymer_types
+    }
+    event_counts: dict[str, int] = dict.fromkeys(polymer_types, 0)
+    for item in loaded:
+        per_type = _event_durations_by_type(item)
+        for polymer_type, durations in per_type.items():
+            event_counts[polymer_type] = event_counts.get(polymer_type, 0) + len(durations)
+            if durations:
+                values_by_type.setdefault(polymer_type, []).append(
+                    (item.artifact.replicate, float(np.mean(durations)))
+                )
+    summaries: dict[str, dict[str, Any]] = {}
+    for polymer_type, values in sorted(values_by_type.items()):
+        replicate_means = [value for _replicate, value in values]
+        if not replicate_means and event_counts.get(polymer_type, 0) == 0:
+            continue
+        mean, sem = compute_sem(replicate_means)
+        summaries[polymer_type] = {
+            "mean_ns": mean,
+            "sem_ns": sem,
+            "n_events": int(event_counts.get(polymer_type, 0)),
+            "replicates_with_events": [replicate for replicate, _value in values],
+            "replicate_means_ns": replicate_means,
+        }
+    return summaries
+
+
+def _aggregate_residue_residence_times(
+    loaded: Sequence[_LoadedContactArtifact], polymer_types: Sequence[str]
+) -> dict[int, dict[str, dict[str, Any]]]:
+    """Aggregate event-conditioned per-residue residence times in ns."""
+
+    values: dict[tuple[int, str], list[tuple[int, float]]] = {}
+    counts: dict[tuple[int, str], int] = {}
+    for item in loaded:
+        per_residue = _event_durations_by_residue_type(item)
+        for key, durations in per_residue.items():
+            counts[key] = counts.get(key, 0) + len(durations)
+            if durations:
+                values.setdefault(key, []).append(
+                    (item.artifact.replicate, float(np.mean(durations)))
+                )
+    result: dict[int, dict[str, dict[str, Any]]] = {}
+    for (residue_index, polymer_type), replicate_values in sorted(values.items()):
+        if polymer_type not in polymer_types:
+            continue
+        means = [value for _replicate, value in replicate_values]
+        mean, sem = compute_sem(means)
+        result.setdefault(residue_index, {})[polymer_type] = {
+            "mean_ns": mean,
+            "sem_ns": sem,
+            "n_events": int(counts.get((residue_index, polymer_type), 0)),
+            "replicates_with_events": [replicate for replicate, _value in replicate_values],
+            "replicate_means_ns": means,
+        }
+    return result
+
+
+def _event_durations_by_type(item: _LoadedContactArtifact) -> dict[str, list[float]]:
+    """Return event durations in ns grouped by polymer residue name."""
+
+    polymer_resnames = [str(value) for value in np.asarray(item.data["polymer_resnames"]).tolist()]
+    polymer_indices = np.asarray(item.data["polymer_residue_index"], dtype=np.int64)
+    durations = np.asarray(item.data["event_duration_ns"], dtype=np.float64)
+    grouped: dict[str, list[float]] = {}
+    for polymer_index, duration in zip(polymer_indices, durations, strict=True):
+        polymer_type = polymer_resnames[int(polymer_index)]
+        grouped.setdefault(polymer_type, []).append(float(duration))
+    return grouped
+
+
+def _event_durations_by_residue_type(
+    item: _LoadedContactArtifact,
+) -> dict[tuple[int, str], list[float]]:
+    """Return event durations in ns grouped by protein residue and polymer type."""
+
+    polymer_resnames = [str(value) for value in np.asarray(item.data["polymer_resnames"]).tolist()]
+    protein_indices = np.asarray(item.data["protein_residue_index"], dtype=np.int64)
+    polymer_indices = np.asarray(item.data["polymer_residue_index"], dtype=np.int64)
+    durations = np.asarray(item.data["event_duration_ns"], dtype=np.float64)
+    grouped: dict[tuple[int, str], list[float]] = {}
+    for protein_index, polymer_index, duration in zip(
+        protein_indices, polymer_indices, durations, strict=True
+    ):
+        key = (int(protein_index), polymer_resnames[int(polymer_index)])
+        grouped.setdefault(key, []).append(float(duration))
+    return grouped
+
+
+def _write_profile_sidecar(
+    ctx: AggregateContext,
+    loaded: Sequence[_LoadedContactArtifact],
+    residue_rows: Sequence[Mapping[str, Any]],
+    polymer_types: Sequence[str],
+) -> ArtifactSidecarRef:
+    """Write condition-level profile arrays for downstream artifact-only plots."""
+
+    replicates = np.asarray([item.artifact.replicate for item in loaded], dtype=np.int64)
+    protein_resids = np.asarray([row["protein_resid"] for row in residue_rows], dtype=np.int64)
+    protein_resnames = np.asarray([row["protein_resname"] for row in residue_rows], dtype="U16")
+    protein_groups = np.asarray([row["protein_group"] for row in residue_rows], dtype="U32")
+    contact_by_replicate = np.asarray(
+        [row["contact_fraction_per_replicate"] for row in residue_rows], dtype=np.float64
+    ).T
+    contact_mean = np.asarray(
+        [row["contact_fraction_mean"] for row in residue_rows], dtype=np.float64
+    )
+    contact_sem = np.asarray(
+        [row["contact_fraction_sem"] for row in residue_rows], dtype=np.float64
+    )
+    by_type = np.zeros((len(polymer_types), len(loaded), len(residue_rows)), dtype=np.float64)
+    rt_mean = np.zeros((len(polymer_types), len(residue_rows)), dtype=np.float64)
+    rt_sem = np.zeros((len(polymer_types), len(residue_rows)), dtype=np.float64)
+    rt_counts = np.zeros((len(polymer_types), len(residue_rows)), dtype=np.int64)
+    for type_index, polymer_type in enumerate(polymer_types):
+        for residue_index, row in enumerate(residue_rows):
+            by_type[type_index, :, residue_index] = np.asarray(
+                row["by_polymer_type_per_replicate"].get(polymer_type, [0.0] * len(loaded)),
+                dtype=np.float64,
+            )
+            rt_summary = row.get("residence_time_by_polymer_type", {}).get(polymer_type, {})
+            rt_mean[type_index, residue_index] = float(rt_summary.get("mean_ns", 0.0))
+            rt_sem[type_index, residue_index] = float(rt_summary.get("sem_ns", 0.0))
+            rt_counts[type_index, residue_index] = int(rt_summary.get("n_events", 0))
+    return ArtifactStore(ctx.output_dir).write_npz_sidecar(
+        CONTACT_PROFILE_SIDECAR,
+        replicates=replicates,
+        protein_resids=protein_resids,
+        protein_resnames=protein_resnames,
+        protein_groups=protein_groups,
+        contact_fraction_by_replicate=contact_by_replicate,
+        contact_fraction_mean=contact_mean,
+        contact_fraction_sem=contact_sem,
+        polymer_types=np.asarray(list(polymer_types), dtype="U16"),
+        contact_fraction_by_polymer_type=by_type,
+        residence_time_mean_ns=rt_mean,
+        residence_time_sem_ns=rt_sem,
+        residence_time_event_counts=rt_counts,
+        compressed=True,
+        metadata={"kind": "contact_profiles", "layout": "condition_profile_table"},
+    )
+
+
+def _aggregated_metric(name: str, values: Sequence[float]) -> AggregatedMetric:
+    """Build an MDA aggregated metric from replicate values."""
+
+    metric_values = [float(value) for value in values]
+    mean, sem = compute_sem(metric_values)
+    std = float(np.std(metric_values, ddof=1)) if len(metric_values) > 1 else 0.0
+    return AggregatedMetric(
+        name=name, values=metric_values, mean=mean, sem=sem, std=std, n=len(values)
+    )
+
+
+def _source_replicates(loaded: Sequence[_LoadedContactArtifact]) -> list[dict[str, Any]]:
+    """Build source replicate records with artifact hashes when available."""
+
+    return [{"replicate": item.artifact.replicate} for item in loaded]
+
+
+def _combined_artifact_warnings(artifacts: Sequence[ReplicateArtifact]) -> list[str]:
+    """Return de-duplicated warnings from source artifacts."""
+
+    warnings: list[str] = []
+    seen: set[str] = set()
+    for artifact in artifacts:
+        for warning in artifact.warnings:
+            if warning in seen:
+                continue
+            warnings.append(warning)
+            seen.add(warning)
+    return warnings
+
+
+def _contacts_condition_fingerprint(artifact: ReplicateArtifact) -> str | None:
+    """Return the condition fingerprint carried by the source detection artifact."""
+
+    stored = artifact.metadata.get("contacts_detection_fingerprint")
+    if stored is None:
+        return None
+    return f"{stored}:{CONTACTS_AGGREGATION_POLICY_VERSION}:rt-ns-v1"

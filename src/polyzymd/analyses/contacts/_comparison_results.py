@@ -88,6 +88,16 @@ class AggregateComparisonResult(BaseModel):
     note: str | None = None
 
 
+class ContactsResidenceTimeSummary(BaseModel):
+    """Descriptive event-conditioned residence time summary in ns."""
+
+    mean_ns: float = 0.0
+    sem_ns: float = 0.0
+    n_events: int = 0
+    replicates_with_events: list[int] = Field(default_factory=list)
+    replicate_means_ns: list[float] = Field(default_factory=list)
+
+
 class ContactsConditionSummary(BaseModel):
     """Summary statistics for one condition in a contacts comparison.
 
@@ -109,10 +119,8 @@ class ContactsConditionSummary(BaseModel):
         Mean of mean contact fractions across replicates
     mean_contact_fraction_sem : float
         SEM of mean contact fraction
-    residence_time_by_polymer_type : dict[str, tuple[float, float]]
-        Mean +/- SEM residence time in frames for each polymer type.
-        Keys are polymer residue names (e.g., "SBM", "EGM").
-        Values are (mean, sem) tuples.
+    residence_time_by_polymer_type : dict[str, ContactsResidenceTimeSummary]
+        Event-conditioned mean +/- SEM residence time in ns for each polymer type.
     compute_residence_times : bool
         Whether aggregate residence-time summaries were requested.
     """
@@ -125,7 +133,9 @@ class ContactsConditionSummary(BaseModel):
     coverage_sem: float
     mean_contact_fraction: float
     mean_contact_fraction_sem: float
-    residence_time_by_polymer_type: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    residence_time_by_polymer_type: dict[str, ContactsResidenceTimeSummary] = Field(
+        default_factory=dict
+    )
     compute_residence_times: bool = True
 
 

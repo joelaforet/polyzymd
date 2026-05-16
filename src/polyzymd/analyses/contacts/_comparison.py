@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Sequence
 
 import numpy as np
 
 from polyzymd.analyses.base import ComparisonContext, Condition
+from polyzymd.analyses.contacts._aggregator import CONTACTS_LEGACY_RECOMPUTE_GUIDANCE
+from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact
+from polyzymd.analyses.mda.store import ArtifactStoreError
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
 
@@ -53,29 +57,7 @@ def compare(analysis: Any, ctx: ComparisonContext) -> Any:
 
     condition_data: list[tuple[Condition, dict[str, Any]]] = []
     for cond in ctx.conditions:
-        agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
-        agg_result = ctx.aggregated_results.get(cond.label)
-        if agg_result is not None and not analysis._cache_matches_context(
-            agg_result,
-            settings=settings,
-            equilibration=ctx.equilibration,
-            sim_config=cond.sim_config,
-            replicates=cond.replicates,
-            allow_replicate_subset=True,
-        ):
-            logger.warning(f"Invalid in-memory aggregate for '{cond.label}' — reloading.")
-            agg_result = None
-
-        if agg_result is None:
-            agg_result = analysis._load_validated_aggregated_result(
-                agg_dir,
-                settings=settings,
-                equilibration=ctx.equilibration,
-                replicates=cond.replicates,
-                sim_config=cond.sim_config,
-                recompute=False,
-                allow_replicate_subset=True,
-            )
+        agg_result = _load_condition_artifact(analysis, ctx, cond)
         if agg_result is None:
             logger.warning(f"No aggregated result for '{cond.label}' — skipping.")
             continue
@@ -103,16 +85,20 @@ def compare(analysis: Any, ctx: ComparisonContext) -> Any:
     summaries: list[ContactsConditionSummary] = []
     for cond, data in condition_data:
         agg_result = data["agg_result"]
+        coverage_metric = agg_result.payload["metrics"]["coverage"]
+        contact_metric = agg_result.payload["metrics"]["mean_contact_fraction"]
         summary = ContactsConditionSummary(
             label=cond.label,
             config_path=str(cond.config_path),
-            n_replicates=agg_result.n_replicates,
-            n_residues=agg_result.n_residues,
-            coverage_mean=agg_result.coverage_mean,
-            coverage_sem=agg_result.coverage_sem,
-            mean_contact_fraction=agg_result.mean_contact_fraction,
-            mean_contact_fraction_sem=agg_result.mean_contact_fraction_sem,
-            residence_time_by_polymer_type=agg_result.residence_time_by_polymer_type,
+            n_replicates=len(agg_result.replicates),
+            n_residues=int(agg_result.payload.get("n_residues", 0)),
+            coverage_mean=float(coverage_metric["mean"]),
+            coverage_sem=float(coverage_metric["sem"]),
+            mean_contact_fraction=float(contact_metric["mean"]),
+            mean_contact_fraction_sem=float(contact_metric["sem"]),
+            residence_time_by_polymer_type=agg_result.payload.get(
+                "residence_time_by_polymer_type", {}
+            ),
             compute_residence_times=settings.compute_residence_times,
         )
         summaries.append(summary)
@@ -163,6 +149,69 @@ def compare(analysis: Any, ctx: ComparisonContext) -> Any:
     )
 
 
+def _load_condition_artifact(
+    analysis: Any, ctx: ComparisonContext, cond: Condition
+) -> ConditionArtifact | None:
+    """Load and validate one contacts condition artifact for comparison."""
+
+    in_memory = ctx.aggregated_results.get(cond.label)
+    if in_memory is not None:
+        if not isinstance(in_memory, ConditionArtifact):
+            raise ValueError(CONTACTS_LEGACY_RECOMPUTE_GUIDANCE)
+        _validate_condition_artifact(in_memory, ctx, cond)
+        return in_memory
+
+    aggregate_path = ctx.analysis_dirs[cond.label] / "aggregated" / "result.json"
+    if not aggregate_path.exists():
+        return None
+    try:
+        artifact = ArtifactStore(aggregate_path.parent).read_condition_result("result.json")
+    except ArtifactStoreError as exc:
+        raise ValueError(
+            f"contacts: aggregate at {aggregate_path} is not a canonical ConditionArtifact. "
+            f"{CONTACTS_LEGACY_RECOMPUTE_GUIDANCE}"
+        ) from exc
+    _validate_condition_artifact(artifact, ctx, cond)
+    del analysis
+    return artifact
+
+
+def _validate_condition_artifact(
+    artifact: ConditionArtifact, ctx: ComparisonContext, cond: Condition
+) -> None:
+    """Validate contacts condition artifact identity for comparison."""
+
+    if artifact.analysis_name != "contacts":
+        raise ValueError(
+            f"contacts: condition artifact for {cond.label!r} has analysis "
+            f"{artifact.analysis_name!r}; expected 'contacts'"
+        )
+    if artifact.condition_label != cond.label:
+        raise ValueError(
+            f"contacts: condition artifact label mismatch: stored {artifact.condition_label!r}, "
+            f"expected {cond.label!r}"
+        )
+    active_replicates = {int(replicate) for replicate in cond.replicates}
+    stored_replicates = {int(replicate) for replicate in artifact.replicates}
+    unexpected = sorted(stored_replicates - active_replicates)
+    if unexpected:
+        raise ValueError(
+            f"contacts: condition {cond.label!r} contains unexpected replicate IDs {unexpected}; "
+            "recompute contacts or clear stale aggregate result.json files"
+        )
+    if not stored_replicates:
+        raise ValueError(f"contacts: condition {cond.label!r} has no successful replicates")
+    from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
+
+    expected_fingerprint = contacts_detection_fingerprint(ctx.settings)
+    stored_fingerprint = artifact.metadata.get("contacts_detection_fingerprint")
+    if stored_fingerprint != expected_fingerprint:
+        raise ValueError(
+            f"contacts: condition {cond.label!r} detection fingerprint mismatch; expected "
+            f"{expected_fingerprint!r}, got {stored_fingerprint!r}. Recompute contacts."
+        )
+
+
 def compute_coverage_per_replicate(result: Any) -> list[float]:
     """Compute coverage per replicate from residue statistics.
 
@@ -176,6 +225,9 @@ def compute_coverage_per_replicate(result: Any) -> list[float]:
     list[float]
         Fraction of residues contacted in each replicate.
     """
+
+    if isinstance(result, ConditionArtifact):
+        return [float(value) for value in result.payload["metrics"]["coverage"]["values"]]
 
     n_replicates = result.n_replicates
     n_residues = result.n_residues
@@ -203,6 +255,11 @@ def compute_contact_fraction_per_replicate(result: Any) -> list[float]:
     list[float]
         Mean contact fraction for each replicate.
     """
+
+    if isinstance(result, ConditionArtifact):
+        return [
+            float(value) for value in result.payload["metrics"]["mean_contact_fraction"]["values"]
+        ]
 
     n_replicates = result.n_replicates
 
@@ -234,11 +291,11 @@ def validate_residue_sets(condition_data: list[tuple[Condition, dict[str, Any]]]
 
     first_cond, first_data = condition_data[0]
     first_result = first_data["agg_result"]
-    first_resids = {rs.protein_resid for rs in first_result.residue_stats}
+    first_resids = _residue_identity_set(first_result)
 
     for cond, data in condition_data[1:]:
         result = data["agg_result"]
-        resids = {rs.protein_resid for rs in result.residue_stats}
+        resids = _residue_identity_set(result)
         if resids != first_resids:
             missing_in_first = resids - first_resids
             missing_in_other = first_resids - resids
@@ -247,6 +304,34 @@ def validate_residue_sets(condition_data: list[tuple[Condition, dict[str, Any]]]
                 f"Missing in {first_cond.label}: {sorted(missing_in_first)}, "
                 f"Missing in {cond.label}: {sorted(missing_in_other)}."
             )
+
+
+def _residue_identity_set(result: Any) -> set[tuple[int, str, str]]:
+    """Return chain-safe residue identities for legacy or condition artifacts."""
+
+    if isinstance(result, ConditionArtifact):
+        return {
+            (
+                int(row.get("protein_resid", 0)),
+                str(row.get("protein_resname", "")),
+                str(row.get("protein_chain_id", "")),
+            )
+            for row in result.payload.get("residue_stats", [])
+        }
+    return {
+        (
+            int(getattr(row, "protein_resid", 0)),
+            _identity_text(getattr(row, "protein_resname", "")),
+            _identity_text(getattr(row, "protein_chain_id", "")),
+        )
+        for row in getattr(result, "residue_stats", [])
+    }
+
+
+def _identity_text(value: Any) -> str:
+    """Return stable identity text for optional legacy residue attributes."""
+
+    return value if isinstance(value, str) else ""
 
 
 def compute_contacts_pairwise(
@@ -633,7 +718,10 @@ def compute_top_contacted_residues(
     def _as_contact_fraction(residue_stat: Any) -> float:
         """Convert residue contact fraction to float for robust sorting."""
 
-        value = getattr(residue_stat, "contact_fraction_mean", 0.0)
+        if isinstance(residue_stat, Mapping):
+            value = residue_stat.get("contact_fraction_mean", 0.0)
+        else:
+            value = getattr(residue_stat, "contact_fraction_mean", 0.0)
         try:
             return float(value)
         except (TypeError, ValueError):
@@ -643,14 +731,25 @@ def compute_top_contacted_residues(
     conditions_with_residue_data: list[str] = []
     for cond, data in condition_data:
         agg_result = data["agg_result"]
-        residue_stats = getattr(agg_result, "residue_stats", [])
+        if isinstance(agg_result, ConditionArtifact):
+            residue_stats = list(agg_result.payload.get("residue_stats", []))
+        else:
+            residue_stats = getattr(agg_result, "residue_stats", [])
         if residue_stats:
             conditions_with_residue_data.append(cond.label)
         sorted_residues = sorted(residue_stats, key=_as_contact_fraction, reverse=True)
         result[cond.label] = [
             (
-                int(getattr(rs, "protein_resid", 0)),
-                str(getattr(rs, "protein_resname", "UNK")),
+                int(
+                    rs.get("protein_resid", 0)
+                    if isinstance(rs, Mapping)
+                    else getattr(rs, "protein_resid", 0)
+                ),
+                str(
+                    rs.get("protein_resname", "UNK")
+                    if isinstance(rs, Mapping)
+                    else getattr(rs, "protein_resname", "UNK")
+                ),
                 _as_contact_fraction(rs),
             )
             for rs in sorted_residues[:top_n]

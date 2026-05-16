@@ -52,7 +52,6 @@ from polyzymd.analyses.contacts._identity import (
 )
 from polyzymd.analyses.contacts._mda import (
     ContactsArtifactCollector,
-    artifact_to_contact_result,
     build_contacts_jobs,
 )
 from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
@@ -65,7 +64,7 @@ from polyzymd.analyses.contacts._plotters import (
     _plot_rt_by_partition_bars,
 )
 from polyzymd.analyses.contacts._results import ContactResult
-from polyzymd.analyses.mda import MDAAnalysisJob, ReplicateArtifact
+from polyzymd.analyses.mda import MDAAnalysisJob
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
 
@@ -661,18 +660,6 @@ class ContactsAnalysis(Analysis):
     ) -> Any:
         """Aggregate contact results across replicates for one condition."""
 
-        if results and all(isinstance(result, ReplicateArtifact) for result in results):
-            settings_fingerprint = self.aggregate_settings_fingerprint(ctx.settings)
-            converted = [
-                artifact_to_contact_result(
-                    cast(ReplicateArtifact, result),
-                    run_dir=ctx.output_dir.parent
-                    / f"run_{cast(ReplicateArtifact, result).replicate}",
-                    settings_fingerprint=settings_fingerprint,
-                )
-                for result in results
-            ]
-            return _contacts_lifecycle.aggregate(self, ctx, converted)
         return _contacts_lifecycle.aggregate(self, ctx, results)
 
     # === filter_conditions() — exclude no-polymer conditions ===
