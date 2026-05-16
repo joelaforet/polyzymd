@@ -634,11 +634,6 @@ class ContactsAnalysis(Analysis):
             load_contacts_plot_data,
         )
 
-        plot_data = load_contacts_plot_data(ctx)
-        if not plot_data.labels:
-            return []
-
-        ctx.output_dir.mkdir(parents=True, exist_ok=True)
         contacts_plot_settings = (ctx.plot_settings.model_extra or {}).get("contacts")
         if contacts_plot_settings is None:
             contacts_plot_settings = ctx.plot_settings.contacts
@@ -656,7 +651,14 @@ class ContactsAnalysis(Analysis):
             plot_functions.append(_plot_cf_by_aa_class_bars)
         if contacts_plot_settings.generate_cf_by_partition_bars:
             plot_functions.append(_plot_cf_by_partition_bars)
+        if not plot_functions:
+            return []
 
+        plot_data = load_contacts_plot_data(ctx)
+        if not plot_data.labels:
+            return []
+
+        ctx.output_dir.mkdir(parents=True, exist_ok=True)
         plots: list[Path] = []
         for plot_function in plot_functions:
             plots.extend(plot_function(plot_data, ctx.output_dir, ctx.plot_settings))

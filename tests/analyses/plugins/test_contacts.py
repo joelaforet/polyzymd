@@ -2402,6 +2402,61 @@ class TestPlot:
             "rt_by_partition_regions_bars",
         } - {disabled_stem}
 
+    def test_plot_skips_artifact_loading_when_all_plot_families_disabled(self, tmp_path):
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.config.comparison import PlotSettings
+
+        settings = ContactsSettings()
+        plot_settings = PlotSettings(
+            contacts={
+                "generate_contact_fraction_profile": False,
+                "generate_residence_time_profile": False,
+                "generate_cf_by_aa_class_bars": False,
+                "generate_cf_by_partition_bars": False,
+                "generate_rt_by_aa_class_bars": False,
+                "generate_rt_by_partition_bars": False,
+            }
+        )
+        ctx = _contacts_plot_context(tmp_path, settings, plot_settings=plot_settings)
+
+        with patch(
+            "polyzymd.analyses.contacts._plotters.load_contacts_plot_data",
+            side_effect=AssertionError("artifact loading should be skipped"),
+        ):
+            paths = ContactsAnalysis().plot(ctx)
+
+        assert paths == []
+        assert not ctx.output_dir.exists()
+
+    def test_plot_skips_artifact_loading_when_only_rt_families_enabled_but_rt_disabled(
+        self,
+        tmp_path,
+    ):
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.config.comparison import PlotSettings
+
+        settings = ContactsSettings(compute_residence_times=False)
+        plot_settings = PlotSettings(
+            contacts={
+                "generate_contact_fraction_profile": False,
+                "generate_residence_time_profile": True,
+                "generate_cf_by_aa_class_bars": False,
+                "generate_cf_by_partition_bars": False,
+                "generate_rt_by_aa_class_bars": True,
+                "generate_rt_by_partition_bars": True,
+            }
+        )
+        ctx = _contacts_plot_context(tmp_path, settings, plot_settings=plot_settings)
+
+        with patch(
+            "polyzymd.analyses.contacts._plotters.load_contacts_plot_data",
+            side_effect=AssertionError("artifact loading should be skipped"),
+        ):
+            paths = ContactsAnalysis().plot(ctx)
+
+        assert paths == []
+        assert not ctx.output_dir.exists()
+
     def test_plot_rejects_tampered_profile_sidecar_without_fallback(self, tmp_path):
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
 
