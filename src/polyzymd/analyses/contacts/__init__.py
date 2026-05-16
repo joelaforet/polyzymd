@@ -28,7 +28,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence, cast
 
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analyses.base import (
     AggregateContext,
@@ -43,7 +43,6 @@ from polyzymd.analyses.contacts import _cache as _contacts_cache
 from polyzymd.analyses.contacts import _comparison as _contacts_comparison
 from polyzymd.analyses.contacts import _filters as _contacts_filters
 from polyzymd.analyses.contacts import _lifecycle as _contacts_lifecycle
-from polyzymd.analyses.contacts import _plotting as _contacts_plotting
 from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
 from polyzymd.analyses.contacts._identity import (
     contacts_detection_fingerprint,
@@ -55,14 +54,6 @@ from polyzymd.analyses.contacts._mda import (
     build_contacts_jobs,
 )
 from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
-from polyzymd.analyses.contacts._plotters import (
-    _plot_cf_by_aa_class_bars,
-    _plot_cf_by_partition_bars,
-    _plot_contact_fraction_profile,
-    _plot_residence_time_profile,
-    _plot_rt_by_aa_class_bars,
-    _plot_rt_by_partition_bars,
-)
 from polyzymd.analyses.contacts._results import ContactResult
 from polyzymd.analyses.mda import MDAAnalysisJob
 
@@ -515,58 +506,6 @@ class ContactsAnalysis(Analysis):
 
         return _contacts_lifecycle.align_replicate_results(results, replicates)
 
-    def _resolve_plot_equilibration(
-        self,
-        ctx: PlotContext,
-        aggregated_dir: Path | None = None,
-    ) -> str:
-        """Resolve the equilibration window to use when validating plot inputs.
-
-        Plot contexts created by the orchestrator carry the resolved window.
-        Direct plot calls may omit it, so finalized comparison metadata is used
-        first and canonical aggregate metadata is used only as a last-resort
-        fallback for direct calls with the dataclass default.
-
-        Parameters
-        ----------
-        ctx : PlotContext
-            Framework-provided plot context.
-        aggregated_dir : Path or None, optional
-            Aggregated result directory for direct-call fallback.
-
-        Returns
-        -------
-        str
-            Requested equilibration window for finalized aggregate validation.
-        """
-
-        comparison_path = ctx.comparison_path or self.comparison_result_path(ctx.results_dir)
-        if comparison_path.exists():
-            try:
-                from polyzymd.analyses.contacts._comparison_results import ContactsComparisonResult
-
-                comparison = ContactsComparisonResult.load(comparison_path)
-            except (OSError, ValueError, ValidationError):
-                logger.warning(
-                    "contacts: could not load comparison metadata for plot validation at %s",
-                    comparison_path,
-                )
-            else:
-                return comparison.equilibration_time
-
-        if ctx.equilibration != "0ns" or aggregated_dir is None:
-            return ctx.equilibration
-
-        aggregate_path = self.aggregate_result_path(aggregated_dir)
-        if not aggregate_path.exists():
-            return ctx.equilibration
-        try:
-            aggregate = AggregatedContactResult.load(aggregate_path)
-        except (OSError, ValueError, ValidationError):
-            return ctx.equilibration
-
-        return self._result_window_string(aggregate) or ctx.equilibration
-
     def _cache_matches_context(
         self,
         result: Any,
@@ -683,9 +622,39 @@ class ContactsAnalysis(Analysis):
     # === plot() ===
 
     def plot(self, ctx: PlotContext) -> list[Path]:
-        """Generate contacts comparison plots."""
+        """Generate contacts comparison plots from canonical artifacts only."""
 
-        return _contacts_plotting.plot(self, ctx)
+        from polyzymd.analyses.contacts._plotters import (
+            _plot_cf_by_aa_class_bars,
+            _plot_cf_by_partition_bars,
+            _plot_contact_fraction_profile,
+            _plot_residence_time_profile,
+            _plot_rt_by_aa_class_bars,
+            _plot_rt_by_partition_bars,
+            load_contacts_plot_data,
+        )
+
+        plot_data = load_contacts_plot_data(ctx)
+        if not plot_data.labels:
+            return []
+
+        ctx.output_dir.mkdir(parents=True, exist_ok=True)
+        plot_functions = [
+            _plot_contact_fraction_profile,
+            _plot_cf_by_aa_class_bars,
+            _plot_cf_by_partition_bars,
+        ]
+        if ctx.settings.compute_residence_times:
+            plot_functions[1:1] = [
+                _plot_residence_time_profile,
+                _plot_rt_by_aa_class_bars,
+                _plot_rt_by_partition_bars,
+            ]
+
+        plots: list[Path] = []
+        for plot_function in plot_functions:
+            plots.extend(plot_function(plot_data, ctx.output_dir, ctx.plot_settings))
+        return plots
 
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format contacts comparison results without legacy dispatch."""
