@@ -19,7 +19,7 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
-from polyzymd.analyses.exceptions import PluginContractError
+from polyzymd.analyses.exceptions import AggregationError, PluginContractError
 from polyzymd.analyses.mda import (
     ArtifactStore,
     MDAAnalysisJob,
@@ -857,6 +857,35 @@ def test_default_mda_aggregation_from_disk_records_partial_success(tmp_path: Pat
         }
     ]
     assert result.payload["metrics"]["mean_value"]["mean"] == pytest.approx(1.2)
+
+
+def test_default_mda_aggregation_rejects_unexpected_disk_artifacts(tmp_path: Path) -> None:
+    """Default lifecycle aggregation should use canonical disk discovery."""
+
+    analysis = _MetricArtifactAnalysis()
+    condition = _condition(tmp_path, replicates=(1, 2))
+    settings = _LifecycleSettings()
+    output_dir = tmp_path / "analysis" / analysis.name
+    settings_fp = analysis.aggregate_settings_fingerprint(settings)
+    for replicate, value in ((1, 1.0), (2, 1.4), (3, 1.8)):
+        artifact = ReplicateArtifact(
+            analysis_name=analysis.name,
+            condition_label=condition.label,
+            replicate=replicate,
+            payload={"metrics": {"mean_value": value}},
+            provenance={"frame_selection": {"start": 0, "stop": 4, "step": 1}},
+            metadata={"settings_fingerprint": settings_fp},
+        )
+        ArtifactStore(output_dir / f"run_{replicate}").write_replicate_result(artifact)
+
+    with pytest.raises(AggregationError, match="unexpected replicate artifact"):
+        AnalysisLifecycle(analysis).aggregate_condition_from_disk(
+            condition,
+            settings,
+            "10ns",
+            output_dir,
+            (1, 2),
+        )
 
 
 def test_public_run_comparison_executes_full_lifecycle(

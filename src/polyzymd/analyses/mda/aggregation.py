@@ -250,6 +250,11 @@ def aggregate_replicate_artifacts_from_disk(
             artifact = store.read_replicate_result(artifact_path)
             source = store.source_artifact_ref(artifact_path)
         except ArtifactStoreError as exc:
+            if _is_malformed_replicate_artifact_error(exc):
+                raise MDAAggregationError(
+                    f"{ctx.analysis_name}: invalid replicate artifact for replicate {replicate} "
+                    f"at {result_path}: {exc}"
+                ) from exc
             _record_or_raise_skip(
                 ctx,
                 skipped,
@@ -543,6 +548,12 @@ def _discover_replicate_artifact_paths(
             )
         discovered[int(replicate_text)] = candidate_path
     return discovered
+
+
+def _is_malformed_replicate_artifact_error(exc: ArtifactStoreError) -> bool:
+    """Return whether an artifact-store error indicates invalid JSON/schema."""
+
+    return "Failed to validate replicate artifact" in str(exc)
 
 
 def _reject_unexpected_discovered_replicates(

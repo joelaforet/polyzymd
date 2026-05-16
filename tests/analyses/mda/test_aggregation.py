@@ -215,6 +215,22 @@ def test_disk_helper_rejects_embedded_replicate_id_mismatch(tmp_path: Path) -> N
         aggregate_replicate_artifacts_from_disk(analysis_dir, _context((1, 2)))
 
 
+def test_disk_helper_rejects_malformed_artifacts_under_partial(tmp_path: Path) -> None:
+    """Partial disk aggregation should not skip malformed canonical JSON."""
+
+    analysis_dir = tmp_path / "analysis" / "PEG" / "rmsd"
+    ArtifactStore(analysis_dir / "run_1").write_replicate_result(_artifact(1))
+    bad_path = analysis_dir / "run_2" / "result.json"
+    bad_path.parent.mkdir(parents=True)
+    bad_path.write_text("{not json")
+
+    with pytest.raises(MDAAggregationError, match="invalid replicate artifact"):
+        aggregate_replicate_artifacts_from_disk(
+            analysis_dir,
+            _context((1, 2), allow_partial=True, min_replicates=1),
+        )
+
+
 def test_disk_helper_validates_sidecars_and_partial_missing(tmp_path: Path) -> None:
     """Disk aggregation should validate sidecars and record missing partial inputs."""
 
