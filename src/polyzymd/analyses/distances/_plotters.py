@@ -376,44 +376,31 @@ def _load_pooled_distances(analysis_dir: Path, replicates: list[int]) -> dict[st
 
     for rep in replicates:
         rep_dir = analysis_dir / f"run_{rep}"
-        json_files: list[Path] = []
-
-        canonical_file = rep_dir / "result.json"
-        if canonical_file.exists():
-            json_files.append(canonical_file)
-
-        for candidate in sorted(rep_dir.glob("distances_*.json")):
-            if candidate == canonical_file:
-                continue
-            json_files.append(candidate)
-
-        if not json_files:
+        result_file = rep_dir / "result.json"
+        if not result_file.exists():
             continue
 
-        for result_file in json_files:
-            try:
-                with result_file.open(encoding="utf-8") as f:
-                    result_data = json.load(f)
+        try:
+            with result_file.open(encoding="utf-8") as f:
+                result_data = json.load(f)
+            if result_data.get("artifact_type") == "replicate":
+                _collect_artifact_distances(rep_dir, result_data, pooled, thresholds)
+                continue
 
-                pair_results = result_data.get("pair_results", [])
-                if not pair_results and "distances" in result_data:
-                    pair_results = [result_data]
-
-                for pair_result in pair_results:
-                    pair_label = pair_result.get("pair_label", "Distance")
-                    distances = pair_result.get("distances")
-                    threshold = pair_result.get("threshold")
-
-                    if distances is not None:
-                        if pair_label not in pooled:
-                            pooled[pair_label] = []
-                        pooled[pair_label].append(np.asarray(distances, dtype=np.float64))
-
-                        if threshold is not None and pair_label not in thresholds:
-                            thresholds[pair_label] = float(threshold)
-
-            except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-                logger.debug(f"Failed to load {result_file}: {exc}")
+            pair_results = result_data.get("pair_results", [])
+            if not pair_results and "distances" in result_data:
+                pair_results = [result_data]
+            for pair_result in pair_results:
+                pair_label = pair_result.get("pair_label", "Distance")
+                distances = pair_result.get("distances")
+                threshold = pair_result.get("threshold")
+                if distances is None:
+                    continue
+                pooled.setdefault(pair_label, []).append(np.asarray(distances, dtype=np.float64))
+                if threshold is not None and pair_label not in thresholds:
+                    thresholds[pair_label] = float(threshold)
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
+            logger.debug(f"Failed to load {result_file}: {exc}")
 
     result: dict[str, dict[str, Any]] = {}
     for pair_label, arrays in pooled.items():
@@ -460,25 +447,56 @@ def _load_distance_aggregated_results(
 
         result_file = aggregated_path / "result.json"
         if not result_file.exists():
-            legacy_file = aggregated_path / "distance_aggregated.json"
-            if legacy_file.exists():
-                result_file = legacy_file
-                logger.warning(f"Using legacy distances aggregate cache: {legacy_file}")
-            else:
-                prefixed_files = sorted(aggregated_path.glob("distances_*.json"))
-                if prefixed_files:
-                    result_file = prefixed_files[0]
-                    logger.warning(f"Using fallback distances aggregate cache: {result_file}")
-                else:
-                    continue
+            continue
 
         try:
             with result_file.open(encoding="utf-8") as f:
-                results[label] = json.load(f)
+                loaded = json.load(f)
+            if loaded.get("artifact_type") == "condition":
+                payload = loaded.get("payload", {})
+                results[label] = {
+                    **payload,
+                    "sidecars": loaded.get("sidecars", []),
+                    "metadata": loaded.get("metadata", {}),
+                }
+            else:
+                results[label] = loaded
         except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
             logger.warning(f"Failed to load {result_file}: {exc}")
 
     return results
+
+
+def _collect_artifact_distances(
+    rep_dir: Path,
+    result_data: dict[str, Any],
+    pooled: dict[str, list[NDArray[np.float64]]],
+    thresholds: dict[str, float],
+) -> None:
+    """Collect raw distance arrays from a canonical replicate artifact sidecar."""
+
+    sidecar = next(
+        (
+            ref
+            for ref in result_data.get("sidecars", [])
+            if isinstance(ref, dict) and ref.get("metadata", {}).get("kind") == "distance_matrix"
+        ),
+        None,
+    )
+    if sidecar is None:
+        return
+    sidecar_path = rep_dir / sidecar["path"]
+    payload_pairs = result_data.get("payload", {}).get("pairs", [])
+    with np.load(sidecar_path) as npz_data:
+        matrix = np.asarray(npz_data["distance_matrix"], dtype=np.float64)
+        for pair_index, pair_result in enumerate(payload_pairs):
+            if pair_index >= matrix.shape[0]:
+                continue
+            pair_label = pair_result.get("pair_label", f"Pair {pair_index}")
+            threshold = pair_result.get("threshold")
+            pooled.setdefault(pair_label, []).append(matrix[pair_index])
+            if threshold is not None and pair_label not in thresholds:
+                thresholds[pair_label] = float(threshold)
 
 
 def _plot_distance_state_single_pair(

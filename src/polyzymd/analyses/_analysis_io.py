@@ -65,16 +65,20 @@ def deserialize_result(analysis: Any, path: Path) -> Any:
     Any
         Deserialized result.
     """
-    text = path.read_text()
-    artifact = _try_load_mda_condition_artifact(analysis, path.parent, path, text)
-    if artifact is not None:
-        return artifact
+    text: str | None = None
+    if path.exists():
+        text = path.read_text()
+        artifact = _try_load_mda_condition_artifact(analysis, path.parent, path, text)
+        if artifact is not None:
+            return artifact
     result_cls = type(analysis).AggregatedResultClass
     if result_cls is not None:
         if hasattr(result_cls, "load"):
             return result_cls.load(path)
-        if hasattr(result_cls, "model_validate_json"):
+        if hasattr(result_cls, "model_validate_json") and text is not None:
             return result_cls.model_validate_json(text)
+    if text is None:
+        text = path.read_text()
     return json.loads(text)
 
 

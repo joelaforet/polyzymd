@@ -50,6 +50,11 @@ def test_public_facade_reexports_primitives() -> None:
         MDAUniversePolicy,
     )
     from polyzymd.analyses.mda.lifecycle import MDAReplicateJobContext
+    from polyzymd.analyses.mda.pair_distance import (
+        PairDistanceSpec,
+        build_pair_distance_analysis,
+        pair_distance_version,
+    )
     from polyzymd.analyses.mda.plugin import (
         MDAArtifactCollector,
         MDACollectorContext,
@@ -91,6 +96,9 @@ def test_public_facade_reexports_primitives() -> None:
     assert mda.MDAJobResult is MDAJobResult
     assert mda.MDAUniversePolicy is MDAUniversePolicy
     assert mda.MDAReplicateJobContext is MDAReplicateJobContext
+    assert mda.PairDistanceSpec is PairDistanceSpec
+    assert mda.build_pair_distance_analysis is build_pair_distance_analysis
+    assert mda.pair_distance_version is pair_distance_version
     assert mda.MDAArtifactCollector is MDAArtifactCollector
     assert mda.MDACollectorContext is MDACollectorContext
     assert mda.StrictJSONMDAResultCollector is StrictJSONMDAResultCollector
@@ -131,6 +139,9 @@ def test_public_facade_reexports_primitives() -> None:
         "MDAJobResult",
         "MDAUniversePolicy",
         "MDAReplicateJobContext",
+        "PairDistanceSpec",
+        "build_pair_distance_analysis",
+        "pair_distance_version",
         "MDAArtifactCollector",
         "MDACollectorContext",
         "StrictJSONMDAResultCollector",

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from polyzymd.analyses.base import ReplicateContext
 from polyzymd.analyses.distances import (
@@ -14,7 +15,7 @@ from polyzymd.analyses.distances import (
     DistancesAnalysis,
     DistancesSettings,
 )
-from polyzymd.analyses.distances._runner import DistancePairPayload, DistancesRunnerPayload
+from polyzymd.analyses.mda import MDAAnalysisJob
 from polyzymd.engines.gromacs import GromacsEngine
 from tests._support.gromacs_smoke import (
     create_gromacs_layout,
@@ -56,39 +57,28 @@ class TestDistancesGromacsSmoke:
         fake_mda = install_fake_mdanalysis()
         fake_mda.Universe = MagicMock(return_value=make_mock_universe(n_frames=120, n_atoms=12))
 
-        distance_payload = DistancesRunnerPayload(
-            n_frames_total=120,
-            n_frames_used=4,
-            pair_payloads=[
-                DistancePairPayload(
-                    pair_label="resid77_OG-resid156_NE2",
-                    selection1="resid 77 and name OG",
-                    selection2="resid 156 and name NE2",
-                    distances=np.asarray([3.2, 3.1, 3.3, 3.4], dtype=np.float64),
-                    mean_distance=3.25,
-                    std_distance=0.11,
-                    median_distance=3.25,
-                    min_distance=3.1,
-                    max_distance=3.4,
-                    sem_distance=None,
-                    correlation_time=None,
-                    correlation_time_unit=None,
-                    n_independent_frames=None,
-                    statistical_inefficiency=None,
-                    autocorrelation_warning=None,
-                    threshold=3.5,
-                    fraction_below_threshold=1.0,
-                    histogram_edges=np.asarray([3.0, 3.5], dtype=np.float64),
-                    histogram_counts=np.asarray([4], dtype=np.int64),
-                    kde_x=None,
-                    kde_y=None,
-                    kde_peak=None,
-                    kde_bandwidth=None,
-                    n_frames_total=120,
-                    n_frames_used=4,
+        class FakeDistanceAnalysis:
+            def __init__(self) -> None:
+                self.results = MagicMock()
+
+            def run(self, **kwargs):
+                del kwargs
+                self.results.distance_matrix = np.asarray([[3.2, 3.1, 3.3, 3.4]], dtype=np.float64)
+                self.results.frames = np.asarray([0, 1, 2, 3], dtype=np.int64)
+                self.results.times_ps = np.asarray([0.0, 10.0, 20.0, 30.0], dtype=np.float64)
+                self.results.warnings = []
+                return self
+
+        def fake_build_jobs(ctx, settings):
+            del settings
+            return [
+                MDAAnalysisJob(
+                    name="pair_distances",
+                    analysis=FakeDistanceAnalysis(),
+                    frame_selection=ctx.frame_selection,
+                    universe_policy=ctx.universe_policy,
                 )
-            ],
-        )
+            ]
 
         original_resolve = GromacsEngine.resolve_trajectory_layout
         with (
@@ -99,13 +89,8 @@ class TestDistancesGromacsSmoke:
                 autospec=True,
                 wraps=original_resolve,
             ) as resolve_spy,
-            patch(
-                "polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="smoke123"
-            ),
-            patch(
-                "polyzymd.analyses.distances._runner.compute_distance_payloads",
-                return_value=distance_payload,
-            ),
+            patch("polyzymd.analyses.distances._mda.compute_config_hash", return_value="smoke123"),
+            patch("polyzymd.analyses.distances.build_distance_jobs", side_effect=fake_build_jobs),
             patch(
                 "polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.3.0-test"
             ),
@@ -123,6 +108,6 @@ class TestDistancesGromacsSmoke:
 
         assert resolve_spy.call_count >= 1
         assert result.replicate == 1
-        assert len(result.pair_results) == 1
-        assert result.trajectory_files == [str(tmp_path / "run_1" / "gromacs" / "prod.xtc")]
+        assert len(result.payload["pairs"]) == 1
+        assert result.payload["pairs"][0]["mean_distance"] == pytest.approx(3.25)
         assert str(tmp_path / "run_1" / "gromacs" / "prod.xtc") in str(fake_mda.Universe.call_args)

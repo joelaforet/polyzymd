@@ -43,7 +43,13 @@ from polyzymd.analyses.base import (
     BasePlotSettings,
     ComparisonContext,
     PlotContext,
-    ReplicateContext,
+)
+from polyzymd.analyses.distances._mda import (
+    DistanceArtifactCollector,
+    aggregate_distance_artifacts,
+    build_distance_jobs,
+    compute_distance_payloads,
+    condition_artifact_to_legacy_result,
 )
 from polyzymd.analyses.distances._plot_settings import DistancesPlotSettings
 from polyzymd.analyses.distances._plotters import (
@@ -58,7 +64,7 @@ from polyzymd.analyses.distances._results import (
     DistanceResult,
     DistanceResultMetadata,
 )
-from polyzymd.analyses.distances._runner import DistancesReplicateRunner, compute_distance_payloads
+from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext, ReplicateArtifact
 from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
 from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
 
@@ -973,7 +979,7 @@ class DistancesAnalysis(Analysis):
     Settings: ClassVar[type] = DistancesSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = DistancesPlotSettings
     AggregatedResultClass: ClassVar[type] = DistanceAggregatedResult
-    ReplicateResultClass: ClassVar[type | None] = DistanceResult
+    ReplicateResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 1
@@ -996,209 +1002,75 @@ class DistancesAnalysis(Analysis):
         """
         return settings_fingerprint(settings)
 
-    def run_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-    ) -> Any:
-        """Run distances for a single replicate through the runner seam."""
-        settings = ctx.settings
-        settings_tag = self._make_settings_cache_tag(settings)
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        result_file = ctx.output_dir / _make_distance_result_filename(
-            pairs=settings.get_pair_selections(),
-            equilibration_time=eq_value,
-            equilibration_unit=eq_unit,
-            use_pbc=settings.use_pbc,
-            alignment=settings.get_alignment_config(),
-            settings_tag=settings_tag,
-        )
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[Any] | None:
+        """Build the MDAnalysis-native pair-distance job for one replicate."""
 
-        cached = self._check_cache(
-            DistanceResult,
-            result_file,
-            recompute=ctx.recompute,
-            sim_config=ctx.sim_config,
-            settings=ctx.settings,
-        )
-        if cached is not None:
-            return cached
+        return build_distance_jobs(ctx, ctx.settings)
 
-        result = super().run_replicate(ctx, replicate)
-        result.save(result_file)
-        logger.info("Saved result to %s", result_file)
+    def build_mda_collector(self, ctx: MDACollectorContext) -> Any:
+        """Build the distances artifact collector."""
 
-        return result
+        del ctx
+        return DistanceArtifactCollector()
 
-    def _trajectory_loader_factory(self) -> type[Any]:
-        """Return the distances loader class for the shared runner seam.
+    def _deserialize_result(self, path: Path) -> Any:
+        """Load a canonical condition artifact or legacy aggregate result."""
 
-        Returns
-        -------
-        type[Any]
-            Loader class patched by distances unit tests.
-        """
+        if path.exists():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                loaded = None
+            if isinstance(loaded, dict) and loaded.get("artifact_type") == "condition":
+                from polyzymd.analyses.mda import ArtifactStore
 
-        return TrajectoryLoader
-
-    def get_trajectory_window(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        loader: Any,
-        universe: Any,
-    ) -> Any:
-        """Resolve the distances window and retain trajectory file metadata."""
-
-        window = super().get_trajectory_window(ctx, replicate, loader, universe)
-        traj_info = loader.get_trajectory_info(replicate)
-        return _DistancesTrajectoryWindow.from_window(window, traj_info.trajectory_files)
-
-    def build_runner(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        universe: Any,
-        window: Any,
-    ) -> Any:
-        """Build the runner-backed distances execution object."""
-
-        del replicate
-        settings = ctx.settings
-        return DistancesReplicateRunner(
-            universe=universe,
-            pairs=settings.get_pair_selections(),
-            thresholds=settings.get_pair_thresholds(),
-            use_pbc=settings.use_pbc,
-            alignment=settings.get_alignment_config(),
-            timestep_ps=window.timestep_ps,
-            pair_label_func=_make_pair_label,
-        )
-
-    def summarize_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        runner: Any,
-        window: Any,
-    ) -> Any:
-        """Serialize runner output into the legacy distances result schema."""
-
-        from polyzymd.analyses._results_base import get_polyzymd_version
-
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        payload = runner.results
-        metadata = DistanceResultMetadata(
-            config_hash=compute_config_hash(ctx.sim_config),
-            polyzymd_version=get_polyzymd_version(),
-            replicate=replicate,
-            equilibration_time=eq_value,
-            equilibration_unit=eq_unit,
-        )
-        pair_metadata = metadata.with_replicate(None)
-
-        pair_results = [
-            DistancePairResult.from_runner_payload(
-                pair_metadata,
-                pair_payload,
-            )
-            for pair_payload in payload.pair_payloads
-        ]
-
-        combined_selection = "; ".join(
-            f"({selection1} : {selection2})"
-            for selection1, selection2 in ctx.settings.get_pair_selections()
-        )
-        trajectory_files = [str(path) for path in getattr(window, "trajectory_files", ())]
-
-        return DistanceResult.from_pair_results(
-            metadata,
-            pair_results,
-            n_frames_total=payload.n_frames_total,
-            n_frames_used=payload.n_frames_used,
-            trajectory_files=trajectory_files,
-            settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
-            selection_string=combined_selection,
-        )
+                return ArtifactStore(path.parent).read_condition_result(path.name)
+        return DistanceAggregatedResult.load(path)
 
     def aggregate(
         self,
         ctx: AggregateContext,
         results: Sequence[Any],
     ) -> Any:
-        """Aggregate distance results across replicates for one condition.
-
-        Computes per-pair aggregated distance statistics from the
-        already-computed per-replicate results. Does NOT re-run the
-        calculator.
+        """Aggregate distance replicate artifacts across one condition.
 
         Parameters
         ----------
         ctx : AggregateContext
             Framework-provided context.
-        results : Sequence[DistanceResult]
-            Per-replicate distance results.
+        results : sequence of ReplicateArtifact
+            Per-replicate MDAnalysis distance artifacts.
 
         Returns
         -------
-        DistanceAggregatedResult
-            Aggregated result with per-pair statistics and SEM.
+        ConditionArtifact
+            Aggregated condition artifact with legacy-compatible pair summaries.
         """
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
 
-        settings = ctx.settings
-        self._validate_replicate_pair_schema(ctx, results, settings)
-        first = results[0]
-        metadata = DistanceResultMetadata(
-            config_hash=first.config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=None,
-            equilibration_time=first.equilibration_time,
-            equilibration_unit=first.equilibration_unit,
-        )
-
-        n_pairs = len(first.pair_results)
-        aggregated_pairs: list[DistancePairAggregatedResult] = []
-
-        for pair_idx in range(n_pairs):
-            stats = aggregate_distance_pair_stats(list(results), pair_idx)
-
-            pr = first.pair_results[pair_idx]
-            thresholds = settings.get_pair_thresholds()
-            threshold = thresholds[pair_idx] if pair_idx < len(thresholds) else None
-
-            agg_pair = DistancePairAggregatedResult.from_aggregated_stats(
-                metadata,
-                pr,
-                stats,
-                replicates=ctx.replicates,
-                threshold=threshold,
+        if not results:
+            raise ValueError(
+                f"Distances aggregation for condition '{ctx.condition.label}' requires at least "
+                "one replicate artifact. No replicate inputs were provided."
             )
-            aggregated_pairs.append(agg_pair)
-
-        # Create aggregated result
-        selection_strs = [f"({pr.selection1} : {pr.selection2})" for pr in first.pair_results]
-        combined_selection = "; ".join(selection_strs)
-
-        agg_result = DistanceAggregatedResult.from_pair_results(
-            metadata,
-            aggregated_pairs,
+        if not all(isinstance(result, ReplicateArtifact) for result in results):
+            raise TypeError(
+                "Distances aggregation expects MDAnalysis ReplicateArtifact inputs. Legacy "
+                "distances replicate caches are incompatible with the MDAnalysis artifact "
+                "lifecycle; recompute the condition or clear stale caches before aggregating."
+            )
+        target_path = ctx.result_path or ctx.output_dir / "result.json"
+        aggregated = aggregate_distance_artifacts(
+            condition_label=ctx.condition.label,
             replicates=ctx.replicates,
-            source_result_files=[],
+            settings=ctx.settings,
+            equilibration=ctx.equilibration,
+            output_dir=ctx.output_dir,
+            result_path=target_path,
+            artifacts=results,
             settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
-            selection_string=combined_selection,
         )
-
-        target_path = ctx.result_path
-        if target_path is None:
-            settings_tag = self._make_settings_cache_tag(ctx.settings)
-            filename = self._make_aggregated_filename(ctx.replicates, first, settings_tag)
-            target_path = ctx.output_dir / filename
-        self.save_result(agg_result, target_path)
-        logger.info(f"Saved aggregated distances to {target_path}")
-
-        return agg_result
+        logger.info("Saved aggregated distances artifact to %s", target_path)
+        return aggregated
 
     @staticmethod
     def _validate_replicate_pair_schema(
@@ -1333,6 +1205,7 @@ class DistancesAnalysis(Analysis):
                 logger.warning(f"No aggregated result found for '{cond.label}' — skipping.")
                 continue
 
+            agg_result = condition_artifact_to_legacy_result(agg_result)
             agg_result = self.validate_aggregated_result(
                 agg_result,
                 condition=cond,
