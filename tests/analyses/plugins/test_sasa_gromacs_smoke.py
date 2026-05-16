@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 
 from polyzymd.analyses.base import ReplicateContext
+from polyzymd.analyses.mda import MDAAnalysisJob
 from polyzymd.analyses.sasa import SASAAnalysis, SASARunSettings, SASASettings
 from polyzymd.analyses.shared.sasa import SASAComputationResult
 from polyzymd.engines.gromacs import GromacsEngine
@@ -58,6 +60,45 @@ class TestSASAGromacsSmoke:
             residue_resnames=["ALA"],
         )
 
+        class _FakeSASAAnalysis:
+            """AnalysisBase-shaped object with precomputed SASA results."""
+
+            def __init__(self) -> None:
+                self.results = SimpleNamespace(
+                    run_label="protein",
+                    target_selection="chainid A",
+                    context_selection="chainid A",
+                    probe_radius_nm=0.14,
+                    n_sphere_points=960,
+                    chunk_size=100,
+                    atom_sasa_a2=raw.atom_sasa_a2,
+                    residue_sasa_a2=raw.residue_sasa_a2,
+                    total_sasa_a2=raw.total_sasa_a2,
+                    frames=raw.frames,
+                    time_ns=raw.time_ns,
+                    target_atom_indices=raw.target_atom_indices,
+                    context_atom_indices=raw.context_atom_indices,
+                    residue_keys=raw.residue_keys,
+                    residue_chainids=raw.residue_chainids,
+                    residue_resids=raw.residue_resids,
+                    residue_resnames=raw.residue_resnames,
+                )
+
+            def run(self, **_kwargs):
+                """Return self with precomputed results."""
+
+                return self
+
+        def _fake_build_mda_jobs(ctx):
+            return [
+                MDAAnalysisJob(
+                    name="sasa:protein",
+                    analysis=_FakeSASAAnalysis(),
+                    frame_selection=ctx.frame_selection,
+                    universe_policy=ctx.universe_policy,
+                )
+            ]
+
         original_resolve = GromacsEngine.resolve_trajectory_layout
         with (
             patch.dict(sys.modules, {"MDAnalysis": fake_mda}),
@@ -67,13 +108,11 @@ class TestSASAGromacsSmoke:
                 autospec=True,
                 wraps=original_resolve,
             ) as resolve_spy,
-            patch("polyzymd.analyses.sasa.compute_config_hash", return_value="smoke123"),
-            patch("polyzymd.analyses.sasa.compute_sasa", return_value=raw),
-            patch("polyzymd.analyses.sasa.save_sasa_artifacts"),
             patch(
                 "polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.3.0-test"
             ),
         ):
+            analysis.build_mda_jobs = _fake_build_mda_jobs  # type: ignore[method-assign]
             ctx = ReplicateContext(
                 condition=condition,
                 replicate=1,
@@ -87,4 +126,5 @@ class TestSASAGromacsSmoke:
 
         assert resolve_spy.call_count >= 2
         assert result.replicate == 1
-        assert result.trajectory_files == [str(tmp_path / "run_1" / "gromacs" / "prod.xtc")]
+        assert result.payload["run_results"][0]["mean_sasa"] == 3.0
+        assert result.sidecars

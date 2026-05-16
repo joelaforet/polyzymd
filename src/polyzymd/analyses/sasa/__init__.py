@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence, cast
@@ -21,68 +20,36 @@ from polyzymd.analyses.base import (
     ReplicateContext,
     SlurmResourceHint,
 )
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    ConditionArtifact,
+    MDACollectorContext,
+    ReplicateArtifact,
+)
+from polyzymd.analyses.sasa._mda import (
+    SASAArtifactCollector,
+    aggregate_sasa_artifacts,
+    build_sasa_jobs,
+    condition_artifact_to_legacy_result,
+    load_condition_artifact,
+)
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
-from polyzymd.analyses.sasa._results import SASAAggregatedResult, SASAResult
-from polyzymd.analyses.sasa._runner import SASAReplicateRunner
-from polyzymd.analyses.shared.config_hash import compute_config_hash
-from polyzymd.analyses.shared.loader import parse_time_string
+from polyzymd.analyses.sasa._results import SASAAggregatedResult
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
     filter_summaries_with_run,
 )
-from polyzymd.analyses.shared.sasa import compute_sasa, save_sasa_artifacts
-from polyzymd.analyses.shared.statistics import compute_sem
 
 if TYPE_CHECKING:
+    from polyzymd.analyses.mda import MDAAnalysisJob, MDAReplicateJobContext
     from polyzymd.analyses.sasa._comparison_results import SASAComparisonResult
 
 LOGGER = logging.getLogger(__name__)
 NOT_TESTABLE_SINGLETON_NOTE = (
     "Inferential statistics require at least two replicates per condition."
 )
-
-
-@dataclass(frozen=True)
-class _SASATrajectoryWindow:
-    """SASA trajectory window that carries loader-derived file metadata."""
-
-    start: int
-    stop: int
-    step: int
-    equilibration_start: int
-    n_frames_total: int
-    n_frames_selected: int
-    timestep_ps: float
-    equilibration_ps: float
-    warning_message: str | None = None
-    trajectory_files: tuple[Path, ...] = ()
-
-    @classmethod
-    def from_window(
-        cls,
-        window: Any,
-        trajectory_files: Sequence[Path],
-    ) -> _SASATrajectoryWindow:
-        """Build an SASA window wrapper from the shared trajectory window."""
-
-        return cls(
-            start=int(window.start),
-            stop=int(window.stop),
-            step=int(window.step),
-            equilibration_start=int(window.equilibration_start),
-            n_frames_total=int(window.n_frames_total),
-            n_frames_selected=int(window.n_frames_selected),
-            timestep_ps=float(window.timestep_ps),
-            equilibration_ps=float(window.equilibration_ps),
-            warning_message=getattr(window, "warning_message", None),
-            trajectory_files=tuple(trajectory_files),
-        )
-
-    def run_kwargs(self) -> dict[str, int]:
-        """Return keyword arguments for the runner ``run()`` call."""
-
-        return {"start": self.start, "stop": self.stop, "step": self.step}
 
 
 class SASARunSettings(BaseModel):
@@ -196,7 +163,7 @@ class SASAAnalysis(Analysis):
     Settings: ClassVar[type] = SASASettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = SASAPlotSettings
     AggregatedResultClass: ClassVar[type | None] = SASAAggregatedResult
-    ReplicateResultClass: ClassVar[type | None] = SASAResult
+    ReplicateResultClass: ClassVar[type | None] = None
     execution_cost_hint: ClassVar[str] = "high"
     slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(
         mem="8G", time="02:00:00"
@@ -205,280 +172,88 @@ class SASAAnalysis(Analysis):
     dependencies: ClassVar[tuple[str, ...]] = ()
     # SASA is a mean-based observable (all frames contribute, SEM corrected via N_eff)
 
+    @staticmethod
+    def _make_settings_cache_tag(settings: BaseModel) -> str:
+        """Return the short settings fingerprint used by SASA artifacts.
+
+        Parameters
+        ----------
+        settings : BaseModel
+            Analysis settings model.
+
+        Returns
+        -------
+        str
+            Stable settings fingerprint.
+        """
+
+        return settings_fingerprint(settings)
+
+    def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
+        """Return the SASA artifact settings fingerprint."""
+
+        if settings is None:
+            return None
+        return self._make_settings_cache_tag(settings)
+
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[MDAAnalysisJob] | None:
+        """Build AnalysisBase-compatible SASA jobs.
+
+        Parameters
+        ----------
+        ctx : MDAReplicateJobContext
+            Framework-provided MDAnalysis job context.
+
+        Returns
+        -------
+        sequence of MDAAnalysisJob
+            One surface-area job per configured SASA run.
+        """
+
+        return build_sasa_jobs(ctx, cast(SASASettings, ctx.settings))
+
+    def build_mda_collector(self, ctx: MDACollectorContext) -> Any:
+        """Build the SASA artifact collector."""
+
+        del ctx
+        return SASAArtifactCollector()
+
     def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Run SASA for all configured runs for a single replicate."""
+        """Run one SASA replicate through the MDA artifact lifecycle."""
 
-        settings = cast(SASASettings, ctx.settings)
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        eq_str = f"eq{eq_value:g}{eq_unit}"
-        settings_token = self._settings_cache_token(settings)
-        result_file = ctx.output_dir / f"sasa_{eq_str}_{settings_token}.json"
-
-        cached = self._check_cache(
-            SASAResult,
-            result_file,
-            recompute=ctx.recompute,
-            sim_config=ctx.sim_config,
-            settings=ctx.settings,
-        )
-        if cached is not None:
-            return cached
-
-        result = super().run_replicate(ctx, replicate)
-        result.save(result_file)
+        result = Analysis.run_replicate(self, ctx, replicate)
+        if isinstance(result, ReplicateArtifact):
+            target_path = ctx.result_path or ctx.output_dir / "result.json"
+            ArtifactStore(target_path.parent).write_replicate_result(result, target_path.name)
         return result
 
-    def get_trajectory_window(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        loader: Any,
-        universe: Any,
-    ) -> Any:
-        """Resolve the SASA window and retain trajectory file metadata."""
-
-        window = super().get_trajectory_window(ctx, replicate, loader, universe)
-        traj_info = loader.get_trajectory_info(replicate)
-        return _SASATrajectoryWindow.from_window(window, traj_info.trajectory_files)
-
-    def build_runner(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        universe: Any,
-        window: Any,
-    ) -> Any:
-        """Build the runner-backed SASA execution object."""
-
-        from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
-
-        del replicate
-        settings = cast(SASASettings, ctx.settings)
-        return SASAReplicateRunner(
-            universe=universe,
-            runs=settings.runs,
-            probe_radius_nm=settings.probe_radius_nm,
-            n_sphere_points=settings.n_sphere_points,
-            chunk_size=settings.chunk_size,
-            timestep_ps=window.timestep_ps,
-            output_dir=ctx.output_dir,
-            equilibration=ctx.equilibration,
-            trajectory_files=getattr(window, "trajectory_files", ()),
-            compute_sasa_func=compute_sasa,
-            save_sasa_artifacts_func=save_sasa_artifacts,
-            estimate_correlation_time_func=estimate_correlation_time,
-            run_cache_token_func=self._run_cache_token,
-        )
-
-    def summarize_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-        runner: Any,
-        window: Any,
-    ) -> Any:
-        """Serialize runner output into the legacy SASA result schema."""
-
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.sasa._results import SASARunResult
-
-        settings = cast(SASASettings, ctx.settings)
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        config_hash = compute_config_hash(ctx.sim_config)
-        payload = runner.results
-
-        run_results = [
-            SASARunResult(
-                config_hash=config_hash,
-                polyzymd_version=get_polyzymd_version(),
-                replicate=replicate,
-                equilibration_time=eq_value,
-                equilibration_unit=eq_unit,
-                selection_string=run_payload.target_selection,
-                correlation_time=run_payload.correlation_time,
-                correlation_time_unit=run_payload.correlation_time_unit,
-                n_independent_frames=run_payload.n_independent_frames,
-                statistical_inefficiency=run_payload.statistical_inefficiency,
-                autocorrelation_warning=run_payload.autocorrelation_warning,
-                run_label=run_payload.run_label,
-                target_selection=run_payload.target_selection,
-                context_selection=run_payload.context_selection,
-                mean_sasa=run_payload.mean_sasa,
-                std_sasa=run_payload.std_sasa,
-                median_sasa=run_payload.median_sasa,
-                min_sasa=run_payload.min_sasa,
-                max_sasa=run_payload.max_sasa,
-                final_sasa=run_payload.final_sasa,
-                sem_sasa=run_payload.sem_sasa,
-                n_frames_total=run_payload.n_frames_total,
-                n_frames_used=run_payload.n_frames_used,
-                n_target_atoms=run_payload.n_target_atoms,
-                n_context_atoms=run_payload.n_context_atoms,
-                n_target_residues=run_payload.n_target_residues,
-                zero_atom_selection=run_payload.zero_atom_selection,
-                raw_npz_path=run_payload.raw_npz_path,
-                raw_metadata_path=run_payload.raw_metadata_path,
-                npz_path=run_payload.npz_path,
-                metadata_path=run_payload.metadata_path,
-                time_unit=run_payload.time_unit,
-                timestep_ps=run_payload.timestep_ps,
-                raw_timestep_ps=run_payload.raw_timestep_ps,
-                frame_stride=run_payload.frame_stride,
-            )
-            for run_payload in payload.run_payloads
-        ]
-
-        del window
-        return SASAResult(
-            config_hash=config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=replicate,
-            equilibration_time=eq_value,
-            equilibration_unit=eq_unit,
-            selection_string="; ".join(
-                f"{run.target_selection}|{run.context_selection or run.target_selection}"
-                for run in settings.runs
-            ),
-            run_results=run_results,
-            n_frames_total=payload.n_frames_total,
-            n_frames_used=payload.n_frames_used,
-            trajectory_files=[str(path) for path in payload.trajectory_files],
-        )
-
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
-        """Aggregate SASA results across replicates for one condition."""
-        import numpy as np
+        """Aggregate SASA replicate artifacts across one condition."""
 
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.sasa._results import SASAAggregatedResult, SASARunAggregatedResult
-
-        first = results[0]
-        aggregated_runs: list[SASARunAggregatedResult] = []
-        settings = cast(SASASettings, ctx.settings)
-        settings_token = self._settings_cache_token(settings)
-        if len(ctx.replicates) == 1:
-            LOGGER.warning(
-                "Only one replicate available for SASA aggregation in condition '%s'; "
-                "replicate-level SEM is reported as 0.0",
-                ctx.condition.label,
+        if not results:
+            raise ValueError(
+                f"SASA aggregation for condition '{ctx.condition.label}' requires at least one "
+                "replicate artifact. No replicate inputs were provided."
             )
-
-        self._validate_replicate_run_coverage(ctx, results, settings)
-        for run in settings.runs:
-            entries = [
-                next(entry for entry in result.run_results if entry.run_label == run.label)
-                for result in results
-            ]
-            self._validate_structural_metadata_consistency(ctx, run.label, entries)
-
-            per_means = np.asarray([entry.mean_sasa for entry in entries], dtype=np.float64)
-            per_stds = [float(entry.std_sasa) for entry in entries]
-            per_medians = [float(entry.median_sasa) for entry in entries]
-            per_mins = [float(entry.min_sasa) for entry in entries]
-            per_maxs = [float(entry.max_sasa) for entry in entries]
-            per_finals = [float(entry.final_sasa) for entry in entries]
-
-            finite_means = per_means[np.isfinite(per_means)]
-            if finite_means.size:
-                mean_stats = compute_sem(finite_means)
-                overall_mean = mean_stats.mean
-                overall_sem = mean_stats.sem
-            else:
-                overall_mean = float("nan")
-                overall_sem = float("nan")
-
-            overall_median = float(np.nanmean(np.asarray(per_medians, dtype=np.float64)))
-            overall_min = float(np.nanmin(np.asarray(per_mins, dtype=np.float64)))
-            overall_max = float(np.nanmax(np.asarray(per_maxs, dtype=np.float64)))
-            overall_final = float(np.nanmean(np.asarray(per_finals, dtype=np.float64)))
-
-            (
-                residue_keys,
-                residue_chainids,
-                residue_resids,
-                residue_resnames,
-                residue_matrix,
-            ) = self._load_per_residue_contributions(ctx, run.label, entries)
-
-            if residue_matrix:
-                stacked = np.stack(residue_matrix, axis=0)
-                per_residue_mean = np.nanmean(stacked, axis=0).astype(np.float64)
-                if stacked.shape[0] > 1:
-                    per_residue_sem = np.nanstd(stacked, axis=0, ddof=1) / np.sqrt(
-                        float(stacked.shape[0])
-                    )
-                else:
-                    per_residue_sem = np.zeros(stacked.shape[1], dtype=np.float64)
-            else:
-                per_residue_mean = np.asarray([], dtype=np.float64)
-                per_residue_sem = np.asarray([], dtype=np.float64)
-
-            template = entries[0]
-            context_atom_counts = [int(entry.n_context_atoms) for entry in entries]
-            context_count_is_variable = len(set(context_atom_counts)) > 1
-            aggregated_runs.append(
-                SASARunAggregatedResult(
-                    config_hash=first.config_hash,
-                    polyzymd_version=get_polyzymd_version(),
-                    replicate=None,
-                    equilibration_time=first.equilibration_time,
-                    equilibration_unit=first.equilibration_unit,
-                    selection_string=template.target_selection,
-                    replicates=list(ctx.replicates),
-                    n_replicates=len(ctx.replicates),
-                    run_label=run.label,
-                    target_selection=template.target_selection,
-                    context_selection=template.context_selection,
-                    overall_mean=overall_mean,
-                    overall_sem=overall_sem,
-                    overall_median=overall_median,
-                    overall_min=overall_min,
-                    overall_max=overall_max,
-                    overall_final=overall_final,
-                    per_replicate_means=[float(v) for v in per_means.tolist()],
-                    per_replicate_stds=per_stds,
-                    per_replicate_medians=per_medians,
-                    per_replicate_mins=per_mins,
-                    per_replicate_maxs=per_maxs,
-                    per_replicate_finals=per_finals,
-                    n_target_atoms=template.n_target_atoms,
-                    n_context_atoms=(None if context_count_is_variable else context_atom_counts[0]),
-                    per_replicate_context_atom_counts=context_atom_counts,
-                    n_context_atoms_variable=context_count_is_variable,
-                    n_target_residues=template.n_target_residues,
-                    zero_atom_selection=all(entry.zero_atom_selection for entry in entries),
-                    residue_keys=residue_keys,
-                    residue_chainids=residue_chainids,
-                    residue_resids=residue_resids,
-                    residue_resnames=residue_resnames,
-                    per_residue_mean_sasa=per_residue_mean.tolist(),
-                    per_residue_sem_sasa=per_residue_sem.tolist(),
-                )
+        if not all(isinstance(result, ReplicateArtifact) for result in results):
+            raise TypeError(
+                "SASA aggregation expects MDAnalysis ReplicateArtifact inputs. Legacy SASA "
+                "replicate caches are incompatible with the MDAnalysis artifact lifecycle; "
+                "recompute the condition or clear stale caches before aggregating."
             )
-
-        agg_result = SASAAggregatedResult(
-            config_hash=first.config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=None,
-            equilibration_time=first.equilibration_time,
-            equilibration_unit=first.equilibration_unit,
-            selection_string=first.selection_string,
-            replicates=list(ctx.replicates),
-            n_replicates=len(ctx.replicates),
-            run_results=aggregated_runs,
-            settings_fingerprint=settings_token,
-            source_result_files=[],
+        target_path = ctx.result_path or ctx.output_dir / "result.json"
+        aggregated = aggregate_sasa_artifacts(
+            condition_label=ctx.condition.label,
+            replicates=ctx.replicates,
+            settings=cast(SASASettings, ctx.settings),
+            equilibration=ctx.equilibration,
+            output_dir=ctx.output_dir,
+            result_path=target_path,
+            artifacts=cast(Sequence[ReplicateArtifact], results),
+            settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
         )
-
-        target_path = ctx.result_path
-        if target_path is None:
-            target_path = ctx.output_dir / self._make_aggregated_filename(
-                ctx.replicates,
-                first,
-                settings_token,
-            )
-        self.save_result(agg_result, target_path)
-        return agg_result
+        LOGGER.info("Saved aggregated SASA artifact to %s", target_path)
+        return aggregated
 
     @staticmethod
     def _load_per_residue_contributions(
@@ -854,7 +629,7 @@ class SASAAnalysis(Analysis):
                 )
 
     def _resolve_aggregated_result_path(self, aggregated_dir: Path) -> Path | None:
-        """Resolve the aggregated SASA result path.
+        """Resolve the canonical aggregated SASA result path.
 
         Parameters
         ----------
@@ -864,29 +639,13 @@ class SASAAnalysis(Analysis):
         Returns
         -------
         Path | None
-            Path to the selected JSON result, or ``None`` when absent.
+            Path to ``result.json``, or ``None`` when absent.
         """
 
-        if not aggregated_dir.exists():
-            return None
         canonical = self.aggregate_result_path(aggregated_dir)
         if canonical.exists():
             return canonical
-
-        json_files = sorted(aggregated_dir.glob("*.json"), key=lambda path: path.stat().st_mtime)
-        if not json_files:
-            return None
-
-        chosen = json_files[-1]
-        LOGGER.warning(
-            "%s: canonical result.json not found in %s — falling back to %s "
-            "(%d JSON file(s) present)",
-            self.name,
-            aggregated_dir,
-            chosen.name,
-            len(json_files),
-        )
-        return chosen
+        return None
 
     def _load_aggregated_result(
         self,
@@ -912,19 +671,36 @@ class SASAAnalysis(Analysis):
             Loaded aggregate, or ``None`` when no result file exists.
         """
 
-        result_path = self._resolve_aggregated_result_path(aggregated_dir)
-        if result_path is None:
-            return None
+        del settings, condition
+        return load_condition_artifact(aggregated_dir)
 
-        result = self._deserialize_result(result_path)
-        if settings is None or condition is None:
-            return result
+    def _deserialize_result(self, path: Path) -> Any:
+        """Load only canonical SASA condition artifacts.
 
-        return self._coerce_and_validate_aggregated_result(
-            result,
-            settings,
-            condition,
-            source=result_path,
+        Parameters
+        ----------
+        path : Path
+            Candidate aggregate path.
+
+        Returns
+        -------
+        Any
+            Canonical condition artifact.
+        """
+
+        if path.exists():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    f"SASA aggregate at {path} is not a valid canonical artifact. Recompute "
+                    "the condition or clear stale caches before comparing."
+                ) from exc
+            if isinstance(loaded, dict) and loaded.get("artifact_type") == "condition":
+                return ArtifactStore(path.parent).read_condition_result(path.name)
+        raise ValueError(
+            f"SASA aggregate at {path} is not a canonical MDAnalysis condition artifact. "
+            "Recompute the condition or clear stale legacy SASA caches."
         )
 
     def compare(self, ctx: ComparisonContext) -> Any:
@@ -951,14 +727,13 @@ class SASAAnalysis(Analysis):
         for condition in ctx.conditions:
             agg_result = ctx.aggregated_results.get(condition.label)
             if agg_result is not None:
-                agg_result = self._coerce_and_validate_aggregated_result(
-                    agg_result,
-                    settings,
-                    condition,
-                    source=self._resolve_aggregated_result_path(
-                        ctx.analysis_dirs[condition.label] / "aggregated"
-                    ),
-                )
+                if not isinstance(agg_result, ConditionArtifact):
+                    raise TypeError(
+                        f"SASA comparison for condition '{condition.label}' requires canonical "
+                        "MDAnalysis condition artifacts. Legacy SASA aggregate inputs are "
+                        "incompatible; recompute the condition or clear stale caches before "
+                        "comparing."
+                    )
             else:
                 agg_result = self._load_aggregated_result(
                     ctx.analysis_dirs[condition.label] / "aggregated",
@@ -967,6 +742,18 @@ class SASAAnalysis(Analysis):
                 )
             if agg_result is None:
                 continue
+            agg_result = self.validate_aggregated_result(
+                agg_result,
+                condition=condition,
+                settings=settings,
+                equilibration=ctx.equilibration,
+                source=self.aggregate_result_path(
+                    ctx.analysis_dirs[condition.label] / "aggregated"
+                ),
+                expected_replicates=condition.replicates,
+                allow_replicate_subset=True,
+            )
+            agg_result = condition_artifact_to_legacy_result(agg_result)
 
             run_summaries = [
                 SASARunSummary(

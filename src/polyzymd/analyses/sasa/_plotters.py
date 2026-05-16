@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence, cast
 
+from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
@@ -562,32 +562,33 @@ def _load_replicate_timeseries_from_results(
     condition_dir: Path,
     run_label: str,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Load per-replicate SASA timeseries using saved raw NPZ paths."""
+    """Load per-replicate SASA timeseries from canonical artifacts."""
     import numpy as np
-
-    condition_payload = _load_condition_result_payloads(condition_dir)
-    if not condition_payload:
-        return np.array([], dtype=np.float64), np.empty((0, 0), dtype=np.float64)
 
     times: list[np.ndarray] = []
     traces: list[np.ndarray] = []
-    for run_result in condition_payload:
-        if run_result.get("run_label") != run_label:
-            continue
-
-        npz_value = run_result.get("raw_npz_path") or run_result.get("npz_path")
-        if not npz_value:
-            continue
-
-        npz_path = Path(npz_value)
-        if not npz_path.exists():
+    for run_dir in sorted(condition_dir.glob("run_*")):
+        result_path = run_dir / "result.json"
+        if not result_path.exists():
             continue
         try:
+            artifact = ArtifactStore(run_dir).read_replicate_result("result.json")
+        except (ArtifactStoreError, OSError, ValueError) as exc:
+            LOGGER.warning("Failed to load canonical SASA artifact %s: %s", result_path, exc)
+            continue
+        run_result = _artifact_run_payload(artifact.payload.get("run_results", []), run_label)
+        if run_result is None:
+            continue
+        sidecar_ref = _artifact_sidecar(artifact.sidecars, run_result)
+        if sidecar_ref is None:
+            continue
+        try:
+            npz_path = ArtifactStore(run_dir).validate_sidecar(sidecar_ref)
             with np.load(npz_path) as payload:
                 total_sasa = np.asarray(payload["total_sasa_a2"], dtype=np.float64)
                 time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
-        except (FileNotFoundError, KeyError, ValueError) as exc:
-            LOGGER.warning("Failed to load SASA NPZ sidecar %s: %s", npz_path, exc)
+        except (ArtifactStoreError, FileNotFoundError, KeyError, ValueError) as exc:
+            LOGGER.warning("Failed to load SASA NPZ sidecar for %s: %s", result_path, exc)
             continue
 
         if total_sasa.ndim != 1 or time_ns.ndim != 1 or total_sasa.size == 0 or time_ns.size == 0:
@@ -607,44 +608,58 @@ def _load_replicate_timeseries_from_results(
 
 
 def _load_condition_aggregated(condition_dir: Path) -> dict | None:
-    """Load condition-level aggregated JSON payload."""
-    agg_path = condition_dir / "aggregated" / "result.json"
-    if not agg_path.exists():
-        return None
+    """Load condition-level canonical artifact payload."""
+    agg_dir = condition_dir / "aggregated"
     try:
-        return json.loads(agg_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError) as exc:
-        LOGGER.warning("Failed to load aggregated SASA JSON %s: %s", agg_path, exc)
+        artifact = ArtifactStore(agg_dir).read_condition_result("result.json")
+    except ArtifactStoreError as exc:
+        LOGGER.warning(
+            "Failed to load aggregated SASA artifact %s: %s", agg_dir / "result.json", exc
+        )
         return None
+    return artifact.payload
 
 
 def _load_condition_result_payloads(condition_dir: Path) -> list[dict]:
-    """Load all per-replicate result payloads for one condition."""
+    """Load all per-replicate run payloads from canonical artifacts."""
     payloads: list[dict] = []
     for run_dir in sorted(condition_dir.glob("run_*")):
         result_path = run_dir / "result.json"
         if not result_path.exists():
-            fallback_paths = [path for path in run_dir.glob("sasa_*.json") if path.exists()]
-            if not fallback_paths:
-                continue
-            result_path = max(
-                fallback_paths,
-                key=lambda path: (path.stat().st_mtime, path.name),
-            )
-
-        if not result_path.exists():
             continue
-
         try:
-            data = json.loads(result_path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError) as exc:
-            LOGGER.warning("Failed to load SASA result JSON %s: %s", result_path, exc)
+            artifact = ArtifactStore(run_dir).read_replicate_result("result.json")
+        except ArtifactStoreError as exc:
+            LOGGER.warning("Failed to load SASA replicate artifact %s: %s", result_path, exc)
             continue
-
-        for run_result in data.get("run_results", []):
+        for run_result in artifact.payload.get("run_results", []):
             if isinstance(run_result, dict):
                 payloads.append(run_result)
     return payloads
+
+
+def _artifact_run_payload(run_results: object, run_label: str) -> dict | None:
+    """Return a run payload by label from artifact JSON content."""
+
+    if not isinstance(run_results, list):
+        return None
+    for run_result in run_results:
+        if isinstance(run_result, dict) and run_result.get("run_label") == run_label:
+            return run_result
+    return None
+
+
+def _artifact_sidecar(sidecars: Sequence[object], run_result: dict) -> object | None:
+    """Return the sidecar reference matching one run payload."""
+
+    sidecar_path = run_result.get("sidecar_path") or run_result.get("raw_npz_path")
+    for sidecar in sidecars:
+        metadata = getattr(sidecar, "metadata", {})
+        if metadata.get("run_label") == run_result.get("run_label"):
+            return sidecar
+        if getattr(sidecar, "path", None) == sidecar_path:
+            return sidecar
+    return None
 
 
 def _get_plot_settings(ctx: PlotContext) -> SASAPlotSettings:
