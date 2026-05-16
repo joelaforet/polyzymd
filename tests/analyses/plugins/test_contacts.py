@@ -750,6 +750,7 @@ def _write_contacts_replicate_artifact(
     *,
     condition_label: str = "test",
     replicate: int = 1,
+    equilibration: str = "10ns",
     contact_fractions: list[float] | None = None,
     event_durations_ns: list[tuple[int, str, float]] | None = None,
 ):
@@ -844,7 +845,9 @@ def _write_contacts_replicate_artifact(
                 "start": 0,
                 "stop": 10,
                 "step": 1,
+                "equilibration": equilibration,
                 "n_frames_total": 10,
+                "n_frames_selected": 10,
                 "timestep_ps": 1000.0,
             },
             "detection_identity": detection,
@@ -857,13 +860,20 @@ def _write_contacts_replicate_artifact(
             "settings_fingerprint": contacts_detection_fingerprint(settings),
             "contacts_detection_fingerprint": contacts_detection_fingerprint(settings),
             "time_axis_policy": "regular_selected_time_axis",
+            "equilibration": equilibration,
         },
     )
     store.write_replicate_result(artifact)
     return artifact
 
 
-def _make_condition_artifact(label: str, settings, replicates=(1, 2, 3), n_residues: int = 2):
+def _make_condition_artifact(
+    label: str,
+    settings,
+    replicates=(1, 2, 3),
+    n_residues: int = 2,
+    equilibration: str = "10ns",
+):
     """Create a condition artifact for contacts comparison tests."""
 
     from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
@@ -918,7 +928,21 @@ def _make_condition_artifact(label: str, settings, replicates=(1, 2, 3), n_resid
                 }
             },
         },
-        metadata={"contacts_detection_fingerprint": contacts_detection_fingerprint(settings)},
+        provenance={
+            "frame_selection": {
+                "start": 0,
+                "stop": 10,
+                "step": 1,
+                "equilibration": equilibration,
+                "n_frames_total": 10,
+                "n_frames_selected": 10,
+                "timestep_ps": 1000.0,
+            }
+        },
+        metadata={
+            "contacts_detection_fingerprint": contacts_detection_fingerprint(settings),
+            "equilibration": equilibration,
+        },
     )
 
 
@@ -968,8 +992,11 @@ class TestAggregate:
         assert result.payload["metrics"]["mean_contact_fraction"]["n"] == 3
 
     def test_aggregate_passes_disabled_residence_time_setting(self, tmp_path):
+        import numpy as np
+
         from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda import ArtifactStore
 
         analysis = ContactsAnalysis()
         settings = ContactsSettings(compute_residence_times=False)
@@ -1001,7 +1028,44 @@ class TestAggregate:
         result = analysis.aggregate(ctx, artifacts)
 
         assert result.payload["residence_time_by_polymer_type"] == {}
+        assert "residence_time_by_polymer_type" not in result.payload["residue_stats"][0]
         assert result.metadata["compute_residence_times"] is False
+        profile_path = ArtifactStore(ctx.output_dir).validate_sidecar(result.sidecars[0])
+
+        with np.load(profile_path) as profile:
+            assert "residence_time_mean_ns" not in profile.files
+            assert "residence_time_sem_ns" not in profile.files
+            assert "residence_time_event_counts" not in profile.files
+
+    def test_aggregate_rejects_stale_replicate_equilibration(self, tmp_path):
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda.aggregation import MDAAggregationError
+
+        settings = ContactsSettings()
+        analysis_dir = tmp_path / "contacts"
+        artifact = _write_contacts_replicate_artifact(
+            analysis_dir,
+            settings,
+            replicate=1,
+            equilibration="0ns",
+        )
+        condition = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1,),
+            sim_config=_make_hashable_sim_config(tmp_path),
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1,),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="10ns",
+            settings=settings,
+        )
+
+        with pytest.raises(MDAAggregationError, match="equilibration mismatch"):
+            ContactsAnalysis().aggregate(ctx, [artifact])
 
     def test_aggregate_rejects_legacy_contact_results(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition
@@ -1433,19 +1497,7 @@ class TestCompare:
         analysis = ContactsAnalysis()
         ctx = self._make_ctx(tmp_path, n_conditions=3, control="Control")
 
-        # Mock _load_aggregated_result to return proper aggregated results
-        mock_agg_results = {}
-        for cond in ctx.conditions:
-            mock_agg = _make_mock_agg_result(n_replicates=3, n_residues=5)
-            mock_agg_results[cond.label] = mock_agg
-
-        def side_effect(agg_dir):
-            # Extract label from path
-            label = agg_dir.parent.parent.name
-            return mock_agg_results.get(label)
-
-        with patch.object(analysis, "_load_aggregated_result", side_effect=side_effect):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         assert result is not None
         assert result.name == "test_comparison"
@@ -1462,16 +1514,7 @@ class TestCompare:
         analysis = ContactsAnalysis()
         ctx = self._make_ctx(tmp_path, n_conditions=3, control="Control")
 
-        mock_agg_results = {}
-        for cond in ctx.conditions:
-            mock_agg_results[cond.label] = _make_mock_agg_result(3, 5)
-
-        def side_effect(agg_dir):
-            label = agg_dir.parent.parent.name
-            return mock_agg_results.get(label)
-
-        with patch.object(analysis, "_load_aggregated_result", side_effect=side_effect):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         # With 3 conditions and a control, expect 2 pairwise comparisons
         assert len(result.pairwise_comparisons) == 2
@@ -1485,16 +1528,7 @@ class TestCompare:
         analysis = ContactsAnalysis()
         ctx = self._make_ctx(tmp_path, n_conditions=3, control=None)
 
-        mock_agg_results = {}
-        for cond in ctx.conditions:
-            mock_agg_results[cond.label] = _make_mock_agg_result(3, 5)
-
-        def side_effect(agg_dir):
-            label = agg_dir.parent.parent.name
-            return mock_agg_results.get(label)
-
-        with patch.object(analysis, "_load_aggregated_result", side_effect=side_effect):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         # Without control: all pairs = C(3,2) = 3
         assert len(result.pairwise_comparisons) == 3
@@ -1505,17 +1539,8 @@ class TestCompare:
         analysis = ContactsAnalysis()
         ctx = self._make_ctx(tmp_path, n_conditions=3, control="Control")
         ctx.aggregated_results.pop("Control")
-        mock_agg_results = {
-            "Treatment A": _make_mock_agg_result(3, 5),
-            "Treatment B": _make_mock_agg_result(3, 5),
-        }
 
-        def side_effect(agg_dir, **_kwargs):
-            label = agg_dir.parent.parent.name
-            return mock_agg_results.get(label)
-
-        with patch.object(analysis, "_load_validated_aggregated_result", side_effect=side_effect):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         assert result is not None
         assert result.control_label is None
@@ -1529,16 +1554,7 @@ class TestCompare:
         analysis = ContactsAnalysis()
         ctx = self._make_ctx(tmp_path, n_conditions=3)
 
-        mock_agg_results = {}
-        for cond in ctx.conditions:
-            mock_agg_results[cond.label] = _make_mock_agg_result(3, 5)
-
-        def side_effect(agg_dir):
-            label = agg_dir.parent.parent.name
-            return mock_agg_results.get(label)
-
-        with patch.object(analysis, "_load_aggregated_result", side_effect=side_effect):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         # ANOVA with 3+ conditions: 2 summaries (coverage + contact_fraction)
         assert len(result.anova) == 2
@@ -1551,16 +1567,7 @@ class TestCompare:
         analysis = ContactsAnalysis()
         ctx = self._make_ctx(tmp_path, n_conditions=2, control="Control")
 
-        mock_agg_results = {}
-        for cond in ctx.conditions:
-            mock_agg_results[cond.label] = _make_mock_agg_result(3, 5)
-
-        def side_effect(agg_dir):
-            label = agg_dir.parent.parent.name
-            return mock_agg_results.get(label)
-
-        with patch.object(analysis, "_load_aggregated_result", side_effect=side_effect):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         # No ANOVA with < 3 conditions
         assert len(result.anova) == 0
@@ -1593,10 +1600,7 @@ class TestCompare:
             recompute=False,
         )
 
-        with patch.object(
-            analysis, "_load_aggregated_result", return_value=_make_mock_agg_result(3, 5)
-        ):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         assert result is not None
         assert len(result.conditions) == 1
@@ -1637,6 +1641,41 @@ class TestCompare:
         assert result is not None
         assert result.conditions[0].label == "Finalized"
         load_mock.assert_not_called()
+
+    def test_compare_rejects_stale_condition_equilibration(self, tmp_path):
+        """Comparison should reject condition artifacts from a different window."""
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda import ArtifactStore
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings()
+        condition = Condition(
+            label="Stale",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        analysis_dir = tmp_path / "Stale" / "contacts"
+        agg_dir = analysis_dir / "aggregated"
+        agg_dir.mkdir(parents=True)
+        ArtifactStore(agg_dir).write_condition_result(
+            _make_condition_artifact("Stale", settings, replicates=(1, 2), equilibration="0ns")
+        )
+        ctx = ComparisonContext(
+            name="test",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"Stale": analysis_dir},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=settings,
+            recompute=False,
+        )
+
+        with pytest.raises(ValueError, match="equilibration mismatch"):
+            analysis.compare(ctx)
 
     def test_compare_rejects_legacy_aggregate_when_recompute_true(self, tmp_path):
         """Comparison-stage reads should not suppress valid aggregate JSON files."""
@@ -1750,10 +1789,7 @@ class TestCompare:
             recompute=False,
         )
 
-        mock_agg = _make_mock_agg_result(3, 5)
-
-        with patch.object(analysis, "_load_aggregated_result", return_value=mock_agg):
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         assert "No Polymer" in result.excluded_conditions
 

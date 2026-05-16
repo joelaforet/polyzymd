@@ -87,6 +87,11 @@ def compare(analysis: Any, ctx: ComparisonContext) -> Any:
         agg_result = data["agg_result"]
         coverage_metric = agg_result.payload["metrics"]["coverage"]
         contact_metric = agg_result.payload["metrics"]["mean_contact_fraction"]
+        residence_summary = (
+            agg_result.payload.get("residence_time_by_polymer_type", {})
+            if settings.compute_residence_times
+            else {}
+        )
         summary = ContactsConditionSummary(
             label=cond.label,
             config_path=str(cond.config_path),
@@ -96,9 +101,7 @@ def compare(analysis: Any, ctx: ComparisonContext) -> Any:
             coverage_sem=float(coverage_metric["sem"]),
             mean_contact_fraction=float(contact_metric["mean"]),
             mean_contact_fraction_sem=float(contact_metric["sem"]),
-            residence_time_by_polymer_type=agg_result.payload.get(
-                "residence_time_by_polymer_type", {}
-            ),
+            residence_time_by_polymer_type=residence_summary,
             compute_residence_times=settings.compute_residence_times,
         )
         summaries.append(summary)
@@ -201,6 +204,7 @@ def _validate_condition_artifact(
         )
     if not stored_replicates:
         raise ValueError(f"contacts: condition {cond.label!r} has no successful replicates")
+    _validate_condition_frame_selection(artifact, ctx, cond)
     from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
 
     expected_fingerprint = contacts_detection_fingerprint(ctx.settings)
@@ -210,6 +214,55 @@ def _validate_condition_artifact(
             f"contacts: condition {cond.label!r} detection fingerprint mismatch; expected "
             f"{expected_fingerprint!r}, got {stored_fingerprint!r}. Recompute contacts."
         )
+
+
+def _validate_condition_frame_selection(
+    artifact: ConditionArtifact, ctx: ComparisonContext, cond: Condition
+) -> None:
+    """Validate condition artifact frame-selection metadata for comparison."""
+
+    frame_selection = artifact.provenance.get("frame_selection")
+    if not isinstance(frame_selection, Mapping):
+        raise ValueError(
+            f"contacts: condition {cond.label!r} lacks frame-selection provenance; "
+            "recompute contacts or clear stale aggregate result.json files"
+        )
+    _validate_equilibration_provenance(
+        stored=frame_selection.get("equilibration"),
+        expected=ctx.equilibration,
+        label=f"condition {cond.label!r} frame selection",
+    )
+    stored_metadata_equilibration = artifact.metadata.get("equilibration")
+    if stored_metadata_equilibration is not None:
+        _validate_equilibration_provenance(
+            stored=stored_metadata_equilibration,
+            expected=ctx.equilibration,
+            label=f"condition {cond.label!r} metadata",
+        )
+
+
+def _validate_equilibration_provenance(*, stored: Any, expected: str, label: str) -> None:
+    """Validate stored equilibration provenance against the active context."""
+
+    if stored is None:
+        raise ValueError(f"contacts: {label} lacks equilibration provenance; recompute contacts")
+    if _equilibration_to_ps(stored) != _equilibration_to_ps(expected):
+        raise ValueError(
+            f"contacts: {label} equilibration mismatch: stored {stored!r}, expected "
+            f"{expected!r}. Recompute contacts or clear stale aggregate result.json files."
+        )
+
+
+def _equilibration_to_ps(value: Any) -> float:
+    """Normalize an equilibration string to picoseconds for comparisons."""
+
+    from polyzymd.analyses.shared.loader import convert_time, parse_time_string
+
+    try:
+        numeric_value, unit = parse_time_string(str(value))
+    except ValueError as exc:
+        raise ValueError(f"contacts: invalid equilibration provenance {value!r}") from exc
+    return float(convert_time(numeric_value, unit, "ps"))
 
 
 def compute_coverage_per_replicate(result: Any) -> list[float]:
