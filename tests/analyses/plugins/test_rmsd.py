@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from polyzymd.analyses._analysis_lifecycle import AnalysisLifecycle
 from polyzymd.analyses.base import Condition, PlotContext
 from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.mda import (
@@ -54,6 +55,8 @@ from tests._support.analysis_testkit import (
     make_replicate_context,
 )
 
+EXPECTED_STRETCH_RMSD = [0.0, 4.0 / 3.0, 4.0]
+
 
 def _make_run_settings() -> list[RMSDRunSettings]:
     """Create two valid RMSD run settings for tests."""
@@ -66,6 +69,47 @@ def _make_run_settings() -> list[RMSDRunSettings]:
 def _settings_hash(settings: RMSDSettings) -> str:
     """Return the shared settings fingerprint used by RMSD caches."""
     return settings_fingerprint(settings)
+
+
+def _make_stretch_universe() -> object:
+    """Create a synthetic triangle trajectory with hand-computable RMSD values."""
+
+    import MDAnalysis as mda
+    from MDAnalysis.coordinates.memory import MemoryReader
+
+    universe = mda.Universe.empty(
+        3,
+        n_residues=3,
+        atom_resindex=np.arange(3),
+        trajectory=True,
+    )
+    universe.add_TopologyAttr("names", ["A1", "A2", "A3"])
+    universe.add_TopologyAttr("masses", [12.0, 12.0, 12.0])
+    universe.add_TopologyAttr("resnames", ["TST", "TST", "TST"])
+    universe.add_TopologyAttr("resids", [1, 2, 3])
+    coords = np.asarray(
+        [
+            [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]],
+            [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [0.0, 4.0, 0.0]],
+            [[0.0, 0.0, 0.0], [8.0, 0.0, 0.0], [0.0, 8.0, 0.0]],
+        ],
+        dtype=np.float32,
+    )
+    universe.load_new(coords, format=MemoryReader, dt=5.0)
+    return universe
+
+
+def _make_stretch_run_settings(label: str = "stretch_triangle") -> RMSDRunSettings:
+    """Create RMSD settings for the synthetic triangle trajectory."""
+
+    return RMSDRunSettings(
+        label=label,
+        selection="all",
+        alignment_selection="all",
+        centroid_selection="all",
+        reference_mode="frame",
+        reference_frame=0,
+    )
 
 
 def _make_run_result(
@@ -596,9 +640,6 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
     condition: Condition, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Real MDAnalysis RMSD jobs should feed aggregation and comparison artifacts."""
-    import MDAnalysis as mda
-    from MDAnalysis.coordinates.memory import MemoryReader
-
     condition = make_condition(label=condition.label, replicates=(1,))
     monkeypatch.setattr("polyzymd.analyses.rmsd._mda.compute_config_hash", lambda _cfg: "hash123")
     monkeypatch.setattr(
@@ -614,34 +655,9 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
             message="Too few frames",
         ),
     )
-    universe = mda.Universe.empty(
-        4,
-        n_residues=4,
-        atom_resindex=np.arange(4),
-        trajectory=True,
-    )
-    universe.add_TopologyAttr("names", ["A1", "A2", "A3", "A4"])
-    universe.add_TopologyAttr("masses", [12.0, 12.0, 12.0, 12.0])
-    universe.add_TopologyAttr("resnames", ["TST", "TST", "TST", "TST"])
-    universe.add_TopologyAttr("resids", [1, 2, 3, 4])
-    coords = np.asarray(
-        [
-            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 2.0]],
-            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 4.0]],
-        ],
-        dtype=np.float32,
-    )
-    universe.load_new(coords, format=MemoryReader, dt=5.0)
+    universe = _make_stretch_universe()
     frame_selection = FrameSelection(start=0, stop=3, step=1, n_frames_total=3, timestep_ps=10.0)
-    run = RMSDRunSettings(
-        label="moving_atom",
-        selection="all",
-        alignment_selection="name A1 A2 A3",
-        centroid_selection="name A1 A2 A3",
-        reference_mode="frame",
-        reference_frame=0,
-    )
+    run = _make_stretch_run_settings()
     settings = RMSDSettings(runs=[run])
     mda_analysis = _build_rmsd_analysis(
         universe=universe,
@@ -662,10 +678,8 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
     completed = job.run()
 
     assert completed.results.rmsd[:, 1].tolist() == pytest.approx([0.0, 5.0, 10.0])
-    expected_rmsd_values = np.asarray(completed.results.rmsd[:, 2], dtype=np.float64)
-    assert np.all(np.isfinite(expected_rmsd_values))
-    assert expected_rmsd_values[0] == pytest.approx(0.0)
-    assert expected_rmsd_values[-1] > expected_rmsd_values[1] > 0.0
+    assert completed.results.rmsd[:, 2].tolist() == pytest.approx(EXPECTED_STRETCH_RMSD)
+    expected_rmsd_values = np.asarray(EXPECTED_STRETCH_RMSD, dtype=np.float64)
     expected_mean_rmsd = float(np.mean(expected_rmsd_values))
 
     collector_ctx, store = _make_rmsd_collector_context(
@@ -677,7 +691,7 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
     artifact = RMSDAnalysis().build_mda_collector(collector_ctx)(collector_ctx, [completed])
     run_payload = artifact.payload["runs"][0]
     assert run_payload["mean_rmsd"] == pytest.approx(expected_mean_rmsd)
-    assert run_payload["npz_path"] == f"sidecars/{_sidecar_filename('moving_atom', 0)}"
+    assert run_payload["npz_path"] == f"sidecars/{_sidecar_filename(run.label, 0)}"
     with np.load(store.resolve_sidecar(artifact.sidecars[0])) as payload:
         assert payload["rmsd_values"].tolist() == pytest.approx(expected_rmsd_values.tolist())
         assert payload["time_ns"].tolist() == pytest.approx([0.0, 0.005, 0.01])
@@ -712,6 +726,91 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
     assert comparison is not None
     assert comparison.n_runs == 1
     assert comparison.conditions[0].run_summaries[0].mean_rmsd == pytest.approx(expected_mean_rmsd)
+
+
+def test_rmsd_full_mda_replicate_lifecycle_persists_artifact(
+    condition: Condition, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RMSD replicate lifecycle should execute MDA jobs and persist artifacts."""
+
+    class FakeLoader:
+        """Synthetic trajectory loader for full-lifecycle RMSD tests."""
+
+        def __init__(self, sim_config: object, *args: object, **kwargs: object) -> None:
+            self.sim_config = sim_config
+
+        def load_universe(self, replicate: int, cache: bool = True) -> object:
+            del replicate, cache
+            return _make_stretch_universe()
+
+        def get_timestep(self, replicate: int, unit: str = "ps") -> float:
+            del replicate
+            assert unit == "ps"
+            return 5.0
+
+    class FakeProvider:
+        """Universe provider that delegates to the synthetic loader."""
+
+        def __init__(self, loader: FakeLoader) -> None:
+            self.loader = loader
+
+        @classmethod
+        def from_config(cls, config: object, **kwargs: object) -> "FakeProvider":
+            del config
+            return cls(kwargs["loader"])
+
+        def load_universe(self, replicate: int) -> object:
+            return self.loader.load_universe(replicate)
+
+        def provenance_for(self, replicate: int) -> dict[str, object]:
+            return {"replicate": replicate, "warnings": []}
+
+    monkeypatch.setattr("polyzymd.analyses.rmsd._mda.compute_config_hash", lambda _cfg: "hash123")
+    monkeypatch.setattr("polyzymd.analyses.shared.loader.TrajectoryLoader", FakeLoader)
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.convergence.find_convergence_time",
+        lambda *args, **kwargs: SimpleNamespace(
+            window_start_times_ns=[],
+            window_mean_values=[],
+            slope_times_ns=[],
+            slopes=[],
+            converged=False,
+            assessable=False,
+            convergence_time_ns=None,
+            message="Too few frames",
+        ),
+    )
+    condition = make_condition(label=condition.label, replicates=(1,))
+    analysis = RMSDAnalysis()
+    monkeypatch.setattr(analysis, "_trajectory_loader_factory", lambda: FakeLoader)
+    monkeypatch.setattr(analysis, "_mda_universe_provider_factory", lambda: FakeProvider)
+    run = _make_stretch_run_settings(label="lifecycle_stretch")
+    settings = RMSDSettings(runs=[run])
+    output_dir = tmp_path / "rmsd" / "run_1"
+
+    artifact = AnalysisLifecycle(analysis).run_replicate_once(
+        condition=condition,
+        settings=settings,
+        equilibration="0ns",
+        output_dir=output_dir,
+        replicate=1,
+        recompute=True,
+    )
+
+    assert isinstance(artifact, ReplicateArtifact)
+    assert analysis.replicate_result_path(output_dir).exists()
+    store = ArtifactStore(output_dir)
+    persisted = store.read_replicate_result()
+    assert persisted.analysis_name == "rmsd"
+    assert persisted.condition_label == condition.label
+    assert persisted.replicate == 1
+    run_payload = persisted.payload["runs"][0]
+    assert run_payload["mean_rmsd"] == pytest.approx(np.mean(EXPECTED_STRETCH_RMSD))
+    assert run_payload["npz_path"] == f"sidecars/{_sidecar_filename(run.label, 0)}"
+    assert persisted.sidecars[0].path == run_payload["npz_path"]
+    with np.load(store.resolve_sidecar(persisted.sidecars[0])) as payload:
+        assert payload["rmsd_values"].tolist() == pytest.approx(EXPECTED_STRETCH_RMSD)
+        assert payload["time_ns"].tolist() == pytest.approx([0.0, 0.005, 0.01])
 
 
 def test_plotter_resolves_npz_from_replicate_artifact(tmp_path: Path) -> None:
