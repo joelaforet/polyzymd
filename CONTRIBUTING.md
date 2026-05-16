@@ -59,8 +59,8 @@ Commit messages use imperative mood with a 50-character subject line:
 ```
 Add radius of gyration analysis plugin
 
-Implement build_runner and summarize_replicate using TrajectoryLoader for
-trajectory handling. Aggregate with SEM across replicates. Wire into default
+Implement build_mda_jobs and artifact aggregation for the MDAnalysis-native
+trajectory lifecycle. Aggregate with SEM across replicates. Wire into default
 scalar comparison path via extract_metrics.
 
 Closes #42
