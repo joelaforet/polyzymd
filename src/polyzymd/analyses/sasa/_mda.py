@@ -70,6 +70,7 @@ def build_sasa_jobs(ctx: MDAReplicateJobContext, settings: SASASettings) -> list
     """
 
     jobs: list[MDAAnalysisJob] = []
+    backend_policy = getattr(ctx, "backend_policy", None)
     for order, run in enumerate(settings.runs):
         context_selection = run.context_selection or run.target_selection
         run_frame_selection = _frame_selection_with_stride(ctx.frame_selection, run.stride)
@@ -88,7 +89,7 @@ def build_sasa_jobs(ctx: MDAReplicateJobContext, settings: SASASettings) -> list
                     timestep_ps=ctx.frame_selection.timestep_ps,
                 ),
                 frame_selection=run_frame_selection,
-                backend_policy=ctx.backend_policy,
+                **({"backend_policy": backend_policy} if backend_policy is not None else {}),
                 universe_policy=MDAUniversePolicy(
                     condition_label=ctx.replicate_context.condition.label,
                     replicate=ctx.replicate,

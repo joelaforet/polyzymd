@@ -32,11 +32,11 @@ from polyzymd.analyses.exceptions import (
     ReplicateSkippedError,
 )
 from polyzymd.analyses.mda.artifacts import ReplicateArtifact
+from polyzymd.analyses.mda.job import MDABackendPolicy
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 
 if TYPE_CHECKING:
     from polyzymd.analyses.base import Analysis
-    from polyzymd.analyses.mda import MDABackendPolicy
     from polyzymd.config.comparison import ComparisonConfig
 
 logger = logging.getLogger("polyzymd.analyses")
@@ -882,7 +882,7 @@ class AnalysisLifecycle:
         settings = prepared_state["settings"]
         equilibration = prepared_state["equilibration"]
         analysis_root = prepared_state["analysis_root"]
-        backend_policy = prepared_state["mda_backend_policy"]
+        backend_policy = prepared_state.get("mda_backend_policy", MDABackendPolicy())
         summary = self._execution_summary
         if summary is not None:
             summary(self.analysis, valid_conditions, settings, equilibration)

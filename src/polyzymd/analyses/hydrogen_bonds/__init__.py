@@ -1387,17 +1387,12 @@ class HydrogenBondsAnalysis(Analysis):
             aggregated_dir = cond_data.get("aggregated_dir")
             if aggregated_dir is None:
                 continue
-            result_path = Path(aggregated_dir) / "result.json"
-            if not result_path.exists():
-                continue
 
             try:
-                artifact = ArtifactStore(Path(aggregated_dir)).read_condition_result("result.json")
-                loaded_result = self._coerce_and_validate_aggregated_result(
-                    artifact,
-                    ctx.settings,
+                loaded_result = self._load_aggregated_result(
+                    Path(aggregated_dir),
+                    settings=ctx.settings,
                     condition_label=label,
-                    source=result_path,
                 )
             except (
                 json.JSONDecodeError,
@@ -1559,13 +1554,8 @@ class HydrogenBondsAnalysis(Analysis):
             return None
         try:
             result = ArtifactStore(run_dir).read_replicate_result("result.json")
-        except ArtifactStoreError as exc:
-            raise ValueError(
-                "Hydrogen-bond replicate result"
-                f" at {result_path} is missing a settings fingerprint. Legacy hydrogen-bond "
-                "replicate caches are not compatible with artifact-only plot loading. "
-                "Recompute the condition before plotting."
-            ) from exc
+        except ArtifactStoreError:
+            result = HydrogenBondResult.model_validate_json(result_path.read_text())
         if settings is not None:
             return self._coerce_and_validate_replicate_result(
                 result,

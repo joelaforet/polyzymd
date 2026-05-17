@@ -77,6 +77,7 @@ def build_rmsf_jobs(ctx: MDAReplicateJobContext, settings: RMSFSettings) -> list
         replicate=ctx.replicate,
     )
     selected_frame_selection = _selected_frame_selection(ctx.frame_selection, job_input.frames)
+    backend_policy = getattr(ctx, "backend_policy", None)
     return [
         MDAAnalysisJob(
             name="rmsf_profile",
@@ -85,7 +86,7 @@ def build_rmsf_jobs(ctx: MDAReplicateJobContext, settings: RMSFSettings) -> list
                 reference_positions=job_input.reference_positions,
             ),
             frame_selection=selected_frame_selection,
-            backend_policy=ctx.backend_policy,
+            **({"backend_policy": backend_policy} if backend_policy is not None else {}),
             universe_policy=MDAUniversePolicy(
                 condition_label=ctx.replicate_context.condition.label,
                 replicate=ctx.replicate,
