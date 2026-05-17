@@ -679,7 +679,7 @@ polyzymd new-analysis NAME [OPTIONS]
 
 Options:
   --class-name TEXT                 PascalCase class prefix
-  --style [dict|pydantic]           Advanced package style
+  --style [dict|pydantic]           Advanced package style only
   --advanced                        Request the advanced MDAnalysis-native package scaffold
   --project-root DIRECTORY          Repository root
   --force                           Overwrite existing files
@@ -691,6 +691,11 @@ By default, the command creates a single-file MDAnalysis-native plugin at
 builds an `MDAAnalysisJob.from_function()` job, returns a `ReplicateArtifact`
 with explicit `payload["metrics"]`, and relies on the default artifact
 aggregation path.
+
+Programmatic callers may still pass `style="measurement"` to
+`generate_scaffold()` as a historical compatibility token for this default
+single-file MDAnalysis-native scaffold. It is not a CLI style; omit `--style` to
+use the default scaffold.
 
 `--advanced`, `--style dict`, and `--style pydantic` create a package at
 `src/polyzymd/analyses/<NAME>/` with lifecycle wiring in `__init__.py` and a

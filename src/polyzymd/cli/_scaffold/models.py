@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Historical compatibility token for the default single-file MDAnalysis-native
+# scaffold; this does not refer to the removed scalar-measurement API
 DEFAULT_STYLE = "measurement"
 VALID_STYLES = (DEFAULT_STYLE, "dict", "pydantic")
 ADVANCED_STYLES = ("dict", "pydantic")
@@ -20,9 +22,10 @@ class ScaffoldSpec:
     class_name : str
         PascalCase class prefix used for generated classes.
     style : str
-        Scaffold style. ``"measurement"`` is retained as the internal default
-        style name for the simple single-file MDAnalysis-native contributor
-        path; ``"dict"`` and ``"pydantic"`` create advanced package scaffolds.
+        Scaffold style. ``"measurement"`` is retained as a historical
+        compatibility token for the default single-file MDAnalysis-native
+        contributor path, not the removed scalar-measurement API. ``"dict"``
+        and ``"pydantic"`` create advanced package scaffolds.
     """
 
     name: str

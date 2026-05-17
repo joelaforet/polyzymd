@@ -134,7 +134,9 @@ def _build_spec(
     class_name : str or None
         Optional PascalCase class prefix.
     style : str
-        Scaffold style name.
+        Scaffold style name. ``"measurement"`` is a compatibility token for
+        the default single-file MDAnalysis-native scaffold; ``"dict"`` and
+        ``"pydantic"`` request advanced package scaffolds.
     advanced : bool, optional
         If True, request an advanced package scaffold.
 
@@ -148,6 +150,7 @@ def _build_spec(
     ValueError
         If any input is invalid.
     """
+    # Preserve the programmatic compatibility token while keeping advanced explicit
     effective_style = "dict" if advanced and style == "measurement" else style
     if effective_style not in VALID_STYLES:
         raise ValueError(f"Invalid style '{style}'. Choose from: {', '.join(VALID_STYLES)}")
@@ -224,6 +227,7 @@ def _path_has_scaffold_signature(path: Path) -> bool:
         return False
 
     text = path.read_text(encoding="utf-8")
+    # Keep legacy signature text so --force can still identify old scaffold output
     signatures = (
         "Replace this placeholder with domain-specific measurement logic",
         "Replace this placeholder with domain-specific MDAnalysis logic",
@@ -388,9 +392,10 @@ def generate_scaffold(
         PascalCase class prefix. Auto-derived from *name* when omitted, by
         default None.
     style : str, optional
-        ``"measurement"`` for the default single-file MDAnalysis-native plugin,
-        ``"dict"`` for advanced plain-dict artifacts, or ``"pydantic"`` for
-        advanced typed helper models, by default ``"measurement"``.
+        ``"measurement"`` for the historical compatibility alias of the default
+        single-file MDAnalysis-native plugin, ``"dict"`` for advanced plain-dict
+        artifacts, or ``"pydantic"`` for advanced typed helper models, by
+        default ``"measurement"``.
     advanced : bool, optional
         Request an advanced package scaffold, by default False.
     force : bool, optional

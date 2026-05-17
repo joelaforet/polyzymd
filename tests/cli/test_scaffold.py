@@ -278,7 +278,7 @@ class TestGenerateScaffold:
         for path in created:
             assert not path.exists(), f"{path} should not exist in dry-run mode"
 
-    def test_default_style_is_measurement(self, tmp_path: Path):
+    def test_default_uses_simple_mda_scaffold(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
         generate_scaffold("solvent_shell", tmp_path)
@@ -286,6 +286,22 @@ class TestGenerateScaffold:
         text = plugin_path.read_text(encoding="utf-8")
 
         assert "MDAAnalysisJob.from_function" in text
+        assert "ScalarMeasurementAnalysis" not in text
+        assert "SolventShellReplicateRunner" not in text
+
+    def test_measurement_style_token_uses_simple_mda_scaffold(self, tmp_path: Path):
+        _prepare_project(tmp_path)
+
+        created = generate_scaffold("solvent_shell", tmp_path, style="measurement")
+        plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+        analyses_root = tmp_path / "src" / "polyzymd" / "analyses"
+        text = plugin_path.read_text(encoding="utf-8")
+
+        assert len(created) == 2
+        assert plugin_path.exists()
+        assert not (analyses_root / "solvent_shell").exists()
+        assert "MDAAnalysisJob.from_function" in text
+        assert "class SolventShellAnalysis(Analysis):" in text
         assert "ScalarMeasurementAnalysis" not in text
         assert "SolventShellReplicateRunner" not in text
 
@@ -348,7 +364,7 @@ class TestStyleValidation:
 class TestLayoutCollisionChecks:
     """Cross-layout collision behavior for module and package scaffolds."""
 
-    def test_measurement_refuses_existing_package_even_with_force(self, tmp_path: Path):
+    def test_compatibility_style_refuses_existing_package_even_with_force(self, tmp_path: Path):
         _prepare_project(tmp_path)
         package_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
         package_dir.mkdir()
@@ -678,7 +694,7 @@ class TestNewAnalysisCLI:
         assert (self.root / "src" / "polyzymd" / "analyses" / "solvent_shell.py").exists()
         assert not (self.root / "src" / "polyzymd" / "analyses" / "solvent_shell").exists()
 
-    def test_default_style_is_measurement(self, runner: CliRunner, cli):
+    def test_default_uses_simple_mda_scaffold(self, runner: CliRunner, cli):
         result = runner.invoke(cli, ["solvent_shell", "--project-root", str(self.root)])
         assert result.exit_code == 0, result.output
         plugin_path = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
@@ -896,11 +912,13 @@ class TestNewAnalysisCLI:
         assert result.exit_code == 0
         assert "tests/analyses/plugins/test_<NAME>.py" in result.output
 
-    def test_help_shows_measurement_and_advanced_layouts(self, runner: CliRunner, cli):
+    def test_help_shows_default_and_advanced_layouts(self, runner: CliRunner, cli):
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0
         assert "src/polyzymd/analyses/<NAME>.py" in result.output
         assert "src/polyzymd/analyses/<NAME>/__init__.py" in result.output
+        assert "Advanced package style only" in result.output
+        assert "--style measurement" not in result.output
         assert "_runner.py" not in result.output
         assert "Advanced package scaffolds" in result.output
 

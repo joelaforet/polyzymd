@@ -3074,7 +3074,7 @@ def info() -> None:
     "--style",
     type=click.Choice(["dict", "pydantic"], case_sensitive=False),
     default=None,
-    help="Advanced package style: 'dict' for plain payloads or 'pydantic' for typed helpers.",
+    help="Advanced package style only; omit for the default single-file scaffold.",
 )
 @click.option(
     "--advanced",
