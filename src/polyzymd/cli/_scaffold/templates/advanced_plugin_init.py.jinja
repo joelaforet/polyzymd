@@ -1,0 +1,246 @@
+"""{{ spec.title }} advanced MDAnalysis-native analysis package."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Any, ClassVar
+
+from pydantic import BaseModel, Field
+
+from polyzymd.analyses.base import Analysis, MetricValue
+from polyzymd.analyses.exceptions import PluginContractError
+from polyzymd.analyses.mda import (
+    ConditionArtifact,
+    MDAAnalysisJob,
+    MDACollectorContext,
+    MDAJobResult,
+    MDAReplicateJobContext,
+    ReplicateArtifact,
+    frame_selection_payload,
+    strict_json_payload,
+)
+
+METRIC_NAME = "{{ spec.name }}_value"
+
+
+class {{ spec.class_name }}Settings(BaseModel):
+    """Settings for the {{ spec.name }} analysis."""
+
+    selection: str = Field(
+        default="protein and name CA",
+        min_length=1,
+        description="MDAnalysis atom selection measured by the AnalysisBase helper.",
+    )
+    scale: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Scale factor applied to the placeholder selected atom-frame count.",
+    )
+
+
+class {{ spec.class_name }}ArtifactCollector:
+    """Collect {{ spec.name }} AnalysisBase jobs into a replicate artifact."""
+
+    def __call__(
+        self,
+        ctx: MDACollectorContext,
+        completed_jobs: Sequence[MDAJobResult],
+    ) -> ReplicateArtifact:
+        """Convert one completed AnalysisBase job to a replicate artifact.
+
+        Parameters
+        ----------
+        ctx : MDACollectorContext
+            Framework-provided collector context.
+        completed_jobs : sequence of MDAJobResult
+            Completed MDAnalysis-compatible jobs.
+
+        Returns
+        -------
+        ReplicateArtifact
+            Artifact with explicit ``payload["metrics"]`` for default aggregation.
+        """
+
+        if len(completed_jobs) != 1:
+            message = f"{ctx.analysis_name} expects exactly one completed MDA job."
+            raise PluginContractError(message)
+        job = completed_jobs[0]
+        result_payload = _normalize_results(job.results)
+        metrics = _extract_job_metrics(result_payload)
+        metadata: dict[str, Any] = {"result_kind": "mda_analysis_base"}
+        if ctx.settings_fingerprint is not None:
+            metadata["settings_fingerprint"] = ctx.settings_fingerprint
+        return ReplicateArtifact(
+            analysis_name=ctx.analysis_name,
+            condition_label=ctx.condition_label,
+            replicate=ctx.replicate,
+            payload={
+                "metrics": metrics,
+                "jobs": [{"name": job.name, "results": result_payload}],
+            },
+            provenance={
+                "source": "{{ spec.name }}_analysis_base",
+                "frame_selection": frame_selection_payload(ctx.frame_selection),
+                "universe_policy": strict_json_payload(
+                    ctx.universe_policy.as_dict(), analysis_name=ctx.analysis_name
+                ),
+            },
+            metadata=metadata,
+            warnings=list(ctx.warnings),
+        )
+
+
+class {{ spec.class_name }}Analysis(Analysis):
+    """Generated advanced MDAnalysis-native analysis package for {{ spec.title }}."""
+
+    name: ClassVar[str] = "{{ spec.name }}"
+    Settings: ClassVar[type[BaseModel]] = {{ spec.class_name }}Settings
+
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[MDAAnalysisJob]:
+        """Build AnalysisBase-backed jobs for one replicate.
+
+        Parameters
+        ----------
+        ctx : MDAReplicateJobContext
+            Framework-provided context with a loaded universe and frame selection.
+
+        Returns
+        -------
+        sequence of MDAAnalysisJob
+            Single AnalysisBase-compatible job for the placeholder metric.
+        """
+
+        from ._mda import build_{{ spec.name }}_analysis
+
+        return [
+            MDAAnalysisJob(
+                name="{{ spec.name }}",
+                analysis_factory=lambda: build_{{ spec.name }}_analysis(
+                    ctx.universe,
+                    settings=ctx.settings,
+                ),
+                frame_selection=ctx.frame_selection,
+                universe_policy=ctx.universe_policy,
+            )
+        ]
+
+    def build_mda_collector(
+        self,
+        ctx: MDACollectorContext,
+    ) -> {{ spec.class_name }}ArtifactCollector:
+        """Build the collector for completed MDAnalysis jobs.
+
+        Parameters
+        ----------
+        ctx : MDACollectorContext
+            Framework-provided collector context.
+
+        Returns
+        -------
+        {{ spec.class_name }}ArtifactCollector
+            Collector that returns a canonical replicate artifact.
+        """
+
+        del ctx
+        return {{ spec.class_name }}ArtifactCollector()
+
+    def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
+        """Extract scalar metrics from a condition artifact.
+
+        Parameters
+        ----------
+        summary : Any
+            Aggregated condition artifact from default MDA aggregation.
+
+        Returns
+        -------
+        dict[str, MetricValue]
+            Metric values used by the default comparison implementation.
+        """
+
+        metric_summary = _metric_summary(summary, METRIC_NAME)
+        return {
+            METRIC_NAME: MetricValue(
+                name=METRIC_NAME,
+                mean=metric_summary["mean"],
+                sem=metric_summary["sem"],
+                replicate_values=metric_summary["values"],
+                higher_is_better=True,
+            )
+        }
+
+
+def _normalize_results(results: Any) -> dict[str, Any]:
+    """Normalize AnalysisBase results to a JSON-compatible dictionary.
+
+    Parameters
+    ----------
+    results : Any
+        Results object from the completed analysis.
+
+    Returns
+    -------
+    dict[str, Any]
+        Strict JSON-compatible results payload.
+    """
+
+    if isinstance(results, dict):
+        payload = results
+    elif hasattr(results, "data") and isinstance(results.data, dict):
+        payload = results.data
+    else:
+        payload = dict(vars(results))
+    return strict_json_payload(payload, analysis_name="{{ spec.name }}")
+
+
+def _extract_job_metrics(result_payload: dict[str, Any]) -> dict[str, float]:
+    """Extract explicit scalar metrics from a JSON-compatible job result.
+
+    Parameters
+    ----------
+    result_payload : dict[str, Any]
+        JSON-compatible payload returned by the completed job.
+
+    Returns
+    -------
+    dict[str, float]
+        Metric names mapped to scalar values.
+    """
+
+    metrics = result_payload.get("metrics")
+    if not isinstance(metrics, dict):
+        raise PluginContractError("Job results must include a metrics mapping.")
+{% if spec.uses_pydantic_results %}
+    from ._results import {{ spec.class_name }}Metrics
+
+    validated = {{ spec.class_name }}Metrics.model_validate(metrics)
+    metrics = validated.model_dump(mode="json")
+{% endif %}
+    return {name: float(value) for name, value in metrics.items()}
+
+
+def _metric_summary(summary: Any, metric_name: str) -> dict[str, Any]:
+    """Return one metric summary from an aggregated condition artifact.
+
+    Parameters
+    ----------
+    summary : Any
+        Condition artifact or dictionary payload.
+    metric_name : str
+        Metric name to extract.
+
+    Returns
+    -------
+    dict[str, Any]
+        Summary statistics emitted by default MDA aggregation.
+    """
+
+    payload = (
+        summary.payload if isinstance(summary, ConditionArtifact) else summary.get("payload", {})
+    )
+    metrics = payload.get("metrics", {})
+    if metric_name not in metrics:
+        aggregate_name = "{{ spec.name }} aggregate"
+        message = f"Missing metric {metric_name!r} in {aggregate_name}."
+        raise KeyError(message)
+    return metrics[metric_name]

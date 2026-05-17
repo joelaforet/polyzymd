@@ -3074,13 +3074,13 @@ def info() -> None:
     "--style",
     type=click.Choice(["dict", "pydantic"], case_sensitive=False),
     default=None,
-    help="Advanced template style: 'dict' for plain dicts or 'pydantic' for typed result models.",
+    help="Advanced package style: 'dict' for plain payloads or 'pydantic' for typed helpers.",
 )
 @click.option(
     "--advanced",
     is_flag=True,
     default=False,
-    help="Request the future advanced MDAnalysis-native package scaffold.",
+    help="Request the advanced MDAnalysis-native package scaffold.",
 )
 @click.option(
     "--project-root",
@@ -3116,12 +3116,15 @@ def new_analysis(
     Default creates:
 
     \b
-      src/polyzymd/analyses/<NAME>.py             — scalar measurement plugin
+      src/polyzymd/analyses/<NAME>.py             — simple MDAnalysis-native plugin
       tests/analyses/plugins/test_<NAME>.py       — contributor-focused tests
 
-    Advanced MDAnalysis-native package scaffolds are reserved for a follow-up
-    implementation. Passing --advanced, --style dict, or --style pydantic
-    currently fails rather than generating the removed runner template.
+    Advanced package scaffolds create:
+
+    \b
+      src/polyzymd/analyses/<NAME>/__init__.py     — plugin lifecycle wiring
+      src/polyzymd/analyses/<NAME>/_mda.py         — lazy AnalysisBase helper
+      tests/analyses/plugins/test_<NAME>.py        — generated plugin tests
 
     Run the generated tests with:
 

@@ -680,23 +680,23 @@ polyzymd new-analysis NAME [OPTIONS]
 Options:
   --class-name TEXT                 PascalCase class prefix
   --style [dict|pydantic]           Advanced package style
-  --advanced                        Request the future advanced MDAnalysis-native package scaffold
+  --advanced                        Request the advanced MDAnalysis-native package scaffold
   --project-root DIRECTORY          Repository root
   --force                           Overwrite existing files
   --dry-run                         Print paths without writing files
 ```
 
-By default, the command creates a single-file scalar measurement plugin at
-`src/polyzymd/analyses/<NAME>.py`. The generated analysis subclasses
-`ScalarMeasurementAnalysis`; its `measure()` method returns one scalar per
-replicate while the scalar measurement adapter handles Universe loading,
-replicate cache identity, aggregation, and default scalar comparison.
+By default, the command creates a single-file MDAnalysis-native plugin at
+`src/polyzymd/analyses/<NAME>.py`. The generated analysis subclasses `Analysis`,
+builds an `MDAAnalysisJob.from_function()` job, returns a `ReplicateArtifact`
+with explicit `payload["metrics"]`, and relies on the default artifact
+aggregation path.
 
-`--advanced`, `--style dict`, and `--style pydantic` currently fail rather than
-generating a stale advanced package template. Use the default scalar measurement
-scaffold until the MDAnalysis job/artifact advanced scaffold is implemented.
-Passing `--style dict` or `--style pydantic` also selects the disabled advanced
-package path for backward compatibility.
+`--advanced`, `--style dict`, and `--style pydantic` create a package at
+`src/polyzymd/analyses/<NAME>/` with lifecycle wiring in `__init__.py` and a
+lazy-imported `AnalysisBase` helper in `_mda.py`. The `pydantic` style also adds
+a small typed helper model for validating metric payloads before they are stored
+as canonical artifacts.
 
 ```bash
 polyzymd new-analysis solvent_shell

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-VALID_STYLES = ("measurement", "dict", "pydantic")
+DEFAULT_STYLE = "measurement"
+VALID_STYLES = (DEFAULT_STYLE, "dict", "pydantic")
 ADVANCED_STYLES = ("dict", "pydantic")
 
 
@@ -19,9 +20,9 @@ class ScaffoldSpec:
     class_name : str
         PascalCase class prefix used for generated classes.
     style : str
-        Scaffold style. ``"measurement"`` creates the simple single-file
-        contributor path; ``"dict"`` and ``"pydantic"`` are reserved for the
-        future MDAnalysis-native advanced package scaffold.
+        Scaffold style. ``"measurement"`` is retained as the internal default
+        style name for the simple single-file MDAnalysis-native contributor
+        path; ``"dict"`` and ``"pydantic"`` create advanced package scaffolds.
     """
 
     name: str
@@ -51,12 +52,23 @@ class ScaffoldSpec:
         return self.style == "pydantic"
 
     @property
-    def uses_measurement_api(self) -> bool:
-        """Return whether the scaffold should use the measurement API.
+    def uses_single_file_layout(self) -> bool:
+        """Return whether the scaffold should use a single plugin file.
 
         Returns
         -------
         bool
-            True when ``style`` is ``"measurement"``.
+            True when ``style`` is the default simple scaffold style.
         """
-        return self.style == "measurement"
+        return self.style == DEFAULT_STYLE
+
+    @property
+    def uses_package_layout(self) -> bool:
+        """Return whether the scaffold should generate a plugin package.
+
+        Returns
+        -------
+        bool
+            True when ``style`` requests an advanced package scaffold.
+        """
+        return self.style in ADVANCED_STYLES

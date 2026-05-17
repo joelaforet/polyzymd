@@ -132,7 +132,7 @@ class TestToPascalCase:
 
 
 class TestGenerateScaffold:
-    """Scaffold file generation using the default measurement style."""
+    """Scaffold file generation using the default MDAnalysis-native style."""
 
     def test_creates_two_files(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -151,7 +151,7 @@ class TestGenerateScaffold:
 
         assert names == {"solvent_shell.py", "test_solvent_shell.py"}
 
-    def test_measurement_plugin_content(self, tmp_path: Path):
+    def test_simple_mda_plugin_content(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
         generate_scaffold("solvent_shell", tmp_path)
@@ -159,18 +159,18 @@ class TestGenerateScaffold:
         text = plugin_path.read_text(encoding="utf-8")
 
         assert "class SolventShellSettings(BaseModel):" in text
+        assert "selection: str = Field(" in text
         assert "scale: float = Field(" in text
-        assert "class SolventShellMeasurement(ScalarMeasurement):" in text
-        assert "metric: ClassVar[MetricSpec] = MetricSpec(" in text
-        assert "def measure(" in text
-        assert "class SolventShellAnalysis(ScalarMeasurementAnalysis):" in text
+        assert "def measure_solvent_shell(" in text
+        assert "class SolventShellArtifactCollector:" in text
+        assert "class SolventShellAnalysis(Analysis):" in text
         assert 'name: ClassVar[str] = "solvent_shell"' in text
         assert "Settings: ClassVar[type[BaseModel]] = SolventShellSettings" in text
-        assert "measurement: ClassVar[type[ScalarMeasurement]] = SolventShellMeasurement" in text
+        assert "def build_mda_jobs(" in text
+        assert "def build_mda_collector(" in text
+        assert "def extract_metrics(" in text
+        assert "ScalarMeasurement" not in text
         assert "def build_runner(" not in text
-        assert "def aggregate(" not in text
-        assert "def plot(" not in text
-        assert "._runner" not in text
 
     def test_default_does_not_create_advanced_package_files(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -190,12 +190,13 @@ class TestGenerateScaffold:
 
         assert "class TestDiscovery:" in text
         assert "class TestSettings:" in text
-        assert "class TestMeasurementLogic:" in text
-        assert "class TestMetricMetadata:" in text
-        assert "test_measure_counts_windowed_frames_with_scale" in text
-        assert "AggregateContext" not in text
-        assert "ReplicateContext" not in text
-        assert "PlotContext" not in text
+        assert "class TestMDAJobs:" in text
+        assert "class TestCollector:" in text
+        assert "class TestDefaultAggregation:" in text
+        assert "test_build_mda_jobs_returns_function_adapter_job" in text
+        assert "AggregateContext" in text
+        assert "ReplicateContext" in text
+        assert "ReplicateArtifact" in text
 
     def test_custom_class_name(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -204,12 +205,8 @@ class TestGenerateScaffold:
         plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "density.py"
 
         assert "class MassDensitySettings(BaseModel):" in plugin_path.read_text(encoding="utf-8")
-        assert "class MassDensityMeasurement(ScalarMeasurement):" in plugin_path.read_text(
-            encoding="utf-8"
-        )
-        assert "class MassDensityAnalysis(ScalarMeasurementAnalysis):" in plugin_path.read_text(
-            encoding="utf-8"
-        )
+        assert "class MassDensityArtifactCollector:" in plugin_path.read_text(encoding="utf-8")
+        assert "class MassDensityAnalysis(Analysis):" in plugin_path.read_text(encoding="utf-8")
 
     def test_refuses_overwrite_without_force(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -288,40 +285,49 @@ class TestGenerateScaffold:
         plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
         text = plugin_path.read_text(encoding="utf-8")
 
-        assert "ScalarMeasurementAnalysis" in text
+        assert "MDAAnalysisJob.from_function" in text
+        assert "ScalarMeasurementAnalysis" not in text
         assert "SolventShellReplicateRunner" not in text
 
 
 class TestGenerateScaffoldAdvancedDict:
-    """Advanced dict scaffolds should not generate old runner templates."""
+    """Advanced dict scaffolds generate MDAnalysis-native packages."""
 
-    def test_style_dict_is_temporarily_unavailable(self, tmp_path: Path):
+    def test_style_dict_creates_package_files(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
-        with pytest.raises(
-            ValueError, match="Advanced analysis scaffolds are temporarily unavailable"
-        ):
-            generate_scaffold("solvent_shell", tmp_path, style="dict")
+        created = generate_scaffold("solvent_shell", tmp_path, style="dict")
+
+        assert len(created) == 3
+        package_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        assert (package_dir / "__init__.py").exists()
+        assert (package_dir / "_mda.py").exists()
+        assert not (package_dir / "_results.py").exists()
 
     def test_advanced_flag_defaults_to_dict_style(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
-        with pytest.raises(
-            ValueError, match="Advanced analysis scaffolds are temporarily unavailable"
-        ):
-            generate_scaffold("solvent_shell", tmp_path, advanced=True)
+        created = generate_scaffold("solvent_shell", tmp_path, advanced=True)
+
+        assert len(created) == 3
+        package_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        assert (package_dir / "__init__.py").exists()
+        assert (package_dir / "_mda.py").exists()
 
 
 class TestGenerateScaffoldPydantic:
-    """Pydantic scaffolds should wait for the MDA-native advanced template."""
+    """Pydantic advanced scaffolds include typed helper models."""
 
-    def test_style_pydantic_is_temporarily_unavailable(self, tmp_path: Path):
+    def test_style_pydantic_creates_results_model(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
-        with pytest.raises(
-            ValueError, match="Advanced analysis scaffolds are temporarily unavailable"
-        ):
-            generate_scaffold("solvent_shell", tmp_path, style="pydantic")
+        created = generate_scaffold("solvent_shell", tmp_path, style="pydantic")
+
+        assert len(created) == 4
+        package_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        assert (package_dir / "__init__.py").exists()
+        assert (package_dir / "_mda.py").exists()
+        assert (package_dir / "_results.py").exists()
 
 
 class TestStyleValidation:
@@ -355,9 +361,7 @@ class TestLayoutCollisionChecks:
         module_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
         module_path.write_text("", encoding="utf-8")
 
-        with pytest.raises(
-            ValueError, match="Advanced analysis scaffolds are temporarily unavailable"
-        ):
+        with pytest.raises(FileExistsError, match="single-file layout"):
             generate_scaffold("solvent_shell", tmp_path, style="dict", force=True)
 
 
@@ -369,8 +373,11 @@ class TestTemplateResources:
         names = {path.name for path in template_root.iterdir()}
 
         assert {
-            "measurement_plugin.py.jinja",
-            "test_measurement_plugin.py.jinja",
+            "simple_mda_plugin.py.jinja",
+            "test_simple_mda_plugin.py.jinja",
+            "advanced_plugin_init.py.jinja",
+            "advanced_mda.py.jinja",
+            "test_advanced_plugin.py.jinja",
         }.issubset(names)
 
     def test_renderer_uses_strict_undefined(self):
@@ -380,13 +387,24 @@ class TestTemplateResources:
             env.from_string("{{ missing_value }}").render()
 
     def test_templates_render_with_sample_context(self):
-        measurement_spec = ScaffoldSpec(
+        simple_spec = ScaffoldSpec(
             name="strict_sample",
             class_name="StrictSample",
             style="measurement",
         )
-        for template_name in ("measurement_plugin.py.jinja", "test_measurement_plugin.py.jinja"):
-            rendered = render_template(template_name, measurement_spec)
+        advanced_spec = ScaffoldSpec(
+            name="strict_sample",
+            class_name="StrictSample",
+            style="dict",
+        )
+        for template_name, spec in (
+            ("simple_mda_plugin.py.jinja", simple_spec),
+            ("test_simple_mda_plugin.py.jinja", simple_spec),
+            ("advanced_plugin_init.py.jinja", advanced_spec),
+            ("advanced_mda.py.jinja", advanced_spec),
+            ("test_advanced_plugin.py.jinja", advanced_spec),
+        ):
+            rendered = render_template(template_name, spec)
             assert "StrictSample" in rendered or "strict_sample" in rendered
 
 
@@ -397,7 +415,8 @@ class TestGeneratedCodeQuality:
         ("name", "style", "expected_count"),
         [
             ("solvent_shell", "measurement", 2),
-            ("scaffold_pydantic_e2e", "measurement", 2),
+            ("scaffold_advanced_dict_e2e", "dict", 3),
+            ("scaffold_pydantic_e2e", "pydantic", 4),
         ],
     )
     def test_generated_files_compile_and_are_formatter_clean(
@@ -422,37 +441,30 @@ class TestGeneratedCodeQuality:
 class TestGeneratedPluginEndToEnd:
     """End-to-end checks for scaffolded plugin discovery and lifecycle."""
 
-    class FakeTrajectory:
-        """Minimal trajectory with a length for measurement tests."""
+    class FakeAtomGroup:
+        """Minimal atom group with a length."""
 
         def __len__(self) -> int:
-            return 5
+            return 3
+
+    class FakeTrajectory:
+        """Minimal trajectory with a length for MDA job tests."""
+
+        def __len__(self) -> int:
+            return 10
 
     class FakeUniverse:
-        """Minimal Universe exposing a trajectory."""
+        """Minimal Universe exposing selection and trajectory behavior."""
 
         def __init__(self) -> None:
             self.trajectory = TestGeneratedPluginEndToEnd.FakeTrajectory()
+            self.selections: list[str] = []
 
-    class FakeWindow:
-        """Minimal trajectory window for scalar measurements."""
+        def select_atoms(self, selection: str):
+            self.selections.append(selection)
+            return TestGeneratedPluginEndToEnd.FakeAtomGroup()
 
-        warning_message: str | None = None
-
-        def run_kwargs(self) -> dict[str, int | None]:
-            return {"start": 1, "stop": 5, "step": 2}
-
-    class FakeLoader:
-        """Minimal loader that returns a fake Universe."""
-
-        def __init__(self, sim_config):
-            self.sim_config = sim_config
-
-        def load_universe(self, replicate: int):
-            self.replicate = replicate
-            return TestGeneratedPluginEndToEnd.FakeUniverse()
-
-    def test_measurement_scaffold_is_discoverable_and_measurable(
+    def test_simple_mda_scaffold_is_discoverable_and_aggregates_artifacts(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -466,6 +478,13 @@ class TestGeneratedPluginEndToEnd:
         import polyzymd.analyses as analyses_pkg
         from polyzymd.analyses.base import AggregateContext, Condition, ReplicateContext
         from polyzymd.analyses.discovery import clear_cache, get_analysis, list_analyses
+        from polyzymd.analyses.mda import (
+            ArtifactStore,
+            FrameSelection,
+            MDACollectorContext,
+            MDAUniversePolicy,
+            ReplicateArtifact,
+        )
 
         original_path = list(analyses_pkg.__path__)
         monkeypatch.setattr(analyses_pkg, "__path__", [*original_path, str(analyses_root)])
@@ -480,7 +499,6 @@ class TestGeneratedPluginEndToEnd:
             settings = analysis_cls.Settings()
             assert "run_replicate" not in analysis_cls.__dict__
             assert "build_runner" not in analysis_cls.__dict__
-            assert analysis_cls.measurement.metric.name == "scaffold_e2e_value"
 
             condition = Condition(
                 label="Scaffold Condition",
@@ -489,23 +507,58 @@ class TestGeneratedPluginEndToEnd:
                 sim_config=FakeSimulationConfig(name="scaffold_condition"),
             )
 
-            rep_ctx = ReplicateContext(
-                condition=condition,
-                replicate=1,
-                sim_config=condition.sim_config,
-                output_dir=tmp_path / "run_1",
-                equilibration="0ns",
-                recompute=True,
+            frame_selection = FrameSelection(start=1, stop=5, step=2, n_frames_total=10)
+            universe_policy = MDAUniversePolicy(condition_label=condition.label, replicate=1)
+            universe = self.FakeUniverse()
+            job_ctx = SimpleNamespace(
+                universe=universe,
+                frame_selection=frame_selection,
+                universe_policy=universe_policy,
                 settings=settings,
             )
-            monkeypatch.setattr(analysis, "_trajectory_loader_factory", lambda: self.FakeLoader)
-            monkeypatch.setattr(analysis, "get_trajectory_window", lambda *args: self.FakeWindow())
-            replicate_result = analysis.run_replicate(rep_ctx, replicate=1)
-            assert isinstance(replicate_result, dict)
-            assert replicate_result["analysis"] == plugin_name
-            assert replicate_result["measurement"] == "scaffold_e2e_measurement"
-            assert replicate_result["metric"] == "scaffold_e2e_value"
-            assert replicate_result["value"] == pytest.approx(2.0)
+            completed = analysis.build_mda_jobs(job_ctx)[0].run()
+            assert completed.results["metrics"]["scaffold_e2e_value"] == pytest.approx(6.0)
+
+            artifacts: list[ReplicateArtifact] = []
+            for replicate, value in ((1, 2.0), (2, 4.0)):
+                output_dir = tmp_path / f"run_{replicate}"
+                rep_ctx = ReplicateContext(
+                    condition=condition,
+                    replicate=replicate,
+                    sim_config=condition.sim_config,
+                    output_dir=output_dir,
+                    equilibration="0ns",
+                    recompute=True,
+                    settings=settings,
+                    result_path=output_dir / "result.json",
+                )
+                collector_ctx = MDACollectorContext(
+                    analysis_name=plugin_name,
+                    replicate_context=rep_ctx,
+                    frame_selection=frame_selection,
+                    universe_policy=MDAUniversePolicy(
+                        condition_label=condition.label,
+                        replicate=replicate,
+                    ),
+                    artifact_store=ArtifactStore(output_dir),
+                )
+                artifact = ReplicateArtifact(
+                    analysis_name=plugin_name,
+                    condition_label=condition.label,
+                    replicate=replicate,
+                    payload={"metrics": {"scaffold_e2e_value": value}},
+                    provenance={"frame_selection": {"start": 0, "stop": None, "step": 1}},
+                    metadata={
+                        "settings_fingerprint": analysis.aggregate_settings_fingerprint(settings),
+                    },
+                )
+                artifact_from_collector = analysis.build_mda_collector(collector_ctx)(
+                    collector_ctx,
+                    [completed],
+                )
+                assert artifact_from_collector.payload["metrics"]["scaffold_e2e_value"]
+                ArtifactStore(output_dir).write_replicate_result(artifact)
+                artifacts.append(artifact)
 
             agg_ctx = AggregateContext(
                 condition=condition,
@@ -516,11 +569,9 @@ class TestGeneratedPluginEndToEnd:
             )
             aggregated = analysis.aggregate(
                 agg_ctx,
-                results=[replicate_result],
+                results=artifacts,
             )
-            assert isinstance(aggregated, dict)
-            assert aggregated["mean_value"] == pytest.approx(2.0)
-            assert aggregated["n_replicates"] == 1
+            assert aggregated.payload["metrics"]["scaffold_e2e_value"]["mean"] == pytest.approx(3.0)
 
             metrics = analysis.extract_metrics(aggregated)
             assert "scaffold_e2e_value" in metrics
@@ -620,8 +671,9 @@ class TestNewAnalysisCLI:
         assert result.exit_code == 0, result.output
         plugin_path = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
         text = plugin_path.read_text(encoding="utf-8")
-        assert "ScalarMeasurementAnalysis" in text
-        assert "class SolventShellMeasurement" in text
+        assert "MDAAnalysisJob.from_function" in text
+        assert "class SolventShellAnalysis(Analysis):" in text
+        assert "ScalarMeasurementAnalysis" not in text
         assert "SolventShellReplicateRunner" not in text
 
     def test_style_pydantic(self, runner: CliRunner, cli):
@@ -629,24 +681,31 @@ class TestNewAnalysisCLI:
             cli,
             ["solvent_shell", "--style", "pydantic", "--project-root", str(self.root)],
         )
-        assert result.exit_code != 0
-        assert "Advanced analysis scaffolds are temporarily unavailable" in result.output
+        assert result.exit_code == 0, result.output
+        package_dir = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        assert (package_dir / "__init__.py").exists()
+        assert (package_dir / "_mda.py").exists()
+        assert (package_dir / "_results.py").exists()
 
     def test_style_dict_explicit(self, runner: CliRunner, cli):
         result = runner.invoke(
             cli,
             ["solvent_shell", "--style", "dict", "--project-root", str(self.root)],
         )
-        assert result.exit_code != 0
-        assert "Advanced analysis scaffolds are temporarily unavailable" in result.output
+        assert result.exit_code == 0, result.output
+        package_dir = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        assert (package_dir / "__init__.py").exists()
+        assert (package_dir / "_mda.py").exists()
 
     def test_advanced_flag(self, runner: CliRunner, cli):
         result = runner.invoke(
             cli,
             ["solvent_shell", "--advanced", "--project-root", str(self.root)],
         )
-        assert result.exit_code != 0
-        assert "Advanced analysis scaffolds are temporarily unavailable" in result.output
+        assert result.exit_code == 0, result.output
+        package_dir = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell"
+        assert (package_dir / "__init__.py").exists()
+        assert (package_dir / "_mda.py").exists()
 
     def test_invalid_style_rejected(self, runner: CliRunner, cli):
         result = runner.invoke(
@@ -700,9 +759,7 @@ class TestNewAnalysisCLI:
         )
         assert result.exit_code == 0, result.output
         plugin_path = self.root / "src" / "polyzymd" / "analyses" / "density.py"
-        assert "class MassDensityAnalysis(ScalarMeasurementAnalysis):" in plugin_path.read_text(
-            encoding="utf-8"
-        )
+        assert "class MassDensityAnalysis(Analysis):" in plugin_path.read_text(encoding="utf-8")
 
     def test_force_overwrites(self, runner: CliRunner, cli):
         result = runner.invoke(cli, ["solvent_shell", "--project-root", str(self.root)])
@@ -722,6 +779,11 @@ class TestNewAnalysisCLI:
         ("plugin_name", "style_args", "stale_path_parts"),
         [
             ("scaffold_force_measurement", [], ("scaffold_force_measurement.py",)),
+            (
+                "scaffold_force_advanced",
+                ["--style", "dict"],
+                ("scaffold_force_advanced", "__init__.py"),
+            ),
         ],
     )
     def test_force_overwrites_discoverable_scaffold_after_fresh_discovery(
@@ -826,8 +888,9 @@ class TestNewAnalysisCLI:
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0
         assert "src/polyzymd/analyses/<NAME>.py" in result.output
+        assert "src/polyzymd/analyses/<NAME>/__init__.py" in result.output
         assert "_runner.py" not in result.output
-        assert "Advanced MDAnalysis-native package scaffolds" in result.output
+        assert "Advanced package scaffolds" in result.output
 
     def test_success_message_shows_correct_test_path(self, runner: CliRunner, cli):
         result = runner.invoke(cli, ["solvent_shell", "--project-root", str(self.root)])

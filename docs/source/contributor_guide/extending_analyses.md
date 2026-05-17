@@ -1,16 +1,15 @@
 # Extending Analyses
 
 This guide shows the supported contributor workflow for adding a new analysis
-plugin. The default path is now a **single-file scalar measurement plugin**:
-your code measures one scalar value per replicate, and PolyzyMD handles
-aggregation, cache identity, default scalar comparison, CLI
-wiring, and discovery.
+plugin. The default path is now a **single-file MDAnalysis-native plugin**: your
+code builds an `MDAAnalysisJob`, converts completed job results into a canonical
+`ReplicateArtifact`, and lets PolyzyMD handle cache, aggregation, comparison,
+CLI wiring, and discovery.
 
-Advanced MDAnalysis-native scaffolds are reserved for a follow-up update. Model
-advanced plugins on built-ins that construct MDAnalysis-compatible jobs and
-artifacts.
+Advanced scaffolds generate packages with lifecycle wiring in `__init__.py` and
+lazy MDAnalysis `AnalysisBase` helpers in `_mda.py`.
 
-## Start with the measurement scaffold
+## Start with the MDAnalysis-native scaffold
 
 Create a working plugin and tests with:
 
@@ -33,35 +32,41 @@ decorators, or bootstrap imports are needed.
 
 ## Public imports
 
-Contributor plugins should import the measurement API from the public facade:
+Contributor plugins should import lifecycle classes from the public facade and
+MDA extension-layer helpers from `polyzymd.analyses.mda`:
 
 ```python
-from polyzymd.analyses.base import MetricSpec, ScalarMeasurement, ScalarMeasurementAnalysis
+from polyzymd.analyses.base import Analysis, MetricValue
+from polyzymd.analyses.mda import MDAAnalysisJob, ReplicateArtifact
 ```
 
 `polyzymd.analyses.base` is the stable contributor surface. It re-exports the
-measurement API, the `Analysis` base class, lifecycle contexts, metric models,
-and comparison result models while implementation details remain private. Do not
-import from modules such as `_measurement.py`, `_contexts.py`, or
-`_comparison_models.py` in contributor plugins.
+`Analysis` base class, lifecycle contexts, metric models, and comparison result
+models while implementation details remain private. Do not import from modules
+such as `_contexts.py` or `_comparison_models.py` in contributor plugins.
 
-## Minimal scalar measurement plugin
+## Minimal MDAnalysis-native plugin
 
-A scalar measurement plugin has three pieces:
+The default scaffold has four pieces:
 
 - a Pydantic settings model
-- a `ScalarMeasurement` that implements `measure()`
-- a `ScalarMeasurementAnalysis` that binds the analysis name, settings, and
-  measurement
+- a small function wrapped by `MDAAnalysisJob.from_function()`
+- a collector that returns a `ReplicateArtifact` with `payload["metrics"]`
+- an `Analysis` subclass implementing `build_mda_jobs()`,
+  `build_mda_collector()`, and `extract_metrics()`
 
 ```python
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
-from polyzymd.analyses.base import MetricSpec, ScalarMeasurement, ScalarMeasurementAnalysis
+from polyzymd.analyses.base import Analysis, MetricValue
+from polyzymd.analyses.mda import MDAAnalysisJob, MDACollectorContext, ReplicateArtifact
+
+METRIC_NAME = "mean_shell_count"
 
 
 class SolventShellSettings(BaseModel):
@@ -71,83 +76,75 @@ class SolventShellSettings(BaseModel):
     cutoff: float = Field(default=5.0, gt=0.0)
 
 
-class SolventShellMeasurement(ScalarMeasurement):
-    """Measure one scalar value from one replicate trajectory."""
-
-    name: ClassVar[str] = "solvent_shell_measurement"
-    version: ClassVar[str] = "1"
-    metric: ClassVar[MetricSpec] = MetricSpec(
-        name="mean_shell_count",
-        higher_is_better=False,
-        label="Mean shell count",
-        unit="atoms",
-        direction_labels=("decreased", "unchanged", "increased"),
-    )
-
-    def measure(
-        self,
-        universe: Any,
-        settings: BaseModel,
-        *,
-        start: int | None = None,
-        stop: int | None = None,
-        step: int | None = None,
-    ) -> float:
-        """Return one scalar value for the requested trajectory window."""
-        if not isinstance(settings, SolventShellSettings):
-            raise TypeError("settings must be a SolventShellSettings instance.")
-
-        atoms = universe.select_atoms(settings.selection)
-        trajectory = universe.trajectory[start:stop:step]
-        values = []
-        for _frame in trajectory:
-            values.append(float(len(atoms)))
-        return sum(values) / len(values) if values else 0.0
+def measure_solvent_shell(universe: Any, *, settings: SolventShellSettings, **_kwargs: Any):
+    """Return strict JSON-compatible job results."""
+    atoms = universe.select_atoms(settings.selection)
+    return {"metrics": {METRIC_NAME: float(len(atoms))}}
 
 
-class SolventShellAnalysis(ScalarMeasurementAnalysis):
-    """Solvent shell analysis backed by one scalar measurement."""
+class SolventShellAnalysis(Analysis):
+    """Solvent shell analysis backed by an MDAnalysis job."""
 
     name: ClassVar[str] = "solvent_shell"
     Settings: ClassVar[type[BaseModel]] = SolventShellSettings
-    measurement: ClassVar[type[ScalarMeasurement]] = SolventShellMeasurement
+
+    def build_mda_jobs(self, ctx):
+        return [
+            MDAAnalysisJob.from_function(
+                name="solvent_shell",
+                function=measure_solvent_shell,
+                universe=ctx.universe,
+                frame_selection=ctx.frame_selection,
+                universe_policy=ctx.universe_policy,
+                function_kwargs={"settings": ctx.settings},
+            )
+        ]
+
+    def build_mda_collector(self, ctx: MDACollectorContext):
+        def collect(ctx: MDACollectorContext, completed_jobs: Sequence[Any]) -> ReplicateArtifact:
+            metrics = dict(completed_jobs[0].results["metrics"])
+            return ReplicateArtifact(
+                analysis_name=ctx.analysis_name,
+                condition_label=ctx.condition_label,
+                replicate=ctx.replicate,
+                payload={"metrics": metrics},
+                provenance={"source": "solvent_shell_scaffold"},
+            )
+
+        return collect
+
+    def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
+        metric = summary.payload["metrics"][METRIC_NAME]
+        return {
+            METRIC_NAME: MetricValue(
+                name=METRIC_NAME,
+                mean=metric["mean"],
+                sem=metric["sem"],
+                replicate_values=metric["values"],
+                higher_is_better=False,
+            )
+        }
 ```
 
-Replace the placeholder measurement logic with your scientific calculation.
-`measure()` receives the MDAnalysis `Universe`, resolved settings, and the frame
-window chosen by the comparison workflow. It must return a single `float` for
-that replicate.
+Replace the placeholder function and collector logic with your scientific
+calculation. The collector should map raw job results to JSON-compatible payloads
+or sidecars; do not persist files directly from the collector.
 
 ## What the framework handles
 
-`ScalarMeasurementAnalysis` adapts the simple `measure()` method to the full
-analysis lifecycle:
+The generated `Analysis` subclass uses the MDAnalysis job lifecycle:
 
 | Lifecycle concern | Handled by PolyzyMD |
 |-------------------|---------------------|
 | Trajectory loading | The framework creates the `TrajectoryLoader` from the run context |
-| Replicate execution | The scalar adapter invokes `measure()` with the resolved frame window |
-| Replicate result | The adapter stores analysis, measurement, metric, replicate, value, and cache identity |
-| Aggregation | Replicate scalar values become mean, SEM, replicate values, and counts |
-| Cache identity | Measurement name, version, metric, settings, and analysis name are fingerprinted |
+| Replicate execution | The framework executes each `MDAAnalysisJob` with the resolved frame window |
+| Replicate result | The collector returns a `ReplicateArtifact` persisted through `ArtifactStore` |
+| Aggregation | Explicit `payload["metrics"]` values become mean, SEM, replicate values, and counts |
+| Cache identity | Settings fingerprints are stored in artifact metadata |
 | Comparison | The default scalar comparison path builds rankings, pairwise tests, and ANOVA where applicable |
 
-You usually do not implement `build_mda_jobs()`, `aggregate()`, or
-`extract_metrics()` for scalar measurement plugins.
-
-## Measurement metadata and cache identity
-
-Use `MetricSpec` to describe the scalar produced by the measurement:
-
-- `name` is the stable serialized metric key
-- `higher_is_better` controls ranking direction
-- `label` and `unit` support human-readable output
-- `direction_labels` describe decreased, unchanged, and increased effects
-
-Set `measurement.version` when changing the meaning of the measurement. The
-default cache identity includes the measurement name, version, metric name,
-analysis name, and settings payload, so stale scalar replicate results are
-rejected when those inputs change.
+The base `aggregate()` implementation handles `ReplicateArtifact` inputs when
+each artifact declares explicit scalar metrics in `payload["metrics"]`.
 
 ## Trajectory access and imports
 
@@ -182,9 +179,8 @@ pixi run -e build polyzymd new-analysis solvent_shell --style dict
 pixi run -e build polyzymd new-analysis solvent_shell --style pydantic
 ```
 
-`--advanced`, `--style dict`, and `--style pydantic` no longer generate the old
-runner package. They intentionally fail until the MDAnalysis-native advanced
-template lands.
+`--advanced`, `--style dict`, and `--style pydantic` generate MDAnalysis-native
+packages. They do not generate or depend on the removed runner package.
 
 Advanced packages use files such as:
 
@@ -220,8 +216,9 @@ field documentation automatically.
 ## Custom comparison guidance
 
 Use the default scalar comparison path whenever your aggregate result can expose
-one or more scalar `MetricValue` objects. For scalar measurement plugins, this is
-already implemented by `ScalarMeasurementAnalysis`.
+one or more scalar `MetricValue` objects. The generated scaffold implements
+`extract_metrics()` for the artifact aggregate produced by default MDA
+aggregation.
 
 Override `compare()` only when the default scalar path cannot represent the
 result, such as:
@@ -250,20 +247,20 @@ organization tools, not the default contributor pattern.
 
 ## Testing checklist
 
-Generated scalar measurement tests currently focus on the scaffold contract:
+Generated MDAnalysis-native tests currently focus on the scaffold contract:
 
 - discovery and class variables
 - settings defaults and validation
-- direct `measure()` behavior with a fake Universe
-- metric metadata exposed by the measurement
+- `build_mda_jobs()` behavior with fake universes or fake AnalysisBase objects
+- collector output as `ReplicateArtifact`
+- default artifact aggregation from explicit `payload["metrics"]`
 
 For production plugins, consider adding targeted tests for optional behavior you
 customize or rely on heavily:
 
-- scalar measurement adapter behavior, including Universe loading and replicate
-  cache identity when relevant
-- aggregation and default metric extraction inherited from
-  `ScalarMeasurementAnalysis`
+- frame-selection behavior, Universe loading, and replicate cache identity when
+  relevant
+- aggregation and default metric extraction for any custom metric policies
 - custom plotting, formatting, filtering, or cache identity logic
 
 Run plugin tests through the pixi environment:

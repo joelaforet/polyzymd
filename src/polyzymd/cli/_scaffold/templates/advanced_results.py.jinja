@@ -1,0 +1,13 @@
+"""Typed helper models for the {{ spec.name }} analysis."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+
+class {{ spec.class_name }}Metrics(BaseModel):
+    """Replicate-level scalar metrics emitted by the AnalysisBase helper."""
+
+    {{ spec.name }}_value: float = Field(
+        description="Placeholder {{ spec.title }} metric value."
+    )

@@ -3,12 +3,12 @@
 This page documents the `polyzymd.analyses` package — the plugin system for
 adding new analysis types to PolyzyMD.
 
-New contributor analyses usually use the Measurement API: a single-file plugin
-subclasses `ScalarMeasurementAnalysis`, declares a `ScalarMeasurement`, and
-returns one scalar value per replicate from `measure()`. The framework handles
-aggregation, cache identity, and default scalar comparison. Built-in
-trajectory-native plugins run through MDAnalysis-compatible jobs and canonical
-artifacts.
+New contributor analyses usually use the MDAnalysis job/artifact API: a
+single-file plugin subclasses `Analysis`, builds `MDAAnalysisJob` objects, and
+returns canonical artifacts with explicit scalar metrics. The framework handles
+aggregation, cache identity, and default scalar comparison. The Measurement API
+remains available for existing scalar adapters but is no longer the default
+scaffold pattern.
 
 ## Public API
 
@@ -39,7 +39,7 @@ artifacts.
 - `ScalarMeasurementAnalysis` — adapter base class for scalar measurement plugins
 
 `polyzymd.analyses.base` is the stable public facade for contributor imports.
-It re-exports the Measurement API, base class, lifecycle contexts, metric
+It re-exports the base class, Measurement API, lifecycle contexts, metric
 descriptors, and comparison result models while delegating implementation to
 private framework modules. Contributor plugins should import from
 `polyzymd.analyses.base`, not from modules named `_analysis_*`, `_contexts`,
@@ -51,7 +51,7 @@ Discovery supports both contributor-friendly single-file plugins such as
 `polyzymd.analyses.my_metric` and package plugins such as
 `polyzymd.analyses.contacts`. Use a package when the plugin needs private helper
 modules for MDAnalysis jobs, results, plotting, or formatting; use a single file
-for the default scalar measurement pattern.
+for the default function-adapter MDA job pattern.
 
 ### Context Objects
 

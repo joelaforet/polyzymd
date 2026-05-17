@@ -60,20 +60,18 @@ generation, resubmission, and recovery flows.
 ### `analyses/`
 
 The **plugin system** — the primary extension point for contributors. The
-default contributor path is measurement-first: a scalar measurement plugin
-returns one value per replicate and lets PolyzyMD handle Universe loading,
-replicate cache identity, aggregation, comparison, and CLI integration. Each
-analysis plugin still participates in a unified lifecycle, but not every plugin
-uses every stage:
+default contributor path is MDAnalysis-native: a generated plugin builds an
+`MDAAnalysisJob`, returns a canonical artifact with explicit metrics, and lets
+PolyzyMD handle Universe loading, replicate cache identity, aggregation,
+comparison, and CLI integration. Each analysis plugin still participates in a
+unified lifecycle, but not every plugin uses every stage:
 compute → aggregate → compare → plot → format.
 
 Within that lifecycle, PolyzyMD now draws a sharper boundary between
 trajectory-level work and ensemble-level work:
 
-- **Measurement plugins are the default contributor pattern** when a calculation
-  can be expressed as one scalar value per replicate
-- **MDAnalysis owns per-trajectory analysis** when an advanced plugin needs an
-  MDAnalysis job built around an AnalysisBase-compatible ``run(...)`` object
+- **MDAnalysis owns per-trajectory analysis** through function-adapter jobs or
+  AnalysisBase-compatible ``run(...)`` objects
 - **PolyzyMD owns ensemble/comparison workflow** including replicate discovery,
   caching, aggregation, cross-condition statistics, plotting, and CLI output
 - **Composition is preferred over mixins or deep inheritance** so trajectory-
@@ -86,12 +84,12 @@ trajectory-level work and ensemble-level work:
   higher-level PolyzyMD concern
 
 To add a new analysis, run `polyzymd new-analysis <name>` to scaffold the
-single-file scalar measurement pattern. The public default path is
-measurement-backed:
+single-file MDAnalysis-native pattern. The public default path:
 
-- subclass `ScalarMeasurementAnalysis`
-- declare a `ScalarMeasurement` with a `MetricSpec`
-- implement `measure(...)` to return one scalar per replicate
+- subclasses `Analysis`
+- implements `build_mda_jobs(...)` with `MDAAnalysisJob.from_function(...)`
+- implements `build_mda_collector(...)` to return a `ReplicateArtifact`
+- implements `extract_metrics(...)` for default scalar comparison
 
 Advanced packages use the explicit MDAnalysis job lifecycle:
 
@@ -114,8 +112,7 @@ Comparison functionality is split across focused modules:
 
 Established analysis package plugins often delegate plotting to `_plotters.py`
 modules, but that is optional organization for larger plugins. Simple
-single-file measurement plugins can keep plotting in `plot()` when they need
-figures at all.
+single-file plugins can keep plotting in `plot()` when they need figures at all.
 
 ### `core/` and `utils/`
 
@@ -155,20 +152,18 @@ CLI operations usable even when optional heavy dependencies are absent.
 
 ### Plugin-based extension points
 
-Analysis is the primary extensibility axis. New scalar analyses are usually
-single files that subclass `ScalarMeasurementAnalysis`; advanced analyses can be
-packages that subclass `Analysis` directly. The framework discovers both shapes
+Analysis is the primary extensibility axis. New analyses are usually single
+files or packages that subclass `Analysis`. The framework discovers both shapes
 automatically via `pkgutil` — no registries, no decorators, no imports needed.
-Use `polyzymd new-analysis <name>` for the default single-file measurement
-scaffold. Advanced MDAnalysis-native package scaffolds are reserved for a
-follow-up update.
+Use `polyzymd new-analysis <name>` for the default single-file MDAnalysis-native
+scaffold, or `--advanced` for a package scaffold with lazy `_mda.py` helpers.
 
 ### Separation between per-condition and cross-condition work
 
 The unified `analyses/` lifecycle still handles both scopes in one plugin
 contract. Public plugins usually:
 
-- use `ScalarMeasurementAnalysis` when one scalar per replicate is sufficient
+- use `MDAAnalysisJob.from_function(...)` when one function-adapter job is sufficient
 
 Advanced plugins can also:
 

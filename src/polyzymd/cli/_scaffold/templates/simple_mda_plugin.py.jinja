@@ -1,0 +1,296 @@
+"""{{ spec.title }} MDAnalysis-native analysis plugin."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Any, ClassVar
+
+from pydantic import BaseModel, Field
+
+from polyzymd.analyses.base import Analysis, MetricValue
+from polyzymd.analyses.exceptions import PluginContractError
+from polyzymd.analyses.mda import (
+    ConditionArtifact,
+    MDAAnalysisJob,
+    MDACollectorContext,
+    MDAJobResult,
+    MDAReplicateJobContext,
+    ReplicateArtifact,
+    frame_selection_payload,
+    strict_json_payload,
+)
+
+METRIC_NAME = "{{ spec.name }}_value"
+
+
+class {{ spec.class_name }}Settings(BaseModel):
+    """Settings for the {{ spec.name }} analysis."""
+
+    selection: str = Field(
+        default="protein and name CA",
+        min_length=1,
+        description="MDAnalysis atom selection measured by the placeholder function.",
+    )
+    scale: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Scale factor applied to the placeholder selected atom-frame count.",
+    )
+
+
+def measure_{{ spec.name }}(
+    universe: Any,
+    *,
+    settings: {{ spec.class_name }}Settings,
+    start: int | None = None,
+    stop: int | None = None,
+    step: int | None = None,
+) -> dict[str, Any]:
+    """Measure a simple selected atom-frame count.
+
+    Replace this placeholder with domain-specific MDAnalysis logic. The function
+    receives a loaded universe from PolyzyMD and frame-window keyword arguments
+    from the MDAnalysis job lifecycle.
+
+    Parameters
+    ----------
+    universe : Any
+        Loaded MDAnalysis universe or universe-like object.
+    settings : {{ spec.class_name }}Settings
+        Resolved analysis settings.
+    start : int or None, optional
+        First frame index included in the measurement.
+    stop : int or None, optional
+        Exclusive final frame index. If None, the trajectory length is used.
+    step : int or None, optional
+        Frame stride. If None, a stride of 1 is used.
+
+    Returns
+    -------
+    dict[str, Any]
+        JSON-compatible measurement payload with explicit replicate metrics.
+    """
+
+    atoms = universe.select_atoms(settings.selection)
+    n_selected_atoms = len(atoms)
+    n_frames = _selected_frame_count(universe, start=start, stop=stop, step=step)
+    value = float(n_selected_atoms * n_frames) * settings.scale
+    return {
+        "metrics": {METRIC_NAME: value},
+        "n_selected_atoms": n_selected_atoms,
+        "n_frames": n_frames,
+    }
+
+
+class {{ spec.class_name }}ArtifactCollector:
+    """Collect {{ spec.name }} MDAnalysis jobs into a replicate artifact."""
+
+    def __call__(
+        self,
+        ctx: MDACollectorContext,
+        completed_jobs: Sequence[MDAJobResult],
+    ) -> ReplicateArtifact:
+        """Convert one completed function-adapter job to a replicate artifact.
+
+        Parameters
+        ----------
+        ctx : MDACollectorContext
+            Framework-provided collector context.
+        completed_jobs : sequence of MDAJobResult
+            Completed MDAnalysis-compatible jobs.
+
+        Returns
+        -------
+        ReplicateArtifact
+            Artifact with explicit ``payload["metrics"]`` for default aggregation.
+        """
+
+        if len(completed_jobs) != 1:
+            message = f"{ctx.analysis_name} expects exactly one completed MDA job."
+            raise PluginContractError(message)
+        job = completed_jobs[0]
+        result_payload = strict_json_payload(job.results, analysis_name=ctx.analysis_name)
+        metrics = _extract_job_metrics(result_payload)
+        metadata: dict[str, Any] = {"result_kind": "mda_function_adapter"}
+        if ctx.settings_fingerprint is not None:
+            metadata["settings_fingerprint"] = ctx.settings_fingerprint
+        return ReplicateArtifact(
+            analysis_name=ctx.analysis_name,
+            condition_label=ctx.condition_label,
+            replicate=ctx.replicate,
+            payload={
+                "metrics": metrics,
+                "jobs": [{"name": job.name, "results": result_payload}],
+            },
+            provenance={
+                "source": "{{ spec.name }}_mda_function_adapter",
+                "frame_selection": frame_selection_payload(ctx.frame_selection),
+                "universe_policy": strict_json_payload(
+                    ctx.universe_policy.as_dict(), analysis_name=ctx.analysis_name
+                ),
+            },
+            metadata=metadata,
+            warnings=list(ctx.warnings),
+        )
+
+
+class {{ spec.class_name }}Analysis(Analysis):
+    """Generated MDAnalysis-native analysis plugin for {{ spec.title }}."""
+
+    name: ClassVar[str] = "{{ spec.name }}"
+    Settings: ClassVar[type[BaseModel]] = {{ spec.class_name }}Settings
+
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[MDAAnalysisJob]:
+        """Build the MDAnalysis-compatible jobs for one replicate.
+
+        Parameters
+        ----------
+        ctx : MDAReplicateJobContext
+            Framework-provided context with a loaded universe and frame selection.
+
+        Returns
+        -------
+        sequence of MDAAnalysisJob
+            Single function-adapter job for the placeholder metric.
+        """
+
+        return [
+            MDAAnalysisJob.from_function(
+                name="{{ spec.name }}",
+                function=measure_{{ spec.name }},
+                universe=ctx.universe,
+                frame_selection=ctx.frame_selection,
+                universe_policy=ctx.universe_policy,
+                function_kwargs={"settings": ctx.settings},
+            )
+        ]
+
+    def build_mda_collector(
+        self,
+        ctx: MDACollectorContext,
+    ) -> {{ spec.class_name }}ArtifactCollector:
+        """Build the collector for completed MDAnalysis jobs.
+
+        Parameters
+        ----------
+        ctx : MDACollectorContext
+            Framework-provided collector context.
+
+        Returns
+        -------
+        {{ spec.class_name }}ArtifactCollector
+            Collector that returns a canonical replicate artifact.
+        """
+
+        del ctx
+        return {{ spec.class_name }}ArtifactCollector()
+
+    def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
+        """Extract scalar metrics from a condition artifact.
+
+        Parameters
+        ----------
+        summary : Any
+            Aggregated condition artifact from default MDA aggregation.
+
+        Returns
+        -------
+        dict[str, MetricValue]
+            Metric values used by the default comparison implementation.
+        """
+
+        metric_summary = _metric_summary(summary, METRIC_NAME)
+        return {
+            METRIC_NAME: MetricValue(
+                name=METRIC_NAME,
+                mean=metric_summary["mean"],
+                sem=metric_summary["sem"],
+                replicate_values=metric_summary["values"],
+                higher_is_better=True,
+            )
+        }
+
+
+def _selected_frame_count(
+    universe: Any,
+    *,
+    start: int | None,
+    stop: int | None,
+    step: int | None,
+) -> int:
+    """Return the number of frames selected by MDAnalysis-style run kwargs.
+
+    Parameters
+    ----------
+    universe : Any
+        Universe with a trajectory.
+    start : int or None
+        Optional start frame.
+    stop : int or None
+        Optional exclusive stop frame.
+    step : int or None
+        Optional stride.
+
+    Returns
+    -------
+    int
+        Number of selected frames.
+    """
+
+    trajectory = getattr(universe, "trajectory", None)
+    if trajectory is None:
+        raise ValueError("universe must expose a trajectory.")
+    total_frames = len(trajectory)
+    start_frame = 0 if start is None else start
+    stop_frame = total_frames if stop is None else min(stop, total_frames)
+    step_size = 1 if step is None else step
+    if step_size <= 0:
+        raise ValueError("step must be a positive integer.")
+    return len(range(start_frame, stop_frame, step_size))
+
+
+def _extract_job_metrics(result_payload: Any) -> dict[str, float]:
+    """Extract explicit scalar metrics from a JSON-compatible job result.
+
+    Parameters
+    ----------
+    result_payload : Any
+        JSON-compatible payload returned by the completed job.
+
+    Returns
+    -------
+    dict[str, float]
+        Metric names mapped to finite scalar values.
+    """
+
+    metrics = result_payload.get("metrics") if isinstance(result_payload, dict) else None
+    if not isinstance(metrics, dict):
+        raise PluginContractError("Job results must include a metrics mapping.")
+    return {name: float(value) for name, value in metrics.items()}
+
+
+def _metric_summary(summary: Any, metric_name: str) -> dict[str, Any]:
+    """Return one metric summary from an aggregated condition artifact.
+
+    Parameters
+    ----------
+    summary : Any
+        Condition artifact or dictionary payload.
+    metric_name : str
+        Metric name to extract.
+
+    Returns
+    -------
+    dict[str, Any]
+        Summary statistics emitted by default MDA aggregation.
+    """
+
+    payload = (
+        summary.payload if isinstance(summary, ConditionArtifact) else summary.get("payload", {})
+    )
+    metrics = payload.get("metrics", {})
+    if metric_name not in metrics:
+        aggregate_name = "{{ spec.name }} aggregate"
+        message = f"Missing metric {metric_name!r} in {aggregate_name}."
+        raise KeyError(message)
+    return metrics[metric_name]
