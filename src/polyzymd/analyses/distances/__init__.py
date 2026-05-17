@@ -43,6 +43,7 @@ from polyzymd.analyses.base import (
     BasePlotSettings,
     ComparisonContext,
     PlotContext,
+    PluginContractError,
 )
 from polyzymd.analyses.distances._mda import (
     DistanceArtifactCollector,
@@ -1015,18 +1016,24 @@ class DistancesAnalysis(Analysis):
         return DistanceArtifactCollector()
 
     def _deserialize_result(self, path: Path) -> Any:
-        """Load a canonical condition artifact or legacy aggregate result."""
+        """Load a canonical distances condition artifact."""
 
         if path.exists():
             try:
                 loaded = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                loaded = None
+            except (OSError, json.JSONDecodeError) as exc:
+                raise PluginContractError(
+                    f"Distances aggregate at {path} is not a valid canonical artifact. "
+                    "Recompute the condition or clear stale caches before comparing."
+                ) from exc
             if isinstance(loaded, dict) and loaded.get("artifact_type") == "condition":
                 from polyzymd.analyses.mda import ArtifactStore
 
                 return ArtifactStore(path.parent).read_condition_result(path.name)
-        return DistanceAggregatedResult.load(path)
+        raise PluginContractError(
+            f"Distances aggregate at {path} is not a canonical MDAnalysis condition artifact. "
+            "Recompute the condition or clear stale legacy distances caches."
+        )
 
     def aggregate(
         self,
@@ -1559,14 +1566,3 @@ class DistancesAnalysis(Analysis):
             fraction_testable=fraction_testable,
             fraction_note=fraction_note,
         )
-
-    @staticmethod
-    def _make_aggregated_filename(
-        replicates: tuple[int, ...] | Sequence[int],
-        first_result: Any,
-        settings_tag: str,
-    ) -> str:
-        """Generate an aggregated distances filename."""
-        eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
-        rep_str = Analysis._format_replicate_range(replicates)
-        return f"distances_{rep_str}_{eq_str}_s{settings_tag}.json"

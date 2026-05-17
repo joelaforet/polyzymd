@@ -332,17 +332,6 @@ class RMSFAnalysis(Analysis):
             "Recompute the condition or clear stale legacy RMSF caches."
         )
 
-    @staticmethod
-    def _make_aggregated_filename(
-        replicates: tuple[int, ...] | Sequence[int],
-        first_result: Any,
-    ) -> str:
-        """Return the legacy aggregate filename for external callers."""
-
-        eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
-        rep_str = Analysis._format_replicate_range(replicates)
-        return f"rmsf_{rep_str}_{eq_str}.json"
-
 
 def _comparison_artifact_to_result(artifact: ComparisonArtifact) -> ComparisonResult:
     """Convert a comparison artifact to the generic scalar comparison model."""

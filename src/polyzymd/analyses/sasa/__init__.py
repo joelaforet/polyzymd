@@ -1080,17 +1080,6 @@ class SASAAnalysis(Analysis):
         return float(value)
 
     @staticmethod
-    def _make_aggregated_filename(
-        replicates: tuple[int, ...] | Sequence[int],
-        first_result: Any,
-        settings_token: str,
-    ) -> str:
-        """Generate an aggregated SASA filename."""
-        eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
-        rep_str = Analysis._format_replicate_range(replicates)
-        return f"sasa_{rep_str}_{eq_str}_{settings_token}.json"
-
-    @staticmethod
     def _deserialize_comparison(path: Path) -> SASAComparisonResult | None:
         """Load SASA comparison result from disk."""
         from polyzymd.analyses.sasa._comparison_results import SASAComparisonResult

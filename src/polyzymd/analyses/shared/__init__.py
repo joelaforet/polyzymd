@@ -24,8 +24,6 @@ aggregation
     Replicate collection, distance pair aggregation.
 autocorrelation
     ACF, correlation time, statistical inefficiency.
-pbc
-    Minimum image distance, PBC-aware distance matrix.
 selections
     Extended selection syntax (midpoint, COM), position retrieval.
 diagnostics
@@ -34,10 +32,6 @@ window
     Centralized trajectory window resolution for MDAnalysis job lifecycles.
 config_hash
     Config hashing for cache validation.
-constants
-    Shared default values (cutoffs, thresholds).
-defaults
-    AnalysisDefaults model (equilibration_time).
 logging_utils
     Colored terminal logging.
 plotting
@@ -71,25 +65,16 @@ from polyzymd.analyses.shared.config_hash import (
     compute_config_hash,
     validate_config_hash,
 )
-from polyzymd.analyses.shared.constants import (
-    DEFAULT_CONTACT_CUTOFF,
-    DEFAULT_DISTANCE_THRESHOLD,
-)
 from polyzymd.analyses.shared.convergence import (
     ConvergenceResult,
     find_convergence_time,
 )
-from polyzymd.analyses.shared.defaults import AnalysisDefaults
 from polyzymd.analyses.shared.loader import (
     TrajectoryInfo,
     TrajectoryLoader,
     convert_time,
     parse_time_string,
     time_to_frame,
-)
-from polyzymd.analyses.shared.pbc import (
-    minimum_image_distance,
-    pairwise_distances_pbc,
 )
 from polyzymd.analyses.shared.plotting import (
     annotate_cells,
@@ -149,14 +134,6 @@ __all__ = [
     "statistical_inefficiency_multiple",
     "n_effective",
     "check_statistical_reliability",
-    # PBC
-    "minimum_image_distance",
-    "pairwise_distances_pbc",
-    # Constants
-    "DEFAULT_CONTACT_CUTOFF",
-    "DEFAULT_DISTANCE_THRESHOLD",
-    # Defaults
-    "AnalysisDefaults",
     # Config hash
     "compute_config_hash",
     "validate_config_hash",

@@ -7,11 +7,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
-from pydantic import BaseModel
-
 if TYPE_CHECKING:
     from polyzymd.analyses._contexts import PlotContext
-    from polyzymd.config.schema import SimulationConfig
 
 logger = logging.getLogger("polyzymd.analyses")
 
@@ -31,23 +28,10 @@ def load_aggregated_result(analysis: Any, aggregated_dir: Path) -> Any:
     Any
         Loaded result, or ``None`` if no file exists.
     """
-    if not aggregated_dir.exists():
-        return None
     canonical = analysis.aggregate_result_path(aggregated_dir)
     if canonical.exists():
         return analysis._deserialize_result(canonical)
-    json_files = sorted(aggregated_dir.glob("*.json"), key=lambda path: path.stat().st_mtime)
-    if not json_files:
-        return None
-    chosen = json_files[-1]
-    logger.warning(
-        "%s: canonical result.json not found in %s — falling back to %s (%d JSON file(s) present)",
-        analysis.name,
-        aggregated_dir,
-        chosen.name,
-        len(json_files),
-    )
-    return analysis._deserialize_result(chosen)
+    return None
 
 
 def deserialize_result(analysis: Any, path: Path) -> Any:
@@ -310,86 +294,6 @@ def _replicate_id_from_run_dir(run_dir: Path) -> str:
     if name.startswith("run_") and name.removeprefix("run_").isdigit():
         return name.removeprefix("run_")
     return "unknown"
-
-
-def check_cache(
-    analysis: Any,
-    result_cls: type,
-    cache_path: Path,
-    *,
-    recompute: bool,
-    sim_config: SimulationConfig | None = None,
-    settings: BaseModel | None = None,
-) -> Any | None:
-    """Load a cached result from disk when it is valid.
-
-    Parameters
-    ----------
-    analysis : Any
-        Analysis instance requesting the cache lookup.
-    result_cls : type
-        Result class with a ``load()`` method.
-    cache_path : Path
-        Path to the cached JSON result file.
-    recompute : bool
-        If ``True``, skip cache loading.
-    sim_config : SimulationConfig, optional
-        Simulation configuration used for hash validation.
-    settings : BaseModel, optional
-        Settings model used for fingerprint validation.
-
-    Returns
-    -------
-    Any | None
-        Cached result on hit, otherwise ``None``.
-    """
-    if recompute or not cache_path.exists():
-        return None
-
-    if not hasattr(result_cls, "load"):
-        raise TypeError(
-            f"_check_cache requires result_cls to have a .load() method, got {result_cls!r}."
-        )
-
-    logger.info("Loading cached %s result from %s", analysis.name, cache_path)
-    result = result_cls.load(cache_path)
-
-    if sim_config is not None and hasattr(result, "config_hash"):
-        from polyzymd.analyses.shared.config_hash import validate_config_hash
-
-        stored_hash = getattr(result, "config_hash", None)
-        if stored_hash not in (None, "", "unknown") and not validate_config_hash(
-            str(stored_hash),
-            sim_config,
-        ):
-            return None
-
-    if settings is not None:
-        from polyzymd.analyses.shared.config_hash import (
-            extract_settings_fingerprint_from_path,
-            validate_settings_fingerprint,
-        )
-
-        stored_fingerprint = getattr(result, "settings_fingerprint", None)
-        if stored_fingerprint is None:
-            stored_fingerprint = getattr(result, "settings_fp", None)
-        if stored_fingerprint is None:
-            metadata = getattr(result, "metadata", None)
-            if isinstance(metadata, dict):
-                stored_fingerprint = metadata.get("settings_fingerprint")
-                if stored_fingerprint is None:
-                    stored_fingerprint = metadata.get("settings_fp")
-        if stored_fingerprint is None:
-            stored_fingerprint = extract_settings_fingerprint_from_path(cache_path)
-
-        if not validate_settings_fingerprint(
-            stored_fingerprint,
-            settings,
-            source=cache_path,
-        ):
-            return None
-
-    return result
 
 
 def replicate_result_path(output_dir: Path) -> Path:

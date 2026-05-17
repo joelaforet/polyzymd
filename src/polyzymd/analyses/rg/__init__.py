@@ -1047,17 +1047,6 @@ class RgAnalysis(Analysis):
         )
 
     @staticmethod
-    def _make_aggregated_filename(
-        replicates: tuple[int, ...] | Sequence[int],
-        first_result: Any,
-        settings_tag: str,
-    ) -> str:
-        """Generate an aggregated Rg filename."""
-        eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
-        rep_str = Analysis._format_replicate_range(replicates)
-        return f"rg_{rep_str}_{eq_str}_{settings_tag}.json"
-
-    @staticmethod
     def _deserialize_comparison(path: Path) -> RgComparisonResult | None:
         """Load Rg comparison result from disk."""
         try:

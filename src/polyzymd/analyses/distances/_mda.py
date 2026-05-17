@@ -75,7 +75,7 @@ class DistancePairPayload:
 
 
 @dataclass(frozen=True)
-class DistancesRunnerPayload:
+class DistanceReplicatePayload:
     """Collection of distance-pair payloads for one replicate."""
 
     n_frames_total: int
@@ -159,7 +159,7 @@ def compute_distance_payloads(
     use_pbc: bool,
     alignment: Any,
     pair_label_func: Callable[[str, str], str],
-) -> DistancesRunnerPayload:
+) -> DistanceReplicatePayload:
     """Compute distance payloads through the shared pair-distance primitive.
 
     This compatibility helper keeps direct callers and the catalytic-triad
@@ -257,7 +257,7 @@ def payload_from_pair_distance_analysis(
     timestep_ps: float,
     step: int,
     n_frames_total: int,
-) -> DistancesRunnerPayload:
+) -> DistanceReplicatePayload:
     """Build summary payloads from a completed pair-distance analysis."""
 
     distance_matrix = np.asarray(analysis.results.distance_matrix, dtype=np.float64)
@@ -276,7 +276,7 @@ def payload_from_pair_distance_analysis(
         )
         for pair_index, pair in enumerate(resolved_pairs)
     ]
-    return DistancesRunnerPayload(
+    return DistanceReplicatePayload(
         n_frames_total=n_frames_total,
         n_frames_used=int(distance_matrix.shape[1]) if distance_matrix.ndim == 2 else 0,
         pair_payloads=pair_payloads,
@@ -587,7 +587,7 @@ def _summarize_distance_series(
 def _write_replicate_sidecar(
     ctx: MDACollectorContext,
     job: MDAJobResult,
-    payload: DistancesRunnerPayload,
+    payload: DistanceReplicatePayload,
 ) -> ArtifactSidecarRef:
     """Write the replicate pair x frame distance matrix sidecar."""
 

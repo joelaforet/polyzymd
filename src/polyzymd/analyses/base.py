@@ -34,9 +34,6 @@ from polyzymd.analyses._analysis_io import (
     build_plot_data as _build_plot_data_impl,
 )
 from polyzymd.analyses._analysis_io import (
-    check_cache as _check_cache_impl,
-)
-from polyzymd.analyses._analysis_io import (
     comparison_result_path as _comparison_result_path,
 )
 from polyzymd.analyses._analysis_io import (
@@ -91,7 +88,6 @@ if TYPE_CHECKING:
         MDAReplicateJobContext,
         ReplicateMetricPolicy,
     )
-    from polyzymd.config.schema import SimulationConfig
 
 __all__ = [
     "ANOVAResult",
@@ -589,25 +585,6 @@ class Analysis(ABC):
     def _load_replicate_result(self, run_dir: Path) -> Any | None:
         """Load a replicate result from a run directory."""
         return load_replicate_result(self, run_dir)
-
-    def _check_cache(
-        self,
-        result_cls: type,
-        cache_path: Path,
-        *,
-        recompute: bool,
-        sim_config: SimulationConfig | None = None,
-        settings: BaseModel | None = None,
-    ) -> Any | None:
-        """Load a cached result from disk if valid."""
-        return _check_cache_impl(
-            self,
-            result_cls,
-            cache_path,
-            recompute=recompute,
-            sim_config=sim_config,
-            settings=settings,
-        )
 
     @staticmethod
     def replicate_result_path(output_dir: Path) -> Path:

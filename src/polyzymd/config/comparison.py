@@ -10,7 +10,6 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analyses.base import BasePlotSettings
-from polyzymd.analyses.shared.defaults import AnalysisDefaults
 from polyzymd.core.archived_features import (
     format_archived_analysis_message,
     get_archived_analysis_plugin,
@@ -19,6 +18,19 @@ from polyzymd.core.branding import prepend_file_header
 from polyzymd.utils.templates import render_package_template
 
 logger = logging.getLogger(__name__)
+
+
+class AnalysisDefaults(BaseModel):
+    """Default parameters applied to every configured analysis.
+
+    The comparison config owns these project-level defaults because they are
+    parsed from ``comparison.yaml`` before plugin lifecycle contexts are built.
+    """
+
+    equilibration_time: str = "10ns"
+    fdr_alpha: float = Field(default=0.05, gt=0.0, le=1.0)
+    ttest_method: str = Field(default="student", pattern="^(welch|student)$")
+    posthoc_method: str = Field(default="ttest_bh", pattern="^(ttest_bh|tukey_hsd)$")
 
 
 # ============================================================================

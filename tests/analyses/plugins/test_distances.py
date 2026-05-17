@@ -1,7 +1,7 @@
 """Tests for the distances analysis plugin.
 
 Covers discovery, settings, run_replicate, aggregate, compare (full override),
-plot delegation, AggregatedResultClass, _make_aggregated_filename, and lifecycle.
+plot delegation, AggregatedResultClass, artifact deserialization, and lifecycle.
 """
 
 from __future__ import annotations
@@ -1649,7 +1649,7 @@ class TestComparePair:
 
 
 class TestDeserializeResult:
-    """AggregatedResultClass loads via DistanceAggregatedResult.load()."""
+    """Aggregated results load from canonical condition artifacts only."""
 
     def test_aggregated_result_class_set(self):
         from polyzymd.analyses.distances import DistancesAnalysis
@@ -1657,58 +1657,16 @@ class TestDeserializeResult:
 
         assert DistancesAnalysis.AggregatedResultClass is DistanceAggregatedResult
 
-    def test_loads_via_result_class(self, tmp_path):
+    def test_rejects_legacy_aggregate_json(self, tmp_path):
         from polyzymd.analyses.distances import DistancesAnalysis
+        from polyzymd.analyses.exceptions import PluginContractError
 
         analysis = DistancesAnalysis()
+        legacy_path = tmp_path / "distances_legacy.json"
+        legacy_path.write_text('{"analysis_type": "distances_aggregated"}', encoding="utf-8")
 
-        mock_result = MagicMock()
-        with patch.object(
-            analysis.AggregatedResultClass, "load", return_value=mock_result
-        ) as mock_load:
-            result = analysis._deserialize_result(tmp_path / "test.json")
-
-        mock_load.assert_called_once_with(tmp_path / "test.json")
-        assert result is mock_result
-
-
-# ---------------------------------------------------------------------------
-# _make_aggregated_filename
-# ---------------------------------------------------------------------------
-
-
-class TestMakeAggregatedFilename:
-    """Filename generation matches existing convention."""
-
-    def test_consecutive_replicates(self):
-        from polyzymd.analyses.distances import DistancesAnalysis
-
-        mock_result = MagicMock()
-        mock_result.equilibration_time = 100.0
-        mock_result.equilibration_unit = "ns"
-
-        filename = DistancesAnalysis._make_aggregated_filename((1, 2, 3), mock_result, "a1b2c3d4")
-        assert filename == "distances_reps1-3_eq100ns_sa1b2c3d4.json"
-
-    def test_nonconsecutive_replicates(self):
-        from polyzymd.analyses.distances import DistancesAnalysis
-
-        mock_result = MagicMock()
-        mock_result.equilibration_time = 50.0
-        mock_result.equilibration_unit = "ns"
-
-        filename = DistancesAnalysis._make_aggregated_filename((1, 3, 5), mock_result, "a1b2c3d4")
-        assert filename == "distances_reps1_3_5_eq50ns_sa1b2c3d4.json"
-
-    def test_ps_equilibration(self):
-        from polyzymd.analyses.distances import DistancesAnalysis
-
-        mock_result = MagicMock()
-        mock_result.equilibration_time = 5000.0
-        mock_result.equilibration_unit = "ps"
-
-        filename = DistancesAnalysis._make_aggregated_filename((1, 2), mock_result, "a1b2c3d4")
-        assert filename == "distances_reps1-2_eq5000ps_sa1b2c3d4.json"
+        with pytest.raises(PluginContractError, match="canonical MDAnalysis condition artifact"):
+            analysis._deserialize_result(legacy_path)
 
 
 class TestSettingsCacheTag:

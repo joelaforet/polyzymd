@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 from polyzymd.analyses._results_base import get_polyzymd_version
 from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult, TriadResult
 from polyzymd.analyses.distances._mda import (
-    DistancesRunnerPayload,
+    DistanceReplicatePayload,
     _pair_payload_to_json,
     mdanalysis_version,
     payload_from_pair_distance_analysis,
@@ -582,7 +582,7 @@ def _metric_summary(name: str, values: Sequence[float], mean: float, sem: float)
 def _write_replicate_sidecar(
     ctx: MDACollectorContext,
     job: MDAJobResult,
-    payload: DistancesRunnerPayload,
+    payload: DistanceReplicatePayload,
     distance_matrix: NDArray[np.float64],
     simultaneous: NDArray[np.bool_],
 ) -> ArtifactSidecarRef:
@@ -631,7 +631,7 @@ def _pair_specs_from_settings(settings: CatalyticTriadSettings) -> list[PairDist
     ]
 
 
-def _distance_matrix(payload: DistancesRunnerPayload) -> NDArray[np.float64]:
+def _distance_matrix(payload: DistanceReplicatePayload) -> NDArray[np.float64]:
     """Return a finite pair x frame distance matrix from distance payloads."""
 
     if not payload.pair_payloads:
@@ -705,7 +705,7 @@ def _simultaneous_contact_statistics(
     }
 
 
-def _effective_timestep_ps(payload: DistancesRunnerPayload, ctx: MDACollectorContext) -> float:
+def _effective_timestep_ps(payload: DistanceReplicatePayload, ctx: MDACollectorContext) -> float:
     """Return the effective analyzed-frame timestep in picoseconds."""
 
     time_ns = payload.time_ns

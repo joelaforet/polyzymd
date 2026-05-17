@@ -30,7 +30,7 @@ from polyzymd.analyses.catalytic_triad._mda import (
     condition_artifact_to_legacy_result,
 )
 from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
-from polyzymd.analyses.distances._mda import DistancePairPayload, DistancesRunnerPayload
+from polyzymd.analyses.distances._mda import DistancePairPayload, DistanceReplicatePayload
 from polyzymd.analyses.mda import (
     ArtifactStore,
     ComparisonArtifact,
@@ -701,7 +701,7 @@ class TestTriadDirectPayloadCompatibility:
     def test_distance_payload_imports_from_mda_module(self) -> None:
         """Distance payload classes should no longer require the deleted runner wrapper."""
 
-        payload = DistancesRunnerPayload(
+        payload = DistanceReplicatePayload(
             n_frames_total=2,
             n_frames_used=2,
             pair_payloads=[

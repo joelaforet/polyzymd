@@ -384,19 +384,6 @@ class CatalyticTriadAnalysis(Analysis):
 
         return plots
 
-    # === Private helpers ===
-
-    @staticmethod
-    def _make_aggregated_filename(
-        replicates: tuple[int, ...] | Sequence[int],
-        first_result: Any,
-    ) -> str:
-        """Backward-compatible filename helper retained for tests."""
-        eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
-        rep_str = Analysis._format_replicate_range(replicates)
-        name_safe = first_result.triad_name.replace(" ", "_").replace("/", "-")
-        return f"triad_{name_safe}_{rep_str}_{eq_str}.json"
-
 
 def _comparison_artifact_to_result(artifact: ComparisonArtifact) -> ComparisonResult:
     """Adapt a canonical comparison artifact for scalar CLI formatting.
