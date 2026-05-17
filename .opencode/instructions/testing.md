@@ -105,31 +105,30 @@ When adding a new analysis plugin in `analyses/`, write tests that cover:
 1. **Discovery**: Plugin is found by `list_analyses()` and `get_analysis()`
 2. **Class variables**: `name` and `Settings` are set correctly
 3. **Settings validation**: Pydantic model validates/rejects correctly
-4. **MDAnalysis job replicate stage**: `build_mda_jobs()` constructs jobs,
-   `build_mda_collector()` maps completed jobs when needed, and base
-   `run_replicate()` dispatch works with fake MDA job objects
-5. **aggregate()**: Combines replicate results correctly (no mocks needed)
-6. **extract_metrics()**: Returns correct `MetricValue` instances (if using default compare)
-7. **_deserialize_result()**: Loads JSON back correctly (if using default compare)
-8. **compare()**: Produces a valid `ComparisonResult`
-9. **format()**: Generates readable CLI output
+4. **MDAnalysis job stage**: `build_mda_jobs()` constructs `MDAAnalysisJob`
+   objects using `FrameSelection` and fake `AnalysisBase`-compatible work.
+5. **Collector artifacts**: `build_mda_collector()` maps completed jobs to a
+   valid `ReplicateArtifact` without serializing raw MDAnalysis `Results`.
+6. **Artifact aggregation**: `aggregate()` or the default artifact aggregator
+   combines replicate artifacts into a `ConditionArtifact` without loading
+   trajectories.
+7. **Comparison metrics**: `extract_metrics()` or custom `compare()` consumes
+   condition artifacts and uses replicate-level statistics.
+8. **Artifact-only plots**: `plot()` reads cached artifacts/sidecars only.
+9. **format()**: Generates readable CLI output from comparison artifacts/results.
 
 Example test structure for a plugin:
 
 ```python
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import numpy as np
-import pytest
+from unittest.mock import MagicMock
 
 from polyzymd.analyses import get_analysis, list_analyses
 from polyzymd.analyses.base import (
     AggregateContext,
     Condition,
+    MDAReplicateJobContext,
     MetricValue,
-    ReplicateContext,
 )
 
 
@@ -152,8 +151,8 @@ class TestMyPluginDiscovery:
         assert settings.selection == "protein and name CA"
 
 
-class TestMyPluginReplicateStage:
-    """Test the MDAnalysis job replicate stage with small fakes."""
+class TestMyPluginMDAJobs:
+    """Test the MDAnalysis job stage with small fakes."""
 
     class FakeTrajectory:
         def __len__(self) -> int:
@@ -162,47 +161,32 @@ class TestMyPluginReplicateStage:
     class FakeUniverse:
         trajectory = FakeTrajectory()
 
-    class FakeWindow:
-        warning_message = None
-
-        def run_kwargs(self) -> dict[str, int | None]:
-            return {"start": 0, "stop": 50, "step": 1}
-
-    class FakeLoader:
-        def __init__(self, sim_config):
-            self.sim_config = sim_config
-
-        def load_universe(self, replicate: int):
-            return TestMyPluginReplicateStage.FakeUniverse()
-
-    def test_base_run_replicate_dispatch(self, monkeypatch, tmp_path):
+    def test_builds_mda_jobs(self, tmp_path):
         cls = get_analysis("my_analysis")
         analysis = cls()
-        settings = cls.Settings()
         condition = Condition(
             label="Test",
             config_path=Path("/fake/config.yaml"),
             replicates=(1,),
             sim_config=object(),
         )
-        ctx = ReplicateContext(
+        ctx = MDAReplicateJobContext(
             condition=condition,
             replicate=1,
             sim_config=condition.sim_config,
             output_dir=tmp_path / "run_1",
             equilibration="0ns",
             recompute=True,
-            settings=settings,
+            settings=cls.Settings(),
         )
-        monkeypatch.setattr(analysis, "_trajectory_loader_factory", lambda: self.FakeLoader)
-        monkeypatch.setattr(analysis, "get_trajectory_window", lambda *args: self.FakeWindow())
 
-        result = analysis.run_replicate(ctx, replicate=1)
-        assert isinstance(result, dict)
+        jobs = analysis.build_mda_jobs(ctx)
+        assert jobs
+        assert all(job.name for job in jobs)
 
 
-class TestMyPluginAggregate:
-    """Test aggregation — no mocks needed."""
+class TestMyPluginArtifacts:
+    """Test artifact aggregation — no trajectory mocks needed."""
 
     def test_aggregate(self, tmp_path):
         cls = get_analysis("my_analysis")

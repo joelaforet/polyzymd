@@ -55,26 +55,24 @@ private framework modules. Contributors should import from
 `polyzymd.analyses.base` and should not import `_analysis_*`, `_contexts.py`, or
 `_comparison_models.py` directly.
 
-Each plugin is a self-contained package. All established plugins extract
-plotting functions into a `_plotters.py` module to keep `__init__.py` focused
-on Analysis lifecycle wiring. Contacts is larger, so `ContactsAnalysis` stays
-public in `contacts/__init__.py` while cache, filtering, lifecycle, comparison,
-plotting, result, and MDAnalysis helpers live in private `contacts/_*.py` modules.
-These modules are implementation details, not
-contributor API. Public contributor plugins use the MDAnalysis job lifecycle;
-trajectory-native plugins should isolate MDAnalysis trajectory logic in a
-dedicated module such as `_mda.py`.
+Plugins may be simple single-file modules or packages. Established and advanced
+plugins usually extract plotting into `_plotters.py` and MDAnalysis helpers into
+`_mda.py`, while the scaffold may generate a compact single-file plugin.
+Contacts is larger, so `ContactsAnalysis` stays public in `contacts/__init__.py`
+while artifact, filtering, comparison, plotting, result, and MDAnalysis helpers
+live in private `contacts/_*.py` modules. These modules are implementation
+details, not contributor API. Public contributor plugins use the MDAnalysis job
+lifecycle: `MDAAnalysisJob` plus collectors producing `ReplicateArtifact`.
 
 ### How to Add a New Analysis
 
-1. Run `polyzymd new-analysis <name>` to scaffold the plugin package and tests, OR
-   create `src/polyzymd/analyses/<name>/` sub-package manually
+1. Run `polyzymd new-analysis <name>` to scaffold a plugin and tests, OR
+   create a module/package under `src/polyzymd/analyses/` manually
 2. Define a `Settings` class (Pydantic v2 `BaseModel`)
 3. Subclass `Analysis` and choose the lifecycle mode for your plugin
 4. When `has_compute_stage=True`, implement `build_mda_jobs()` and, when
-   needed, `build_mda_collector()` for the MDAnalysis job path; keep lifecycle
-   wiring in `__init__.py` and put job logic in a dedicated module such as
-   `_mda.py`
+   needed, `build_mda_collector()` for the MDAnalysis job path. Advanced
+   packages should put `AnalysisBase`-compatible helpers in `_mda.py`.
 5. If the plugin is compare-only, set `has_compute_stage=False`
 6. Implement `aggregate()` only when `has_aggregate_stage=True`
 7. Done — framework discovers it via `pkgutil` (no registries, no imports)
@@ -93,8 +91,8 @@ Required hooks depend on the plugin mode:
 
 | Hook | When Used | Signature / Notes |
 |------|-----------|-------------------|
-| `build_mda_jobs()` + `build_mda_collector()` | Public compute-stage plugins with `has_compute_stage=True` | MDAnalysis owns per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow |
-| `run_replicate()` | Advanced/internal cache or sidecar wrappers only | Framework entry point used by the orchestrator; new contributor plugins should not override it |
+| `build_mda_jobs()` + `build_mda_collector()` | Public compute-stage plugins with `has_compute_stage=True` | MDAnalysis owns per-trajectory iteration; collectors map completed jobs to `ReplicateArtifact`; PolyzyMD owns `ArtifactStore`, `ConditionArtifact`, `ComparisonArtifact`, statistics, and plotting |
+| `run_replicate()` | Exceptional direct-replicate adapters only | Avoid for trajectory-native plugins; prefer MDAnalysis jobs and collectors |
 | `aggregate()` | Only when `has_aggregate_stage=True` | `(ctx: AggregateContext, results: Sequence[Any]) -> Any` |
 
 Compare-only or no-compute plugins set `has_compute_stage=False` and skip the
@@ -159,21 +157,17 @@ Plugins receive framework-provided context objects — never load configs yourse
 
 | Context | Passed To | Key Attributes |
 |---------|-----------|----------------|
-| `ReplicateContext` | advanced `run_replicate()` wrappers and lower-level context access | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
+| `ReplicateContext` | lower-level context access and rare direct-replicate adapters | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
 | `AggregateContext` | `aggregate()` | `.condition`, `.replicates`, `.output_dir`, `.settings`, `.result_path` |
 | `ComparisonContext` | `compare()` | `.conditions`, `.analysis_dirs`, `.results_dir`, `.effective_control`, `.settings` |
 | `PlotContext` | `plot()` | `.conditions`, `.analysis_dirs`, `.output_dir`, `.settings`, `.plot_settings` |
 
 ### Result Saving
 
-Existing plugins save results to disk explicitly — using custom filenames
-for per-replicate caching (e.g. `rmsf_eq10ns.json`) and `ctx.result_path`
-for aggregated results. The orchestrator also provides fallback result saving
-for plugins that return serializable outputs without writing them manually.
-
-Simple plugins can skip manual saves and rely on the fallback. Plugins that
-want equilibration-aware caching should save explicitly (see `rmsf/` for the
-pattern).
+Trajectory-native plugins should persist canonical replicate, condition, and
+comparison artifacts through `ArtifactStore`. Do not add plugin-specific cache
+filename schemes; place large arrays or event tables in validated sidecars and
+refer to them from artifact payload/provenance.
 
 ### Return Types: Pydantic Models vs Dicts
 
@@ -212,8 +206,9 @@ def plot(self, ctx: PlotContext) -> list[Path]:
 
 ### Loading Results in `plot()`
 
-Use `_build_plot_data()` to collect per-condition paths, then
-`_load_aggregated_result()` to load each condition's result:
+Plots must read cached artifacts and sidecars only; they must not reload
+trajectories or rerun analyses. Use framework helpers to collect per-condition
+artifact paths, then load `ConditionArtifact` data through the artifact layer:
 
 ```python
 data, labels = self._build_plot_data(ctx)

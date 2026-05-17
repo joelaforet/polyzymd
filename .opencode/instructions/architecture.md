@@ -12,7 +12,7 @@ src/polyzymd/
 ├── core/         # Shared base classes and types
 ├── analyses/     # ★ Plugin system — unified analysis lifecycle
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-│   └── <name>/   #   One package per analysis type (all plugins are packages)
+│   └── <name>/   #   Analysis plugins (single-file simple modules or packages)
 ├── exporters/    # Format converters (GROMACS, etc.)
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
@@ -26,14 +26,15 @@ src/polyzymd/
 | **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the extension point |
 | **Private modules** | `_analysis_*`, `_contexts.py`, `_comparison_models.py`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics |
-| **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Stable public facade, auto-discovery, lifecycle runner |
+| **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/` | Stable public facade, auto-discovery, artifact lifecycle |
 
-New analysis types are added as **packages in `analyses/<name>/`**. All existing
-plugins are packages (no single-file plugins exist). New compute-stage plugins
-use `build_mda_jobs()` and, when needed, `build_mda_collector()` for
-MDAnalysis-first trajectory iteration. Keep PolyzyMD lifecycle orchestration in
-the plugin package and isolate MDAnalysis trajectory logic in a dedicated module
-such as `_mda.py`.
+New analysis types may be simple single-file modules or packages under
+`analyses/`. Compute-stage plugins use `build_mda_jobs()` to create
+`MDAAnalysisJob` objects around `AnalysisBase`-compatible work and, when
+needed, `build_mda_collector()` to map completed jobs to `ReplicateArtifact`.
+PolyzyMD owns `ArtifactStore`, `ConditionArtifact`, `ComparisonArtifact`,
+ensemble orchestration, statistics, and plotting. Advanced packages should keep
+MDAnalysis helpers in a dedicated module such as `_mda.py`.
 
 `polyzymd.analyses.base` is the stable public API facade for contributors. It
 re-exports `Analysis`, lifecycle context objects, metric descriptors, and
@@ -44,9 +45,9 @@ import these private modules from contributor plugins; import public symbols
 from `polyzymd.analyses.base`.
 
 `polyzymd.analyses.contacts` follows the same facade pattern. The public
-`ContactsAnalysis` class remains in `contacts/__init__.py`; cache handling,
-lifecycle helpers, condition filtering, custom comparison, plotting orchestration,
-result models, and trajectory runners live in private `contacts/_*.py` modules.
+`ContactsAnalysis` class remains in `contacts/__init__.py`; artifact handling,
+condition filtering, custom comparison, plotting orchestration, result models,
+and MDAnalysis helpers live in private `contacts/_*.py` modules.
 
 ## Chain Convention (Critical)
 
@@ -107,8 +108,8 @@ for name, cls in list_analyses().items():
 RMSFAnalysis = get_analysis("rmsf")
 ```
 
-No registries, no decorators, no explicit imports needed — just create a
-package in `analyses/<name>/` that subclasses `Analysis`.
+No registries, no decorators, no explicit imports needed — just create a module
+or package in `analyses/` that subclasses `Analysis`.
 
 ### Config Pattern
 Pydantic v2 `BaseModel` subclasses with validators:
@@ -128,10 +129,10 @@ class AnalysisConfig(BaseModel):
 
 ### Adding a new analysis type (primary path)
 
-1. Run `polyzymd new-analysis <name>` to scaffold the plugin, OR create `src/polyzymd/analyses/<name>/` manually
+1. Run `polyzymd new-analysis <name>` to scaffold the plugin, OR create a module/package under `src/polyzymd/analyses/` manually
 2. Subclass `Analysis` with `name` and `Settings`
 3. Choose the lifecycle mode:
-   - MDAnalysis-native plugin: implement `build_mda_jobs()` and, when needed, `build_mda_collector()` when `has_compute_stage=True`; MDAnalysis owns per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow
+   - MDAnalysis-native plugin: implement `build_mda_jobs()` and, when needed, `build_mda_collector()` when `has_compute_stage=True`; MDAnalysis owns per-trajectory iteration while PolyzyMD owns artifacts, ensemble aggregation, statistics, and plotting
    - Compare-only plugin: set `has_compute_stage=False`
 4. Implement `aggregate()` only when `has_aggregate_stage=True`
 5. For default comparison: implement `extract_metrics()`
