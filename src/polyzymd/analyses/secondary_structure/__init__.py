@@ -54,8 +54,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("polyzymd.analyses.secondary_structure")
 
-SS_CHAR_TO_INT: dict[str, int] = {"C": 0, "H": 1, "E": 2}
-
 
 class SecondaryStructureSettings(BaseModel):
     """Settings for secondary structure analysis.
