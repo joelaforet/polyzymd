@@ -3,12 +3,16 @@
 This page documents the `polyzymd.analyses` package — the plugin system for
 adding new analysis types to PolyzyMD.
 
-New contributor analyses usually use the MDAnalysis job/artifact API: a
-single-file plugin subclasses `Analysis`, builds `MDAAnalysisJob` objects, and
-returns canonical artifacts with explicit scalar metrics. The framework handles
-aggregation, cache identity, and default scalar comparison. The Measurement API
-remains available for existing scalar adapters but is no longer the default
-scaffold pattern.
+PolyzyMD analyses are MDAnalysis analyses lifted from one trajectory to
+condition/replicate ensembles. New contributor analyses usually use the
+MDAnalysis job/artifact API: a plugin subclasses `Analysis`, builds
+`MDAAnalysisJob` objects, maps completed MDAnalysis results to canonical
+artifacts, and lets the framework handle cache identity, aggregation, scalar
+comparison, CLI wiring, and plotting orchestration.
+
+The public MDAnalysis extension-layer reference is on
+{doc}`analyses_mda`. The Measurement API remains available for existing scalar
+adapters but is no longer the default scaffold pattern.
 
 ## Public API
 
@@ -34,6 +38,8 @@ scaffold pattern.
 ### Base Class
 
 - `Analysis` — abstract base class all plugins inherit from
+- `build_mda_jobs(ctx)` — hook implemented by compute-stage plugins to construct `MDAAnalysisJob` objects for one replicate
+- `build_mda_collector(ctx)` — hook that maps completed jobs to a `ReplicateArtifact`
 - `MetricSpec` — metadata for a scalar metric produced by a measurement
 - `ScalarMeasurement` — strategy object that measures one scalar per replicate
 - `ScalarMeasurementAnalysis` — adapter base class for scalar measurement plugins
@@ -52,6 +58,20 @@ Discovery supports both contributor-friendly single-file plugins such as
 `polyzymd.analyses.contacts`. Use a package when the plugin needs private helper
 modules for MDAnalysis jobs, results, plotting, or formatting; use a single file
 for the default function-adapter MDA job pattern.
+
+### MDAnalysis extension layer
+
+The `polyzymd.analyses.mda` namespace provides the public job/artifact layer:
+
+- `MDAAnalysisJob` wraps one `AnalysisBase`-compatible object or simple function adapter
+- `FrameSelection` maps PolyzyMD windows to MDAnalysis `run()` kwargs
+- `MDAFunctionAdapter` powers the default scaffold function path
+- `ReplicateArtifact`, `ConditionArtifact`, and `ComparisonArtifact` define cache envelopes
+- `ArtifactStore` persists `result.json`, manifests, and sidecars
+- `aggregate_replicate_artifacts()` provides default aggregation from `payload["metrics"]`
+- `compare_condition_artifacts()` compares condition artifacts with replicate-level statistics
+
+See {doc}`analyses_mda` for autodoc reference.
 
 ### Context Objects
 
@@ -75,23 +95,23 @@ for the default function-adapter MDA job pattern.
 
 | Plugin | Module | Comparison Style |
 |--------|--------|-----------------|
-| `rmsd` | `analyses.rmsd` | Custom (per-run) |
-| `rg` | `analyses.rg` | Custom (per-run) |
-| `rmsf` | `analyses.rmsf` | Default (scalar) |
-| `catalytic_triad` | `analyses.catalytic_triad` | Measurement-backed default (scalar) |
-| `secondary_structure` | `analyses.secondary_structure` | Default (scalar) |
-| `sasa` | `analyses.sasa` | Custom (per-run) |
-| `distances` | `analyses.distances` | Custom |
-| `contacts` | `analyses.contacts` | Custom |
-| `hydrogen_bonds` | `analyses.hydrogen_bonds` | Custom result loading with default-style scalar comparison per summary |
+| `rmsd` | `analyses.rmsd` | MDAnalysis job artifacts with custom per-run comparison |
+| `rg` | `analyses.rg` | Custom `AnalysisBase` artifacts with custom per-run comparison |
+| `rmsf` | `analyses.rmsf` | Profile artifacts with default scalar comparison |
+| `catalytic_triad` | `analyses.catalytic_triad` | Pair-distance artifact reducer with default scalar comparison |
+| `secondary_structure` | `analyses.secondary_structure` | Categorical matrix artifacts with default scalar comparison |
+| `sasa` | `analyses.sasa` | AnalysisBase-compatible SASA wrapper with custom per-run comparison |
+| `distances` | `analyses.distances` | Pair-distance artifacts with custom comparison |
+| `contacts` | `analyses.contacts` | Sparse contact-event artifacts with custom comparison |
+| `hydrogen_bonds` | `analyses.hydrogen_bonds` | MDAnalysis hydrogen-bond event artifacts with custom summaries |
 
 ### Contacts package facade
 
 `polyzymd.analyses.contacts` exposes the public `ContactsAnalysis` plugin and
 its supported settings/result classes. The package is intentionally split into
-private helper modules for cache handling, lifecycle dispatch, condition
-filtering, custom comparison, plotting, result models, MDAnalysis job helpers,
-and artifact lifecycle support. These `contacts/_*.py` modules are internal
+private helper modules for contact-event detection, artifact aggregation,
+condition filtering, custom comparison, plotting, result models, MDAnalysis job
+helpers, and sidecar loading. These `contacts/_*.py` modules are internal
 implementation details and are not separate contributor API entry points.
 
 ## Shared Utilities
@@ -140,5 +160,6 @@ summaries.
 
 ## Related Documentation
 
-- [Extending the Analysis Framework](../contributor_guide/extending_analyses.md) — tutorial
+- [Extending PolyzyMD with MDAnalysis-native analyses](../contributor_guide/extending_analyses.md) — contributor guide
+- [MDAnalysis Extension-Layer API](analyses_mda.md) — API reference
 - [API Overview](overview.rst)

@@ -13,5 +13,6 @@ Use these pages for module-level API documentation.
    workflow
    core
    analyses
+   analyses_mda
    analyses_base
    analyses_shared

@@ -1,15 +1,33 @@
-# Extending Analyses
+# Extend PolyzyMD with MDAnalysis-native analyses
 
 This guide shows the supported contributor workflow for adding a new analysis
-plugin. The default path is now a **single-file MDAnalysis-native plugin**: your
-code builds an `MDAAnalysisJob`, converts completed job results into a canonical
-`ReplicateArtifact`, and lets PolyzyMD handle cache, aggregation, comparison,
-CLI wiring, and discovery.
+plugin. PolyzyMD treats each trajectory-native analysis as an MDAnalysis-style
+analysis, then lifts it from one trajectory to condition/replicate ensembles.
+MDAnalysis owns the per-trajectory `Universe`, `AtomGroup`, frame iteration,
+`AnalysisBase`, and `Results` layer. PolyzyMD owns discovery, cache provenance,
+replicate artifacts, condition aggregation, cross-condition statistics, CLI
+wiring, and plotting from cached artifacts.
 
-Advanced scaffolds generate packages with lifecycle wiring in `__init__.py` and
-lazy MDAnalysis `AnalysisBase` helpers in `_mda.py`.
+Start with the scaffold unless you are updating a built-in analysis. The
+generated code matches the current MDAnalysis-native extension layer and is the
+smallest working example of the contract.
 
-## Start with the MDAnalysis-native scaffold
+## What you will build
+
+A contributor plugin normally provides:
+
+1. a Pydantic settings model for user-facing options;
+2. one or more `MDAAnalysisJob` objects in `build_mda_jobs()`;
+3. a collector from completed MDAnalysis jobs to a `ReplicateArtifact`;
+4. optional custom aggregation when `payload["metrics"]` is not enough;
+5. `extract_metrics()` for default scalar comparison, or a custom `compare()`;
+6. optional `plot()` code that reads artifacts and sidecars only.
+
+The default path is intentionally small. A single-file plugin can wrap a
+function with `MDAAnalysisJob.from_function()`. More advanced plugins can build
+direct `AnalysisBase`-compatible objects in a package-level `_mda.py` helper.
+
+## Start with the scaffold
 
 Create a working plugin and tests with:
 
@@ -27,33 +45,50 @@ tests/analyses/plugins/test_solvent_shell.py
 
 The plugin is discovered automatically. Single-file plugins named
 `src/polyzymd/analyses/<name>.py` and package plugins under
-`src/polyzymd/analyses/<name>/` both participate in discovery; no registry edits,
-decorators, or bootstrap imports are needed.
+`src/polyzymd/analyses/<name>/` both participate in discovery. No registry
+edits, decorators, or bootstrap imports are needed.
+
+Use an advanced package when your plugin needs a direct `AnalysisBase` helper,
+sidecars, multiple metrics, custom aggregation, or custom plotting:
+
+```bash
+pixi run -e build polyzymd new-analysis solvent_shell --advanced
+pixi run -e build polyzymd new-analysis solvent_shell --style dict
+pixi run -e build polyzymd new-analysis solvent_shell --style pydantic
+```
+
+`--advanced`, `--style dict`, and `--style pydantic` generate MDAnalysis-native
+packages. `--style pydantic` validates the artifact metric payload before it is
+stored, but still persists framework-owned `ReplicateArtifact` and
+`ConditionArtifact` files through `ArtifactStore`.
 
 ## Public imports
 
-Contributor plugins should import lifecycle classes from the public facade and
-MDA extension-layer helpers from `polyzymd.analyses.mda`:
+Contributor plugins should import from public facades only:
 
 ```python
 from polyzymd.analyses.base import Analysis, MetricValue
-from polyzymd.analyses.mda import MDAAnalysisJob, ReplicateArtifact
+from polyzymd.analyses.mda import (
+    MDAAnalysisJob,
+    MDACollectorContext,
+    MDAReplicateJobContext,
+    ReplicateArtifact,
+)
 ```
 
-`polyzymd.analyses.base` is the stable contributor surface. It re-exports the
-`Analysis` base class, lifecycle contexts, metric models, and comparison result
-models while implementation details remain private. Do not import from modules
-such as `_contexts.py` or `_comparison_models.py` in contributor plugins.
+`polyzymd.analyses.base` is the stable contributor surface for the `Analysis`
+base class, lifecycle contexts, `MetricValue`, and comparison result models.
+`polyzymd.analyses.mda` is the stable MDAnalysis extension-layer surface for
+jobs, frame selection, artifacts, stores, aggregation, and comparison helpers.
+Do not import private modules such as `_contexts.py`, `_comparison_models.py`,
+or `_analysis_*` from contributor plugins.
 
-## Minimal MDAnalysis-native plugin
+## Minimal function-adapter plugin
 
-The default scaffold has four pieces:
-
-- a Pydantic settings model
-- a small function wrapped by `MDAAnalysisJob.from_function()`
-- a collector that returns a `ReplicateArtifact` with `payload["metrics"]`
-- an `Analysis` subclass implementing `build_mda_jobs()`,
-  `build_mda_collector()`, and `extract_metrics()`
+Use `MDAAnalysisJob.from_function()` when one function can compute a
+replicate-level result from an already-loaded MDAnalysis `Universe`. The
+function receives MDAnalysis-style frame-selection kwargs and should return a
+strict JSON-compatible object.
 
 ```python
 from __future__ import annotations
@@ -64,7 +99,17 @@ from typing import Any, ClassVar
 from pydantic import BaseModel, Field
 
 from polyzymd.analyses.base import Analysis, MetricValue
-from polyzymd.analyses.mda import MDAAnalysisJob, MDACollectorContext, ReplicateArtifact
+from polyzymd.analyses.exceptions import PluginContractError
+from polyzymd.analyses.mda import (
+    ConditionArtifact,
+    MDAAnalysisJob,
+    MDACollectorContext,
+    MDAJobResult,
+    MDAReplicateJobContext,
+    ReplicateArtifact,
+    frame_selection_payload,
+    strict_json_payload,
+)
 
 METRIC_NAME = "mean_shell_count"
 
@@ -72,23 +117,65 @@ METRIC_NAME = "mean_shell_count"
 class SolventShellSettings(BaseModel):
     """Settings for solvent shell analysis."""
 
-    selection: str = Field(default="protein and name CA")
-    cutoff: float = Field(default=5.0, gt=0.0)
+    selection: str = Field(default="protein and name CA", min_length=1)
+    scale: float = Field(default=1.0, gt=0.0)
 
 
-def measure_solvent_shell(universe: Any, *, settings: SolventShellSettings, **_kwargs: Any):
-    """Return strict JSON-compatible job results."""
+def measure_solvent_shell(
+    universe: Any,
+    *,
+    settings: SolventShellSettings,
+    start: int | None = None,
+    stop: int | None = None,
+    step: int | None = None,
+    frames: Sequence[Any] | None = None,
+) -> dict[str, Any]:
+    """Return a JSON-compatible replicate result."""
+
     atoms = universe.select_atoms(settings.selection)
-    return {"metrics": {METRIC_NAME: float(len(atoms))}}
+    n_frames = _selected_frame_count(universe, start=start, stop=stop, step=step, frames=frames)
+    value = float(len(atoms) * n_frames) * settings.scale
+    return {"metrics": {METRIC_NAME: value}, "n_frames": n_frames}
+
+
+class SolventShellArtifactCollector:
+    """Collect completed jobs into one replicate artifact."""
+
+    def __call__(
+        self,
+        ctx: MDACollectorContext,
+        completed_jobs: Sequence[MDAJobResult],
+    ) -> ReplicateArtifact:
+        if len(completed_jobs) != 1:
+            raise PluginContractError("solvent_shell expects exactly one MDA job.")
+        job = completed_jobs[0]
+        result_payload = strict_json_payload(job.results, analysis_name=ctx.analysis_name)
+        metrics = result_payload.get("metrics")
+        if not isinstance(metrics, dict):
+            raise PluginContractError("Job results must include a metrics mapping.")
+        return ReplicateArtifact(
+            analysis_name=ctx.analysis_name,
+            condition_label=ctx.condition_label,
+            replicate=ctx.replicate,
+            payload={"metrics": {name: float(value) for name, value in metrics.items()}},
+            provenance={
+                "source": "solvent_shell_function_adapter",
+                "frame_selection": frame_selection_payload(ctx.frame_selection),
+                "universe_policy": strict_json_payload(
+                    ctx.universe_policy.as_dict(), analysis_name=ctx.analysis_name
+                ),
+            },
+            warnings=list(ctx.warnings),
+        )
 
 
 class SolventShellAnalysis(Analysis):
-    """Solvent shell analysis backed by an MDAnalysis job."""
+    """Solvent shell analysis backed by an MDAnalysis-compatible job."""
 
     name: ClassVar[str] = "solvent_shell"
     Settings: ClassVar[type[BaseModel]] = SolventShellSettings
 
-    def build_mda_jobs(self, ctx):
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[MDAAnalysisJob]:
         return [
             MDAAnalysisJob.from_function(
                 name="solvent_shell",
@@ -100,61 +187,186 @@ class SolventShellAnalysis(Analysis):
             )
         ]
 
-    def build_mda_collector(self, ctx: MDACollectorContext):
-        def collect(ctx: MDACollectorContext, completed_jobs: Sequence[Any]) -> ReplicateArtifact:
-            metrics = dict(completed_jobs[0].results["metrics"])
-            return ReplicateArtifact(
-                analysis_name=ctx.analysis_name,
-                condition_label=ctx.condition_label,
-                replicate=ctx.replicate,
-                payload={"metrics": metrics},
-                provenance={"source": "solvent_shell_scaffold"},
-            )
-
-        return collect
+    def build_mda_collector(self, ctx: MDACollectorContext) -> SolventShellArtifactCollector:
+        del ctx
+        return SolventShellArtifactCollector()
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-        metric = summary.payload["metrics"][METRIC_NAME]
+        payload = summary.payload if isinstance(summary, ConditionArtifact) else summary["payload"]
+        metric = payload["metrics"][METRIC_NAME]
         return {
             METRIC_NAME: MetricValue(
                 name=METRIC_NAME,
                 mean=metric["mean"],
                 sem=metric["sem"],
                 replicate_values=metric["values"],
-                higher_is_better=False,
+                higher_is_better=True,
             )
         }
 ```
 
-Replace the placeholder function and collector logic with your scientific
-calculation. The collector should map raw job results to JSON-compatible payloads
-or sidecars; do not persist files directly from the collector.
+The helper `_selected_frame_count()` is generated by the scaffold and handles
+both `start`/`stop`/`step` and explicit `frames` selectors. Replace the
+placeholder measurement with your scientific calculation.
 
-## What the framework handles
+## Use direct AnalysisBase-compatible jobs for frame algorithms
 
-The generated `Analysis` subclass uses the MDAnalysis job lifecycle:
+Use a direct MDAnalysis `AnalysisBase` subclass when the calculation needs to do
+work on every frame, store arrays/events, or use MDAnalysis internal backends.
+Put the helper in `_mda.py` for package plugins and keep heavy imports lazy:
 
-| Lifecycle concern | Handled by PolyzyMD |
-|-------------------|---------------------|
-| Trajectory loading | The framework creates the `TrajectoryLoader` from the run context |
-| Replicate execution | The framework executes each `MDAAnalysisJob` with the resolved frame window |
-| Replicate result | The collector returns a `ReplicateArtifact` persisted through `ArtifactStore` |
-| Aggregation | Explicit `payload["metrics"]` values become mean, SEM, replicate values, and counts |
-| Cache identity | Settings fingerprints are stored in artifact metadata |
-| Comparison | The default scalar comparison path builds rankings, pairwise tests, and ANOVA where applicable |
+```python
+def build_solvent_shell_analysis(universe, *, settings):
+    from MDAnalysis.analysis.base import AnalysisBase
 
-The base `aggregate()` implementation handles `ReplicateArtifact` inputs when
-each artifact declares explicit scalar metrics in `payload["metrics"]`.
+    class SolventShellAnalysisBase(AnalysisBase):
+        def __init__(self, universe, *, settings):
+            self.universe = universe
+            self.settings = settings
+            self._atoms = universe.select_atoms(settings.selection)
+            self._counts = []
+            super().__init__(universe.trajectory)
 
-## Trajectory access and imports
+        def _prepare(self):
+            self._counts = []
 
-Heavy dependencies such as MDAnalysis, OpenMM, OpenFF, ParmEd, and PDBFixer must
-be imported lazily inside functions or methods. Do not import them at module
-level in plugin files.
+        def _single_frame(self):
+            self._counts.append(len(self._atoms))
+
+        def _conclude(self):
+            self.results.metrics = {"mean_shell_count": float(sum(self._counts))}
+            self.results.n_frames = len(self._counts)
+
+    return SolventShellAnalysisBase(universe, settings=settings)
+```
+
+Then build the job with an analysis factory:
+
+```python
+MDAAnalysisJob(
+    name="solvent_shell",
+    analysis_factory=lambda: build_solvent_shell_analysis(ctx.universe, settings=ctx.settings),
+    frame_selection=ctx.frame_selection,
+    universe_policy=ctx.universe_policy,
+)
+```
+
+Non-MDAnalysis kernels are acceptable only when exposed through an
+`AnalysisBase`-compatible object so PolyzyMD can keep one job/artifact lifecycle.
+
+## FrameSelection and backend policy
+
+PolyzyMD resolves each replicate's analysis window into a `FrameSelection`.
+`FrameSelection.run_kwargs()` maps directly to MDAnalysis `run()` keyword
+arguments:
+
+| FrameSelection field | MDAnalysis meaning |
+|----------------------|-------------------|
+| `start` | first frame index |
+| `stop` | exclusive final frame index |
+| `step` | stride |
+| `frames` | explicit integer frame list or boolean mask |
+
+Do not mix `frames` with `start`/`stop`/`step`. If your analysis has reference
+construction, autocorrelation, or variance-based subsampling requirements,
+record the policy in artifact provenance so stale caches can be rejected.
+
+MDAnalysis internal parallel backends are opt-in per job through
+`MDABackendPolicy`. The default policy forwards no backend kwargs, because
+PolyzyMD normally parallelizes over analyses, conditions, and replicates. Avoid
+nested parallelism on HPC unless the scheduler configuration explicitly reserves
+cores for each replicate job.
+
+## Artifact contract
+
+Collectors must map raw MDAnalysis outputs into PolyzyMD artifacts. The standard
+objects are:
+
+| Object | Scope | Contributor responsibility |
+|--------|-------|----------------------------|
+| `ReplicateArtifact` | one analysis on one replicate | include JSON-compatible payload, provenance, warnings, and sidecar refs |
+| `ConditionArtifact` | aggregated replicates for one condition | use the default aggregator or a custom plugin reducer |
+| `ComparisonArtifact` | cross-condition comparison | produced by the default MDA comparison path or custom `compare()` |
+| `ArtifactStore` | filesystem persistence | write/read `result.json`, manifests, and sidecars safely |
+
+For simple scalar plugins, put one replicate-level value per metric in
+`payload["metrics"]`:
+
+```python
+payload={"metrics": {"mean_shell_count": 12.5}}
+```
+
+The default aggregator reads `payload["metrics"]` or
+`payload["replicate_metrics"]`, validates finite scalar values, and produces a
+condition artifact whose `payload["metrics"]` contains `mean`, `std`, `sem`,
+`n`, and replicate `values` for each metric. It does not reduce arrays, event
+tables, or frame-level values; those are scientific choices that belong in your
+plugin's custom aggregation.
+
+Large arrays, event tables, and profile data must be sidecars, not large JSON
+fields. Use `ArtifactStore` to register sidecars so size and SHA-256 hashes are
+validated on load.
+
+## Raw MDAnalysis Results mapping rule
+
+Never store raw MDAnalysis `Results` or `ResultsGroup` objects in artifact
+payloads, provenance, metadata, sidecar refs, or comparison outputs. They are
+runtime containers, not cache schemas. A collector must convert them first:
+
+- scalar metrics to JSON numbers in `payload["metrics"]`;
+- small summaries to JSON-compatible dictionaries/lists;
+- arrays, profiles, and event tables to sidecars plus JSON metadata;
+- labels, selections, frame policy, transformations, and software versions to
+  provenance or metadata.
+
+Artifact validation rejects raw MDAnalysis results recursively. This keeps cache
+files stable across MDAnalysis versions and makes aggregation/comparison
+independent of trajectory loading.
+
+## Aggregation and comparison
+
+Use the default aggregation path when each replicate artifact declares explicit
+scalar metrics. The default MDA comparison path consumes `ConditionArtifact`
+objects, validates that replicate IDs and aggregate statistics match the active
+comparison, then delegates statistics to PolyzyMD's scalar comparison engine.
+
+Implement `extract_metrics(summary)` to expose scalar metrics as `MetricValue`
+objects. Set `higher_is_better` and units/direction metadata thoughtfully; these
+drive ranking and CLI interpretation.
+
+Override `aggregate()` when the replicate payload contains arrays or events that
+need scientific reduction before comparison. Override `compare()` only when the
+default scalar comparison cannot represent the output, such as per-residue
+hypothesis families, multi-run tables, or custom statistical models.
+
+## Plot from artifacts only
+
+Plotting must not load trajectories, rebuild universes, rerun MDAnalysis jobs,
+or scan legacy cache filenames. `plot(ctx)` should load canonical aggregate or
+comparison artifacts and validated sidecars, then write figures to
+`ctx.output_dir` and return their paths.
+
+Small plugins can keep plotting inline. Extract `_plotters.py` when a plugin has
+several figure types, sidecar loaders, or enough plotting code that lifecycle
+wiring becomes hard to review.
+
+## Trajectory selections and lazy imports
+
+Heavy scientific dependencies such as MDAnalysis, OpenMM, OpenFF, MDTraj,
+ParmEd, and PDBFixer must be imported lazily inside functions or methods. Do
+not import them at module level in contributor plugins.
 
 Selection strings are passed to MDAnalysis `Universe.select_atoms()` unless your
-plugin documents a wrapper such as `com(...)` for center-of-mass selections.
-Common examples are:
+plugin documents an explicit wrapper. Follow the PolyzyMD chain convention:
+
+| Chain | Role |
+|-------|------|
+| A | protein/enzyme |
+| B | substrate/small molecule |
+| C | polymer/conjugate |
+| D+ | solvent, ions, and other molecules |
+
+Common selection examples are:
 
 - `protein`
 - `protein and name CA`
@@ -164,106 +376,26 @@ Common examples are:
 - `protein and (resid 77 or resid 156)`
 
 Validate selections on representative topologies because available attributes
-depend on the trajectory topology.
-
-## Advanced MDAnalysis-native plugins
-
-Use an advanced package when your plugin needs multi-metric outputs,
-per-frame/per-residue tables, custom result models, sidecar files, or
-MDAnalysis-compatible jobs that cannot be expressed as one scalar `measure()`
-call.
-
-```bash
-pixi run -e build polyzymd new-analysis solvent_shell --advanced
-pixi run -e build polyzymd new-analysis solvent_shell --style dict
-pixi run -e build polyzymd new-analysis solvent_shell --style pydantic
-```
-
-`--advanced`, `--style dict`, and `--style pydantic` generate MDAnalysis-native
-packages. They do not generate or depend on the removed runner package.
-
-Advanced packages use files such as:
-
-```text
-src/polyzymd/analyses/<name>/__init__.py
-src/polyzymd/analyses/<name>/_mda.py
-src/polyzymd/analyses/<name>/_results.py  # pydantic style only
-```
-
-Advanced plugins implement the MDAnalysis job lifecycle:
-
-| Hook | Purpose |
-|------|---------|
-| `build_mda_jobs(ctx)` | Construct MDAnalysis-compatible jobs for one replicate |
-| `build_mda_collector(ctx)` | Convert completed job outputs into a canonical artifact |
-| `aggregate(ctx, results)` | Combine replicate results for one condition |
-| `extract_metrics(summary)` | Expose scalar metrics for the default comparison path |
-
-Keep the inherited per-replicate dispatch unless you need an explicit
-`run_replicate()` override for advanced/internal behavior. Compare-only plugins
-can set `has_compute_stage = False`.
-
-## Pydantic result models
-
-Use `--style pydantic` when the generated advanced package should validate its
-replicate-level metric payload before storing it in a canonical artifact. The
-scaffold writes a small helper model to `_results.py`, but it still persists
-replicate and condition outputs through `ReplicateArtifact`, `ConditionArtifact`,
-and `ArtifactStore`. It does not set `ReplicateResultClass` or
-`AggregatedResultClass`.
-
-Avoid manually documenting Pydantic fields in class docstrings; Sphinx renders
-field documentation automatically.
-
-## Custom comparison guidance
-
-Use the default scalar comparison path whenever your aggregate result can expose
-one or more scalar `MetricValue` objects. The generated scaffold implements
-`extract_metrics()` for the artifact aggregate produced by default MDA
-aggregation.
-
-Override `compare()` only when the default scalar path cannot represent the
-result, such as:
-
-- entry tables or per-residue hypothesis families
-- multiple named runs per condition
-- custom statistical models or output schemas
-- comparisons that need to load sidecar files in addition to `result.json`
-
-Keep custom comparison logic in the plugin package, return a saveable Pydantic
-model or framework `ComparisonResult`, and implement `format()` if CLI output
-needs more than the default JSON-style rendering.
-
-(plotters-extraction)=
-## Plotting guidance
-
-Small plugins can keep plotting directly in `plot(ctx)`. Use the context-provided
-output directory, load cached aggregate or comparison results through the plugin
-helpers, and return the list of figure paths written.
-
-Extract helpers into `_plotters.py` only when plotting grows enough to justify a
-separate module, for example when a plugin has several figure types or the
-analysis file becomes hard to review. Established package plugins may also use
-`_formatters.py` for custom CLI text. These private helper modules are optional
-organization tools, not the default contributor pattern.
+depend on topology format. GROMACS/GRO files may not preserve chain IDs; failures
+should report the selection, condition, replicate, and topology source.
 
 ## Testing checklist
 
-Generated MDAnalysis-native tests currently focus on the scaffold contract:
+Generated MDAnalysis-native tests cover the scaffold contract:
 
-- discovery and class variables
-- settings defaults and validation
-- `build_mda_jobs()` behavior with fake universes or fake AnalysisBase objects
-- collector output as `ReplicateArtifact`
-- default artifact aggregation from explicit `payload["metrics"]`
+- discovery and class variables;
+- settings defaults and validation;
+- `build_mda_jobs()` with fake universes or fake `AnalysisBase` objects;
+- collector output as `ReplicateArtifact`;
+- default artifact aggregation from explicit `payload["metrics"]`.
 
-For production plugins, consider adding targeted tests for optional behavior you
-customize or rely on heavily:
+Production plugins should add tests for the behavior they customize:
 
-- frame-selection behavior, Universe loading, and replicate cache identity when
-  relevant
-- aggregation and default metric extraction for any custom metric policies
-- custom plotting, formatting, filtering, or cache identity logic
+- `FrameSelection` behavior, explicit `frames`, and backend policy when relevant;
+- collector mapping from raw `results` to JSON payloads and sidecars;
+- aggregation over replicate artifacts, including stale/missing sidecars;
+- default metric extraction or custom comparison output;
+- plotting from artifacts without trajectory loading.
 
 Run plugin tests through the pixi environment:
 
@@ -271,13 +403,29 @@ Run plugin tests through the pixi environment:
 pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v
 ```
 
+## Further reading
+
+PolyzyMD intentionally follows MDAnalysis idioms for trajectory-native work.
+Before writing a complex plugin, review:
+
+- MDAnalysis custom trajectory analysis tutorial:
+  <https://userguide.mdanalysis.org/stable/examples/analysis/custom_trajectory_analysis.html>
+- Michaud-Agrawal, N., Denning, E. J., Woolf, T. B., & Beckstein, O. (2011).
+  MDAnalysis: A toolkit for the analysis of molecular dynamics simulations.
+  *Journal of Computational Chemistry*, 32(10), 2319-2327.
+- Gowers, R. J., Linke, M., Barnoud, J., Reddy, T. J. E., Melo, M. N., Seyler,
+  S. L., Domański, J., Dotson, D. L., Buchoux, S., Kenney, I. M., & Beckstein,
+  O. (2016). MDAnalysis: A Python package for the rapid analysis of molecular
+  dynamics simulations. *Proceedings of the 15th Python in Science Conference*,
+  98-105.
+
 ## Style checklist
 
-- Use NumPy-style docstrings for new classes and methods
-- Keep imports ordered stdlib, third-party, local
-- Keep heavy scientific dependencies lazy
-- Use `X | None` annotations rather than `Optional[X]`
-- Run Ruff and Black checks on modified Python files
+- Use NumPy-style docstrings for new classes and methods.
+- Keep imports ordered stdlib, third-party, local.
+- Keep heavy scientific dependencies lazy.
+- Use `X | None` annotations rather than `Optional[X]`.
+- Run Ruff and Black checks on modified Python files.
 
 ```bash
 pixi run -e build ruff check src/polyzymd/analyses/<name>.py tests/analyses/plugins/test_<name>.py
