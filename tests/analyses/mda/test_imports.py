@@ -153,6 +153,27 @@ def test_public_facade_reexports_primitives() -> None:
     }
 
 
+def test_pair_distance_star_import_excludes_aggregation_internals() -> None:
+    """Pair-distance star imports should expose only public MDAnalysis primitives."""
+
+    from polyzymd.analyses.mda import pair_distance
+
+    namespace: dict[str, object] = {}
+
+    exec("from polyzymd.analyses.mda.pair_distance import *", namespace)
+
+    assert set(pair_distance.__all__) == {
+        "PairDistanceSpec",
+        "build_pair_distance_analysis",
+        "pair_distance_version",
+    }
+    assert "PairDistanceSpec" in namespace
+    assert "build_pair_distance_analysis" in namespace
+    assert "pair_distance_version" in namespace
+    assert "PairAggregatedStats" not in namespace
+    assert "aggregate_distance_pair_stats" not in namespace
+
+
 def test_import_does_not_load_heavy_simulation_modules() -> None:
     """Importing extension primitives should not import heavy optional modules."""
 

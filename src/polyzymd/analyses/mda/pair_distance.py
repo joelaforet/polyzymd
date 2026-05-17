@@ -14,6 +14,12 @@ from polyzymd.analyses.shared.statistics import StatResult, compute_sem
 
 LOGGER = logging.getLogger(__name__)
 
+__all__ = [
+    "PairDistanceSpec",
+    "build_pair_distance_analysis",
+    "pair_distance_version",
+]
+
 
 @dataclass(frozen=True)
 class PairDistanceSpec:

@@ -87,12 +87,10 @@ helpers are documented with their owning packages.
 ## Compatibility facades
 
 `polyzymd.analyses.shared.config_hash` and `polyzymd.analyses.shared.sasa`
-remain importable as temporary compatibility facades. New code should use the
-owning modules instead:
-
-- `polyzymd.analyses._framework.cache_identity` for framework cache identity
-  helpers.
-- `polyzymd.analyses.sasa._artifacts` for SASA plugin artifact helpers.
+remain importable as temporary compatibility facades for legacy callers. They
+are not contributor-facing extension points. New user and contributor code
+should rely on documented public analysis APIs instead of importing through
+these legacy facades.
 
 ## `polyzymd.analyses.shared.groupings`
 
