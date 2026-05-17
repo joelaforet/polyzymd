@@ -30,7 +30,7 @@ Package Structure
     │   ├── parameters.py # Simulation parameters
     │   └── restraints.py # Restraint definitions
     ├── analyses/         # ★ Plugin system — unified analysis lifecycle
-    │   ├── base.py       # Public facade, Measurement API, contexts, result models
+    │   ├── base.py       # Public facade, contexts, result models
     │   ├── discovery.py  # pkgutil-based auto-discovery
     │   ├── orchestrator.py  # Framework engine
     │   ├── stats.py      # Shared statistical utilities
@@ -95,9 +95,7 @@ Analysis
 ~~~~~~~~
 
 - :py:class:`~polyzymd.analyses.base.Analysis` - Plugin base class for all analyses
-- :py:class:`~polyzymd.analyses.base.ScalarMeasurementAnalysis` - Base class for simple scalar measurement plugins
-- :py:class:`~polyzymd.analyses.base.ScalarMeasurement` - Strategy that returns one scalar per replicate
-- :py:class:`~polyzymd.analyses.base.MetricSpec` - Metadata for a scalar measurement metric
+- :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor for default comparisons
 - :py:class:`~polyzymd.analyses.distances.DistanceCalculator` - Inter-group distances
 - :py:class:`~polyzymd.analyses.contacts.ParallelContactAnalyzer` - Polymer-protein contacts
 

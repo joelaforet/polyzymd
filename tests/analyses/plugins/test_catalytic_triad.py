@@ -29,7 +29,6 @@ from polyzymd.analyses.catalytic_triad._mda import (
     artifact_to_triad_result,
     condition_artifact_to_legacy_result,
 )
-from polyzymd.analyses.catalytic_triad._measurement import TriadSimultaneousContactMeasurement
 from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
 from polyzymd.analyses.distances._mda import DistancePairPayload, DistancesRunnerPayload
 from polyzymd.analyses.mda import (
@@ -182,15 +181,21 @@ class TestTriadDiscoveryAndSettings:
         assert triad_analysis.ReplicateResultClass is None
         assert triad_analysis.AggregatedResultClass is TriadAggregatedResult
 
-    def test_measurement_metadata_preserves_primary_metric(
+    def test_extract_metrics_metadata_preserves_primary_metric(
         self, triad_analysis: CatalyticTriadAnalysis
     ) -> None:
-        """Measurement metadata should preserve the legacy comparison metric."""
+        """Metric extraction should preserve the primary comparison metadata."""
 
-        measurement = triad_analysis._measurement_instance()
-        assert isinstance(measurement, TriadSimultaneousContactMeasurement)
-        assert measurement.metric.name == SIMULTANEOUS_CONTACT_METRIC
-        assert measurement.metric.higher_is_better is True
+        summary = MagicMock(
+            overall_simultaneous_contact=0.72,
+            sem_simultaneous_contact=0.04,
+            per_replicate_simultaneous=[0.70, 0.72, 0.74],
+        )
+        metric = triad_analysis.extract_metrics(summary)[SIMULTANEOUS_CONTACT_METRIC]
+
+        assert metric.name == SIMULTANEOUS_CONTACT_METRIC
+        assert metric.higher_is_better is True
+        assert metric.direction_labels == ("worsening", "unchanged", "improving")
 
     def test_settings_validation(self, default_settings: CatalyticTriadSettings) -> None:
         """Settings should validate required pairs and expose labels."""

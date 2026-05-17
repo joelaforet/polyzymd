@@ -13,6 +13,12 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 ### Breaking Changes
 
+- **Scalar Measurement API removed.**  The obsolete alternate scalar
+  measurement abstraction (`MetricSpec`, `CacheIdentity`, `Measurement`,
+  `ScalarMeasurement`, and `ScalarMeasurementAnalysis`) was deleted now that
+  the MDAnalysis job/artifact lifecycle is the true contributor extension path.
+  Catalytic triad now inherits directly from `Analysis` and exposes its primary
+  comparison metric through `extract_metrics()`.
 - **`compare/` package removed.**  The entire `compare/` package (lazy-export
   facade, re-export layer, registries, plotters, formatters, comparators) has
   been deleted.  Analysis-specific code now lives in each plugin's package under

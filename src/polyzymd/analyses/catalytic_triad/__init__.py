@@ -23,16 +23,17 @@ from polyzymd.analyses.base import (
     BasePlotSettings,
     ComparisonResult,
     ConditionSummary,
+    MetricValue,
     PairwiseResult,
     PlotContext,
-    ScalarMeasurementAnalysis,
 )
 from polyzymd.analyses.catalytic_triad._mda import (
+    SIMULTANEOUS_CONTACT_METADATA,
+    SIMULTANEOUS_CONTACT_METRIC,
     TriadArtifactCollector,
     aggregate_triad_artifacts,
     build_triad_jobs,
 )
-from polyzymd.analyses.catalytic_triad._measurement import TriadSimultaneousContactMeasurement
 from polyzymd.analyses.catalytic_triad._plot_settings import TriadPlotSettings
 from polyzymd.analyses.catalytic_triad._plotters import (
     plot_triad_kde_panel_from_data,
@@ -130,17 +131,17 @@ class CatalyticTriadSettings(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class CatalyticTriadAnalysis(ScalarMeasurementAnalysis):
+class CatalyticTriadAnalysis(Analysis):
     """Catalytic triad analysis: active-site geometry from MD trajectories.
 
     Computes per-pair distances through the shared MDAnalysis pair-distance job
     and derives a simultaneous contact fraction — the percentage of frames where
     all pairs are below the threshold at the same time.
 
-    The ``compare()`` method is NOT overridden — it uses the default scalar
-    measurement implementation to extract
-    ``simultaneous_contact_fraction`` as a single scalar metric with
-    ``higher_is_better=True`` (more contact = better triad integrity).
+    The ``compare()`` method is NOT overridden. Canonical condition artifacts
+    are compared through the MDAnalysis artifact lifecycle, while legacy
+    in-memory summaries still expose ``simultaneous_contact_fraction`` as a
+    percent-scaled scalar metric for the default comparison fallback.
 
     Plots
     -----
@@ -153,9 +154,6 @@ class CatalyticTriadAnalysis(ScalarMeasurementAnalysis):
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = TriadPlotSettings
     AggregatedResultClass: ClassVar[type] = TriadAggregatedResult
     ReplicateResultClass: ClassVar[type | None] = None
-    measurement: ClassVar[type[TriadSimultaneousContactMeasurement]] = (
-        TriadSimultaneousContactMeasurement
-    )
     aliases: ClassVar[tuple[str, ...]] = ("triad",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 1
@@ -321,6 +319,33 @@ class CatalyticTriadAnalysis(ScalarMeasurementAnalysis):
                 higher_is_better=True,
             )
         return super().format(result, output_format)
+
+    def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
+        """Extract the percent-scaled simultaneous contact metric.
+
+        Parameters
+        ----------
+        summary : Any
+            Aggregated catalytic-triad summary with simultaneous contact fields.
+
+        Returns
+        -------
+        dict[str, MetricValue]
+            Mapping for the primary simultaneous contact metric.
+        """
+
+        return {
+            SIMULTANEOUS_CONTACT_METRIC: MetricValue(
+                name=SIMULTANEOUS_CONTACT_METRIC,
+                mean=float(summary.overall_simultaneous_contact) * 100.0,
+                sem=float(summary.sem_simultaneous_contact) * 100.0,
+                replicate_values=[
+                    float(value) * 100.0 for value in summary.per_replicate_simultaneous
+                ],
+                higher_is_better=bool(SIMULTANEOUS_CONTACT_METADATA["higher_is_better"]),
+                direction_labels=tuple(SIMULTANEOUS_CONTACT_METADATA["direction_labels"]),
+            )
+        }
 
     def plot(self, ctx: PlotContext) -> list[Path]:
         """Generate triad comparison plots.

@@ -10,9 +10,9 @@ MDAnalysis job/artifact API: a plugin subclasses `Analysis`, builds
 artifacts, and lets the framework handle cache identity, aggregation, scalar
 comparison, CLI wiring, and plotting orchestration.
 
-The public MDAnalysis extension-layer reference is on
-{doc}`analyses_mda`. The Measurement API remains available for existing scalar
-adapters but is no longer the default scaffold pattern.
+The public MDAnalysis extension-layer reference is on {doc}`analyses_mda`.
+The old scalar Measurement API was removed in v1.3 after the MDAnalysis
+job/artifact lifecycle became the only supported contributor extension path.
 
 ## Public API
 
@@ -40,16 +40,14 @@ adapters but is no longer the default scaffold pattern.
 - `Analysis` — abstract base class all plugins inherit from
 - `build_mda_jobs(ctx)` — hook implemented by compute-stage plugins to construct `MDAAnalysisJob` objects for one replicate
 - `build_mda_collector(ctx)` — hook that maps completed jobs to a `ReplicateArtifact`
-- `MetricSpec` — metadata for a scalar metric produced by a measurement
-- `ScalarMeasurement` — strategy object that measures one scalar per replicate
-- `ScalarMeasurementAnalysis` — adapter base class for scalar measurement plugins
+- `extract_metrics(summary)` — optional hook for default scalar comparison of condition summaries
 
 `polyzymd.analyses.base` is the stable public facade for contributor imports.
-It re-exports the base class, Measurement API, lifecycle contexts, metric
-descriptors, and comparison result models while delegating implementation to
-private framework modules. Contributor plugins should import from
+It re-exports the base class, lifecycle contexts, metric descriptors, and
+comparison result models while delegating implementation to private framework
+modules. Contributor plugins should import from
 `polyzymd.analyses.base`, not from modules named `_analysis_*`, `_contexts`,
-`_comparison_models`, or `_measurement`.
+or `_comparison_models`.
 
 ### Discovery
 
