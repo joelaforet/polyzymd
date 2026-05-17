@@ -107,7 +107,7 @@ Comparison functionality is split across focused modules:
 - `config/comparison.py` for comparison config and plotting settings
 - `cli/compare.py` for `polyzymd compare` subcommands
 - `analyses/shared/inferential_statistics.py` for t-tests, ANOVA, and effect sizes
-- `analyses/shared/result_io.py` for result discovery and loading
+- `analyses/mda/` for canonical artifact storage, aggregation, and comparison inputs
 - `analyses/shared/paths.py` for label/path helpers such as `sanitize_label()`
 
 Established analysis package plugins often delegate plotting to `_plotters.py`

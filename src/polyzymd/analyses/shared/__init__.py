@@ -4,12 +4,11 @@ This package provides a curated set of commonly used shared utilities.
 For advanced or less common helpers, import directly from the relevant
 shared submodules.
 
-In particular, selectors, custom selections, and result I/O helpers are not
-re-exported from this package root and should be imported from:
+In particular, selectors and custom selections are not re-exported from this
+package root and should be imported from:
 
 - ``polyzymd.analyses.shared.selectors``
 - ``polyzymd.analyses.shared.selections``
-- ``polyzymd.analyses.shared.result_io``
 
 Sub-modules
 -----------
@@ -96,7 +95,6 @@ from polyzymd.analyses.shared.plotting import (
     annotate_cells,
     apply_axis_style,
     apply_legend,
-    find_json,
     get_colors,
     get_output_path,
     get_theme,
@@ -173,7 +171,6 @@ __all__ = [
     "get_output_path",
     "save_figure",
     "grouped_bars",
-    "find_json",
     "annotate_cells",
     "symmetric_clim",
     # Plot settings (lazily re-exported from config.comparison)

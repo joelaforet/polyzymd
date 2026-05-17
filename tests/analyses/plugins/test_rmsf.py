@@ -913,45 +913,6 @@ class TestRMSFCompareFormatPlot:
 
         assert plots == [tmp_path / "a.png", tmp_path / "b.png"]
 
-    def test_comparison_plotter_does_not_discover_legacy_json(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """Comparison plotting should use provided artifact data only."""
-
-        from polyzymd.analyses.rmsf import _plotters
-        from polyzymd.analyses.shared import result_io
-        from polyzymd.config.comparison import PlotSettings
-
-        def fail_legacy_discovery(*args: object, **kwargs: object) -> None:
-            raise AssertionError("legacy comparison discovery should not be used")
-
-        monkeypatch.setattr(result_io, "find_comparison_result", fail_legacy_discovery)
-        data = {
-            "Control": {
-                "aggregated_result": {
-                    "overall_mean_rmsf": 1.5,
-                    "overall_sem_rmsf": 0.1,
-                    "per_replicate_mean_rmsf": [1.4, 1.6],
-                }
-            }
-        }
-
-        with patch(
-            "polyzymd.analyses.rmsf._plotters.save_figure",
-            side_effect=lambda fig, path, settings: path,
-        ):
-            plots = _plotters._plot_rmsf_comparison(
-                data,
-                ["Control"],
-                tmp_path,
-                PlotSettings(),
-            )
-
-        assert len(plots) == 1
-        assert plots[0].name.startswith("rmsf_comparison")
-
     def test_profile_plotter_does_not_load_reference_pdb_with_mdtraj(
         self,
         monkeypatch: pytest.MonkeyPatch,

@@ -46,7 +46,6 @@ Package Structure
     │   └── comparison.py # ComparisonConfig, PlotSettings, condition models
     ├── analyses/shared/
     │   ├── inferential_statistics.py # t-tests, ANOVA, effect sizes
-    │   ├── result_io.py  # Comparison result discovery/loading
     │   └── paths.py      # sanitize_label() and path helpers
     ├── cli/
     │   └── compare.py    # `polyzymd compare` subcommands

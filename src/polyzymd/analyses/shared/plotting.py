@@ -371,43 +371,6 @@ def save_figure(
 
 
 # ---------------------------------------------------------------------------
-# File helpers
-# ---------------------------------------------------------------------------
-
-
-def find_json(
-    directory: Path,
-    preferred: str,
-    glob_pattern: str = "*.json",
-) -> Path | None:
-    """Locate a JSON result file inside *directory*.
-
-    Tries the *preferred* filename first; if it does not exist, falls
-    back to the first file matching *glob_pattern* (sorted
-    lexicographically so results are deterministic).
-
-    Parameters
-    ----------
-    directory : Path
-        Directory to search.
-    preferred : str
-        Exact filename to try first (e.g. ``"rmsf_aggregated.json"``).
-    glob_pattern : str, optional
-        Glob to use as fallback, by default ``"*.json"``.
-
-    Returns
-    -------
-    Path | None
-        Path to the located file, or ``None`` if nothing was found.
-    """
-    exact = directory / preferred
-    if exact.is_file():
-        return exact
-    candidates = sorted(directory.glob(glob_pattern))
-    return candidates[0] if candidates else None
-
-
-# ---------------------------------------------------------------------------
 # Grouped bar chart
 # ---------------------------------------------------------------------------
 
