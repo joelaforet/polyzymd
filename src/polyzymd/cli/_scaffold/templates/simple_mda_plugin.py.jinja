@@ -45,6 +45,7 @@ def measure_{{ spec.name }}(
     start: int | None = None,
     stop: int | None = None,
     step: int | None = None,
+    frames: Sequence[Any] | None = None,
 ) -> dict[str, Any]:
     """Measure a simple selected atom-frame count.
 
@@ -64,6 +65,8 @@ def measure_{{ spec.name }}(
         Exclusive final frame index. If None, the trajectory length is used.
     step : int or None, optional
         Frame stride. If None, a stride of 1 is used.
+    frames : sequence of Any or None, optional
+        Explicit frame indices or boolean mask supplied by MDAnalysis.
 
     Returns
     -------
@@ -73,7 +76,13 @@ def measure_{{ spec.name }}(
 
     atoms = universe.select_atoms(settings.selection)
     n_selected_atoms = len(atoms)
-    n_frames = _selected_frame_count(universe, start=start, stop=stop, step=step)
+    n_frames = _selected_frame_count(
+        universe,
+        start=start,
+        stop=stop,
+        step=step,
+        frames=frames,
+    )
     value = float(n_selected_atoms * n_frames) * settings.scale
     return {
         "metrics": {METRIC_NAME: value},
@@ -217,6 +226,7 @@ def _selected_frame_count(
     start: int | None,
     stop: int | None,
     step: int | None,
+    frames: Sequence[Any] | None,
 ) -> int:
     """Return the number of frames selected by MDAnalysis-style run kwargs.
 
@@ -230,6 +240,8 @@ def _selected_frame_count(
         Optional exclusive stop frame.
     step : int or None
         Optional stride.
+    frames : sequence of Any or None
+        Optional explicit frame indices or boolean mask.
 
     Returns
     -------
@@ -240,6 +252,11 @@ def _selected_frame_count(
     trajectory = getattr(universe, "trajectory", None)
     if trajectory is None:
         raise ValueError("universe must expose a trajectory.")
+    if frames is not None:
+        frozen_frames = tuple(frames)
+        if all(_is_boolean_frame_value(frame) for frame in frozen_frames):
+            return sum(1 for frame in frozen_frames if frame)
+        return len(frozen_frames)
     total_frames = len(trajectory)
     start_frame = 0 if start is None else start
     stop_frame = total_frames if stop is None else min(stop, total_frames)
@@ -247,6 +264,29 @@ def _selected_frame_count(
     if step_size <= 0:
         raise ValueError("step must be a positive integer.")
     return len(range(start_frame, stop_frame, step_size))
+
+
+def _is_boolean_frame_value(frame: Any) -> bool:
+    """Return whether a frame selector value is boolean-like.
+
+    Parameters
+    ----------
+    frame : Any
+        Candidate explicit frame selector value.
+
+    Returns
+    -------
+    bool
+        True for Python or NumPy-style boolean values.
+    """
+
+    if isinstance(frame, bool):
+        return True
+    frame_type = type(frame)
+    return (
+        frame_type.__name__ == "bool_"
+        and frame_type.__module__.split(".", maxsplit=1)[0] == "numpy"
+    )
 
 
 def _extract_job_metrics(result_payload: Any) -> dict[str, float]:

@@ -205,10 +205,12 @@ can set `has_compute_stage = False`.
 
 ## Pydantic result models
 
-Use `--style pydantic` for advanced plugins that need typed replicate or
-aggregated result models. The scaffold writes models to `_results.py` and sets
-`ReplicateResultClass` and `AggregatedResultClass` so serialization and default
-deserialization use those models.
+Use `--style pydantic` when the generated advanced package should validate its
+replicate-level metric payload before storing it in a canonical artifact. The
+scaffold writes a small helper model to `_results.py`, but it still persists
+replicate and condition outputs through `ReplicateArtifact`, `ConditionArtifact`,
+and `ArtifactStore`. It does not set `ReplicateResultClass` or
+`AggregatedResultClass`.
 
 Avoid manually documenting Pydantic fields in class docstrings; Sphinx renders
 field documentation automatically.

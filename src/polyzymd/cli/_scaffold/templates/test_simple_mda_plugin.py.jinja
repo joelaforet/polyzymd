@@ -165,6 +165,45 @@ class TestMDAJobs:
         assert completed.results["metrics"][METRIC_NAME] == pytest.approx(12.0)
         assert ctx.universe.selections == [settings.selection]
 
+    def test_build_mda_jobs_accepts_explicit_frames(self):
+        analysis = {{ spec.class_name }}Analysis()
+        settings = {{ spec.class_name }}Settings(scale=2.0)
+        ctx = SimpleNamespace(
+            universe=FakeUniverse(n_atoms=3, n_frames=10),
+            frame_selection=FrameSelection(frames=(0, 2, 4), n_frames_total=10),
+            universe_policy=MDAUniversePolicy(
+                condition_label="Scaffold Condition",
+                replicate=1,
+            ),
+            settings=settings,
+        )
+
+        completed = analysis.build_mda_jobs(ctx)[0].run()
+
+        assert completed.results["n_frames"] == 3
+        assert completed.results["metrics"][METRIC_NAME] == pytest.approx(18.0)
+
+    def test_build_mda_jobs_accepts_boolean_frame_mask(self):
+        analysis = {{ spec.class_name }}Analysis()
+        settings = {{ spec.class_name }}Settings(scale=2.0)
+        ctx = SimpleNamespace(
+            universe=FakeUniverse(n_atoms=3, n_frames=5),
+            frame_selection=FrameSelection(
+                frames=(True, False, True, False, False),
+                n_frames_total=5,
+            ),
+            universe_policy=MDAUniversePolicy(
+                condition_label="Scaffold Condition",
+                replicate=1,
+            ),
+            settings=settings,
+        )
+
+        completed = analysis.build_mda_jobs(ctx)[0].run()
+
+        assert completed.results["n_frames"] == 2
+        assert completed.results["metrics"][METRIC_NAME] == pytest.approx(12.0)
+
 
 class TestCollector:
     """Collector output and artifact shape."""

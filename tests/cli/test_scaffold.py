@@ -519,6 +519,18 @@ class TestGeneratedPluginEndToEnd:
             completed = analysis.build_mda_jobs(job_ctx)[0].run()
             assert completed.results["metrics"]["scaffold_e2e_value"] == pytest.approx(6.0)
 
+            explicit_frame_ctx = SimpleNamespace(
+                universe=self.FakeUniverse(),
+                frame_selection=FrameSelection(frames=(0, 2, 4), n_frames_total=10),
+                universe_policy=universe_policy,
+                settings=settings,
+            )
+            explicit_frame_result = analysis.build_mda_jobs(explicit_frame_ctx)[0].run()
+            assert explicit_frame_result.results["n_frames"] == 3
+            assert explicit_frame_result.results["metrics"]["scaffold_e2e_value"] == pytest.approx(
+                9.0
+            )
+
             artifacts: list[ReplicateArtifact] = []
             for replicate, value in ((1, 2.0), (2, 4.0)):
                 output_dir = tmp_path / f"run_{replicate}"
