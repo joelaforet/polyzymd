@@ -1,4 +1,4 @@
-"""Lifecycle helpers for the contacts analysis facade."""
+"""Lifecycle helpers for contacts MDAnalysis artifacts."""
 
 from __future__ import annotations
 
@@ -59,13 +59,11 @@ def get_trajectory_window(
     )
 
 
-def aggregate(analysis: Any, ctx: AggregateContext, results: Sequence[Any]) -> Any:
+def aggregate(ctx: AggregateContext, results: Sequence[Any]) -> Any:
     """Aggregate contact artifacts across replicates for one condition.
 
     Parameters
     ----------
-    analysis : Any
-        Contacts facade instance used for cache, path, and save hooks.
     ctx : AggregateContext
         Framework-provided context.
     results : Sequence[Any]
@@ -79,7 +77,6 @@ def aggregate(analysis: Any, ctx: AggregateContext, results: Sequence[Any]) -> A
 
     from polyzymd.analyses.mda import ReplicateArtifact
 
-    del analysis
     if not results or not all(isinstance(result, ReplicateArtifact) for result in results):
         raise ValueError(CONTACTS_LEGACY_RECOMPUTE_GUIDANCE)
     logger.info("  Aggregating %d contacts replicate artifacts...", len(results))

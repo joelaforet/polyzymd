@@ -1192,20 +1192,20 @@ class TestAggregatePolymerTypeCoverage:
 
 
 class TestPerReplicateMetrics:
-    """Test _compute_coverage_per_replicate and _compute_contact_fraction_per_replicate."""
+    """Test contacts replicate metric helpers."""
 
     def test_coverage_per_replicate(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
+        from polyzymd.analyses.contacts._comparison import compute_coverage_per_replicate
 
         agg = _make_mock_agg_result(n_replicates=3, n_residues=5)
         # By default all residues have >0 fractions, so coverage should be 1.0
-        coverages = ContactsAnalysis._compute_coverage_per_replicate(agg)
+        coverages = compute_coverage_per_replicate(agg)
         assert len(coverages) == 3
         for c in coverages:
             assert c == 1.0  # all residues have >0 contact fraction
 
     def test_coverage_with_zero_fractions(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
+        from polyzymd.analyses.contacts._comparison import compute_coverage_per_replicate
 
         agg = MagicMock()
         agg.n_replicates = 2
@@ -1222,13 +1222,15 @@ class TestPerReplicateMetrics:
         rs3.contact_fraction_per_replicate = [0.0, 0.0]
         agg.residue_stats = [rs1, rs2, rs3]
 
-        coverages = ContactsAnalysis._compute_coverage_per_replicate(agg)
+        coverages = compute_coverage_per_replicate(agg)
         assert len(coverages) == 2
         assert coverages[0] == pytest.approx(2 / 3)  # rs1 + rs2 contacted in rep 0
         assert coverages[1] == pytest.approx(1 / 3)  # only rs1 contacted in rep 1
 
     def test_contact_fraction_per_replicate(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
+        from polyzymd.analyses.contacts._comparison import (
+            compute_contact_fraction_per_replicate,
+        )
 
         agg = MagicMock()
         agg.n_replicates = 2
@@ -1239,7 +1241,7 @@ class TestPerReplicateMetrics:
         rs2.contact_fraction_per_replicate = [0.2, 0.8]
         agg.residue_stats = [rs1, rs2]
 
-        fractions = ContactsAnalysis._compute_contact_fraction_per_replicate(agg)
+        fractions = compute_contact_fraction_per_replicate(agg)
         assert len(fractions) == 2
         assert fractions[0] == pytest.approx(0.3)  # (0.4 + 0.2) / 2
         assert fractions[1] == pytest.approx(0.7)  # (0.6 + 0.8) / 2
@@ -1251,10 +1253,10 @@ class TestPerReplicateMetrics:
 
 
 class TestResidueSetValidation:
-    """Test _validate_residue_sets."""
+    """Test contacts residue-set validation."""
 
     def test_matching_residue_sets(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
+        from polyzymd.analyses.contacts._comparison import validate_residue_sets
 
         cond_a = MagicMock()
         cond_a.label = "A"
@@ -1269,10 +1271,10 @@ class TestResidueSetValidation:
         data_b["agg_result"].residue_stats = rs_b
 
         # Should not raise
-        ContactsAnalysis._validate_residue_sets([(cond_a, data_a), (cond_b, data_b)])
+        validate_residue_sets([(cond_a, data_a), (cond_b, data_b)])
 
     def test_mismatched_residue_sets(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
+        from polyzymd.analyses.contacts._comparison import validate_residue_sets
 
         cond_a = MagicMock()
         cond_a.label = "A"
@@ -1285,7 +1287,7 @@ class TestResidueSetValidation:
         data_b["agg_result"].residue_stats = [MagicMock(protein_resid=i) for i in [1, 2, 4]]
 
         with pytest.raises(ValueError, match="Residue set mismatch"):
-            ContactsAnalysis._validate_residue_sets([(cond_a, data_a), (cond_b, data_b)])
+            validate_residue_sets([(cond_a, data_a), (cond_b, data_b)])
 
 
 # ---------------------------------------------------------------------------
@@ -1960,6 +1962,7 @@ class TestCompare:
         ctx = ComparisonContext(
             name="test",
             conditions=[condition],
+            excluded_conditions=[],
             control_label=None,
             analysis_dirs={"A": tmp_path / "A" / "contacts"},
             results_dir=tmp_path / "results",
@@ -2055,10 +2058,10 @@ class TestCompare:
 
 
 class TestPairwiseComparison:
-    """Test _compare_contacts_pair static method."""
+    """Test contacts pairwise comparison helper."""
 
     def test_pair_produces_two_metrics(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
+        from polyzymd.analyses.contacts._comparison import compare_contacts_pair
 
         summary_a = MagicMock()
         summary_a.coverage_mean = 0.8
@@ -2081,9 +2084,7 @@ class TestPairwiseComparison:
             "contact_fraction_per_replicate": [0.38, 0.40, 0.42],
         }
 
-        comp = ContactsAnalysis._compare_contacts_pair(
-            "A", summary_a, data_a, "B", summary_b, data_b
-        )
+        comp = compare_contacts_pair("A", summary_a, data_a, "B", summary_b, data_b)
 
         assert comp.condition_a == "A"
         assert comp.condition_b == "B"
@@ -2093,7 +2094,7 @@ class TestPairwiseComparison:
         assert metrics == {"coverage", "mean_contact_fraction"}
 
     def test_pair_direction_labels(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
+        from polyzymd.analyses.contacts._comparison import compare_contacts_pair
 
         summary_a = MagicMock(
             coverage_mean=0.5,
@@ -2117,9 +2118,7 @@ class TestPairwiseComparison:
             "contact_fraction_per_replicate": [0.48, 0.50, 0.52],
         }
 
-        comp = ContactsAnalysis._compare_contacts_pair(
-            "Control", summary_a, data_a, "Treatment", summary_b, data_b
-        )
+        comp = compare_contacts_pair("Control", summary_a, data_a, "Treatment", summary_b, data_b)
 
         for ac in comp.aggregate_comparisons:
             assert ac.direction in ("increased", "decreased", "unchanged")
@@ -2131,10 +2130,10 @@ class TestPairwiseComparison:
 
 
 class TestANOVA:
-    """Test _compute_contacts_anova."""
+    """Test contacts ANOVA helper."""
 
     def test_anova_returns_two_summaries(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
+        from polyzymd.analyses.contacts._comparison import compute_contacts_anova
 
         condition_data = []
         for i in range(3):
@@ -2146,7 +2145,7 @@ class TestANOVA:
             }
             condition_data.append((cond, data))
 
-        results = ContactsAnalysis._compute_contacts_anova(condition_data)
+        results = compute_contacts_anova(condition_data)
         assert len(results) == 2
         metrics = {r.metric for r in results}
         assert metrics == {"coverage", "mean_contact_fraction"}
@@ -2612,6 +2611,8 @@ class TestContactsCanonicalArtifacts:
         assert not {name for name in facade_names if "sidecar" in name and "path" in name}
         assert not {name for name in facade_names if "cache" in name and "candidate" in name}
         assert not {name for name in facade_names if "cache" in name and "context" in name}
+        assert not {name for name in facade_names if name.startswith("_compute_contacts")}
+        assert not {name for name in facade_names if name.startswith("_apply_fdr")}
 
     def test_condition_artifact_loads_from_canonical_result_json(self, tmp_path):
         """Comparison should read ``aggregated/result.json`` through ArtifactStore."""
@@ -2635,6 +2636,7 @@ class TestContactsCanonicalArtifacts:
         ctx = ComparisonContext(
             name="test",
             conditions=[condition],
+            excluded_conditions=[],
             control_label=None,
             analysis_dirs={"A": analysis_dir},
             results_dir=tmp_path / "results",
@@ -2665,6 +2667,7 @@ class TestContactsCanonicalArtifacts:
         ctx = ComparisonContext(
             name="test",
             conditions=[condition],
+            excluded_conditions=[],
             control_label=None,
             analysis_dirs={"A": analysis_dir},
             results_dir=tmp_path / "results",

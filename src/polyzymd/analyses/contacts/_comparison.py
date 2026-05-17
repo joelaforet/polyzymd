@@ -1,4 +1,4 @@
-"""Comparison and statistics helpers for the contacts analysis facade."""
+"""Comparison and statistics helpers for contacts condition artifacts."""
 
 from __future__ import annotations
 
@@ -23,13 +23,11 @@ CONTACTS_COMPARED_METRICS = ("coverage", "mean_contact_fraction")
 METRIC_STAT_TOLERANCE = 1e-12
 
 
-def compare(analysis: Any, ctx: ComparisonContext) -> Any:
+def compare(ctx: ComparisonContext) -> Any:
     """Compare contacts metrics across conditions.
 
     Parameters
     ----------
-    analysis : Any
-        Contacts facade instance used for cache validation and helper wrappers.
     ctx : ComparisonContext
         Framework-provided comparison context.
 
@@ -59,13 +57,13 @@ def compare(analysis: Any, ctx: ComparisonContext) -> Any:
 
     condition_data: list[tuple[Condition, dict[str, Any]]] = []
     for cond in ctx.conditions:
-        agg_result = _load_condition_artifact(analysis, ctx, cond)
+        agg_result = _load_condition_artifact(ctx, cond)
         if agg_result is None:
             logger.warning(f"No aggregated result for '{cond.label}' — skipping.")
             continue
 
-        coverage_per_rep = analysis._compute_coverage_per_replicate(agg_result)
-        contact_fraction_per_rep = analysis._compute_contact_fraction_per_replicate(agg_result)
+        coverage_per_rep = compute_coverage_per_replicate(agg_result)
+        contact_fraction_per_rep = compute_contact_fraction_per_replicate(agg_result)
 
         condition_data.append(
             (
@@ -82,7 +80,7 @@ def compare(analysis: Any, ctx: ComparisonContext) -> Any:
         logger.warning("contacts: no conditions have valid results — skipping.")
         return None
 
-    analysis._validate_residue_sets(condition_data)
+    validate_residue_sets(condition_data)
 
     summaries: list[ContactsConditionSummary] = []
     for cond, data in condition_data:
@@ -108,26 +106,22 @@ def compare(analysis: Any, ctx: ComparisonContext) -> Any:
         )
         summaries.append(summary)
 
-    effective_control = analysis._resolve_effective_control(ctx.effective_control, summaries)
+    effective_control = resolve_effective_control(ctx.effective_control, summaries)
 
     comparisons: list[ContactsPairwiseComparison] = []
     if len(summaries) >= 2:
-        comparisons = analysis._compute_contacts_pairwise(
-            summaries, condition_data, effective_control
-        )
+        comparisons = compute_contacts_pairwise(summaries, condition_data, effective_control)
 
     anova_results: list[ContactsANOVASummary] = []
     if len(summaries) >= 3:
-        anova_results = analysis._compute_contacts_anova(condition_data)
+        anova_results = compute_contacts_anova(condition_data)
 
-    analysis._apply_fdr_correction(comparisons, anova_results, settings.fdr_alpha)
-    analysis._apply_effect_size_threshold(comparisons, settings.min_effect_size)
+    apply_fdr_correction(comparisons, anova_results, settings.fdr_alpha)
+    apply_effect_size_threshold(comparisons, settings.min_effect_size)
 
     ranked_coverage = sorted(summaries, key=lambda s: s.coverage_mean, reverse=True)
     ranked_contact = sorted(summaries, key=lambda s: s.mean_contact_fraction, reverse=True)
-    top_residues_data = analysis._compute_top_contacted_residues(
-        condition_data, settings.top_residues
-    )
+    top_residues_data = compute_top_contacted_residues(condition_data, settings.top_residues)
     return ContactsComparisonResult(
         name=ctx.name,
         contacts_name="polymer_contacts",
@@ -154,9 +148,7 @@ def compare(analysis: Any, ctx: ComparisonContext) -> Any:
     )
 
 
-def _load_condition_artifact(
-    analysis: Any, ctx: ComparisonContext, cond: Condition
-) -> ConditionArtifact | None:
+def _load_condition_artifact(ctx: ComparisonContext, cond: Condition) -> ConditionArtifact | None:
     """Load and validate one contacts condition artifact for comparison."""
 
     in_memory = ctx.aggregated_results.get(cond.label)
@@ -177,7 +169,6 @@ def _load_condition_artifact(
             f"{CONTACTS_LEGACY_RECOMPUTE_GUIDANCE}"
         ) from exc
     _validate_condition_artifact(artifact, ctx, cond)
-    del analysis
     return artifact
 
 
@@ -542,7 +533,6 @@ def _identity_text(value: Any) -> str:
 
 
 def compute_contacts_pairwise(
-    analysis: Any,
     summaries: list[Any],
     condition_data: list[tuple[Condition, dict[str, Any]]],
     effective_control: str | None,
@@ -551,8 +541,6 @@ def compute_contacts_pairwise(
 
     Parameters
     ----------
-    analysis : Any
-        Contacts facade instance used for pairwise helper dispatch.
     summaries : list[Any]
         Condition summaries.
     condition_data : list[tuple[Condition, dict[str, Any]]]
@@ -578,7 +566,7 @@ def compute_contacts_pairwise(
             if summary.label == effective_control:
                 continue
             data = label_to_data[summary.label]
-            comp = analysis._compare_contacts_pair(
+            comp = compare_contacts_pair(
                 effective_control,
                 control_summary,
                 control_data,
@@ -591,7 +579,7 @@ def compute_contacts_pairwise(
         labels = [s.label for s in summaries]
         for i, label_a in enumerate(labels):
             for label_b in labels[i + 1 :]:
-                comp = analysis._compare_contacts_pair(
+                comp = compare_contacts_pair(
                     label_a,
                     label_to_summary[label_a],
                     label_to_data[label_a],

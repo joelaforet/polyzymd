@@ -319,7 +319,7 @@ class ContactsAnalysis(Analysis):
     ) -> Any:
         """Aggregate contact results across replicates for one condition."""
 
-        return _contacts_lifecycle.aggregate(self, ctx, results)
+        return _contacts_lifecycle.aggregate(ctx, results)
 
     # === filter_conditions() — exclude no-polymer conditions ===
 
@@ -337,7 +337,7 @@ class ContactsAnalysis(Analysis):
     def compare(self, ctx: ComparisonContext) -> Any:
         """Compare contacts metrics across conditions."""
 
-        return _contacts_comparison.compare(self, ctx)
+        return _contacts_comparison.compare(ctx)
 
     # === plot() ===
 
@@ -394,7 +394,7 @@ class ContactsAnalysis(Analysis):
     def _normalize_output_format(output_format: str) -> str:
         return "table" if output_format == "text" else output_format
 
-    # === Private helper wrappers: condition filtering ===
+    # === Condition filtering ===
 
     def _condition_has_polymer(
         self, cond: Condition, settings: "ContactsAnalysis.Settings"
@@ -402,92 +402,3 @@ class ContactsAnalysis(Analysis):
         """Check whether a condition has polymer atoms."""
 
         return _contacts_filters.condition_has_polymer(self, cond, settings)
-
-    # === Private helper wrappers: contacts comparison ===
-
-    @staticmethod
-    def _compute_coverage_per_replicate(result: "AggregatedContactResult") -> list[float]:
-        """Compute coverage per replicate from residue statistics."""
-
-        return _contacts_comparison.compute_coverage_per_replicate(result)
-
-    @staticmethod
-    def _compute_contact_fraction_per_replicate(result: "AggregatedContactResult") -> list[float]:
-        """Compute mean contact fraction per replicate."""
-
-        return _contacts_comparison.compute_contact_fraction_per_replicate(result)
-
-    @staticmethod
-    def _validate_residue_sets(condition_data: list[tuple[Condition, dict[str, Any]]]) -> None:
-        """Validate that all conditions have identical residue sets."""
-
-        _contacts_comparison.validate_residue_sets(condition_data)
-
-    def _compute_contacts_pairwise(
-        self,
-        summaries: list[Any],
-        condition_data: list[tuple[Condition, dict[str, Any]]],
-        effective_control: str | None,
-    ) -> list[Any]:
-        """Compute pairwise statistical comparisons for contacts."""
-
-        return _contacts_comparison.compute_contacts_pairwise(
-            self, summaries, condition_data, effective_control
-        )
-
-    @staticmethod
-    def _resolve_effective_control(
-        requested_control: str | None,
-        summaries: Sequence[Any],
-    ) -> str | None:
-        """Return a control label that exists in validated summaries."""
-
-        return _contacts_comparison.resolve_effective_control(requested_control, summaries)
-
-    @staticmethod
-    def _compare_contacts_pair(
-        label_a: str,
-        summary_a: Any,
-        data_a: dict[str, Any],
-        label_b: str,
-        summary_b: Any,
-        data_b: dict[str, Any],
-    ) -> Any:
-        """Compare two conditions for coverage and contact fraction."""
-
-        return _contacts_comparison.compare_contacts_pair(
-            label_a, summary_a, data_a, label_b, summary_b, data_b
-        )
-
-    @staticmethod
-    def _compute_contacts_anova(
-        condition_data: list[tuple[Condition, dict[str, Any]]],
-    ) -> list[Any]:
-        """Compute one-way ANOVA for both aggregate metrics."""
-
-        return _contacts_comparison.compute_contacts_anova(condition_data)
-
-    @staticmethod
-    def _apply_fdr_correction(
-        comparisons: list[Any],
-        anova_results: list[Any],
-        fdr_alpha: float,
-    ) -> None:
-        """Apply Benjamini-Hochberg FDR correction to comparison p-values."""
-
-        _contacts_comparison.apply_fdr_correction(comparisons, anova_results, fdr_alpha)
-
-    @staticmethod
-    def _apply_effect_size_threshold(comparisons: list[Any], min_effect_size: float) -> None:
-        """Tag aggregate comparisons by effect-size threshold."""
-
-        _contacts_comparison.apply_effect_size_threshold(comparisons, min_effect_size)
-
-    @staticmethod
-    def _compute_top_contacted_residues(
-        condition_data: list[tuple[Any, dict[str, Any]]],
-        top_n: int,
-    ) -> dict[str, list[tuple[int, str, float]]] | None:
-        """Compute top contacted residues per condition."""
-
-        return _contacts_comparison.compute_top_contacted_residues(condition_data, top_n)

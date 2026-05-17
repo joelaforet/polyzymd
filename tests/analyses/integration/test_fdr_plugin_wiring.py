@@ -16,6 +16,11 @@ from pydantic import BaseModel
 
 from polyzymd.analyses import get_analysis
 from polyzymd.analyses.base import ComparisonContext, Condition
+from polyzymd.analyses.contacts._comparison import (
+    apply_effect_size_threshold,
+    apply_fdr_correction,
+    compute_top_contacted_residues,
+)
 from polyzymd.analyses.contacts._comparison_results import (
     AggregateComparisonResult,
     ContactsANOVASummary,
@@ -205,9 +210,6 @@ def _make_contacts_result_for_formatting() -> ContactsComparisonResult:
 
 def test_contacts_fdr_correction_applied() -> None:
     """Contacts BH correction should produce exact adjusted p-values."""
-    cls = get_analysis("contacts")
-    analysis = cls()
-
     raw_p_values = [0.001, 0.01, 0.03, 0.031, 0.08, 0.2, 0.21, 0.9]
     comparisons: list[ContactsPairwiseComparison] = []
 
@@ -256,7 +258,7 @@ def test_contacts_fdr_correction_applied() -> None:
             )
         )
 
-    analysis._apply_fdr_correction(comparisons, [], fdr_alpha=0.05)
+    apply_fdr_correction(comparisons, [], fdr_alpha=0.05)
 
     expected_adjusted = [0.008, 0.04, 0.062, 0.062, 0.128, 0.24, 0.24, 0.9]
 
@@ -278,9 +280,6 @@ def test_contacts_fdr_correction_applied() -> None:
 
 def test_contacts_effect_size_threshold() -> None:
     """Contacts effect-size threshold should tag entries by |d| cutoff."""
-    cls = get_analysis("contacts")
-    analysis = cls()
-
     comparisons = [
         ContactsPairwiseComparison(
             condition_a="A",
@@ -322,7 +321,7 @@ def test_contacts_effect_size_threshold() -> None:
         )
     ]
 
-    analysis._apply_effect_size_threshold(comparisons, min_effect_size=0.5)
+    apply_effect_size_threshold(comparisons, min_effect_size=0.5)
 
     first, second = comparisons[0].aggregate_comparisons
     assert first.meets_effect_size_threshold is True
@@ -332,7 +331,6 @@ def test_contacts_effect_size_threshold() -> None:
 def test_contacts_top_residues_selection() -> None:
     """Contacts top-residue helper should work with canonical artifacts."""
     cls = get_analysis("contacts")
-    analysis = cls()
     settings = cls.Settings()
 
     agg_a = _make_contacts_artifact(
@@ -401,7 +399,7 @@ def test_contacts_top_residues_selection() -> None:
         (SimpleNamespace(label="B"), {"agg_result": agg_b}),
     ]
 
-    top = analysis._compute_top_contacted_residues(condition_data, top_n=3)
+    top = compute_top_contacted_residues(condition_data, top_n=3)
 
     assert top is not None
     assert top["A"] == [(11, "GLY", 0.8), (13, "TYR", 0.6), (10, "ALA", 0.4)]
@@ -410,11 +408,8 @@ def test_contacts_top_residues_selection() -> None:
 
 def test_contacts_settings_wiring_to_helper_arguments() -> None:
     """Contacts settings values should flow to helper arguments via ctx.settings."""
-    cls = get_analysis("contacts")
-    analysis = cls()
-
     ctx = SimpleNamespace(
-        settings=cls.Settings(
+        settings=get_analysis("contacts").Settings(
             fdr_alpha=0.10,
             min_effect_size=0.3,
             top_residues=2,
@@ -462,8 +457,8 @@ def test_contacts_settings_wiring_to_helper_arguments() -> None:
         )
     ]
 
-    analysis._apply_fdr_correction(comparisons, [], ctx.settings.fdr_alpha)
-    analysis._apply_effect_size_threshold(comparisons, ctx.settings.min_effect_size)
+    apply_fdr_correction(comparisons, [], ctx.settings.fdr_alpha)
+    apply_effect_size_threshold(comparisons, ctx.settings.min_effect_size)
 
     coverage_comp, fraction_comp = comparisons[0].aggregate_comparisons
     assert coverage_comp.p_value_adjusted == pytest.approx(0.08)
@@ -504,7 +499,7 @@ def test_contacts_settings_wiring_to_helper_arguments() -> None:
             },
         )
     ]
-    top = analysis._compute_top_contacted_residues(condition_data, ctx.settings.top_residues)
+    top = compute_top_contacted_residues(condition_data, ctx.settings.top_residues)
 
     assert top is not None
     assert top["Treatment"] == [(1, "ALA", 0.9), (2, "GLY", 0.4)]
@@ -804,9 +799,6 @@ class TestYAMLToSettingsWiring:
 
 def test_contacts_anova_fdr_correction() -> None:
     """Contacts ANOVA entries should receive BH-adjusted p-values."""
-    cls = get_analysis("contacts")
-    analysis = cls()
-
     anova = [
         ContactsANOVASummary(metric="coverage", f_statistic=6.0, p_value=0.01, significant=True),
         ContactsANOVASummary(
@@ -817,7 +809,7 @@ def test_contacts_anova_fdr_correction() -> None:
         ),
     ]
 
-    analysis._apply_fdr_correction([], anova, fdr_alpha=0.05)
+    apply_fdr_correction([], anova, fdr_alpha=0.05)
 
     assert anova[0].p_value_adjusted == pytest.approx(0.02)
     assert anova[1].p_value_adjusted == pytest.approx(0.20)
