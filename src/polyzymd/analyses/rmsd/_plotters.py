@@ -534,7 +534,7 @@ def _load_replicate_timeseries(
                 "Time arrays differ across replicates for run '%s' in %s; using shortest common "
                 "prefix (replicate index %d mismatch)",
                 run_label,
-                condition_dir,
+                artifact_data.analysis_dir,
                 idx,
             )
             break

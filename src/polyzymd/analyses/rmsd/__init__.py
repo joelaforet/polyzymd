@@ -684,12 +684,12 @@ class RMSDAnalysis(Analysis):
         if comparison_result is None:
             return []
 
-        data, labels = self._build_plot_data(ctx)
+        data, labels = self._build_plot_data(ctx, include_replicates=True)
         plot_artifacts = {}
         for label in labels:
             artifacts = load_canonical_plot_artifacts(
                 data[label]["analysis_dir"],
-                data[label].get("replicates", []),
+                data[label]["replicates"],
                 require_condition=True,
             )
             if artifacts.condition_artifact is None:

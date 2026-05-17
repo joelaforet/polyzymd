@@ -16,6 +16,7 @@ from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.mda import (
     ArtifactStore,
     ArtifactStoreError,
+    ConditionArtifact,
     FrameSelection,
     MDAAnalysisJob,
     MDABackendPolicy,
@@ -1876,4 +1877,48 @@ def test_plot_rejects_legacy_aggregated_result_from_disk(tmp_path: Path) -> None
     )
 
     with pytest.raises(ArtifactStoreError, match="Failed to validate condition artifact"):
+        analysis.plot(ctx)
+
+
+def test_plot_requires_configured_replicate_artifacts(tmp_path: Path) -> None:
+    """RMSD plot loading should request configured replicates, not an empty list."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    condition = make_condition(label="CondA", replicates=(1, 2))
+    analysis_dir = tmp_path / "analysis" / "conda" / "rmsd"
+    aggregated_dir = analysis_dir / "aggregated"
+
+    run_result = _make_aggregated_run("protein_backbone", "protein and name CA", [1.1, 1.2])
+    ArtifactStore(aggregated_dir).write_condition_result(
+        ConditionArtifact(
+            analysis_name="rmsd",
+            condition_label="CondA",
+            replicates=[1, 2],
+            payload={"runs": [run_result.model_dump(mode="json")]},
+            metadata={
+                "settings_fingerprint": settings_fingerprint(settings),
+                "config_hash": "hash123",
+                "polyzymd_version": "1.2.1",
+                "equilibration_time": 10.0,
+                "equilibration_unit": "ns",
+                "selection_string": "protein and name CA",
+            },
+        )
+    )
+
+    results_dir = tmp_path / "comparison"
+    results_dir.mkdir(parents=True)
+    _make_comparison_result().save(results_dir / "result.json")
+
+    ctx = PlotContext(
+        conditions=[condition],
+        analysis_dirs={"CondA": analysis_dir},
+        results_dir=results_dir,
+        output_dir=tmp_path / "figures",
+        settings=settings,
+        plot_settings=PlotSettings(),
+        equilibration="10ns",
+    )
+
+    with pytest.raises(ArtifactStoreError, match="Missing canonical replicate artifact"):
         analysis.plot(ctx)
