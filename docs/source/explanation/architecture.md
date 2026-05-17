@@ -61,10 +61,10 @@ generation, resubmission, and recovery flows.
 
 The **plugin system** — the primary extension point for contributors. The
 default contributor path is measurement-first: a scalar measurement plugin
-returns one value per replicate and lets PolyzyMD handle the runner bridge,
-aggregation, cache identity, comparison, and CLI integration. Each analysis
-plugin still participates in a unified lifecycle, but not every plugin uses every
-stage:
+returns one value per replicate and lets PolyzyMD handle Universe loading,
+replicate cache identity, aggregation, comparison, and CLI integration. Each
+analysis plugin still participates in a unified lifecycle, but not every plugin
+uses every stage:
 compute → aggregate → compare → plot → format.
 
 Within that lifecycle, PolyzyMD now draws a sharper boundary between
@@ -73,7 +73,7 @@ trajectory-level work and ensemble-level work:
 - **Measurement plugins are the default contributor pattern** when a calculation
   can be expressed as one scalar value per replicate
 - **MDAnalysis owns per-trajectory analysis** when an advanced plugin needs an
-  MDAnalysis runner or compatible ``run(...)`` object
+  MDAnalysis job built around an AnalysisBase-compatible ``run(...)`` object
 - **PolyzyMD owns ensemble/comparison workflow** including replicate discovery,
   caching, aggregation, cross-condition statistics, plotting, and CLI output
 - **Composition is preferred over mixins or deep inheritance** so trajectory-

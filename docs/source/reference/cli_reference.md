@@ -689,15 +689,14 @@ Options:
 By default, the command creates a single-file scalar measurement plugin at
 `src/polyzymd/analyses/<NAME>.py`. The generated analysis subclasses
 `ScalarMeasurementAnalysis`; its `measure()` method returns one scalar per
-replicate while the framework handles the runner bridge, aggregation, cache
-identity, and default scalar comparison.
+replicate while the scalar measurement adapter handles Universe loading,
+replicate cache identity, aggregation, and default scalar comparison.
 
 `--advanced`, `--style dict`, and `--style pydantic` currently fail rather than
-generating the removed runner template. Use the default scalar measurement
-scaffold until the MDAnalysis-native advanced scaffold is implemented.
-hooks. Passing `--style dict` or `--style pydantic` also selects advanced package
-scaffolding for backward compatibility. The `pydantic` style adds `_results.py`
-typed result models; the `dict` style uses plain dictionaries.
+generating a stale advanced package template. Use the default scalar measurement
+scaffold until the MDAnalysis job/artifact advanced scaffold is implemented.
+Passing `--style dict` or `--style pydantic` also selects the disabled advanced
+package path for backward compatibility.
 
 ```bash
 polyzymd new-analysis solvent_shell

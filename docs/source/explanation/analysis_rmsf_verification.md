@@ -36,11 +36,13 @@ The RMSF and RMSD calculations now live in the RMSF plugin package:
 - **RMSF + RMSD workflow:** RMSF MDAnalysis job construction and artifact
   collection in
   `src/polyzymd/analyses/rmsf/__init__.py`, with trajectory-native logic in the
-  runner path. The implementation performs the same two-pass RMSF logic and
-  internal RMSD timeseries calculation for autocorrelation analysis.
+  AnalysisBase-compatible helper module
+  `src/polyzymd/analyses/rmsf/_mda.py`. The implementation writes canonical
+  replicate and condition artifacts while preserving the same two-pass RMSF
+  logic and internal RMSD timeseries calculation for autocorrelation analysis.
 
-The implementation is plain NumPy with no MDAnalysis analysis class
-dependencies.
+The numerical RMSF kernel remains a plain NumPy calculation inside the current
+MDAnalysis job/artifact lifecycle.
 
 ## Benchmark Methodology
 

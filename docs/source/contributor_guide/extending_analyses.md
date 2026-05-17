@@ -260,7 +260,8 @@ Generated scalar measurement tests currently focus on the scaffold contract:
 For production plugins, consider adding targeted tests for optional behavior you
 customize or rely on heavily:
 
-- base scalar runner dispatch through the framework bridge
+- scalar measurement adapter behavior, including Universe loading and replicate
+  cache identity when relevant
 - aggregation and default metric extraction inherited from
   `ScalarMeasurementAnalysis`
 - custom plotting, formatting, filtering, or cache identity logic
