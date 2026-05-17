@@ -14,50 +14,6 @@ from polyzymd.analyses.contacts._aggregator import (
 logger = logging.getLogger("polyzymd.analyses.contacts")
 
 
-def align_replicate_results(results: Sequence[Any], replicates: Sequence[int]) -> list[Any]:
-    """Return replicate results ordered to match the requested IDs.
-
-    Parameters
-    ----------
-    results : Sequence[Any]
-        Per-replicate results returned by the orchestrator.
-    replicates : Sequence[int]
-        Requested replicate IDs from the aggregate context.
-
-    Returns
-    -------
-    list[Any]
-        Results ordered by ``replicates``.
-
-    Raises
-    ------
-    ValueError
-        If any result is missing a replicate ID, duplicates an ID, or does not
-        match the requested replicate set.
-    """
-
-    requested = tuple(int(rep) for rep in replicates)
-    by_replicate: dict[int, Any] = {}
-    for result in results:
-        stored_replicate = getattr(result, "replicate", None)
-        try:
-            replicate = int(stored_replicate)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("contacts aggregate input lacks a valid replicate ID") from exc
-        if replicate in by_replicate:
-            raise ValueError(f"contacts aggregate input duplicates replicate {replicate}")
-        by_replicate[replicate] = result
-
-    requested_set = set(requested)
-    stored_set = set(by_replicate)
-    if stored_set != requested_set:
-        raise ValueError(
-            "contacts aggregate input replicate IDs do not match requested replicates: "
-            f"stored={sorted(stored_set)}, requested={sorted(requested_set)}"
-        )
-    return [by_replicate[replicate] for replicate in requested]
-
-
 def get_trajectory_window(
     ctx: ReplicateContext,
     replicate: int,

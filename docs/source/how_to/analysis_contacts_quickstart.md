@@ -120,7 +120,8 @@ polyzymd compare run contacts -f comparison.yaml
 Set `compute_residence_times: false` when you only need contact fractions or
 downstream contacts-derived analyses. This skips aggregate residence-time
 summaries and residence-time plots, but still stores per-replicate contact
-events. Changing the setting creates a distinct contacts cache identity.
+events. Changing the setting changes the canonical contacts artifact identity,
+so recompute contacts after toggling it.
 
 ### Analyze one polymer type only
 

@@ -225,7 +225,7 @@ Each entry in `pairs`:
 | `protein_selection` | string | `"chainid A"` | MDAnalysis selection for protein atoms |
 | `cutoff` | float | `4.5` | Contact distance cutoff in Angstroms |
 | `grouping` | string | `"aa_class"` | Residue grouping: `"aa_class"`, `"secondary_structure"`, or `"none"` |
-| `compute_residence_times` | bool | `true` | Whether to compute aggregate residence-time summaries and plots. When `false`, per-replicate contact events are still stored and the cache identity changes. |
+| `compute_residence_times` | bool | `true` | Whether to compute aggregate residence-time summaries and plots. When `false`, per-replicate contact events are still stored and the canonical artifact identity changes. |
 | `protein_groups` | mapping | `null` | Custom residue groups: `{group_name: [resid, ...]}` |
 | `protein_partitions` | mapping | `null` | Mutually exclusive partitions for contact-fraction and residence-time plots: `{partition_name: [group_name, ...]}` |
 | `polymer_types` | list of string | `null` | Explicit polymer type labels. If `null`, types are auto-detected from topology. |

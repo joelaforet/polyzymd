@@ -21,9 +21,8 @@ Contacts plugin settings live under `plugins.contacts` in `comparison.yaml`.
 Set `compute_residence_times: false` to skip aggregate residence-time summaries
 and residence-time plotters. Per-replicate contact events remain stored because
 they are the compressed representation used for contact fractions and
-contacts-derived analyses. The setting participates in contacts cache identity;
-older caches without this identity are accepted only for the default `true`
-setting when their other metadata is valid.
+contacts-derived analyses. The setting is validated through the canonical
+contacts detection fingerprint recorded in replicate and condition artifacts.
 
 ### Partition fields
 
@@ -59,93 +58,76 @@ Contacts results are written under each condition's analysis directory.
         └── contacts/
             ├── run_1/
             │   ├── result.json
-            │   └── contacts_eq10ns_cut4.5_s<fingerprint>_rep1.json
+            │   └── sidecars/
+            │       └── contact_events.npz
             ├── run_2/
             │   └── ...
             ├── run_3/
             │   └── ...
             ├── aggregated/
             │   ├── result.json
-            │   └── contacts_aggregated_eq10ns_cut4.5_s<fingerprint>_reps1-3.json
+            │   └── sidecars/
+            │       └── contact_profiles.npz
 ```
 
-Depending on cache history and plugin version, legacy file names may also
-exist (for example `contacts_rep1.json`).
+Legacy standalone JSON filenames from pre-artifact contacts runs are no longer
+loaded by the v1.3 contacts workflow. Recompute contacts to produce canonical
+artifact-store outputs.
 
-### Per-replicate JSON structure (`ContactResult`)
+### Per-replicate JSON structure (`ReplicateArtifact`)
 
 Representative structure:
 
 ```python
 {
-    "analysis_type": "contacts",
-    "residue_contacts": [
-        {
-            "protein_resid": 77,
-            "protein_resname": "SER",
-            "protein_group": "polar",
-            "segment_contacts": [
-                {
-                    "polymer_resname": "SBM",
-                    "polymer_resid": 403,
-                    "polymer_chain_idx": 0,
-                    "events": [{"start_frame": 120, "duration": 9}]
-                }
-            ],
-            "statistical_inefficiency": 2.41,
-            "n_effective": 3733.6
-        }
-    ],
-    "n_frames": 9000,
-    "timestep_ps": 10.0,
-    "criteria_label": "any_atom_4.5A",
-    "criteria_cutoff": 4.5,
-    "start_frame": 1000,
-    "schema_version": 2,
+    "analysis_name": "contacts",
+    "replicate": 1,
+    "payload": {
+        "metrics": {"coverage": 0.74, "mean_contact_fraction": 0.18},
+        "event_sidecar": "sidecars/contact_events.npz",
+        "n_contact_events": 1240,
+        "n_frames_used": 9000
+    },
+    "sidecars": [{"path": "sidecars/contact_events.npz", "metadata": {"kind": "contact_events"}}],
     "metadata": {
-        "target_selector": "chainid A",
-        "query_selector": "chainid C",
-        "algorithm": "capped_distance"
+        "contacts_detection_fingerprint": "...",
+        "equilibration": "10ns"
     }
 }
 ```
 
-### Aggregated JSON structure (`AggregatedContactResult`)
+### Aggregated JSON structure (`ConditionArtifact`)
 
 Representative structure:
 
 ```python
 {
-    "analysis_type": "contacts_aggregated",
-    "n_replicates": 3,
-    "total_frames_per_replicate": [9000, 9000, 9000],
-    "timestep_ps": 10.0,
-    "criteria_label": "any_atom_4.5A",
-    "criteria_cutoff": 4.5,
-    "coverage_mean": 0.740,
-    "coverage_sem": 0.011,
-    "mean_contact_fraction": 0.180,
-    "mean_contact_fraction_sem": 0.004,
-    "group_stats": {
-        "aromatic": [0.242, 0.013],
-        "polar": [0.168, 0.009]
-    },
-    "residence_time_by_polymer_type": {
-        "SBM": [9.60, 0.53],
-        "EGM": [8.14, 0.56]
-    },
-    "residue_stats": [
-        {
-            "protein_resid": 77,
-            "protein_group": "polar",
-            "contact_fraction_mean": 0.211,
-            "contact_fraction_sem": 0.016,
-            "contact_fraction_per_replicate": [0.201, 0.232, 0.200],
-            "by_polymer_type": {"SBM": [0.173, 0.012]},
-            "residence_time_by_polymer_type": {"SBM": [7.2, 0.8]}
+    "analysis_name": "contacts",
+    "condition_label": "PEGylated",
+    "replicates": [1, 2, 3],
+    "payload": {
+        "metrics": {
+            "coverage": {"values": [0.73, 0.75, 0.74], "mean": 0.74, "sem": 0.01},
+            "mean_contact_fraction": {"values": [0.17, 0.19, 0.18], "mean": 0.18, "sem": 0.01}
+        },
+        "residue_stats": [
+            {
+                "protein_resid": 77,
+                "protein_group": "polar",
+                "contact_fraction_mean": 0.211,
+                "contact_fraction_per_replicate": [0.201, 0.232, 0.200]
+            }
+        ],
+        "profile_sidecar": "sidecars/contact_profiles.npz",
+        "residence_time_by_polymer_type": {
+            "SBM": {"mean_ns": 9.60, "sem_ns": 0.53}
         }
-    ],
-    "metadata": {"aggregation_method": "mean_sem"}
+    },
+    "metadata": {
+        "contacts_detection_fingerprint": "...",
+        "compute_residence_times": true,
+        "equilibration": "10ns"
+    }
 }
 ```
 

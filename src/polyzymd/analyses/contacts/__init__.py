@@ -5,9 +5,8 @@ neighbour searching, aggregates per-residue contact fractions across
 replicates, and performs cross-condition comparison with dual metrics
 (coverage and mean contact fraction).
 
-Contact computation uses :class:`ParallelContactAnalyzer` which delegates to
-MDAnalysis ``capped_distance`` for O(N) neighbour searching — typically
-10–100× faster than naïve pairwise distance calculations.
+Contact computation uses the MDAnalysis-native sparse contact job seam, which
+delegates to MDAnalysis ``capped_distance`` for O(N) neighbour searching.
 
 Unlike single-scalar analyses (RMSF, catalytic_triad), contacts has **two**
 primary metrics — coverage (fraction of residues contacted) and mean
@@ -18,7 +17,7 @@ Condition filtering
 -------------------
 No-polymer conditions (e.g. "No Polymer" controls) are automatically
 excluded via :meth:`filter_conditions`. Detection checks topology with the
-active MDAnalysis polymer selection and does not treat stale contacts caches
+active MDAnalysis polymer selection and does not treat stale contact artifacts
 as polymer evidence.
 """
 
@@ -39,22 +38,19 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
-from polyzymd.analyses.contacts import _cache as _contacts_cache
 from polyzymd.analyses.contacts import _comparison as _contacts_comparison
 from polyzymd.analyses.contacts import _filters as _contacts_filters
 from polyzymd.analyses.contacts import _lifecycle as _contacts_lifecycle
 from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
 from polyzymd.analyses.contacts._identity import (
     contacts_detection_fingerprint,
-    contacts_settings_fingerprint,
-    contacts_settings_fingerprint_candidates,
+    normalize_polymer_types,
 )
 from polyzymd.analyses.contacts._mda import (
     ContactsArtifactCollector,
     build_contacts_jobs,
 )
 from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
-from polyzymd.analyses.contacts._results import ContactResult
 from polyzymd.analyses.mda import MDAAnalysisJob
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
@@ -268,7 +264,7 @@ class ContactsAnalysis(Analysis):
     # === Required methods ===
 
     def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
-        """Return the contacts-domain aggregate settings fingerprint.
+        """Return the sparse contact-detection settings fingerprint.
 
         Parameters
         ----------
@@ -278,7 +274,7 @@ class ContactsAnalysis(Analysis):
         Returns
         -------
         str or None
-            Contacts-domain fingerprint, or ``None`` when settings are absent.
+            Contact-detection fingerprint, or ``None`` when settings are absent.
         """
 
         if settings is None:
@@ -297,289 +293,13 @@ class ContactsAnalysis(Analysis):
         return ContactsArtifactCollector()
 
     @staticmethod
-    def _replicate_sidecar_path(
-        output_dir: Path,
-        settings: BaseModel,
-        equilibration: str,
-        replicate: int,
-    ) -> Path:
-        """Build the legacy per-replicate contacts side-output path."""
-
-        return _contacts_cache.replicate_sidecar_path(
-            output_dir, settings, equilibration, replicate
-        )
-
-    @staticmethod
-    def _replicate_sidecar_candidates(
-        output_dir: Path,
-        settings: BaseModel,
-        equilibration: str,
-        replicate: int,
-    ) -> tuple[Path, ...]:
-        """Build accepted per-replicate contacts side-output paths."""
-
-        return _contacts_cache.replicate_sidecar_candidates(
-            output_dir, settings, equilibration, replicate
-        )
-
-    @staticmethod
-    def _replicate_cache_candidates(
-        output_dir: Path,
-        settings: BaseModel,
-        equilibration: str,
-        replicate: int,
-        *,
-        result_path: Path | None = None,
-    ) -> tuple[Path, ...]:
-        """Build accepted per-replicate contacts cache candidates."""
-
-        return _contacts_cache.replicate_cache_candidates(
-            output_dir,
-            settings,
-            equilibration,
-            replicate,
-            result_path=result_path,
-        )
-
-    @staticmethod
-    def _aggregated_sidecar_path(
-        output_dir: Path,
-        settings: BaseModel,
-        equilibration: str,
-        replicates: Sequence[int],
-    ) -> Path:
-        """Build the legacy aggregated contacts side-output path."""
-
-        return _contacts_cache.aggregated_sidecar_path(
-            output_dir, settings, equilibration, replicates
-        )
-
-    @staticmethod
-    def _aggregated_sidecar_candidates(
-        output_dir: Path,
-        settings: BaseModel,
-        equilibration: str,
-        replicates: Sequence[int],
-    ) -> tuple[Path, ...]:
-        """Build accepted aggregated contacts side-output paths."""
-
-        return _contacts_cache.aggregated_sidecar_candidates(
-            output_dir, settings, equilibration, replicates
-        )
-
-    @staticmethod
-    def _aggregated_cache_candidates(
-        output_dir: Path,
-        settings: BaseModel,
-        equilibration: str,
-        replicates: Sequence[int],
-        *,
-        result_path: Path | None = None,
-    ) -> tuple[Path, ...]:
-        """Build accepted aggregated contacts cache candidates."""
-
-        return _contacts_cache.aggregated_cache_candidates(
-            output_dir,
-            settings,
-            equilibration,
-            replicates,
-            result_path=result_path,
-        )
-
-    @staticmethod
     def _effective_polymer_selection(settings: "ContactsSettings") -> str:
         """Return the polymer selection constrained by polymer type filters."""
 
-        return _contacts_cache.effective_polymer_selection(settings)
-
-    @staticmethod
-    def _cache_matches_window(result: Any, equilibration: str) -> bool:
-        """Return whether a cached result matches the requested analysis window."""
-
-        return _contacts_cache.cache_matches_window(result, equilibration)
-
-    def _load_cache_candidate(
-        self,
-        result_cls: type,
-        candidate: Path,
-        *,
-        recompute: bool,
-        sim_config: Any | None = None,
-        settings: BaseModel | None = None,
-    ) -> Any | None:
-        """Load one cache candidate while tolerating invalid legacy JSON."""
-
-        return _contacts_cache.load_cache_candidate(
-            self,
-            result_cls,
-            candidate,
-            recompute=recompute,
-            sim_config=sim_config,
-            settings=settings,
-        )
-
-    @staticmethod
-    def _result_window_string(result: Any) -> str | None:
-        """Return the equilibration window encoded on a result."""
-
-        return _contacts_cache.result_window_string(result)
-
-    @staticmethod
-    def _cache_matches_replicate_id(
-        result: Any,
-        replicate: int,
-        *,
-        source: Path | None = None,
-    ) -> bool:
-        """Return whether a cached per-replicate result matches the request."""
-
-        return _contacts_cache.cache_matches_replicate_id(result, replicate, source=source)
-
-    @staticmethod
-    def _embedded_contacts_settings_fingerprint(result: Any) -> str | None:
-        """Return contacts settings fingerprint embedded in cache content."""
-
-        return _contacts_cache.embedded_contacts_settings_fingerprint(result)
-
-    @classmethod
-    def _cache_has_contacts_identity_proof(cls, result: Any, settings: BaseModel) -> bool:
-        """Return whether cache content fully proves contacts settings identity."""
-
-        del cls
-        return _contacts_cache.cache_has_contacts_identity_proof(result, settings)
-
-    @staticmethod
-    def _coerce_optional_bool(value: Any) -> bool | None:
-        """Coerce common metadata values to booleans."""
-
-        return _contacts_cache.coerce_optional_bool(value)
-
-    @classmethod
-    def _cache_matches_residence_time_setting(
-        cls,
-        result: Any,
-        settings: BaseModel,
-        *,
-        allow_missing: bool,
-        source: Path | None = None,
-    ) -> bool:
-        """Return whether a cache proves the active residence-time setting."""
-
-        del cls
-        return _contacts_cache.cache_matches_residence_time_setting(
-            result,
-            settings,
-            allow_missing=allow_missing,
-            source=source,
-        )
-
-    @staticmethod
-    def _cache_has_residence_time_summaries(result: Any) -> bool:
-        """Return whether an aggregate artifact contains RT summary maps."""
-
-        return _contacts_cache.cache_has_residence_time_summaries(result)
-
-    @classmethod
-    def _attach_contacts_identity_metadata(cls, result: Any, settings: BaseModel) -> None:
-        """Attach current contacts identity metadata to a cache result."""
-
-        del cls
-        _contacts_cache.attach_contacts_identity_metadata(result, settings)
-
-    @staticmethod
-    def _cache_matches_contacts_settings(
-        result: Any,
-        settings: BaseModel,
-        *,
-        source: Path | None = None,
-    ) -> bool:
-        """Return whether a cached contacts artifact matches active settings."""
-
-        return _contacts_cache.cache_matches_contacts_settings(result, settings, source=source)
-
-    @staticmethod
-    def _align_replicate_results(
-        results: Sequence[Any],
-        replicates: Sequence[int],
-    ) -> list[Any]:
-        """Return replicate results ordered to match the requested IDs."""
-
-        return _contacts_lifecycle.align_replicate_results(results, replicates)
-
-    def _cache_matches_context(
-        self,
-        result: Any,
-        *,
-        settings: BaseModel,
-        equilibration: str,
-        sim_config: Any,
-        replicates: Sequence[int] | None = None,
-        allow_replicate_subset: bool = False,
-        source: Path | None = None,
-    ) -> bool:
-        """Return whether an aggregate result matches the active context."""
-
-        return _contacts_cache.cache_matches_context(
-            self,
-            result,
-            settings=settings,
-            equilibration=equilibration,
-            sim_config=sim_config,
-            replicates=replicates,
-            allow_replicate_subset=allow_replicate_subset,
-            source=source,
-        )
-
-    def _cache_matches_replicates(
-        self,
-        result: Any,
-        replicates: Sequence[int],
-        *,
-        allow_subset: bool = False,
-        source: Path | None = None,
-    ) -> bool:
-        """Return whether cached aggregate replicate identity matches the request."""
-
-        return _contacts_cache.cache_matches_replicates(
-            self,
-            result,
-            replicates,
-            allow_subset=allow_subset,
-            source=source,
-        )
-
-    @staticmethod
-    def _replicate_vector_length_mismatches(
-        result: Any,
-        expected_replicates: Sequence[int],
-    ) -> list[str]:
-        """Return per-replicate vector fields whose lengths are inconsistent."""
-
-        return _contacts_cache.replicate_vector_length_mismatches(result, expected_replicates)
-
-    def _load_validated_aggregated_result(
-        self,
-        aggregated_dir: Path,
-        *,
-        settings: BaseModel,
-        equilibration: str,
-        replicates: Sequence[int],
-        sim_config: Any,
-        recompute: bool,
-        allow_replicate_subset: bool = False,
-    ) -> Any | None:
-        """Load an aggregated contacts result after cache identity validation."""
-
-        return _contacts_cache.load_validated_aggregated_result(
-            self,
-            aggregated_dir,
-            settings=settings,
-            equilibration=equilibration,
-            replicates=replicates,
-            sim_config=sim_config,
-            recompute=recompute,
-            allow_replicate_subset=allow_replicate_subset,
-        )
+        polymer_types = normalize_polymer_types(settings.polymer_types)
+        if not polymer_types:
+            return settings.polymer_selection
+        return f"({settings.polymer_selection}) and (resname {' '.join(polymer_types)})"
 
     def get_trajectory_window(
         self,

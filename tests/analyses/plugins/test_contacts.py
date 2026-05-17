@@ -271,18 +271,18 @@ class TestSettings:
         assert s2.protein_groups == {"active": [1, 2]}
         assert s2.protein_partitions == {"site": ["active"]}
 
-    def test_settings_fingerprint_changes_with_cutoff(self):
+    def test_detection_fingerprint_changes_with_cutoff(self):
         from polyzymd.analyses.contacts import ContactsSettings
-        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+        from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
 
         low = ContactsSettings(cutoff=4.0)
         high = ContactsSettings(cutoff=4.5)
 
-        assert contacts_settings_fingerprint(low) != contacts_settings_fingerprint(high)
+        assert contacts_detection_fingerprint(low) != contacts_detection_fingerprint(high)
 
-    def test_contacts_domain_fingerprint_excludes_comparison_partition_fields(self):
+    def test_detection_fingerprint_excludes_comparison_partition_fields(self):
         from polyzymd.analyses.contacts import ContactsSettings
-        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+        from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
 
         base = ContactsSettings(cutoff=4.5)
         downstream_only = ContactsSettings(
@@ -292,38 +292,20 @@ class TestSettings:
             top_residues=25,
         )
 
-        assert contacts_settings_fingerprint(base) == contacts_settings_fingerprint(downstream_only)
+        assert contacts_detection_fingerprint(base) == contacts_detection_fingerprint(
+            downstream_only
+        )
 
-    def test_contacts_domain_fingerprint_changes_with_contact_fields(self):
+    def test_detection_fingerprint_changes_with_contact_fields(self):
         from polyzymd.analyses.contacts import ContactsSettings
-        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+        from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
 
         unfiltered = ContactsSettings(polymer_selection="chainid C")
         filtered = ContactsSettings(polymer_selection="chainid C", polymer_types=["PEG"])
 
-        assert contacts_settings_fingerprint(unfiltered) != contacts_settings_fingerprint(filtered)
-
-    def test_contacts_domain_fingerprint_changes_with_residence_time_toggle(self):
-        from polyzymd.analyses.contacts import ContactsSettings
-        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
-
-        enabled = ContactsSettings(compute_residence_times=True)
-        disabled = ContactsSettings(compute_residence_times=False)
-
-        assert contacts_settings_fingerprint(enabled) != contacts_settings_fingerprint(disabled)
-
-    def test_contacts_domain_candidates_include_legacy_only_when_residence_times_enabled(self):
-        from polyzymd.analyses.contacts import ContactsSettings
-        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint_candidates
-
-        enabled = ContactsSettings(compute_residence_times=True)
-        disabled = ContactsSettings(compute_residence_times=False)
-
-        enabled_candidates = contacts_settings_fingerprint_candidates(enabled)
-        disabled_candidates = contacts_settings_fingerprint_candidates(disabled)
-
-        assert len(enabled_candidates) > 1
-        assert len(disabled_candidates) == 1
+        assert contacts_detection_fingerprint(unfiltered) != contacts_detection_fingerprint(
+            filtered
+        )
 
 
 def _make_mock_contact_result(replicate: int = 1):
@@ -710,7 +692,7 @@ def _make_valid_agg_result(settings, n_replicates: int = 2, n_residues: int = 2)
         AggregatedContactResult,
         AggregatedResidueStats,
     )
-    from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+    from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
 
     residue_stats = []
     for residue_index in range(n_residues):
@@ -738,7 +720,7 @@ def _make_valid_agg_result(settings, n_replicates: int = 2, n_residues: int = 2)
         equilibration_time=10.0,
         equilibration_unit="ns",
         metadata={
-            "settings_fingerprint": contacts_settings_fingerprint(settings),
+            "contacts_detection_fingerprint": contacts_detection_fingerprint(settings),
             "compute_residence_times": bool(settings.compute_residence_times),
             "residence_times_computed": bool(settings.compute_residence_times),
             "replicates": list(range(1, n_replicates + 1)),
@@ -1651,12 +1633,10 @@ class TestCompare:
             recompute=True,
         )
 
-        with patch.object(analysis, "_load_validated_aggregated_result") as load_mock:
-            result = analysis.compare(ctx)
+        result = analysis.compare(ctx)
 
         assert result is not None
         assert result.conditions[0].label == "Finalized"
-        load_mock.assert_not_called()
 
     def test_compare_rejects_stale_condition_equilibration(self, tmp_path):
         """Comparison should reject condition artifacts from a different window."""
@@ -1963,27 +1943,35 @@ class TestCompare:
 
         assert "No Polymer" in result.excluded_conditions
 
-    def test_aggregate_context_validation_rejects_settings_mismatch(self, tmp_path):
-        """Compare/finalize should not accept aggregates from different settings."""
+    def test_compare_rejects_detection_fingerprint_mismatch(self, tmp_path):
+        """Compare should not accept condition artifacts from different settings."""
+        from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
         analysis = ContactsAnalysis()
         current_settings = ContactsSettings(cutoff=4.5)
         stale_settings = ContactsSettings(cutoff=4.0)
-        summary = SimpleNamespace(
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            metadata={"settings_fingerprint": settings_fingerprint(stale_settings)},
-            config_hash="unknown",
+        condition = Condition(
+            label="A",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="test",
+            conditions=[condition],
+            control_label=None,
+            analysis_dirs={"A": tmp_path / "A" / "contacts"},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=current_settings,
+            aggregated_results={
+                "A": _make_condition_artifact("A", stale_settings, replicates=(1, 2, 3))
+            },
         )
 
-        assert not analysis._cache_matches_context(
-            summary,
-            settings=current_settings,
-            equilibration="10ns",
-            sim_config=_make_hashable_sim_config(tmp_path),
-        )
+        with pytest.raises(ValueError, match="detection fingerprint mismatch"):
+            analysis.compare(ctx)
 
     def test_compare_accepts_successful_replicate_subset_aggregate(self, tmp_path):
         """Finalize should accept aggregates that record successful replicate subsets."""
@@ -2612,436 +2600,76 @@ class TestLifecycle:
         assert callable(analysis.filter_conditions)
 
 
-class TestContactsCacheAmbiguity:
-    """Tests for ambiguous cache file detection in contacts path resolution."""
+class TestContactsCanonicalArtifacts:
+    """Contacts uses canonical artifact store paths only."""
 
-    def test_canonical_run_result_precedes_legacy_cache(self, tmp_path):
-        """Canonical ``run_N/result.json`` should win over legacy sidecars."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
+    def test_legacy_cache_wrappers_are_not_public_on_plugin(self):
+        """Legacy sidecar/cache path wrappers should not remain on the facade."""
+        from polyzymd.analyses.contacts import ContactsAnalysis
 
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        canonical = run_dir / "result.json"
-        canonical.write_text("{}")
-        (tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
+        facade_names = set(ContactsAnalysis.__dict__)
 
-        assert find_contact_result_for_replicate(tmp_path, 1) == canonical
+        assert not {name for name in facade_names if "sidecar" in name and "path" in name}
+        assert not {name for name in facade_names if "cache" in name and "candidate" in name}
+        assert not {name for name in facade_names if "cache" in name and "context" in name}
 
-    def test_find_results_for_replicates_includes_canonical_paths(self, tmp_path):
-        """Replicate mapping should expose canonical result paths for consumers."""
-        from polyzymd.analyses.contacts._paths import find_contact_results_for_replicates
+    def test_condition_artifact_loads_from_canonical_result_json(self, tmp_path):
+        """Comparison should read ``aggregated/result.json`` through ArtifactStore."""
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda import ArtifactStore
 
-        run_1 = tmp_path / "run_1"
-        run_2 = tmp_path / "run_2"
-        run_1.mkdir()
-        run_2.mkdir()
-        (run_1 / "result.json").write_text("{}")
-        (run_2 / "result.json").write_text("{}")
+        settings = ContactsSettings()
+        condition = Condition(
+            label="A",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        analysis_dir = tmp_path / "A" / "contacts"
+        aggregated_dir = analysis_dir / "aggregated"
+        aggregated_dir.mkdir(parents=True)
+        ArtifactStore(aggregated_dir).write_condition_result(
+            _make_condition_artifact("A", settings, replicates=(1, 2))
+        )
+        ctx = ComparisonContext(
+            name="test",
+            conditions=[condition],
+            control_label=None,
+            analysis_dirs={"A": analysis_dir},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=settings,
+        )
 
-        found = find_contact_results_for_replicates(tmp_path, (1, 2))
-
-        assert found == {1: run_1 / "result.json", 2: run_2 / "result.json"}
-
-    def test_raises_on_ambiguous_top_level_glob(self, tmp_path):
-        """Multiple contacts_eq*_cut*_rep1.json files should raise ValueError."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        (tmp_path / "contacts_eq10ns_cut4.0_rep1.json").write_text("{}")
-        (tmp_path / "contacts_eq10ns_cut4.5_rep1.json").write_text("{}")
-
-        with pytest.raises(ValueError, match="Ambiguous contacts cache"):
-            find_contact_result_for_replicate(tmp_path, 1)
-
-    def test_raises_on_ambiguous_run_subdir_glob(self, tmp_path):
-        """Multiple matches in run_{rep}/ subdir should raise ValueError."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        (run_dir / "contacts_eq5ns_cut4.0_rep1.json").write_text("{}")
-        (run_dir / "contacts_eq10ns_cut4.5_rep1.json").write_text("{}")
-
-        with pytest.raises(ValueError, match="Ambiguous contacts cache"):
-            find_contact_result_for_replicate(tmp_path, 1)
-
-    def test_single_glob_match_succeeds(self, tmp_path):
-        """A single glob match should return that file without error."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        (tmp_path / "contacts_eq10ns_cut4.5_rep1.json").write_text("{}")
-        result = find_contact_result_for_replicate(tmp_path, 1)
+        result = ContactsAnalysis().compare(ctx)
 
         assert result is not None
-        assert result.name == "contacts_eq10ns_cut4.5_rep1.json"
-
-    def test_fingerprinted_cache_precedes_legacy_when_metadata_proves_settings(
-        self,
-        tmp_path,
-    ):
-        """Fingerprinted cache should be preferred only with embedded settings proof."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        legacy = tmp_path / "contacts_eq10ns_cut4.5_rep1.json"
-        fingerprinted = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
-        legacy.write_text("{}")
-        fingerprinted.write_text('{"contacts_settings_fingerprint": "deadbeef"}')
-
-        result = find_contact_result_for_replicate(tmp_path, 1, settings_fp="deadbeef")
-
-        assert result == fingerprinted
-
-    def test_strict_lookup_rejects_filename_only_fingerprinted_sidecar(self, tmp_path):
-        """Filename-only ``_s`` tokens are candidate locators, not identity proof."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        sidecar = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
-        sidecar.write_text("{}")
-
-        result = find_contact_result_for_replicate(tmp_path, 1, settings_fp="deadbeef")
-
-        assert result is None
-
-    def test_strict_lookup_accepts_sidecar_with_embedded_contacts_metadata(self, tmp_path):
-        """Strict sidecar lookup should accept explicit contacts-domain metadata."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        sidecar = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
-        sidecar.write_text('{"contacts_settings_fingerprint": "deadbeef"}')
-
-        result = find_contact_result_for_replicate(tmp_path, 1, settings_fp="deadbeef")
-
-        assert result == sidecar
-
-    @pytest.mark.parametrize(
-        ("relative_name", "expected_relative_name"),
-        [
-            ("contacts_eq10ns_cut4.5_rep1.json", "contacts_eq10ns_cut4.5_rep1.json"),
-            ("run_1/contacts_eq10ns_cut4.5_rep1.json", "run_1/contacts_eq10ns_cut4.5_rep1.json"),
-            ("contacts_rep1.json", "contacts_rep1.json"),
-            ("run_1/contacts_rep1.json", "run_1/contacts_rep1.json"),
-        ],
-    )
-    def test_strict_lookup_accepts_metadata_proven_legacy_sidecar(
-        self,
-        tmp_path,
-        relative_name,
-        expected_relative_name,
-    ):
-        """Explicit lookups may use legacy contacts sidecars proven by metadata."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        legacy = tmp_path / relative_name
-        legacy.parent.mkdir(parents=True, exist_ok=True)
-        legacy.write_text(
-            '{"metadata": {"contacts_settings_fingerprint": "deadbeef", "equilibration": "10ns"}}'
-        )
-
-        result = find_contact_result_for_replicate(
-            tmp_path,
-            1,
-            settings_fp="deadbeef",
-            equilibration="10ns",
-        )
-
-        assert result == tmp_path / expected_relative_name
-
-    @pytest.mark.parametrize(
-        "fingerprinted_payload",
-        [
-            "{}",
-            '{"metadata": {"contacts_settings_fingerprint": "badcafe0"}}',
-        ],
-    )
-    def test_strict_lookup_blocks_legacy_when_fingerprinted_sidecar_unproven_or_mismatched(
-        self,
-        tmp_path,
-        fingerprinted_payload,
-    ):
-        """Any unproven or mismatched ``_s*`` sidecar blocks legacy fallback."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        fingerprinted = tmp_path / "contacts_eq10ns_cut4.5_sbadcafe0_rep1.json"
-        legacy = tmp_path / "contacts_eq10ns_cut4.5_rep1.json"
-        fingerprinted.write_text(fingerprinted_payload)
-        legacy.write_text(
-            '{"metadata": {"contacts_settings_fingerprint": "deadbeef", "equilibration": "10ns"}}'
-        )
-
-        result = find_contact_result_for_replicate(
-            tmp_path,
-            1,
-            settings_fp="deadbeef",
-            equilibration="10ns",
-        )
-
-        assert result is None
-
-    def test_lookup_filters_contacts_by_equilibration_window(self, tmp_path):
-        """Contacts artifact lookup should not cross equilibration windows."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        wrong = tmp_path / "contacts_eq0ns_cut4.5_sdeadbeef_rep1.json"
-        expected = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
-        wrong.write_text("{}")
-        expected.write_text('{"contacts_settings_fingerprint": "deadbeef"}')
-
-        result = find_contact_result_for_replicate(
-            tmp_path,
-            1,
-            settings_fp="deadbeef",
-            equilibration="10ns",
-        )
-
-        assert result == expected
-
-    def test_lookup_rejects_canonical_with_wrong_window_metadata(self, tmp_path):
-        """Canonical contacts outputs must prove the requested window."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        canonical = run_dir / "result.json"
-        canonical.write_text('{"equilibration_time": 0.0, "equilibration_unit": "ns"}')
-
-        assert find_contact_result_for_replicate(tmp_path, 1, equilibration="10ns") is None
-
-    def test_fingerprinted_cache_precedes_canonical_when_settings_fp_provided(self, tmp_path):
-        """Matching fingerprinted cache should win over potentially stale canonical output."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        canonical = run_dir / "result.json"
-        fingerprinted = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
-        canonical.write_text("{}")
-        fingerprinted.write_text('{"contacts_settings_fingerprint": "deadbeef"}')
-
-        result = find_contact_result_for_replicate(tmp_path, 1, settings_fp="deadbeef")
-
-        assert result == fingerprinted
-
-    def test_strict_lookup_accepts_canonical_only_with_matching_fingerprint(self, tmp_path):
-        """Explicit settings lookups may use canonical only when metadata proves identity."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        canonical = run_dir / "result.json"
-        canonical.write_text(
-            '{"metadata": {"settings_fingerprint": "deadbeef", "equilibration": "10ns"}}'
-        )
-
-        result = find_contact_result_for_replicate(
-            tmp_path,
-            1,
-            settings_fp="deadbeef",
-            equilibration="10ns",
-        )
-
-        assert result == canonical
-
-    def test_strict_lookup_rejects_window_only_canonical(self, tmp_path):
-        """Explicit settings lookups should not fall back to unproven canonical files."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        canonical = run_dir / "result.json"
-        canonical.write_text('{"metadata": {"equilibration": "10ns"}}')
-
-        result = find_contact_result_for_replicate(
-            tmp_path,
-            1,
-            settings_fp="deadbeef",
-            equilibration="10ns",
-        )
-
-        assert result is None
-
-    def test_mismatched_fingerprinted_cache_rejected_when_settings_fp_provided(self, tmp_path):
-        """Non-matching fingerprinted sidecars should not satisfy explicit lookups."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        mismatched = tmp_path / "contacts_eq10ns_cut4.5_sfeedface_rep1.json"
-        mismatched.write_text("{}")
-
-        result = find_contact_result_for_replicate(tmp_path, 1, settings_fp="deadbeef")
-
-        assert result is None
-
-    def test_infers_settings_fingerprint_from_contact_metadata(self, tmp_path):
-        """Downstream consumers should use actual contacts artifact metadata."""
-        from polyzymd.analyses.contacts._paths import infer_contact_results_settings_fingerprint
-
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        canonical = run_dir / "result.json"
-        canonical.write_text('{"metadata": {"settings_fingerprint": "cafebabe"}}')
-
-        assert infer_contact_results_settings_fingerprint({1: canonical}) == "cafebabe"
-
-    def test_infer_settings_fingerprint_rejects_conflicting_artifacts(self, tmp_path):
-        """Mixed contacts contracts should not be silently accepted."""
-        from polyzymd.analyses.contacts._paths import infer_contact_results_settings_fingerprint
-
-        first = tmp_path / "contacts_eq10ns_cut4.5_s11111111_rep1.json"
-        second = tmp_path / "contacts_eq10ns_cut4.5_s22222222_rep2.json"
-        first.write_text('{"metadata": {"settings_fingerprint": "11111111"}}')
-        second.write_text('{"metadata": {"settings_fingerprint": "22222222"}}')
-
-        with pytest.raises(ValueError, match="inconsistent settings fingerprints"):
-            infer_contact_results_settings_fingerprint({1: first, 2: second})
-
-    def test_artifact_inference_prefers_fingerprinted_sidecar_over_stale_canonical(
-        self,
-        tmp_path,
-    ):
-        """Current fingerprinted contacts sidecars should define cache identity."""
-        from polyzymd.analyses.contacts._paths import infer_contacts_artifact_settings_fingerprint
-
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        (run_dir / "result.json").write_text(
-            "{"
-            '"criteria_cutoff": 4.0,'
-            '"criteria_label": "Distance <= 4.0 A",'
-            '"n_frames": 10,'
-            '"residue_contacts": [],'
-            '"metadata": {"settings_fingerprint": "badcafe0", "equilibration": "10ns"}'
-            "}"
-        )
-        (tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text(
-            '{"metadata": {"contacts_settings_fingerprint": "deadbeef"}}'
-        )
-
-        result = infer_contacts_artifact_settings_fingerprint(
-            tmp_path,
-            (1,),
-            equilibration="10ns",
-        )
-
-        assert result == "deadbeef"
-
-    def test_contact_artifact_match_requires_embedded_metadata(self, tmp_path):
-        """Strict artifact matching should ignore filename-only settings tokens."""
-        from polyzymd.analyses.contacts._paths import (
-            contact_artifact_matches_settings_fingerprint,
-        )
-
-        filename_only = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
-        embedded = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep2.json"
-        filename_only.write_text("{}")
-        embedded.write_text('{"metadata": {"contacts_settings_fingerprint": "deadbeef"}}')
-
-        assert not contact_artifact_matches_settings_fingerprint(filename_only, "deadbeef")
-        assert contact_artifact_matches_settings_fingerprint(embedded, "deadbeef")
-
-    def test_infer_contacts_artifact_settings_ignores_filename_only_sidecars(
-        self,
-        tmp_path,
-    ):
-        """Contacts identity inference should fail closed for filename-only sidecars."""
-        from polyzymd.analyses.contacts._paths import infer_contacts_artifact_settings_fingerprint
-
-        (tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
-
-        result = infer_contacts_artifact_settings_fingerprint(
-            tmp_path,
-            (1,),
-            equilibration="10ns",
-        )
-
-        assert result is None
-
-    def test_infer_contacts_artifact_settings_uses_metadata_proven_legacy_sidecars(
-        self,
-        tmp_path,
-    ):
-        """Legacy contacts sidecars with metadata should define contacts identity."""
-        from polyzymd.analyses.contacts._paths import infer_contacts_artifact_settings_fingerprint
-
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        (run_dir / "result.json").write_text('{"metadata": {"equilibration": "10ns"}}')
-        (tmp_path / "contacts_eq10ns_cut6.0_rep1.json").write_text(
-            '{"metadata": {"contacts_settings_fingerprint": "deadbeef", "equilibration": "10ns"}}'
-        )
-
-        result = infer_contacts_artifact_settings_fingerprint(
-            tmp_path,
-            (1,),
-            equilibration="10ns",
-        )
-
-        assert result == "deadbeef"
-
-    def test_filename_only_sidecar_blocks_legacy_artifact_inference(self, tmp_path):
-        """Unproven fingerprinted contacts sidecars should block legacy inference."""
-        from polyzymd.analyses.contacts._paths import infer_contacts_artifact_settings_fingerprint
-
-        (tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
-        (tmp_path / "contacts_eq10ns_cut6.0_rep1.json").write_text(
-            '{"metadata": {"contacts_settings_fingerprint": "feedface", "equilibration": "10ns"}}'
-        )
-
-        result = infer_contacts_artifact_settings_fingerprint(
-            tmp_path,
-            (1,),
-            equilibration="10ns",
-        )
-
-        assert result is None
-
-    def test_strict_identity_blocks_canonical_when_fingerprinted_sidecar_unproven(
-        self,
-        tmp_path,
-    ):
-        """Strict downstream lookup must fail closed on filename-only sidecars."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        canonical = run_dir / "result.json"
-        canonical.write_text('{"metadata": {"equilibration": "10ns"}}')
-        (tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
-
-        result = find_contact_result_for_replicate(
-            tmp_path,
-            1,
-            equilibration="10ns",
-            strict_identity=True,
-        )
-
-        assert result is None
-
-    def test_strict_identity_accepts_proven_fingerprinted_sidecar_without_requested_fp(
-        self,
-        tmp_path,
-    ):
-        """Strict downstream lookup can use sidecars with embedded contacts identity."""
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
-
-        sidecar = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
-        sidecar.write_text('{"metadata": {"contacts_settings_fingerprint": "deadbeef"}}')
-
-        result = find_contact_result_for_replicate(
-            tmp_path,
-            1,
-            equilibration="10ns",
-            strict_identity=True,
-        )
-
-        assert result == sidecar
-
-    def test_aggregated_sidecar_names_noncontiguous_replicates_uniquely(self, tmp_path):
-        """Non-contiguous replicate IDs should not collide with contiguous ranges."""
+        assert [summary.label for summary in result.conditions] == ["A"]
+
+    def test_legacy_sidecar_json_is_ignored_when_canonical_artifact_is_missing(self, tmp_path):
+        """Comparison should not discover legacy contacts JSON sidecars."""
+        from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
 
         settings = ContactsSettings()
+        condition = Condition(
+            label="A",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1,),
+            sim_config=MagicMock(),
+        )
+        analysis_dir = tmp_path / "A" / "contacts"
+        analysis_dir.mkdir(parents=True)
+        (analysis_dir / "contacts_eq10ns_cut4.5_rep1.json").write_text("{}")
+        ctx = ComparisonContext(
+            name="test",
+            conditions=[condition],
+            control_label=None,
+            analysis_dirs={"A": analysis_dir},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=settings,
+        )
 
-        sparse = ContactsAnalysis._aggregated_sidecar_path(tmp_path, settings, "10ns", (1, 3))
-        dense = ContactsAnalysis._aggregated_sidecar_path(tmp_path, settings, "10ns", (1, 2, 3))
-
-        assert sparse.name != dense.name
-        assert "_reps1_3.json" in sparse.name
-        assert "_reps1-3.json" in dense.name
+        assert ContactsAnalysis().compare(ctx) is None
