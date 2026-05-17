@@ -344,6 +344,29 @@ class ArtifactStore:
             )
         return resolved_path
 
+    def load_npz_sidecar(self, ref: ArtifactSidecarRef) -> Any:
+        """Validate and open an NPZ sidecar.
+
+        Parameters
+        ----------
+        ref : ArtifactSidecarRef
+            Sidecar reference to validate before loading.
+
+        Returns
+        -------
+        Any
+            Open ``numpy.load`` handle. Callers should use it as a context
+            manager to close the underlying file promptly.
+        """
+
+        import numpy as np
+
+        resolved_path = self.validate_sidecar(ref)
+        try:
+            return np.load(resolved_path)
+        except (OSError, ValueError) as exc:
+            raise ArtifactStoreError(f"Failed to load NPZ sidecar {resolved_path}: {exc}") from exc
+
     def source_artifact_ref(self, path: str | Path = "result.json") -> dict[str, Any]:
         """Return a hashed reference for an artifact JSON file.
 

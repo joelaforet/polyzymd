@@ -832,6 +832,7 @@ def test_plotter_resolves_npz_from_replicate_artifact(tmp_path: Path) -> None:
         ],
         condition_label="Control",
     )
+    artifact.sidecars.append(sidecar)
     store.write_replicate_result(artifact)
 
     resolved = _resolve_npz_sidecar_path(

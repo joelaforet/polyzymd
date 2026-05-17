@@ -2020,12 +2020,10 @@ class TestPlotLoadersCacheFiltering:
     """Plot data loaders should only read distances cache files."""
 
     def test_pooled_loader_ignores_unrelated_json_files(self, tmp_path):
-        import json
-
         import numpy as np
 
         from polyzymd.analyses.distances._plotters import _load_pooled_distances
-        from polyzymd.analyses.mda import ArtifactStore
+        from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
 
         analysis_dir = tmp_path / "condition" / "distances"
         run_dir = analysis_dir / "run_1"
@@ -2036,27 +2034,19 @@ class TestPlotLoadersCacheFiltering:
             metadata={"kind": "distance_matrix"},
         )
 
-        distances_payload = {
-            "artifact_type": "replicate",
-            "analysis_name": "distances",
-            "payload": {"pairs": [{"pair_label": "Distance Pair", "threshold": 3.5}]},
-            "sidecars": [sidecar.model_dump(mode="json")],
-        }
-        contacts_payload = {
-            "pair_results": [
-                {
-                    "pair_label": "Contacts Pair",
-                    "distances": [10.0, 10.5],
-                    "threshold": 11.0,
-                }
-            ]
-        }
-
-        (run_dir / "result.json").write_text(json.dumps(distances_payload), encoding="utf-8")
-        (run_dir / "contacts_result.json").write_text(
-            json.dumps(contacts_payload), encoding="utf-8"
+        ArtifactStore(run_dir).write_replicate_result(
+            ReplicateArtifact(
+                analysis_name="distances",
+                condition_label="Cond1",
+                replicate=1,
+                payload={"pairs": [{"pair_label": "Distance Pair", "threshold": 3.5}]},
+                sidecars=[sidecar],
+            )
         )
-        (run_dir / "notes.json").write_text(json.dumps({"note": "ignore me"}), encoding="utf-8")
+        (run_dir / "contacts_result.json").write_text(
+            '{"pair_results": [{"pair_label": "Contacts Pair"}]}', encoding="utf-8"
+        )
+        (run_dir / "notes.json").write_text('{"note": "ignore me"}', encoding="utf-8")
 
         pooled = _load_pooled_distances(analysis_dir, [1])
 
@@ -2064,27 +2054,25 @@ class TestPlotLoadersCacheFiltering:
         assert pooled["Distance Pair"]["threshold"] == pytest.approx(3.5)
 
     def test_aggregated_loader_ignores_unrelated_json_files(self, tmp_path):
-        import json
-
         from polyzymd.analyses.distances._plotters import _load_distance_aggregated_results
+        from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact
 
         aggregated_dir = tmp_path / "condition" / "distances" / "aggregated"
         aggregated_dir.mkdir(parents=True)
 
-        distances_payload = {
-            "artifact_type": "condition",
-            "analysis_name": "distances",
-            "payload": {"pair_results": [{"pair_label": "Distance Pair", "overall_mean": 3.3}]},
-        }
-        contacts_payload = {"pair_results": [{"pair_label": "Contacts Pair", "overall_mean": 9.9}]}
-
-        (aggregated_dir / "result.json").write_text(json.dumps(distances_payload), encoding="utf-8")
+        ArtifactStore(aggregated_dir).write_condition_result(
+            ConditionArtifact(
+                analysis_name="distances",
+                condition_label="Cond1",
+                replicates=[1],
+                payload={"pair_results": [{"pair_label": "Distance Pair", "overall_mean": 3.3}]},
+            )
+        )
         (aggregated_dir / "contacts_result.json").write_text(
-            json.dumps(contacts_payload), encoding="utf-8"
+            '{"pair_results": [{"pair_label": "Contacts Pair", "overall_mean": 9.9}]}',
+            encoding="utf-8",
         )
-        (aggregated_dir / "notes.json").write_text(
-            json.dumps({"note": "ignore me"}), encoding="utf-8"
-        )
+        (aggregated_dir / "notes.json").write_text('{"note": "ignore me"}', encoding="utf-8")
 
         data = {"Cond1": {"aggregated_dir": aggregated_dir}}
         loaded = _load_distance_aggregated_results(data, ["Cond1"])

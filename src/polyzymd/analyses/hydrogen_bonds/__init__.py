@@ -48,7 +48,12 @@ from polyzymd.analyses.hydrogen_bonds._results import (
     UndirectedPairAggregate,
     UndirectedResiduePairResult,
 )
-from polyzymd.analyses.mda import ArtifactStoreError, ConditionArtifact, ReplicateArtifact
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    ArtifactStoreError,
+    ConditionArtifact,
+    ReplicateArtifact,
+)
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.loader import TrajectoryLoader
 from polyzymd.analyses.shared.statistics import compute_sem
@@ -1382,12 +1387,17 @@ class HydrogenBondsAnalysis(Analysis):
             aggregated_dir = cond_data.get("aggregated_dir")
             if aggregated_dir is None:
                 continue
+            result_path = Path(aggregated_dir) / "result.json"
+            if not result_path.exists():
+                continue
 
             try:
-                loaded_result = self._load_aggregated_result(
-                    Path(aggregated_dir),
-                    settings=ctx.settings,
+                artifact = ArtifactStore(Path(aggregated_dir)).read_condition_result("result.json")
+                loaded_result = self._coerce_and_validate_aggregated_result(
+                    artifact,
+                    ctx.settings,
                     condition_label=label,
+                    source=result_path,
                 )
             except (
                 json.JSONDecodeError,
@@ -1522,7 +1532,7 @@ class HydrogenBondsAnalysis(Analysis):
         condition_label: str | None = None,
         replicate: int | None = None,
     ) -> Any | None:
-        """Load a canonical replicate artifact or legacy result from a run directory.
+        """Load a canonical replicate artifact from a run directory.
 
         Parameters
         ----------
@@ -1540,17 +1550,22 @@ class HydrogenBondsAnalysis(Analysis):
         Returns
         -------
         ReplicateArtifact, HydrogenBondResult, or None
-            Deserialized canonical artifact/result, or ``None`` if no result
-            file is present.
+            Deserialized canonical artifact/result, or ``None`` if no canonical
+            result file is present.
         """
 
+        result_path = self.replicate_result_path(run_dir)
+        if not result_path.exists():
+            return None
         try:
-            result = super()._load_replicate_result(run_dir)
-        except ArtifactStoreError:
-            logger.debug("Could not load replicate result from %s", run_dir, exc_info=True)
-            return None
-        if result is None:
-            return None
+            result = ArtifactStore(run_dir).read_replicate_result("result.json")
+        except ArtifactStoreError as exc:
+            raise ValueError(
+                "Hydrogen-bond replicate result"
+                f" at {result_path} is missing a settings fingerprint. Legacy hydrogen-bond "
+                "replicate caches are not compatible with artifact-only plot loading. "
+                "Recompute the condition before plotting."
+            ) from exc
         if settings is not None:
             return self._coerce_and_validate_replicate_result(
                 result,
@@ -1559,8 +1574,6 @@ class HydrogenBondsAnalysis(Analysis):
                 replicate=replicate,
                 source=self.replicate_result_path(run_dir),
             )
-        if isinstance(result, dict) and result.get("artifact_type") != "replicate":
-            return HydrogenBondResult.model_validate(result)
         return result
 
     def _load_replicate_timeseries(

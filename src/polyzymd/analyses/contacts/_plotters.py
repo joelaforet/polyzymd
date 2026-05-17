@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 from collections.abc import Mapping, Sequence
@@ -219,10 +218,10 @@ def _is_noncanonical_json(path: Path) -> bool:
     """Return whether an existing JSON file is not a condition artifact."""
 
     try:
-        payload = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return False
-    return not (isinstance(payload, dict) and payload.get("artifact_type") == "condition")
+        ArtifactStore(path.parent).read_condition_result(path.name)
+    except ArtifactStoreError:
+        return True
+    return False
 
 
 def _validate_condition_artifact_for_plot(
@@ -304,15 +303,15 @@ def _load_profile_sidecar(artifact: ConditionArtifact, aggregated_dir: Path) -> 
             f"contacts: condition artifact {aggregated_dir / 'result.json'} lacks profile sidecar"
         )
     try:
-        sidecar_path = ArtifactStore(aggregated_dir).validate_sidecar(sidecar)
+        sidecar_payload = ArtifactStore(aggregated_dir).load_npz_sidecar(sidecar)
     except ArtifactStoreError as exc:
         raise ValueError(f"contacts: invalid profile sidecar for plots: {exc}") from exc
 
     try:
-        with np.load(sidecar_path) as raw:
+        with sidecar_payload as raw:
             return _profile_from_npz(raw, artifact=artifact, sidecar=sidecar)
     except (OSError, KeyError, ValueError) as exc:
-        raise ValueError(f"contacts: malformed profile sidecar {sidecar_path}: {exc}") from exc
+        raise ValueError(f"contacts: malformed profile sidecar {sidecar.path}: {exc}") from exc
 
 
 def _profile_sidecar_ref(artifact: ConditionArtifact) -> ArtifactSidecarRef | None:
@@ -451,10 +450,10 @@ def _is_noncanonical_comparison_json(path: Path) -> bool:
     """Return whether an existing JSON file is not a comparison artifact."""
 
     try:
-        payload = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return False
-    return not (isinstance(payload, dict) and payload.get("artifact_type") == "comparison")
+        ArtifactStore(path.parent).read_comparison_result(path.name)
+    except ArtifactStoreError:
+        return True
+    return False
 
 
 def _plot_contact_fraction_profile(

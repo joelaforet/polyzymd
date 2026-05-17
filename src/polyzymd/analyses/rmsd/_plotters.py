@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
@@ -436,23 +436,34 @@ def _load_replicate_timeseries(
     traces: list[np.ndarray] = []
 
     for replicate in replicates:
-        npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate)
-        if npz_path is None:
+        npz_payload = _load_npz_sidecar_payload(condition_dir, run_label, replicate)
+        if npz_payload is None:
             continue
 
         try:
-            with np.load(npz_path) as payload:
+            with npz_payload as payload:
                 rmsd_values = np.asarray(payload["rmsd_values"], dtype=np.float64)
                 time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
         except (OSError, ValueError, KeyError) as exc:
-            logger.warning("Failed to load RMSD NPZ sidecar %s: %s", npz_path, exc)
+            logger.warning(
+                "Failed to load RMSD NPZ sidecar for run '%s' replicate %s: %s",
+                run_label,
+                replicate,
+                exc,
+            )
             continue
 
         if rmsd_values.ndim != 1 or time_ns.ndim != 1:
-            logger.warning("Unexpected NPZ shape for %s; expected 1D arrays", npz_path)
+            logger.warning(
+                "Unexpected RMSD NPZ shape for run '%s' replicate %s; expected 1D arrays",
+                run_label,
+                replicate,
+            )
             continue
         if len(rmsd_values) == 0 or len(time_ns) == 0:
-            logger.warning("Empty NPZ timeseries for %s", npz_path)
+            logger.warning(
+                "Empty RMSD NPZ timeseries for run '%s' replicate %s", run_label, replicate
+            )
             continue
 
         n_common = min(len(rmsd_values), len(time_ns))
@@ -544,12 +555,12 @@ def _load_replicate_convergence_payload(
     """
     import numpy as np
 
-    npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate)
-    if npz_path is None:
+    npz_payload = _load_npz_sidecar_payload(condition_dir, run_label, replicate)
+    if npz_payload is None:
         return None
 
     try:
-        with np.load(npz_path) as payload:
+        with npz_payload as payload:
             time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
             rmsd_values = np.asarray(payload["rmsd_values"], dtype=np.float64)
             window_start_times_ns = np.asarray(
@@ -576,11 +587,20 @@ def _load_replicate_convergence_payload(
                 if np.isfinite(value):
                     convergence_time_ns = value
     except (OSError, ValueError, KeyError) as exc:
-        logger.warning("Failed to load RMSD NPZ sidecar %s: %s", npz_path, exc)
+        logger.warning(
+            "Failed to load RMSD NPZ sidecar for run '%s' replicate %s: %s",
+            run_label,
+            replicate,
+            exc,
+        )
         return None
 
     if time_ns.ndim != 1 or rmsd_values.ndim != 1 or len(time_ns) == 0 or len(rmsd_values) == 0:
-        logger.warning("Unexpected NPZ shape for %s; expected non-empty 1D arrays", npz_path)
+        logger.warning(
+            "Unexpected RMSD NPZ shape for run '%s' replicate %s; expected non-empty 1D arrays",
+            run_label,
+            replicate,
+        )
         return None
 
     n_common = min(len(time_ns), len(rmsd_values))
@@ -617,6 +637,42 @@ def _resolve_npz_sidecar_path(
     Path | None
         NPZ sidecar path from metadata, or ``None`` when unavailable.
     """
+    resolved = _resolve_npz_sidecar_reference(condition_dir, run_label, replicate)
+    if resolved is None:
+        return None
+    from polyzymd.analyses.mda import ArtifactStoreError
+
+    store, sidecar, _result_path = resolved
+    try:
+        return store.validate_sidecar(sidecar)
+    except ArtifactStoreError as exc:
+        logger.warning("Invalid RMSD NPZ sidecar from metadata path %s: %s", sidecar.path, exc)
+        return None
+
+
+def _load_npz_sidecar_payload(condition_dir: Path, run_label: str, replicate: int) -> Any | None:
+    """Open a validated RMSD NPZ sidecar for one configured replicate."""
+
+    resolved = _resolve_npz_sidecar_reference(condition_dir, run_label, replicate)
+    if resolved is None:
+        return None
+    from polyzymd.analyses.mda import ArtifactStoreError
+
+    store, sidecar, _result_path = resolved
+    try:
+        return store.load_npz_sidecar(sidecar)
+    except ArtifactStoreError as exc:
+        logger.warning("Invalid RMSD NPZ sidecar from metadata path %s: %s", sidecar.path, exc)
+        return None
+
+
+def _resolve_npz_sidecar_reference(
+    condition_dir: Path,
+    run_label: str,
+    replicate: int,
+) -> tuple[Any, Any, Path] | None:
+    """Resolve the artifact store and registered sidecar for a run."""
+
     from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
 
     run_dir = condition_dir / f"run_{replicate}"
@@ -660,9 +716,13 @@ def _resolve_npz_sidecar_path(
         )
         return None
 
-    npz_path = ArtifactStore(run_dir).resolve_sidecar(npz_ref)
-    if not npz_path.exists():
-        logger.warning("Missing RMSD NPZ sidecar from metadata path: %s", npz_path)
+    sidecar = next((ref for ref in artifact.sidecars if ref.path == npz_ref), None)
+    if sidecar is None:
+        logger.warning(
+            "RMSD artifact JSON %s does not register NPZ sidecar %s",
+            result_path,
+            npz_ref,
+        )
         return None
 
-    return npz_path
+    return ArtifactStore(run_dir), sidecar, result_path

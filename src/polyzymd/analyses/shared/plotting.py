@@ -27,6 +27,7 @@ Examples
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
@@ -42,6 +43,83 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _UNSET = object()  # sentinel for apply_legend defaults
+
+
+@dataclass(frozen=True)
+class ArtifactPlotData:
+    """Canonical artifacts loaded for plot-time data access."""
+
+    analysis_dir: Path
+    condition_artifact: Any | None
+    replicate_artifacts: dict[int, Any]
+    aggregated_dir: Path
+    run_dirs: dict[int, Path]
+
+
+def load_canonical_plot_artifacts(
+    analysis_dir: Path,
+    replicates: Sequence[int],
+    *,
+    require_condition: bool = False,
+    require_replicates: bool = False,
+) -> ArtifactPlotData:
+    """Load plot inputs from canonical MDAnalysis artifacts only.
+
+    The loader reads ``aggregated/result.json`` and the configured
+    ``run_N/result.json`` files through :class:`ArtifactStore`. It never scans
+    directories, opens legacy JSON files, or imports trajectory packages.
+
+    Parameters
+    ----------
+    analysis_dir : Path
+        Condition-level analysis directory containing ``aggregated`` and
+        ``run_N`` subdirectories.
+    replicates : sequence of int
+        Configured replicate IDs to load. Extra run directories are ignored.
+    require_condition : bool, optional
+        Raise when ``aggregated/result.json`` is absent, by default False.
+    require_replicates : bool, optional
+        Raise when any configured ``run_N/result.json`` is absent, by default
+        False.
+
+    Returns
+    -------
+    ArtifactPlotData
+        Loaded canonical condition and replicate artifacts.
+    """
+
+    from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
+
+    root = Path(analysis_dir)
+    aggregated_dir = root / "aggregated"
+    condition_artifact = None
+    condition_path = aggregated_dir / "result.json"
+    if condition_path.exists():
+        condition_artifact = ArtifactStore(aggregated_dir).read_condition_result("result.json")
+    elif require_condition:
+        raise ArtifactStoreError(f"Missing canonical condition artifact: {condition_path}")
+
+    replicate_artifacts: dict[int, Any] = {}
+    run_dirs: dict[int, Path] = {}
+    for replicate in replicates:
+        replicate_id = int(replicate)
+        run_dir = root / f"run_{replicate_id}"
+        run_dirs[replicate_id] = run_dir
+        replicate_path = run_dir / "result.json"
+        if replicate_path.exists():
+            replicate_artifacts[replicate_id] = ArtifactStore(run_dir).read_replicate_result(
+                "result.json"
+            )
+        elif require_replicates:
+            raise ArtifactStoreError(f"Missing canonical replicate artifact: {replicate_path}")
+
+    return ArtifactPlotData(
+        analysis_dir=root,
+        condition_artifact=condition_artifact,
+        replicate_artifacts=replicate_artifacts,
+        aggregated_dir=aggregated_dir,
+        run_dirs=run_dirs,
+    )
 
 
 # ---------------------------------------------------------------------------

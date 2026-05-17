@@ -1755,6 +1755,45 @@ def _make_replicate_artifact(
     )
 
 
+def _write_hbond_condition_artifact(
+    aggregated_dir: Path,
+    *,
+    condition_label: str,
+    result: HydrogenBondAggregatedResult,
+) -> ConditionArtifact:
+    """Write a canonical hydrogen-bond condition artifact for plot tests."""
+
+    artifact = ConditionArtifact(
+        analysis_name="hydrogen_bonds",
+        condition_label=condition_label,
+        replicates=[int(replicate) for replicate in result.replicates],
+        payload={
+            "summaries": [summary.model_dump(mode="json") for summary in result.summaries],
+            "composition_entries": [
+                entry.model_dump(mode="json") for entry in result.composition_entries
+            ],
+            "metrics": {},
+            "replicate_metrics": {},
+            "n_replicates": result.n_replicates,
+        },
+        metadata={
+            "result_kind": "hydrogen_bonds_mda_condition",
+            "settings_fingerprint": result.settings_fingerprint,
+            "config_hash": result.config_hash,
+            "polyzymd_version": result.polyzymd_version,
+            "equilibration_time": result.equilibration_time,
+            "equilibration_unit": result.equilibration_unit,
+            "selection_string": result.selection_string,
+            "timestep_ps": result.timestep_ps,
+            "raw_timestep_ps": result.raw_timestep_ps,
+            "frame_stride": result.frame_stride,
+            "n_replicates": result.n_replicates,
+        },
+    )
+    ArtifactStore(aggregated_dir).write_condition_result(artifact)
+    return artifact
+
+
 def _aggregate_replicate_results(
     analysis: HydrogenBondsAnalysis,
     ctx: AggregateContext,
@@ -2638,12 +2677,16 @@ def test_plot_rejects_stale_aggregated_result_from_disk(tmp_path: Path) -> None:
     analysis_dir = tmp_path / "analysis" / "conda" / "hydrogen_bonds"
     aggregated_dir = analysis_dir / "aggregated"
     aggregated_dir.mkdir(parents=True)
-    HydrogenBondAggregatedResult(
-        settings_fingerprint=_settings_hash(stale_settings),
-        replicates=[1, 2],
-        n_replicates=2,
-        summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [1.8, 2.2])],
-    ).save(aggregated_dir / "result.json")
+    _write_hbond_condition_artifact(
+        aggregated_dir,
+        condition_label="CondA",
+        result=HydrogenBondAggregatedResult(
+            settings_fingerprint=_settings_hash(stale_settings),
+            replicates=[1, 2],
+            n_replicates=2,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [1.8, 2.2])],
+        ),
+    )
 
     ctx = PlotContext(
         conditions=[condition],
@@ -2674,12 +2717,16 @@ def test_plot_rejects_legacy_replicate_cache_from_disk(tmp_path: Path) -> None:
     aggregated_dir.mkdir(parents=True)
     run_dir.mkdir(parents=True)
 
-    HydrogenBondAggregatedResult(
-        settings_fingerprint=_settings_hash(current_settings),
-        replicates=[1],
-        n_replicates=1,
-        summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [2.0])],
-    ).save(aggregated_dir / "result.json")
+    _write_hbond_condition_artifact(
+        aggregated_dir,
+        condition_label="CondA",
+        result=HydrogenBondAggregatedResult(
+            settings_fingerprint=_settings_hash(current_settings),
+            replicates=[1],
+            n_replicates=1,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [2.0])],
+        ),
+    )
 
     HydrogenBondResult(
         config_hash="cfg123",
@@ -2724,17 +2771,19 @@ def test_plot_returns_paths(tmp_path: Path) -> None:
     )
     analysis_dir = tmp_path / "analysis" / "conda" / "hydrogen_bonds"
     analysis_dir.mkdir(parents=True)
+    settings = HydrogenBondSettings()
 
     ctx = PlotContext(
         conditions=[condition],
         analysis_dirs={"CondA": analysis_dir},
         results_dir=tmp_path / "comparison",
         output_dir=tmp_path / "figures",
-        settings=HydrogenBondSettings(),
+        settings=settings,
         plot_settings=PlotSettings(),
     )
 
     loaded_result = HydrogenBondAggregatedResult(
+        settings_fingerprint=_settings_hash(settings),
         replicates=[1, 2],
         n_replicates=2,
         summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [1.8, 2.2])],
@@ -2750,6 +2799,11 @@ def test_plot_returns_paths(tmp_path: Path) -> None:
                 per_replicate_fraction=[0.55, 0.65],
             )
         ],
+    )
+    _write_hbond_condition_artifact(
+        analysis_dir / "aggregated",
+        condition_label="CondA",
+        result=loaded_result,
     )
 
     with (

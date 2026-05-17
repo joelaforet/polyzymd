@@ -16,6 +16,7 @@ from typing import Any, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+from polyzymd.analyses.mda import ArtifactStoreError
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
@@ -23,6 +24,7 @@ from polyzymd.analyses.shared.plotting import (
     get_output_path,
     get_theme,
     grouped_bars,
+    load_canonical_plot_artifacts,
     save_figure,
 )
 
@@ -369,38 +371,23 @@ def _load_pooled_distances(analysis_dir: Path, replicates: list[int]) -> dict[st
     dict[str, dict[str, Any]]
         Mapping ``{pair_label: {"distances": ndarray, "threshold": float | None}}``.
     """
-    import json
-
     pooled: dict[str, list[NDArray[np.float64]]] = {}
     thresholds: dict[str, float] = {}
 
-    for rep in replicates:
-        rep_dir = analysis_dir / f"run_{rep}"
-        result_file = rep_dir / "result.json"
-        if not result_file.exists():
-            continue
+    try:
+        artifacts = load_canonical_plot_artifacts(analysis_dir, replicates)
+    except (ArtifactStoreError, ValueError) as exc:
+        logger.warning(
+            "Failed to load canonical distance plot artifacts in %s: %s", analysis_dir, exc
+        )
+        return {}
 
+    for rep, artifact in artifacts.replicate_artifacts.items():
+        rep_dir = artifacts.run_dirs[rep]
         try:
-            with result_file.open(encoding="utf-8") as f:
-                result_data = json.load(f)
-            if result_data.get("artifact_type") == "replicate":
-                _collect_artifact_distances(rep_dir, result_data, pooled, thresholds)
-                continue
-
-            pair_results = result_data.get("pair_results", [])
-            if not pair_results and "distances" in result_data:
-                pair_results = [result_data]
-            for pair_result in pair_results:
-                pair_label = pair_result.get("pair_label", "Distance")
-                distances = pair_result.get("distances")
-                threshold = pair_result.get("threshold")
-                if distances is None:
-                    continue
-                pooled.setdefault(pair_label, []).append(np.asarray(distances, dtype=np.float64))
-                if threshold is not None and pair_label not in thresholds:
-                    thresholds[pair_label] = float(threshold)
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.debug(f"Failed to load {result_file}: {exc}")
+            _collect_artifact_distances(rep_dir, artifact, pooled, thresholds)
+        except (OSError, KeyError, ValueError) as exc:
+            logger.debug("Failed to load distance artifact %s: %s", rep_dir / "result.json", exc)
 
     result: dict[str, dict[str, Any]] = {}
     for pair_label, arrays in pooled.items():
@@ -430,8 +417,6 @@ def _load_distance_aggregated_results(
     dict[str, dict[str, Any]]
         Mapping ``{condition_label: aggregated_result_dict}``.
     """
-    import json
-
     results: dict[str, dict[str, Any]] = {}
 
     for label in labels:
@@ -443,51 +428,48 @@ def _load_distance_aggregated_results(
         if not aggregated_dir:
             continue
 
-        aggregated_path = Path(aggregated_dir)
-
-        result_file = aggregated_path / "result.json"
-        if not result_file.exists():
-            continue
-
         try:
-            with result_file.open(encoding="utf-8") as f:
-                loaded = json.load(f)
-            if loaded.get("artifact_type") == "condition":
-                payload = loaded.get("payload", {})
-                results[label] = {
-                    **payload,
-                    "sidecars": loaded.get("sidecars", []),
-                    "metadata": loaded.get("metadata", {}),
-                }
-            else:
-                results[label] = loaded
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.warning(f"Failed to load {result_file}: {exc}")
+            artifacts = load_canonical_plot_artifacts(Path(aggregated_dir).parent, [])
+        except (ArtifactStoreError, ValueError) as exc:
+            logger.warning("Failed to load canonical distance aggregate for %s: %s", label, exc)
+            continue
+        artifact = artifacts.condition_artifact
+        if artifact is None:
+            continue
+        results[label] = {
+            **artifact.payload,
+            "sidecars": [sidecar.model_dump(mode="json") for sidecar in artifact.sidecars],
+            "metadata": artifact.metadata,
+        }
 
     return results
 
 
 def _collect_artifact_distances(
     rep_dir: Path,
-    result_data: dict[str, Any],
+    artifact: Any,
     pooled: dict[str, list[NDArray[np.float64]]],
     thresholds: dict[str, float],
 ) -> None:
     """Collect raw distance arrays from a canonical replicate artifact sidecar."""
+    from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
 
     sidecar = next(
         (
             ref
-            for ref in result_data.get("sidecars", [])
-            if isinstance(ref, dict) and ref.get("metadata", {}).get("kind") == "distance_matrix"
+            for ref in artifact.sidecars
+            if getattr(ref, "metadata", {}).get("kind") == "distance_matrix"
         ),
         None,
     )
     if sidecar is None:
         return
-    sidecar_path = rep_dir / sidecar["path"]
-    payload_pairs = result_data.get("payload", {}).get("pairs", [])
-    with np.load(sidecar_path) as npz_data:
+    payload_pairs = artifact.payload.get("pairs", [])
+    try:
+        npz_context = ArtifactStore(rep_dir).load_npz_sidecar(sidecar)
+    except ArtifactStoreError as exc:
+        raise ValueError(f"invalid distance sidecar for {rep_dir / 'result.json'}: {exc}") from exc
+    with npz_context as npz_data:
         matrix = np.asarray(npz_data["distance_matrix"], dtype=np.float64)
         for pair_index, pair_result in enumerate(payload_pairs):
             if pair_index >= matrix.shape[0]:

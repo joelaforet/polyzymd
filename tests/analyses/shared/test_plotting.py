@@ -8,10 +8,17 @@ import matplotlib
 import numpy as np
 import pytest
 
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    ArtifactStoreError,
+    ConditionArtifact,
+    ReplicateArtifact,
+)
 from polyzymd.analyses.shared.plotting import (
     finite_numeric_values,
     grouped_bars,
     has_replicate_uncertainty,
+    load_canonical_plot_artifacts,
     scatter_replicate_values,
     scatter_stacked_segment_replicates,
     suppress_singleton_errors,
@@ -19,6 +26,76 @@ from polyzymd.analyses.shared.plotting import (
 from polyzymd.config.comparison import PlotSettings, PlotTheme
 
 matplotlib.use("Agg")
+
+
+def test_load_canonical_plot_artifacts_reads_configured_artifacts_only(tmp_path) -> None:
+    """Plot artifact loading should ignore legacy JSON and extra run directories."""
+    analysis_dir = tmp_path / "condition" / "rmsd"
+    aggregated_dir = analysis_dir / "aggregated"
+    run_1 = analysis_dir / "run_1"
+    run_99 = analysis_dir / "run_99"
+    run_99.mkdir(parents=True)
+
+    ArtifactStore(aggregated_dir).write_condition_result(
+        ConditionArtifact(
+            analysis_name="rmsd",
+            condition_label="condition",
+            replicates=[1],
+            payload={"metric": 1.0},
+        )
+    )
+    ArtifactStore(run_1).write_replicate_result(
+        ReplicateArtifact(
+            analysis_name="rmsd",
+            condition_label="condition",
+            replicate=1,
+            payload={"metric": 1.1},
+        )
+    )
+    (run_99 / "result.json").write_text('{"artifact_type": "replicate"}', encoding="utf-8")
+    (analysis_dir / "legacy_plot.json").write_text('{"metric": 99}', encoding="utf-8")
+
+    loaded = load_canonical_plot_artifacts(analysis_dir, [1])
+
+    assert loaded.condition_artifact is not None
+    assert loaded.condition_artifact.payload["metric"] == pytest.approx(1.0)
+    assert set(loaded.replicate_artifacts) == {1}
+    assert loaded.replicate_artifacts[1].payload["metric"] == pytest.approx(1.1)
+
+
+def test_load_canonical_plot_artifacts_rejects_legacy_result_json(tmp_path) -> None:
+    """Legacy JSON at the canonical path should fail artifact validation."""
+    analysis_dir = tmp_path / "condition" / "distances"
+    aggregated_dir = analysis_dir / "aggregated"
+    aggregated_dir.mkdir(parents=True)
+    (aggregated_dir / "result.json").write_text('{"pair_results": []}', encoding="utf-8")
+
+    with pytest.raises(ArtifactStoreError, match="condition artifact"):
+        load_canonical_plot_artifacts(analysis_dir, [])
+
+
+def test_load_canonical_plot_artifacts_rejects_corrupt_result_json(tmp_path) -> None:
+    """Corrupt canonical JSON should fail before plotters see payloads."""
+    analysis_dir = tmp_path / "condition" / "sasa"
+    run_dir = analysis_dir / "run_1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "result.json").write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(ArtifactStoreError, match="replicate artifact"):
+        load_canonical_plot_artifacts(analysis_dir, [1])
+
+
+def test_artifact_store_load_npz_sidecar_rejects_tampering(tmp_path) -> None:
+    """NPZ sidecar loading should validate the sidecar before opening it."""
+    store = ArtifactStore(tmp_path)
+    sidecar = store.write_npz_sidecar(
+        "sidecars/data.npz",
+        values=np.asarray([1.0, 2.0], dtype=np.float64),
+    )
+    store.resolve_sidecar(sidecar).write_bytes(b"tampered")
+
+    with pytest.raises(ArtifactStoreError, match="Sidecar .* mismatch"):
+        store.load_npz_sidecar(sidecar)
 
 
 def test_finite_numeric_values_skips_invalid_entries() -> None:

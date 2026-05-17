@@ -15,6 +15,7 @@ from polyzymd.analyses.shared.plotting import (
     get_colors,
     get_output_path,
     has_replicate_uncertainty,
+    load_canonical_plot_artifacts,
     save_figure,
     scatter_replicate_values,
     suppress_singleton_errors,
@@ -220,6 +221,9 @@ def plot_sasa_timeseries(ctx: PlotContext, comparison_result: SASAComparisonResu
 
     plot_settings = cast(SASAPlotSettings, _get_plot_settings(ctx))
     condition_labels = [condition.label for condition in comparison_result.conditions]
+    replicates_by_condition = {
+        condition.label: list(condition.replicates) for condition in ctx.conditions
+    }
     colors = get_colors(len(condition_labels), ctx.plot_settings)
 
     generated: list[Path] = []
@@ -232,7 +236,11 @@ def plot_sasa_timeseries(ctx: PlotContext, comparison_result: SASAComparisonResu
             if condition_dir is None:
                 continue
 
-            time_ns, sasa_matrix = _load_replicate_timeseries_from_results(condition_dir, run_label)
+            time_ns, sasa_matrix = _load_replicate_timeseries_from_results(
+                condition_dir,
+                run_label,
+                replicates_by_condition.get(condition_label, []),
+            )
             if time_ns.size == 0 or sasa_matrix.size == 0:
                 continue
 
@@ -561,30 +569,30 @@ def _is_valid_control_mean(value: float) -> bool:
 def _load_replicate_timeseries_from_results(
     condition_dir: Path,
     run_label: str,
+    replicates: Sequence[int],
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load per-replicate SASA timeseries from canonical artifacts."""
     import numpy as np
 
     times: list[np.ndarray] = []
     traces: list[np.ndarray] = []
-    for run_dir in sorted(condition_dir.glob("run_*")):
+    try:
+        artifacts = load_canonical_plot_artifacts(condition_dir, replicates)
+    except ArtifactStoreError as exc:
+        LOGGER.warning("Failed to load canonical SASA plot artifacts in %s: %s", condition_dir, exc)
+        return np.array([], dtype=np.float64), np.empty((0, 0), dtype=np.float64)
+
+    for replicate, artifact in artifacts.replicate_artifacts.items():
+        run_dir = artifacts.run_dirs[replicate]
         result_path = run_dir / "result.json"
-        if not result_path.exists():
-            continue
         try:
-            artifact = ArtifactStore(run_dir).read_replicate_result("result.json")
-        except (ArtifactStoreError, OSError, ValueError) as exc:
-            LOGGER.warning("Failed to load canonical SASA artifact %s: %s", result_path, exc)
-            continue
-        run_result = _artifact_run_payload(artifact.payload.get("run_results", []), run_label)
-        if run_result is None:
-            continue
-        sidecar_ref = _artifact_sidecar(artifact.sidecars, run_result)
-        if sidecar_ref is None:
-            continue
-        try:
-            npz_path = ArtifactStore(run_dir).validate_sidecar(sidecar_ref)
-            with np.load(npz_path) as payload:
+            run_result = _artifact_run_payload(artifact.payload.get("run_results", []), run_label)
+            if run_result is None:
+                continue
+            sidecar_ref = _artifact_sidecar(artifact.sidecars, run_result)
+            if sidecar_ref is None:
+                continue
+            with ArtifactStore(run_dir).load_npz_sidecar(sidecar_ref) as payload:
                 total_sasa = np.asarray(payload["total_sasa_a2"], dtype=np.float64)
                 time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
         except (ArtifactStoreError, FileNotFoundError, KeyError, ValueError) as exc:
@@ -620,18 +628,18 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
     return artifact.payload
 
 
-def _load_condition_result_payloads(condition_dir: Path) -> list[dict]:
+def _load_condition_result_payloads(
+    condition_dir: Path,
+    replicates: Sequence[int] = (),
+) -> list[dict]:
     """Load all per-replicate run payloads from canonical artifacts."""
     payloads: list[dict] = []
-    for run_dir in sorted(condition_dir.glob("run_*")):
-        result_path = run_dir / "result.json"
-        if not result_path.exists():
-            continue
-        try:
-            artifact = ArtifactStore(run_dir).read_replicate_result("result.json")
-        except ArtifactStoreError as exc:
-            LOGGER.warning("Failed to load SASA replicate artifact %s: %s", result_path, exc)
-            continue
+    try:
+        artifacts = load_canonical_plot_artifacts(condition_dir, replicates)
+    except ArtifactStoreError as exc:
+        LOGGER.warning("Failed to load canonical SASA plot artifacts in %s: %s", condition_dir, exc)
+        return []
+    for artifact in artifacts.replicate_artifacts.values():
         for run_result in artifact.payload.get("run_results", []):
             if isinstance(run_result, dict):
                 payloads.append(run_result)

@@ -832,7 +832,9 @@ def test_sasa_timeseries_loader_uses_canonical_artifact_sidecars(tmp_path: Path)
         raw=_raw_sasa(total=[10.0, 12.0, 11.0]),
     )
 
-    time_ns, matrix = _load_replicate_timeseries_from_results(tmp_path / "condition", "protein")
+    time_ns, matrix = _load_replicate_timeseries_from_results(
+        tmp_path / "condition", "protein", [1]
+    )
     loaded = load_replicate_sasa_sidecar(artifact, "protein", tmp_path / "condition" / "run_1")
 
     assert loaded.total_sasa_a2.tolist() == pytest.approx([10.0, 12.0, 11.0])
