@@ -308,15 +308,6 @@ class TestSettings:
         )
 
 
-def _make_mock_contact_result(replicate: int = 1):
-    """Create a mock ContactResult."""
-    mock = MagicMock()
-    mock.replicate = replicate
-    mock.save = MagicMock()
-    mock.has_per_residue_statistics = MagicMock(return_value=True)
-    return mock
-
-
 def _make_hashable_sim_config(tmp_path: Path):
     """Build a lightweight config object compatible with ``compute_config_hash``."""
 
@@ -529,44 +520,6 @@ class TestContactsMDAArtifacts:
             assert data["protein_resids"].tolist() == [1]
             assert data["polymer_resids"].tolist() == [10]
 
-    def test_artifact_adapter_preserves_legacy_contact_semantics(self, tmp_path):
-        from polyzymd.analyses.contacts import ContactsSettings
-        from polyzymd.analyses.contacts._mda import (
-            ContactsArtifactCollector,
-            artifact_to_contact_result,
-            build_contact_event_analysis,
-        )
-        from polyzymd.analyses.mda import FrameSelection, MDAAnalysisJob
-
-        settings = ContactsSettings()
-        analysis = build_contact_event_analysis(
-            universe=_make_contact_universe(),
-            protein_selection="chainid A",
-            polymer_selection="chainid C",
-            cutoff=4.5,
-            grouping_mode="aa_class",
-            raw_timestep_ps=1.0,
-        )
-        job = MDAAnalysisJob(
-            name="contacts",
-            analysis=analysis,
-            frame_selection=FrameSelection(
-                start=0, stop=2, step=1, timestep_ps=1.0, n_frames_total=2
-            ),
-        )
-        artifact = ContactsArtifactCollector()(
-            _make_contacts_collector_context(tmp_path, settings), [job.run()]
-        )
-
-        result = artifact_to_contact_result(
-            artifact, run_dir=tmp_path, settings_fingerprint="contacts-test-fp"
-        )
-
-        assert result.n_frames == 2
-        assert result.coverage_fraction() == 1.0
-        assert result.mean_contact_fraction() == 0.5
-        assert result.residue_contacts[0].segment_contacts[0].events[0].start_frame == 0
-
 
 class TestContactsSparseEventUtilities:
     """Contacts-local helpers preserve legacy scientific semantics."""
@@ -642,90 +595,6 @@ class TestContactsSparseEventUtilities:
 # ---------------------------------------------------------------------------
 # aggregate
 # ---------------------------------------------------------------------------
-
-
-def _make_mock_agg_result(n_replicates: int = 3, n_residues: int = 5):
-    """Create a mock AggregatedContactResult."""
-    mock = MagicMock()
-    mock.n_replicates = n_replicates
-    mock.replicates = list(range(1, n_replicates + 1))
-    mock.n_residues = n_residues
-    mock.coverage_mean = 0.8
-    mock.coverage_sem = 0.05
-    mock.mean_contact_fraction = 0.3
-    mock.mean_contact_fraction_sem = 0.02
-    mock.residence_time_by_polymer_type = {"SBM": (10.0, 1.0)}
-    mock.metadata = {}
-    mock.save = MagicMock()
-
-    residue_stats = []
-    for i in range(n_residues):
-        rs = MagicMock()
-        rs.protein_resid = i + 1
-        # Per-replicate contact fractions
-        fracs = [0.2 + i * 0.05 + rep * 0.01 for rep in range(n_replicates)]
-        rs.contact_fraction_per_replicate = fracs
-        residue_stats.append(rs)
-    mock.residue_stats = residue_stats
-
-    return mock
-
-
-def _make_valid_agg_result(settings, n_replicates: int = 2, n_residues: int = 2):
-    """Create a valid aggregated contacts result for compare regression tests.
-
-    Parameters
-    ----------
-    settings : ContactsSettings
-        Contacts settings used to stamp cache identity metadata.
-    n_replicates : int, optional
-        Number of replicate vectors to include, by default 2.
-    n_residues : int, optional
-        Number of residue summary rows to include, by default 2.
-
-    Returns
-    -------
-    AggregatedContactResult
-        Aggregate result with window, replicate, and settings metadata.
-    """
-    from polyzymd.analyses.contacts._aggregator import (
-        AggregatedContactResult,
-        AggregatedResidueStats,
-    )
-    from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
-
-    residue_stats = []
-    for residue_index in range(n_residues):
-        fractions = [0.25 + 0.05 * residue_index + 0.05 * rep for rep in range(n_replicates)]
-        residue_stats.append(
-            AggregatedResidueStats(
-                protein_resid=residue_index + 1,
-                protein_resname="ALA",
-                contact_fraction_mean=sum(fractions) / len(fractions),
-                contact_fraction_sem=0.01,
-                contact_fraction_per_replicate=fractions,
-            )
-        )
-
-    return AggregatedContactResult(
-        n_replicates=n_replicates,
-        replicates=list(range(1, n_replicates + 1)),
-        residue_stats=residue_stats,
-        total_frames_per_replicate=[10] * n_replicates,
-        criteria_cutoff=float(settings.cutoff),
-        coverage_mean=1.0,
-        coverage_sem=0.0,
-        mean_contact_fraction=0.325,
-        mean_contact_fraction_sem=0.01,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        metadata={
-            "contacts_detection_fingerprint": contacts_detection_fingerprint(settings),
-            "compute_residence_times": bool(settings.compute_residence_times),
-            "residence_times_computed": bool(settings.compute_residence_times),
-            "replicates": list(range(1, n_replicates + 1)),
-        },
-    )
 
 
 def _write_contacts_replicate_artifact(
@@ -1086,7 +955,7 @@ class TestAggregate:
         )
 
         with pytest.raises(ValueError, match="ReplicateArtifact inputs"):
-            analysis.aggregate(ctx, [_make_mock_contact_result(1), _make_mock_contact_result(2)])
+            analysis.aggregate(ctx, [object(), object()])
 
     def test_aggregate_rejects_sidecar_hash_mismatch(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition
@@ -1195,56 +1064,34 @@ class TestPerReplicateMetrics:
     """Test contacts replicate metric helpers."""
 
     def test_coverage_per_replicate(self):
+        from polyzymd.analyses.contacts import ContactsSettings
         from polyzymd.analyses.contacts._comparison import compute_coverage_per_replicate
 
-        agg = _make_mock_agg_result(n_replicates=3, n_residues=5)
-        # By default all residues have >0 fractions, so coverage should be 1.0
-        coverages = compute_coverage_per_replicate(agg)
-        assert len(coverages) == 3
-        for c in coverages:
-            assert c == 1.0  # all residues have >0 contact fraction
+        artifact = _make_condition_artifact("A", ContactsSettings(), replicates=(1, 2, 3))
+
+        assert compute_coverage_per_replicate(artifact) == [1.0, 1.0, 1.0]
 
     def test_coverage_with_zero_fractions(self):
+        from polyzymd.analyses.contacts import ContactsSettings
         from polyzymd.analyses.contacts._comparison import compute_coverage_per_replicate
 
-        agg = MagicMock()
-        agg.n_replicates = 2
-        agg.n_residues = 3
+        artifact = _make_condition_artifact("A", ContactsSettings(), replicates=(1, 2))
+        artifact.payload["metrics"]["coverage"]["values"] = [2 / 3, 1 / 3]
 
-        # Residue 1: contacted in both reps
-        # Residue 2: contacted only in rep 0
-        # Residue 3: never contacted
-        rs1 = MagicMock()
-        rs1.contact_fraction_per_replicate = [0.5, 0.3]
-        rs2 = MagicMock()
-        rs2.contact_fraction_per_replicate = [0.1, 0.0]
-        rs3 = MagicMock()
-        rs3.contact_fraction_per_replicate = [0.0, 0.0]
-        agg.residue_stats = [rs1, rs2, rs3]
-
-        coverages = compute_coverage_per_replicate(agg)
-        assert len(coverages) == 2
-        assert coverages[0] == pytest.approx(2 / 3)  # rs1 + rs2 contacted in rep 0
-        assert coverages[1] == pytest.approx(1 / 3)  # only rs1 contacted in rep 1
+        coverages = compute_coverage_per_replicate(artifact)
+        assert coverages[0] == pytest.approx(2 / 3)
+        assert coverages[1] == pytest.approx(1 / 3)
 
     def test_contact_fraction_per_replicate(self):
+        from polyzymd.analyses.contacts import ContactsSettings
         from polyzymd.analyses.contacts._comparison import (
             compute_contact_fraction_per_replicate,
         )
 
-        agg = MagicMock()
-        agg.n_replicates = 2
+        artifact = _make_condition_artifact("A", ContactsSettings(), replicates=(1, 2))
+        artifact.payload["metrics"]["mean_contact_fraction"]["values"] = [0.3, 0.7]
 
-        rs1 = MagicMock()
-        rs1.contact_fraction_per_replicate = [0.4, 0.6]
-        rs2 = MagicMock()
-        rs2.contact_fraction_per_replicate = [0.2, 0.8]
-        agg.residue_stats = [rs1, rs2]
-
-        fractions = compute_contact_fraction_per_replicate(agg)
-        assert len(fractions) == 2
-        assert fractions[0] == pytest.approx(0.3)  # (0.4 + 0.2) / 2
-        assert fractions[1] == pytest.approx(0.7)  # (0.6 + 0.8) / 2
+        assert compute_contact_fraction_per_replicate(artifact) == [0.3, 0.7]
 
 
 # ---------------------------------------------------------------------------
@@ -1256,35 +1103,32 @@ class TestResidueSetValidation:
     """Test contacts residue-set validation."""
 
     def test_matching_residue_sets(self):
+        from polyzymd.analyses.contacts import ContactsSettings
         from polyzymd.analyses.contacts._comparison import validate_residue_sets
 
         cond_a = MagicMock()
         cond_a.label = "A"
-        data_a = {"agg_result": MagicMock()}
-        rs_a = [MagicMock(protein_resid=i) for i in [1, 2, 3]]
-        data_a["agg_result"].residue_stats = rs_a
+        data_a = {"agg_result": _make_condition_artifact("A", ContactsSettings(), n_residues=3)}
 
         cond_b = MagicMock()
         cond_b.label = "B"
-        data_b = {"agg_result": MagicMock()}
-        rs_b = [MagicMock(protein_resid=i) for i in [1, 2, 3]]
-        data_b["agg_result"].residue_stats = rs_b
+        data_b = {"agg_result": _make_condition_artifact("B", ContactsSettings(), n_residues=3)}
 
         # Should not raise
         validate_residue_sets([(cond_a, data_a), (cond_b, data_b)])
 
     def test_mismatched_residue_sets(self):
+        from polyzymd.analyses.contacts import ContactsSettings
         from polyzymd.analyses.contacts._comparison import validate_residue_sets
 
         cond_a = MagicMock()
         cond_a.label = "A"
-        data_a = {"agg_result": MagicMock()}
-        data_a["agg_result"].residue_stats = [MagicMock(protein_resid=i) for i in [1, 2, 3]]
+        data_a = {"agg_result": _make_condition_artifact("A", ContactsSettings(), n_residues=3)}
 
         cond_b = MagicMock()
         cond_b.label = "B"
-        data_b = {"agg_result": MagicMock()}
-        data_b["agg_result"].residue_stats = [MagicMock(protein_resid=i) for i in [1, 2, 4]]
+        data_b = {"agg_result": _make_condition_artifact("B", ContactsSettings(), n_residues=3)}
+        data_b["agg_result"].payload["residue_stats"][2]["protein_resid"] = 4
 
         with pytest.raises(ValueError, match="Residue set mismatch"):
             validate_residue_sets([(cond_a, data_a), (cond_b, data_b)])
@@ -1419,27 +1263,6 @@ class TestFilterConditions:
 # ---------------------------------------------------------------------------
 # compare — full override
 # ---------------------------------------------------------------------------
-
-
-def _make_condition_and_data(label: str, n_reps: int = 3, n_residues: int = 5):
-    """Build a mock condition + data dict for compare() tests."""
-    from polyzymd.analyses.base import Condition
-
-    mock_sim_config = MagicMock()
-    cond = Condition(
-        label=label,
-        config_path=Path(f"/tmp/{label}/config.yaml"),
-        replicates=tuple(range(1, n_reps + 1)),
-        sim_config=mock_sim_config,
-    )
-
-    agg = _make_mock_agg_result(n_replicates=n_reps, n_residues=n_residues)
-    data = {
-        "agg_result": agg,
-        "coverage_per_replicate": [0.8 + i * 0.01 for i in range(n_reps)],
-        "contact_fraction_per_replicate": [0.3 + i * 0.005 for i in range(n_reps)],
-    }
-    return cond, data
 
 
 class TestCompare:
@@ -1845,7 +1668,9 @@ class TestCompare:
         analysis_dir = tmp_path / "Cached" / "contacts"
         agg_dir = analysis_dir / "aggregated"
         agg_dir.mkdir(parents=True)
-        _make_valid_agg_result(settings).save(agg_dir / "result.json")
+        (agg_dir / "result.json").write_text(
+            '{"analysis_type":"contacts_aggregated","n_replicates":2}', encoding="utf-8"
+        )
         ctx = ComparisonContext(
             name="test",
             conditions=[condition],
@@ -1877,7 +1702,9 @@ class TestCompare:
         analysis_dir = tmp_path / "LegacyRoot" / "contacts"
         (analysis_dir / "aggregated").mkdir(parents=True)
         legacy_path = analysis_dir / "contacts_aggregated_eq10ns_cut4.5_reps1-2.json"
-        _make_valid_agg_result(settings).save(legacy_path)
+        legacy_path.write_text(
+            '{"analysis_type":"contacts_aggregated","n_replicates":2}', encoding="utf-8"
+        )
         ctx = ComparisonContext(
             name="test",
             conditions=[condition],
@@ -2166,20 +1993,22 @@ class TestDeserializeResult:
 
     def test_aggregated_result_class_set(self):
         from polyzymd.analyses.contacts import ContactsAnalysis
-        from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
+        from polyzymd.analyses.mda import ConditionArtifact
 
-        assert ContactsAnalysis.AggregatedResultClass is AggregatedContactResult
+        assert ContactsAnalysis.AggregatedResultClass is ConditionArtifact
 
-    def test_deserialize_delegates_to_load(self, tmp_path):
-        from polyzymd.analyses.contacts import ContactsAnalysis
+    def test_deserialize_loads_condition_artifact(self, tmp_path):
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact
 
         analysis = ContactsAnalysis()
+        artifact = _make_condition_artifact("Canonical", ContactsSettings(), replicates=(1, 2))
+        ArtifactStore(tmp_path).write_condition_result(artifact)
 
-        mock_result = MagicMock()
-        with patch.object(analysis.AggregatedResultClass, "load", return_value=mock_result):
-            result = analysis._deserialize_result(tmp_path / "test.json")
+        result = analysis._deserialize_result(tmp_path / "result.json")
 
-        assert result is mock_result
+        assert isinstance(result, ConditionArtifact)
+        assert result.condition_label == "Canonical"
 
 
 # ---------------------------------------------------------------------------

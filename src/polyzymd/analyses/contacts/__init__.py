@@ -41,7 +41,6 @@ from polyzymd.analyses.base import (
 from polyzymd.analyses.contacts import _comparison as _contacts_comparison
 from polyzymd.analyses.contacts import _filters as _contacts_filters
 from polyzymd.analyses.contacts import _lifecycle as _contacts_lifecycle
-from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
 from polyzymd.analyses.contacts._identity import (
     contacts_detection_fingerprint,
     normalize_polymer_types,
@@ -51,7 +50,7 @@ from polyzymd.analyses.contacts._mda import (
     build_contacts_jobs,
 )
 from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
-from polyzymd.analyses.mda import MDAAnalysisJob
+from polyzymd.analyses.mda import ConditionArtifact, MDAAnalysisJob
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
 
@@ -255,7 +254,7 @@ class ContactsAnalysis(Analysis):
     execution_cost_hint: ClassVar[str] = "high"
     Settings: ClassVar[type] = ContactsSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = ContactsPlotSettings
-    AggregatedResultClass: ClassVar[type] = AggregatedContactResult
+    AggregatedResultClass: ClassVar[type] = ConditionArtifact
     ReplicateResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()

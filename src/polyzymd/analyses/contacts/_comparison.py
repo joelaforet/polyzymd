@@ -410,13 +410,13 @@ def _equilibration_to_ps(value: Any) -> float:
     return float(convert_time(numeric_value, unit, "ps"))
 
 
-def compute_coverage_per_replicate(result: Any) -> list[float]:
-    """Compute coverage per replicate from residue statistics.
+def compute_coverage_per_replicate(result: ConditionArtifact) -> list[float]:
+    """Return coverage per replicate from a contacts condition artifact.
 
     Parameters
     ----------
-    result : Any
-        Aggregated contacts result with per-residue replicate fractions.
+    result : ConditionArtifact
+        Canonical contacts condition artifact.
 
     Returns
     -------
@@ -424,29 +424,16 @@ def compute_coverage_per_replicate(result: Any) -> list[float]:
         Fraction of residues contacted in each replicate.
     """
 
-    if isinstance(result, ConditionArtifact):
-        return [float(value) for value in result.payload["metrics"]["coverage"]["values"]]
-
-    n_replicates = result.n_replicates
-    n_residues = result.n_residues
-
-    coverages = []
-    for rep_idx in range(n_replicates):
-        contacted = sum(
-            1 for rs in result.residue_stats if rs.contact_fraction_per_replicate[rep_idx] > 0
-        )
-        coverages.append(contacted / n_residues if n_residues > 0 else 0.0)
-
-    return coverages
+    return [float(value) for value in result.payload["metrics"]["coverage"]["values"]]
 
 
-def compute_contact_fraction_per_replicate(result: Any) -> list[float]:
-    """Compute mean contact fraction per replicate.
+def compute_contact_fraction_per_replicate(result: ConditionArtifact) -> list[float]:
+    """Return mean contact fraction per replicate from a contacts condition artifact.
 
     Parameters
     ----------
-    result : Any
-        Aggregated contacts result with per-residue replicate fractions.
+    result : ConditionArtifact
+        Canonical contacts condition artifact.
 
     Returns
     -------
@@ -454,20 +441,7 @@ def compute_contact_fraction_per_replicate(result: Any) -> list[float]:
         Mean contact fraction for each replicate.
     """
 
-    if isinstance(result, ConditionArtifact):
-        return [
-            float(value) for value in result.payload["metrics"]["mean_contact_fraction"]["values"]
-        ]
-
-    n_replicates = result.n_replicates
-
-    fractions = []
-    for rep_idx in range(n_replicates):
-        rep_fractions = [rs.contact_fraction_per_replicate[rep_idx] for rs in result.residue_stats]
-        mean_frac = float(np.mean(rep_fractions)) if rep_fractions else 0.0
-        fractions.append(mean_frac)
-
-    return fractions
+    return [float(value) for value in result.payload["metrics"]["mean_contact_fraction"]["values"]]
 
 
 def validate_residue_sets(condition_data: list[tuple[Condition, dict[str, Any]]]) -> None:
@@ -504,32 +478,17 @@ def validate_residue_sets(condition_data: list[tuple[Condition, dict[str, Any]]]
             )
 
 
-def _residue_identity_set(result: Any) -> set[tuple[int, str, str]]:
-    """Return chain-safe residue identities for legacy or condition artifacts."""
+def _residue_identity_set(result: ConditionArtifact) -> set[tuple[int, str, str]]:
+    """Return chain-safe residue identities for a condition artifact."""
 
-    if isinstance(result, ConditionArtifact):
-        return {
-            (
-                int(row.get("protein_resid", 0)),
-                str(row.get("protein_resname", "")),
-                str(row.get("protein_chain_id", "")),
-            )
-            for row in result.payload.get("residue_stats", [])
-        }
     return {
         (
-            int(getattr(row, "protein_resid", 0)),
-            _identity_text(getattr(row, "protein_resname", "")),
-            _identity_text(getattr(row, "protein_chain_id", "")),
+            int(row.get("protein_resid", 0)),
+            str(row.get("protein_resname", "")),
+            str(row.get("protein_chain_id", "")),
         )
-        for row in getattr(result, "residue_stats", [])
+        for row in result.payload.get("residue_stats", [])
     }
-
-
-def _identity_text(value: Any) -> str:
-    """Return stable identity text for optional legacy residue attributes."""
-
-    return value if isinstance(value, str) else ""
 
 
 def compute_contacts_pairwise(

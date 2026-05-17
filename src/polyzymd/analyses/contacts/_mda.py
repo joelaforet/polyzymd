@@ -28,12 +28,6 @@ from polyzymd.analyses.contacts._identity import (
     contacts_detection_identity_payload,
     normalize_polymer_types,
 )
-from polyzymd.analyses.contacts._results import (
-    ContactEvent,
-    ContactResult,
-    PolymerSegmentContacts,
-    ResidueContactData,
-)
 from polyzymd.analyses.mda import (
     ArtifactStore,
     MDAAnalysisJob,
@@ -365,51 +359,6 @@ class ContactsArtifactCollector:
         )
 
 
-def artifact_to_contact_result(
-    artifact: ReplicateArtifact,
-    *,
-    run_dir: Path,
-    settings_fingerprint: str | None = None,
-) -> ContactResult:
-    """Adapt a contact replicate artifact to the legacy result model."""
-
-    if artifact.analysis_name != "contacts":
-        raise ValueError(f"Expected contacts artifact, got {artifact.analysis_name!r}")
-    stored_fingerprint = artifact.metadata.get("settings_fingerprint")
-    if settings_fingerprint is not None and stored_fingerprint != settings_fingerprint:
-        raise ValueError(
-            "Contacts replicate artifact settings fingerprint mismatch: expected "
-            f"{settings_fingerprint!r}, got {stored_fingerprint!r}. Recompute stale caches."
-        )
-    data = load_contact_events_sidecar(artifact, run_dir)
-    payload = artifact.payload
-    residue_contacts = _legacy_residue_contacts(data)
-    result = ContactResult(
-        config_hash=str(artifact.metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(artifact.metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=int(artifact.replicate),
-        equilibration_time=float(artifact.metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(artifact.metadata.get("equilibration_unit", "ns")),
-        selection_string=str(artifact.metadata.get("selection_string", "")),
-        residue_contacts=residue_contacts,
-        n_frames=int(payload.get("n_frames_used", data["frame_indices"].size)),
-        timestep_ps=float(artifact.metadata.get("timestep_ps", 1.0)),
-        criteria_label=f"any_atom_{float(payload.get('criteria_cutoff', 0.0)):.1f}A",
-        criteria_cutoff=float(payload.get("criteria_cutoff", 0.0)),
-        start_frame=int(data["frame_indices"][0]) if data["frame_indices"].size else 0,
-        metadata={
-            "settings_fingerprint": stored_fingerprint,
-            "contacts_detection_fingerprint": artifact.metadata.get(
-                "contacts_detection_fingerprint"
-            ),
-            "source_artifact": str(run_dir / "result.json"),
-            "time_axis_policy": artifact.metadata.get("time_axis_policy"),
-        },
-    )
-    result.compute_per_residue_statistics()
-    return result
-
-
 def load_contact_events_sidecar(artifact: ReplicateArtifact, run_dir: Path) -> dict[str, Any]:
     """Load and validate one contact-events NPZ sidecar."""
 
@@ -540,53 +489,6 @@ def _protein_summary_rows(results: Any, n_frames_used: int) -> list[dict[str, An
             }
         )
     return rows
-
-
-def _legacy_residue_contacts(data: Mapping[str, Any]) -> list[ResidueContactData]:
-    """Convert sidecar event arrays to legacy residue contact rows."""
-
-    n_protein = int(np.asarray(data["protein_resids"]).size)
-    segment_events: dict[tuple[int, int], list[ContactEvent]] = defaultdict(list)
-    for start_sample, duration, protein_idx, polymer_idx in zip(
-        np.asarray(data["event_start_sample_index"], dtype=np.int64),
-        np.asarray(data["event_duration_samples"], dtype=np.int64),
-        np.asarray(data["protein_residue_index"], dtype=np.int64),
-        np.asarray(data["polymer_residue_index"], dtype=np.int64),
-    ):
-        segment_events[(int(protein_idx), int(polymer_idx))].append(
-            ContactEvent(start_frame=int(start_sample), duration=int(duration))
-        )
-
-    residue_contacts: list[ResidueContactData] = []
-    protein_resids = np.asarray(data["protein_resids"], dtype=np.int64)
-    protein_resnames = [str(value) for value in data["protein_resnames"].tolist()]
-    protein_groups = [str(value) for value in data["protein_groups"].tolist()]
-    polymer_resids = np.asarray(data["polymer_resids"], dtype=np.int64)
-    polymer_resnames = [str(value) for value in data["polymer_resnames"].tolist()]
-    polymer_chain_indices = np.asarray(data["polymer_chain_indices"], dtype=np.int64)
-    for protein_idx in range(n_protein):
-        contacts: list[PolymerSegmentContacts] = []
-        for polymer_idx in range(polymer_resids.size):
-            events = segment_events.get((protein_idx, polymer_idx), [])
-            if not events:
-                continue
-            contacts.append(
-                PolymerSegmentContacts(
-                    polymer_resname=polymer_resnames[polymer_idx],
-                    polymer_resid=int(polymer_resids[polymer_idx]),
-                    polymer_chain_idx=int(polymer_chain_indices[polymer_idx]),
-                    events=events,
-                )
-            )
-        residue_contacts.append(
-            ResidueContactData(
-                protein_resid=int(protein_resids[protein_idx]),
-                protein_resname=protein_resnames[protein_idx],
-                protein_group=protein_groups[protein_idx],
-                segment_contacts=contacts,
-            )
-        )
-    return residue_contacts
 
 
 def _contact_events_sidecar(artifact: ReplicateArtifact) -> ArtifactSidecarRef:
