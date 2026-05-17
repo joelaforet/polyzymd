@@ -77,10 +77,10 @@ class BaseAnalysisResult(BaseModel, ABC):
        and ``selection_string`` have sensible defaults for analyzers that
        operate without full config context (e.g., low-level ``ContactAnalyzer``).
 
-    6. **Backward compatibility** — if migrating from a legacy format, use a
-       ``model_validator(mode="before")`` to remap old field names.  See
-       ``ContactResult`` for an example mapping ``analysis_timestamp`` →
-       ``created_at``.
+    6. **Backward compatibility** — if migrating from a legacy format, keep
+       remapping local to the active result class with a
+       ``model_validator(mode="before")`` and cover it with focused
+       regression tests.
 
     Attributes
     ----------
