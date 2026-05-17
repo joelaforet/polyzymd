@@ -20,9 +20,9 @@ from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
-from openff.toolkit import Molecule
-
 if TYPE_CHECKING:
+    from openff.toolkit import Molecule
+
     from polyzymd.config.schema import MonomerSpec, PolymerConfig, ReactionConfig
 
 LOGGER = logging.getLogger(__name__)

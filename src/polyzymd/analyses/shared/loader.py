@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Iterator, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import ValidationError
 
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
@@ -257,12 +258,11 @@ class TrajectoryLoader:
             engine_dir = working_dir
         try:
             layout = engine.resolve_trajectory_layout(engine_dir, replicate)
-        except Exception as exc:
-            # Pydantic ValidationError, TypeError, etc. when paths are
-            # invalid (e.g. MagicMock in tests).  Translate to
-            # FileNotFoundError so callers' existing handlers work.
-            if isinstance(exc, FileNotFoundError):
-                raise
+        except FileNotFoundError:
+            raise
+        except (TypeError, ValueError, ValidationError) as exc:
+            # Invalid path-like inputs are treated as missing layouts so callers
+            # can use the existing discovery fallback path
             raise FileNotFoundError(
                 f"Engine could not resolve trajectory layout in {working_dir}: {exc}"
             ) from exc

@@ -11,9 +11,9 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Literal, Optional, Union
 
-from openff.toolkit import Molecule
-
 if TYPE_CHECKING:
+    from openff.toolkit import Molecule
+
     from polyzymd.config.schema import ChargeMethod, SubstrateConfig
 
 LOGGER = logging.getLogger(__name__)
@@ -91,6 +91,8 @@ class SubstrateBuilder:
             IndexError: If the conformer index is out of range.
             ValueError: If the charge method is not supported.
         """
+        from openff.toolkit import Molecule
+
         sdf_path = Path(sdf_path)
 
         if not sdf_path.exists():
