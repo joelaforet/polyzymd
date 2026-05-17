@@ -56,6 +56,7 @@ from polyzymd.analyses.distances._plotters import (
     _plot_distance_kde,
     _plot_distance_state_bars,
     _plot_distance_threshold_bars,
+    build_distance_plot_data,
 )
 from polyzymd.analyses.distances._results import (
     DistanceAggregatedResult,
@@ -1410,21 +1411,22 @@ class DistancesAnalysis(Analysis):
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
         plot_settings = ctx.plot_settings
+        plot_data = build_distance_plot_data(data, labels)
 
         try:
-            result = _plot_distance_kde(data, labels, ctx.output_dir, plot_settings)
+            result = _plot_distance_kde(plot_data, labels, ctx.output_dir, plot_settings)
             plots.extend(result)
         except (ValueError, RuntimeError, OSError) as exc:
             logger.warning(f"Distance KDE plot failed: {exc}")
 
         try:
-            result = _plot_distance_threshold_bars(data, labels, ctx.output_dir, plot_settings)
+            result = _plot_distance_threshold_bars(plot_data, labels, ctx.output_dir, plot_settings)
             plots.extend(result)
         except (ValueError, RuntimeError, OSError) as exc:
             logger.warning(f"Distance threshold bars plot failed: {exc}")
 
         try:
-            result = _plot_distance_state_bars(data, labels, ctx.output_dir, plot_settings)
+            result = _plot_distance_state_bars(plot_data, labels, ctx.output_dir, plot_settings)
             plots.extend(result)
         except (ValueError, RuntimeError, OSError) as exc:
             logger.warning(f"Distance state bars plot failed: {exc}")

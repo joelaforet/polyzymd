@@ -61,7 +61,7 @@ def load_canonical_plot_artifacts(
     replicates: Sequence[int],
     *,
     require_condition: bool = False,
-    require_replicates: bool = False,
+    require_replicates: bool = True,
 ) -> ArtifactPlotData:
     """Load plot inputs from canonical MDAnalysis artifacts only.
 
@@ -80,7 +80,7 @@ def load_canonical_plot_artifacts(
         Raise when ``aggregated/result.json`` is absent, by default False.
     require_replicates : bool, optional
         Raise when any configured ``run_N/result.json`` is absent, by default
-        False.
+        True.
 
     Returns
     -------

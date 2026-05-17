@@ -10,6 +10,7 @@ All functions are called exclusively from ``DistanceAnalysis.plot()``.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -31,13 +32,45 @@ from polyzymd.analyses.shared.plotting import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class DistancePlotData:
+    """Loaded distance artifact data prepared before rendering."""
+
+    pooled_distances: dict[str, dict[str, dict[str, Any]]]
+    aggregated_results: dict[str, dict[str, Any]]
+    pair_settings: list[Any] | None = None
+
+
+def build_distance_plot_data(data: dict[str, Any], labels: Sequence[str]) -> DistancePlotData:
+    """Load all canonical distance plot inputs before rendering.
+
+    Parameters
+    ----------
+    data : dict of str to Any
+        Plot data dictionary produced by the analysis framework.
+    labels : sequence of str
+        Condition labels in display order.
+
+    Returns
+    -------
+    DistancePlotData
+        Sidecar-derived distance arrays and condition artifact payloads.
+    """
+
+    return DistancePlotData(
+        pooled_distances=_collect_distance_data(data, labels),
+        aggregated_results=_load_distance_aggregated_results(data, labels),
+        pair_settings=_get_distance_pair_settings(data),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public entry points (called from DistanceAnalysis.plot)
 # ---------------------------------------------------------------------------
 
 
 def _plot_distance_kde(
-    data: dict[str, Any],
+    data: DistancePlotData,
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -71,7 +104,7 @@ def _plot_distance_kde(
 
     t = get_theme(plot_settings)
 
-    pair_data = _collect_distance_data(data, labels)
+    pair_data = data.pooled_distances
     if not pair_data:
         logger.warning("No distance data found for KDE plots")
         return []
@@ -146,7 +179,7 @@ def _plot_distance_kde(
 
 
 def _plot_distance_threshold_bars(
-    data: dict[str, Any],
+    data: DistancePlotData,
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -173,7 +206,7 @@ def _plot_distance_threshold_bars(
 
     t = get_theme(plot_settings)
 
-    aggregated = _load_distance_aggregated_results(data, labels)
+    aggregated = data.aggregated_results
     if not aggregated:
         logger.warning("No aggregated distance data found for threshold bars")
         return []
@@ -258,7 +291,7 @@ def _plot_distance_threshold_bars(
 
 
 def _plot_distance_state_bars(
-    data: dict[str, Any],
+    data: DistancePlotData,
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -281,12 +314,12 @@ def _plot_distance_state_bars(
     list[Path]
         Paths to generated state-bar figures, one per distance pair.
     """
-    aggregated = _load_distance_aggregated_results(data, labels)
+    aggregated = data.aggregated_results
     if not aggregated:
         logger.warning("No aggregated distance data found for state bars")
         return []
 
-    pair_settings = _get_distance_pair_settings(data)
+    pair_settings = data.pair_settings
 
     first_label = next(iter(aggregated.keys()))
     pair_results_ref = aggregated[first_label].get("pair_results", [])

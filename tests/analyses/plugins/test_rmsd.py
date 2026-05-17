@@ -15,6 +15,7 @@ from polyzymd.analyses.base import Condition, PlotContext
 from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.mda import (
     ArtifactStore,
+    ArtifactStoreError,
     FrameSelection,
     MDAAnalysisJob,
     MDABackendPolicy,
@@ -1874,5 +1875,5 @@ def test_plot_rejects_legacy_aggregated_result_from_disk(tmp_path: Path) -> None
         equilibration="10ns",
     )
 
-    with pytest.raises(ValueError, match="missing a settings fingerprint"):
+    with pytest.raises(ArtifactStoreError, match="Failed to validate condition artifact"):
         analysis.plot(ctx)

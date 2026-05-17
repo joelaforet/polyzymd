@@ -8,14 +8,17 @@ All functions are called exclusively from ``RMSDAnalysis.plot()``.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from polyzymd.analyses.shared.plotting import (
+    ArtifactPlotData,
     apply_axis_style,
     apply_legend,
     get_colors,
     get_output_path,
+    load_canonical_plot_artifacts,
     save_figure,
     scatter_replicate_values,
     suppress_singleton_errors,
@@ -31,7 +34,70 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def plot_rmsd_timeseries(ctx: PlotContext, comparison_result: RMSDComparisonResult) -> list[Path]:
+@dataclass(frozen=True)
+class RMSDPlotData:
+    """Validated RMSD artifact data prepared before rendering."""
+
+    timeseries: dict[str, dict[str, tuple[Any, Any]]]
+    convergence: dict[str, dict[str, dict[int, dict[str, Any] | None]]]
+
+
+def build_rmsd_plot_data(
+    ctx: PlotContext,
+    comparison_result: RMSDComparisonResult,
+    artifacts_by_condition: dict[str, ArtifactPlotData],
+) -> RMSDPlotData:
+    """Load RMSD sidecar data from validated artifacts before rendering.
+
+    Parameters
+    ----------
+    ctx : PlotContext
+        Framework-provided plot context.
+    comparison_result : RMSDComparisonResult
+        Comparison result defining plotted conditions and runs.
+    artifacts_by_condition : dict of str to ArtifactPlotData
+        Canonical artifacts loaded by the plugin plot hook.
+
+    Returns
+    -------
+    RMSDPlotData
+        Sidecar-derived arrays keyed by condition, run, and replicate.
+    """
+
+    plot_settings = _get_plot_settings(ctx)
+    timeseries: dict[str, dict[str, tuple[Any, Any]]] = {}
+    convergence: dict[str, dict[str, dict[int, dict[str, Any] | None]]] = {}
+
+    for condition in comparison_result.conditions:
+        artifact_data = artifacts_by_condition.get(condition.label)
+        if artifact_data is None:
+            continue
+        for run_label in comparison_result.run_labels:
+            time_ns, rmsd_matrix = _load_replicate_timeseries(artifact_data, run_label)
+            timeseries.setdefault(condition.label, {})[run_label] = (time_ns, rmsd_matrix)
+
+        if not plot_settings.show_convergence_plots:
+            continue
+        condition_convergence: dict[str, dict[int, dict[str, Any] | None]] = {}
+        for run_label in comparison_result.run_labels:
+            condition_convergence[run_label] = {
+                replicate: _load_replicate_convergence_payload(
+                    artifact_data,
+                    run_label,
+                    replicate,
+                )
+                for replicate in artifact_data.replicate_artifacts
+            }
+        convergence[condition.label] = condition_convergence
+
+    return RMSDPlotData(timeseries=timeseries, convergence=convergence)
+
+
+def plot_rmsd_timeseries(
+    ctx: PlotContext,
+    comparison_result: RMSDComparisonResult,
+    plot_data: RMSDPlotData,
+) -> list[Path]:
     """Plot mean RMSD timeseries with SEM shading for each run.
 
     Parameters
@@ -51,9 +117,6 @@ def plot_rmsd_timeseries(ctx: PlotContext, comparison_result: RMSDComparisonResu
 
     plot_settings = _get_plot_settings(ctx)
 
-    replicates_by_condition = {
-        condition.label: list(condition.replicates) for condition in ctx.conditions
-    }
     condition_labels = [condition.label for condition in comparison_result.conditions]
     colors = get_colors(len(condition_labels), ctx.plot_settings)
 
@@ -63,19 +126,9 @@ def plot_rmsd_timeseries(ctx: PlotContext, comparison_result: RMSDComparisonResu
         had_data = False
 
         for idx, condition_label in enumerate(condition_labels):
-            condition_dir = ctx.analysis_dirs.get(condition_label)
-            if condition_dir is None:
-                logger.warning(
-                    "No analysis directory found for condition '%s' in RMSD timeseries plot",
-                    condition_label,
-                )
-                continue
-
-            replicates = replicates_by_condition.get(condition_label, [])
-            time_ns, rmsd_matrix = _load_replicate_timeseries(
-                condition_dir,
+            time_ns, rmsd_matrix = plot_data.timeseries.get(condition_label, {}).get(
                 run_label,
-                replicates,
+                _empty_timeseries(),
             )
             if rmsd_matrix.size == 0 or time_ns.size == 0:
                 logger.warning(
@@ -255,6 +308,7 @@ def plot_rmsd_comparison_bars(
 def plot_rmsd_convergence_diagnostics(
     ctx: PlotContext,
     comparison_result: RMSDComparisonResult,
+    plot_data: RMSDPlotData,
 ) -> list[Path]:
     """Plot per-replicate sliding-window convergence diagnostics.
 
@@ -277,23 +331,19 @@ def plot_rmsd_convergence_diagnostics(
     if not plot_settings.show_convergence_plots:
         return []
 
-    replicates_by_condition = {
-        condition.label: list(condition.replicates) for condition in ctx.conditions
-    }
     generated: list[Path] = []
 
     run_thresholds = {run.label: run.convergence_slope_threshold for run in ctx.settings.runs}
 
     for condition in comparison_result.conditions:
-        condition_dir = ctx.analysis_dirs.get(condition.label)
-        if condition_dir is None:
-            logger.warning(
-                "No analysis directory found for condition '%s' in RMSD convergence plot",
-                condition.label,
-            )
-            continue
-
-        replicates = replicates_by_condition.get(condition.label, [])
+        condition_convergence = plot_data.convergence.get(condition.label, {})
+        replicates = sorted(
+            {
+                replicate
+                for run_payloads in condition_convergence.values()
+                for replicate in run_payloads
+            }
+        )
         if not replicates:
             continue
 
@@ -309,11 +359,7 @@ def plot_rmsd_convergence_diagnostics(
 
             for row_idx, replicate in enumerate(replicates):
                 ax = axes[row_idx, 0]
-                payload = _load_replicate_convergence_payload(
-                    condition_dir,
-                    run_label,
-                    replicate,
-                )
+                payload = condition_convergence.get(run_label, {}).get(replicate)
                 if payload is None:
                     ax.set_visible(False)
                     continue
@@ -407,22 +453,26 @@ def plot_rmsd_convergence_diagnostics(
     return generated
 
 
+def _empty_timeseries() -> tuple[Any, Any]:
+    """Return empty arrays for missing RMSD timeseries data."""
+
+    import numpy as np
+
+    return np.array([], dtype=np.float64), np.empty((0, 0), dtype=np.float64)
+
+
 def _load_replicate_timeseries(
-    condition_dir: Path,
+    artifact_data: ArtifactPlotData,
     run_label: str,
-    replicates: list[int],
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load RMSD NPZ sidecars for one condition and run.
 
     Parameters
     ----------
-    condition_dir : Path
-        Condition analysis directory containing ``run_<replicate>`` subdirectories.
+    artifact_data : ArtifactPlotData
+        Canonical artifacts and run directories for one condition.
     run_label : str
         RMSD run label used in NPZ filename.
-    replicates : list[int]
-        Replicate indices expected for this condition.
-
     Returns
     -------
     tuple[np.ndarray, np.ndarray]
@@ -435,8 +485,8 @@ def _load_replicate_timeseries(
     times: list[np.ndarray] = []
     traces: list[np.ndarray] = []
 
-    for replicate in replicates:
-        npz_payload = _load_npz_sidecar_payload(condition_dir, run_label, replicate)
+    for replicate in artifact_data.replicate_artifacts:
+        npz_payload = _load_npz_sidecar_payload(artifact_data, run_label, replicate)
         if npz_payload is None:
             continue
 
@@ -471,7 +521,7 @@ def _load_replicate_timeseries(
         traces.append(rmsd_values[:n_common])
 
     if not traces:
-        return np.array([], dtype=np.float64), np.empty((0, 0), dtype=np.float64)
+        return _empty_timeseries()
 
     min_len = min(len(trace) for trace in traces)
     aligned_traces = [trace[:min_len] for trace in traces]
@@ -533,7 +583,7 @@ def _sanitize_run_label(run_label: str) -> str:
 
 
 def _load_replicate_convergence_payload(
-    condition_dir: Path,
+    artifact_data: ArtifactPlotData,
     run_label: str,
     replicate: int,
 ) -> dict[str, np.ndarray | float | bool | None] | None:
@@ -541,8 +591,8 @@ def _load_replicate_convergence_payload(
 
     Parameters
     ----------
-    condition_dir : Path
-        Condition analysis directory.
+    artifact_data : ArtifactPlotData
+        Canonical artifacts and run directories for one condition.
     run_label : str
         RMSD run label.
     replicate : int
@@ -555,7 +605,7 @@ def _load_replicate_convergence_payload(
     """
     import numpy as np
 
-    npz_payload = _load_npz_sidecar_payload(condition_dir, run_label, replicate)
+    npz_payload = _load_npz_sidecar_payload(artifact_data, run_label, replicate)
     if npz_payload is None:
         return None
 
@@ -637,7 +687,15 @@ def _resolve_npz_sidecar_path(
     Path | None
         NPZ sidecar path from metadata, or ``None`` when unavailable.
     """
-    resolved = _resolve_npz_sidecar_reference(condition_dir, run_label, replicate)
+    from polyzymd.analyses.mda import ArtifactStoreError
+
+    try:
+        artifact_data = load_canonical_plot_artifacts(condition_dir, [replicate])
+    except (ArtifactStoreError, ValueError) as exc:
+        logger.warning("Failed to load RMSD plot artifacts in %s: %s", condition_dir, exc)
+        return None
+
+    resolved = _resolve_npz_sidecar_reference(artifact_data, run_label, replicate)
     if resolved is None:
         return None
     from polyzymd.analyses.mda import ArtifactStoreError
@@ -650,10 +708,14 @@ def _resolve_npz_sidecar_path(
         return None
 
 
-def _load_npz_sidecar_payload(condition_dir: Path, run_label: str, replicate: int) -> Any | None:
+def _load_npz_sidecar_payload(
+    artifact_data: ArtifactPlotData,
+    run_label: str,
+    replicate: int,
+) -> Any | None:
     """Open a validated RMSD NPZ sidecar for one configured replicate."""
 
-    resolved = _resolve_npz_sidecar_reference(condition_dir, run_label, replicate)
+    resolved = _resolve_npz_sidecar_reference(artifact_data, run_label, replicate)
     if resolved is None:
         return None
     from polyzymd.analyses.mda import ArtifactStoreError
@@ -667,29 +729,20 @@ def _load_npz_sidecar_payload(condition_dir: Path, run_label: str, replicate: in
 
 
 def _resolve_npz_sidecar_reference(
-    condition_dir: Path,
+    artifact_data: ArtifactPlotData,
     run_label: str,
     replicate: int,
 ) -> tuple[Any, Any, Path] | None:
     """Resolve the artifact store and registered sidecar for a run."""
 
-    from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
+    from polyzymd.analyses.mda import ArtifactStore
 
-    run_dir = condition_dir / f"run_{replicate}"
-    if not run_dir.exists():
-        logger.warning("Missing RMSD run directory: %s", run_dir)
+    artifact = artifact_data.replicate_artifacts.get(int(replicate))
+    run_dir = artifact_data.run_dirs.get(int(replicate))
+    if artifact is None or run_dir is None:
+        logger.warning("Missing RMSD replicate artifact for replicate %s", replicate)
         return None
-
     result_path = run_dir / "result.json"
-    if not result_path.exists():
-        logger.warning("Missing RMSD per-replicate result JSON %s", result_path)
-        return None
-
-    try:
-        artifact = ArtifactStore(run_dir).read_replicate_result("result.json")
-    except (OSError, ValueError, ArtifactStoreError) as exc:
-        logger.warning("Failed to load RMSD artifact JSON %s: %s", result_path, exc)
-        return None
 
     run_payload = next(
         (

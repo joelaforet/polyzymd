@@ -990,9 +990,15 @@ def test_sasa_analysis_plot_includes_normalized_control_plotter(
     monkeypatch.setattr(
         plotters, "plot_sasa_comparison_bars", lambda _ctx, _result: [expected_paths[0]]
     )
-    monkeypatch.setattr(plotters, "plot_sasa_timeseries", lambda _ctx, _result: [expected_paths[1]])
     monkeypatch.setattr(
-        plotters, "plot_sasa_residue_profiles", lambda _ctx, _result: [expected_paths[2]]
+        plotters,
+        "plot_sasa_timeseries",
+        lambda _ctx, _result, _plot_data: [expected_paths[1]],
+    )
+    monkeypatch.setattr(
+        plotters,
+        "plot_sasa_residue_profiles",
+        lambda _ctx, _result, _plot_data: [expected_paths[2]],
     )
     monkeypatch.setattr(
         plotters,

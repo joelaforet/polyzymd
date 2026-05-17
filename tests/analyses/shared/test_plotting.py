@@ -85,6 +85,14 @@ def test_load_canonical_plot_artifacts_rejects_corrupt_result_json(tmp_path) -> 
         load_canonical_plot_artifacts(analysis_dir, [1])
 
 
+def test_load_canonical_plot_artifacts_requires_configured_replicates(tmp_path) -> None:
+    """Configured replicate artifacts should be required by default."""
+    analysis_dir = tmp_path / "condition" / "rmsd"
+
+    with pytest.raises(ArtifactStoreError, match="Missing canonical replicate artifact"):
+        load_canonical_plot_artifacts(analysis_dir, [1])
+
+
 def test_artifact_store_load_npz_sidecar_rejects_tampering(tmp_path) -> None:
     """NPZ sidecar loading should validate the sidecar before opening it."""
     store = ArtifactStore(tmp_path)

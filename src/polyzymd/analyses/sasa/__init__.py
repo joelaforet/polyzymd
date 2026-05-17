@@ -940,16 +940,18 @@ class SASAAnalysis(Analysis):
             return []
 
         from polyzymd.analyses.sasa._plotters import (
+            build_sasa_plot_data,
             plot_sasa_comparison_bars,
             plot_sasa_normalized_control_bars,
             plot_sasa_residue_profiles,
             plot_sasa_timeseries,
         )
 
+        plot_data = build_sasa_plot_data(ctx, comparison_result)
         paths: list[Path] = []
         paths.extend(plot_sasa_comparison_bars(ctx, comparison_result))
-        paths.extend(plot_sasa_timeseries(ctx, comparison_result))
-        paths.extend(plot_sasa_residue_profiles(ctx, comparison_result))
+        paths.extend(plot_sasa_timeseries(ctx, comparison_result, plot_data))
+        paths.extend(plot_sasa_residue_profiles(ctx, comparison_result, plot_data))
         paths.extend(plot_sasa_normalized_control_bars(ctx, comparison_result))
         return paths
 

@@ -35,6 +35,7 @@ from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
 )
+from polyzymd.analyses.shared.plotting import load_canonical_plot_artifacts
 
 if TYPE_CHECKING:
     from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext
@@ -303,20 +304,7 @@ class RMSDAnalysis(Analysis):
         if canonical.exists():
             return canonical
 
-        json_files = sorted(aggregated_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
-        if not json_files:
-            return None
-
-        chosen = json_files[-1]
-        logger.warning(
-            "%s: canonical result.json not found in %s — falling back to %s "
-            "(%d JSON file(s) present)",
-            self.name,
-            aggregated_dir,
-            chosen.name,
-            len(json_files),
-        )
-        return chosen
+        return None
 
     def _load_aggregated_result(
         self,
@@ -697,16 +685,26 @@ class RMSDAnalysis(Analysis):
             return []
 
         data, labels = self._build_plot_data(ctx)
+        plot_artifacts = {}
         for label in labels:
-            aggregated_dir = data[label]["aggregated_dir"]
-            self._load_aggregated_result(
-                aggregated_dir,
+            artifacts = load_canonical_plot_artifacts(
+                data[label]["analysis_dir"],
+                data[label].get("replicates", []),
+                require_condition=True,
+            )
+            if artifacts.condition_artifact is None:
+                continue
+            self._coerce_and_validate_aggregated_result(
+                artifacts.condition_artifact,
                 settings=ctx.settings,
                 condition_label=label,
+                source=artifacts.aggregated_dir / "result.json",
             )
+            plot_artifacts[label] = artifacts
 
         try:
             from polyzymd.analyses.rmsd._plotters import (
+                build_rmsd_plot_data,
                 plot_rmsd_comparison_bars,
                 plot_rmsd_convergence_diagnostics,
                 plot_rmsd_timeseries,
@@ -715,10 +713,11 @@ class RMSDAnalysis(Analysis):
             logger.warning("RMSD plotter module unavailable: %s", exc)
             return []
 
+        plot_data = build_rmsd_plot_data(ctx, comparison_result, plot_artifacts)
         plots: list[Path] = []
-        plots.extend(plot_rmsd_timeseries(ctx, comparison_result))
+        plots.extend(plot_rmsd_timeseries(ctx, comparison_result, plot_data))
         plots.extend(plot_rmsd_comparison_bars(ctx, comparison_result))
-        plots.extend(plot_rmsd_convergence_diagnostics(ctx, comparison_result))
+        plots.extend(plot_rmsd_convergence_diagnostics(ctx, comparison_result, plot_data))
         return plots
 
     def format(self, result: Any, output_format: str = "text") -> str:

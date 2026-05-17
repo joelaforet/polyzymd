@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Sequence, cast
 
 from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
 from polyzymd.analyses.shared.plotting import (
+    ArtifactPlotData,
     apply_axis_style,
     apply_legend,
     get_colors,
@@ -54,6 +55,62 @@ class SASANormalizedControlRow:
     percent_delta: float
     sem_delta: float | None
     replicate_percent_deltas: list[float]
+
+
+@dataclass(frozen=True)
+class SASAPlotData:
+    """Validated SASA artifact data prepared before rendering."""
+
+    timeseries: dict[str, dict[str, tuple[object, object]]]
+    condition_payloads: dict[str, dict]
+
+
+def build_sasa_plot_data(ctx: PlotContext, comparison_result: SASAComparisonResult) -> SASAPlotData:
+    """Load SASA artifact and sidecar data before rendering.
+
+    Parameters
+    ----------
+    ctx : PlotContext
+        Framework plot context with condition directories and replicates.
+    comparison_result : SASAComparisonResult
+        Comparison result defining plotted conditions and runs.
+
+    Returns
+    -------
+    SASAPlotData
+        Sidecar-derived timeseries and condition artifact payloads.
+    """
+    from polyzymd.analyses.mda import ArtifactStoreError
+
+    timeseries: dict[str, dict[str, tuple[object, object]]] = {}
+    condition_payloads: dict[str, dict] = {}
+    replicates_by_condition = {
+        condition.label: list(condition.replicates) for condition in ctx.conditions
+    }
+
+    for condition in comparison_result.conditions:
+        condition_dir = ctx.analysis_dirs.get(condition.label)
+        if condition_dir is None:
+            continue
+        try:
+            artifacts = load_canonical_plot_artifacts(
+                condition_dir,
+                replicates_by_condition.get(condition.label, []),
+                require_condition=True,
+            )
+        except ArtifactStoreError as exc:
+            LOGGER.warning(
+                "Failed to load canonical SASA plot artifacts in %s: %s", condition_dir, exc
+            )
+            continue
+        if artifacts.condition_artifact is not None:
+            condition_payloads[condition.label] = artifacts.condition_artifact.payload
+        for run_label in comparison_result.run_labels:
+            timeseries.setdefault(condition.label, {})[run_label] = (
+                _load_replicate_timeseries_from_artifacts(artifacts, run_label)
+            )
+
+    return SASAPlotData(timeseries=timeseries, condition_payloads=condition_payloads)
 
 
 def plot_sasa_comparison_bars(
@@ -214,16 +271,17 @@ def plot_sasa_normalized_control_bars(
     return generated
 
 
-def plot_sasa_timeseries(ctx: PlotContext, comparison_result: SASAComparisonResult) -> list[Path]:
+def plot_sasa_timeseries(
+    ctx: PlotContext,
+    comparison_result: SASAComparisonResult,
+    plot_data: SASAPlotData,
+) -> list[Path]:
     """Plot mean SASA timeseries with SEM shading for each run."""
     import matplotlib.pyplot as plt
     import numpy as np
 
     plot_settings = cast(SASAPlotSettings, _get_plot_settings(ctx))
     condition_labels = [condition.label for condition in comparison_result.conditions]
-    replicates_by_condition = {
-        condition.label: list(condition.replicates) for condition in ctx.conditions
-    }
     colors = get_colors(len(condition_labels), ctx.plot_settings)
 
     generated: list[Path] = []
@@ -232,14 +290,9 @@ def plot_sasa_timeseries(ctx: PlotContext, comparison_result: SASAComparisonResu
         had_data = False
 
         for idx, condition_label in enumerate(condition_labels):
-            condition_dir = ctx.analysis_dirs.get(condition_label)
-            if condition_dir is None:
-                continue
-
-            time_ns, sasa_matrix = _load_replicate_timeseries_from_results(
-                condition_dir,
+            time_ns, sasa_matrix = plot_data.timeseries.get(condition_label, {}).get(
                 run_label,
-                replicates_by_condition.get(condition_label, []),
+                _empty_timeseries(),
             )
             if time_ns.size == 0 or sasa_matrix.size == 0:
                 continue
@@ -300,7 +353,9 @@ def plot_sasa_timeseries(ctx: PlotContext, comparison_result: SASAComparisonResu
 
 
 def plot_sasa_residue_profiles(
-    ctx: PlotContext, comparison_result: SASAComparisonResult
+    ctx: PlotContext,
+    comparison_result: SASAComparisonResult,
+    plot_data: SASAPlotData,
 ) -> list[Path]:
     """Plot per-residue mean SASA profiles for each run."""
     import matplotlib.pyplot as plt
@@ -316,11 +371,7 @@ def plot_sasa_residue_profiles(
         had_data = False
 
         for idx, condition_label in enumerate(condition_labels):
-            condition_dir = ctx.analysis_dirs.get(condition_label)
-            if condition_dir is None:
-                continue
-
-            payload = _load_condition_aggregated(condition_dir)
+            payload = plot_data.condition_payloads.get(condition_label)
             if payload is None:
                 continue
 
@@ -572,15 +623,31 @@ def _load_replicate_timeseries_from_results(
     replicates: Sequence[int],
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load per-replicate SASA timeseries from canonical artifacts."""
-    import numpy as np
-
-    times: list[np.ndarray] = []
-    traces: list[np.ndarray] = []
     try:
         artifacts = load_canonical_plot_artifacts(condition_dir, replicates)
     except ArtifactStoreError as exc:
         LOGGER.warning("Failed to load canonical SASA plot artifacts in %s: %s", condition_dir, exc)
-        return np.array([], dtype=np.float64), np.empty((0, 0), dtype=np.float64)
+        return _empty_timeseries()
+
+    return _load_replicate_timeseries_from_artifacts(artifacts, run_label)
+
+
+def _empty_timeseries() -> tuple[np.ndarray, np.ndarray]:
+    """Return empty arrays for missing SASA timeseries data."""
+    import numpy as np
+
+    return np.array([], dtype=np.float64), np.empty((0, 0), dtype=np.float64)
+
+
+def _load_replicate_timeseries_from_artifacts(
+    artifacts: ArtifactPlotData,
+    run_label: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Load per-replicate SASA timeseries from preloaded artifacts."""
+    import numpy as np
+
+    times: list[np.ndarray] = []
+    traces: list[np.ndarray] = []
 
     for replicate, artifact in artifacts.replicate_artifacts.items():
         run_dir = artifacts.run_dirs[replicate]
@@ -606,7 +673,7 @@ def _load_replicate_timeseries_from_results(
         times.append(time_ns[:n_common])
 
     if not traces:
-        return np.array([], dtype=np.float64), np.empty((0, 0), dtype=np.float64)
+        return _empty_timeseries()
 
     min_len = min(len(trace) for trace in traces)
     aligned_traces = [trace[:min_len] for trace in traces]
