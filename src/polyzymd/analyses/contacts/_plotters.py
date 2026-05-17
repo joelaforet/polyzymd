@@ -15,7 +15,6 @@ from polyzymd.analyses.base import Condition, PlotContext
 from polyzymd.analyses.mda import (
     ArtifactSidecarRef,
     ArtifactStore,
-    ComparisonArtifact,
     ConditionArtifact,
 )
 from polyzymd.analyses.mda.store import ArtifactStoreError
@@ -113,7 +112,6 @@ class ContactsPlotData:
     conditions: Mapping[str, ContactsConditionPlotData]
     labels: tuple[str, ...]
     settings: Any
-    comparison_artifact: ComparisonArtifact | None = None
 
     @property
     def has_residence_times(self) -> bool:
@@ -164,7 +162,6 @@ def load_contacts_plot_data(ctx: PlotContext) -> ContactsPlotData:
         conditions=loaded,
         labels=tuple(labels),
         settings=ctx.settings,
-        comparison_artifact=_load_optional_comparison_artifact(ctx),
     )
 
 
@@ -432,28 +429,6 @@ def _validate_finite_array(values: np.ndarray, name: str) -> None:
 
     if not np.all(np.isfinite(values)):
         raise ValueError(f"contacts: profile array {name} contains non-finite values")
-
-
-def _load_optional_comparison_artifact(ctx: PlotContext) -> ComparisonArtifact | None:
-    """Load an optional canonical comparison artifact for future plot annotations."""
-
-    comparison_path = ctx.comparison_path or ctx.results_dir / "result.json"
-    if not comparison_path.exists() or _is_noncanonical_comparison_json(comparison_path):
-        return None
-    try:
-        return ArtifactStore(comparison_path.parent).read_comparison_result(comparison_path.name)
-    except ArtifactStoreError:
-        return None
-
-
-def _is_noncanonical_comparison_json(path: Path) -> bool:
-    """Return whether an existing JSON file is not a comparison artifact."""
-
-    try:
-        ArtifactStore(path.parent).read_comparison_result(path.name)
-    except ArtifactStoreError:
-        return True
-    return False
 
 
 def _plot_contact_fraction_profile(

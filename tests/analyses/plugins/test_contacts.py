@@ -2165,6 +2165,27 @@ class TestPlot:
         }
         assert all(path.exists() for path in paths)
 
+    def test_plot_ignores_noncanonical_comparison_result_json(self, tmp_path):
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        settings = ContactsSettings(
+            protein_groups={"active_site": [1, 2], "surface": [3]},
+            protein_partitions={"regions": ["active_site", "surface"]},
+        )
+        ctx = _contacts_plot_context(tmp_path, settings)
+        _write_contacts_plot_artifact(ctx.analysis_dirs["A"], settings)
+        ctx.results_dir.mkdir(parents=True)
+        (ctx.results_dir / "result.json").write_text("not a comparison artifact", encoding="utf-8")
+
+        with patch(
+            "polyzymd.analyses.contacts._plotters.ArtifactStore.read_comparison_result",
+            side_effect=AssertionError("comparison result should not be loaded"),
+        ):
+            paths = ContactsAnalysis().plot(ctx)
+
+        assert paths
+        assert all(path.exists() for path in paths)
+
     def test_plot_skips_residence_time_families_when_disabled(self, tmp_path):
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
 
