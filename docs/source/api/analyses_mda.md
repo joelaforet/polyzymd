@@ -47,7 +47,19 @@ subclass.
 
 `MDABackendPolicy` controls optional MDAnalysis internal backends. The default
 policy forwards no backend kwargs so PolyzyMD-level parallelism remains the
-default.
+default. In `comparison.yaml`, the top-level `mda_backend_policy` section maps
+to this object and is intentionally opt-in:
+
+```yaml
+mda_backend_policy:
+  backend: "multiprocessing"
+  n_workers: 2
+  n_parts: 2
+```
+
+Leave the section empty or omit it to forward no backend kwargs. Function-adapter
+jobs reject non-default backend policies; use an `AnalysisBase`-compatible job
+when opting into MDAnalysis internal parallelism.
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.mda.job

@@ -112,6 +112,7 @@ def build_contacts_jobs(
             name="contacts",
             analysis=analysis,
             frame_selection=ctx.frame_selection,
+            backend_policy=ctx.backend_policy,
             universe_policy=policy,
         )
     ]

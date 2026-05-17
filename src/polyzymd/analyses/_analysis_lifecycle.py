@@ -36,6 +36,7 @@ from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 
 if TYPE_CHECKING:
     from polyzymd.analyses.base import Analysis
+    from polyzymd.analyses.mda import MDABackendPolicy
     from polyzymd.config.comparison import ComparisonConfig
 
 logger = logging.getLogger("polyzymd.analyses")
@@ -58,7 +59,7 @@ ONE_ANALYSIS_STAGE_ORDER = (
 
 SettingsResolver = Callable[["Analysis", "ComparisonConfig"], Any]
 PrepareRun = Callable[["Analysis", "ComparisonConfig", str | None], dict[str, Any]]
-RunCondition = Callable[["Analysis", Condition, Any, str, Path | None, bool], Any]
+RunCondition = Callable[["Analysis", Condition, Any, str, Path | None, bool, Any], Any]
 FinalizeRun = Callable[..., dict[str, Any]]
 ExecutionSummary = Callable[["Analysis", list[Condition], BaseModel, str], None]
 
@@ -270,6 +271,7 @@ class AnalysisLifecycle:
         output_dir: Path,
         replicate: int,
         recompute: bool,
+        backend_policy: MDABackendPolicy | None = None,
     ) -> Any:
         """Run one replicate and save the canonical ``result.json``.
 
@@ -287,6 +289,8 @@ class AnalysisLifecycle:
             One-indexed replicate ID.
         recompute : bool
             Whether recomputation was requested.
+        backend_policy : MDABackendPolicy or None, optional
+            MDAnalysis internal backend policy for MDA job-backed analyses.
 
         Returns
         -------
@@ -305,6 +309,7 @@ class AnalysisLifecycle:
             recompute=recompute,
             settings=settings,
             result_path=result_path,
+            backend_policy=backend_policy or _default_mda_backend_policy(),
         )
         try:
             result = self.adapter.run_replicate(ctx, replicate)
@@ -419,6 +424,7 @@ class AnalysisLifecycle:
         equilibration: str = "0ns",
         output_dir: Path | None = None,
         recompute: bool = False,
+        backend_policy: MDABackendPolicy | None = None,
     ) -> Any:
         """Run compute and aggregate for one condition.
 
@@ -435,6 +441,8 @@ class AnalysisLifecycle:
             config path.
         recompute : bool, optional
             Force recomputation, by default ``False``.
+        backend_policy : MDABackendPolicy or None, optional
+            MDAnalysis internal backend policy for replicate jobs.
 
         Returns
         -------
@@ -468,6 +476,7 @@ class AnalysisLifecycle:
                     rep_dir,
                     rep,
                     recompute,
+                    backend_policy=backend_policy,
                 )
                 results.append(result)
                 successful.append(rep)
@@ -844,12 +853,13 @@ class AnalysisLifecycle:
             lambda analysis, cfg, eq: self.prepare_comparison_run(cfg, eq)
         )
         run_condition = self._run_analysis or (
-            lambda analysis, condition, settings, eq, output_dir, rec: self.run_analysis(
+            lambda analysis, condition, settings, eq, output_dir, rec, backend: self.run_analysis(
                 condition,
                 settings,
                 eq,
                 output_dir=output_dir,
                 recompute=rec,
+                backend_policy=backend,
             )
         )
         finalize_run = self._finalize_comparison_from_disk or (
@@ -872,6 +882,7 @@ class AnalysisLifecycle:
         settings = prepared_state["settings"]
         equilibration = prepared_state["equilibration"]
         analysis_root = prepared_state["analysis_root"]
+        backend_policy = prepared_state["mda_backend_policy"]
         summary = self._execution_summary
         if summary is not None:
             summary(self.analysis, valid_conditions, settings, equilibration)
@@ -891,6 +902,7 @@ class AnalysisLifecycle:
                     equilibration,
                     cond_dir,
                     recompute,
+                    backend_policy,
                 )
                 if agg is not None:
                     analysis_dirs[cond.label] = cond_dir
@@ -1074,6 +1086,7 @@ class AnalysisLifecycle:
             "settings": settings,
             "equilibration": equilibration,
             "analysis_root": analysis_root,
+            "mda_backend_policy": _resolve_mda_backend_policy(config),
         }
 
     def _prepare_conditions_with_filter(
@@ -1250,6 +1263,42 @@ def _check_result_type(result: Any, method: str, analysis_name: str) -> None:
         f"{analysis_name}.{method}() returned {type(result).__name__}; "
         "expected dict, pydantic BaseModel, or None"
     )
+
+
+def _default_mda_backend_policy() -> MDABackendPolicy:
+    """Return the default MDAnalysis backend policy.
+
+    Returns
+    -------
+    MDABackendPolicy
+        Policy that forwards no backend keyword arguments.
+    """
+
+    from polyzymd.analyses.mda import MDABackendPolicy
+
+    return MDABackendPolicy()
+
+
+def _resolve_mda_backend_policy(config: ComparisonConfig) -> MDABackendPolicy:
+    """Resolve the comparison-level MDA backend policy.
+
+    Parameters
+    ----------
+    config : ComparisonConfig
+        Comparison configuration or a compatible test stand-in.
+
+    Returns
+    -------
+    MDABackendPolicy
+        Backend policy for replicate job construction.
+    """
+
+    policy_config = getattr(config, "mda_backend_policy", None)
+    if policy_config is None:
+        return _default_mda_backend_policy()
+    if hasattr(policy_config, "to_policy"):
+        return policy_config.to_policy()
+    return policy_config
 
 
 def _save_replicate_result(

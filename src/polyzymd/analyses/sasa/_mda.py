@@ -88,6 +88,7 @@ def build_sasa_jobs(ctx: MDAReplicateJobContext, settings: SASASettings) -> list
                     timestep_ps=ctx.frame_selection.timestep_ps,
                 ),
                 frame_selection=run_frame_selection,
+                backend_policy=ctx.backend_policy,
                 universe_policy=MDAUniversePolicy(
                     condition_label=ctx.replicate_context.condition.label,
                     replicate=ctx.replicate,

@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from polyzymd.analyses.base import Analysis
+    from polyzymd.analyses.mda import MDABackendPolicy
     from polyzymd.config.comparison import ComparisonConfig
 
 logger = logging.getLogger("polyzymd.analyses")
@@ -61,6 +62,7 @@ def run_replicate_once(
     output_dir: Path,
     replicate: int,
     recompute: bool,
+    backend_policy: "MDABackendPolicy | None" = None,
 ) -> Any:
     """Run ``run_replicate()`` for a single replicate and save canonical output.
 
@@ -80,6 +82,8 @@ def run_replicate_once(
         Replicate number.
     recompute : bool
         Whether to force recomputation.
+    backend_policy : MDABackendPolicy or None, optional
+        MDAnalysis internal backend policy for MDA job-backed analyses.
 
     Returns
     -------
@@ -93,6 +97,7 @@ def run_replicate_once(
         output_dir,
         replicate,
         recompute,
+        backend_policy=backend_policy,
     )
 
 
@@ -156,6 +161,7 @@ def run_analysis(
     equilibration: str = "0ns",
     output_dir: Path | None = None,
     recompute: bool = False,
+    backend_policy: "MDABackendPolicy | None" = None,
 ) -> Any:
     """Run a single analysis for one condition (compute + aggregate).
 
@@ -173,6 +179,8 @@ def run_analysis(
         Output directory.  If ``None``, auto-resolved from condition config.
     recompute : bool
         Force recomputation of cached results.
+    backend_policy : MDABackendPolicy or None, optional
+        MDAnalysis internal backend policy for MDA job-backed analyses.
 
     Returns
     -------
@@ -185,6 +193,7 @@ def run_analysis(
         equilibration=equilibration,
         output_dir=output_dir,
         recompute=recompute,
+        backend_policy=backend_policy,
     )
 
 

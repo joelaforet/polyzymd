@@ -85,6 +85,7 @@ def build_rmsf_jobs(ctx: MDAReplicateJobContext, settings: RMSFSettings) -> list
                 reference_positions=job_input.reference_positions,
             ),
             frame_selection=selected_frame_selection,
+            backend_policy=ctx.backend_policy,
             universe_policy=MDAUniversePolicy(
                 condition_label=ctx.replicate_context.condition.label,
                 replicate=ctx.replicate,

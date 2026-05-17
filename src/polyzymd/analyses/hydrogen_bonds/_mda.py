@@ -213,6 +213,7 @@ def build_hydrogen_bond_jobs(ctx: MDAReplicateJobContext) -> list[MDAAnalysisJob
             name="hydrogen_bonds",
             analysis=analysis,
             frame_selection=ctx.frame_selection,
+            backend_policy=ctx.backend_policy,
             universe_policy=policy,
         )
     ]

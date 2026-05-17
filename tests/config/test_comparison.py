@@ -7,7 +7,12 @@ import pytest
 import yaml
 from pydantic import BaseModel
 
-from polyzymd.config.comparison import ComparisonConfig, ConditionConfig, PlotSettings
+from polyzymd.config.comparison import (
+    ComparisonConfig,
+    ConditionConfig,
+    MDABackendPolicyConfig,
+    PlotSettings,
+)
 
 
 class _FakePathSettings(BaseModel):
@@ -77,12 +82,83 @@ class TestUnknownTopLevelKeys:
                     ],
                     "defaults": {"equilibration_time": "10ns"},
                     "plugins": {},
+                    "mda_backend_policy": {},
                     "plot_settings": {},
                 }
             )
         )
         config = ComparisonConfig.from_yaml(yaml_path)
         assert config.name == "test"
+
+
+class TestMDABackendPolicyConfig:
+    """MDAnalysis backend policy config should be opt-in and validated."""
+
+    def test_default_policy_forwards_no_backend_kwargs(self) -> None:
+        """Default config should keep per-replicate execution serial."""
+        policy = MDABackendPolicyConfig().to_policy()
+
+        assert policy.run_kwargs() == {}
+        assert policy.is_default()
+
+    def test_explicit_backend_accepts_workers_and_parts(self) -> None:
+        """Explicit backend should convert to an MDA job policy."""
+        policy = MDABackendPolicyConfig(
+            backend="multiprocessing",
+            n_workers=2,
+            n_parts=4,
+        ).to_policy()
+
+        assert policy.run_kwargs() == {
+            "backend": "multiprocessing",
+            "n_workers": 2,
+            "n_parts": 4,
+        }
+
+    @pytest.mark.parametrize("field_name", ["n_workers", "n_parts"])
+    def test_worker_controls_require_backend(self, field_name: str) -> None:
+        """Worker and part controls should not imply backend opt-in."""
+        with pytest.raises(ValueError, match="require an explicit backend"):
+            MDABackendPolicyConfig(**{field_name: 2})
+
+    @pytest.mark.parametrize("field_name", ["n_workers", "n_parts"])
+    def test_worker_controls_must_be_positive_integers(self, field_name: str) -> None:
+        """Worker and part counts should reject invalid values."""
+        with pytest.raises(ValueError):
+            MDABackendPolicyConfig(backend="multiprocessing", **{field_name: 0})
+
+        with pytest.raises(ValueError, match="positive integers"):
+            MDABackendPolicyConfig(backend="multiprocessing", **{field_name: True})
+
+    def test_backend_name_must_not_be_empty(self) -> None:
+        """Empty backend strings should not be treated as backend opt-in."""
+        with pytest.raises(ValueError, match="backend must not be empty"):
+            MDABackendPolicyConfig(backend="  ")
+
+    def test_from_yaml_accepts_top_level_policy(self, tmp_path: Path) -> None:
+        """comparison.yaml should expose a top-level MDA backend policy."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "backend-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "mda_backend_policy": {
+                        "backend": "multiprocessing",
+                        "n_workers": 2,
+                    },
+                }
+            )
+        )
+
+        config = ComparisonConfig.from_yaml(yaml_path)
+
+        assert config.mda_backend_policy.to_policy().run_kwargs() == {
+            "backend": "multiprocessing",
+            "n_workers": 2,
+        }
 
     def test_legacy_analysis_settings_still_migrates(self, tmp_path: Path) -> None:
         """Legacy analysis_settings key should warn but migrate to plugins."""

@@ -543,6 +543,69 @@ class PlotSettings(BaseModel):
 
 
 # ============================================================================
+# MDAnalysis Backend Policy Configuration
+# ============================================================================
+
+
+class MDABackendPolicyConfig(BaseModel):
+    """Configuration for optional MDAnalysis internal backend execution.
+
+    The default configuration forwards no backend-related keyword arguments to
+    MDAnalysis. This keeps PolyzyMD replicate-level scheduling as the default
+    execution model and avoids nested oversubscription unless users explicitly
+    opt in.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    backend: str | None = None
+    n_workers: int | None = Field(default=None, ge=1)
+    n_parts: int | None = Field(default=None, ge=1)
+
+    @field_validator("backend")
+    @classmethod
+    def validate_backend(cls, value: str | None) -> str | None:
+        """Reject empty backend names while preserving default serial behavior."""
+        if value is None:
+            return None
+        backend = value.strip()
+        if not backend:
+            raise ValueError("backend must not be empty")
+        return backend
+
+    @field_validator("n_workers", "n_parts", mode="before")
+    @classmethod
+    def reject_bool_counts(cls, value: Any) -> Any:
+        """Reject booleans before integer coercion handles worker counts."""
+        if isinstance(value, bool):
+            raise ValueError("worker and part counts must be positive integers")
+        return value
+
+    @model_validator(mode="after")
+    def validate_backend_required(self) -> "MDABackendPolicyConfig":
+        """Require an explicit backend before forwarding worker controls."""
+        if self.backend is None and (self.n_workers is not None or self.n_parts is not None):
+            raise ValueError("n_workers and n_parts require an explicit backend")
+        return self
+
+    def to_policy(self) -> Any:
+        """Convert this config to an MDAnalysis backend policy.
+
+        Returns
+        -------
+        MDABackendPolicy
+            Import-light policy object consumed by ``MDAAnalysisJob``.
+        """
+        from polyzymd.analyses.mda import MDABackendPolicy
+
+        return MDABackendPolicy(
+            backend=self.backend,
+            n_workers=self.n_workers,
+            n_parts=self.n_parts,
+        )
+
+
+# ============================================================================
 # Main Comparison Configuration
 # ============================================================================
 
@@ -571,6 +634,9 @@ class ComparisonConfig(BaseModel):
         Default analysis parameters (equilibration_time)
     plugins : PluginSettingsContainer
         Unified plugin parameters for compute, compare, and plot-aware metadata.
+    mda_backend_policy : MDABackendPolicyConfig
+        Optional MDAnalysis internal backend policy. Defaults to no backend
+        keyword arguments.
     plot_settings : PlotSettings
         Plot customization (HOW to visualize)
 
@@ -593,6 +659,7 @@ class ComparisonConfig(BaseModel):
     conditions: list[ConditionConfig]
     defaults: AnalysisDefaults = Field(default_factory=AnalysisDefaults)
     plugins: PluginSettingsContainer = Field(default_factory=PluginSettingsContainer)
+    mda_backend_policy: MDABackendPolicyConfig = Field(default_factory=MDABackendPolicyConfig)
     plot_settings: PlotSettings = Field(default_factory=PlotSettings)
     source_path: Path | None = Field(default=None, exclude=True)
 
@@ -658,6 +725,7 @@ class ComparisonConfig(BaseModel):
             "conditions",
             "defaults",
             "plugins",
+            "mda_backend_policy",
             "plot_settings",
         }
         unknown_keys = sorted(set(data.keys()) - allowed_keys)

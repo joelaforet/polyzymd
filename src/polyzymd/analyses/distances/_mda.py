@@ -136,6 +136,7 @@ def build_distance_jobs(
                 use_pbc=settings.use_pbc,
             ),
             frame_selection=ctx.frame_selection,
+            backend_policy=ctx.backend_policy,
             universe_policy=MDAUniversePolicy(
                 condition_label=ctx.replicate_context.condition.label,
                 replicate=ctx.replicate,

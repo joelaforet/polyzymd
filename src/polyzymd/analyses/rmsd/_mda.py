@@ -60,6 +60,7 @@ def build_rmsd_jobs(
                 name=run.label,
                 analysis_factory=_make_rmsd_analysis_factory(ctx, run),
                 frame_selection=ctx.frame_selection,
+                backend_policy=ctx.backend_policy,
                 universe_policy=MDAUniversePolicy(
                     condition_label=ctx.replicate_context.condition.label,
                     replicate=ctx.replicate,

@@ -29,6 +29,19 @@ defaults:
   equilibration_time: {{ eq_time | yaml_quote }}
 
 # ============================================================================
+# MDAnalysis Backend Policy (optional)
+# ============================================================================
+# Default behavior forwards no backend kwargs to MDAnalysis, so PolyzyMD-level
+# replicate scheduling remains the only parallelism layer. Uncomment only when
+# running a single local process and intentionally opting into MDAnalysis
+# internal parallelism for AnalysisBase-compatible jobs.
+#
+# mda_backend_policy:
+#   backend: "multiprocessing"  # e.g., multiprocessing or dask
+#   n_workers: 2                # requires backend
+#   n_parts: 2                  # optional; requires backend
+
+# ============================================================================
 # Plugins (unified analysis settings)
 # ============================================================================
 # Define which analyses to run. Presence of a section enables that analysis.

@@ -162,6 +162,7 @@ def build_rg_jobs(
                     timestep_ps=ctx.frame_selection.timestep_ps,
                 ),
                 frame_selection=ctx.frame_selection,
+                backend_policy=ctx.backend_policy,
                 universe_policy=MDAUniversePolicy(
                     condition_label=ctx.replicate_context.condition.label,
                     replicate=ctx.replicate,

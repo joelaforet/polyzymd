@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from polyzymd.analyses.mda import MDABackendPolicy
     from polyzymd.config.comparison import ConditionConfig, PlotSettings
     from polyzymd.config.schema import SimulationConfig
 
@@ -47,6 +48,19 @@ class Condition:
         )
 
 
+def _default_mda_backend_policy() -> MDABackendPolicy:
+    """Create default MDAnalysis backend policy without eager imports.
+
+    Returns
+    -------
+    MDABackendPolicy
+        Policy that forwards no backend keyword arguments.
+    """
+    from polyzymd.analyses.mda import MDABackendPolicy
+
+    return MDABackendPolicy()
+
+
 @dataclass(frozen=True)
 class ReplicateContext:
     """Context passed to per-replicate analysis execution."""
@@ -59,6 +73,7 @@ class ReplicateContext:
     recompute: bool
     settings: BaseModel
     result_path: Path | None = None
+    backend_policy: MDABackendPolicy = field(default_factory=_default_mda_backend_policy)
 
 
 @dataclass(frozen=True)

@@ -23,6 +23,7 @@ from polyzymd.analyses.exceptions import AggregationError, PluginContractError
 from polyzymd.analyses.mda import (
     ArtifactStore,
     MDAAnalysisJob,
+    MDABackendPolicy,
     MDAReplicateJobContext,
     MDAUniversePolicy,
 )
@@ -378,6 +379,7 @@ class _MDAJobOnlyAnalysis(Analysis):
                 name="fake_job",
                 analysis=_FakeMDAAnalysisBase(),
                 frame_selection=ctx.frame_selection,
+                backend_policy=ctx.backend_policy,
                 universe_policy=ctx.universe_policy,
             )
         ]
@@ -693,6 +695,37 @@ def test_public_lifecycle_runs_mda_jobs_and_saves_artifact(tmp_path: Path) -> No
     assert saved.payload["jobs"][0]["results"]["value"] == 5.0
     assert "fake provenance warning" in saved.warnings
     assert (output_dir / "aggregated" / "result.json").exists()
+
+
+def test_public_lifecycle_propagates_backend_policy_to_mda_job(tmp_path: Path) -> None:
+    """Replicate contexts should pass configured MDA backend policy to jobs."""
+
+    analysis = _MDAJobOnlyAnalysis()
+    condition = _condition(tmp_path, replicates=(1,))
+    output_dir = tmp_path / "analysis" / analysis.name
+
+    result = run_analysis(
+        analysis,
+        condition,
+        _LifecycleSettings(),
+        equilibration="10ns",
+        output_dir=output_dir,
+        recompute=False,
+        backend_policy=MDABackendPolicy(
+            backend="multiprocessing",
+            n_workers=2,
+            n_parts=4,
+        ),
+    )
+
+    assert result["run_kwargs"] == {
+        "start": 2,
+        "stop": 8,
+        "step": 2,
+        "backend": "multiprocessing",
+        "n_workers": 2,
+        "n_parts": 4,
+    }
 
 
 def test_public_lifecycle_custom_collector_maps_raw_results(tmp_path: Path) -> None:

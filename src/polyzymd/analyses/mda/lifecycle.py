@@ -19,6 +19,7 @@ from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 
 if TYPE_CHECKING:
     from polyzymd.analyses._contexts import ReplicateContext
+    from polyzymd.analyses.mda.job import MDABackendPolicy
 
 logger = logging.getLogger("polyzymd.analyses")
 
@@ -68,6 +69,18 @@ class MDAReplicateJobContext:
         """
 
         return self.replicate_context.settings
+
+    @property
+    def backend_policy(self) -> MDABackendPolicy:
+        """Return the MDAnalysis backend policy for job construction.
+
+        Returns
+        -------
+        MDABackendPolicy
+            Policy resolved from comparison configuration, or the serial default.
+        """
+
+        return self.replicate_context.backend_policy
 
 
 def build_mda_replicate_job_context(
