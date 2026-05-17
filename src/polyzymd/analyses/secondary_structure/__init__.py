@@ -38,7 +38,6 @@ from polyzymd.analyses.secondary_structure._mda import (
     aggregate_secondary_structure_artifacts,
     build_secondary_structure_jobs,
     condition_artifact_to_legacy_result,
-    encode_dssp_matrix,
 )
 from polyzymd.analyses.secondary_structure._plot_settings import SSPlotSettings
 from polyzymd.analyses.secondary_structure._plotters import (
@@ -345,9 +344,3 @@ def _comparison_artifact_to_result(artifact: ComparisonArtifact) -> ComparisonRe
         created_at=str(artifact.metadata.get("created_at", "")),
         polyzymd_version=str(artifact.metadata.get("polyzymd_version", "")),
     )
-
-
-def _encode_dssp_matrix(dssp_raw: Any) -> Any:
-    """Backward-compatible DSSP encoding helper."""
-
-    return encode_dssp_matrix(dssp_raw)
