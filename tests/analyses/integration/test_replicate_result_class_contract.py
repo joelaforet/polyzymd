@@ -1,64 +1,62 @@
-"""Regression test: all typed-result plugins must declare ReplicateResultClass.
-
-This prevents a repeat of the HPC aggregate deserialization bug where
-replicate results loaded from disk as raw dicts instead of Pydantic models.
-"""
+"""Regression tests for canonical MDA replicate artifact contracts."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
 from polyzymd.analyses import get_analysis, list_analyses
+from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
 
-# All plugins that return typed Pydantic models from run_replicate
-# and need ReplicateResultClass set for disk round-trip deserialization
-TYPED_REPLICATE_PLUGINS = {
-    "rmsf": "RMSFResult",
-    "rmsd": "RMSDResult",
-    "rg": "RgResult",
-    "catalytic_triad": "TriadResult",
-    "distances": "DistanceResult",
-    "secondary_structure": "SecondaryStructureResult",
-    "contacts": "ContactResult",
-    "sasa": "SASAResult",
-    "hydrogen_bonds": "HydrogenBondResult",
+MDA_ARTIFACT_PLUGINS = {
+    "rmsf",
+    "rmsd",
+    "rg",
+    "catalytic_triad",
+    "distances",
+    "secondary_structure",
+    "contacts",
+    "sasa",
+    "hydrogen_bonds",
 }
 
 
-class TestReplicateResultClassContract:
-    """Every typed-result plugin must set ReplicateResultClass."""
+class TestReplicateArtifactContract:
+    """Compute-stage plugins use canonical artifacts instead of typed result classes."""
 
-    @pytest.mark.parametrize("plugin_name,expected_class_name", TYPED_REPLICATE_PLUGINS.items())
-    def test_replicate_result_class_is_set(self, plugin_name, expected_class_name):
-        """Plugin should have ReplicateResultClass pointing to the correct model."""
+    @pytest.mark.parametrize("plugin_name", sorted(MDA_ARTIFACT_PLUGINS))
+    def test_migrated_plugin_replicate_result_class_is_none(self, plugin_name: str) -> None:
+        """Migrated built-ins should not declare legacy replicate result classes."""
+
         cls = get_analysis(plugin_name)
-        assert cls.ReplicateResultClass is not None, (
-            f"{plugin_name} is missing ReplicateResultClass — "
-            "HPC aggregate deserialization will return raw dicts instead of Pydantic models"
-        )
-        assert cls.ReplicateResultClass.__name__ == expected_class_name, (
-            f"{plugin_name}.ReplicateResultClass should be {expected_class_name}, "
-            f"got {cls.ReplicateResultClass.__name__}"
+        assert cls.ReplicateResultClass is None
+
+    def test_all_compute_stage_plugins_are_mda_artifact_plugins(self) -> None:
+        """All discovered compute plugins should be represented by the artifact contract."""
+
+        discovered_compute_plugins = {
+            name for name, cls in list_analyses().items() if cls.has_compute_stage
+        }
+        assert discovered_compute_plugins == MDA_ARTIFACT_PLUGINS
+
+    @pytest.mark.parametrize("plugin_name", sorted(MDA_ARTIFACT_PLUGINS))
+    def test_replicate_artifact_roundtrip(self, plugin_name: str, tmp_path: Path) -> None:
+        """Canonical replicate artifacts should roundtrip through the artifact store."""
+
+        artifact = ReplicateArtifact(
+            analysis_name=plugin_name,
+            condition_label="Artifact Contract",
+            replicate=1,
+            payload={"metrics": {"smoke": 1.0}, "replicate_metrics": {"smoke": 1.0}},
+            provenance={"source": "contract_test"},
+            metadata={"settings_fingerprint": "contract"},
         )
 
-    @pytest.mark.parametrize("plugin_name", TYPED_REPLICATE_PLUGINS.keys())
-    def test_replicate_result_class_has_model_validate_json(self, plugin_name):
-        """ReplicateResultClass must support Pydantic deserialization."""
-        cls = get_analysis(plugin_name)
-        result_cls = cls.ReplicateResultClass
-        assert result_cls is not None
-        message = f"{plugin_name}.ReplicateResultClass must have model_validate_json() or load()"
-        assert hasattr(result_cls, "model_validate_json") or hasattr(result_cls, "load"), message
+        store = ArtifactStore(tmp_path)
+        store.write_replicate_result(artifact)
+        loaded = store.read_replicate_result()
 
-    def test_all_compute_stage_plugins_covered(self):
-        """Sanity check for compute-stage plugin coverage."""
-        all_plugins = list_analyses()
-        for name, cls in all_plugins.items():
-            if not cls.has_compute_stage:
-                continue
-            if name not in TYPED_REPLICATE_PLUGINS:
-                # Plugin uses dict results so ReplicateResultClass should remain None
-                assert cls.ReplicateResultClass is None, (
-                    f"Plugin '{name}' has compute_stage and ReplicateResultClass set "
-                    "but is not in TYPED_REPLICATE_PLUGINS — add it to the contract test"
-                )
+        assert loaded == artifact
+        assert loaded.analysis_name == plugin_name
+        assert loaded.replicate == 1

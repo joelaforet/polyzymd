@@ -14,8 +14,10 @@ from tests._support.gromacs_smoke import (
     create_gromacs_layout,
     install_fake_mdanalysis,
     make_condition,
+    make_fake_mda_job,
     make_gromacs_config,
     make_mock_universe,
+    make_replicate_artifact_collector,
 )
 
 
@@ -35,9 +37,6 @@ class TestContactsGromacsSmoke:
         universe = make_mock_universe(n_frames=100, n_atoms=20)
         fake_mda.Universe = MagicMock(return_value=universe)
 
-        mock_result = MagicMock()
-        mock_result.save = MagicMock()
-
         original_resolve = GromacsEngine.resolve_trajectory_layout
         with (
             patch.dict(sys.modules, {"MDAnalysis": fake_mda}),
@@ -47,10 +46,17 @@ class TestContactsGromacsSmoke:
                 autospec=True,
                 wraps=original_resolve,
             ) as resolve_spy,
-            patch("polyzymd.analyses.contacts.ParallelContactAnalyzer") as mock_analyzer_cls,
+            patch.object(
+                analysis,
+                "build_mda_jobs",
+                side_effect=lambda mda_ctx: [make_fake_mda_job(mda_ctx, analysis.name)],
+            ),
+            patch.object(
+                analysis,
+                "build_mda_collector",
+                return_value=make_replicate_artifact_collector({"plugin": analysis.name}),
+            ),
         ):
-            mock_analyzer_cls.return_value.run.return_value = mock_result
-
             ctx = ReplicateContext(
                 condition=condition,
                 replicate=1,
@@ -62,7 +68,8 @@ class TestContactsGromacsSmoke:
             )
             result = analysis.run_replicate(ctx, replicate=1)
 
-        assert result is mock_result
+        assert result.analysis_name == "contacts"
+        assert result.payload["plugin"] == "contacts"
         assert resolve_spy.call_count >= 1
         topo_arg, traj_arg = fake_mda.Universe.call_args.args
         assert topo_arg.endswith("run_1/gromacs/solvated_system.pdb")

@@ -8,13 +8,14 @@ MDAnalysis-heavy behavior.
 from __future__ import annotations
 
 from pathlib import Path
-from types import ModuleType
-from typing import Sequence
+from types import ModuleType, SimpleNamespace
+from typing import Any, Callable, Sequence
 from unittest.mock import MagicMock
 
 import numpy as np
 
 from polyzymd.analyses.base import Condition
+from polyzymd.analyses.mda import MDAAnalysisJob, MDACollectorContext, ReplicateArtifact
 
 
 def make_gromacs_config(tmp_path: Path) -> MagicMock:
@@ -233,3 +234,99 @@ def make_condition(
         replicates=replicates,
         sim_config=config,
     )
+
+
+class FakeMDAAnalysis:
+    """Minimal AnalysisBase-like object for artifact-layer smoke tests."""
+
+    def __init__(self, **result_fields: Any) -> None:
+        """Create a fake analysis with a JSON-compatible ``results`` namespace.
+
+        Parameters
+        ----------
+        **result_fields : Any
+            Fields exposed on the fake ``results`` object.
+        """
+
+        self.results = SimpleNamespace(**result_fields)
+        self.run_kwargs: dict[str, Any] = {}
+
+    def run(self, **kwargs: Any) -> "FakeMDAAnalysis":
+        """Record run kwargs and return the completed fake analysis.
+
+        Parameters
+        ----------
+        **kwargs : Any
+            Frame-selection keyword arguments forwarded by ``MDAAnalysisJob``.
+
+        Returns
+        -------
+        FakeMDAAnalysis
+            This analysis instance.
+        """
+
+        self.run_kwargs = dict(kwargs)
+        return self
+
+
+def make_fake_mda_job(ctx: Any, analysis_name: str) -> MDAAnalysisJob:
+    """Build a no-op MDA job that still uses the framework frame selection.
+
+    Parameters
+    ----------
+    ctx : Any
+        MDA replicate job context supplied to ``build_mda_jobs()``.
+    analysis_name : str
+        Name assigned to the fake job.
+
+    Returns
+    -------
+    MDAAnalysisJob
+        Executable no-op job for smoke tests.
+    """
+
+    return MDAAnalysisJob(
+        name=analysis_name,
+        analysis=FakeMDAAnalysis(smoke=True),
+        frame_selection=ctx.frame_selection,
+        universe_policy=ctx.universe_policy,
+    )
+
+
+def make_replicate_artifact_collector(
+    payload: dict[str, Any] | None = None,
+) -> Callable[[MDACollectorContext, Sequence[Any]], ReplicateArtifact]:
+    """Return a collector that emits a canonical replicate artifact.
+
+    Parameters
+    ----------
+    payload : dict[str, Any] or None, optional
+        Additional payload fields to include in the artifact, by default ``None``.
+
+    Returns
+    -------
+    callable
+        Collector compatible with ``Analysis.build_mda_collector()``.
+    """
+
+    def collect(ctx: MDACollectorContext, completed_jobs: Sequence[Any]) -> ReplicateArtifact:
+        """Collect completed fake jobs into a JSON artifact."""
+
+        return ReplicateArtifact(
+            analysis_name=ctx.analysis_name,
+            condition_label=ctx.condition_label,
+            replicate=ctx.replicate,
+            payload={
+                "metrics": {"smoke": 1.0},
+                "n_completed_jobs": len(completed_jobs),
+                **dict(payload or {}),
+            },
+            provenance={
+                "source": "gromacs_smoke_fake_mda_job",
+                "frame_selection": {"start": ctx.frame_selection.start},
+                "universe_policy": ctx.universe_policy.as_dict(),
+            },
+            metadata={"settings_fingerprint": ctx.settings_fingerprint},
+        )
+
+    return collect
