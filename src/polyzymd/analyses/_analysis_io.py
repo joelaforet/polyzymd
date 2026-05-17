@@ -35,7 +35,7 @@ def load_aggregated_result(analysis: Any, aggregated_dir: Path) -> Any:
 
 
 def deserialize_result(analysis: Any, path: Path) -> Any:
-    """Deserialize an aggregated JSON result.
+    """Deserialize an aggregated artifact or JSON result.
 
     Parameters
     ----------
@@ -131,7 +131,7 @@ def _load_replicate_result_from_path(analysis: Any, run_dir: Path, result_path: 
     Returns
     -------
     Any
-        Loaded legacy result or MDA replicate artifact.
+        Loaded plugin result or MDA replicate artifact.
     """
 
     result_cls = type(analysis).ReplicateResultClass
@@ -159,7 +159,7 @@ def _try_load_mda_replicate_artifact(analysis: Any, run_dir: Path, result_path: 
     -------
     Any or None
         Loaded ``ReplicateArtifact`` when the file is an MDA artifact, otherwise
-        ``None`` so legacy JSON loading can continue.
+        ``None`` so standard result deserialization can continue.
     """
 
     from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
@@ -201,7 +201,7 @@ def _try_load_mda_condition_artifact(
     -------
     Any or None
         Loaded ``ConditionArtifact`` when the file is an MDA condition artifact,
-        otherwise ``None`` so legacy JSON loading can continue.
+        otherwise ``None`` so standard result deserialization can continue.
     """
 
     try:
