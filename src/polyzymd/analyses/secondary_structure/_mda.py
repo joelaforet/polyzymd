@@ -423,53 +423,6 @@ def aggregate_secondary_structure_artifacts(
     return artifact
 
 
-def condition_artifact_to_legacy_result(artifact: ConditionArtifact) -> Any:
-    """Adapt a condition artifact to the legacy aggregated result model.
-
-    Parameters
-    ----------
-    artifact : ConditionArtifact
-        Canonical secondary-structure condition artifact.
-
-    Returns
-    -------
-    SecondaryStructureAggregatedResult
-        Legacy-shaped model used by existing formatters and plots.
-    """
-
-    from polyzymd.analyses.secondary_structure._results import SecondaryStructureAggregatedResult
-
-    payload = artifact.payload
-    return SecondaryStructureAggregatedResult(
-        config_hash=str(artifact.metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(artifact.metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=None,
-        equilibration_time=float(artifact.metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(artifact.metadata.get("equilibration_unit", "ns")),
-        selection_string=str(artifact.metadata.get("selection_string", "")),
-        n_replicates=int(payload["n_replicates"]),
-        replicates=[int(replicate) for replicate in artifact.replicates],
-        residue_ids=_int_list(payload["residue_ids"], field="residue_ids"),
-        residue_names=_str_list(payload["residue_names"], field="residue_names"),
-        mean_persistence_coil=list(payload["mean_persistence_coil"]),
-        mean_persistence_helix=list(payload["mean_persistence_helix"]),
-        mean_persistence_strand=list(payload["mean_persistence_strand"]),
-        sem_persistence_coil=list(payload["sem_persistence_coil"]),
-        sem_persistence_helix=list(payload["sem_persistence_helix"]),
-        sem_persistence_strand=list(payload["sem_persistence_strand"]),
-        mean_overall_helix=float(payload["mean_overall_helix"]),
-        mean_overall_strand=float(payload["mean_overall_strand"]),
-        mean_overall_coil=float(payload["mean_overall_coil"]),
-        sem_overall_helix=float(payload["sem_overall_helix"]),
-        sem_overall_strand=float(payload["sem_overall_strand"]),
-        sem_overall_coil=float(payload["sem_overall_coil"]),
-        per_replicate_helix=list(payload["per_replicate_helix"]),
-        per_replicate_strand=list(payload["per_replicate_strand"]),
-        per_replicate_coil=list(payload["per_replicate_coil"]),
-        settings_fingerprint=artifact.metadata.get("settings_fingerprint"),
-    )
-
-
 def load_replicate_matrix(artifact: ReplicateArtifact, run_dir: Path) -> NDArray[np.int8]:
     """Load and validate the DSSP matrix sidecar for one replicate.
 

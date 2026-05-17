@@ -37,7 +37,6 @@ from polyzymd.analyses.secondary_structure._mda import (
     SecondaryStructureArtifactCollector,
     aggregate_secondary_structure_artifacts,
     build_secondary_structure_jobs,
-    condition_artifact_to_legacy_result,
 )
 from polyzymd.analyses.secondary_structure._plot_settings import SSPlotSettings
 from polyzymd.analyses.secondary_structure._plotters import (
@@ -46,7 +45,6 @@ from polyzymd.analyses.secondary_structure._plotters import (
     _plot_ss_persistence_diff_heatmap,
     _plot_ss_timeline_heatmap,
 )
-from polyzymd.analyses.secondary_structure._results import SecondaryStructureAggregatedResult
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 if TYPE_CHECKING:
@@ -74,7 +72,7 @@ class SecondaryStructureAnalysis(Analysis):
     name: ClassVar[str] = "secondary_structure"
     Settings: ClassVar[type] = SecondaryStructureSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = SSPlotSettings
-    AggregatedResultClass: ClassVar[type] = SecondaryStructureAggregatedResult
+    AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ("ss",)
     dependencies: ClassVar[tuple[str, ...]] = ()
@@ -191,12 +189,12 @@ class SecondaryStructureAnalysis(Analysis):
         return aggregated
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-        """Extract helix fraction for scalar comparison adapters.
+        """Extract helix fraction directly from a condition artifact.
 
         Parameters
         ----------
         summary : Any
-            Canonical condition artifact or legacy aggregate adapter.
+            Canonical condition artifact.
 
         Returns
         -------
@@ -205,16 +203,28 @@ class SecondaryStructureAnalysis(Analysis):
             structured.
         """
 
-        if isinstance(summary, ConditionArtifact):
-            summary = condition_artifact_to_legacy_result(summary)
+        if not isinstance(summary, ConditionArtifact):
+            raise TypeError(
+                "Secondary-structure metric extraction requires a canonical MDAnalysis "
+                "condition artifact. Legacy aggregate summaries are incompatible; recompute "
+                "the condition or clear stale caches before comparing."
+            )
+        metric = summary.payload.get("metrics", {}).get(HELIX_FRACTION_METRIC)
+        if not isinstance(metric, dict):
+            raise ValueError(
+                "Secondary-structure condition artifact is missing the helix_fraction metric "
+                "payload. Recompute the condition or clear stale caches before comparing."
+            )
         return {
             HELIX_FRACTION_METRIC: MetricValue(
                 name=HELIX_FRACTION_METRIC,
-                mean=summary.mean_overall_helix,
-                sem=summary.sem_overall_helix,
-                replicate_values=summary.per_replicate_helix,
-                higher_is_better=True,
-                direction_labels=("destabilizing", "unchanged", "stabilizing"),
+                mean=float(metric["mean"]),
+                sem=float(metric["sem"]),
+                replicate_values=[float(value) for value in metric["values"]],
+                higher_is_better=bool(metric.get("higher_is_better", True)),
+                direction_labels=tuple(
+                    metric.get("direction_labels", ("destabilizing", "unchanged", "stabilizing"))
+                ),
             ),
         }
 
@@ -290,7 +300,6 @@ class SecondaryStructureAnalysis(Analysis):
                 allow_replicate_subset=True,
             )
             cond_data["condition_artifact"] = artifact
-            cond_data["aggregated_result"] = condition_artifact_to_legacy_result(artifact)
 
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
         plots: list[Path] = []

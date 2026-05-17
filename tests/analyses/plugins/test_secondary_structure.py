@@ -13,6 +13,7 @@ from polyzymd.analyses.base import (
     AggregateContext,
     ComparisonContext,
     Condition,
+    MetricValue,
     PlotContext,
     ReplicateContext,
     SlurmResourceHint,
@@ -68,6 +69,7 @@ def test_plugin_attributes(settings: SecondaryStructureSettings) -> None:
 
     assert settings.chain_id == "A"
     assert SecondaryStructureAnalysis.name == "secondary_structure"
+    assert SecondaryStructureAnalysis.AggregatedResultClass is None
     assert SecondaryStructureAnalysis.ReplicateResultClass is None
     assert SecondaryStructureAnalysis.aliases == ("ss",)
     assert SecondaryStructureAnalysis.slurm_resource_hint == SlurmResourceHint(mem="16G")
@@ -239,6 +241,35 @@ def test_plugin_aggregate_rejects_legacy_inputs(tmp_path, condition, settings) -
 
     with pytest.raises(TypeError, match="ReplicateArtifact"):
         SecondaryStructureAnalysis().aggregate(ctx, [{"legacy": True}])
+
+
+def test_extract_metrics_reads_condition_artifact_payload(condition, settings) -> None:
+    """Metric extraction should read the canonical artifact metric payload."""
+
+    artifact = _condition_artifact(condition.label, (1, 2), [0.2, 0.4], settings)
+
+    metrics = SecondaryStructureAnalysis().extract_metrics(artifact)
+
+    metric = metrics["helix_fraction"]
+    assert isinstance(metric, MetricValue)
+    assert metric.mean == pytest.approx(0.3)
+    assert metric.sem == pytest.approx(0.1)
+    assert metric.replicate_values == [0.2, 0.4]
+    assert metric.higher_is_better is True
+    assert metric.direction_labels == ("destabilizing", "unchanged", "stabilizing")
+
+
+def test_extract_metrics_rejects_legacy_summary() -> None:
+    """Metric extraction should reject legacy-shaped aggregate summaries."""
+
+    legacy_summary = {
+        "mean_overall_helix": 0.3,
+        "sem_overall_helix": 0.1,
+        "per_replicate_helix": [0.2, 0.4],
+    }
+
+    with pytest.raises(TypeError, match="canonical MDAnalysis condition artifact"):
+        SecondaryStructureAnalysis().extract_metrics(legacy_summary)
 
 
 def test_default_compare_returns_comparison_artifact(tmp_path, condition, settings) -> None:
