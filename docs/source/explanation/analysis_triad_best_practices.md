@@ -604,7 +604,10 @@ system should be equilibrated before triad analysis.
 ### Programmatic Analysis
 
 ```python
+from pathlib import Path
+
 from polyzymd.analyses.discovery import get_analysis
+from polyzymd.analyses.mda import ArtifactStore
 from polyzymd.analyses.orchestrator import run_comparison
 from polyzymd.config.comparison import ComparisonConfig
 
@@ -622,49 +625,55 @@ pipeline_result = run_comparison(
     equilibration="100ns",
 )
 
-# Access condition-level aggregated result
-result = pipeline_result["aggregated"]["No Polymer"]
-print(f"Mean contact: {result.overall_simultaneous_contact * 100:.1f}%")
+# Access condition-level artifact output
+condition = ArtifactStore(
+    Path("analysis/No Polymer/catalytic_triad/aggregated")
+).read_condition_result()
+metric = condition.payload["metrics"]["simultaneous_contact_fraction"]
+print(f"Mean contact: {metric['mean'] * 100:.1f}%")
 
-# Comparison-level statistics
-comparison = pipeline_result["comparison"]
-print(f"Ranking: {comparison.ranking}")
+# Access comparison-level artifact output
+comparison = ArtifactStore(Path("comparison/catalytic_triad")).read_comparison_result()
+print(f"Ranking: {comparison.payload['ranking']}")
 ```
 
 ### Accessing Detailed Results
 
 ```python
 # Per-pair statistics
-for pair in result.pair_results:
-    print(f"{pair.pair_label}:")
-    print(f"  Mean: {pair.mean_distance:.2f} A")
-    print(f"  Std:  {pair.std_distance:.2f} A")
-    if pair.fraction_below_threshold:
-        print(f"  Contact: {pair.fraction_below_threshold * 100:.1f}%")
+for pair in condition.payload["pair_results"]:
+    print(f"{pair['pair_label']}:")
+    print(f"  Mean: {pair['overall_mean']:.2f} A")
+    print(f"  SEM:  {pair['overall_sem']:.2f} A")
+    if "fraction_below_threshold" in pair:
+        print(f"  Contact: {pair['fraction_below_threshold'] * 100:.1f}%")
 
 # Autocorrelation info
-if result.sim_contact_correlation_time:
-    print(f"Correlation time: {result.sim_contact_correlation_time:.1f} "
-          f"{result.sim_contact_correlation_time_unit}")
-    print(f"N independent: {result.sim_contact_n_independent}")
+autocorr = condition.payload.get("autocorrelation", {})
+if autocorr.get("simultaneous_contact_correlation_time"):
+    print(
+        f"Correlation time: {autocorr['simultaneous_contact_correlation_time']:.1f} "
+        f"{autocorr.get('correlation_time_unit', 'ps')}"
+    )
+    print(f"N independent: {autocorr['simultaneous_contact_n_independent']}")
 ```
 
 ### Loading Saved Results
 
 ```python
-from polyzymd.analyses.catalytic_triad._results import TriadResult, TriadAggregatedResult
+from pathlib import Path
 
-# Load single replicate result (within comparison workspace)
-result = TriadResult.load(
-    "analysis/<condition>/catalytic_triad/run_1/triad_LipA_eq100ns.json"
-)
-print(result.summary())
+from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact, ReplicateArtifact
 
-# Load aggregated result
-agg = TriadAggregatedResult.load(
-    "analysis/<condition>/catalytic_triad/aggregated/triad_LipA_reps1-3_eq100ns.json"
-)
-print(agg.summary())
+# Load a single replicate artifact
+replicate_store = ArtifactStore(Path("analysis/<condition>/catalytic_triad/run_1"))
+replicate: ReplicateArtifact = replicate_store.read_replicate_result()
+print(replicate.payload["metrics"])
+
+# Load a per-condition aggregate artifact
+condition_store = ArtifactStore(Path("analysis/<condition>/catalytic_triad/aggregated"))
+aggregate: ConditionArtifact = condition_store.read_condition_result()
+print(aggregate.payload["metrics"])
 ```
 
 ## Plotting and Visualization

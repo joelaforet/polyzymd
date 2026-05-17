@@ -433,27 +433,46 @@ A stride of 5 uses every 5th frame, reducing computation time by ~5x. The
 plugin still computes autocorrelation-corrected SEM on the subsampled data.
 :::
 
-## Result Models
+## Artifact Outputs
 
 :::{admonition} Reference material
 :class: note
 
-This section is **reference-style** content for plugin developers and advanced
-users who need to inspect the data models programmatically.
+This section is **reference-style** content for advanced users who need to
+inspect saved SASA outputs programmatically.
 :::
 
-For plugin developers or advanced users, the SASA result hierarchy is:
+SASA writes canonical v1.3 artifact outputs. The JSON files are stable artifact
+envelopes, not public promises for plugin-private result adapter classes:
 
-| Model | Level | Key fields |
-|-------|-------|------------|
-| `SASARunResult` | Per-replicate, per-run | `mean_sasa`, `std_sasa`, `sem_sasa`, `n_frames_used`, `n_target_atoms` |
-| `SASAResult` | Per-replicate (all runs) | `run_results: list[SASARunResult]` |
-| `SASARunAggregatedResult` | Per-condition, per-run | `overall_mean`, `overall_sem`, `per_replicate_means`, `per_residue_mean_sasa` |
-| `SASAAggregatedResult` | Per-condition (all runs) | `run_results: list[SASARunAggregatedResult]` |
-| `SASAComparisonResult` | Cross-condition | `pairwise_comparisons`, `ranking_by_run`, `anova_by_run` |
+| Level | Artifact | Path | Contents |
+|-------|----------|------|----------|
+| Per replicate | `ReplicateArtifact` | `analysis/<condition>/sasa/run_<replicate>/result.json` | SASA run summaries and scalar metrics in `payload` |
+| Per condition | `ConditionArtifact` | `analysis/<condition>/sasa/aggregated/result.json` | Replicate aggregates and per-run metric summaries in `payload` |
+| Cross condition | Comparison result | `comparison/sasa/result.json` | Statistical comparisons, rankings, and ANOVA summaries |
+| Large arrays | NPZ sidecars | `analysis/<condition>/sasa/**/sidecars/*.npz` | Per-frame SASA, per-residue profiles, and other arrays |
 
-Raw per-frame and per-residue SASA data is stored as NPZ sidecars alongside
-the JSON result files.
+The artifact envelope fields have consistent meanings across analysis plugins:
+
+| Field | Description |
+|-------|-------------|
+| `payload` | JSON-compatible SASA metrics, run summaries, and relative sidecar paths |
+| `metadata` | Plugin settings, equilibration labels, units, and cache metadata |
+| `provenance` | Input topology/trajectory identity and workflow details |
+| `sidecars` | Validated references to files under `sidecars/`, including size and SHA-256 hash metadata |
+
+Load artifacts through the public MDAnalysis artifact API:
+
+```python
+from pathlib import Path
+
+from polyzymd.analyses.mda import ArtifactStore
+
+replicate = ArtifactStore(Path("analysis/PEGylated/sasa/run_1")).read_replicate_result()
+condition = ArtifactStore(Path("analysis/PEGylated/sasa/aggregated")).read_condition_result()
+print(replicate.payload)
+print(condition.payload)
+```
 
 ## What You Have Now
 

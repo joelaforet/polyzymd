@@ -53,76 +53,130 @@ or catalytically competent conformation.
 
 ## Output Files
 
-RMSF writes per-replicate and aggregated JSON files under each condition's
-analysis directory:
-
-```text
-<projects_directory>/
-└── analysis/
-    └── rmsf/
-        ├── run_1/
-        │   └── rmsf_eq10ns.json
-        ├── run_2/
-        │   └── rmsf_eq10ns.json
-        ├── run_3/
-        │   └── rmsf_eq10ns.json
-        └── aggregated/
-            └── rmsf_reps1-3_eq10ns.json
-```
-
-Comparison-level output is written separately in the comparison workspace:
+RMSF writes canonical v1.3 artifact outputs under each condition's analysis
+directory. Artifact JSON files use stable envelope fields instead of exposing
+plugin-private result model classes as public output schemas.
 
 ```text
 <comparison_workspace>/
+├── analysis/
+│   └── <condition>/
+│       └── rmsf/
+│           ├── run_1/
+│           │   ├── result.json
+│           │   └── sidecars/
+│           │       └── rmsf_profile.npz
+│           ├── run_2/
+│           │   └── ...
+│           ├── run_3/
+│           │   └── ...
+│           └── aggregated/
+│               ├── result.json
+│               └── sidecars/
+│                   └── rmsf_profile.npz
 └── comparison/
     └── rmsf/
         └── result.json
 ```
 
-### Per-replicate JSON (`RMSFResult`)
+The canonical paths are:
+
+| Level | Artifact | Path |
+|-------|----------|------|
+| Per replicate | `ReplicateArtifact` | `analysis/<condition>/rmsf/run_<replicate>/result.json` |
+| Per condition | `ConditionArtifact` | `analysis/<condition>/rmsf/aggregated/result.json` |
+| Cross condition | Comparison result | `comparison/rmsf/result.json` |
+| Large arrays | NPZ sidecars | `analysis/<condition>/rmsf/**/sidecars/*.npz` |
+
+### Artifact envelope fields
+
+All RMSF artifact JSON files use common envelope fields:
+
+| Field | Description |
+|-------|-------------|
+| `payload` | JSON-compatible RMSF metrics, summaries, and relative sidecar references |
+| `metadata` | Plugin settings, equilibration labels, units, and other cache metadata |
+| `provenance` | Input identity and workflow details needed to audit how the artifact was produced |
+| `sidecars` | Validated references to large arrays or profiles in `sidecars/*.npz`, with hashes and sizes |
+
+Use the public artifact store API to inspect artifacts programmatically:
+
+```python
+from pathlib import Path
+
+from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact, ReplicateArtifact
+
+rep_store = ArtifactStore(Path("analysis/PEGylated/rmsf/run_1"))
+replicate: ReplicateArtifact = rep_store.read_replicate_result()
+print(replicate.payload["metrics"])
+
+condition_store = ArtifactStore(Path("analysis/PEGylated/rmsf/aggregated"))
+condition: ConditionArtifact = condition_store.read_condition_result()
+print(condition.payload["metrics"])
+```
+
+### Per-replicate JSON (`ReplicateArtifact`)
+
+Representative structure:
 
 ```python
 {
-    "config_hash": "abc123...",
+    "schema_version": "1",
+    "artifact_type": "replicate",
+    "analysis_name": "rmsf",
+    "condition_label": "PEGylated",
     "replicate": 1,
-    "equilibration_time": 10.0,
-    "equilibration_unit": "ns",
-    "selection_string": "protein and name CA",
-    "correlation_time": 15394.5,
-    "correlation_time_unit": "ps",
-    "n_independent_frames": 6,
-    "residue_ids": [1, 2, 3],
-    "residue_names": ["MET", "ALA", "SER"],
-    "rmsf_values": [0.45, 0.52, 0.49],
-    "mean_rmsf": 0.621,
-    "std_rmsf": 0.215,
-    "min_rmsf": 0.248,
-    "max_rmsf": 3.160,
-    "reference_mode": "centroid",
-    "reference_frame": 401,
-    "alignment_selection": "protein and name CA",
-    "reference_file": null,
-    "n_frames_total": 10000,
-    "n_frames_used": 9000,
-    "trajectory_files": [".../prod_1.xtc"]
+    "payload": {
+        "metrics": {"mean_rmsf": 0.621},
+        "residue_ids": [1, 2, 3],
+        "residue_names": ["MET", "ALA", "SER"],
+        "profile_sidecar": "sidecars/rmsf_profile.npz",
+        "summary": {
+            "std_rmsf": 0.215,
+            "min_rmsf": 0.248,
+            "max_rmsf": 3.160,
+            "n_frames_used": 9000
+        }
+    },
+    "metadata": {
+        "selection": "protein and name CA",
+        "reference_mode": "centroid",
+        "alignment_selection": "protein and name CA",
+        "equilibration": "10ns"
+    },
+    "provenance": {"trajectory_files": [".../prod_1.xtc"]},
+    "sidecars": [
+        {"path": "sidecars/rmsf_profile.npz", "metadata": {"kind": "rmsf_profile"}}
+    ]
 }
 ```
 
-### Aggregated JSON (`RMSFAggregatedResult`)
+The sidecar stores arrays such as `rmsf_values`, residue indices, and any
+profile data that should not be duplicated into JSON.
+
+### Aggregated JSON (`ConditionArtifact`)
+
+Representative structure:
 
 ```python
 {
+    "schema_version": "1",
+    "artifact_type": "condition",
+    "analysis_name": "rmsf",
+    "condition_label": "PEGylated",
     "replicates": [1, 2, 3],
-    "n_replicates": 3,
-    "residue_ids": [1, 2, 3],
-    "residue_names": ["MET", "ALA", "SER"],
-    "mean_rmsf_per_residue": [0.46, 0.50, 0.47],
-    "sem_rmsf_per_residue": [0.02, 0.03, 0.02],
-    "per_replicate_mean_rmsf": [0.64, 0.59, 0.63],
-    "overall_mean_rmsf": 0.62,
-    "overall_sem_rmsf": 0.02,
-    "overall_min_rmsf": 0.30,
-    "overall_max_rmsf": 4.21
+    "payload": {
+        "metrics": {
+            "mean_rmsf": {"values": [0.64, 0.59, 0.63], "mean": 0.62, "sem": 0.02}
+        },
+        "profile_sidecar": "sidecars/rmsf_profile.npz",
+        "summary": {"overall_min_rmsf": 0.30, "overall_max_rmsf": 4.21}
+    },
+    "metadata": {"equilibration": "10ns"},
+    "provenance": {"source_replicates": [1, 2, 3]},
+    "sidecars": [
+        {"path": "sidecars/rmsf_profile.npz", "metadata": {"kind": "mean_sem_profile"}}
+    ]
 }
 ```
 
