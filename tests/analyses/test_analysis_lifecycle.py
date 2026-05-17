@@ -10,7 +10,7 @@ from typing import Any, ClassVar, Sequence
 import pytest
 from pydantic import BaseModel
 
-from polyzymd.analyses._analysis_lifecycle import AnalysisLifecycle
+from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,

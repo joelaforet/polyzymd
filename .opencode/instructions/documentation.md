@@ -164,8 +164,8 @@ Use MyST roles for cross-referencing:
 
 `polyzymd.analyses.base` is a public facade. It re-exports context and result
 models from private framework modules so contributor documentation can keep a
-single stable import path. Do not document `_analysis_*`, `_contexts.py`, or
-`_comparison_models.py` as user-facing API pages unless explicitly writing
+single stable import path. Do not document private `_framework/` modules as
+user-facing API pages unless explicitly writing
 internal developer reference material.
 
 ## ReadTheDocs

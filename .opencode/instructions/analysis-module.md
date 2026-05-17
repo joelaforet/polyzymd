@@ -7,16 +7,11 @@ The analysis system lives in the `analyses/` package:
 ```
 src/polyzymd/analyses/
 ├── base.py                 # Public facade: Analysis, contexts, result models
-├── _analysis_compare.py    # Internal default comparison implementation
-├── _analysis_io.py         # Internal result paths, cache, serialization helpers
-├── _analysis_contract.py   # Internal plugin contract validation
-├── _contexts.py            # Internal definitions re-exported by base.py
-├── _comparison_models.py   # Internal models re-exported by base.py
+├── _framework/             # Internal lifecycle, I/O, context, and comparison helpers
 ├── discovery.py            # pkgutil-based auto-discovery
 ├── orchestrator.py         # Framework engine: compute → aggregate → compare → plot
 ├── stats.py                # default_scalar_comparison(), format_scalar_comparison()
 ├── shared/                 # Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-├── _results_base.py        # Base result model (shared, stays at top level)
 ├── rmsf/                   # RMSF plugin sub-package
 │   ├── __init__.py         #   RMSFAnalysis plugin class
 │   ├── _plotters.py        #   Plotting functions (extracted from __init__.py)
@@ -52,8 +47,7 @@ src/polyzymd/analyses/
 `polyzymd.analyses.base` is the supported public import surface. It re-exports
 `Analysis`, lifecycle contexts, metric descriptors, and comparison models from
 private framework modules. Contributors should import from
-`polyzymd.analyses.base` and should not import `_analysis_*`, `_contexts.py`, or
-`_comparison_models.py` directly.
+`polyzymd.analyses.base` and should not import private `_framework/` modules directly.
 
 Plugins may be simple single-file modules or packages. Established and advanced
 plugins usually extract plotting into `_plotters.py` and MDAnalysis helpers into

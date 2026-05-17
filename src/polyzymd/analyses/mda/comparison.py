@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from polyzymd.analyses._comparison_models import ComparisonResult, MetricValue
+from polyzymd.analyses._framework.comparison_models import ComparisonResult, MetricValue
 from polyzymd.analyses.mda.aggregation import AggregatedMetric
 from polyzymd.analyses.mda.artifacts import ComparisonArtifact, ConditionArtifact
 from polyzymd.analyses.mda.base import MDAnalysisExtensionError

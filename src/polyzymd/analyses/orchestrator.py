@@ -34,7 +34,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
-from polyzymd.analyses._analysis_lifecycle import AnalysisLifecycle, _resolve_settings
+from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle, _resolve_settings
 from polyzymd.analyses.base import Condition
 from polyzymd.analyses.exceptions import (
     AnalysisError,

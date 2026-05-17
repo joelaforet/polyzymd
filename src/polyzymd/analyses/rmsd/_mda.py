@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import NDArray
 
-from polyzymd.analyses._results_base import get_polyzymd_version
+from polyzymd.analyses._framework.results_base import get_polyzymd_version
 from polyzymd.analyses.mda import (
     MDAAnalysisJob,
     MDACollectorContext,

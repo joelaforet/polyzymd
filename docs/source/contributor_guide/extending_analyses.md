@@ -85,8 +85,7 @@ from polyzymd.analyses.mda import (
 base class, lifecycle contexts, `MetricValue`, and comparison result models.
 `polyzymd.analyses.mda` is the stable MDAnalysis extension-layer surface for
 jobs, frame selection, artifacts, stores, aggregation, and comparison helpers.
-Do not import private modules such as `_contexts.py`, `_comparison_models.py`,
-or `_analysis_*` from contributor plugins.
+Do not import private `_framework/` modules from contributor plugins.
 
 ## Minimal function-adapter plugin
 

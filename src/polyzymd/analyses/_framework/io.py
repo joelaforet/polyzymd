@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
 if TYPE_CHECKING:
-    from polyzymd.analyses._contexts import PlotContext
+    from polyzymd.analyses._framework.contexts import PlotContext
 
 logger = logging.getLogger("polyzymd.analyses")
 

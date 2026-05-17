@@ -18,46 +18,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel
 
-from polyzymd.analyses._aggregate_validation import AggregateValidationError
-from polyzymd.analyses._aggregate_validation import (
+from polyzymd.analyses._framework.aggregate_validation import AggregateValidationError
+from polyzymd.analyses._framework.aggregate_validation import (
     aggregate_settings_fingerprint as _aggregate_settings_fingerprint_impl,
 )
-from polyzymd.analyses._aggregate_validation import (
+from polyzymd.analyses._framework.aggregate_validation import (
     validate_aggregated_result as _validate_aggregated_result_impl,
 )
-from polyzymd.analyses._analysis_compare import default_compare as _default_compare
-from polyzymd.analyses._analysis_contract import validate_analysis_subclass
-from polyzymd.analyses._analysis_io import (
-    aggregate_result_path as _aggregate_result_path,
-)
-from polyzymd.analyses._analysis_io import (
-    build_plot_data as _build_plot_data_impl,
-)
-from polyzymd.analyses._analysis_io import (
-    comparison_result_path as _comparison_result_path,
-)
-from polyzymd.analyses._analysis_io import (
-    deserialize_replicate_result,
-    format_replicate_range,
-    load_aggregated_result,
-    load_replicate_result,
-)
-from polyzymd.analyses._analysis_io import (
-    deserialize_result as _deserialize_result_impl,
-)
-from polyzymd.analyses._analysis_io import (
-    figures_output_dir as _figures_output_dir,
-)
-from polyzymd.analyses._analysis_io import (
-    replicate_result_path as _replicate_result_path,
-)
-from polyzymd.analyses._analysis_io import (
-    resolve_output_dir as _resolve_output_dir,
-)
-from polyzymd.analyses._analysis_io import (
-    save_result as _save_result_impl,
-)
-from polyzymd.analyses._comparison_models import (
+from polyzymd.analyses._framework.compare import default_compare as _default_compare
+from polyzymd.analyses._framework.comparison_models import (
     ANOVAResult,
     BaseComparisonResult,
     BaseConditionSummary,
@@ -70,13 +39,44 @@ from polyzymd.analyses._comparison_models import (
     TConditionSummary,
     TPairwiseResult,
 )
-from polyzymd.analyses._contexts import (
+from polyzymd.analyses._framework.contexts import (
     AggregateContext,
     ComparisonContext,
     Condition,
     PlotContext,
     ReplicateContext,
     _default_plot_settings,
+)
+from polyzymd.analyses._framework.contract import validate_analysis_subclass
+from polyzymd.analyses._framework.io import (
+    aggregate_result_path as _aggregate_result_path,
+)
+from polyzymd.analyses._framework.io import (
+    build_plot_data as _build_plot_data_impl,
+)
+from polyzymd.analyses._framework.io import (
+    comparison_result_path as _comparison_result_path,
+)
+from polyzymd.analyses._framework.io import (
+    deserialize_replicate_result,
+    format_replicate_range,
+    load_aggregated_result,
+    load_replicate_result,
+)
+from polyzymd.analyses._framework.io import (
+    deserialize_result as _deserialize_result_impl,
+)
+from polyzymd.analyses._framework.io import (
+    figures_output_dir as _figures_output_dir,
+)
+from polyzymd.analyses._framework.io import (
+    replicate_result_path as _replicate_result_path,
+)
+from polyzymd.analyses._framework.io import (
+    resolve_output_dir as _resolve_output_dir,
+)
+from polyzymd.analyses._framework.io import (
+    save_result as _save_result_impl,
 )
 from polyzymd.analyses.exceptions import PluginContractError
 

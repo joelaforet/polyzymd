@@ -24,7 +24,7 @@ src/polyzymd/
 | Layer | Files | Role |
 |-------|-------|------|
 | **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the extension point |
-| **Private modules** | `_analysis_*`, `_contexts.py`, `_comparison_models.py`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
+| **Private modules** | `_framework/`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/` | Stable public facade, auto-discovery, artifact lifecycle |
 
@@ -38,9 +38,9 @@ MDAnalysis helpers in a dedicated module such as `_mda.py`.
 
 `polyzymd.analyses.base` is the stable public API facade for contributors. It
 re-exports `Analysis`, lifecycle context objects, metric descriptors, and
-comparison models while delegating implementation to private modules such as
-`_analysis_compare.py`, `_analysis_io.py`,
-`_analysis_contract.py`, `_contexts.py`, and `_comparison_models.py`. Do not
+comparison models while delegating implementation to private `_framework/`
+modules such as `compare.py`, `io.py`, `contract.py`, `contexts.py`, and
+`comparison_models.py`. Do not
 import these private modules from contributor plugins; import public symbols
 from `polyzymd.analyses.base`.
 

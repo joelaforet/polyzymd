@@ -93,7 +93,8 @@ class TestRMSFGromacsSmoke:
             ),
             patch("polyzymd.analyses.rmsf._mda.RMSFProfileAnalysis", side_effect=fake_jobs),
             patch(
-                "polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.3.0-test"
+                "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+                return_value="1.3.0-test",
             ),
         ):
             ctx1 = ReplicateContext(

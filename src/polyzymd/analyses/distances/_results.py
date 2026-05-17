@@ -15,7 +15,7 @@ from typing import Any, ClassVar, Protocol, Sequence
 
 from pydantic import Field
 
-from polyzymd.analyses._results_base import (
+from polyzymd.analyses._framework.results_base import (
     AggregatedResultMixin,
     BaseAnalysisResult,
 )

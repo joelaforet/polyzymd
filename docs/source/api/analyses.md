@@ -46,8 +46,7 @@ job/artifact lifecycle became the only supported contributor extension path.
 It re-exports the base class, lifecycle contexts, metric descriptors, and
 comparison result models while delegating implementation to private framework
 modules. Contributor plugins should import from
-`polyzymd.analyses.base`, not from modules named `_analysis_*`, `_contexts`,
-or `_comparison_models`.
+`polyzymd.analyses.base`, not from private `_framework` modules.
 
 ### Discovery
 

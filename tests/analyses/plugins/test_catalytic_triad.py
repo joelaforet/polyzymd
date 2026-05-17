@@ -223,7 +223,10 @@ class TestTriadMDACollector:
         )
         ctx = _collector_context(tmp_path, condition, default_settings)
 
-        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.3.0"):
+        with patch(
+            "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+            return_value="1.3.0",
+        ):
             artifact = TriadArtifactCollector()(ctx, [_completed_pair_distance_job(matrix)])
 
         assert artifact.analysis_name == "catalytic_triad"

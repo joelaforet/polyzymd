@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from polyzymd.analyses._analysis_lifecycle import AnalysisLifecycle
+from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
 from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
 from polyzymd.analyses.rg import RgAnalysis, RgRunSettings, RgSettings
 from polyzymd.engines.gromacs import GromacsEngine

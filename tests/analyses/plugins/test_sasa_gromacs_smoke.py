@@ -109,7 +109,8 @@ class TestSASAGromacsSmoke:
                 wraps=original_resolve,
             ) as resolve_spy,
             patch(
-                "polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.3.0-test"
+                "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+                return_value="1.3.0-test",
             ),
         ):
             analysis.build_mda_jobs = _fake_build_mda_jobs  # type: ignore[method-assign]

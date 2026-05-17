@@ -779,7 +779,7 @@ class DistanceCalculator:
         DistanceResult
             Distance analysis results.
         """
-        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses._framework.results_base import get_polyzymd_version
         from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
 
         if output_dir is None:

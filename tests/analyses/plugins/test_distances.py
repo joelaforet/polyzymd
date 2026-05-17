@@ -979,7 +979,7 @@ class TestAggregate:
             mock_agg.return_value = mock_stats
 
             with patch(
-                "polyzymd.analyses._results_base.get_polyzymd_version",
+                "polyzymd.analyses._framework.results_base.get_polyzymd_version",
                 return_value="1.0.0-test",
             ):
                 result = analysis.aggregate(ctx, mock_results)
@@ -1052,7 +1052,7 @@ class TestAggregate:
             mock_agg.return_value = mock_stats
 
             with patch(
-                "polyzymd.analyses._results_base.get_polyzymd_version",
+                "polyzymd.analyses._framework.results_base.get_polyzymd_version",
                 return_value="1.0.0-test",
             ):
                 analysis.aggregate(ctx, mock_results)
@@ -2138,7 +2138,7 @@ class TestLifecycle:
             mock_agg.return_value = mock_stats
 
             with patch(
-                "polyzymd.analyses._results_base.get_polyzymd_version",
+                "polyzymd.analyses._framework.results_base.get_polyzymd_version",
                 return_value="1.0.0-test",
             ):
                 agg_result = analysis.aggregate(agg_ctx, rep_results)

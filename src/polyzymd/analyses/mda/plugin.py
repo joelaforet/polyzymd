@@ -21,7 +21,7 @@ from polyzymd.analyses.mda.job import MDAJobResult, MDAUniversePolicy
 from polyzymd.analyses.mda.store import ArtifactStore
 
 if TYPE_CHECKING:
-    from polyzymd.analyses._contexts import ReplicateContext
+    from polyzymd.analyses._framework.contexts import ReplicateContext
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from polyzymd.analyses._comparison_models import MetricValue
+from polyzymd.analyses._framework.comparison_models import MetricValue
 from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda.artifacts import ConditionArtifact
 from polyzymd.analyses.mda.comparison import (

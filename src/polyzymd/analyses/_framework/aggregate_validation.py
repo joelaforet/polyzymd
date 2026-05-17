@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 if TYPE_CHECKING:
-    from polyzymd.analyses._contexts import Condition
+    from polyzymd.analyses._framework.contexts import Condition
 
 
 _UNKNOWN_VALUES = {None, "", "unknown"}

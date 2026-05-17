@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from polyzymd.analyses._analysis_lifecycle import AnalysisLifecycle
+from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
 from polyzymd.analyses.base import Analysis, PlotContext
 from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.mda import (

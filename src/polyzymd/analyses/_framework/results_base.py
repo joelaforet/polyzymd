@@ -52,7 +52,7 @@ class BaseAnalysisResult(BaseModel, ABC):
        .. code-block:: python
 
            from typing import ClassVar
-           from polyzymd.analyses._results_base import BaseAnalysisResult
+           from polyzymd.analyses._framework.results_base import BaseAnalysisResult
 
            class MyResult(BaseAnalysisResult):
                analysis_type: ClassVar[str] = "my_analysis"

@@ -18,7 +18,7 @@ from polyzymd.analyses.mda.plugin import MDACollectorContext
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 
 if TYPE_CHECKING:
-    from polyzymd.analyses._contexts import ReplicateContext
+    from polyzymd.analyses._framework.contexts import ReplicateContext
     from polyzymd.analyses.mda.job import MDABackendPolicy
 
 logger = logging.getLogger("polyzymd.analyses")

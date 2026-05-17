@@ -92,7 +92,8 @@ class TestDistancesGromacsSmoke:
             patch("polyzymd.analyses.distances._mda.compute_config_hash", return_value="smoke123"),
             patch("polyzymd.analyses.distances.build_distance_jobs", side_effect=fake_build_jobs),
             patch(
-                "polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.3.0-test"
+                "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+                return_value="1.3.0-test",
             ),
         ):
             ctx = ReplicateContext(

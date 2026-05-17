@@ -104,7 +104,8 @@ class TestCatalyticTriadGromacsSmoke:
                 "polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="smoke123"
             ),
             patch(
-                "polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.3.0-test"
+                "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+                return_value="1.3.0-test",
             ),
             patch.object(analysis, "build_mda_jobs", side_effect=_fake_jobs),
         ):

@@ -10,7 +10,7 @@ from typing import ClassVar
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from polyzymd.analyses._results_base import AggregatedResultMixin, BaseAnalysisResult
+from polyzymd.analyses._framework.results_base import AggregatedResultMixin, BaseAnalysisResult
 
 
 class ResidueRef(BaseModel):
