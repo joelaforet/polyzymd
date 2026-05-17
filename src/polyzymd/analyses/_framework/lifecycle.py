@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from pydantic import BaseModel
 
-from polyzymd.analyses.base import (
+from polyzymd.analyses._framework.aggregate_validation import AggregateValidationError
+from polyzymd.analyses._framework.contexts import (
     AggregateContext,
-    AggregateValidationError,
     ComparisonContext,
     Condition,
     PlotContext,
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("polyzymd.analyses")
 
 _ACCEPTABLE_RESULT_TYPES = (dict,)  # BaseModel checked separately to keep parity
+_PLOT_ONLY_EXPECTED_FAILURES = (PlotError, ArtifactStoreError, OSError, ValueError)
 
 PREPARE_STAGE = "prepare"
 COMPUTE_STAGE = "compute"
@@ -1030,9 +1031,16 @@ class AnalysisLifecycle:
             return paths, []
         except PluginContractError:
             raise
-        except Exception as e:
-            logger.error(f"Failed to generate plots for {self.analysis.name}: {e}")
-            return [], [(self.analysis.name, str(e))]
+        except _PLOT_ONLY_EXPECTED_FAILURES as exc:
+            if isinstance(exc, PlotError):
+                plot_error = exc
+            else:
+                plot_error = PlotError(
+                    f"{self.analysis.name}: plot failed for comparison='{config.name}': "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            logger.error("Failed to generate plots for %s: %s", self.analysis.name, plot_error)
+            return [], [(self.analysis.name, str(plot_error))]
 
     def _create_prepared_state(
         self,

@@ -1010,7 +1010,7 @@ def test_public_plot_only_returns_paths_and_failures(
             """Raise a plotting failure for plot-only failure reporting."""
 
             del ctx
-            raise RuntimeError("plot boom")
+            raise ValueError("plot boom")
 
     _patch_condition_loader(monkeypatch)
     config = _ComparisonConfig(tmp_path)
@@ -1029,7 +1029,35 @@ def test_public_plot_only_returns_paths_and_failures(
         equilibration="1ns",
     )
     assert failing_paths == []
-    assert failing_failures == [("failing_plot_lifecycle", "plot boom")]
+    assert failing_failures == [
+        (
+            "failing_plot_lifecycle",
+            "failing_plot_lifecycle: plot failed for comparison='project': "
+            "ValueError: plot boom",
+        )
+    ]
+
+
+def test_public_plot_only_propagates_unexpected_plot_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Plot-only execution should not hide unexpected plugin bugs."""
+
+    class _RuntimePlotAnalysis(_DelegatingAnalysis):
+        name: ClassVar[str] = "runtime_plot_lifecycle"
+
+        def plot(self, ctx: PlotContext) -> list[Path]:
+            """Raise an unexpected runtime failure from plotting."""
+
+            del ctx
+            raise RuntimeError("unexpected plot boom")
+
+    _patch_condition_loader(monkeypatch)
+    config = _ComparisonConfig(tmp_path)
+
+    with pytest.raises(RuntimeError, match="unexpected plot boom"):
+        run_plot_only(_RuntimePlotAnalysis(), config, equilibration="1ns")
 
 
 def test_public_run_all_plots_passes_equilibration_override(
