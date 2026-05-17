@@ -1,19 +1,21 @@
 """Functions used to load polymer-enzyme MD trajectories into MDAnalysis Universes"""
 
+from __future__ import annotations
+
 __author__ = "Joseph R. Laforet Jr."
 __email__ = "jola3134@colorado.edu"
 
-from sklearn.cluster import KMeans
-from MDAnalysis.analysis import align
-import numpy as np
-
-from biopandas.pdb import PandasPdb
-
-import MDAnalysis as mda
-from MDAnalysis import transformations
-from tqdm import tqdm
 import os
 import warnings
+from typing import TYPE_CHECKING
+
+import numpy as np
+from biopandas.pdb import PandasPdb
+from sklearn.cluster import KMeans
+from tqdm import tqdm
+
+if TYPE_CHECKING:
+    import MDAnalysis as mda
 
 ########################################################################################################################################################
 
@@ -62,6 +64,7 @@ def write_corrected_protein_topology(
     prot_path: str = "NH3_terminal_His_proton_updated.pdb",
     out_name: str = "Protein_Corrected_Topology.pdb",
 ):
+    import MDAnalysis as mda
 
     u = fix_prot_atoms_names(universe)
     all_atoms = u.select_atoms("all")
@@ -177,6 +180,9 @@ def load_or_transform_universes(
     prot_path: str = "NH3_terminal_His_proton_updated.pdb",
     ligand_name: str = "RBY",
 ) -> list:
+    import MDAnalysis as mda
+    from MDAnalysis import transformations
+    from MDAnalysis.analysis import align
 
     u_arr = []
     for temp, num_replicates in temperatures_replicates.items():
@@ -275,7 +281,7 @@ def load_or_transform_universes(
             universe.trajectory.add_transformations(*workflow)
 
             #ag = universe.select_atoms("protein")
-            
+
             representative_frame_index = get_representative_frame(universe=universe, equil_offset=equilibrium_offset)
 
             print("running AverageStructure")
@@ -283,9 +289,9 @@ def load_or_transform_universes(
             ref = average.results.universe
             print("starting AlignTraj")
             aligner = align.AlignTraj(universe, ref, select='protein and type CA', in_memory=False).run(verbose=True)
-            del aligner   
+            del aligner
             del average
-             
+
             u_arr.append((universe, ref))
 
     return u_arr
@@ -310,6 +316,8 @@ def load_universe(
     ligand_name: str = "RBY",
 ) -> mda.Universe:
     """Load and prepare a single universe with transformations applied"""
+    import MDAnalysis as mda
+    from MDAnalysis import transformations
 
     # Try to load pre-processed trajectory first
     transformed_trajectory = f"{dir_id}/{simulation_id}_{float(temp)}K_{thermo_id}_run{run}/production/prot_centered_trajectory.dcd"
@@ -320,7 +328,7 @@ def load_universe(
         universe = mda.Universe(topology_file, transformed_trajectory)
     else:
         # Load original trajectory and apply transformations
-        print(f"Loading original trajectory and applying transformations")
+        print("Loading original trajectory and applying transformations")
         universe = mda.Universe(
             f"{dir_id}/{simulation_id}_{float(temp)}K_{thermo_id}_run{run}/production/production_topology.pdb",
             f"{dir_id}/{simulation_id}_{float(temp)}K_{thermo_id}_run{run}/production/production_trajectory.dcd",
@@ -351,6 +359,9 @@ def load_or_transform_daisychain_universes(
     prot_path: str = "NH3_terminal_His_proton_updated.pdb",
     ligand_name: str = "RBY",
 ) -> list:
+    import MDAnalysis as mda
+    from MDAnalysis import transformations
+    from MDAnalysis.analysis import align
 
     u_arr = []
     for temp, num_replicates in temperatures_replicates.items():
@@ -440,11 +451,11 @@ def load_or_transform_daisychain_universes(
                             topology_file = potential_topology
 
                 if not all_dcd_files:
-                    print(f"Warning: No production DCD files found in any production directories")
+                    print("Warning: No production DCD files found in any production directories")
                     continue
 
                 if topology_file is None:
-                    print(f"Warning: No topology file found in production directories")
+                    print("Warning: No topology file found in production directories")
                     continue
 
                 print(

@@ -793,6 +793,7 @@ class ContinuationManager:
             GracefulExit,
             get_interrupt_signal,
             install_handlers,
+            interrupted_state_save_exceptions,
             is_interrupted,
             save_interrupted_state,
             save_restart_checkpoint,
@@ -913,7 +914,7 @@ class ContinuationManager:
                     )
         except GracefulExit:
             raise  # Re-raise so caller can set exit code
-        except Exception:
+        except interrupted_state_save_exceptions():
             # On unexpected crash, still try to save interrupted state
             try:
                 save_interrupted_state(
@@ -923,8 +924,11 @@ class ContinuationManager:
                     steps_completed=steps_done,
                     total_steps=total_steps,
                 )
-            except Exception:
-                LOGGER.error("Failed to save interrupted state after crash")
+            except interrupted_state_save_exceptions() as save_exc:
+                LOGGER.exception(
+                    "Failed to save interrupted state after crash: %s",
+                    save_exc,
+                )
             raise
 
         # Save final state
