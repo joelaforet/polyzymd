@@ -13,9 +13,9 @@ PolyzyMD, understand the codebase, or add new capabilities.
 ## Extension Workflows
 
 - **[Extend the Analysis Framework](extending_analyses.md)** —
-  how to add a new scalar measurement analysis and understand advanced
-  MDAnalysis-native plugins,
-  including comparison, formatting, and plotting
+  how to add an MDAnalysis-native analysis plugin with `MDAAnalysisJob`,
+  `ReplicateArtifact`, default artifact aggregation, comparison, formatting,
+  and artifact-only plotting
 
 ## Contributor Mindset
 

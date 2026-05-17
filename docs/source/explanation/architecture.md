@@ -176,10 +176,12 @@ Per-condition aggregation is likewise optional and is required only when
 `compare()`, `plot()`, and `format()`.
 
 The important migration rule is that simple contributors should not reimplement
-the lifecycle. Measurement plugins provide `measure()` only; advanced
-MDAnalysis-native plugins let MDAnalysis own per-trajectory iteration while
-PolyzyMD owns replicate discovery, caching, ensemble aggregation,
-cross-condition statistics, plotting, and CLI output.
+the lifecycle. The default scaffold creates a single-file `Analysis` plugin
+that uses `MDAAnalysisJob.from_function(...)`, returns a `ReplicateArtifact`,
+and lets PolyzyMD own replicate discovery, caching, ensemble aggregation,
+cross-condition statistics, plotting, and CLI output. Advanced package plugins
+use `AnalysisBase`-compatible jobs when MDAnalysis should own per-frame
+trajectory iteration directly.
 
 ## Where contributors usually need to look
 
@@ -188,7 +190,7 @@ cross-condition statistics, plotting, and CLI output.
 | add or validate config fields | `src/polyzymd/config/` |
 | change build behavior | `src/polyzymd/builders/` |
 | change run or restart behavior | `src/polyzymd/simulation/` and `src/polyzymd/workflow/` |
-| add an analysis type | `src/polyzymd/analyses/` (default: single-file `ScalarMeasurementAnalysis`; advanced: package `Analysis` plugin) |
+| add an analysis type | `src/polyzymd/analyses/` (default: single-file `Analysis` plugin using `MDAAnalysisJob.from_function()` and `ReplicateArtifact`; advanced: package plugin with `AnalysisBase`-compatible jobs) |
 | add comparison statistics | `src/polyzymd/analyses/shared/inferential_statistics.py` |
 | add or change CLI commands | `src/polyzymd/cli/` |
 
