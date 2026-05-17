@@ -735,7 +735,13 @@ def _check_ignore_conect_supported() -> bool:
         from packaging.version import Version
 
         return _get_packmol_version() > Version("21.1.3")
-    except Exception:
+    except (ImportError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning(
+            "Could not determine Packmol ignore_conect support (%s). "
+            "Continuing with CONECT stripping fallback; verify the Packmol executable "
+            "is installed if packing fails.",
+            exc,
+        )
         return False
 
 
@@ -751,5 +757,11 @@ def _check_pbc_available(box_vectors) -> bool:
         if not is_rectangular:
             return False
         return _get_packmol_version() >= Version("20.15.0")
-    except Exception:
+    except (AttributeError, ImportError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning(
+            "Could not determine Packmol PBC support (%s). "
+            "Continuing without Packmol PBC mode; verify box vectors and Packmol "
+            "installation if packing fails.",
+            exc,
+        )
         return False

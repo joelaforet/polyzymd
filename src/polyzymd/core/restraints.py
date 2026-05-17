@@ -10,13 +10,86 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
-from openmm import CustomBondForce, HarmonicBondForce, System
-from openmm.app import Topology as OpenMMTopology
-from openmm.unit import Quantity, angstrom, kilojoule_per_mole, nanometer
+if TYPE_CHECKING:
+    from openmm import CustomBondForce, HarmonicBondForce, System
+    from openmm.app import Topology as OpenMMTopology
+    from openmm.unit import Quantity
 
 logger = logging.getLogger(__name__)
+
+
+def _distance_in_angstroms(value: float) -> Quantity:
+    """Create an OpenMM distance quantity in Angstroms.
+
+    Parameters
+    ----------
+    value : float
+        Distance magnitude in Angstroms.
+
+    Returns
+    -------
+    Quantity
+        OpenMM quantity with Angstrom units.
+    """
+    from openmm.unit import angstrom
+
+    return value * angstrom
+
+
+def _force_constant_in_kj_per_mol_nm2(value: float) -> Quantity:
+    """Create an OpenMM force constant quantity.
+
+    Parameters
+    ----------
+    value : float
+        Force constant magnitude in kJ/mol/nm^2.
+
+    Returns
+    -------
+    Quantity
+        OpenMM quantity with kJ/mol/nm^2 units.
+    """
+    from openmm.unit import kilojoule_per_mole, nanometer
+
+    return value * kilojoule_per_mole / nanometer**2
+
+
+def _quantity_in_nanometers(quantity: Quantity) -> float:
+    """Convert an OpenMM distance quantity to nanometers.
+
+    Parameters
+    ----------
+    quantity : Quantity
+        Distance quantity to convert.
+
+    Returns
+    -------
+    float
+        Distance magnitude in nanometers.
+    """
+    from openmm.unit import nanometer
+
+    return quantity.value_in_unit(nanometer)
+
+
+def _force_constant_value_in_openmm_units(quantity: Quantity) -> float:
+    """Convert an OpenMM force constant to kJ/mol/nm^2.
+
+    Parameters
+    ----------
+    quantity : Quantity
+        Force constant quantity to convert.
+
+    Returns
+    -------
+    float
+        Force constant magnitude in kJ/mol/nm^2.
+    """
+    from openmm.unit import kilojoule_per_mole, nanometer
+
+    return quantity.value_in_unit(kilojoule_per_mole / nanometer**2)
 
 
 class RestraintType(str, Enum):
@@ -228,9 +301,9 @@ class RestraintDefinition:
     name: str
     atom1: AtomSelection
     atom2: AtomSelection
-    distance: Quantity = field(default_factory=lambda: 3.3 * angstrom)
+    distance: Quantity = field(default_factory=lambda: _distance_in_angstroms(3.3))
     force_constant: Quantity = field(
-        default_factory=lambda: 10000 * kilojoule_per_mole / nanometer**2
+        default_factory=lambda: _force_constant_in_kj_per_mol_nm2(10000)
     )
     enabled: bool = True
 
@@ -289,6 +362,8 @@ class RestraintDefinition:
         U(r) = 0 if r < r0
                0.5 * k * (r - r0)^2 if r >= r0
         """
+        from openmm import CustomBondForce
+
         expression = "step(r - r0) * 0.5 * k * (r - r0)^2"
         force = CustomBondForce(expression)
         force.addGlobalParameter("k", self.force_constant)
@@ -301,11 +376,13 @@ class RestraintDefinition:
 
         U(r) = 0.5 * k * (r - r0)^2
         """
+        from openmm import HarmonicBondForce
+
         force = HarmonicBondForce()
         # Convert distance to nanometers for OpenMM
-        r0_nm = self.distance.value_in_unit(nanometer)
+        r0_nm = _quantity_in_nanometers(self.distance)
         # Convert force constant to kJ/mol/nm^2
-        k_value = self.force_constant.value_in_unit(kilojoule_per_mole / nanometer**2)
+        k_value = _force_constant_value_in_openmm_units(self.force_constant)
         force.addBond(atom1_idx, atom2_idx, r0_nm, k_value)
         return force
 
@@ -325,6 +402,8 @@ class RestraintDefinition:
         U(r) = 0.5 * k * (r0 - r)^2 if r < r0
                0 if r >= r0
         """
+        from openmm import CustomBondForce
+
         expression = "step(r0 - r) * 0.5 * k * (r0 - r)^2"
         force = CustomBondForce(expression)
         force.addGlobalParameter("k", self.force_constant)
@@ -370,11 +449,11 @@ class RestraintFactory:
 
         # Parse distance (default unit: angstrom)
         distance_value = config.get("distance", 3.3)
-        distance = distance_value * angstrom
+        distance = _distance_in_angstroms(distance_value)
 
         # Parse force constant (default unit: kJ/mol/nm^2)
         k_value = config.get("force_constant", 10000.0)
-        force_constant = k_value * kilojoule_per_mole / nanometer**2
+        force_constant = _force_constant_in_kj_per_mol_nm2(k_value)
 
         return RestraintDefinition(
             restraint_type=restraint_type,
@@ -411,8 +490,8 @@ class RestraintFactory:
             name=name,
             atom1=AtomSelection(atom1_selection),
             atom2=AtomSelection(atom2_selection),
-            distance=distance * angstrom,
-            force_constant=force_constant * kilojoule_per_mole / nanometer**2,
+            distance=_distance_in_angstroms(distance),
+            force_constant=_force_constant_in_kj_per_mol_nm2(force_constant),
         )
 
     @staticmethod
@@ -440,8 +519,8 @@ class RestraintFactory:
             name=name,
             atom1=AtomSelection(atom1_selection),
             atom2=AtomSelection(atom2_selection),
-            distance=distance * angstrom,
-            force_constant=force_constant * kilojoule_per_mole / nanometer**2,
+            distance=_distance_in_angstroms(distance),
+            force_constant=_force_constant_in_kj_per_mol_nm2(force_constant),
         )
 
 

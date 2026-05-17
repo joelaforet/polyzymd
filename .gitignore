@@ -220,6 +220,9 @@ conda-recipe/
 src/polyzymd/exporters/gmx_run_again/
 src/polyzymd/exporters/gmx_test_correct_outputs/
 
+# Mock/test artifacts accidentally created at repository root
+MagicMock/
+
 # Legacy backup files
 *.bak
 

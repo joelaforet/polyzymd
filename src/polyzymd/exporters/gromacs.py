@@ -1127,7 +1127,13 @@ class PositionRestraintGenerator:
                     if parts:
                         return parts[0]
             return None
-        except Exception:
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(
+                "Could not read molecule name from %s (%s). "
+                "The exporter will fall back to filename-based molecule ordering.",
+                itp_path,
+                exc,
+            )
             return None
 
     @staticmethod

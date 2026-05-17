@@ -30,10 +30,11 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Uni
 
 import numpy as np
 from numpy.typing import NDArray
-from openff.toolkit import Molecule, Topology
-from openff.units import Quantity
 
 if TYPE_CHECKING:
+    from openff.toolkit import Molecule, Topology
+    from openff.units import Quantity
+
     from polyzymd.config.schema import SolventConfig
 
 LOGGER = logging.getLogger(__name__)
@@ -239,6 +240,9 @@ class SolventBuilder:
         Returns:
             Solvated OpenFF Topology.
         """
+        from openff.toolkit import Molecule
+        from openff.units import Quantity
+
         from polyzymd.data.solvent_molecules import get_solvent_molecule
         from polyzymd.utils import boxvectors
         from polyzymd.utils.packmol import solvate_with_packmol

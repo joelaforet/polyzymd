@@ -13,12 +13,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Union
 
-import openmm
-from openmm import XmlSerializer
-from openmm import unit as omm_unit
-from openmm.app import CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
-
 if TYPE_CHECKING:
+    import openmm
+    from openmm import XmlSerializer
+    from openmm import unit as omm_unit
+    from openmm.app import CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
+
     from polyzymd.config.schema import (
         EquilibrationStageConfig,
         SimulationConfig,
@@ -26,11 +26,63 @@ if TYPE_CHECKING:
     )
     from polyzymd.core.atom_groups import AtomGroupResolver
     from polyzymd.core.parameters import SimulationParameters
+else:
+    openmm = None
+    XmlSerializer = None
+    omm_unit = None
+    CheckpointReporter = None
+    DCDReporter = None
+    PDBFile = None
+    Simulation = None
+    StateDataReporter = None
 
 LOGGER = logging.getLogger(__name__)
 
 # Phase types
 PhaseType = Literal["equilibration", "production"]
+
+
+def _ensure_openmm_loaded() -> None:
+    """Load OpenMM symbols used by the simulation runner lazily.
+
+    Returns
+    -------
+    None
+        The module globals are populated on first use.
+    """
+    global CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
+    global XmlSerializer, omm_unit, openmm
+
+    if openmm is not None:
+        return
+
+    import openmm as _openmm
+    from openmm import XmlSerializer as _XmlSerializer
+    from openmm import unit as _omm_unit
+    from openmm.app import (
+        CheckpointReporter as _CheckpointReporter,
+    )
+    from openmm.app import (
+        DCDReporter as _DCDReporter,
+    )
+    from openmm.app import (
+        PDBFile as _PDBFile,
+    )
+    from openmm.app import (
+        Simulation as _Simulation,
+    )
+    from openmm.app import (
+        StateDataReporter as _StateDataReporter,
+    )
+
+    openmm = _openmm
+    XmlSerializer = _XmlSerializer
+    omm_unit = _omm_unit
+    CheckpointReporter = _CheckpointReporter
+    DCDReporter = _DCDReporter
+    PDBFile = _PDBFile
+    Simulation = _Simulation
+    StateDataReporter = _StateDataReporter
 
 
 class SimulationRunner:
@@ -71,6 +123,8 @@ class SimulationRunner:
             working_dir: Working directory for output files.
             platform: Compute platform (CUDA, OpenCL, CPU).
         """
+        _ensure_openmm_loaded()
+
         self._topology = topology
         self._system = system
         self._positions = positions
@@ -117,11 +171,18 @@ class SimulationRunner:
         Returns:
             OpenMM Platform object.
         """
+        _ensure_openmm_loaded()
+
         try:
             platform = openmm.Platform.getPlatformByName(self._platform_name)
             LOGGER.info(f"Using {self._platform_name} platform")
-        except Exception:
-            LOGGER.warning(f"Platform {self._platform_name} not available, falling back to CPU")
+        except openmm.OpenMMException as exc:
+            LOGGER.warning(
+                "Platform %s is not available (%s); falling back to CPU. "
+                "Install/configure the requested OpenMM platform or set platform='CPU'.",
+                self._platform_name,
+                exc,
+            )
             platform = openmm.Platform.getPlatformByName("CPU")
         return platform
 

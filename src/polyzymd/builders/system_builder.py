@@ -12,10 +12,10 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
-from openff.interchange import Interchange
-from openff.toolkit import ForceField, Molecule, Topology
-
 if TYPE_CHECKING:
+    from openff.interchange import Interchange
+    from openff.toolkit import ForceField, Molecule, Topology
+
     from polyzymd.config.schema import SimulationConfig
 
 from polyzymd.builders.enzyme import EnzymeBuilder
@@ -237,6 +237,8 @@ class SystemBuilder:
 
         LOGGER.info("Combining solute components")
 
+        from openff.toolkit import Topology
+
         # Start with enzyme
         molecules = [self._enzyme_topology.molecule(0)]
 
@@ -408,6 +410,8 @@ class SystemBuilder:
         """
         if self._solvated_topology is None:
             raise RuntimeError("System must be solvated before creating Interchange")
+
+        from openff.toolkit import ForceField
 
         from polyzymd.data.solvent_molecules import get_solvent_molecule
 
