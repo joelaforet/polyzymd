@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -30,7 +31,6 @@ from polyzymd.analyses.rmsd._mda import (
 )
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
 from polyzymd.analyses.rmsd._results import RMSDAggregatedResult
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,

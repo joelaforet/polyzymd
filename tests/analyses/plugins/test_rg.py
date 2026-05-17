@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
 from polyzymd.analyses.base import Analysis, PlotContext
 from polyzymd.analyses.discovery import get_analysis
@@ -36,7 +37,6 @@ from polyzymd.analyses.rg._results import (
     RgResult,
     RgRunAggregatedResult,
 )
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.config.comparison import PlotSettings
 from tests._support.analysis_testkit import (
     make_aggregate_context,

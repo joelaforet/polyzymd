@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence, cast
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -35,7 +36,6 @@ from polyzymd.analyses.sasa._mda import (
 )
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
 from polyzymd.analyses.sasa._results import SASAAggregatedResult
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
@@ -286,7 +286,7 @@ class SASAAnalysis(Analysis):
 
         import numpy as np
 
-        from polyzymd.analyses.shared.sasa import load_sasa_artifacts
+        from polyzymd.analyses.sasa._artifacts import load_sasa_artifacts
 
         residue_keys: list[str] = []
         residue_chainids: list[str] = []

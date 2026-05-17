@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import NDArray
 
+from polyzymd.analyses._framework.cache_identity import compute_config_hash
 from polyzymd.analyses._framework.results_base import get_polyzymd_version
 from polyzymd.analyses.distances._results import (
     DistanceAggregatedResult,
@@ -32,8 +33,8 @@ from polyzymd.analyses.mda import (
     build_pair_distance_analysis,
     pair_distance_version,
 )
+from polyzymd.analyses.mda.pair_distance import aggregate_distance_pair_stats
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
-from polyzymd.analyses.shared.config_hash import compute_config_hash
 from polyzymd.analyses.shared.loader import parse_time_string
 
 if TYPE_CHECKING:
@@ -658,8 +659,6 @@ def _aggregate_legacy_result(
     settings_fingerprint: str,
 ) -> DistanceAggregatedResult:
     """Build the established aggregate model from replicate artifacts."""
-
-    from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
 
     eq_value, eq_unit = parse_time_string(equilibration)
     legacy_results = [artifact_to_distance_result(artifact) for artifact in artifacts]

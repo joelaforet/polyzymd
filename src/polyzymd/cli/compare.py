@@ -573,7 +573,7 @@ def run_comparison(
     """
     from polyzymd.analyses.discovery import get_analysis, list_all_names, list_analyses
     from polyzymd.analyses.orchestrator import run_comparison as _run_pipeline
-    from polyzymd.analyses.shared.logging_utils import setup_logging
+    from polyzymd.cli.logging_utils import setup_logging
 
     # Handle --list flag
     if list_types:
@@ -922,7 +922,7 @@ def run_all(
         polyzymd compare run-all --recompute --plot
     """
     from polyzymd.analyses.orchestrator import run_all_comparisons
-    from polyzymd.analyses.shared.logging_utils import setup_logging
+    from polyzymd.cli.logging_utils import setup_logging
 
     _echo_branding()
 

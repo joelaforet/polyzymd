@@ -340,8 +340,8 @@ def _make_distance_artifacts(tmp_path, condition_label, settings, n_reps: int = 
     """Create canonical distance replicate artifacts with NPZ sidecars."""
     import numpy as np
 
+    from polyzymd.analyses._framework.cache_identity import settings_fingerprint
     from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
-    from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
     analysis_dir = tmp_path
     artifacts = []
@@ -923,13 +923,13 @@ class TestAggregate:
         return results
 
     def test_aggregate_produces_result(self, tmp_path):
+        from polyzymd.analyses._framework.cache_identity import settings_fingerprint
         from polyzymd.analyses.base import AggregateContext, AggregateValidationError, Condition
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
         )
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
         analysis = DistancesAnalysis()
         settings = DistancesSettings(
@@ -957,9 +957,7 @@ class TestAggregate:
 
         mock_results = _make_distance_artifacts(tmp_path, "test", settings, n_reps=3)
 
-        with patch(
-            "polyzymd.analyses.shared.aggregation.aggregate_distance_pair_stats"
-        ) as mock_agg:
+        with patch("polyzymd.analyses.distances._mda.aggregate_distance_pair_stats") as mock_agg:
             # Create mock return for aggregate_distance_pair_stats
             mock_stats = MagicMock()
             mock_stats.mean_stats.mean = 3.5
@@ -1035,9 +1033,7 @@ class TestAggregate:
 
         mock_results = _make_distance_artifacts(tmp_path, "test", settings, n_reps=2)
 
-        with patch(
-            "polyzymd.analyses.shared.aggregation.aggregate_distance_pair_stats"
-        ) as mock_agg:
+        with patch("polyzymd.analyses.distances._mda.aggregate_distance_pair_stats") as mock_agg:
             mock_stats = MagicMock()
             mock_stats.mean_stats.mean = 3.5
             mock_stats.mean_stats.sem = 0.05
@@ -1149,8 +1145,8 @@ class TestAggregate:
 
 def _make_mock_agg_result(n_pairs: int = 2, n_reps: int = 3, offset: float = 0.0):
     """Create a mock DistanceAggregatedResult for comparison tests."""
+    from polyzymd.analyses._framework.cache_identity import settings_fingerprint
     from polyzymd.analyses.distances import DistancePairSettings, DistancesSettings
-    from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
     labels = ["Alpha", "Beta", "Gamma", "Delta"]
     settings = DistancesSettings(
@@ -1401,13 +1397,13 @@ class TestCompare:
         assert result.fraction_ranking_by_pair is not None
 
     def test_compare_preserves_duplicate_selection_pair_labels_by_index(self, tmp_path):
+        from polyzymd.analyses._framework.cache_identity import settings_fingerprint
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
         )
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
         analysis = DistancesAnalysis()
         settings = DistancesSettings(
@@ -1483,6 +1479,7 @@ class TestCompare:
         assert result.ranking_by_pair["Outer duplicate"] == ["Control"]
 
     def test_compare_remaps_duplicate_legacy_auto_labels_by_index(self, tmp_path):
+        from polyzymd.analyses._framework.cache_identity import settings_fingerprint
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.distances import (
             DistancePairSettings,
@@ -1490,7 +1487,6 @@ class TestCompare:
             DistancesSettings,
             _make_pair_label,
         )
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
         selection_a = "resid 10 and name CA"
         selection_b = "resid 20 and name CA"
@@ -1763,7 +1759,7 @@ class TestDistanceCalculatorCacheIdentity:
         calc._write_cache_metadata(result_file)
 
         with patch(
-            "polyzymd.analyses.shared.config_hash.validate_config_hash",
+            "polyzymd.analyses._framework.cache_identity.validate_config_hash",
             return_value=False,
         ) as mock_validate:
             reused = calc._load_cached_result(result_file)
@@ -1814,7 +1810,7 @@ class TestDistanceCalculatorCacheIdentity:
         calc_old._write_cache_metadata(result_file)
 
         with patch(
-            "polyzymd.analyses.shared.config_hash.validate_config_hash",
+            "polyzymd.analyses._framework.cache_identity.validate_config_hash",
             return_value=True,
         ):
             reused = calc_new._load_cached_result(result_file)
@@ -2121,9 +2117,7 @@ class TestLifecycle:
             settings=settings,
         )
 
-        with patch(
-            "polyzymd.analyses.shared.aggregation.aggregate_distance_pair_stats"
-        ) as mock_agg:
+        with patch("polyzymd.analyses.distances._mda.aggregate_distance_pair_stats") as mock_agg:
             mock_stats = MagicMock()
             mock_stats.mean_stats.mean = 3.5
             mock_stats.mean_stats.sem = 0.05

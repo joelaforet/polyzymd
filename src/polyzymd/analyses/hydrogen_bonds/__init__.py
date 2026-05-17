@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -54,7 +55,6 @@ from polyzymd.analyses.mda import (
     ConditionArtifact,
     ReplicateArtifact,
 )
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.loader import TrajectoryLoader
 from polyzymd.analyses.shared.statistics import compute_sem
 

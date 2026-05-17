@@ -1,4 +1,4 @@
-"""Tests for config hash utilities."""
+"""Tests for framework cache identity utilities."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from polyzymd.analyses.shared.config_hash import (
+from polyzymd.analyses._framework.cache_identity import (
     _WARNED_CONFIG_HASH_MISMATCHES,
     compute_cache_identity,
     extract_settings_fingerprint_from_path,
@@ -130,7 +130,7 @@ class TestConfigHashValidation:
         _WARNED_CONFIG_HASH_MISMATCHES.clear()
         config = object()
         monkeypatch.setattr(
-            "polyzymd.analyses.shared.config_hash.compute_config_hash",
+            "polyzymd.analyses._framework.cache_identity.compute_config_hash",
             lambda current_config: "currenthash",
         )
 

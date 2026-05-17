@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from polyzymd.analyses._framework.cache_identity import compute_config_hash, settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -67,7 +68,6 @@ from polyzymd.analyses.distances._results import (
     DistanceResultMetadata,
 )
 from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext, ReplicateArtifact
-from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
 from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
 
 if TYPE_CHECKING:
@@ -630,7 +630,9 @@ class DistanceCalculator:
             identity metadata is unavailable.
         """
 
-        from polyzymd.analyses.shared.config_hash import extract_settings_fingerprint_from_path
+        from polyzymd.analyses._framework.cache_identity import (
+            extract_settings_fingerprint_from_path,
+        )
 
         metadata_path = _distance_calculator_metadata_path(result_file)
         if metadata_path.exists():
@@ -741,7 +743,7 @@ class DistanceCalculator:
             Cached result on a strict cache hit, otherwise ``None``.
         """
 
-        from polyzymd.analyses.shared.config_hash import validate_config_hash
+        from polyzymd.analyses._framework.cache_identity import validate_config_hash
 
         logger.info("Loading cached result from %s", result_file)
         result = DistanceResult.load(result_file)

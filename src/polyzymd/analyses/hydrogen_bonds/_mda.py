@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import NDArray
 
+from polyzymd.analyses._framework.cache_identity import compute_config_hash
 from polyzymd.analyses._framework.results_base import get_polyzymd_version
 from polyzymd.analyses.hydrogen_bonds._results import (
     AggregatedCompositionEntry,
@@ -35,7 +36,6 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
-from polyzymd.analyses.shared.config_hash import compute_config_hash
 from polyzymd.analyses.shared.loader import parse_time_string
 
 if TYPE_CHECKING:

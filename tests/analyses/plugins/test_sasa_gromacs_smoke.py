@@ -12,7 +12,7 @@ import numpy as np
 from polyzymd.analyses.base import ReplicateContext
 from polyzymd.analyses.mda import MDAAnalysisJob
 from polyzymd.analyses.sasa import SASAAnalysis, SASARunSettings, SASASettings
-from polyzymd.analyses.shared.sasa import SASAComputationResult
+from polyzymd.analyses.sasa._artifacts import SASAComputationResult
 from polyzymd.engines.gromacs import GromacsEngine
 from tests._support.gromacs_smoke import (
     create_gromacs_layout,

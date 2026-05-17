@@ -16,6 +16,7 @@ from typing import Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -47,7 +48,6 @@ from polyzymd.analyses.mda import (
     MDAReplicateJobContext,
     ReplicateArtifact,
 )
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 logger = logging.getLogger("polyzymd.analyses.catalytic_triad")
 

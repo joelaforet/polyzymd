@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -45,7 +46,6 @@ from polyzymd.analyses.secondary_structure._plotters import (
     _plot_ss_persistence_diff_heatmap,
     _plot_ss_timeline_heatmap,
 )
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 if TYPE_CHECKING:
     from polyzymd.analyses.mda import MDAAnalysisJob, MDAReplicateJobContext

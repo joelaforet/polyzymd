@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -36,7 +37,6 @@ from polyzymd.analyses.rmsf._mda import (
 from polyzymd.analyses.rmsf._plot_settings import RMSFPlotSettings
 from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison, _plot_rmsf_profile
 from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 if TYPE_CHECKING:
     from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext

@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from polyzymd.analyses.shared.statistics import StatResult, compute_sem
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -45,6 +47,90 @@ class PairDistanceSpec:
     mode_a: Any
     mode_b: Any
     threshold: float | None = None
+
+
+@dataclass
+class PairAggregatedStats:
+    """Aggregated statistics for a single distance pair.
+
+    Parameters
+    ----------
+    mean_stats : StatResult
+        Mean distance across replicates.
+    median_stats : StatResult
+        Median distance across replicates.
+    fraction_stats : StatResult or None
+        Fraction below threshold, if available.
+    kde_peak_stats : StatResult or None
+        KDE peak distance, if available.
+    per_rep_means : list[float]
+        Per-replicate mean distances.
+    per_rep_stds : list[float]
+        Per-replicate standard deviations.
+    per_rep_medians : list[float]
+        Per-replicate median distances.
+    per_rep_fractions : list[float]
+        Per-replicate fractions below threshold.
+    per_rep_kde_peaks : list[float]
+        Per-replicate KDE peak distances.
+    """
+
+    mean_stats: StatResult
+    median_stats: StatResult
+    fraction_stats: StatResult | None
+    kde_peak_stats: StatResult | None
+    per_rep_means: list[float]
+    per_rep_stds: list[float]
+    per_rep_medians: list[float]
+    per_rep_fractions: list[float]
+    per_rep_kde_peaks: list[float]
+
+
+def aggregate_distance_pair_stats(
+    individual_results: Sequence[Any],
+    pair_idx: int,
+) -> PairAggregatedStats:
+    """Aggregate per-pair distance statistics across replicate results.
+
+    Parameters
+    ----------
+    individual_results : sequence
+        Per-replicate result objects with indexable ``pair_results`` entries.
+    pair_idx : int
+        Index of the pair to aggregate.
+
+    Returns
+    -------
+    PairAggregatedStats
+        Aggregated statistics for this pair.
+    """
+    per_rep_means: list[float] = []
+    per_rep_stds: list[float] = []
+    per_rep_medians: list[float] = []
+    per_rep_fractions: list[float] = []
+    per_rep_kde_peaks: list[float] = []
+
+    for result in individual_results:
+        pair_result = result.pair_results[pair_idx]
+        per_rep_means.append(pair_result.mean_distance)
+        per_rep_stds.append(pair_result.std_distance)
+        per_rep_medians.append(pair_result.median_distance)
+        if pair_result.fraction_below_threshold is not None:
+            per_rep_fractions.append(pair_result.fraction_below_threshold)
+        if pair_result.kde_peak is not None:
+            per_rep_kde_peaks.append(pair_result.kde_peak)
+
+    return PairAggregatedStats(
+        mean_stats=compute_sem(per_rep_means),
+        median_stats=compute_sem(per_rep_medians),
+        fraction_stats=compute_sem(per_rep_fractions) if per_rep_fractions else None,
+        kde_peak_stats=compute_sem(per_rep_kde_peaks) if per_rep_kde_peaks else None,
+        per_rep_means=per_rep_means,
+        per_rep_stds=per_rep_stds,
+        per_rep_medians=per_rep_medians,
+        per_rep_fractions=per_rep_fractions,
+        per_rep_kde_peaks=per_rep_kde_peaks,
+    )
 
 
 def build_pair_distance_analysis(

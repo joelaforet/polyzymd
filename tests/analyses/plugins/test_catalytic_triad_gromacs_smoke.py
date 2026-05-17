@@ -101,7 +101,8 @@ class TestCatalyticTriadGromacsSmoke:
                 wraps=original_resolve,
             ) as resolve_spy,
             patch(
-                "polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="smoke123"
+                "polyzymd.analyses._framework.cache_identity.compute_config_hash",
+                return_value="smoke123",
             ),
             patch(
                 "polyzymd.analyses._framework.results_base.get_polyzymd_version",

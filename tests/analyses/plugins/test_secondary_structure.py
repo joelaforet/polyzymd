@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     ComparisonContext,
@@ -42,7 +43,6 @@ from polyzymd.analyses.secondary_structure._mda import (
     load_replicate_matrix,
 )
 from polyzymd.analyses.secondary_structure._plotters import _load_ss_timeline_matrix
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 
 @pytest.fixture

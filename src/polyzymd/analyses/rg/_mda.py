@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import NDArray
 
+from polyzymd.analyses._framework.cache_identity import compute_config_hash
 from polyzymd.analyses._framework.results_base import get_polyzymd_version
 from polyzymd.analyses.mda import (
     ArtifactStore,
@@ -31,7 +32,6 @@ from polyzymd.analyses.rg._results import (
     RgRunResult,
     RgSkippedRunResult,
 )
-from polyzymd.analyses.shared.config_hash import compute_config_hash
 from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.statistics import compute_sem
 

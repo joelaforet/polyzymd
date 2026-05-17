@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     ComparisonContext,
@@ -41,7 +42,6 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
 )
 from polyzymd.analyses.mda.job import MDABackendPolicy
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 
 @pytest.fixture

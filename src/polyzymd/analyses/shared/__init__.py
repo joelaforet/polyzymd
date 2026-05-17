@@ -1,8 +1,8 @@
-"""Shared infrastructure for analysis plugins.
+"""Reusable shared utilities for analysis plugins.
 
-This package provides a curated set of commonly used shared utilities.
-For advanced or less common helpers, import directly from the relevant
-shared submodules.
+This package provides contributor-facing utilities that are broadly reusable
+across analysis plugins. Framework internals, CLI helpers, and plugin-private
+artifact helpers live with their owning packages.
 
 In particular, selectors and custom selections are not re-exported from this
 package root and should be imported from:
@@ -20,8 +20,6 @@ centroid
     K-Means centroid frame finding, reference mode dispatch.
 statistics
     SEM, per-residue/region aggregation, weighted mean.
-aggregation
-    Replicate collection, distance pair aggregation.
 autocorrelation
     ACF, correlation time, statistical inefficiency.
 selections
@@ -31,14 +29,19 @@ diagnostics
 window
     Centralized trajectory window resolution for MDAnalysis job lifecycles.
 config_hash
-    Config hashing for cache validation.
-logging_utils
-    Colored terminal logging.
+    Temporary compatibility facade for framework cache identity helpers.
+sasa
+    Temporary compatibility facade for SASA plugin artifact helpers.
 plotting
     Shared plotting helpers (axis styling, figure saving, grouped bars, etc.).
 """
 
 from __future__ import annotations
+
+from polyzymd.analyses._framework.cache_identity import (
+    compute_config_hash,
+    validate_config_hash,
+)
 
 # Re-export the most commonly used symbols for convenience.
 # Plugins can do:  from polyzymd.analyses.shared import TrajectoryLoader, AlignmentConfig
@@ -60,10 +63,6 @@ from polyzymd.analyses.shared.autocorrelation import (
     n_effective,
     statistical_inefficiency,
     statistical_inefficiency_multiple,
-)
-from polyzymd.analyses.shared.config_hash import (
-    compute_config_hash,
-    validate_config_hash,
 )
 from polyzymd.analyses.shared.convergence import (
     ConvergenceResult,

@@ -1,7 +1,8 @@
 # Analysis Shared Utilities
 
-API reference for `polyzymd.analyses.shared` and its commonly used
-submodules.
+API reference for `polyzymd.analyses.shared` and its contributor-facing
+submodules. Framework internals, CLI logging, and plugin-private artifact
+helpers are documented with their owning packages.
 
 ## `polyzymd.analyses.shared`
 
@@ -83,25 +84,15 @@ submodules.
    :no-index:
 ```
 
-## `polyzymd.analyses.shared.config_hash`
+## Compatibility facades
 
-```{eval-rst}
-.. automodule:: polyzymd.analyses.shared.config_hash
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-```
+`polyzymd.analyses.shared.config_hash` and `polyzymd.analyses.shared.sasa`
+remain importable as temporary compatibility facades. New code should use the
+owning modules instead:
 
-## `polyzymd.analyses.shared.sasa`
-
-```{eval-rst}
-.. automodule:: polyzymd.analyses.shared.sasa
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-```
+- `polyzymd.analyses._framework.cache_identity` for framework cache identity
+  helpers.
+- `polyzymd.analyses.sasa._artifacts` for SASA plugin artifact helpers.
 
 ## `polyzymd.analyses.shared.groupings`
 

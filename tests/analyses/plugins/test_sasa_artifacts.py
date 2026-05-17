@@ -1,4 +1,4 @@
-"""Tests for shared SASA helper utilities."""
+"""Tests for SASA plugin artifact helper utilities."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from polyzymd.analyses.shared.sasa import (
+from polyzymd.analyses.sasa._artifacts import (
     SASA_ARTIFACT_COMPATIBILITY_VERSION,
     SASA_ARTIFACT_SCHEMA_NAME,
     SASA_ARTIFACT_SCHEMA_VERSION,
@@ -769,7 +769,7 @@ class TestBuildSASAArtifactMetadata:
         assert metadata["artifact_schema"] == SASA_ARTIFACT_SCHEMA_NAME
         assert metadata["artifact_schema_version"] == SASA_ARTIFACT_SCHEMA_VERSION
         assert metadata["artifact_compatibility_version"] == SASA_ARTIFACT_COMPATIBILITY_VERSION
-        assert metadata["artifact_producer"] == "polyzymd.analyses.shared.sasa"
+        assert metadata["artifact_producer"] == "polyzymd.analyses.sasa._artifacts"
         assert metadata["sasa_engine"] == "mdtraj.shrake_rupley"
         assert metadata["sasa_mode"] == "atom"
 
@@ -972,7 +972,7 @@ class TestFindSiblingSASAArtifacts:
             "artifact_schema": SASA_ARTIFACT_SCHEMA_NAME,
             "artifact_schema_version": SASA_ARTIFACT_SCHEMA_VERSION,
             "artifact_compatibility_version": SASA_ARTIFACT_COMPATIBILITY_VERSION,
-            "artifact_producer": "polyzymd.analyses.shared.sasa",
+            "artifact_producer": "polyzymd.analyses.sasa._artifacts",
             "sasa_engine": "mdtraj.shrake_rupley",
             "sasa_mode": "atom",
             "compatibility_hash": hash_value,

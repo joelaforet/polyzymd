@@ -8,8 +8,8 @@ from typing import Any, ClassVar
 import pytest
 from pydantic import BaseModel
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import AggregateValidationError, Analysis, Condition
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 
 class DummySettings(BaseModel):

@@ -9,7 +9,11 @@ from typing import Any
 import numpy as np
 import pytest
 
-from polyzymd.analyses.mda import PairDistanceSpec, build_pair_distance_analysis
+from polyzymd.analyses.mda import (
+    PairDistanceSpec,
+    build_pair_distance_analysis,
+)
+from polyzymd.analyses.mda.pair_distance import aggregate_distance_pair_stats
 from polyzymd.analyses.shared.selections import SelectionMode
 
 
@@ -197,3 +201,82 @@ def test_pair_distance_analysis_warns_once_and_disables_invalid_pbc_boxes(
     assert fake_mdanalysis_pair_modules == [None, None]
     assert len(analysis.results.warnings) == 1
     assert message in analysis.results.warnings[0]
+
+
+def test_aggregate_distance_pair_stats_collects_replicate_values() -> None:
+    """Pair aggregation should summarize per-replicate distance statistics."""
+
+    replicate_results = [
+        SimpleNamespace(
+            pair_results=[
+                SimpleNamespace(
+                    mean_distance=2.0,
+                    std_distance=0.1,
+                    median_distance=1.9,
+                    fraction_below_threshold=0.75,
+                    kde_peak=1.8,
+                )
+            ]
+        ),
+        SimpleNamespace(
+            pair_results=[
+                SimpleNamespace(
+                    mean_distance=4.0,
+                    std_distance=0.2,
+                    median_distance=3.7,
+                    fraction_below_threshold=0.25,
+                    kde_peak=3.4,
+                )
+            ]
+        ),
+    ]
+
+    stats = aggregate_distance_pair_stats(replicate_results, pair_idx=0)
+
+    assert stats.mean_stats.mean == pytest.approx(3.0)
+    assert stats.median_stats.mean == pytest.approx(2.8)
+    assert stats.fraction_stats is not None
+    assert stats.fraction_stats.mean == pytest.approx(0.5)
+    assert stats.kde_peak_stats is not None
+    assert stats.kde_peak_stats.mean == pytest.approx(2.6)
+    assert stats.per_rep_means == [2.0, 4.0]
+    assert stats.per_rep_stds == [0.1, 0.2]
+    assert stats.per_rep_medians == [1.9, 3.7]
+    assert stats.per_rep_fractions == [0.75, 0.25]
+    assert stats.per_rep_kde_peaks == [1.8, 3.4]
+
+
+def test_aggregate_distance_pair_stats_allows_optional_pair_metrics() -> None:
+    """Optional threshold and KDE metrics should remain absent when unavailable."""
+
+    replicate_results = [
+        SimpleNamespace(
+            pair_results=[
+                SimpleNamespace(
+                    mean_distance=2.0,
+                    std_distance=0.1,
+                    median_distance=1.9,
+                    fraction_below_threshold=None,
+                    kde_peak=None,
+                )
+            ]
+        ),
+        SimpleNamespace(
+            pair_results=[
+                SimpleNamespace(
+                    mean_distance=4.0,
+                    std_distance=0.2,
+                    median_distance=3.7,
+                    fraction_below_threshold=None,
+                    kde_peak=None,
+                )
+            ]
+        ),
+    ]
+
+    stats = aggregate_distance_pair_stats(replicate_results, pair_idx=0)
+
+    assert stats.fraction_stats is None
+    assert stats.kde_peak_stats is None
+    assert stats.per_rep_fractions == []
+    assert stats.per_rep_kde_peaks == []

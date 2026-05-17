@@ -1,4 +1,4 @@
-"""Logging utilities for colorized terminal output.
+"""Logging utilities for colorized CLI output.
 
 This module provides a ColoredFormatter and setup function for consistent
 logging with visual emphasis on warnings and errors in terminal output.
@@ -77,7 +77,7 @@ def setup_logging(quiet: bool = False, debug: bool = False) -> None:
 
     Examples
     --------
-    >>> from polyzymd.analyses.shared.logging_utils import setup_logging
+    >>> from polyzymd.cli.logging_utils import setup_logging
     >>> setup_logging()                # INFO+, full format (default)
     >>> setup_logging(quiet=True)      # WARNING+, minimal format
     >>> setup_logging(debug=True)      # DEBUG+, full format

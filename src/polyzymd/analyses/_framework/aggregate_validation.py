@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 from pydantic import BaseModel
 
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 
 if TYPE_CHECKING:
     from polyzymd.analyses._framework.contexts import Condition
@@ -139,7 +139,7 @@ def _validate_config_hash(
     if stored_hash in _UNKNOWN_VALUES or condition is None:
         return
 
-    from polyzymd.analyses.shared.config_hash import validate_config_hash
+    from polyzymd.analyses._framework.cache_identity import validate_config_hash
 
     if not validate_config_hash(str(stored_hash), condition.sim_config):
         raise _validation_error(

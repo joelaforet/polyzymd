@@ -24,6 +24,7 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
 )
 from polyzymd.analyses.sasa import SASAAnalysis, SASARunSettings, SASASettings
+from polyzymd.analyses.sasa._artifacts import SASAComputationResult
 from polyzymd.analyses.sasa._comparison_results import (
     SASAComparisonResult,
     SASAConditionSummary,
@@ -47,7 +48,6 @@ from polyzymd.analyses.sasa._plotters import (
     _sanitize_run_label,
     plot_sasa_normalized_control_bars,
 )
-from polyzymd.analyses.shared.sasa import SASAComputationResult
 from tests._support.analysis_testkit import (
     make_aggregate_context,
     make_comparison_context,
