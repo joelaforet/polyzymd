@@ -19,16 +19,20 @@ artifacts, condition aggregation, cross-condition comparison, and plotting.
 3. **Orient to the package architecture.** Read
    [Architecture](../../explanation/architecture.md) for the high-level package
    layout before focusing on analyses.
-4. **Use the current full analysis extension guide.** The supported detailed
+4. **Understand how analysis plugins work.** Read
+   [How PolyzyMD analysis plugins work](architecture.md) to learn why plugins
+   use `MDAAnalysisJob`, collectors, artifacts, sidecars, and artifact-only
+   plotting before you start editing code.
+5. **Use the current full analysis extension guide.** The supported detailed
    guide is [Extend PolyzyMD with MDAnalysis-native analyses](../extending_analyses.md).
    It covers the current scaffold, public imports, `MDAAnalysisJob`, collectors,
    artifacts, default comparison, and artifact-only plotting.
-5. **Look up stable API surfaces when needed.** Use the API pages for
+6. **Look up stable API surfaces when needed.** Use the API pages for
    [analysis plugins](../../api/analyses.md),
    [analysis base classes](../../api/analyses_base.md),
    [MDAnalysis integration](../../api/analyses_mda.md), and
    [shared analysis utilities](../../api/analyses_shared.md).
-6. **Check CLI and configuration reference material.** Use the
+7. **Check CLI and configuration reference material.** Use the
    [CLI reference](../../reference/cli_reference.md) and
    [analysis plugin settings reference](../../reference/analysis_plugin_settings.md)
    when you need command or configuration lookup.
@@ -64,3 +68,10 @@ each. These pages are planned and are intentionally not linked until they exist:
 Until those pages are written, use
 [Extend PolyzyMD with MDAnalysis-native analyses](../extending_analyses.md) as
 the complete implementation guide.
+
+```{toctree}
+:hidden:
+:maxdepth: 1
+
+How PolyzyMD analysis plugins work <architecture>
+```
