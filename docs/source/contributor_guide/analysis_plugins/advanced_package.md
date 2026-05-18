@@ -151,15 +151,23 @@ from polyzymd.analyses.mda import (
 )
 
 
-def calculate_shell_counts(universe, *, selection: str, **frame_kwargs):
+def calculate_shell_counts(
+    universe,
+    *,
+    selection: str,
+    start=None,
+    stop=None,
+    step=None,
+    frames=None,
+    **_frame_kwargs,
+):
     """Calculate compact per-replicate values for one trajectory."""
 
     import numpy as np
 
     atoms = universe.select_atoms(selection)
     values: list[float] = []
-    frames = frame_kwargs.get("frames")
-    iterator = universe.trajectory[frames] if frames is not None else universe.trajectory
+    iterator = universe.trajectory[frames] if frames is not None else universe.trajectory[start:stop:step]
 
     for _ts in iterator:
         values.append(float(np.asarray(atoms.positions).shape[0]))
@@ -205,6 +213,11 @@ class SolventShellCollector:
 The collector returns a durable artifact. It should not serialize raw MDAnalysis
 `Results` objects. If the job produces arrays or event tables, write registered
 sidecars as shown in {doc}`sidecars`.
+
+Function-adapter workers receive frame-selection keyword arguments from
+PolyzyMD's `FrameSelection`. They must respect both explicit `frames` selectors
+and `start`/`stop`/`step` selectors so equilibration cuts, analysis windows, and
+strides are honored consistently.
 
 ## Move artifact-only plotting to `_plotters.py`
 
