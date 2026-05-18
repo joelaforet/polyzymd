@@ -27,16 +27,19 @@ artifacts, condition aggregation, cross-condition comparison, and plotting.
    [Scaffold your first analysis plugin](first_scaffold.md) to generate one
    default single-file plugin and matching tests with the throwaway name
    `solvent_shell`.
-6. **Use the current full analysis extension guide.** The supported detailed
+6. **Build one small scalar plugin.** Follow
+   [Build a simple scalar analysis plugin](simple_scalar_plugin.md) to learn how
+   a function job, collector, default aggregation, and `MetricValue` fit together.
+7. **Use the current full analysis extension guide.** The supported detailed
    guide is [Extend PolyzyMD with MDAnalysis-native analyses](../extending_analyses.md).
    It covers the current scaffold, public imports, `MDAAnalysisJob`, collectors,
    artifacts, default comparison, and artifact-only plotting.
-7. **Look up stable API surfaces when needed.** Use the API pages for
+8. **Look up stable API surfaces when needed.** Use the API pages for
    [analysis plugins](../../api/analyses.md),
    [analysis base classes](../../api/analyses_base.md),
    [MDAnalysis integration](../../api/analyses_mda.md), and
    [shared analysis utilities](../../api/analyses_shared.md).
-8. **Check CLI and configuration reference material.** Use the
+9. **Check CLI and configuration reference material.** Use the
    [CLI reference](../../reference/cli_reference.md) and
    [analysis plugin settings reference](../../reference/analysis_plugin_settings.md)
    when you need command or configuration lookup.
@@ -55,13 +58,12 @@ Contributor-facing plugin code should use public facades:
 Do not import from `polyzymd.analyses._framework` in contributor plugins. That
 package is an internal implementation detail behind the public facades.
 
-## Planned path pages
+## Remaining planned path pages
 
-The New Analysis Contributor Path will grow into smaller pages with one purpose
-each. These pages are planned and are intentionally not linked until they exist:
+The New Analysis Contributor Path will continue to grow into smaller pages with
+one purpose each. These pages are planned and are intentionally not linked until
+they exist:
 
-- Conceptual overview of the analysis plugin lifecycle — explanation.
-- Simple scalar analysis plugin — tutorial.
 - Sidecars for arrays, tables, and event streams — how-to guide.
 - Advanced package layout for larger plugins — how-to guide.
 - Testing analysis plugin contributions — how-to guide.
@@ -78,4 +80,5 @@ the complete implementation guide.
 
 How PolyzyMD analysis plugins work <architecture>
 Scaffold your first analysis plugin <first_scaffold>
+Build a simple scalar analysis plugin <simple_scalar_plugin>
 ```
