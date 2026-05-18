@@ -178,10 +178,15 @@ Running `polyzymd compare init -n my_study` creates:
 ```
 my_study/
 ├── comparison.yaml          # Analysis configuration (edit this)
-├── comparison/              # Analysis result JSON files
+├── comparison/              # Cross-condition comparison results
 ├── figures/                 # Generated plots
 └── structures/              # (Optional) shared structure files (e.g., enzyme PDB for SASA)
 ```
+
+Analysis runs also create and populate `analysis/` with canonical
+`ReplicateArtifact` and `ConditionArtifact` outputs for per-replicate and
+per-condition results. The `comparison/` directory is reserved for
+cross-condition comparison results.
 
 ### comparison.yaml structure
 

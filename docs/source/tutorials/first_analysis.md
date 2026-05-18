@@ -46,13 +46,14 @@ This creates a small project scaffold:
 ```text
 my_first_analysis/
 ├── comparison.yaml    # Analysis configuration (you will edit this)
-├── comparison/        # Where result JSON files are written
+├── comparison/        # Cross-condition comparison outputs
 ├── figures/           # Where plots are saved
 └── structures/        # Optional shared structure files
 ```
 
 The generated `comparison.yaml` is a template with placeholder values. You
-will replace them in the next step.
+will replace them in the next step. Per-replicate and per-condition analysis
+artifacts are created under `analysis/` when you run an analysis.
 
 ## Step 2: Edit comparison.yaml
 
