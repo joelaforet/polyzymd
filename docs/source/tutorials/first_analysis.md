@@ -159,25 +159,33 @@ my_first_analysis/
 │   └── My_Simulation/
 │       └── rmsf/
 │           ├── run_1/
-│           │   └── rmsf_eq10ns.json           # Per-replicate result
+│           │   └── result.json                # ReplicateArtifact
 │           └── aggregated/
-│               └── result.json               # Combined result
+│               └── result.json                # ConditionArtifact
 ├── comparison/
 │   └── rmsf/
-│       └── result.json                       # Comparison summary
+│       └── result.json                        # Comparison artifact/summary
 ├── figures/
 └── structures/
 ```
 
 The key files are:
 
-- **`rmsf_eq10ns.json`** --- per-replicate RMSF values for every residue in
-  the selection, computed after discarding the first 10 ns.
-- **`aggregated/result.json`** --- aggregated statistics across replicates (with
-  one replicate, this matches the per-replicate file).
-- **`comparison/rmsf/result.json`** --- the comparison-level summary with mean
+- **`analysis/My_Simulation/rmsf/run_1/result.json`** --- a
+  `ReplicateArtifact` for replicate 1, including per-replicate RMSF values for
+  every residue in the selection after discarding the first 10 ns.
+- **`analysis/My_Simulation/rmsf/aggregated/result.json`** --- a
+  `ConditionArtifact` with statistics across replicates. With one replicate,
+  the values closely mirror the replicate artifact.
+- **`comparison/rmsf/result.json`** --- the comparison artifact/summary with mean
   RMSF and ranking information. Singleton SEM is unavailable and suppressed
   until at least 2 replicates contribute to a condition.
+
+```{note}
+PolyzyMD artifacts are more than bare result values. They also carry metadata,
+provenance, warnings, and references to sidecar files when an analysis needs to
+store larger tables or arrays outside the main JSON file.
+```
 
 ```{note}
 This tutorial intentionally uses one replicate so you can complete the workflow

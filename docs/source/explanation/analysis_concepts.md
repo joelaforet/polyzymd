@@ -17,10 +17,18 @@ Here is what each stage does:
 
 | Stage | Scope | What it produces |
 |-------|-------|------------------|
-| **replicate stage** | One replicate of one condition | Raw per-replicate result (e.g., RMSF values for each residue) |
-| **aggregate** | All replicates of one condition | Means, standard errors, and distributions across replicates |
-| **compare** | All conditions together | Statistical tests, effect sizes, and rankings |
-| **plot** | All conditions together | Figures saved as PNG files |
+| **replicate stage** | One replicate of one condition | `ReplicateArtifact` at `analysis/<condition_label>/<plugin_name>/run_<N>/result.json` |
+| **aggregate** | All replicates of one condition | `ConditionArtifact` at `analysis/<condition_label>/<plugin_name>/aggregated/result.json` |
+| **compare** | All conditions together | `ComparisonArtifact` or active custom comparison result at `comparison/<plugin_name>/result.json` |
+| **plot** | All conditions together | Figures saved as PNG files from cached artifacts and sidecars |
+
+Each artifact stores a validated payload plus metadata, provenance, warnings,
+and references to sidecar files when an analysis needs large tables or arrays
+outside the main JSON document.
+
+Plots are deliberately downstream of this artifact layer. They read cached
+artifacts and sidecars only; they do not reload trajectories or rerun the
+analysis calculation.
 
 You don't call these stages yourself. When you run `polyzymd compare run`, the
 CLI walks through the pipeline automatically. But knowing the stages helps when
@@ -63,7 +71,9 @@ The key sections are:
 
 Each entry points to a simulation's `config.yaml` and lists which replicate
 numbers to include. The `label` is a human-readable name that shows up in plots
-and result files.
+and result files. When labels appear in directory names, PolyzyMD sanitizes them
+for the filesystem; for example, `100% SBMA` may be written as `100_SBMA` in
+paths while remaining `100% SBMA` in summaries and plots.
 
 ### `control`
 
@@ -104,13 +114,14 @@ producing an independent trajectory.
 
 The pipeline processes data in this order:
 
-1. **Per-replicate**: the compute stage runs once for each
-   replicate of each condition. If you have 2 conditions with 3 replicates
-   each, that is 6 replicate-stage calls.
-2. **Per-condition**: `aggregate` runs once per condition, combining the
-   replicate results. That's 2 aggregate calls.
-3. **Cross-condition**: `compare` and `plot` each run once, looking at all
-   conditions together.
+1. **Per-replicate**: the compute stage runs once for each replicate of each
+   condition and writes a `ReplicateArtifact`. If you have 2 conditions with 3
+   replicates each, that is 6 replicate artifacts.
+2. **Per-condition**: `aggregate` runs once per condition, combining replicate
+   artifacts into a `ConditionArtifact`. That's 2 aggregate calls.
+3. **Cross-condition**: `compare` runs once, looking at all conditions together
+   and writing a `ComparisonArtifact` or an active custom comparison result.
+   `plot` then reads those cached outputs and any referenced sidecars.
 
 ## Plugins — the analysis modules
 
@@ -176,11 +187,13 @@ comparison_project/
 ├── analysis/
 │   └── <condition_label>/
 │       └── <plugin_name>/
-│           ├── run_<N>/        # Per-replicate results
-│           └── aggregated/     # Cross-replicate aggregation
+│           ├── run_<N>/
+│           │   └── result.json # ReplicateArtifact
+│           └── aggregated/
+│               └── result.json # ConditionArtifact
 ├── comparison/
 │   └── <plugin_name>/
-│       └── result.json         # Cross-condition comparison
+│       └── result.json         # ComparisonArtifact or active custom result
 └── figures/
     └── <plugin_name>/
         └── *.png               # Plots
@@ -189,15 +202,17 @@ comparison_project/
 The three output directories map directly to the pipeline stages:
 
 - **`analysis/`** holds the compute and aggregate output. Each condition gets
-  its own subdirectory, and within that, each plugin gets a directory with
-  per-replicate (`run_1/`, `run_2/`, ...) and `aggregated/` results.
+  its own filesystem-sanitized subdirectory, and within that, each plugin gets
+  a directory with `ReplicateArtifact` files in `run_1/`, `run_2/`, ... and a
+  `ConditionArtifact` in `aggregated/result.json`.
 - **`comparison/`** holds the compare output. One `result.json` per plugin
-  with the statistical tests and rankings.
+  stores a `ComparisonArtifact` or an active custom comparison result with the
+  statistical tests and rankings.
 - **`figures/`** holds the plot output. One subdirectory per plugin with PNG
-  files.
+  files generated from cached artifacts and sidecars.
 
 Results are cached: if you rerun the pipeline without changing settings, the
-compute stage skips replicates that already have results on disk.
+compute stage skips replicates that already have canonical artifacts on disk.
 
 ## See also
 

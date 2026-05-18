@@ -18,16 +18,15 @@ That lifecycle is reflected in the package layout:
 
 ```text
 src/polyzymd/
-|- cli/
-|- config/
-|- builders/
-|- simulation/
-|- workflow/
-|- analyses/     # ★ plugin system — unified analysis lifecycle
-|- config/comparison.py  # comparison config and plot settings
-|- exporters/
-|- core/
-`- utils/
+├── cli/
+├── config/       # simulation and comparison configuration
+├── builders/
+├── simulation/
+├── workflow/
+├── analyses/     # ★ plugin system — unified analysis lifecycle
+├── exporters/
+├── core/
+└── utils/
 ```
 
 ## What each area is responsible for
@@ -61,11 +60,31 @@ generation, resubmission, and recovery flows.
 
 The **plugin system** — the primary extension point for contributors. The
 default contributor path is MDAnalysis-native: a generated plugin builds an
-`MDAAnalysisJob`, returns a canonical artifact with explicit metrics, and lets
-PolyzyMD handle Universe loading, replicate cache identity, aggregation,
-comparison, and CLI integration. Each analysis plugin still participates in a
-unified lifecycle, but not every plugin uses every stage:
+`MDAAnalysisJob`, provides a collector that converts completed work into a
+`ReplicateArtifact`, and lets PolyzyMD handle Universe loading, replicate cache
+identity, aggregation, comparison, and CLI integration. Each analysis plugin
+still participates in a unified lifecycle, but not every plugin uses every
+stage:
 compute → aggregate → compare → plot → format.
+
+The analysis package itself is split by responsibility:
+
+```text
+src/polyzymd/analyses/
+├── base.py          # stable contributor facade: Analysis, contexts, metrics
+├── discovery.py     # plugin auto-discovery
+├── orchestrator.py  # comparison workflow orchestration facade
+├── stats.py         # reusable comparison/statistics helpers
+├── _framework/      # private/internal lifecycle, I/O, and contracts
+├── mda/             # public MDAnalysis job, frame-selection, artifact layer
+├── shared/          # contributor-shared reusable utilities
+└── <plugin>/        # built-in and contributed analysis plugins
+```
+
+The private `_framework/` modules support the public facade; they are not the
+contributor import surface. Contributor-facing docs and plugins should use
+`polyzymd.analyses.base`, `polyzymd.analyses.mda`, and documented shared
+utilities instead.
 
 Within that lifecycle, PolyzyMD now draws a sharper boundary between
 trajectory-level work and ensemble-level work:
@@ -74,6 +93,12 @@ trajectory-level work and ensemble-level work:
   AnalysisBase-compatible ``run(...)`` objects
 - **PolyzyMD owns ensemble/comparison workflow** including replicate discovery,
   caching, aggregation, cross-condition statistics, plotting, and CLI output
+- **Collectors turn completed MDAnalysis jobs into `ReplicateArtifact` objects**
+  with payload, metadata, provenance, warnings, and sidecar references
+- **Aggregation combines replicate artifacts into a `ConditionArtifact`** for
+  each condition before cross-condition comparison
+- **Comparison produces a `ComparisonArtifact`** on the canonical path, or an
+  explicitly active custom output contract for plugins that still expose one
 - **Composition is preferred over mixins or deep inheritance** so trajectory-
   native plugins can provide small hooks instead of re-implementing the full
   framework lifecycle
@@ -107,7 +132,8 @@ Comparison functionality is split across focused modules:
 - `config/comparison.py` for comparison config and plotting settings
 - `cli/compare.py` for `polyzymd compare` subcommands
 - `analyses/shared/inferential_statistics.py` for t-tests, ANOVA, and effect sizes
-- `analyses/mda/` for canonical artifact storage, aggregation, and comparison inputs
+- `analyses/mda/` for MDAnalysis jobs, frame selection, artifacts, artifact
+  storage, aggregation, and comparison inputs
 - `analyses/shared/paths.py` for label/path helpers such as `sanitize_label()`
 
 Established analysis package plugins often delegate plotting to `_plotters.py`
@@ -130,8 +156,9 @@ config.yaml
   -> system builders
   -> OpenMM-ready simulation objects
   -> local or SLURM execution
-  -> analysis results on disk
-  -> cross-condition comparisons
+  -> ReplicateArtifact files and sidecars
+  -> ConditionArtifact files
+  -> ComparisonArtifact or active custom comparison output
   -> plots and reports
 ```
 
