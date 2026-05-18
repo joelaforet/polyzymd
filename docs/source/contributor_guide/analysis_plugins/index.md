@@ -23,16 +23,20 @@ artifacts, condition aggregation, cross-condition comparison, and plotting.
    [How PolyzyMD analysis plugins work](architecture.md) to learn why plugins
    use `MDAAnalysisJob`, collectors, artifacts, sidecars, and artifact-only
    plotting before you start editing code.
-5. **Use the current full analysis extension guide.** The supported detailed
+5. **Scaffold your first plugin.** Follow
+   [Scaffold your first analysis plugin](first_scaffold.md) to generate one
+   default single-file plugin and matching tests with the throwaway name
+   `solvent_shell`.
+6. **Use the current full analysis extension guide.** The supported detailed
    guide is [Extend PolyzyMD with MDAnalysis-native analyses](../extending_analyses.md).
    It covers the current scaffold, public imports, `MDAAnalysisJob`, collectors,
    artifacts, default comparison, and artifact-only plotting.
-6. **Look up stable API surfaces when needed.** Use the API pages for
+7. **Look up stable API surfaces when needed.** Use the API pages for
    [analysis plugins](../../api/analyses.md),
    [analysis base classes](../../api/analyses_base.md),
    [MDAnalysis integration](../../api/analyses_mda.md), and
    [shared analysis utilities](../../api/analyses_shared.md).
-7. **Check CLI and configuration reference material.** Use the
+8. **Check CLI and configuration reference material.** Use the
    [CLI reference](../../reference/cli_reference.md) and
    [analysis plugin settings reference](../../reference/analysis_plugin_settings.md)
    when you need command or configuration lookup.
@@ -57,7 +61,6 @@ The New Analysis Contributor Path will grow into smaller pages with one purpose
 each. These pages are planned and are intentionally not linked until they exist:
 
 - Conceptual overview of the analysis plugin lifecycle — explanation.
-- First scaffold walkthrough — tutorial.
 - Simple scalar analysis plugin — tutorial.
 - Sidecars for arrays, tables, and event streams — how-to guide.
 - Advanced package layout for larger plugins — how-to guide.
@@ -74,4 +77,5 @@ the complete implementation guide.
 :maxdepth: 1
 
 How PolyzyMD analysis plugins work <architecture>
+Scaffold your first analysis plugin <first_scaffold>
 ```
