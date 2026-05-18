@@ -28,7 +28,7 @@ APIs for contributor plugins.
 | Apply shared plotting themes, figure paths, axis helpers, legends, grouped bars, or matrix annotations | `polyzymd.analyses.shared.plotting` | {doc}`../../api/analyses_shared` |
 | Reuse documented selection, selector, residue-classification, or grouping helpers | `polyzymd.analyses.shared.selections`, `polyzymd.analyses.shared.selectors`, `polyzymd.analyses.shared.groupings`, `polyzymd.analyses.shared.aa_classification` | {doc}`../../api/analyses_shared` |
 | Use multi-run comparison or formatting helpers for analyses with several named runs per condition | `polyzymd.analyses.shared.multi_run_comparison`, `polyzymd.analyses.shared.multi_run_formatting` | {doc}`../../api/analyses_shared` |
-| Scaffold a new analysis plugin and matching tests | Command: `pixi run -e build polyzymd new-analysis <name>` | [CLI `new-analysis` reference](../../reference/cli_reference.md#polyzymd-new-analysis) |
+| Scaffold a new analysis plugin and matching tests | Command: `pixi run -e build polyzymd new-analysis <name>` | {ref}`CLI new-analysis reference <polyzymd-new-analysis>` |
 | Look up built-in plugin settings in `comparison.yaml` | `plugins.<plugin_name>` settings keys in YAML | {doc}`../../reference/analysis_plugin_settings` |
 
 ## Stable import boundaries

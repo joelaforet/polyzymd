@@ -670,6 +670,7 @@ Example configs: polyzymd/templates/examples/
 
 ---
 
+(polyzymd-new-analysis)=
 ## polyzymd new-analysis
 
 Scaffold an analysis plugin and matching tests.
