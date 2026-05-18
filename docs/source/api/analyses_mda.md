@@ -1,8 +1,9 @@
 # MDAnalysis Extension-Layer API
 
-`polyzymd.analyses.mda` is the public extension-layer API for analyses that run
-as MDAnalysis-compatible jobs and persist PolyzyMD artifacts. Use this page for
-lookup. For the contributor workflow, see
+`polyzymd.analyses.mda` is the public MDAnalysis extension-layer API for
+analyses that run as MDAnalysis-compatible jobs and persist PolyzyMD artifacts.
+The primary contributor surface is the job, frame-selection, collector,
+artifact, and artifact-store API. Use this page for lookup. For the contributor workflow, see
 {doc}`../contributor_guide/extending_analyses`.
 
 ## API overview
@@ -17,7 +18,7 @@ lookup. For the contributor workflow, see
 | Aggregation | `aggregate_replicate_artifacts`, `aggregate_replicate_artifacts_from_disk`, `ExplicitReplicateMetricPolicy` |
 | Comparison | `compare_condition_artifacts`, `MDAComparisonContext` |
 | Universe provenance | `UniverseProvider`, `UniverseProvenance`, `FileIdentity` |
-| Shared primitives | `PairDistanceSpec`, `build_pair_distance_analysis`, `AnalysisBaseLike`, `MDARunKwargs` |
+| Shared primitives | `AnalysisBaseLike`, `MDARunKwargs`, `PairDistanceSpec`, `build_pair_distance_analysis` |
 
 The package is import-light: importing `polyzymd.analyses.mda` should not import
 MDAnalysis or other heavy simulation dependencies. Individual jobs and helpers
@@ -163,9 +164,13 @@ consistency, then delegates scalar statistics to the shared comparison engine.
 ## Universe provenance and shared MDAnalysis primitives
 
 `UniverseProvider` wraps the existing trajectory loader and records topology and
-trajectory identity for provenance. Shared primitives such as the pair-distance
-builder are internal building blocks used by built-in analyses and available for
-contributors who need the same MDAnalysis-native behavior.
+trajectory identity for provenance.
+
+`AnalysisBaseLike` and `MDARunKwargs` describe the lightweight protocol used by
+jobs and adapters. The pair-distance helper is a public but specialized
+primitive for distance-family analyses that need the same MDAnalysis-native
+pair-distance behavior as built-in plugins; most contributors only need the job,
+frame-selection, artifact, and store objects above.
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.mda.universe
