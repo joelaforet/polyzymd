@@ -383,15 +383,15 @@ dropping a module or package in `analyses/` with no modifications to core code.
 
 ### Tests
 
-- 2,134 tests collected (up from 908 at branch start).
+- Expanded regression coverage substantially from the branch baseline.
 - Added GROMACS engine tests: binary resolution (`test_gromacs_binary.py`),
   engine adapter (`test_gromacs_engine.py`), SLURM script generation
   (`test_gromacs_slurm.py`), progress tracking (`test_gromacs_progress.py`),
   trajectory layout (`test_gromacs_layout.py`), and engine dispatch
-  (`test_dispatch.py`, `test_base.py`).  667 engine/workflow/cli/config tests
-  total.  (`tests/engines/`)
-- Added GROMACS smoke tests for all 13 analysis plugins, verifying that each
-  plugin resolves trajectory layouts from the GROMACS engine correctly.
+  (`test_dispatch.py`, `test_base.py`), with expanded engine/workflow/cli/config
+  coverage.  (`tests/engines/`)
+- Added GROMACS smoke tests for the active analysis plugin set, verifying that
+  plugins resolve trajectory layouts from the GROMACS engine correctly.
   (`tests/analyses/plugins/test_*_gromacs_smoke.py`)
 - Added `run_sbatch()` tests (`test_slurm_submit.py`) and engine-aware CLI
   tests for submit, recover, status, and check-progress.
@@ -402,7 +402,8 @@ dropping a module or package in `analyses/` with no modifications to core code.
 - Added plugin contract enforcement tests (`TestContractEnforcement` in
   `test_orchestrator.py`).
 - Added discovery robustness tests (shared descendant skip, getattr logging).
-- Added cache ambiguity tests (contacts paths, binding preference helpers).
+- Added contacts cache identity/path regression tests and archived setting
+  rejection coverage.
 - Added settings fingerprint canonicalization tests (`test_config_hash.py`).
 - Added Phase 14 test hardening: exact Tukey pair assertions, BH/Tukey boundary
   tests, ANOVA alpha threading tests, `fdr_alpha` validation tests, cache
@@ -418,9 +419,6 @@ dropping a module or package in `analyses/` with no modifications to core code.
 
 - **Config hash mismatch warning prints 66+ times.**  The warning should print
   once per analysis run but currently fires per-frame.  Does not affect results.
-- **Contact criteria cutoff not included in cache key.**  Changing the contacts
-  cutoff (e.g. 4.0 Å → 4.5 Å) does not invalidate cached results.  Clear the
-  analysis output directory manually when changing cutoff values.
 
 ## [1.2.1] - 2026-04-01
 

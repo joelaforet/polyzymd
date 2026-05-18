@@ -188,7 +188,6 @@ def aggregate_contact_artifacts(
         source_replicates=_source_replicates(loaded),
         warnings=_combined_artifact_warnings([item.artifact for item in loaded]),
     )
-    ArtifactStore(ctx.output_dir).write_condition_result(artifact)
     return artifact
 
 

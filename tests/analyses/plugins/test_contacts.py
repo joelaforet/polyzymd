@@ -816,11 +816,10 @@ def _make_condition_artifact(
 class TestAggregate:
     """aggregate consumes contacts replicate artifacts only."""
 
-    def test_aggregate_artifacts_writes_condition_artifact(self, tmp_path):
+    def test_aggregate_artifacts_returns_condition_artifact_without_persistence(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
         from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact
-        from polyzymd.analyses.mda.aggregation import MDAAggregationError
 
         analysis = ContactsAnalysis()
         settings = ContactsSettings()
@@ -853,7 +852,7 @@ class TestAggregate:
         result = analysis.aggregate(ctx, artifacts)
 
         assert isinstance(result, ConditionArtifact)
-        assert (output_dir / "result.json").exists()
+        assert not (output_dir / "result.json").exists()
         assert ArtifactStore(output_dir).validate_sidecar(result.sidecars[0]).exists()
         assert result.payload["metrics"]["coverage"]["values"] == [1.0, 1.0, 0.5]
         assert result.payload["metrics"]["mean_contact_fraction"]["n"] == 3
@@ -1480,6 +1479,7 @@ class TestCompare:
         analysis_dir = tmp_path / "Stale" / "contacts"
         agg_dir = analysis_dir / "aggregated"
         agg_dir.mkdir(parents=True)
+        # Simulate framework-owned condition artifact persistence for compare
         ArtifactStore(agg_dir).write_condition_result(
             _make_condition_artifact("Stale", settings, replicates=(1, 2), equilibration="0ns")
         )
@@ -1820,6 +1820,7 @@ class TestCompare:
         analysis_dir = tmp_path / "Subset" / "contacts"
         agg_dir = analysis_dir / "aggregated"
         agg_dir.mkdir(parents=True)
+        # Simulate framework-owned condition artifact persistence for compare
         ArtifactStore(agg_dir).write_condition_result(
             _make_condition_artifact("Subset", settings, replicates=(1, 2))
         )
@@ -1857,6 +1858,7 @@ class TestCompare:
         analysis_dir = tmp_path / "Subset" / "contacts"
         agg_dir = analysis_dir / "aggregated"
         agg_dir.mkdir(parents=True)
+        # Simulate framework-owned condition artifact persistence for compare
         ArtifactStore(agg_dir).write_condition_result(
             _make_condition_artifact("Subset", settings, replicates=(1,))
         )
@@ -2112,6 +2114,7 @@ def _write_contacts_plot_artifact(
             "equilibration": "10ns",
         },
     )
+    # Simulate framework-owned condition artifact persistence for artifact-only plots
     store.write_condition_result(artifact)
     return aggregated_dir / "result.json"
 
@@ -2480,6 +2483,7 @@ class TestContactsCanonicalArtifacts:
         analysis_dir = tmp_path / "A" / "contacts"
         aggregated_dir = analysis_dir / "aggregated"
         aggregated_dir.mkdir(parents=True)
+        # Simulate framework-owned condition artifact persistence for compare
         ArtifactStore(aggregated_dir).write_condition_result(
             _make_condition_artifact("A", settings, replicates=(1, 2))
         )
