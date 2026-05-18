@@ -77,7 +77,7 @@ The choice of atoms for RMSD calculation strongly affects the result:
 | `protein and backbone` | 1–3 Å | Backbone conformation (includes N, C, O) |
 | `protein and name CA and resid 50:150` | 0.5–2 Å | Core region, excluding flexible termini |
 | Active site residues | 0.5–2 Å | Catalytic geometry maintenance |
-| `chainID C and not name H*` | Variable | Polymer conformation tracking |
+| `chainid C and not name H*` | Variable | Polymer conformation tracking |
 
 ## RMSD vs Time: What to Look For
 
@@ -185,7 +185,7 @@ Different RMSD selections answer different questions:
 |-----------|-----------|----------|
 | "Protein Backbone" | `protein and name CA` | Overall protein stability? |
 | "Active Site" | Catalytic residues CA | Catalytic geometry maintenance? |
-| "Polymer Core" | `chainID C and not name H*` | Polymer conformation stability? |
+| "Polymer Core" | `chainid C and not name H*` | Polymer conformation stability? |
 | "Crystal Deviation" | `protein and name CA` (external ref) | Distance from functional state? |
 
 ### When to Use Multi-Run

@@ -157,7 +157,7 @@ first_ten_waters = u.select_atoms("resname HOH and resid 1:10")
 sodium_42 = u.select_atoms("resname NA and resid 42")
 
 # Select water in chain D only (first 9999 waters)
-chain_d_water = u.select_atoms("chainID D and resname HOH")
+chain_d_water = u.select_atoms("chainid D and resname HOH")
 ```
 
 ### 2. Find Waters Near the Active Site
@@ -221,8 +221,8 @@ for resid in top_residents:
 ```python
 # Select specific monomers in a polymer chain
 # (Remember: each monomer is its own residue)
-first_monomer = u.select_atoms("chainID C and resid 1")
-last_monomer = u.select_atoms("chainID C and resid 10")  # For a 10-mer
+first_monomer = u.select_atoms("chainid C and resid 1")
+last_monomer = u.select_atoms("chainid C and resid 10")  # For a 10-mer
 
 # Calculate end-to-end distance over trajectory
 e2e_distances = []
@@ -410,7 +410,7 @@ If your system has >9999 solvent molecules, they span multiple chains:
 all_water = u.select_atoms("resname HOH")
 
 # Select water in first solvent chain only
-chain_d_water = u.select_atoms("chainID D and resname HOH")
+chain_d_water = u.select_atoms("chainid D and resname HOH")
 ```
 
 ### 3. Think in Terms of Repeat Units
@@ -423,7 +423,7 @@ for residue in u.select_atoms("protein").residues:
     print(f"{residue.resname} {residue.resid}: {len(residue.atoms)} atoms")
 
 # For polymers: iterate over monomers (residues)
-for residue in u.select_atoms("chainID C").residues:
+for residue in u.select_atoms("chainid C").residues:
     print(f"Monomer {residue.resid}: {residue.resname}")
 
 # For solvent: iterate over molecules (each is one residue)

@@ -72,8 +72,8 @@ The choice of atoms for Rg calculation affects the result:
 | `protein` | Overall protein compactness (all atoms) |
 | `protein and name CA` | Backbone compactness (less noise from sidechains) |
 | `protein and name CA and resid 20:250` | Core region, excluding flexible termini |
-| `chainID C` | Polymer compactness/extension |
-| `protein or chainID C` | Combined enzyme-polymer system size |
+| `chainid C` | Polymer compactness/extension |
+| `protein or chainid C` | Combined enzyme-polymer system size |
 
 ### Rg Scales with Protein Size
 
@@ -219,8 +219,8 @@ Different Rg selections answer different questions:
 | "Whole Protein" | `protein` | Overall protein compactness? |
 | "Protein Backbone" | `protein and name CA` | Backbone compactness (less side-chain noise)? |
 | "Core Region" | Core residues only | Is the structured core stable? |
-| "Polymer" | `chainID C` | Is the polymer extended or collapsed? |
-| "Enzyme+Polymer" | `protein or chainID C` | Overall conjugate compactness? |
+| "Polymer" | `chainid C` | Is the polymer extended or collapsed? |
+| "Enzyme+Polymer" | `protein or chainid C` | Overall conjugate compactness? |
 
 ### When to Use Multi-Run
 
@@ -438,7 +438,7 @@ atoms in the selection.
 **Solution:** Match your selection to your scientific question:
 - Whole-protein Rg → `"protein"` or `"protein and name CA"`
 - Core stability → exclude flexible termini with specific residue ranges
-- Polymer behavior → `"chainID C"`
+- Polymer behavior → `"chainid C"`
 
 ## Fragment Mode Best Practices
 
@@ -454,7 +454,7 @@ between molecules rather than individual chain conformations.
 ### Selection Strategy
 
 Use `resname`-based selections for polymer fragment mode. These are more
-robust than `chainID` or `segid` because residue names are consistently
+robust than `chainid` or `segid` because residue names are consistently
 assigned during system building, whereas chain and segment IDs can be
 reassigned during topology manipulations:
 
@@ -467,10 +467,10 @@ reassigned during topology manipulations:
 ```
 
 ```{code-block} yaml
-:caption: Less robust — chainID may be reassigned
+:caption: Less robust — chainid may be reassigned
 
 - label: polymer_blob_rg
-  selection: "chainID C"
+  selection: "chainid C"
   calculation_mode: fragments
 ```
 

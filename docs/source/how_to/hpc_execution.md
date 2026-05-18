@@ -159,7 +159,7 @@ plugins:
         context_selection: "protein"
       - label: "protein_with_polymer"
         target_selection: "protein"
-        context_selection: "protein or chainID C"
+        context_selection: "protein or chainid C"
     probe_radius_nm: 0.14
     n_sphere_points: 960
 
