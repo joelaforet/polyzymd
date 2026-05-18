@@ -269,7 +269,7 @@ You have the pieces of a simple scalar plugin when:
 - **Passing backend settings to `MDAAnalysisJob.from_function()`.** Function jobs
   use the default adapter path; do not pass `backend_policy` in this tutorial.
 - **Serializing raw MDAnalysis results.** Store primitive values in the artifact
-  payload. Use sidecars later for arrays or tables.
+  payload. Use {doc}`sidecars` later for arrays or tables.
 - **Hiding aggregation inside the collector.** The collector should describe one
   replicate. Let the default aggregation stage combine replicates.
 - **Importing private framework modules.** Contributor examples should use
@@ -278,6 +278,8 @@ You have the pieces of a simple scalar plugin when:
 ## What to read next
 
 - {doc}`../extending_analyses` for the full implementation guide.
+- {doc}`sidecars` for the next practical guide when your plugin needs array or
+  table outputs.
 - {doc}`../../api/analyses_base` for `Analysis` and `MetricValue` API details.
 - {doc}`../../api/analyses_mda` for `MDAAnalysisJob`, collectors, and artifact
   models.
