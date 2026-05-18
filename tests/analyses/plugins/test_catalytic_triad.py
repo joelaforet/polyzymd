@@ -180,6 +180,7 @@ class TestTriadDiscoveryAndSettings:
         assert triad_analysis.aliases == ("triad",)
         assert triad_analysis.ReplicateResultClass is None
         assert triad_analysis.AggregatedResultClass is TriadAggregatedResult
+        assert "run_replicate" not in type(triad_analysis).__dict__
 
     def test_extract_metrics_metadata_preserves_primary_metric(
         self, triad_analysis: CatalyticTriadAnalysis

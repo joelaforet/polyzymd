@@ -292,9 +292,11 @@ def validate_config_hash(
 
     If the hashes don't match, this indicates the config has changed since
     the analysis was performed. This could mean:
-    1. The user modified the config (bad practice - should create new project)
-    2. The analysis was performed on a different config file
-    3. A bug in the hashing algorithm
+
+    1. The user modified the config, which is discouraged because a new project
+       directory should be created instead.
+    2. The analysis was performed on a different config file.
+    3. The hashing algorithm has a bug.
 
     Parameters
     ----------

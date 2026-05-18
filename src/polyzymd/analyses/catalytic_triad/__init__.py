@@ -195,28 +195,6 @@ class CatalyticTriadAnalysis(Analysis):
         del ctx
         return TriadArtifactCollector()
 
-    def run_replicate(self, ctx: Any, replicate: int) -> Any:
-        """Run one catalytic-triad replicate through the MDA artifact path.
-
-        Parameters
-        ----------
-        ctx : Any
-            Framework-provided replicate context.
-        replicate : int
-            One-indexed replicate number.
-
-        Returns
-        -------
-        Any
-            Canonical replicate artifact produced by the MDAnalysis lifecycle.
-        """
-
-        result = Analysis.run_replicate(self, ctx, replicate)
-        if isinstance(result, ReplicateArtifact):
-            target_path = ctx.result_path or ctx.output_dir / "result.json"
-            ArtifactStore(target_path.parent).write_replicate_result(result, target_path.name)
-        return result
-
     def _deserialize_result(self, path: Path) -> Any:
         """Load only canonical condition artifacts for catalytic-triad aggregates."""
 

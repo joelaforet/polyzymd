@@ -18,7 +18,6 @@ from polyzymd.analyses.base import (
     BasePlotSettings,
     ComparisonContext,
     PlotContext,
-    ReplicateContext,
     SlurmResourceHint,
 )
 from polyzymd.analyses.mda import (
@@ -217,15 +216,6 @@ class SASAAnalysis(Analysis):
 
         del ctx
         return SASAArtifactCollector()
-
-    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Run one SASA replicate through the MDA artifact lifecycle."""
-
-        result = Analysis.run_replicate(self, ctx, replicate)
-        if isinstance(result, ReplicateArtifact):
-            target_path = ctx.result_path or ctx.output_dir / "result.json"
-            ArtifactStore(target_path.parent).write_replicate_result(result, target_path.name)
-        return result
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
         """Aggregate SASA replicate artifacts across one condition."""

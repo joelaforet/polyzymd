@@ -37,9 +37,11 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   `analyses/rmsf/`.
 - **`compare/comparators/` directory removed.**  All 11 old comparator files
   deleted; comparison logic lives in each plugin's `compare()` method.
-- **Contacts plugin slimmed.**  `_binding_preference.py` (3,938 lines),
-  `_surface_exposure.py` (369 lines), and `_helpers.py` (369 lines) extracted
-  to `analyses/shared/` as reusable cross-plugin compute utilities.
+- **Contacts plugin slimmed.**  Obsolete binding-preference and surface-exposure
+  experiments were archived out of the active runtime instead of being exposed
+  as reusable shared compute utilities.  Contacts-specific implementation
+  details now remain private to the contacts plugin, while cross-plugin helpers
+  live only in the documented shared utility modules.
 
 ### Added
 
@@ -54,13 +56,15 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - **Analysis plugin framework.**  `Analysis` ABC (`analyses/base.py`),
   `pkgutil`-based auto-discovery (`analyses/discovery.py`), lifecycle
   orchestrator (`analyses/orchestrator.py`), and default scalar comparison
-  pipeline (`analyses/stats.py`).  Eight analysis types migrated as plugins:
-  RMSF, contacts, distances, catalytic triad, secondary structure, exposure,
-  binding free energy, polymer affinity.
+  pipeline (`analyses/stats.py`).  Active v1.3 plugins are contacts,
+  distances, hydrogen bonds, RMSD, RMSF, radius of gyration, SASA, secondary
+  structure, and catalytic triad.  Archived experiments such as exposure,
+  binding free energy, and polymer affinity are not active runtime plugins.
 - **Shared analysis utilities.**  `analyses/shared/` package with reusable
-  `TrajectoryLoader`, alignment helpers, autocorrelation, plot utilities,
-  `surface_exposure.py`, `binding_preference.py`, and
-  `binding_preference_helpers.py`.
+  `TrajectoryLoader`, alignment helpers, autocorrelation/statistics helpers,
+  selection utilities, path helpers, SASA compatibility utilities, multi-run
+  comparison helpers, convergence helpers, and plot utilities used by the
+  active plugin set.
 - **Framework hardening.**  `compute_replicate()` return values are validated
   (None rejected).  `ComparisonContext` gains `failed_conditions` and
   `aggregated_results` fields.  Orchestrator warns on undeclared plugin
@@ -176,9 +180,9 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   `list[Path]` for plot).  `run_comparison()` fails fast on contract
   violations.  (`analyses/orchestrator.py`)
 - **Discovery skip logic checks all path components.**  `_should_skip_module()`
-  now checks ALL path components (not just the last one), so
-  `shared.loader`, `shared.binding_preference`, etc. are properly skipped
-  instead of being probed as plugins.  (`analyses/discovery.py`)
+  now checks ALL path components (not just the last one), so shared utility
+  modules and private helper packages are skipped instead of being probed as
+  plugins.  (`analyses/discovery.py`)
 - **Settings fingerprint canonicalized.**  `settings_fingerprint()` now uses
   `json.dumps(settings.model_dump(mode="json"), sort_keys=True)` for
   deterministic hashing across Pydantic versions and Python dict ordering.
@@ -251,11 +255,11 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   (openmm, MDAnalysis, parmed, etc.) governs skip-vs-reraise for
   `ImportError` during plugin discovery.  Known heavy deps are skip+warn;
   unknown `ImportError`s re-raise immediately.  (`analyses/discovery.py`)
-- **Cache identity with settings fingerprint.**  Contact path resolver and
-  binding preference helpers now accept `settings_fp` parameter.
+- **Cache identity with settings fingerprint.**  Contact artifact path
+  resolution now includes settings fingerprints where applicable.
   Fingerprinted files are searched first, legacy files as fallback.
   `find_enzyme_pdb()` sorts glob results and warns on ambiguity.
-  (`analyses/contacts/_paths.py`, `analyses/shared/binding_preference_helpers.py`)
+  (`analyses/contacts/_paths.py`)
 
 ### Removed
 
@@ -292,11 +296,9 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - **Scaffold test path corrected.**  `new-analysis` now generates test files at
   `tests/analyses/plugins/test_<name>.py` matching the project's test layout.
   (`cli/scaffold.py`)
-- **Cache ambiguity detection.**  `contacts/_paths.py` and
-  `shared/binding_preference_helpers.py` now raise `ValueError` on ambiguous
-  glob matches (>1 file) instead of silently picking the last alphabetical
-  match.  (`analyses/contacts/_paths.py`,
-  `analyses/shared/binding_preference_helpers.py`)
+- **Cache ambiguity detection.**  `contacts/_paths.py` now raises `ValueError`
+  on ambiguous glob matches (>1 file) instead of silently picking the last
+  alphabetical match.  (`analyses/contacts/_paths.py`)
 - **GROMACS trajectory resolution order corrected.**  `resolve_trajectory_layout()`
   now prefers post-processed trajectories: `prod_centered.xtc` (whole molecules,
   centered protein) before `prod_nojump.xtc` before raw `prod.xtc`.
@@ -444,12 +446,13 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - **Comparison engine for multi-condition studies.** Added registry-based
   comparators, typed comparison result models, shared statistical utilities, and
   a generic `polyzymd compare run` workflow for RMSF, contacts, distances,
-  catalytic triad, exposure dynamics, binding free energy, polymer affinity,
-  and secondary structure. (`src/polyzymd/compare/`)
+  catalytic triad, secondary structure, and historical experimental metrics
+  that were later archived from the v1.3 active runtime. (`src/polyzymd/compare/`)
 - **Config-driven plotting stack.** Added `polyzymd compare plot-all`,
   registry-based plot discovery, shared plot themes, and publication-oriented
   plotters for RMSF, contacts, distances, catalytic triad, secondary structure,
-  binding free energy, exposure, and polymer affinity. (`src/polyzymd/compare/plotter.py`,
+  and historical experimental metrics that were later archived from the v1.3
+  active runtime. (`src/polyzymd/compare/plotter.py`,
   `src/polyzymd/compare/plotters/`)
 - **Secondary-structure comparison support.** Added DSSP-backed secondary
   structure analysis, comparison results, and plotting so secondary structure is
@@ -464,10 +467,11 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 ### Changed
 
 - **Release presentation labeling for debated metrics.** Binding preference,
-  exposure dynamics, binding free energy, and polymer affinity remain available
-  from the CLI and plotting pipeline, but PolyzyMD now marks them explicitly as
-  experimental in command output, plot listings, generated text reports, figure
-  annotations, config templates, and user-facing docs. (`src/polyzymd/core/experimental.py`,
+  exposure dynamics, binding free energy, and polymer affinity were historical
+  v1.2 experimental metrics; they were later archived from the v1.3 active
+  runtime. At the time, PolyzyMD marked them explicitly as experimental in
+  command output, plot listings, generated text reports, figure annotations,
+  config templates, and user-facing docs. (`src/polyzymd/core/experimental.py`,
   `src/polyzymd/compare/cli.py`, `src/polyzymd/compare/plotter.py`, `README.md`)
 - **Stable release scope for analysis demos.** The presentation-ready stable
   comparison stack is now RMSF, contacts, distances, catalytic triad, and
@@ -479,9 +483,10 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 - **Comparison result and plotting reliability.** Fixed multiple comparison and
   plotting issues uncovered while building the release branch, including cached
-  result discovery, condition-specific result paths, partition-aware BFE plots,
-  shared-path bugs in the plot orchestrator, contacts/distances comparison edge
-  cases, and corrupted-trajectory handling in contacts/exposure workflows.
+  result discovery, condition-specific result paths, partition-aware historical
+  BFE plots, shared-path bugs in the plot orchestrator, contacts/distances
+  comparison edge cases, and corrupted-trajectory handling in historical
+  contacts/exposure workflows.
    (`src/polyzymd/compare/`, `src/polyzymd/analyses/contacts.py`,
     `src/polyzymd/analyses/distances.py`)
 

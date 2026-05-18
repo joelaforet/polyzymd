@@ -269,6 +269,7 @@ class TestRMSFDiscoveryAndSettings:
 
         assert RMSFAnalysis.ReplicateResultClass is None
         assert RMSFAnalysis.AggregatedResultClass is not None
+        assert "run_replicate" not in RMSFAnalysis.__dict__
 
     def test_settings_defaults_and_validation(self) -> None:
         """Settings should retain established defaults and mode validation."""

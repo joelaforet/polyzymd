@@ -337,6 +337,7 @@ def test_sasa_plugin_discovered() -> None:
     analyses = list_analyses()
     assert "sasa" in analyses
     assert analyses["sasa"] is SASAAnalysis
+    assert "run_replicate" not in SASAAnalysis.__dict__
 
 
 def test_sasa_settings_validation() -> None:

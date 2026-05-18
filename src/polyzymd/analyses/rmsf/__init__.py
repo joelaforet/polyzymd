@@ -154,28 +154,6 @@ class RMSFAnalysis(Analysis):
         del ctx
         return RMSFArtifactCollector()
 
-    def run_replicate(self, ctx: Any, replicate: int) -> Any:
-        """Run one RMSF replicate through the MDA artifact lifecycle.
-
-        Parameters
-        ----------
-        ctx : Any
-            Framework-provided replicate context.
-        replicate : int
-            One-indexed replicate number.
-
-        Returns
-        -------
-        Any
-            Canonical replicate artifact.
-        """
-
-        result = Analysis.run_replicate(self, ctx, replicate)
-        if isinstance(result, ReplicateArtifact):
-            target_path = ctx.result_path or ctx.output_dir / "result.json"
-            ArtifactStore(target_path.parent).write_replicate_result(result, target_path.name)
-        return result
-
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
         """Aggregate RMSF replicate artifacts across one condition.
 

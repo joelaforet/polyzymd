@@ -23,7 +23,6 @@ from polyzymd.analyses.base import (
     ComparisonResult,
     MetricValue,
     PlotContext,
-    ReplicateContext,
     SlurmResourceHint,
 )
 from polyzymd.analyses.mda import (
@@ -124,28 +123,6 @@ class SecondaryStructureAnalysis(Analysis):
 
         del ctx
         return SecondaryStructureArtifactCollector()
-
-    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Run one replicate through the MDA artifact lifecycle.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            One-indexed replicate number.
-
-        Returns
-        -------
-        Any
-            Canonical replicate artifact.
-        """
-
-        result = Analysis.run_replicate(self, ctx, replicate)
-        if isinstance(result, ReplicateArtifact):
-            target_path = ctx.result_path or ctx.output_dir / "result.json"
-            ArtifactStore(target_path.parent).write_replicate_result(result, target_path.name)
-        return result
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
         """Aggregate secondary-structure replicate artifacts across one condition.

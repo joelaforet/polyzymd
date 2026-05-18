@@ -10,6 +10,7 @@ subclassing MolecularSelector and implementing the select() method.
 
 from __future__ import annotations
 
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -20,6 +21,21 @@ from numpy.typing import NDArray
 if TYPE_CHECKING:
     from MDAnalysis.core.groups import AtomGroup, ResidueGroup
     from MDAnalysis.core.universe import Universe
+
+
+def _expected_selection_exceptions() -> tuple[type[Exception], ...]:
+    """Return exception types that represent expected selector failures.
+
+    MDAnalysis exception classes are inspected only when already loaded so
+    selector classes remain importable without the analysis stack installed.
+    """
+
+    exceptions: list[type[Exception]] = [ValueError, AttributeError]
+    mda_exceptions = sys.modules.get("MDAnalysis.exceptions")
+    selection_error = getattr(mda_exceptions, "SelectionError", None)
+    if isinstance(selection_error, type) and issubclass(selection_error, Exception):
+        exceptions.append(selection_error)
+    return tuple(exceptions)
 
 
 @dataclass
@@ -165,10 +181,10 @@ class MolecularSelector(ABC):
                 "warnings": warnings,
             }
 
-        except Exception as e:
+        except _expected_selection_exceptions() as exc:
             return {
                 "valid": False,
-                "error": str(e),
+                "error": str(exc),
                 "n_atoms": 0,
                 "n_residues": 0,
                 "warnings": [],

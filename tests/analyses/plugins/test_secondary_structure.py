@@ -73,6 +73,7 @@ def test_plugin_attributes(settings: SecondaryStructureSettings) -> None:
     assert SecondaryStructureAnalysis.ReplicateResultClass is None
     assert SecondaryStructureAnalysis.aliases == ("ss",)
     assert SecondaryStructureAnalysis.slurm_resource_hint == SlurmResourceHint(mem="16G")
+    assert "run_replicate" not in SecondaryStructureAnalysis.__dict__
 
 
 def test_dssp_encoding() -> None:
