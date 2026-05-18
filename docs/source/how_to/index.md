@@ -82,6 +82,7 @@ Run Rg Analysis <analysis_rg_quickstart>
 Run RMSF Analysis <analysis_rmsf_quickstart>
 Run Distance Analysis <analysis_distances_quickstart>
 Run Contacts Analysis <analysis_contacts_quickstart>
+Run SASA Analysis <analysis_sasa_quickstart>
 Analyze Hydrogen Bonds <hydrogen_bonds>
 Run Catalytic Triad Analysis <analysis_triad_quickstart>
 ```
