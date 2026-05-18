@@ -150,7 +150,6 @@ def aggregate_rmsd_artifacts(
     settings: RMSDSettings,
     equilibration: str,
     output_dir: Path,
-    result_path: Path,
     artifacts: Sequence[ReplicateArtifact],
     settings_fingerprint: str,
 ) -> Any:
@@ -168,8 +167,6 @@ def aggregate_rmsd_artifacts(
         Equilibration string from the framework context.
     output_dir : Path
         Aggregated output directory.
-    result_path : Path
-        Canonical condition artifact path.
     artifacts : sequence of ReplicateArtifact
         Per-replicate RMSD artifacts.
     settings_fingerprint : str
@@ -181,7 +178,7 @@ def aggregate_rmsd_artifacts(
         Aggregated RMSD condition artifact.
     """
 
-    from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact
+    from polyzymd.analyses.mda import ConditionArtifact
 
     if not artifacts:
         raise ValueError(
@@ -292,7 +289,7 @@ def aggregate_rmsd_artifacts(
         )
 
     source_result_files = _source_result_files(output_dir, replicate_order)
-    artifact = ConditionArtifact(
+    return ConditionArtifact(
         analysis_name="rmsd",
         condition_label=condition_label,
         replicates=replicate_order,
@@ -322,8 +319,6 @@ def aggregate_rmsd_artifacts(
         ],
         warnings=_combined_warnings(ordered_artifacts),
     )
-    ArtifactStore(result_path.parent).write_condition_result(artifact, result_path.name)
-    return artifact
 
 
 def condition_artifact_to_legacy_result(artifact: Any) -> RMSDAggregatedResult:

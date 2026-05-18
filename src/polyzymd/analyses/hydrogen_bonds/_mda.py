@@ -378,7 +378,6 @@ def aggregate_hydrogen_bond_artifacts(
     condition_label: str,
     replicates: Sequence[int],
     output_dir: Path,
-    result_path: Path,
     artifacts: Sequence[ReplicateArtifact],
     legacy_result: HydrogenBondAggregatedResult,
 ) -> ConditionArtifact:
@@ -392,8 +391,6 @@ def aggregate_hydrogen_bond_artifacts(
         Expected replicate IDs.
     output_dir : Path
         Aggregated output directory.
-    result_path : Path
-        Canonical condition artifact path.
     artifacts : sequence of ReplicateArtifact
         Per-replicate hydrogen-bond artifacts.
     legacy_result : HydrogenBondAggregatedResult
@@ -402,7 +399,7 @@ def aggregate_hydrogen_bond_artifacts(
     Returns
     -------
     ConditionArtifact
-        Aggregated condition artifact saved to ``result_path``.
+        Aggregated condition artifact.
     """
 
     ordered_artifacts = validate_and_order_replicate_artifacts(
@@ -414,7 +411,7 @@ def aggregate_hydrogen_bond_artifacts(
     )
     metrics, replicate_metrics = _condition_metrics(legacy_result)
     source_result_files = _source_result_files(output_dir, replicates)
-    artifact = ConditionArtifact(
+    return ConditionArtifact(
         analysis_name="hydrogen_bonds",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
@@ -451,8 +448,6 @@ def aggregate_hydrogen_bond_artifacts(
         ],
         warnings=_combined_warnings(ordered_artifacts),
     )
-    ArtifactStore(result_path.parent).write_condition_result(artifact, result_path.name)
-    return artifact
 
 
 def validate_and_order_replicate_artifacts(

@@ -439,7 +439,6 @@ def aggregate_rg_artifacts(
     settings: RgSettings,
     equilibration: str,
     output_dir: Path,
-    result_path: Path,
     artifacts: Sequence[ReplicateArtifact],
     settings_fingerprint: str,
 ) -> ConditionArtifact:
@@ -457,8 +456,6 @@ def aggregate_rg_artifacts(
         Equilibration string from the framework context.
     output_dir : Path
         Aggregated output directory.
-    result_path : Path
-        Canonical condition artifact path.
     artifacts : sequence of ReplicateArtifact
         Per-replicate Rg artifacts.
     settings_fingerprint : str
@@ -495,7 +492,7 @@ def aggregate_rg_artifacts(
     )
     metrics, replicate_metrics = _condition_metrics(legacy_result)
     source_result_files = _source_result_files(output_dir, replicates)
-    artifact = ConditionArtifact(
+    return ConditionArtifact(
         analysis_name="rg",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
@@ -530,8 +527,6 @@ def aggregate_rg_artifacts(
         ],
         warnings=_combined_warnings(ordered_artifacts),
     )
-    ArtifactStore(result_path.parent).write_condition_result(artifact, result_path.name)
-    return artifact
 
 
 def artifact_to_rg_result(artifact: ReplicateArtifact) -> RgResult:

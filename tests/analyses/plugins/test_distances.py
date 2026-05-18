@@ -1000,7 +1000,7 @@ class TestAggregate:
                 expected_replicates=(1, 2, 3),
             )
 
-    def test_aggregate_saves_file(self, tmp_path):
+    def test_aggregate_returns_artifact_without_canonical_result(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.distances import (
             DistancePairSettings,
@@ -1051,11 +1051,11 @@ class TestAggregate:
                 "polyzymd.analyses._framework.results_base.get_polyzymd_version",
                 return_value="1.0.0-test",
             ):
-                analysis.aggregate(ctx, mock_results)
+                result = analysis.aggregate(ctx, mock_results)
 
-        # Check that output file was created
+        assert result is not None
         json_files = list(output_dir.glob("*.json"))
-        assert len(json_files) == 1
+        assert json_files == []
 
     def test_aggregate_rejects_pair_count_mismatch(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition

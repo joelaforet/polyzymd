@@ -491,19 +491,15 @@ class RMSDAnalysis(Analysis):
             )
         if not all(isinstance(result, ReplicateArtifact) for result in results):
             raise TypeError("RMSD aggregation expects MDAnalysis ReplicateArtifact inputs")
-        target_path = ctx.result_path or ctx.output_dir / "result.json"
-        aggregated = aggregate_rmsd_artifacts(
+        return aggregate_rmsd_artifacts(
             condition_label=ctx.condition.label,
             replicates=ctx.replicates,
             settings=ctx.settings,
             equilibration=ctx.equilibration,
             output_dir=ctx.output_dir,
-            result_path=target_path,
             artifacts=results,
             settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
         )
-        logger.info("Saved aggregated RMSD artifact to %s", target_path)
-        return aggregated
 
     def compare(self, ctx: ComparisonContext) -> Any:
         """Compare RMSD runs across conditions.

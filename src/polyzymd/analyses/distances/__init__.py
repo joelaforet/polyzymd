@@ -1068,19 +1068,15 @@ class DistancesAnalysis(Analysis):
                 "distances replicate caches are incompatible with the MDAnalysis artifact "
                 "lifecycle; recompute the condition or clear stale caches before aggregating."
             )
-        target_path = ctx.result_path or ctx.output_dir / "result.json"
-        aggregated = aggregate_distance_artifacts(
+        return aggregate_distance_artifacts(
             condition_label=ctx.condition.label,
             replicates=ctx.replicates,
             settings=ctx.settings,
             equilibration=ctx.equilibration,
             output_dir=ctx.output_dir,
-            result_path=target_path,
             artifacts=results,
             settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
         )
-        logger.info("Saved aggregated distances artifact to %s", target_path)
-        return aggregated
 
     @staticmethod
     def _validate_replicate_pair_schema(

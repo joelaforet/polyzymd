@@ -1823,7 +1823,6 @@ def _make_aggregate_context(
         output_dir=tmp_path / "aggregated",
         equilibration="10ns",
         settings=settings,
-        result_path=tmp_path / "aggregated" / "result.json",
     )
 
 
@@ -1855,8 +1854,7 @@ def test_aggregate_basic(tmp_path: Path) -> None:
     assert summary.sem_fraction_with_any == pytest.approx(
         np.std([0.40, 0.50, 0.60], ddof=1) / np.sqrt(3)
     )
-    assert ctx.result_path is not None
-    assert ctx.result_path.exists()
+    assert not (ctx.output_dir / "result.json").exists()
 
 
 def test_aggregate_rejects_legacy_replicate_results(tmp_path: Path) -> None:
@@ -2055,8 +2053,8 @@ def test_aggregate_rejects_unexpected_replicate_ids(tmp_path: Path) -> None:
         )
 
 
-def test_aggregate_saves_result(tmp_path: Path) -> None:
-    """aggregate should write its result to ctx.result_path."""
+def test_framework_can_persist_returned_aggregate(tmp_path: Path) -> None:
+    """Framework-owned persistence should write returned aggregate artifacts."""
     analysis = HydrogenBondsAnalysis()
     ctx = _make_aggregate_context(tmp_path)
     results = [
@@ -2065,10 +2063,11 @@ def test_aggregate_saves_result(tmp_path: Path) -> None:
         _make_replicate_result(3, 1.4, 0.4),
     ]
 
-    _ = _aggregate_replicate_results(analysis, ctx, results)
+    artifacts = [_make_replicate_artifact(result, ctx) for result in results]
+    aggregate = analysis.aggregate(ctx, artifacts)
+    ArtifactStore(ctx.output_dir).write_condition_result(aggregate)
 
-    assert ctx.result_path is not None
-    assert ctx.result_path.exists()
+    assert (ctx.output_dir / "result.json").exists()
 
 
 def test_aggregate_rejects_missing_summary_in_one_replicate(tmp_path: Path) -> None:
@@ -3480,7 +3479,6 @@ def test_aggregate_all_summaries_present(tmp_path: Path) -> None:
         output_dir=tmp_path / "aggregated",
         equilibration="10ns",
         settings=settings,
-        result_path=tmp_path / "aggregated" / "result.json",
     )
 
     rep1 = HydrogenBondResult(
@@ -4215,7 +4213,6 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
         output_dir=tmp_path / "aggregated",
         equilibration="0ns",
         settings=settings,
-        result_path=tmp_path / "aggregated" / "result.json",
     )
     aggregated = analysis.aggregate(aggregate_ctx, [rep_result_1, rep_result_2])
     legacy_aggregated = _as_hydrogen_bond_aggregate(aggregated)

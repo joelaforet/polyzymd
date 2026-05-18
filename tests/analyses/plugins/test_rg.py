@@ -735,7 +735,8 @@ def test_plotters_load_canonical_artifacts_only(tmp_path) -> None:
         settings=settings,
         equilibration="0ns",
     )
-    analysis.aggregate(ctx, artifacts)
+    aggregate = analysis.aggregate(ctx, artifacts)
+    ArtifactStore(ctx.output_dir).write_condition_result(aggregate)
 
     time_ns, matrix = _load_replicate_timeseries(analysis_dir, "protein_rg", [1, 2])
     aggregate_payload = _load_condition_aggregated(analysis_dir)

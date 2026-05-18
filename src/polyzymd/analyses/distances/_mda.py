@@ -361,7 +361,6 @@ def aggregate_distance_artifacts(
     settings: DistancesSettings,
     equilibration: str,
     output_dir: Path,
-    result_path: Path,
     artifacts: Sequence[ReplicateArtifact],
     settings_fingerprint: str,
 ) -> ConditionArtifact:
@@ -385,7 +384,7 @@ def aggregate_distance_artifacts(
     )
     sidecar = _write_condition_sidecar(output_dir, ordered_artifacts, legacy_result)
     metrics, replicate_metrics = _condition_metrics(legacy_result)
-    artifact = ConditionArtifact(
+    return ConditionArtifact(
         analysis_name="distances",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
@@ -426,8 +425,6 @@ def aggregate_distance_artifacts(
         ],
         warnings=_combined_warnings(ordered_artifacts),
     )
-    ArtifactStore(result_path.parent).write_condition_result(artifact, result_path.name)
-    return artifact
 
 
 def artifact_to_distance_result(artifact: ReplicateArtifact) -> DistanceResult:

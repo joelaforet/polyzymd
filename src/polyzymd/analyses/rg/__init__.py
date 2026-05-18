@@ -673,19 +673,15 @@ class RgAnalysis(Analysis):
                 "replicate caches are incompatible with the MDAnalysis artifact lifecycle; "
                 "recompute the condition or clear stale caches before aggregating."
             )
-        target_path = ctx.result_path or ctx.output_dir / "result.json"
-        aggregated = aggregate_rg_artifacts(
+        return aggregate_rg_artifacts(
             condition_label=ctx.condition.label,
             replicates=ctx.replicates,
             settings=ctx.settings,
             equilibration=ctx.equilibration,
             output_dir=ctx.output_dir,
-            result_path=target_path,
             artifacts=results,
             settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
         )
-        logger.info("Saved aggregated Rg artifact to %s", target_path)
-        return aggregated
 
     def compare(self, ctx: ComparisonContext) -> Any:
         """Compare Rg runs across conditions.

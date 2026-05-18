@@ -1155,18 +1155,13 @@ class HydrogenBondsAnalysis(Analysis):
             composition_entries=aggregated_composition,
         )
 
-        target_path = ctx.result_path or (ctx.output_dir / "result.json")
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        artifact_result = aggregate_hydrogen_bond_artifacts(
+        return aggregate_hydrogen_bond_artifacts(
             condition_label=ctx.condition.label,
             replicates=ctx.replicates,
             output_dir=ctx.output_dir,
-            result_path=target_path,
             artifacts=ordered_artifacts,
             legacy_result=agg_result,
         )
-        logger.info("Saved aggregated hydrogen bond artifact to %s", target_path)
-        return artifact_result
 
     def _compute_composition(
         self,

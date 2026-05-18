@@ -1181,6 +1181,7 @@ def test_aggregate_single_replicate(
     assert aggregated.replicates == [1]
     assert legacy.n_replicates == 1
     assert len(legacy.run_results) == 2
+    assert not (ctx.output_dir / "result.json").exists()
     assert "Only one replicate available for RMSD aggregation" in caplog.text
 
 
