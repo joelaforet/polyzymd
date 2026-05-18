@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Large-scale refactoring of the analysis and comparison subsystems to achieve
 Open-Closed Principle compliance.  New analysis types can now be added by
-dropping a package in `analyses/<name>/` with no modifications to core code.
+dropping a module or package in `analyses/` with no modifications to core code.
 
 ### Breaking Changes
 
@@ -46,13 +46,15 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 ### Added
 
 - **`polyzymd new-analysis <name>` scaffold CLI command.**  Generates a complete
-  plugin package (`__init__.py`) and test file
-  (`tests/analyses/plugins/test_<name>.py`) with working discovery, compute,
-  aggregate, extract_metrics, format, and plot implementations.  Supports
-  `--class-name`, `--force`, `--dry-run`, `--style` (dict or pydantic), and
-  `--project-root` options.  Validates plugin names (snake_case, no collisions)
-  and class names (PascalCase, valid identifiers).  (`cli/scaffold.py`,
-  `cli/main.py`)
+  single-file MDAnalysis-native plugin at `src/polyzymd/analyses/<name>.py` and
+  test file (`tests/analyses/plugins/test_<name>.py`) with working discovery,
+  compute, aggregate, extract_metrics, format, and plot implementations.
+  Advanced/package scaffolds are available with `--advanced`, `--style dict`,
+  or `--style pydantic` and create package files such as
+  `src/polyzymd/analyses/<name>/__init__.py`.  Supports `--class-name`,
+  `--force`, `--dry-run`, `--style`, and `--project-root` options.  Validates
+  plugin names (snake_case, no collisions) and class names (PascalCase, valid
+  identifiers).  (`cli/scaffold.py`, `cli/main.py`)
 - **Analysis plugin framework.**  `Analysis` ABC (`analyses/base.py`),
   `pkgutil`-based auto-discovery (`analyses/discovery.py`), lifecycle
   orchestrator (`analyses/orchestrator.py`), and default scalar comparison
@@ -168,11 +170,11 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 ### Changed
 
-- **All analysis plugins are now packages.**  Each plugin lives in
-  `analyses/<name>/` with `__init__.py` (plugin class) and optional private
+- **Bundled v1.3 analyses are package-organized.**  Active bundled plugins live
+  in `analyses/<name>/` with `__init__.py` (plugin class) and optional private
   modules (`_plotters.py`, `_results.py`, `_comparison_results.py`,
-  `_formatters.py`, `_aggregator.py`) as needed.
-  Single-file plugins no longer exist.
+  `_formatters.py`, `_aggregator.py`) as needed.  Contributor plugins and
+  discovery still support both single-file modules and packages.
 - **Plugin contract enforcement hardened.**  `compute_replicate()` returning
   `None` is now a hard `PluginContractError` (not a soft skip).
   `PluginContractError` propagates without being wrapped.  `compare()` and

@@ -128,5 +128,6 @@ class TestCatalyticTriadGromacsSmoke:
         assert result.payload["pair_results"][0]["pair_label"] == "Asp133-His156"
         assert result.payload["pair_results"][1]["pair_label"] == "His156-Ser77"
         assert result.payload["simultaneous_contact_fraction"] == 1.0
-        assert (tmp_path / "analysis" / "run_1" / "result.json").exists()
+        # Direct plugin calls return in-memory artifacts; lifecycle persistence owns result.json
+        assert not (tmp_path / "analysis" / "run_1" / "result.json").exists()
         assert str(tmp_path / "run_1" / "gromacs" / "prod.xtc") in str(fake_mda.Universe.call_args)
