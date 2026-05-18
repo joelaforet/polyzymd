@@ -33,19 +33,23 @@ artifacts, condition aggregation, cross-condition comparison, and plotting.
 7. **Store arrays and tables as sidecars.** Use
    [Store arrays and tables with sidecars](sidecars.md) when your collector needs
    to persist NPZ arrays, CSV tables, or other bulky data beside an artifact.
-8. **Use the current full analysis extension guide.** The supported detailed
+8. **Split larger plugins into packages when needed.** Use
+   [Convert a plugin into an advanced package](advanced_package.md) when a
+   working single-file plugin has grown enough to need `_mda.py`, `_plotters.py`,
+   `_results.py`, or `_formatters.py` helpers.
+9. **Use the current full analysis extension guide.** The supported detailed
    guide is [Extend PolyzyMD with MDAnalysis-native analyses](../extending_analyses.md).
    It covers the current scaffold, public imports, `MDAAnalysisJob`, collectors,
    artifacts, default comparison, and artifact-only plotting.
-9. **Look up stable API surfaces when needed.** Use the API pages for
-   [analysis plugins](../../api/analyses.md),
-   [analysis base classes](../../api/analyses_base.md),
-   [MDAnalysis integration](../../api/analyses_mda.md), and
-   [shared analysis utilities](../../api/analyses_shared.md).
-10. **Check CLI and configuration reference material.** Use the
-    [CLI reference](../../reference/cli_reference.md) and
-    [analysis plugin settings reference](../../reference/analysis_plugin_settings.md)
-    when you need command or configuration lookup.
+10. **Look up stable API surfaces when needed.** Use the API pages for
+    [analysis plugins](../../api/analyses.md),
+    [analysis base classes](../../api/analyses_base.md),
+    [MDAnalysis integration](../../api/analyses_mda.md), and
+    [shared analysis utilities](../../api/analyses_shared.md).
+11. **Check CLI and configuration reference material.** Use the
+     [CLI reference](../../reference/cli_reference.md) and
+     [analysis plugin settings reference](../../reference/analysis_plugin_settings.md)
+     when you need command or configuration lookup.
 
 ## Public and private import guardrails
 
@@ -67,7 +71,6 @@ The New Analysis Contributor Path will continue to grow into smaller pages with
 one purpose each. These pages are planned and are intentionally not linked until
 they exist:
 
-- Advanced package layout for larger plugins — how-to guide.
 - Testing analysis plugin contributions — how-to guide.
 - Pre-PR plugin checklist — reference.
 - Stable API map for analysis contributors — reference.
@@ -84,4 +87,5 @@ How PolyzyMD analysis plugins work <architecture>
 Scaffold your first analysis plugin <first_scaffold>
 Build a simple scalar analysis plugin <simple_scalar_plugin>
 Store arrays and tables with sidecars <sidecars>
+Convert a plugin into an advanced package <advanced_package>
 ```
