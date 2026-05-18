@@ -141,7 +141,7 @@ You should see these outputs:
 analysis/<condition>/sasa/run_<replicate>/result.json
 analysis/<condition>/sasa/aggregated/result.json
 comparison/sasa/result.json
-comparison/sasa/plots/
+figures/sasa/
 ```
 
 The comparison file is the first place to check after a successful run:
@@ -189,8 +189,8 @@ the polymer context.
 
 ## Step 6: Use the plots
 
-Open the SASA plots in `comparison/sasa/plots/`. The most useful first checks
-are:
+Open the SASA plots in the configured plot output directory, usually
+`figures/sasa/`. The most useful first checks are:
 
 - `sasa_comparison_protein_with_polymer.png` — mean SASA by condition, with
   replicate scatter points.

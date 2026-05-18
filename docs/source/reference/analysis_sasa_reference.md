@@ -77,7 +77,7 @@ comparison output and plots.
 | Per condition | `analysis/<condition>/sasa/aggregated/result.json` | `ConditionArtifact` envelope with aggregate per-run summaries across replicates. |
 | Per condition sidecars | `analysis/<condition>/sasa/aggregated/sidecars/*.npz` | Aggregate arrays and supporting data, when written. |
 | Cross condition | `comparison/sasa/result.json` | Comparison output with condition summaries, pairwise tests, ANOVA-by-run, rankings, and metadata. |
-| Plots | `comparison/sasa/plots/` | SASA comparison, normalized-control, time-series, and profile plots. |
+| Plots | `figures/sasa/` by default, or the configured plot output directory | SASA comparison, normalized-control, time-series, and profile plots. |
 
 ## Artifact envelope fields
 
@@ -188,8 +188,8 @@ values indicate increased exposure relative to the control.
 
 ## Plot outputs
 
-For each configured run label, SASA may generate these plots under
-`comparison/sasa/plots/`:
+For each configured run label, SASA may generate these plots under the
+configured plot output directory, usually `figures/sasa/`:
 
 | Plot output | Description |
 |-------------|-------------|
