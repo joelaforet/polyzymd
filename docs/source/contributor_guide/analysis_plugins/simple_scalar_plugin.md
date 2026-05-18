@@ -3,8 +3,8 @@
 This tutorial turns the scaffold pattern into one small trajectory-native
 analysis. You will sketch a plugin that computes one scalar value per replicate,
 stores it in a `ReplicateArtifact`, lets PolyzyMD aggregate replicate metrics
-into a `ConditionArtifact`, and exposes the condition metric through
-`MetricValue` for the default comparison path.
+into a `ConditionArtifact`, and lets the MDAnalysis artifact comparison path
+build the default scalar comparison from that artifact.
 
 The metric in this tutorial is **teaching-only**: the mean x-coordinate of the
 selected protein atoms. It is not validated science and should not be used to
@@ -24,21 +24,21 @@ You also need the architecture vocabulary from {doc}`architecture`:
 - A collector maps completed jobs to a `ReplicateArtifact`.
 - Default aggregation reads scalar replicate metrics from
   `payload["metrics"]` and writes a `ConditionArtifact`.
-- `extract_metrics()` exposes condition-level scalar metrics as `MetricValue`
-  objects for default comparison.
+- Default comparison sees the `ConditionArtifact` and uses the MDAnalysis
+  artifact comparison path before any legacy `extract_metrics()` hook.
 
 ## 1. Define a tiny settings model
 
-Start with one atom selection and one metric name. Use lowercase `chainid` in
-MDAnalysis selections. In the PolyzyMD chain convention, `chainid A` is the
-protein.
+Start with one atom selection and one constant metric key. Use lowercase
+`chainid` in MDAnalysis selections. In the PolyzyMD chain convention,
+`chainid A` is the protein.
 
 ```python
 from typing import ClassVar
 
 from pydantic import BaseModel, Field
 
-from polyzymd.analyses.base import Analysis, MetricValue
+from polyzymd.analyses.base import Analysis
 from polyzymd.analyses.mda import (
     MDAAnalysisJob,
     MDACollectorContext,
@@ -50,6 +50,9 @@ from polyzymd.analyses.mda import (
 )
 
 
+METRIC_NAME: str = "mean_protein_x_nm"
+
+
 class MeanProteinXSettings(BaseModel):
     """Settings for the teaching-only scalar metric."""
 
@@ -57,14 +60,12 @@ class MeanProteinXSettings(BaseModel):
         default="protein and chainid A",
         description="MDAnalysis selection for atoms to summarize.",
     )
-    metric_name: str = Field(
-        default="mean_protein_x_nm",
-        description="Name stored in artifact metric payloads.",
-    )
 ```
 
 This imports PolyzyMD symbols only from the public contributor facades:
-`polyzymd.analyses.base` and `polyzymd.analyses.mda`.
+`polyzymd.analyses.base` and `polyzymd.analyses.mda`. The metric key is a
+module constant instead of a setting so every replicate and condition writes the
+same scalar name.
 
 ## 2. Write a function job that returns JSON-compatible data
 
@@ -160,7 +161,6 @@ class MeanProteinXCollector:
 
         job = completed_jobs[0]
         result = dict(job.results)
-        metric_name = ctx.settings.metric_name
         mean_x = float(result["mean_x_nm"])
 
         metadata = {"result_kind": "teaching_scalar"}
@@ -174,7 +174,7 @@ class MeanProteinXCollector:
             payload={
                 "selection": result["selection"],
                 "n_frames": int(result["n_frames"]),
-                "metrics": {metric_name: mean_x},
+                "metrics": {METRIC_NAME: mean_x},
             },
             provenance={
                 "source": "mean_protein_x_teaching_function",
@@ -228,31 +228,24 @@ creates a `ConditionArtifact` with a payload shaped like this:
 The exact numbers will differ. The stable idea is that aggregation computes
 replicate values, mean, standard deviation, and SEM for each named scalar metric.
 
-## 6. Expose the condition metric for default comparison
+## 6. Let artifact comparison use the condition metrics
 
-Default comparison calls `extract_metrics()` once per aggregated condition. Read
-the condition artifact payload and return a `MetricValue`.
+For this simple MDAnalysis artifact tutorial, do not implement
+`extract_metrics()`. When the aggregate result is a `ConditionArtifact`,
+PolyzyMD's default comparison path short-circuits to
+`compare_condition_artifacts()`. That artifact comparison code reads
+`payload["metrics"]`, builds the internal `MetricValue` inputs from the stored
+means, SEMs, and replicate values, and returns a comparison artifact.
 
-```python
-class MeanProteinXAnalysis(MeanProteinXAnalysis):
-    def extract_metrics(self, summary) -> dict[str, MetricValue]:
-        metric_name = self.Settings().metric_name
-        metric = summary.payload["metrics"][metric_name]
-        return {
-            metric_name: MetricValue(
-                name=metric_name,
-                mean=float(metric["mean"]),
-                sem=float(metric["sem"]),
-                replicate_values=[float(value) for value in metric["values"]],
-                higher_is_better=None,
-                direction_labels=("shifted lower", "unchanged", "shifted higher"),
-            )
-        }
-```
+The older `extract_metrics()` hook is still relevant for plugins whose
+aggregation returns a non-`ConditionArtifact` result, such as a custom Pydantic
+model or a plain dictionary. It is not required for this simple
+`ReplicateArtifact` → `ConditionArtifact` path.
 
-`higher_is_better=None` is deliberate here because this teaching metric has no
-scientific direction. For a real plugin, choose the metric direction only after
-you have a validated interpretation.
+Because the teaching metric has no scientific direction, treat any comparison
+output as a lifecycle check only. For a real plugin, define metric direction and
+labels through the supported comparison contract only after the metric has a
+validated interpretation.
 
 ## Success state
 
@@ -264,8 +257,8 @@ You have the pieces of a simple scalar plugin when:
   `payload["metrics"]`.
 - You do not override `aggregate()` because default aggregation can create the
   `ConditionArtifact` from replicate metrics.
-- `extract_metrics()` returns a `MetricValue` built from the aggregated condition
-  metric.
+- You do not implement `extract_metrics()` for this artifact path; default
+  comparison reads the `ConditionArtifact` metrics directly.
 
 ## Common mistakes
 
