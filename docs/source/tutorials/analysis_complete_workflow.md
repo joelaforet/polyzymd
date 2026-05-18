@@ -150,8 +150,11 @@ For the tutorial, use the batch runner:
 pixi run -e build polyzymd compare run-all
 ```
 
-This runs every enabled comparison and writes canonical cache files into
-`comparison/<analysis>/result.json`.
+This runs each enabled analysis through its replicate, aggregate, and
+cross-condition comparison stages. Successful runs write canonical
+per-replicate `ReplicateArtifact` files under `analysis/`, per-condition
+`ConditionArtifact` files under `analysis/`, and cross-condition comparison
+outputs under `comparison/<analysis>/result.json`.
 
 ```{tip}
 **On an HPC cluster?** For large studies, submit each analysis as a SLURM
@@ -190,15 +193,36 @@ At this point you should have:
 ```text
 polymer_stabilization_study/
 ├── comparison.yaml
+├── analysis/
+│   ├── No Polymer/
+│   │   ├── rmsf/
+│   │   │   ├── run_1/
+│   │   │   │   └── result.json        # ReplicateArtifact
+│   │   │   ├── run_2/
+│   │   │   │   └── result.json        # ReplicateArtifact
+│   │   │   ├── run_3/
+│   │   │   │   └── result.json        # ReplicateArtifact
+│   │   │   └── aggregated/
+│   │   │       └── result.json        # ConditionArtifact
+│   │   └── contacts/
+│   │       └── ...
+│   ├── 100% SBMA/
+│   │   └── rmsf/
+│   │       ├── run_1/
+│   │       │   └── result.json        # ReplicateArtifact
+│   │       └── aggregated/
+│   │           └── result.json        # ConditionArtifact
+│   └── 100% EGMA/
+│       └── ...
 ├── comparison/
 │   ├── rmsf/
-│   │   └── result.json
+│   │   └── result.json                # cross-condition comparison output
 │   ├── contacts/
-│   │   └── result.json
+│   │   └── result.json                # cross-condition comparison output
 │   ├── distances/
-│   │   └── result.json
+│   │   └── result.json                # cross-condition comparison output
 │   └── catalytic_triad/
-│       └── result.json
+│       └── result.json                # cross-condition comparison output
 └── figures/
     ├── rmsf/
     │   ├── rmsf_comparison.png
@@ -209,8 +233,11 @@ polymer_stabilization_study/
     └── ...
 ```
 
-That is the tutorial success state: the canonical comparison caches exist, the
-figures exist, and `polyzymd compare plot-all` completes without error.
+That is the tutorial success state: canonical `ReplicateArtifact` and
+`ConditionArtifact` files exist under `analysis/`, each
+`comparison/<analysis>/result.json` contains the cross-condition comparison
+artifact or plugin-specific summary output, the figures exist, and
+`polyzymd compare plot-all` completes without error.
 
 ## What to Do Next
 

@@ -160,8 +160,9 @@ polyzymd compare plot-all
   `comparison/<analysis>/result.json`
 - figures are written under the configured `plot_settings.output_dir`, usually
   `figures/<analysis>/`
-- default project scaffolds create `analysis/`, `comparison/`, and `figures/`
-  directories next to `comparison.yaml`
+- `polyzymd compare init` scaffolds `comparison/`, `figures/`, and
+  `structures/` next to `comparison.yaml`; `analysis/` is created and
+  populated during analysis runs
 
 Typical comparison cache paths:
 
