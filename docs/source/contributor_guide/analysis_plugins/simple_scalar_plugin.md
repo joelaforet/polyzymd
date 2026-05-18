@@ -190,7 +190,8 @@ class MeanProteinXCollector:
 
 
 class MeanProteinXAnalysis(MeanProteinXAnalysis):
-    def build_mda_collector(self):
+    def build_mda_collector(self, ctx: MDACollectorContext):
+        del ctx
         return MeanProteinXCollector()
 ```
 
