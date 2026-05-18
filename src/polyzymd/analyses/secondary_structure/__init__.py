@@ -9,7 +9,6 @@ comparison path.
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
@@ -48,8 +47,6 @@ from polyzymd.analyses.secondary_structure._plotters import (
 
 if TYPE_CHECKING:
     from polyzymd.analyses.mda import MDAAnalysisJob, MDAReplicateJobContext
-
-logger = logging.getLogger("polyzymd.analyses.secondary_structure")
 
 
 class SecondaryStructureSettings(BaseModel):
@@ -151,19 +148,15 @@ class SecondaryStructureAnalysis(Analysis):
                 "Legacy secondary-structure replicate caches are incompatible with the "
                 "MDAnalysis artifact lifecycle; recompute the condition or clear stale caches."
             )
-        target_path = ctx.result_path or ctx.output_dir / "result.json"
-        aggregated = aggregate_secondary_structure_artifacts(
+        return aggregate_secondary_structure_artifacts(
             condition_label=ctx.condition.label,
             replicates=ctx.replicates,
             settings=ctx.settings,
             equilibration=ctx.equilibration,
             output_dir=ctx.output_dir,
-            result_path=target_path,
             artifacts=results,
             settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
         )
-        logger.info("Saved aggregated secondary-structure artifact to %s", target_path)
-        return aggregated
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
         """Extract helix fraction directly from a condition artifact.

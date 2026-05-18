@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 
@@ -60,7 +60,42 @@ class TestCatalyticTriadGromacsSmoke:
         )
 
         fake_mda = install_fake_mdanalysis()
-        fake_mda.Universe = MagicMock(return_value=make_mock_universe(n_frames=100, n_atoms=20))
+        expected_topology = tmp_path / "run_1" / "gromacs" / "solvated_system.pdb"
+        expected_trajectory = tmp_path / "run_1" / "gromacs" / "prod.xtc"
+
+        class FakeUniverseFactory:
+            """Validate and record MDAnalysis Universe construction calls."""
+
+            def __init__(self) -> None:
+                """Create an empty call recorder."""
+
+                self.calls: list[tuple[Path, Path]] = []
+
+            def __call__(self, topology: str | Path, trajectory: str | Path) -> object:
+                """Return a fake universe after checking resolved GROMACS paths.
+
+                Parameters
+                ----------
+                topology : str or Path
+                    Topology path supplied to ``MDAnalysis.Universe``.
+                trajectory : str or Path
+                    Trajectory path supplied to ``MDAnalysis.Universe``.
+
+                Returns
+                -------
+                object
+                    Universe-like fake object for the smoke path.
+                """
+
+                topology_path = Path(topology)
+                trajectory_path = Path(trajectory)
+                assert topology_path == expected_topology
+                assert trajectory_path == expected_trajectory
+                self.calls.append((topology_path, trajectory_path))
+                return make_mock_universe(n_frames=100, n_atoms=20)
+
+        universe_factory = FakeUniverseFactory()
+        fake_mda.Universe = universe_factory
         job_results = SimpleNamespace(
             distance_matrix=np.vstack([np.full(100, 3.2), np.full(100, 3.3)]),
             frames=np.arange(100, dtype=np.int64),
@@ -130,4 +165,4 @@ class TestCatalyticTriadGromacsSmoke:
         assert result.payload["simultaneous_contact_fraction"] == 1.0
         # Direct plugin calls return in-memory artifacts; lifecycle persistence owns result.json
         assert not (tmp_path / "analysis" / "run_1" / "result.json").exists()
-        assert str(tmp_path / "run_1" / "gromacs" / "prod.xtc") in str(fake_mda.Universe.call_args)
+        assert universe_factory.calls == [(expected_topology, expected_trajectory)]

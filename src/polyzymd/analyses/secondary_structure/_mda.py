@@ -279,7 +279,6 @@ def aggregate_secondary_structure_artifacts(
     settings: SecondaryStructureSettings,
     equilibration: str,
     output_dir: Path,
-    result_path: Path,
     artifacts: Sequence[ReplicateArtifact],
     settings_fingerprint: str,
 ) -> ConditionArtifact:
@@ -297,8 +296,6 @@ def aggregate_secondary_structure_artifacts(
         Equilibration string from the framework context.
     output_dir : Path
         Aggregated output directory.
-    result_path : Path
-        Canonical condition artifact path.
     artifacts : sequence of ReplicateArtifact
         Per-replicate secondary-structure artifacts.
     settings_fingerprint : str
@@ -419,7 +416,6 @@ def aggregate_secondary_structure_artifacts(
         ],
         warnings=_combined_warnings(ordered_artifacts),
     )
-    ArtifactStore(result_path.parent).write_condition_result(artifact, result_path.name)
     return artifact
 
 

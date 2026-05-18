@@ -154,12 +154,12 @@ def test_sidecar_validation_rejects_corruption(tmp_path, condition, settings) ->
         load_replicate_matrix(artifact, run_dir)
 
 
-def test_aggregate_computes_occupancy_and_writes_condition_artifact(
+def test_aggregate_computes_occupancy_without_writing_condition_artifact(
     tmp_path,
     condition,
     settings,
 ) -> None:
-    """Aggregation should compute mean and SEM from replicate sidecars."""
+    """Aggregation should compute summaries without helper persistence."""
 
     artifact_1 = _write_replicate_artifact(
         tmp_path,
@@ -184,13 +184,12 @@ def test_aggregate_computes_occupancy_and_writes_condition_artifact(
         settings=settings,
         equilibration="0ns",
         output_dir=output_dir,
-        result_path=result_path,
         artifacts=[artifact_1, artifact_2],
         settings_fingerprint=settings_fingerprint(settings),
     )
 
     assert isinstance(artifact, ConditionArtifact)
-    assert result_path.is_file()
+    assert not result_path.exists()
     assert artifact.payload["mean_overall_helix"] == pytest.approx(0.375)
     assert artifact.payload["mean_persistence_helix"] == pytest.approx([0.75, 0.0])
     assert artifact.payload["metrics"]["helix_fraction"]["higher_is_better"] is True
@@ -223,7 +222,6 @@ def test_aggregate_rejects_residue_identity_mismatch(tmp_path, condition, settin
             settings=settings,
             equilibration="0ns",
             output_dir=tmp_path / "aggregated",
-            result_path=tmp_path / "aggregated" / "result.json",
             artifacts=[artifact_1, artifact_2],
             settings_fingerprint=settings_fingerprint(settings),
         )

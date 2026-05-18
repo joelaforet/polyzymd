@@ -326,14 +326,14 @@ class TestTriadAggregationAndComparison:
         with pytest.raises(TypeError, match="recompute the condition"):
             triad_analysis.aggregate(ctx, [object()])
 
-    def test_aggregate_writes_condition_artifact_and_adapter(
+    def test_aggregate_returns_condition_artifact_and_adapter(
         self,
         triad_analysis: CatalyticTriadAnalysis,
         condition: Condition,
         tmp_path: Path,
         default_settings: CatalyticTriadSettings,
     ) -> None:
-        """Aggregation should produce canonical artifacts and legacy-compatible summaries."""
+        """Aggregation should return artifacts and leave persistence to the framework."""
 
         artifacts = [
             _replicate_artifact(
@@ -369,7 +369,7 @@ class TestTriadAggregationAndComparison:
         legacy = condition_artifact_to_legacy_result(artifact)
 
         assert artifact.artifact_type == "condition"
-        assert (tmp_path / "aggregated" / "result.json").exists()
+        assert not (tmp_path / "aggregated" / "result.json").exists()
         assert artifact.payload["metrics"][SIMULTANEOUS_CONTACT_METRIC]["values"] == [50.0, 100.0]
         assert artifact.payload["metric_metadata"][SIMULTANEOUS_CONTACT_METRIC] == {
             "label": "Simultaneous Contact",

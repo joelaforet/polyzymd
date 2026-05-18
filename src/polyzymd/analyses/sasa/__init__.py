@@ -231,19 +231,15 @@ class SASAAnalysis(Analysis):
                 "replicate caches are incompatible with the MDAnalysis artifact lifecycle; "
                 "recompute the condition or clear stale caches before aggregating."
             )
-        target_path = ctx.result_path or ctx.output_dir / "result.json"
-        aggregated = aggregate_sasa_artifacts(
+        return aggregate_sasa_artifacts(
             condition_label=ctx.condition.label,
             replicates=ctx.replicates,
             settings=cast(SASASettings, ctx.settings),
             equilibration=ctx.equilibration,
             output_dir=ctx.output_dir,
-            result_path=target_path,
             artifacts=cast(Sequence[ReplicateArtifact], results),
             settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
         )
-        LOGGER.info("Saved aggregated SASA artifact to %s", target_path)
-        return aggregated
 
     @staticmethod
     def _load_per_residue_contributions(

@@ -551,6 +551,10 @@ def test_sasa_zero_selection_artifact_roundtrip_aggregate_compare(tmp_path: Path
             condition_label=condition_label,
             settings=settings,
         )
+        assert not (condition_root / "aggregated" / "result.json").exists()
+        ArtifactStore(condition_root / "aggregated").write_condition_result(
+            aggregate, "result.json"
+        )
         loaded_aggregate = ArtifactStore(condition_root / "aggregated").read_condition_result(
             "result.json"
         )
@@ -678,6 +682,7 @@ def test_sasa_aggregate_per_residue_profiles(tmp_path: Path) -> None:
     aggregated = _aggregate_artifacts(tmp_path, artifacts)
 
     assert isinstance(aggregated, ConditionArtifact)
+    assert not (tmp_path / "aggregated" / "result.json").exists()
     legacy = condition_artifact_to_legacy_result(aggregated)
     run = legacy.run_results[0]
     assert run.overall_mean == pytest.approx(13.0)

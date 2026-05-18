@@ -692,7 +692,6 @@ class TestRMSFArtifacts:
             settings=RMSFSettings(),
             equilibration="0ns",
             output_dir=tmp_path / "aggregated",
-            result_path=tmp_path / "aggregated" / "result.json",
             artifacts=artifacts,
             settings_fingerprint=RMSFAnalysis._make_settings_cache_tag(RMSFSettings()),
         )
@@ -702,7 +701,7 @@ class TestRMSFArtifacts:
         assert result.payload["sem_rmsf_per_residue"] == pytest.approx([0.5, 0.5, 0.5])
         assert result.payload["per_replicate_mean_rmsf"] == pytest.approx([1.5, 2.5])
         assert result.payload["metric_metadata"][MEAN_RMSF_METRIC]["higher_is_better"] is False
-        assert (tmp_path / "aggregated" / "result.json").exists()
+        assert not (tmp_path / "aggregated" / "result.json").exists()
 
     def test_aggregate_rejects_residue_identity_mismatch(
         self,
@@ -728,7 +727,6 @@ class TestRMSFArtifacts:
                 settings=RMSFSettings(),
                 equilibration="0ns",
                 output_dir=tmp_path / "aggregated",
-                result_path=tmp_path / "aggregated" / "result.json",
                 artifacts=artifacts,
                 settings_fingerprint=RMSFAnalysis._make_settings_cache_tag(RMSFSettings()),
             )
@@ -777,7 +775,6 @@ class TestRMSFArtifacts:
                 settings=settings,
                 equilibration="0ns",
                 output_dir=tmp_path / "aggregated",
-                result_path=tmp_path / "aggregated" / "result.json",
                 artifacts=updated_artifacts,
                 settings_fingerprint=current_fingerprint,
             )
@@ -808,16 +805,17 @@ class TestRMSFCompareFormatPlot:
             _replicate_artifact(tmp_path, condition, 1, [1.0, 1.5, 2.0]),
             _replicate_artifact(tmp_path, condition, 2, [2.0, 2.5, 3.0]),
         ]
-        return aggregate_rmsf_artifacts(
+        artifact = aggregate_rmsf_artifacts(
             condition_label=condition.label,
             replicates=condition.replicates,
             settings=RMSFSettings(),
             equilibration="0ns",
             output_dir=tmp_path / "aggregated",
-            result_path=tmp_path / "aggregated" / "result.json",
             artifacts=artifacts,
             settings_fingerprint=RMSFAnalysis._make_settings_cache_tag(RMSFSettings()),
         )
+        ArtifactStore(tmp_path / "aggregated").write_condition_result(artifact, "result.json")
+        return artifact
 
     def test_default_compare_returns_comparison_artifact(
         self,

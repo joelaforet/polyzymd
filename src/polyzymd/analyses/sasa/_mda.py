@@ -431,7 +431,6 @@ def aggregate_sasa_artifacts(
     settings: SASASettings,
     equilibration: str,
     output_dir: Path,
-    result_path: Path,
     artifacts: Sequence[ReplicateArtifact],
     settings_fingerprint: str,
 ) -> ConditionArtifact:
@@ -449,8 +448,6 @@ def aggregate_sasa_artifacts(
         Equilibration string from the framework context.
     output_dir : Path
         Aggregated output directory.
-    result_path : Path
-        Canonical condition artifact path.
     artifacts : sequence of ReplicateArtifact
         Per-replicate SASA artifacts.
     settings_fingerprint : str
@@ -538,7 +535,6 @@ def aggregate_sasa_artifacts(
         ],
         warnings=_combined_warnings(ordered_artifacts),
     )
-    ArtifactStore(result_path.parent).write_condition_result(artifact, result_path.name)
     return artifact
 
 
