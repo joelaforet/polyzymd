@@ -38,25 +38,29 @@ artifacts, condition aggregation, cross-condition comparison, and plotting.
    working single-file plugin has grown enough to need `_mda.py`, `_plotters.py`,
    `_results.py`, or `_formatters.py` helpers.
 9. **Test the plugin contract.** Use
-   [Test your analysis plugin contribution](testing.md) to cover discovery,
-   settings validation, MDAnalysis jobs, collectors, artifacts, sidecars,
-   aggregation, comparison metrics, and artifact-only plotting.
-10. **Check your contribution before review.** Use
-    [Analysis plugin contribution checklist](checklist.md) for the PR-ready
-    plugin contract and reviewer checklist.
-11. **Use the current full analysis extension guide.** The supported detailed
-    guide is [Extend PolyzyMD with MDAnalysis-native analyses](../extending_analyses.md).
-    It covers the current scaffold, public imports, `MDAAnalysisJob`, collectors,
-    artifacts, default comparison, and artifact-only plotting.
-12. **Look up stable API surfaces when needed.** Use the API pages for
-     [analysis plugins](../../api/analyses.md),
-     [analysis base classes](../../api/analyses_base.md),
-     [MDAnalysis integration](../../api/analyses_mda.md), and
-     [shared analysis utilities](../../api/analyses_shared.md).
-13. **Check CLI and configuration reference material.** Use the
-      [CLI reference](../../reference/cli_reference.md) and
-      [analysis plugin settings reference](../../reference/analysis_plugin_settings.md)
-      when you need command or configuration lookup.
+    [Test your analysis plugin contribution](testing.md) to cover discovery,
+    settings validation, MDAnalysis jobs, collectors, artifacts, sidecars,
+    aggregation, comparison metrics, and artifact-only plotting.
+10. **Look up stable API surfaces.** Use
+     [API map for analysis plugin contributors](api_map.md) when you need the
+     public import path, API reference page, scaffold command, or plugin-settings
+     reference without browsing internals.
+11. **Check your contribution before review.** Use
+     [Analysis plugin contribution checklist](checklist.md) for the PR-ready
+     plugin contract and reviewer checklist.
+12. **Use the current full analysis extension guide.** The supported detailed
+     guide is [Extend PolyzyMD with MDAnalysis-native analyses](../extending_analyses.md).
+     It covers the current scaffold, public imports, `MDAAnalysisJob`, collectors,
+     artifacts, default comparison, and artifact-only plotting.
+13. **Use the API reference directly when needed.** Use the API pages for
+      [analysis plugins](../../api/analyses.md),
+      [analysis base classes](../../api/analyses_base.md),
+      [MDAnalysis integration](../../api/analyses_mda.md), and
+      [shared analysis utilities](../../api/analyses_shared.md).
+14. **Check CLI and configuration reference material.** Use the
+       [CLI reference](../../reference/cli_reference.md) and
+       [analysis plugin settings reference](../../reference/analysis_plugin_settings.md)
+       when you need command or configuration lookup.
 
 ## Public and private import guardrails
 
@@ -72,18 +76,6 @@ Contributor-facing plugin code should use public facades:
 Do not import from `polyzymd.analyses._framework` in contributor plugins. That
 package is an internal implementation detail behind the public facades.
 
-## Remaining planned path pages
-
-The New Analysis Contributor Path will continue to grow into smaller pages with
-one purpose each. These pages are planned and are intentionally not linked until
-they exist:
-
-- Stable API map for analysis contributors — reference.
-
-Until the API map page is written, use
-[Extend PolyzyMD with MDAnalysis-native analyses](../extending_analyses.md) as
-the complete implementation guide.
-
 ```{toctree}
 :hidden:
 :maxdepth: 1
@@ -94,5 +86,6 @@ Build a simple scalar analysis plugin <simple_scalar_plugin>
 Store arrays and tables with sidecars <sidecars>
 Convert a plugin into an advanced package <advanced_package>
 Test your analysis plugin contribution <testing>
+API map for analysis plugin contributors <api_map>
 Analysis plugin contribution checklist <checklist>
 ```
