@@ -189,11 +189,13 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from polyzymd.analyses.base import AggregateContext, Condition, MetricValue
-from polyzymd.analyses.mda import ConditionArtifact, ReplicateArtifact
+from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact, ReplicateArtifact
 from polyzymd.analyses.solvent_shell import SolventShellAnalysis, SolventShellSettings
 
 
 def test_aggregate_or_default_metrics(tmp_path: Path) -> None:
+    analysis = SolventShellAnalysis()
+    settings = SolventShellSettings()
     condition = Condition(
         label="Control",
         config_path=Path("/fake/config.yaml"),
@@ -205,24 +207,36 @@ def test_aggregate_or_default_metrics(tmp_path: Path) -> None:
         replicates=(1, 2),
         output_dir=tmp_path / "aggregated",
         equilibration="0ns",
-        settings=SolventShellSettings(),
+        settings=settings,
     )
-    replicate_artifacts = [
+    frame_selection = {"start": 0, "stop": None, "step": 1, "frames": None}
+    settings_fingerprint = analysis.aggregate_settings_fingerprint(settings)
+
+    # The default Analysis.aggregate() path loads replicate artifacts from disk
+    # under ctx.output_dir.parent / f"run_{replicate}" / "result.json".
+    artifacts = [
         ReplicateArtifact(
             analysis_name="solvent_shell",
             condition_label="Control",
             replicate=1,
             payload={"metrics": {"mean_shell_count": 4.0}},
+            provenance={"frame_selection": frame_selection},
+            metadata={"settings_fingerprint": settings_fingerprint},
         ),
         ReplicateArtifact(
             analysis_name="solvent_shell",
             condition_label="Control",
             replicate=2,
             payload={"metrics": {"mean_shell_count": 6.0}},
+            provenance={"frame_selection": frame_selection},
+            metadata={"settings_fingerprint": settings_fingerprint},
         ),
     ]
+    for artifact in artifacts:
+        run_dir = ctx.output_dir.parent / f"run_{artifact.replicate}"
+        ArtifactStore(run_dir).write_replicate_result(artifact)
 
-    result = SolventShellAnalysis().aggregate(ctx, replicate_artifacts)
+    result = analysis.aggregate(ctx, artifacts)
 
     assert isinstance(result, ConditionArtifact)
     metric = result.payload["metrics"]["mean_shell_count"]
@@ -283,6 +297,7 @@ def test_plot_reads_condition_artifacts_only(tmp_path: Path) -> None:
     ctx = PlotContext(
         conditions=(condition,),
         analysis_dirs={"Control": analysis_dir},
+        results_dir=tmp_path / "comparison" / "solvent_shell",
         output_dir=tmp_path / "plots",
         settings=SolventShellSettings(),
     )
