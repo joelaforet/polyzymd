@@ -16,9 +16,10 @@ from polyzymd.analyses.shared.plotting import (
     ArtifactPlotData,
     apply_axis_style,
     apply_legend,
-    get_colors,
+    get_condition_colors,
     get_output_path,
     load_canonical_plot_artifacts,
+    order_condition_labels,
     save_figure,
     scatter_replicate_values,
     suppress_singleton_errors,
@@ -117,8 +118,12 @@ def plot_rmsd_timeseries(
 
     plot_settings = _get_plot_settings(ctx)
 
-    condition_labels = [condition.label for condition in comparison_result.conditions]
-    colors = get_colors(len(condition_labels), ctx.plot_settings)
+    condition_labels = _ordered_condition_labels(ctx, comparison_result)
+    colors = get_condition_colors(
+        condition_labels,
+        ctx.plot_settings,
+        control_label=comparison_result.control_label,
+    )
 
     generated: list[Path] = []
     for run_label in comparison_result.run_labels:
@@ -239,7 +244,10 @@ def plot_rmsd_comparison_bars(
         sems: list[float] = []
         replicate_values: list[list[float]] = []
 
-        for condition in comparison_result.conditions:
+        conditions_by_label = _condition_summaries_by_label(comparison_result)
+        ordered_labels = _ordered_condition_labels(ctx, comparison_result)
+        for condition_label in ordered_labels:
+            condition = conditions_by_label[condition_label]
             try:
                 run_summary = condition.get_run(run_label)
             except KeyError:
@@ -260,7 +268,11 @@ def plot_rmsd_comparison_bars(
             continue
 
         positions = np.arange(len(labels))
-        colors = get_colors(len(labels), ctx.plot_settings)
+        colors = get_condition_colors(
+            labels,
+            ctx.plot_settings,
+            control_label=comparison_result.control_label,
+        )
 
         fig, ax = plt.subplots(figsize=plot_settings.figsize)
         theme = ctx.plot_settings.theme
@@ -459,6 +471,45 @@ def _empty_timeseries() -> tuple[Any, Any]:
     import numpy as np
 
     return np.array([], dtype=np.float64), np.empty((0, 0), dtype=np.float64)
+
+
+def _ordered_condition_labels(
+    ctx: PlotContext, comparison_result: RMSDComparisonResult
+) -> list[str]:
+    """Return RMSD condition labels in display order.
+
+    Parameters
+    ----------
+    ctx : PlotContext
+        Framework-provided plot context with global plot settings.
+    comparison_result : RMSDComparisonResult
+        Comparison result whose condition order remains unchanged on disk.
+
+    Returns
+    -------
+    list of str
+        Labels ordered for plotting only.
+    """
+
+    labels = [condition.label for condition in comparison_result.conditions]
+    return order_condition_labels(labels, ctx.plot_settings)
+
+
+def _condition_summaries_by_label(comparison_result: RMSDComparisonResult) -> dict[str, Any]:
+    """Map RMSD condition labels to comparison summaries.
+
+    Parameters
+    ----------
+    comparison_result : RMSDComparisonResult
+        Comparison result containing condition summaries.
+
+    Returns
+    -------
+    dict of str to Any
+        Summary objects keyed by label.
+    """
+
+    return {condition.label: condition for condition in comparison_result.conditions}
 
 
 def _load_replicate_timeseries(

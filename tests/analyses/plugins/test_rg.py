@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from matplotlib.colors import to_hex
 
 from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
@@ -31,7 +32,13 @@ from polyzymd.analyses.rg._mda import (
     RG_PBC_POLICY_WARNING,
     compute_rg_run,
 )
-from polyzymd.analyses.rg._plotters import _load_condition_aggregated, _load_replicate_timeseries
+from polyzymd.analyses.rg._plotters import (
+    _load_condition_aggregated,
+    _load_replicate_timeseries,
+    plot_rg_comparison_bars,
+    plot_rg_distributions,
+    plot_rg_timeseries,
+)
 from polyzymd.analyses.rg._results import (
     RgAggregatedResult,
     RgResult,
@@ -203,6 +210,141 @@ def _make_comparison_result() -> RgComparisonResult:
         created_at=datetime.now(),
         polyzymd_version="test",
     )
+
+
+def _make_rg_condition_summary(label: str, mean_rg: float) -> RgConditionSummary:
+    """Create one Rg condition summary for semantic plotting tests."""
+
+    return RgConditionSummary(
+        label=label,
+        config_path=f"/fake/{label}.yaml",
+        n_replicates=2,
+        run_summaries=[
+            RgRunSummary(
+                label="protein_rg",
+                selection="protein",
+                mean_rg=mean_rg,
+                sem_rg=0.1,
+                per_replicate_means=[mean_rg - 0.1, mean_rg + 0.1],
+                replicates=[1, 2],
+                n_replicates=2,
+            )
+        ],
+    )
+
+
+def _make_semantic_rg_comparison_result() -> RgComparisonResult:
+    """Create an Rg comparison result with out-of-order conditions."""
+
+    return RgComparisonResult(
+        metric="mean_rg",
+        name="rg_semantic_compare",
+        n_runs=1,
+        run_labels=["protein_rg"],
+        control_label="Control",
+        conditions=[
+            _make_rg_condition_summary("Control", 10.0),
+            _make_rg_condition_summary("PEG 20", 8.0),
+            _make_rg_condition_summary("PEG 5", 9.0),
+        ],
+        pairwise_comparisons=[],
+        anova_by_run=None,
+        ranking_by_run={"protein_rg": ["PEG 20", "PEG 5", "Control"]},
+        equilibration_time="0ns",
+        created_at=datetime.now(),
+        polyzymd_version="test",
+    )
+
+
+def _make_semantic_plot_settings() -> PlotSettings:
+    """Create semantic plot settings for Rg regression tests."""
+
+    return PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "order": ["PEG 5", "Control", "PEG 20"],
+            "manual_colors": {
+                "PEG 5": "#ff0000",
+                "Control": "#000000",
+                "PEG 20": "#0000ff",
+            },
+        }
+    )
+
+
+def test_rg_plotters_apply_semantic_order_and_colors(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rg bars, timeseries, and distributions should use semantic colors."""
+
+    import matplotlib.pyplot as plt
+
+    import polyzymd.analyses.rg._plotters as plotters
+
+    captured: list[dict[str, list[str]]] = []
+
+    def fake_save_figure(fig, output_path, _plot_settings):
+        ax = fig.axes[0]
+        colors = [to_hex(patch.get_facecolor()) for patch in ax.patches]
+        if colors:
+            labels = [text.get_text() for text in ax.get_xticklabels() if text.get_text()]
+        else:
+            labels = [line.get_label() for line in ax.lines if not line.get_label().startswith("_")]
+            colors = [
+                to_hex(line.get_color())
+                for line in ax.lines
+                if not line.get_label().startswith("_")
+            ]
+        captured.append({"labels": labels, "colors": colors})
+        plt.close(fig)
+        return output_path
+
+    def fake_timeseries(_condition_dir, _run_label, _replicates):
+        return (
+            np.asarray([0.0, 1.0], dtype=np.float64),
+            np.asarray([[1.0, 1.1]], dtype=np.float64),
+        )
+
+    def fake_aggregated(_condition_dir):
+        return {
+            "runs": [
+                {
+                    "run_label": "protein_rg",
+                    "calculation_mode": "selection",
+                    "reduced_histogram_edges": [0.0, 1.0, 2.0],
+                    "reduced_histogram_density_mean": [0.2, 0.8],
+                    "reduced_histogram_density_sem": [0.01, 0.02],
+                }
+            ]
+        }
+
+    monkeypatch.setattr(plotters, "save_figure", fake_save_figure)
+    monkeypatch.setattr(plotters, "_load_replicate_timeseries", fake_timeseries)
+    monkeypatch.setattr(plotters, "_load_condition_aggregated", fake_aggregated)
+    comparison = _make_semantic_rg_comparison_result()
+    ctx = SimpleNamespace(
+        conditions=[
+            make_condition(label=label, replicates=(1, 2))
+            for label in ("Control", "PEG 20", "PEG 5")
+        ],
+        analysis_dirs={label: tmp_path / label for label in ("Control", "PEG 20", "PEG 5")},
+        output_dir=tmp_path,
+        plot_settings=_make_semantic_plot_settings(),
+    )
+
+    plot_rg_comparison_bars(ctx, comparison)
+    plot_rg_timeseries(ctx, comparison)
+    plot_rg_distributions(ctx, comparison)
+
+    expected_labels = ["PEG 5", "Control", "PEG 20"]
+    expected_colors = ["#ff0000", "#000000", "#0000ff"]
+    assert captured[0]["labels"] == expected_labels
+    assert captured[0]["colors"] == expected_colors
+    assert captured[1]["labels"] == expected_labels
+    assert captured[1]["colors"] == expected_colors
+    assert captured[2]["labels"] == expected_labels
+    assert captured[2]["colors"] == expected_colors
 
 
 def _replicate_artifact(

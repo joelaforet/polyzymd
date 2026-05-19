@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from matplotlib.colors import to_hex
 
 from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
@@ -42,7 +43,12 @@ from polyzymd.analyses.rmsd._mda import (
     condition_artifact_to_legacy_result,
 )
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
-from polyzymd.analyses.rmsd._plotters import _resolve_npz_sidecar_path
+from polyzymd.analyses.rmsd._plotters import (
+    RMSDPlotData,
+    _resolve_npz_sidecar_path,
+    plot_rmsd_comparison_bars,
+    plot_rmsd_timeseries,
+)
 from polyzymd.analyses.rmsd._results import (
     RMSDAggregatedResult,
     RMSDResult,
@@ -437,6 +443,83 @@ def _make_comparison_result() -> RMSDComparisonResult:
         created_at=datetime.now(),
         polyzymd_version="1.2.1",
     )
+
+
+def _make_semantic_plot_settings() -> PlotSettings:
+    """Create semantic plot settings for order and color regression tests."""
+
+    return PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "order": ["Treatment_B", "Control", "Treatment_A"],
+            "manual_colors": {
+                "Treatment_B": "#ff0000",
+                "Control": "#000000",
+                "Treatment_A": "#0000ff",
+            },
+        }
+    )
+
+
+def test_rmsd_plotters_apply_semantic_order_and_colors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RMSD bars and timeseries should use semantic display order and colors."""
+
+    import matplotlib.pyplot as plt
+
+    import polyzymd.analyses.rmsd._plotters as plotters
+
+    captured: list[dict[str, list[str]]] = []
+
+    def fake_save_figure(fig, output_path, _plot_settings):
+        ax = fig.axes[0]
+        colors = [to_hex(patch.get_facecolor()) for patch in ax.patches]
+        if colors:
+            labels = [text.get_text() for text in ax.get_xticklabels() if text.get_text()]
+        else:
+            labels = [line.get_label() for line in ax.lines if not line.get_label().startswith("_")]
+            colors = [
+                to_hex(line.get_color())
+                for line in ax.lines
+                if not line.get_label().startswith("_")
+            ]
+        captured.append({"labels": labels, "colors": colors})
+        plt.close(fig)
+        return output_path
+
+    monkeypatch.setattr(plotters, "save_figure", fake_save_figure)
+    ctx = SimpleNamespace(
+        output_dir=tmp_path,
+        plot_settings=_make_semantic_plot_settings(),
+    )
+    comparison = _make_comparison_result()
+
+    plot_rmsd_comparison_bars(ctx, comparison)
+    plot_rmsd_timeseries(
+        ctx,
+        comparison,
+        RMSDPlotData(
+            timeseries={
+                label: {
+                    "protein_backbone": (
+                        np.asarray([0.0, 1.0], dtype=np.float64),
+                        np.asarray([[1.0, 1.1]], dtype=np.float64),
+                    )
+                }
+                for label in ("Control", "Treatment_A", "Treatment_B")
+            },
+            convergence={},
+        ),
+    )
+
+    expected_labels = ["Treatment_B", "Control", "Treatment_A"]
+    expected_colors = ["#ff0000", "#000000", "#0000ff"]
+    assert captured[0]["labels"] == expected_labels
+    assert captured[0]["colors"] == expected_colors
+    assert captured[-1]["labels"] == expected_labels
+    assert captured[-1]["colors"] == expected_colors
 
 
 def test_rmsd_run_settings_defaults() -> None:

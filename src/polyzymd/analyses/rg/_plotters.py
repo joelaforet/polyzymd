@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
-    get_colors,
+    get_condition_colors,
     get_output_path,
+    order_condition_labels,
     save_figure,
     scatter_replicate_values,
     suppress_singleton_errors,
@@ -54,8 +55,12 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
     replicates_by_condition = {
         condition.label: list(condition.replicates) for condition in ctx.conditions
     }
-    condition_labels = [condition.label for condition in comparison_result.conditions]
-    colors = get_colors(len(condition_labels), ctx.plot_settings)
+    condition_labels = _ordered_condition_labels(ctx, comparison_result)
+    colors = get_condition_colors(
+        condition_labels,
+        ctx.plot_settings,
+        control_label=comparison_result.control_label,
+    )
 
     generated: list[Path] = []
     for run_label in comparison_result.run_labels:
@@ -184,7 +189,10 @@ def plot_rg_comparison_bars(
         sems: list[float] = []
         replicate_values: list[list[float]] = []
 
-        for condition in comparison_result.conditions:
+        conditions_by_label = _condition_summaries_by_label(comparison_result)
+        ordered_labels = _ordered_condition_labels(ctx, comparison_result)
+        for condition_label in ordered_labels:
+            condition = conditions_by_label[condition_label]
             try:
                 run_summary = condition.get_run(run_label)
             except KeyError:
@@ -205,7 +213,11 @@ def plot_rg_comparison_bars(
             continue
 
         positions = np.arange(len(labels))
-        colors = get_colors(len(labels), ctx.plot_settings)
+        colors = get_condition_colors(
+            labels,
+            ctx.plot_settings,
+            control_label=comparison_result.control_label,
+        )
 
         fig, ax = plt.subplots(figsize=plot_settings.figsize)
         theme = ctx.plot_settings.theme
@@ -274,8 +286,12 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
         logger.info("Rg distribution plotting disabled by plot settings")
         return []
 
-    condition_labels = [condition.label for condition in comparison_result.conditions]
-    colors = get_colors(len(condition_labels), ctx.plot_settings)
+    condition_labels = _ordered_condition_labels(ctx, comparison_result)
+    colors = get_condition_colors(
+        condition_labels,
+        ctx.plot_settings,
+        control_label=comparison_result.control_label,
+    )
 
     generated: list[Path] = []
     for run_label in comparison_result.run_labels:
@@ -284,7 +300,9 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
             break
 
         first_run_summary = None
-        for condition in comparison_result.conditions:
+        conditions_by_label = _condition_summaries_by_label(comparison_result)
+        for condition_label in condition_labels:
+            condition = conditions_by_label[condition_label]
             try:
                 first_run_summary = condition.get_run(run_label)
                 break
@@ -581,6 +599,43 @@ def _load_replicate_timeseries(
 
     rg_matrix = np.vstack(aligned_traces)
     return reference_time, rg_matrix
+
+
+def _ordered_condition_labels(ctx: PlotContext, comparison_result: RgComparisonResult) -> list[str]:
+    """Return Rg condition labels in display order.
+
+    Parameters
+    ----------
+    ctx : PlotContext
+        Framework-provided plot context with global plot settings.
+    comparison_result : RgComparisonResult
+        Comparison result whose condition order remains unchanged on disk.
+
+    Returns
+    -------
+    list of str
+        Labels ordered for plotting only.
+    """
+
+    labels = [condition.label for condition in comparison_result.conditions]
+    return order_condition_labels(labels, ctx.plot_settings)
+
+
+def _condition_summaries_by_label(comparison_result: RgComparisonResult) -> dict[str, object]:
+    """Map Rg condition labels to comparison summaries.
+
+    Parameters
+    ----------
+    comparison_result : RgComparisonResult
+        Comparison result containing condition summaries.
+
+    Returns
+    -------
+    dict of str to object
+        Summary objects keyed by label.
+    """
+
+    return {condition.label: condition for condition in comparison_result.conditions}
 
 
 def _resolve_npz_sidecar_path(

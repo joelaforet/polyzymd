@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from matplotlib.colors import to_hex
 
 from polyzymd.analyses.base import Condition, PlotContext
 from polyzymd.analyses.mda import (
@@ -40,14 +41,19 @@ from polyzymd.analyses.sasa._mda import (
 )
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
 from polyzymd.analyses.sasa._plotters import (
+    SASAPlotData,
     _build_sasa_normalized_control_rows,
     _build_sasa_normalized_replicate_deltas,
     _load_condition_result_payloads,
     _load_replicate_timeseries_from_results,
     _propagate_sasa_normalized_sem,
     _sanitize_run_label,
+    plot_sasa_comparison_bars,
     plot_sasa_normalized_control_bars,
+    plot_sasa_residue_profiles,
+    plot_sasa_timeseries,
 )
+from polyzymd.config.comparison import PlotSettings
 from tests._support.analysis_testkit import (
     make_aggregate_context,
     make_comparison_context,
@@ -326,6 +332,103 @@ def _make_sasa_plot_context(
         plot_settings=PlotSettings(),
         control_label=control_label,
     )
+
+
+def _make_semantic_plot_settings() -> PlotSettings:
+    """Create semantic plot settings for SASA plotter regressions."""
+
+    return PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "order": ["treated_b", "control", "treated_a"],
+            "manual_colors": {
+                "treated_b": "#ff0000",
+                "control": "#000000",
+                "treated_a": "#0000ff",
+            },
+        }
+    )
+
+
+def test_sasa_plotters_apply_semantic_order_and_colors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SASA plotters should use semantic order while normalized bars omit control."""
+
+    import matplotlib.pyplot as plt
+
+    import polyzymd.analyses.sasa._plotters as plotters
+
+    captured: list[dict[str, list[str]]] = []
+
+    def fake_save_figure(fig, output_path, _plot_settings):
+        ax = fig.axes[0]
+        colors = [to_hex(patch.get_facecolor()) for patch in ax.patches]
+        if colors:
+            labels = [text.get_text() for text in ax.get_xticklabels() if text.get_text()]
+        else:
+            labels = [line.get_label() for line in ax.lines if not line.get_label().startswith("_")]
+            colors = [
+                to_hex(line.get_color())
+                for line in ax.lines
+                if not line.get_label().startswith("_")
+            ]
+        captured.append({"labels": labels, "colors": colors})
+        plt.close(fig)
+        return output_path
+
+    monkeypatch.setattr(plotters, "save_figure", fake_save_figure)
+    comparison = _make_sasa_comparison_result(
+        {
+            "control": {"protein": (10.0, 0.1)},
+            "treated_a": {"protein": (12.0, 0.1)},
+            "treated_b": {"protein": (8.0, 0.1)},
+        }
+    )
+    plot_data = SASAPlotData(
+        timeseries={
+            label: {
+                "protein": (
+                    np.asarray([0.0, 1.0], dtype=np.float64),
+                    np.asarray([[mean, mean + 0.1]], dtype=np.float64),
+                )
+            }
+            for label, mean in {"control": 10.0, "treated_a": 12.0, "treated_b": 8.0}.items()
+        },
+        condition_payloads={
+            label: {
+                "n_replicates": 2,
+                "run_results": [
+                    {
+                        "run_label": "protein",
+                        "residue_resids": [1, 2],
+                        "per_residue_mean_sasa": [mean, mean + 1.0],
+                        "per_residue_sem_sasa": [0.1, 0.1],
+                    }
+                ],
+            }
+            for label, mean in {"control": 10.0, "treated_a": 12.0, "treated_b": 8.0}.items()
+        },
+    )
+    ctx = SimpleNamespace(
+        output_dir=tmp_path,
+        plot_settings=_make_semantic_plot_settings(),
+        control_label="control",
+    )
+
+    plot_sasa_comparison_bars(ctx, comparison)
+    plot_sasa_timeseries(ctx, comparison, plot_data)
+    plot_sasa_residue_profiles(ctx, comparison, plot_data)
+    plot_sasa_normalized_control_bars(ctx, comparison)
+
+    expected_labels = ["treated_b", "control", "treated_a"]
+    expected_colors = ["#ff0000", "#000000", "#0000ff"]
+    for entry in captured[:3]:
+        assert entry["labels"] == expected_labels
+        assert entry["colors"] == expected_colors
+    assert captured[3]["labels"] == ["treated_b", "treated_a"]
+    assert captured[3]["colors"] == ["#ff0000", "#0000ff"]
 
 
 def test_sasa_plugin_discovered() -> None:
