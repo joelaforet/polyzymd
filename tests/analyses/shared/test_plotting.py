@@ -16,9 +16,13 @@ from polyzymd.analyses.mda import (
 )
 from polyzymd.analyses.shared.plotting import (
     finite_numeric_values,
+    get_condition_color_map,
+    get_condition_colors,
+    get_palette_colors,
     grouped_bars,
     has_replicate_uncertainty,
     load_canonical_plot_artifacts,
+    order_condition_labels,
     scatter_replicate_values,
     scatter_stacked_segment_replicates,
     suppress_singleton_errors,
@@ -26,6 +30,203 @@ from polyzymd.analyses.shared.plotting import (
 from polyzymd.config.comparison import PlotSettings, PlotTheme
 
 matplotlib.use("Agg")
+
+
+def _rgba(color):
+    """Normalize matplotlib color specs for assertions.
+
+    Parameters
+    ----------
+    color : Any
+        Matplotlib-compatible color specification.
+
+    Returns
+    -------
+    tuple[float, float, float, float]
+        RGBA tuple for stable comparisons.
+    """
+    from matplotlib.colors import to_rgba
+
+    return to_rgba(color)
+
+
+def test_semantic_order_disabled_preserves_input_order() -> None:
+    """Disabled semantic colors should preserve legacy condition order."""
+    plot_settings = PlotSettings(
+        semantic_colors={"enabled": False, "order": ["B", "A"]},
+    )
+
+    assert order_condition_labels(["A", "B", "C"], plot_settings) == ["A", "B", "C"]
+
+
+def test_semantic_colors_disabled_use_legacy_palette() -> None:
+    """Disabled semantic colors should return palette colors."""
+    labels = ["A", "B", "C"]
+    plot_settings = PlotSettings(color_palette="tab10")
+
+    assert get_condition_colors(labels, plot_settings) == get_palette_colors(3, plot_settings)
+
+
+def test_semantic_explicit_and_condition_order() -> None:
+    """Explicit order should lead, then condition order, then original order."""
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "order": ["C", "Missing"],
+            "conditions": {
+                "D": {"order": 1},
+                "B": {"order": 0},
+            },
+        }
+    )
+
+    assert order_condition_labels(["A", "B", "C", "D", "E"], plot_settings) == [
+        "C",
+        "B",
+        "D",
+        "A",
+        "E",
+    ]
+
+
+def test_semantic_manual_condition_and_control_precedence() -> None:
+    """Manual colors should override condition and control colors."""
+    labels = ["Control", "Treated", "Manual"]
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "control_color": "black",
+            "manual_colors": {"Manual": "purple", "Control": "orange"},
+            "conditions": {
+                "Control": {"role": "control", "color": "red"},
+                "Treated": {"color": "blue"},
+                "Manual": {"color": "green"},
+            },
+        }
+    )
+
+    color_map = get_condition_color_map(labels, plot_settings, control_label="Control")
+
+    assert color_map["Control"] == "orange"
+    assert color_map["Treated"] == "blue"
+    assert color_map["Manual"] == "purple"
+
+
+def test_semantic_control_role_uses_control_color() -> None:
+    """Control role should resolve to the configured control color."""
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "control_color": "black",
+            "conditions": {"Reference": {"role": "Control"}},
+        }
+    )
+
+    assert get_condition_color_map(["Reference"], plot_settings)["Reference"] == "black"
+
+
+def test_semantic_ordinal_family_colors_use_value_order() -> None:
+    """Ordinal family colors should sample configured value order."""
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "conditions": {
+                "Low": {"family": "dose", "value": "low"},
+                "High": {"family": "dose", "value": "high"},
+            },
+            "families": {
+                "dose": {
+                    "scale": "ordinal",
+                    "colormap": "viridis",
+                    "value_order": ["low", "medium", "high"],
+                    "colormap_range": [0.0, 1.0],
+                }
+            },
+        }
+    )
+
+    color_map = get_condition_color_map(["Low", "High"], plot_settings)
+
+    assert _rgba(color_map["Low"]) == pytest.approx(_rgba(matplotlib.colormaps["viridis"](0.0)))
+    assert _rgba(color_map["High"]) == pytest.approx(_rgba(matplotlib.colormaps["viridis"](1.0)))
+
+
+def test_semantic_linear_family_colors_use_numeric_values() -> None:
+    """Linear family colors should normalize numeric condition values."""
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "conditions": {
+                "Zero": {"family": "fraction", "value": 0.0},
+                "Half": {"family": "fraction", "value": 0.5},
+                "One": {"family": "fraction", "value": 1.0},
+            },
+            "families": {
+                "fraction": {
+                    "scale": "linear",
+                    "colormap": "plasma",
+                    "vmin": 0.0,
+                    "vmax": 1.0,
+                    "colormap_range": [0.2, 0.8],
+                }
+            },
+        }
+    )
+
+    color_map = get_condition_color_map(["Zero", "Half", "One"], plot_settings)
+
+    assert _rgba(color_map["Zero"]) == pytest.approx(_rgba(matplotlib.colormaps["plasma"](0.2)))
+    assert _rgba(color_map["Half"]) == pytest.approx(_rgba(matplotlib.colormaps["plasma"](0.5)))
+    assert _rgba(color_map["One"]) == pytest.approx(_rgba(matplotlib.colormaps["plasma"](0.8)))
+
+
+def test_semantic_value_colors_override_family_colormap() -> None:
+    """Explicit value colors should override family colormap sampling."""
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "conditions": {"Special": {"family": "category", "value": "x"}},
+            "families": {
+                "category": {
+                    "scale": "ordinal",
+                    "colormap": "viridis",
+                    "value_colors": {"x": "cyan"},
+                }
+            },
+        }
+    )
+
+    assert get_condition_color_map(["Special"], plot_settings)["Special"] == "cyan"
+
+
+def test_semantic_unknown_metadata_uses_missing_color(caplog: pytest.LogCaptureFixture) -> None:
+    """Unresolvable semantic metadata should use missing_color with a warning."""
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "missing_color": "pink",
+            "conditions": {"Unknown": {"family": "not-configured", "value": 1.0}},
+        }
+    )
+
+    color_map = get_condition_color_map(["Unknown"], plot_settings)
+
+    assert color_map["Unknown"] == "pink"
+    assert "unknown semantic color family" in caplog.text
+
+
+def test_semantic_no_metadata_uses_default_or_palette() -> None:
+    """Labels without metadata should use default_color or palette fallback."""
+    labels = ["A", "B"]
+    default_settings = PlotSettings(
+        semantic_colors={"enabled": True, "default_color": "gray"},
+    )
+    palette_settings = PlotSettings(semantic_colors={"enabled": True})
+
+    assert get_condition_color_map(labels, default_settings)["A"] == "gray"
+    assert get_condition_color_map(labels, palette_settings) == dict(
+        zip(labels, get_palette_colors(2, palette_settings))
+    )
 
 
 def test_load_canonical_plot_artifacts_reads_configured_artifacts_only(tmp_path) -> None:

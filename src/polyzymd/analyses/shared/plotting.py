@@ -238,7 +238,7 @@ def apply_legend(
 # ---------------------------------------------------------------------------
 
 
-def get_colors(n: int, plot_settings: "PlotSettings") -> list:
+def get_palette_colors(n: int, plot_settings: "PlotSettings") -> list:
     """Get *n* distinct colors from the configured palette.
 
     Tries seaborn first (richer palette support), falls back to a
@@ -276,6 +276,314 @@ def get_colors(n: int, plot_settings: "PlotSettings") -> list:
         )
         cmap = plt.colormaps["tab10"]
     return [cmap(i / max(1, n - 1)) for i in range(n)]
+
+
+def get_colors(n: int, plot_settings: "PlotSettings") -> list:
+    """Get *n* legacy palette colors.
+
+    This backward-compatible alias preserves the historical behavior of
+    ``get_colors()`` while semantic condition color helpers opt in separately.
+
+    Parameters
+    ----------
+    n : int
+        Number of colors needed.
+    plot_settings : PlotSettings
+        Global plot settings.
+
+    Returns
+    -------
+    list
+        List of color values from the configured palette.
+    """
+    return get_palette_colors(n, plot_settings)
+
+
+def order_condition_labels(labels: Sequence[str], plot_settings: "PlotSettings") -> list[str]:
+    """Return condition labels in semantic plot order when enabled.
+
+    Ordering only affects plot display order. It does not alter comparison
+    statistics, rankings, or condition result files.
+
+    Parameters
+    ----------
+    labels : sequence of str
+        Condition labels in their original order.
+    plot_settings : PlotSettings
+        Global plot settings carrying optional semantic color settings.
+
+    Returns
+    -------
+    list of str
+        Ordered labels for plotting.
+    """
+    label_list = list(labels)
+    semantic = getattr(plot_settings, "semantic_colors", None)
+    if semantic is None or not semantic.enabled:
+        return label_list
+
+    remaining = list(label_list)
+    ordered: list[str] = []
+    for label in semantic.order:
+        if label in remaining:
+            ordered.append(label)
+            remaining.remove(label)
+
+    indexed_remaining = list(enumerate(remaining))
+    with_order: list[tuple[int, str, int]] = []
+    without_order: list[tuple[int, str]] = []
+    for relative_index, label in indexed_remaining:
+        condition = semantic.conditions.get(label)
+        if condition is not None and condition.order is not None:
+            with_order.append((condition.order, label, relative_index))
+        else:
+            without_order.append((relative_index, label))
+
+    ordered.extend(label for _, label, _ in sorted(with_order, key=lambda item: (item[0], item[2])))
+    ordered.extend(label for _, label in without_order)
+    return ordered
+
+
+def get_condition_colors(
+    labels: Sequence[str],
+    plot_settings: "PlotSettings",
+    *,
+    control_label: str | None = None,
+) -> list:
+    """Return colors for condition labels using semantic settings if enabled.
+
+    Parameters
+    ----------
+    labels : sequence of str
+        Condition labels in plot order.
+    plot_settings : PlotSettings
+        Global plot settings carrying optional semantic color settings.
+    control_label : str, optional
+        Label that should use the configured semantic control color.
+
+    Returns
+    -------
+    list
+        Color values aligned to ``labels``.
+    """
+    color_map = get_condition_color_map(labels, plot_settings, control_label=control_label)
+    return [color_map[label] for label in labels]
+
+
+def get_condition_color_map(
+    labels: Sequence[str],
+    plot_settings: "PlotSettings",
+    *,
+    control_label: str | None = None,
+) -> dict[str, Any]:
+    """Return a label-to-color map using semantic condition color rules.
+
+    Resolution precedence is manual color, condition color, control color,
+    family/value color, missing metadata fallback, then legacy palette fallback.
+    Invalid color or colormap values warn and continue to a safe fallback.
+
+    Parameters
+    ----------
+    labels : sequence of str
+        Condition labels in their original palette-alignment order.
+    plot_settings : PlotSettings
+        Global plot settings carrying optional semantic color settings.
+    control_label : str, optional
+        Label that should use the configured semantic control color.
+
+    Returns
+    -------
+    dict of str to Any
+        Mapping from each label to its resolved matplotlib-compatible color.
+    """
+    label_list = list(labels)
+    palette_colors = get_palette_colors(len(label_list), plot_settings)
+    palette_by_label = dict(zip(label_list, palette_colors))
+    semantic = getattr(plot_settings, "semantic_colors", None)
+    if semantic is None or not semantic.enabled:
+        return dict(palette_by_label)
+
+    observed_values = _collect_family_values(label_list, semantic.conditions)
+    color_map: dict[str, Any] = {}
+    for label in label_list:
+        color_map[label] = _resolve_condition_color(
+            label,
+            semantic,
+            palette_by_label,
+            observed_values,
+            control_label=control_label,
+        )
+    return color_map
+
+
+def _resolve_condition_color(
+    label: str,
+    semantic: Any,
+    palette_by_label: dict[str, Any],
+    observed_values: dict[str, list[Any]],
+    *,
+    control_label: str | None,
+) -> Any:
+    """Resolve one condition color using semantic precedence."""
+    manual_color = _validated_color(
+        semantic.manual_colors.get(label), f"manual color for {label!r}"
+    )
+    if manual_color is not None:
+        return manual_color
+
+    condition = semantic.conditions.get(label)
+    if condition is None:
+        default_color = _validated_color(semantic.default_color, "semantic default_color")
+        return default_color if default_color is not None else palette_by_label[label]
+
+    condition_color = _validated_color(condition.color, f"condition color for {label!r}")
+    if condition_color is not None:
+        return condition_color
+
+    is_control = control_label is not None and label == control_label
+    is_control = is_control or condition.role == "control"
+    if is_control:
+        control_color = _validated_color(semantic.control_color, "semantic control_color")
+        if control_color is not None:
+            return control_color
+
+    family_color = _resolve_family_color(condition, semantic.families, observed_values, label)
+    if family_color is not None:
+        return family_color
+
+    missing_color = _validated_color(semantic.missing_color, "semantic missing_color")
+    return missing_color if missing_color is not None else palette_by_label[label]
+
+
+def _collect_family_values(
+    labels: Sequence[str], conditions: dict[str, Any]
+) -> dict[str, list[Any]]:
+    """Collect observed semantic values by family in label order."""
+    observed_values: dict[str, list[Any]] = {}
+    for label in labels:
+        condition = conditions.get(label)
+        if condition is None or condition.family is None or condition.value is None:
+            continue
+        values = observed_values.setdefault(condition.family, [])
+        if condition.value not in values:
+            values.append(condition.value)
+    return observed_values
+
+
+def _validated_color(color: Any, context: str) -> Any | None:
+    """Return a color when matplotlib accepts it, otherwise warn."""
+    if color is None:
+        return None
+
+    from matplotlib.colors import is_color_like
+
+    if is_color_like(color):
+        return color
+    logger.warning("Invalid %s %r. Falling back to the next available color rule.", context, color)
+    return None
+
+
+def _resolve_family_color(
+    condition: Any,
+    families: dict[str, Any],
+    observed_values: dict[str, list[Any]],
+    label: str,
+) -> Any | None:
+    """Resolve a condition color from its semantic family and value."""
+    if condition.family is None or condition.value is None:
+        return None
+
+    family = families.get(condition.family)
+    if family is None:
+        logger.warning(
+            "Condition %r references unknown semantic color family %r.",
+            label,
+            condition.family,
+        )
+        return None
+
+    value_color = _resolve_explicit_value_color(family.value_colors, condition.value, label)
+    if value_color is not None:
+        return value_color
+
+    cmap = _get_colormap(family.colormap, label)
+    if cmap is None:
+        return None
+
+    if family.scale == "ordinal":
+        fraction = _ordinal_fraction(
+            condition.value, family, observed_values.get(condition.family, [])
+        )
+    else:
+        fraction = _linear_fraction(
+            condition.value, family, observed_values.get(condition.family, [])
+        )
+
+    if fraction is None:
+        return None
+    if family.reverse:
+        fraction = 1.0 - fraction
+    low, high = family.colormap_range
+    return cmap(low + ((high - low) * fraction))
+
+
+def _resolve_explicit_value_color(
+    value_colors: dict[str, Any], value: Any, label: str
+) -> Any | None:
+    """Resolve an exact semantic value color if configured."""
+    if value in value_colors:
+        color = value_colors[value]
+    else:
+        color = value_colors.get(str(value))
+    return _validated_color(color, f"value color for {label!r}")
+
+
+def _get_colormap(colormap_name: str, label: str) -> Any | None:
+    """Return a matplotlib colormap or warn and return ``None``."""
+    import matplotlib.pyplot as plt
+
+    try:
+        return plt.colormaps[colormap_name]
+    except (KeyError, ValueError):
+        logger.warning(
+            "Semantic color colormap %r for condition %r is invalid. Falling back.",
+            colormap_name,
+            label,
+        )
+        return None
+
+
+def _ordinal_fraction(value: Any, family: Any, observed_values: list[Any]) -> float | None:
+    """Return an ordinal colormap fraction for a semantic value."""
+    value_order = family.value_order or observed_values
+    if value not in value_order:
+        logger.warning("Semantic ordinal value %r is not present in value_order.", value)
+        return None
+    if len(value_order) <= 1:
+        return 0.5
+    return value_order.index(value) / (len(value_order) - 1)
+
+
+def _linear_fraction(value: Any, family: Any, observed_values: list[Any]) -> float | None:
+    """Return a linear colormap fraction for a semantic numeric value."""
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        logger.warning("Semantic linear value %r is not numeric.", value)
+        return None
+
+    numeric_values: list[float] = []
+    for observed_value in observed_values:
+        try:
+            numeric_values.append(float(observed_value))
+        except (TypeError, ValueError):
+            continue
+
+    vmin = family.vmin if family.vmin is not None else min(numeric_values, default=numeric_value)
+    vmax = family.vmax if family.vmax is not None else max(numeric_values, default=numeric_value)
+    if vmax == vmin:
+        return 0.5
+    return min(1.0, max(0.0, (numeric_value - vmin) / (vmax - vmin)))
 
 
 # ---------------------------------------------------------------------------

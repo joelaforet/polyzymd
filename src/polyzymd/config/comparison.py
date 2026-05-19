@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -173,6 +173,120 @@ class PluginSettingsContainer(BaseModel):
 # Each plugin exposes its plot settings model via
 # Analysis.PlotSettingsModel. PlotSettings.__init__ discovers plugins and
 # builds a mapping from analysis name to plot settings model.
+
+
+class SemanticConditionColorConfig(BaseModel):
+    """Semantic metadata for one plotted condition.
+
+    The model is intentionally chemistry-agnostic. Projects can describe any
+    condition family, numeric or ordinal value, display order, direct color,
+    or role without core PolyzyMD knowing domain-specific condition names.
+    """
+
+    color: Any | None = None
+    family: str | None = None
+    value: Any | None = None
+    order: int | None = None
+    role: str | None = None
+
+    @field_validator("family")
+    @classmethod
+    def strip_optional_family(cls, value: str | None) -> str | None:
+        """Normalize optional family text while rejecting empty values."""
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("semantic condition family must not be empty")
+        return stripped
+
+    @field_validator("role")
+    @classmethod
+    def strip_optional_role(cls, value: str | None) -> str | None:
+        """Normalize optional role text while rejecting empty values."""
+        if value is None:
+            return None
+        stripped = value.strip().lower()
+        if not stripped:
+            raise ValueError("semantic condition role must not be empty")
+        return stripped
+
+
+class SemanticFamilyColorConfig(BaseModel):
+    """Color mapping rules for a semantic family of conditions.
+
+    A family can map condition values through a matplotlib colormap using a
+    linear or ordinal scale, or through explicit ``value_colors`` for selected
+    values. Invalid color and colormap names are handled by plotting helpers so
+    figure generation can fall back with warnings.
+    """
+
+    colormap: str = "viridis"
+    scale: Literal["linear", "ordinal"] = "linear"
+    value_order: list[Any] = Field(default_factory=list)
+    vmin: float | None = None
+    vmax: float | None = None
+    colormap_range: tuple[float, float] = (0.0, 1.0)
+    reverse: bool = False
+    value_colors: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("colormap")
+    @classmethod
+    def validate_colormap_name(cls, value: str) -> str:
+        """Reject empty colormap names while deferring existence checks."""
+        colormap = value.strip()
+        if not colormap:
+            raise ValueError("colormap must not be empty")
+        return colormap
+
+    @field_validator("colormap_range")
+    @classmethod
+    def validate_colormap_range(cls, value: tuple[float, float]) -> tuple[float, float]:
+        """Ensure colormap sampling bounds are ordered fractions."""
+        low, high = value
+        if not 0.0 <= low <= 1.0 or not 0.0 <= high <= 1.0:
+            raise ValueError("colormap_range values must be between 0.0 and 1.0")
+        if low > high:
+            raise ValueError("colormap_range lower bound must be <= upper bound")
+        return value
+
+    @model_validator(mode="after")
+    def validate_linear_bounds(self) -> "SemanticFamilyColorConfig":
+        """Validate optional linear scale bounds."""
+        if self.vmin is not None and self.vmax is not None and self.vmin > self.vmax:
+            raise ValueError("vmin must be <= vmax")
+        return self
+
+
+class SemanticColorSettings(BaseModel):
+    """Semantic condition color and ordering settings for comparison plots.
+
+    Defaults keep semantic behavior disabled, preserving legacy palette order
+    and colors until users opt in with ``enabled: true``.
+    """
+
+    enabled: bool = False
+    order: list[str] = Field(default_factory=list)
+    conditions: dict[str, SemanticConditionColorConfig] = Field(default_factory=dict)
+    families: dict[str, SemanticFamilyColorConfig] = Field(default_factory=dict)
+    manual_colors: dict[str, Any] = Field(default_factory=dict)
+    control_color: Any = "black"
+    missing_color: Any = "lightgray"
+    default_color: Any | None = None
+
+    @field_validator("order")
+    @classmethod
+    def validate_order_labels(cls, value: list[str]) -> list[str]:
+        """Reject duplicate or empty labels in explicit plot order."""
+        normalized: list[str] = []
+        for label in value:
+            stripped = label.strip()
+            if not stripped:
+                raise ValueError("semantic color order labels must not be empty")
+            normalized.append(stripped)
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("semantic color order labels must be unique")
+        return normalized
 
 
 class PlotTheme(BaseModel):
@@ -400,6 +514,7 @@ class PlotSettings(BaseModel):
         "style",
         "color_palette",
         "theme",
+        "semantic_colors",
     }
 
     output_dir: Path = Field(default=Path("figures/"))
@@ -408,6 +523,7 @@ class PlotSettings(BaseModel):
     style: str = Field(default="publication", pattern="^(publication|presentation|minimal)$")
     color_palette: str = "tab10"
     theme: PlotTheme = Field(default_factory=PlotTheme)
+    semantic_colors: SemanticColorSettings = Field(default_factory=SemanticColorSettings)
 
     def __init__(self, **data: Any):
         """Initialize with global fields and plugin-discovered per-analysis settings.

@@ -12,6 +12,8 @@ from polyzymd.config.comparison import (
     ConditionConfig,
     MDABackendPolicyConfig,
     PlotSettings,
+    SemanticColorSettings,
+    SemanticFamilyColorConfig,
 )
 
 
@@ -237,6 +239,71 @@ class TestPlotThemeValidation:
         """None theme should use publication preset."""
         ps = PlotSettings(theme=None)
         assert ps.theme is not None
+
+
+class TestSemanticColorSettings:
+    """Semantic color settings should parse without changing defaults."""
+
+    def test_defaults_disabled_for_backward_compatibility(self) -> None:
+        """Semantic colors should be opt-in by default."""
+        settings = PlotSettings()
+
+        assert settings.semantic_colors.enabled is False
+        assert settings.semantic_colors.order == []
+        assert settings.semantic_colors.conditions == {}
+        assert settings.semantic_colors.families == {}
+        assert settings.semantic_colors.default_color is None
+
+    def test_plot_settings_accepts_semantic_colors(self) -> None:
+        """PlotSettings should parse the global semantic_colors block."""
+        settings = PlotSettings(
+            semantic_colors={
+                "enabled": True,
+                "order": ["Control", "Condition B"],
+                "manual_colors": {"Control": "#222222"},
+                "conditions": {
+                    "Control": {"role": "Control", "order": 0},
+                    "Condition B": {"family": "composition", "value": 0.5},
+                },
+                "families": {
+                    "composition": {
+                        "scale": "linear",
+                        "colormap": "viridis",
+                        "vmin": 0.0,
+                        "vmax": 1.0,
+                        "colormap_range": [0.2, 0.8],
+                    }
+                },
+            }
+        )
+
+        semantic = settings.semantic_colors
+        assert semantic.enabled is True
+        assert semantic.order == ["Control", "Condition B"]
+        assert semantic.conditions["Control"].role == "control"
+        assert semantic.conditions["Condition B"].family == "composition"
+        assert semantic.families["composition"].colormap_range == (0.2, 0.8)
+
+    def test_semantic_colors_is_global_plot_field(self) -> None:
+        """semantic_colors should not be treated as a plugin-specific key."""
+        settings = PlotSettings(semantic_colors=SemanticColorSettings(enabled=True))
+
+        assert settings.semantic_colors.enabled is True
+
+    def test_duplicate_explicit_order_raises(self) -> None:
+        """Explicit plot order labels should be unique."""
+        with pytest.raises(ValueError, match="order labels must be unique"):
+            SemanticColorSettings(order=["A", "A"])
+
+    def test_invalid_family_scale_raises(self) -> None:
+        """Family color scale should be linear or ordinal."""
+        with pytest.raises(ValueError):
+            SemanticFamilyColorConfig(scale="bad")
+
+    def test_invalid_colormap_range_raises(self) -> None:
+        """Family colormap ranges should be ordered fractions."""
+        with pytest.raises(ValueError, match="colormap_range"):
+            SemanticFamilyColorConfig(colormap_range=(0.8, 0.2))
 
 
 class TestArchivedAnalysisDiagnostics:
