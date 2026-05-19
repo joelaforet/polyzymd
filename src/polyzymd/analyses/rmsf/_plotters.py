@@ -91,6 +91,7 @@ def _plot_rmsf_profile(
             1,
             figsize=(width, height + 0.9),
             sharex=True,
+            constrained_layout=True,
             gridspec_kw={"height_ratios": [1.0, 0.12], "hspace": 0.08},
         )
     else:
@@ -138,7 +139,8 @@ def _plot_rmsf_profile(
     else:
         ax_rmsf.set_xlabel("Residue Number", fontsize=t.label_fontsize)
 
-    plt.tight_layout()
+    if not show_reference_ss:
+        plt.tight_layout()
 
     output_path = get_output_path(output_dir, "rmsf_profile", plot_settings)
     return [save_figure(fig, output_path, plot_settings)]
