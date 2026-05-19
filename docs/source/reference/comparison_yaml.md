@@ -322,7 +322,70 @@ and usable element metadata.
 | `dpi` | int | `300` | Resolution for raster formats. Range: 50–600. |
 | `style` | string | `"publication"` | Style preset: `"publication"`, `"presentation"`, or `"minimal"` |
 | `color_palette` | string | `"tab10"` | Seaborn/matplotlib color palette name |
+| `semantic_colors` | mapping | disabled | Optional condition-label color and display-order rules for condition-series plots |
 | `theme` | mapping | from style preset | Visual theme overrides (see below) |
+
+### `plot_settings.semantic_colors`
+
+Semantic colors let a comparison project encode condition meaning directly in
+figures. The settings are optional and disabled by default; when disabled,
+plots keep using `color_palette` and each plotter's existing category colors.
+
+Semantic ordering is **plot-only**. It changes the display order of conditions
+in figures, but it does not mutate comparison statistics, rankings, cached
+artifacts, or JSON result files.
+
+Top-level fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Opt in to semantic condition colors and plot ordering |
+| `order` | list of string | `[]` | Explicit plot display order by condition label. Labels not present keep their relative order after condition-level `order` sorting. |
+| `manual_colors` | mapping | `{}` | Direct color overrides by exact condition label. Highest precedence color rule. |
+| `conditions` | mapping | `{}` | Per-condition semantic metadata keyed by exact condition label |
+| `families` | mapping | `{}` | Family-level colormap rules keyed by family name |
+| `control_color` | color | `"black"` | Color used for the configured `control` condition or a condition with `role: control` |
+| `missing_color` | color | `"lightgray"` | Fallback color for conditions with incomplete semantic metadata |
+| `default_color` | color or `null` | `null` | Fallback for labels missing from `conditions`. If `null`, the regular palette color is used. |
+
+`conditions.<label>` fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `color` | color or `null` | `null` | Direct color for this condition, after `manual_colors` and before control/family rules |
+| `family` | string or `null` | `null` | Semantic family name used to look up `families.<family>` |
+| `value` | scalar or `null` | `null` | Numeric or ordinal value mapped through the family color rule |
+| `order` | int or `null` | `null` | Plot-only display order used after explicit `semantic_colors.order` |
+| `role` | string or `null` | `null` | Optional semantic role. Use `control` to apply `control_color`. |
+
+`families.<family>` fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `colormap` | string | `"viridis"` | Matplotlib colormap name for values in this family |
+| `scale` | `"linear"` or `"ordinal"` | `"linear"` | Map numeric values continuously (`linear`) or ordered categories/steps discretely (`ordinal`) |
+| `value_order` | list | `[]` | Explicit value order for `ordinal` mapping. If omitted, observed values are used in label order. |
+| `vmin` | float or `null` | `null` | Lower bound for `linear` normalization. If omitted, observed values set the bound. |
+| `vmax` | float or `null` | `null` | Upper bound for `linear` normalization. If omitted, observed values set the bound. |
+| `colormap_range` | two floats | `[0.0, 1.0]` | Fractional colormap interval to sample, useful for avoiding colors that are too pale or too dark |
+| `reverse` | bool | `false` | Reverse the value-to-colormap direction |
+| `value_colors` | mapping | `{}` | Explicit color overrides by value. These override the family colormap for matching values. |
+
+Color precedence for each condition label is:
+
+1. `semantic_colors.manual_colors.<label>`
+2. `semantic_colors.conditions.<label>.color`
+3. `semantic_colors.control_color` when the label is the top-level `control` or
+   the condition has `role: control`
+4. `families.<family>.value_colors.<value>`
+5. `families.<family>` colormap mapping
+6. `semantic_colors.missing_color` for incomplete condition metadata
+7. `semantic_colors.default_color` or the regular `color_palette` for labels
+   missing from `semantic_colors.conditions`
+
+Semantic colors apply to plots where colors represent comparison conditions.
+Non-condition categories, such as secondary-structure states or residue classes,
+may still use categorical palettes or plot-specific colormaps.
 
 ### `plot_settings.theme`
 

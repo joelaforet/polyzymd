@@ -177,6 +177,70 @@ plot_settings:
   style: "publication"           # publication, presentation, or minimal
   color_palette: "tab10"         # seaborn/matplotlib color palette
 
+  # ── Semantic condition colors (optional) ───────────────────────────────────
+  # Keep this block commented unless you want condition colors/order to encode
+  # project-specific meaning. Semantic order is plot-only; it does not change
+  # statistics, rankings, comparison JSON, or cached artifacts.
+  #
+  # semantic_colors:
+  #   enabled: true
+  #   order:
+  #     - "No Polymer"
+  #     - "100% SBMA"
+  #     - "100% EGMA"
+  #     - "1% EGPMA"
+  #     - "2% EGPMA"
+  #     - "5% EGPMA"
+  #     - "10% EGPMA"
+  #   control_color: "#222222"
+  #   missing_color: "#bdbdbd"
+  #   conditions:
+  #     "No Polymer":
+  #       role: control
+  #       order: 0
+  #     "100% SBMA":
+  #       family: sbma
+  #       value: 100
+  #       order: 10
+  #     "100% EGMA":
+  #       family: egma
+  #       value: 100
+  #       order: 20
+  #     "1% EGPMA":
+  #       family: egpma
+  #       value: 1
+  #       order: 30
+  #     "2% EGPMA":
+  #       family: egpma
+  #       value: 2
+  #       order: 40
+  #     "5% EGPMA":
+  #       family: egpma
+  #       value: 5
+  #       order: 50
+  #     "10% EGPMA":
+  #       family: egpma
+  #       value: 10
+  #       order: 60
+  #   families:
+  #     sbma:
+  #       colormap: "Blues"
+  #       scale: linear
+  #       vmin: 0
+  #       vmax: 100
+  #       colormap_range: [0.55, 0.85]
+  #     egma:
+  #       colormap: "Greens"
+  #       scale: linear
+  #       vmin: 0
+  #       vmax: 100
+  #       colormap_range: [0.55, 0.85]
+  #     egpma:
+  #       colormap: "Purples"
+  #       scale: ordinal
+  #       value_order: [1, 2, 5, 10]
+  #       colormap_range: [0.35, 0.9]
+
   # ── Visual theme (all fields optional — defaults come from style preset) ──
   # Uncomment individual lines to override the preset values.
   # theme:
