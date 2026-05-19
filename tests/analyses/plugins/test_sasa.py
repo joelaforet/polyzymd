@@ -525,7 +525,7 @@ def test_build_mda_jobs_subsamples_explicit_frames(monkeypatch: pytest.MonkeyPat
 
     jobs = build_sasa_jobs(ctx, settings)
 
-    assert jobs[0].frame_selection.run_kwargs() == {"frames": (0, 7)}
+    assert jobs[0].frame_selection.run_kwargs() == {"frames": [0, 7]}
 
 
 def test_sasa_analysisbase_wrapper_bounds_coordinate_buffer(

@@ -233,7 +233,7 @@ def _job_result(ctx: MDACollectorContext, rmsf_values: list[float] | None = None
         name="rmsf_profile",
         analysis=SimpleNamespace(),
         results=SimpleNamespace(rmsf_values=values),
-        run_kwargs={"frames": (0, 1, 2)},
+        run_kwargs={"frames": [0, 1, 2]},
         frame_selection=FrameSelection(frames=[0, 1, 2], n_frames_total=20, timestep_ps=10.0),
         backend_policy=MDABackendPolicy(),
         universe_policy=policy,

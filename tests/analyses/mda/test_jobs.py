@@ -416,7 +416,7 @@ def test_from_function_creates_executable_job() -> None:
 
     assert result.results == {
         "universe": "fake-universe",
-        "kwargs": {"frames": (0, 2, 4), "metric": "rg"},
+        "kwargs": {"frames": [0, 2, 4], "metric": "rg"},
     }
     assert job.results == result.results
 

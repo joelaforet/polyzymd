@@ -263,7 +263,7 @@ class FrameSelection:
         """
 
         if self.frames is not None:
-            return MDARunKwargs(frames=self.frames)
+            return MDARunKwargs(frames=list(self.frames))
 
         kwargs = MDARunKwargs()
         if self.start is not None:

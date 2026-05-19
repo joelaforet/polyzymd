@@ -32,7 +32,7 @@ def test_frames_selection_returns_only_frames() -> None:
 
     selection = FrameSelection(frames=[0, 3, 8], n_frames_total=10)
 
-    assert selection.run_kwargs() == {"frames": (0, 3, 8)}
+    assert selection.run_kwargs() == {"frames": [0, 3, 8]}
     assert selection.frames == (0, 3, 8)
     assert selection.n_frames_selected == 3
 
@@ -97,7 +97,7 @@ def test_numpy_integer_frame_indices_are_valid() -> None:
 
     selection = FrameSelection(frames=np.array([0, 3, 8]), n_frames_total=10)
 
-    assert selection.run_kwargs() == {"frames": (np.int64(0), np.int64(3), np.int64(8))}
+    assert selection.run_kwargs() == {"frames": [np.int64(0), np.int64(3), np.int64(8)]}
     assert selection.n_frames_selected == 3
 
 
@@ -106,7 +106,7 @@ def test_boolean_frame_mask_counts_selected_frames() -> None:
 
     selection = FrameSelection(frames=[True, False, True, False], n_frames_total=4)
 
-    assert selection.run_kwargs() == {"frames": (True, False, True, False)}
+    assert selection.run_kwargs() == {"frames": [True, False, True, False]}
     assert selection.n_frames_selected == 2
 
 
@@ -116,7 +116,7 @@ def test_numpy_boolean_frame_mask_counts_selected_frames() -> None:
     selection = FrameSelection(frames=np.array([True, False, True, False]), n_frames_total=4)
 
     assert selection.run_kwargs() == {
-        "frames": (np.bool_(True), np.bool_(False), np.bool_(True), np.bool_(False))
+        "frames": [np.bool_(True), np.bool_(False), np.bool_(True), np.bool_(False)]
     }
     assert selection.n_frames_selected == 2
 

@@ -116,7 +116,7 @@ def test_build_mda_jobs_uses_frame_selection(monkeypatch, tmp_path, condition, s
     assert len(jobs) == 1
     assert jobs[0].name == "dssp"
     assert jobs[0].frame_selection is frame_selection
-    assert jobs[0].frame_selection.run_kwargs()["frames"] == (0, 3, 7)
+    assert jobs[0].frame_selection.run_kwargs()["frames"] == [0, 3, 7]
 
 
 def test_collector_writes_sidecar_artifact(tmp_path, condition, settings) -> None:
