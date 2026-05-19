@@ -67,6 +67,20 @@ def test_semantic_colors_disabled_use_legacy_palette() -> None:
     assert get_condition_colors(labels, plot_settings) == get_palette_colors(3, plot_settings)
 
 
+def test_invalid_global_palette_falls_back_to_tab10(caplog: pytest.LogCaptureFixture) -> None:
+    """Invalid global palettes should warn and use a safe tab10 fallback."""
+    plot_settings = PlotSettings(color_palette="not-a-real-palette")
+
+    colors = get_palette_colors(3, plot_settings)
+
+    np.testing.assert_allclose(
+        [_rgba(color) for color in colors],
+        [_rgba(matplotlib.colormaps["tab10"](fraction)) for fraction in (0.0, 0.5, 1.0)],
+    )
+    assert "not-a-real-palette" in caplog.text
+    assert "Falling back to 'tab10'" in caplog.text
+
+
 def test_semantic_explicit_and_condition_order() -> None:
     """Explicit order should lead, then condition order, then original order."""
     plot_settings = PlotSettings(
@@ -197,6 +211,45 @@ def test_semantic_value_colors_override_family_colormap() -> None:
     )
 
     assert get_condition_color_map(["Special"], plot_settings)["Special"] == "cyan"
+
+
+def test_invalid_semantic_condition_color_falls_back(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Invalid semantic condition colors should warn and use missing_color."""
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "missing_color": "pink",
+            "conditions": {"Bad": {"color": "not-a-color"}},
+        }
+    )
+
+    color_map = get_condition_color_map(["Bad"], plot_settings)
+
+    assert color_map["Bad"] == "pink"
+    assert "Invalid condition color for 'Bad'" in caplog.text
+    assert "not-a-color" in caplog.text
+
+
+def test_invalid_semantic_family_colormap_falls_back(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Invalid semantic family colormaps should warn and use missing_color."""
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "missing_color": "pink",
+            "conditions": {"Bad": {"family": "dose", "value": 1.0}},
+            "families": {"dose": {"colormap": "not-a-colormap"}},
+        }
+    )
+
+    color_map = get_condition_color_map(["Bad"], plot_settings)
+
+    assert color_map["Bad"] == "pink"
+    assert "Semantic color colormap 'not-a-colormap'" in caplog.text
+    assert "Falling back" in caplog.text
 
 
 def test_semantic_unknown_metadata_uses_missing_color(caplog: pytest.LogCaptureFixture) -> None:

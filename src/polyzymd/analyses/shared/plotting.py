@@ -256,25 +256,50 @@ def get_palette_colors(n: int, plot_settings: "PlotSettings") -> list:
     list
         List of color values (RGB tuples or matplotlib color specs).
     """
+    palette = plot_settings.color_palette
     try:
         import seaborn as sns
 
-        return list(sns.color_palette(plot_settings.color_palette, n))
+        try:
+            return list(sns.color_palette(palette, n))
+        except ValueError:
+            logger.warning(
+                "Color palette %r is not a valid seaborn palette. Falling back to 'tab10'.",
+                palette,
+            )
+            return _matplotlib_colormap_colors("tab10", n)
     except ImportError:
         pass
 
-    import matplotlib.pyplot as plt
-
-    palette = plot_settings.color_palette
     try:
-        cmap = plt.colormaps[palette]
+        return _matplotlib_colormap_colors(palette, n)
     except (KeyError, ValueError):
         logger.warning(
             "Color palette %r is not a valid matplotlib colormap "
             "(seaborn is not installed). Falling back to 'tab10'.",
             palette,
         )
-        cmap = plt.colormaps["tab10"]
+        return _matplotlib_colormap_colors("tab10", n)
+
+
+def _matplotlib_colormap_colors(colormap_name: str, n: int) -> list:
+    """Sample colors from a matplotlib colormap.
+
+    Parameters
+    ----------
+    colormap_name : str
+        Name of the matplotlib colormap to sample.
+    n : int
+        Number of colors to return.
+
+    Returns
+    -------
+    list
+        RGBA colors sampled across the colormap range.
+    """
+    import matplotlib.pyplot as plt
+
+    cmap = plt.colormaps[colormap_name]
     return [cmap(i / max(1, n - 1)) for i in range(n)]
 
 
