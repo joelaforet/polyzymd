@@ -17,7 +17,9 @@ from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
     get_colors,
+    get_condition_colors,
     get_output_path,
+    order_condition_labels,
     save_figure,
     scatter_replicate_values,
     scatter_stacked_segment_replicates,
@@ -44,6 +46,7 @@ def plot_summary_comparison(
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
+    control_label: str | None = None,
 ) -> Path | None:
     """Plot faceted grouped bars by summary with independent y-axis scales."""
     import matplotlib
@@ -51,6 +54,7 @@ def plot_summary_comparison(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    labels = order_condition_labels(labels, plot_settings)
     summary_names: list[str] = []
     seen: set[str] = set()
     for label in labels:
@@ -67,7 +71,7 @@ def plot_summary_comparison(
 
     n_summaries = len(summary_names)
     x = np.arange(len(labels), dtype=float)
-    colors = get_colors(len(labels), plot_settings)
+    colors = get_condition_colors(labels, plot_settings, control_label=control_label)
 
     height_per_summary = 3.5
     fig, axes = plt.subplots(
@@ -134,6 +138,7 @@ def plot_timeseries(
     summary_name: str,
     output_dir: Path,
     plot_settings: Any,
+    control_label: str | None = None,
 ) -> Path | None:
     """Plot per-frame mean timeseries with ±1 SD band across replicates."""
     import matplotlib
@@ -141,7 +146,8 @@ def plot_timeseries(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    colors = get_colors(len(labels), plot_settings)
+    labels = order_condition_labels(labels, plot_settings)
+    colors = get_condition_colors(labels, plot_settings, control_label=control_label)
     fig, ax = plt.subplots(figsize=(9.0, 4.8))
 
     plotted_any = False
@@ -213,6 +219,8 @@ def plot_top_pairs(
     output_dir: Path,
     plot_settings: Any,
     top_n: int = 15,
+    *,
+    control_label: str | None = None,
 ) -> Path | None:
     """Plot top undirected residue-pair occupancies for one summary."""
     import matplotlib
@@ -220,6 +228,7 @@ def plot_top_pairs(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    labels = order_condition_labels(labels, plot_settings)
     scores: dict[str, float] = {}
     presence_count: dict[str, int] = {}
     for label in labels:
@@ -252,7 +261,7 @@ def plot_top_pairs(
     y = np.arange(len(top_labels), dtype=float)
     n_conditions = len(labels)
     bar_height = 0.8 / max(n_conditions, 1)
-    colors = get_colors(n_conditions, plot_settings)
+    colors = get_condition_colors(labels, plot_settings, control_label=control_label)
 
     fig, ax = plt.subplots(figsize=(10.0, max(4.0, 0.55 * len(top_labels) + 1.5)))
     for idx, label in enumerate(labels):
@@ -324,6 +333,7 @@ def plot_composition_absolute(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    labels = order_condition_labels(labels, plot_settings)
     keys = _composition_keys(results, labels)
     if not keys:
         return None
@@ -412,6 +422,7 @@ def plot_composition_fraction(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    labels = order_condition_labels(labels, plot_settings)
     keys = _composition_keys(results, labels)
     if not keys:
         return None

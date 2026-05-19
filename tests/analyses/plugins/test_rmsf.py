@@ -958,6 +958,82 @@ class TestRMSFCompareFormatPlot:
         assert len(plots) == 1
         assert plots[0].name.startswith("rmsf_profile")
 
+    def test_plotters_apply_semantic_order_and_condition_colors(self, tmp_path: Path) -> None:
+        """RMSF condition plots should honor semantic condition order and colors."""
+
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import to_rgba
+
+        from polyzymd.analyses.rmsf import _plotters
+        from polyzymd.config.comparison import PlotSettings
+
+        plot_settings = PlotSettings(
+            semantic_colors={
+                "enabled": True,
+                "order": ["Control", "Treated"],
+                "conditions": {"Control": {"role": "control"}, "Treated": {"color": "#1f77b4"}},
+                "control_color": "#111111",
+            }
+        )
+        data = {
+            "__meta__": {"control_label": "Control"},
+            "Treated": {
+                "aggregated_result": {
+                    "overall_mean_rmsf": 2.0,
+                    "overall_sem_rmsf": 0.1,
+                    "per_replicate_mean_rmsf": [1.9, 2.1],
+                    "residue_ids": [1, 2],
+                    "mean_rmsf_per_residue": [2.0, 2.2],
+                    "sem_rmsf_per_residue": [0.1, 0.1],
+                    "n_replicates": 2,
+                }
+            },
+            "Control": {
+                "aggregated_result": {
+                    "overall_mean_rmsf": 1.0,
+                    "overall_sem_rmsf": 0.1,
+                    "per_replicate_mean_rmsf": [0.9, 1.1],
+                    "residue_ids": [1, 2],
+                    "mean_rmsf_per_residue": [1.0, 1.2],
+                    "sem_rmsf_per_residue": [0.1, 0.1],
+                    "n_replicates": 2,
+                }
+            },
+        }
+        captured = []
+
+        def _capture_save_figure(fig, output_path, settings):
+            captured.append(fig)
+            return output_path
+
+        with patch.object(_plotters, "save_figure", side_effect=_capture_save_figure):
+            comparison_paths = _plotters._plot_rmsf_comparison_from_aggregated(
+                data,
+                ["Treated", "Control"],
+                tmp_path,
+                plot_settings,
+            )
+            profile_paths = _plotters._plot_rmsf_profile(
+                data,
+                ["Treated", "Control"],
+                tmp_path,
+                plot_settings,
+            )
+
+        assert comparison_paths == [tmp_path / "rmsf_comparison.png"]
+        assert profile_paths == [tmp_path / "rmsf_profile.png"]
+        comparison_ax = captured[0].axes[0]
+        profile_ax = captured[1].axes[0]
+        assert [tick.get_text() for tick in comparison_ax.get_yticklabels()] == [
+            "Control",
+            "Treated",
+        ]
+        assert [line.get_label() for line in profile_ax.lines[:2]] == ["Control", "Treated"]
+        assert to_rgba(comparison_ax.patches[0].get_facecolor()) == to_rgba("#111111")
+        assert to_rgba(profile_ax.lines[1].get_color()) == to_rgba("#1f77b4")
+        for fig in captured:
+            plt.close(fig)
+
     def test_deserialize_rejects_legacy_json(self, tmp_path: Path) -> None:
         """Legacy aggregate files should not be loaded as RMSF MDA artifacts."""
 

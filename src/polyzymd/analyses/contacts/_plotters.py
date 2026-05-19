@@ -22,11 +22,12 @@ from polyzymd.analyses.shared.aa_classification import CANONICAL_AA_CLASS_ORDER
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
-    get_colors,
+    get_condition_colors,
     get_output_path,
     get_theme,
     grouped_bars,
     has_replicate_uncertainty,
+    order_condition_labels,
     save_figure,
 )
 
@@ -112,6 +113,7 @@ class ContactsPlotData:
     conditions: Mapping[str, ContactsConditionPlotData]
     labels: tuple[str, ...]
     settings: Any
+    control_label: str | None = None
 
     @property
     def has_residence_times(self) -> bool:
@@ -160,8 +162,9 @@ def load_contacts_plot_data(ctx: PlotContext) -> ContactsPlotData:
 
     return ContactsPlotData(
         conditions=loaded,
-        labels=tuple(labels),
+        labels=tuple(order_condition_labels(labels, ctx.plot_settings)),
         settings=ctx.settings,
+        control_label=ctx.control_label,
     )
 
 
@@ -447,7 +450,11 @@ def _plot_contact_fraction_profile(
     saved: list[Path] = []
     for polymer_type in polymer_types:
         settings = plot_settings.contacts
-        colors = get_colors(len(plot_data.labels), plot_settings)
+        colors = get_condition_colors(
+            plot_data.labels,
+            plot_settings,
+            control_label=plot_data.control_label,
+        )
         theme = get_theme(plot_settings)
         fig, ax = plt.subplots(figsize=settings.figsize_contact_fraction_profile)
         has_data = False
@@ -523,7 +530,11 @@ def _plot_residence_time_profile(
     saved: list[Path] = []
     for polymer_type in _polymer_type_sequence(plot_data):
         settings = plot_settings.contacts
-        colors = get_colors(len(plot_data.labels), plot_settings)
+        colors = get_condition_colors(
+            plot_data.labels,
+            plot_settings,
+            control_label=plot_data.control_label,
+        )
         theme = get_theme(plot_settings)
         fig, ax = plt.subplots(figsize=settings.figsize_residence_time_profile)
         has_data = False
@@ -695,7 +706,11 @@ def _plot_grouped_contact_fraction_bars(
     if not elements:
         return []
     x = np.arange(len(elements))
-    colors = get_colors(len(plot_data.labels), plot_settings)
+    colors = get_condition_colors(
+        plot_data.labels,
+        plot_settings,
+        control_label=plot_data.control_label,
+    )
     saved: list[Path] = []
     for polymer_type in _polymer_type_sequence(plot_data):
         fig, ax = plt.subplots(figsize=figsize, dpi=plot_settings.dpi)
@@ -763,7 +778,11 @@ def _plot_grouped_residence_time_bars(
     if not elements:
         return []
     x = np.arange(len(elements))
-    colors = get_colors(len(plot_data.labels), plot_settings)
+    colors = get_condition_colors(
+        plot_data.labels,
+        plot_settings,
+        control_label=plot_data.control_label,
+    )
     saved: list[Path] = []
     for polymer_type in _polymer_type_sequence(plot_data):
         fig, ax = plt.subplots(figsize=figsize, dpi=plot_settings.dpi)

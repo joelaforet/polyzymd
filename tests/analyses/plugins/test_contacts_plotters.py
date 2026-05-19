@@ -105,38 +105,129 @@ def test_rt_by_partition_bars_skip_sparse_replicate_dots(tmp_path) -> None:
     assert mock_grouped_bars.call_args.kwargs["replicate_values"] is None
 
 
-def _make_plot_data(tmp_path: Path, settings: object | None = None):
+def test_load_contacts_plot_data_semantically_orders_labels(tmp_path) -> None:
+    """Contacts plot-data loading should store semantic display labels."""
+
+    from polyzymd.analyses.base import Condition, PlotContext
+    from polyzymd.analyses.contacts import ContactsSettings
+
+    conditions = [
+        Condition("Treatment", Path("/tmp/t.yaml"), (1,), object()),
+        Condition("Control", Path("/tmp/c.yaml"), (1,), object()),
+    ]
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "order": ["Control", "Treatment"],
+        }
+    )
+    ctx = PlotContext(
+        conditions=conditions,
+        analysis_dirs={"Treatment": tmp_path / "t", "Control": tmp_path / "c"},
+        results_dir=tmp_path / "results",
+        output_dir=tmp_path / "plots",
+        settings=ContactsSettings(),
+        plot_settings=plot_settings,
+        control_label="Control",
+    )
+    fake_conditions = _make_plot_data(tmp_path, labels=("Treatment", "Control")).conditions
+
+    def _fake_load_condition_profile(*, condition, analysis_dir, settings, equilibration):
+        del analysis_dir, settings, equilibration
+        return fake_conditions[condition.label]
+
+    with patch.object(
+        plotters_mod,
+        "_load_condition_profile",
+        side_effect=_fake_load_condition_profile,
+    ):
+        plot_data = plotters_mod.load_contacts_plot_data(ctx)
+
+    assert plot_data.labels == ("Control", "Treatment")
+    assert plot_data.control_label == "Control"
+
+
+def test_contacts_condition_series_use_semantic_colors(tmp_path) -> None:
+    """Contacts condition series should use semantic colors after label ordering."""
+
+    plot_data = _make_plot_data(
+        tmp_path,
+        labels=("Control", "Treatment"),
+        control_label="Control",
+    )
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "order": ["Control", "Treatment"],
+            "conditions": {
+                "Control": {"role": "control"},
+                "Treatment": {"color": "#ff7f0e"},
+            },
+            "control_color": "#111111",
+        }
+    )
+
+    with (
+        patch.object(plotters_mod, "grouped_bars") as mock_grouped_bars,
+        patch.object(plotters_mod, "apply_legend"),
+        patch.object(plotters_mod, "save_figure", return_value=tmp_path / "cf.png"),
+    ):
+        paths = plotters_mod._plot_cf_by_aa_class_bars(
+            plot_data,
+            tmp_path,
+            plot_settings,
+        )
+
+    assert paths == [tmp_path / "cf.png"]
+    assert mock_grouped_bars.call_args.args[2][0][0] == "Control"
+    assert mock_grouped_bars.call_args.args[2][1][0] == "Treatment"
+    assert mock_grouped_bars.call_args.args[3] == ["#111111", "#ff7f0e"]
+
+
+def _make_plot_data(
+    tmp_path: Path,
+    settings: object | None = None,
+    labels: tuple[str, ...] = ("Control",),
+    control_label: str | None = None,
+):
     """Build a minimal artifact-backed contacts plot dataset."""
 
-    profile = plotters_mod.ContactsProfileData(
-        replicate_ids=np.asarray([1, 2], dtype=np.int64),
-        residue_ids=np.asarray([1], dtype=np.int64),
-        residue_names=np.asarray(["ALA"], dtype=str),
-        residue_groups=np.asarray(["nonpolar"], dtype=str),
-        contact_fraction_by_replicate=np.asarray([[0.4], [0.6]], dtype=np.float64),
-        contact_fraction_mean=np.asarray([0.5], dtype=np.float64),
-        contact_fraction_sem=np.asarray([0.1], dtype=np.float64),
-        polymer_types=np.asarray(["PEG"], dtype=str),
-        contact_fraction_by_polymer_type=np.asarray([[[0.4], [0.6]]], dtype=np.float64),
-        residence_time_mean_ns=np.asarray([[5.0]], dtype=np.float64),
-        residence_time_sem_ns=np.asarray([[0.5]], dtype=np.float64),
-        residence_time_event_counts=np.asarray([[2]], dtype=np.int64),
-    )
-    artifact = ConditionArtifact(
-        analysis_name="contacts",
-        condition_label="Control",
-        replicates=[1, 2],
-        payload={},
-        metadata={"compute_residence_times": True},
-    )
-    condition = plotters_mod.ContactsConditionPlotData(
-        label="Control",
-        aggregated_dir=tmp_path / "aggregated",
-        artifact=artifact,
-        profile=profile,
-    )
+    conditions = {}
+    for index, label in enumerate(labels):
+        profile = plotters_mod.ContactsProfileData(
+            replicate_ids=np.asarray([1, 2], dtype=np.int64),
+            residue_ids=np.asarray([1], dtype=np.int64),
+            residue_names=np.asarray(["ALA"], dtype=str),
+            residue_groups=np.asarray(["nonpolar"], dtype=str),
+            contact_fraction_by_replicate=np.asarray(
+                [[0.4 + index * 0.1], [0.6 + index * 0.1]], dtype=np.float64
+            ),
+            contact_fraction_mean=np.asarray([0.5 + index * 0.1], dtype=np.float64),
+            contact_fraction_sem=np.asarray([0.1], dtype=np.float64),
+            polymer_types=np.asarray(["PEG"], dtype=str),
+            contact_fraction_by_polymer_type=np.asarray(
+                [[[0.4 + index * 0.1], [0.6 + index * 0.1]]], dtype=np.float64
+            ),
+            residence_time_mean_ns=np.asarray([[5.0 + index]], dtype=np.float64),
+            residence_time_sem_ns=np.asarray([[0.5]], dtype=np.float64),
+            residence_time_event_counts=np.asarray([[2]], dtype=np.int64),
+        )
+        artifact = ConditionArtifact(
+            analysis_name="contacts",
+            condition_label=label,
+            replicates=[1, 2],
+            payload={},
+            metadata={"compute_residence_times": True},
+        )
+        conditions[label] = plotters_mod.ContactsConditionPlotData(
+            label=label,
+            aggregated_dir=tmp_path / label / "aggregated",
+            artifact=artifact,
+            profile=profile,
+        )
     return plotters_mod.ContactsPlotData(
-        conditions={"Control": condition},
-        labels=("Control",),
+        conditions=conditions,
+        labels=labels,
         settings=settings or SimpleNamespace(protein_groups=None, protein_partitions=None),
+        control_label=control_label,
     )

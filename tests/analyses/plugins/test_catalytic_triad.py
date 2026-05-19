@@ -669,6 +669,73 @@ class TestTriadPlot:
         mock_kde_fn.assert_called_once()
         mock_bars_fn.assert_called_once()
 
+    def test_from_data_helpers_apply_semantic_order_and_colors(self, tmp_path: Path) -> None:
+        """Artifact-backed triad helpers should pass semantic labels and colors to renderers."""
+
+        from polyzymd.analyses.catalytic_triad import _plotters
+        from polyzymd.config.comparison import PlotSettings
+
+        plot_settings = PlotSettings(
+            semantic_colors={
+                "enabled": True,
+                "order": ["Control", "Treatment"],
+                "conditions": {
+                    "Control": {"role": "control"},
+                    "Treatment": {"color": "#ff7f0e"},
+                },
+                "control_color": "#111111",
+            }
+        )
+        data = {"__meta__": {"control_label": "Control"}}
+        labels = ["Treatment", "Control"]
+        pooled = {
+            "Control": {"Asp-His": [2.8, 3.0]},
+            "Treatment": {"Asp-His": [3.5, 3.8]},
+        }
+        result = MagicMock()
+
+        with (
+            patch.object(
+                _plotters, "_pool_distances", return_value=(pooled, ["Asp-His"], 3.5)
+            ) as pool,
+            patch.object(
+                _plotters,
+                "plot_triad_kde_panel_pooled",
+                return_value=MagicMock(),
+            ) as kde,
+            patch.object(
+                _plotters,
+                "_load_aggregated_results",
+                return_value={"Control": result, "Treatment": result},
+            ) as load,
+            patch.object(_plotters, "plot_triad_threshold_bars", return_value=MagicMock()) as bars,
+            patch(
+                "polyzymd.analyses.shared.plotting.save_figure",
+                side_effect=lambda fig, path, settings: path,
+            ),
+        ):
+            kde_paths = _plotters.plot_triad_kde_panel_from_data(
+                data,
+                labels,
+                tmp_path,
+                plot_settings,
+            )
+            bar_paths = _plotters.plot_triad_threshold_bars_from_data(
+                data,
+                labels,
+                tmp_path,
+                plot_settings,
+            )
+
+        assert kde_paths == [tmp_path / "triad_kde_panel.png"]
+        assert bar_paths == [tmp_path / "triad_threshold_bars.png"]
+        assert pool.call_args.args[1] == ["Control", "Treatment"]
+        assert load.call_args.args[1] == ["Control", "Treatment"]
+        assert kde.call_args.kwargs["colors"] == ["#111111", "#ff7f0e"]
+        assert bars.call_args.kwargs["labels"] == ["Control", "Treatment"]
+        assert bars.call_args.kwargs["colors"] == ["#111111", "#ff7f0e"]
+        assert bars.call_args.kwargs["control_label"] == "Control"
+
 
 class TestTriadLifecycle:
     """Tests for the MDA lifecycle hooks."""

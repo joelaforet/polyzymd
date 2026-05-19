@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -357,6 +357,80 @@ def test_plot_rejects_legacy_aggregate_file(tmp_path, condition, settings) -> No
         SecondaryStructureAnalysis().plot(ctx)
 
 
+def test_plotters_preserve_ss_category_colors_and_apply_semantic_condition_bars(
+    tmp_path,
+) -> None:
+    """Secondary-structure plots should separate SS category and condition colors."""
+
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import to_rgba
+
+    from polyzymd.analyses.secondary_structure import _plotters
+    from polyzymd.config.comparison import PlotSettings
+
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "order": ["Control", "Treatment"],
+            "conditions": {
+                "Control": {"role": "control"},
+                "Treatment": {"color": "#ff7f0e"},
+            },
+            "control_color": "#111111",
+        }
+    )
+    data = {
+        "__meta__": {"control_label": "Control"},
+        "Treatment": {"condition_artifact": _plot_condition_artifact("Treatment", 0.5)},
+        "Control": {"condition_artifact": _plot_condition_artifact("Control", 0.2)},
+    }
+    captured_figs = []
+
+    def _capture_save_figure(fig, output_path, settings):
+        captured_figs.append(fig)
+        return output_path
+
+    with (
+        patch.object(_plotters, "grouped_bars") as grouped,
+        patch.object(_plotters, "save_figure", side_effect=_capture_save_figure),
+    ):
+        content_paths = _plotters._plot_ss_content_bars(
+            data,
+            ["Treatment", "Control"],
+            tmp_path,
+            plot_settings,
+        )
+
+    assert content_paths == [tmp_path / "ss_content_bars.png"]
+    assert grouped.call_args.args[2] == [
+        ("Helix", [0.2, 0.5], [0.01, 0.01]),
+        ("β-Sheet", [0.3, 0.3], [0.01, 0.01]),
+        ("No SS", [0.5, 0.2], [0.01, 0.01]),
+    ]
+    assert grouped.call_args.args[3] == ["#E74C3C", "#3498DB", "#95A5A6"]
+    assert [tick.get_text() for tick in captured_figs[0].axes[0].get_xticklabels()] == [
+        "Control",
+        "Treatment",
+    ]
+    plt.close(captured_figs.pop())
+
+    with patch.object(_plotters, "save_figure", side_effect=_capture_save_figure):
+        individual_paths = _plotters._plot_ss_individual_bars(
+            data,
+            ["Treatment", "Control"],
+            tmp_path,
+            plot_settings,
+        )
+
+    assert individual_paths[0] == tmp_path / "ss_helix_bars.png"
+    helix_ax = captured_figs[0].axes[0]
+    assert [tick.get_text() for tick in helix_ax.get_xticklabels()] == ["Control", "Treatment"]
+    assert to_rgba(helix_ax.patches[0].get_facecolor())[:3] == to_rgba("#111111")[:3]
+    assert to_rgba(helix_ax.patches[1].get_facecolor())[:3] == to_rgba("#ff7f0e")[:3]
+    for fig in captured_figs:
+        plt.close(fig)
+
+
 def _collect_artifact(
     run_dir: Path,
     *,
@@ -437,6 +511,29 @@ def _write_replicate_artifact(
     )
     ArtifactStore(run_dir).write_replicate_result(artifact, "result.json")
     return artifact
+
+
+def _plot_condition_artifact(label: str, helix_fraction: float) -> ConditionArtifact:
+    """Create a minimal condition artifact for plotter tests."""
+
+    strand_fraction = 0.3
+    coil_fraction = max(0.0, 1.0 - helix_fraction - strand_fraction)
+    return ConditionArtifact(
+        analysis_name="secondary_structure",
+        condition_label=label,
+        replicates=[1, 2],
+        payload={
+            "mean_overall_helix": helix_fraction,
+            "sem_overall_helix": 0.01,
+            "mean_overall_strand": strand_fraction,
+            "sem_overall_strand": 0.01,
+            "mean_overall_coil": coil_fraction,
+            "sem_overall_coil": 0.01,
+            "per_replicate_helix": [helix_fraction - 0.01, helix_fraction + 0.01],
+            "per_replicate_strand": [strand_fraction, strand_fraction],
+            "per_replicate_coil": [coil_fraction, coil_fraction],
+        },
+    )
 
 
 def _condition_artifact(

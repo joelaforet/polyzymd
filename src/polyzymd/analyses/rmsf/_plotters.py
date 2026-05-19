@@ -16,8 +16,9 @@ import numpy as np
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
-    get_colors,
+    get_condition_colors,
     get_output_path,
+    order_condition_labels,
     save_figure,
     scatter_replicate_values,
 )
@@ -50,13 +51,19 @@ def _plot_rmsf_profile(
     """Generate a per-residue RMSF profile plot from canonical aggregate data."""
     import matplotlib.pyplot as plt
 
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    control_label = _control_label_from_data(data)
     t = plot_settings.theme
-    colors = get_colors(len(labels), plot_settings)
+    colors = get_condition_colors(
+        ordered_labels,
+        plot_settings,
+        control_label=control_label,
+    )
 
     # Load per-residue RMSF data for each condition
     profiles: dict[str, dict] = {}
 
-    for label in labels:
+    for label in ordered_labels:
         cond_data = data.get(label)
         if cond_data is None:
             continue
@@ -75,7 +82,7 @@ def _plot_rmsf_profile(
 
     fig, ax_rmsf = plt.subplots(figsize=plot_settings.rmsf.figsize_profile)
 
-    for idx, label in enumerate(labels):
+    for idx, label in enumerate(ordered_labels):
         if label not in profiles:
             continue
 
@@ -132,13 +139,16 @@ def _plot_rmsf_comparison_from_aggregated(
     """Generate simple bar chart from validated aggregated RMSF data."""
     import matplotlib.pyplot as plt
 
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    control_label = _control_label_from_data(data)
+
     # Collect mean RMSF and SEM for each condition
     plot_labels = []
     means = []
     sems = []
     replicate_data: list[Any] = []
 
-    for label in labels:
+    for label in ordered_labels:
         cond_data = data.get(label)
         if cond_data is None:
             continue
@@ -187,7 +197,11 @@ def _plot_rmsf_comparison_from_aggregated(
 
     t = plot_settings.theme
     positions = np.arange(len(plot_labels))
-    colors = get_colors(len(plot_labels), plot_settings)
+    colors = get_condition_colors(
+        plot_labels,
+        plot_settings,
+        control_label=control_label,
+    )
 
     bar_height = 0.7
     means_arr = np.asarray(means, dtype=np.float64)
@@ -281,6 +295,14 @@ def _get_first_available_field(item: Any, *names: str, default: Any = None) -> A
         if value is not None:
             return value
     return default
+
+
+def _control_label_from_data(data: dict[str, Any]) -> str | None:
+    """Return the framework-provided control label when available."""
+
+    meta = data.get("__meta__", {})
+    control_label = meta.get("control_label")
+    return control_label if isinstance(control_label, str) else None
 
 
 def _rmsf_profile_from_aggregated(data: Any) -> dict | None:

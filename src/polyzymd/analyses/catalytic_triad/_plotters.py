@@ -16,7 +16,12 @@ from typing import TYPE_CHECKING, Any, Sequence
 import numpy as np
 
 from polyzymd.analyses.shared.loader import _require_matplotlib
-from polyzymd.analyses.shared.plotting import has_replicate_uncertainty, scatter_replicate_values
+from polyzymd.analyses.shared.plotting import (
+    get_condition_colors,
+    has_replicate_uncertainty,
+    order_condition_labels,
+    scatter_replicate_values,
+)
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -144,6 +149,14 @@ def _map_triad_pair_indices(
         if label_counts[key[0]] == 1:
             mapping[key[0]] = pair_idx
     return mapping
+
+
+def _control_label_from_data(data: dict[str, Any]) -> str | None:
+    """Return the framework-provided control label when available."""
+
+    meta = data.get("__meta__", {})
+    control_label = meta.get("control_label")
+    return control_label if isinstance(control_label, str) else None
 
 
 def plot_triad_kde_panel(
@@ -446,6 +459,7 @@ def plot_triad_threshold_bars(
     save_path: Path | str | None = None,
     dpi: int = 300,
     plot_settings: Any | None = None,
+    control_label: str | None = None,
 ) -> "Figure":
     """Create grouped bar chart of threshold fractions across conditions.
 
@@ -475,6 +489,8 @@ def plot_triad_threshold_bars(
     plot_settings : PlotSettings, optional
         Global plot settings used for replicate dot styling. When omitted,
         default plotting settings are used.
+    control_label : str, optional
+        Condition label that should use the configured semantic control color.
 
     Returns
     -------
@@ -510,7 +526,11 @@ def plot_triad_threshold_bars(
 
     # Set up colors
     if colors is None:
-        colors = _get_color_palette(n_conditions, color_palette)
+        semantic = getattr(plot_settings, "semantic_colors", None)
+        if semantic is not None and semantic.enabled:
+            colors = get_condition_colors(labels, plot_settings, control_label=control_label)
+        else:
+            colors = _get_color_palette(n_conditions, color_palette)
 
     # Extract data with per-condition pair alignment
     data = np.zeros((n_conditions, n_metrics))
@@ -852,8 +872,11 @@ def plot_triad_kde_panel_from_data(
     if not plot_settings.catalytic_triad.generate_kde_panel:
         return []
 
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    control_label = _control_label_from_data(data)
+
     # Pool distances across replicates for each condition
-    condition_distances, pair_labels, threshold = _pool_distances(data, labels)
+    condition_distances, pair_labels, threshold = _pool_distances(data, ordered_labels)
 
     if not condition_distances:
         logger.warning("No distance data found for KDE panel plot")
@@ -861,11 +884,18 @@ def plot_triad_kde_panel_from_data(
 
     # Generate the plot
     output_path = get_output_path(output_dir, "triad_kde_panel", plot_settings)
+    condition_labels = list(condition_distances.keys())
+    colors = get_condition_colors(
+        condition_labels,
+        plot_settings,
+        control_label=control_label,
+    )
 
     fig = plot_triad_kde_panel_pooled(
         condition_distances=condition_distances,
         pair_labels=pair_labels,
         threshold=threshold,
+        colors=colors,
         color_palette=plot_settings.color_palette,
         kde_fill_alpha=plot_settings.catalytic_triad.kde_fill_alpha,
         threshold_line_color=plot_settings.catalytic_triad.threshold_line_color,
@@ -909,8 +939,11 @@ def plot_triad_threshold_bars_from_data(
     if not plot_settings.catalytic_triad.generate_bars:
         return []
 
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    control_label = _control_label_from_data(data)
+
     # Load aggregated results for each condition
-    aggregated_results = _load_aggregated_results(data, labels)
+    aggregated_results = _load_aggregated_results(data, ordered_labels)
 
     if not aggregated_results:
         logger.warning("No aggregated triad results found for bar chart")
@@ -919,7 +952,7 @@ def plot_triad_threshold_bars_from_data(
     # Filter to conditions that have data
     valid_results = []
     valid_labels = []
-    for label in labels:
+    for label in ordered_labels:
         if label in aggregated_results:
             valid_results.append(aggregated_results[label])
             valid_labels.append(label)
@@ -929,15 +962,22 @@ def plot_triad_threshold_bars_from_data(
 
     # Generate the plot
     output_path = get_output_path(output_dir, "triad_threshold_bars", plot_settings)
+    colors = get_condition_colors(
+        valid_labels,
+        plot_settings,
+        control_label=control_label,
+    )
 
     fig = plot_triad_threshold_bars(
         results=valid_results,
         labels=valid_labels,
+        colors=colors,
         color_palette=plot_settings.color_palette,
         figsize=plot_settings.catalytic_triad.figsize_bars,
         show_simultaneous=True,
         dpi=plot_settings.dpi,
         plot_settings=plot_settings,
+        control_label=control_label,
     )
 
     return [save_figure(fig, output_path, plot_settings)]

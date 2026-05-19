@@ -21,11 +21,12 @@ from polyzymd.analyses.mda import ArtifactStoreError
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
-    get_colors,
+    get_condition_colors,
     get_output_path,
     get_theme,
     grouped_bars,
     load_canonical_plot_artifacts,
+    order_condition_labels,
     save_figure,
 )
 
@@ -39,6 +40,7 @@ class DistancePlotData:
     pooled_distances: dict[str, dict[str, dict[str, Any]]]
     aggregated_results: dict[str, dict[str, Any]]
     pair_settings: list[Any] | None = None
+    control_label: str | None = None
 
 
 def build_distance_plot_data(data: dict[str, Any], labels: Sequence[str]) -> DistancePlotData:
@@ -61,6 +63,7 @@ def build_distance_plot_data(data: dict[str, Any], labels: Sequence[str]) -> Dis
         pooled_distances=_collect_distance_data(data, labels),
         aggregated_results=_load_distance_aggregated_results(data, labels),
         pair_settings=_get_distance_pair_settings(data),
+        control_label=_get_control_label(data),
     )
 
 
@@ -102,6 +105,8 @@ def _plot_distance_kde(
     except ImportError:
         has_seaborn = False
 
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    control_label = data.control_label
     t = get_theme(plot_settings)
 
     pair_data = data.pooled_distances
@@ -114,12 +119,17 @@ def _plot_distance_kde(
     for pair_label, condition_distances in pair_data.items():
         fig, ax = plt.subplots(figsize=plot_settings.distances.figsize)
 
-        n_conditions = len(condition_distances)
-        colors = get_colors(n_conditions, plot_settings)
+        condition_labels = [label for label in ordered_labels if label in condition_distances]
+        colors = get_condition_colors(
+            condition_labels,
+            plot_settings,
+            control_label=control_label,
+        )
 
         threshold = None
 
-        for idx, (cond_label, dist_data) in enumerate(condition_distances.items()):
+        for idx, cond_label in enumerate(condition_labels):
+            dist_data = condition_distances[cond_label]
             distances = dist_data.get("distances")
             if distances is None:
                 continue
@@ -204,6 +214,8 @@ def _plot_distance_threshold_bars(
     """
     import matplotlib.pyplot as plt
 
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    control_label = data.control_label
     t = get_theme(plot_settings)
 
     aggregated = data.aggregated_results
@@ -223,7 +235,7 @@ def _plot_distance_threshold_bars(
     replicate_values: list[list[list[float]]] = []
     valid_labels: list[str] = []
 
-    for label in labels:
+    for label in ordered_labels:
         if label not in aggregated:
             continue
         valid_labels.append(label)
@@ -253,7 +265,11 @@ def _plot_distance_threshold_bars(
         replicate_values.append(row_reps)
 
     n_conditions = len(valid_labels)
-    colors = get_colors(n_conditions, plot_settings)
+    colors = get_condition_colors(
+        valid_labels,
+        plot_settings,
+        control_label=control_label,
+    )
 
     fig, ax = plt.subplots(figsize=plot_settings.distances.figsize)
 
@@ -314,6 +330,7 @@ def _plot_distance_state_bars(
     list[Path]
         Paths to generated state-bar figures, one per distance pair.
     """
+    ordered_labels = order_condition_labels(labels, plot_settings)
     aggregated = data.aggregated_results
     if not aggregated:
         logger.warning("No aggregated distance data found for state bars")
@@ -332,7 +349,7 @@ def _plot_distance_state_bars(
         fig_path = _plot_distance_state_single_pair(
             pair_idx=pair_idx,
             aggregated=aggregated,
-            labels=labels,
+            labels=ordered_labels,
             pair_settings=pair_settings,
             output_dir=output_dir,
             plot_settings=plot_settings,
@@ -725,3 +742,11 @@ def _get_distance_pair_settings(data: dict[str, Any]) -> list[Any] | None:
         return getattr(dist_settings, "pairs", None)
 
     return None
+
+
+def _get_control_label(data: dict[str, Any]) -> str | None:
+    """Return the framework-provided control label when available."""
+
+    meta = data.get("__meta__", {})
+    control_label = meta.get("control_label")
+    return control_label if isinstance(control_label, str) else None

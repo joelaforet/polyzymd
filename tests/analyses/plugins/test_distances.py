@@ -1964,6 +1964,90 @@ class TestPlot:
         call_args = MockKDE.call_args
         assert isinstance(call_args[0][3], PlotSettings)
 
+    def test_semantic_colors_apply_to_condition_plots_but_not_state_categories(self, tmp_path):
+        """Distance condition plots should use semantic colors while state bars stay categorical."""
+
+        import numpy as np
+
+        from polyzymd.analyses.distances._plotters import (
+            DistancePlotData,
+            _plot_distance_kde,
+            _plot_distance_state_bars,
+            _plot_distance_threshold_bars,
+        )
+        from polyzymd.config.comparison import PlotSettings
+
+        plot_settings = PlotSettings(
+            semantic_colors={
+                "enabled": True,
+                "order": ["Control", "Treatment"],
+                "conditions": {
+                    "Control": {"role": "control"},
+                    "Treatment": {"color": "#ff7f0e"},
+                },
+                "control_color": "#111111",
+            }
+        )
+        pair_result = {
+            "pair_label": "Pair 1",
+            "overall_fraction_below": 0.25,
+            "sem_fraction_below": 0.05,
+            "per_replicate_fractions_below": [0.2, 0.3],
+            "threshold": 3.5,
+        }
+        plot_data = DistancePlotData(
+            pooled_distances={
+                "Pair 1": {
+                    "Treatment": {"distances": np.asarray([3.0, 3.2, 3.4]), "threshold": 3.5},
+                    "Control": {"distances": np.asarray([2.7, 2.9, 3.1]), "threshold": 3.5},
+                }
+            },
+            aggregated_results={
+                "Treatment": {"pair_results": [pair_result]},
+                "Control": {"pair_results": [pair_result]},
+            },
+            control_label="Control",
+        )
+
+        with (
+            patch(
+                "polyzymd.analyses.distances._plotters.get_condition_colors",
+                return_value=["#111111", "#ff7f0e"],
+            ) as colors,
+            patch(
+                "polyzymd.analyses.distances._plotters.save_figure",
+                side_effect=lambda fig, path, _: path,
+            ),
+            patch("polyzymd.analyses.distances._plotters.grouped_bars") as grouped,
+        ):
+            kde_paths = _plot_distance_kde(
+                plot_data,
+                ["Treatment", "Control"],
+                tmp_path,
+                plot_settings,
+            )
+            threshold_paths = _plot_distance_threshold_bars(
+                plot_data,
+                ["Treatment", "Control"],
+                tmp_path,
+                plot_settings,
+            )
+            state_paths = _plot_distance_state_bars(
+                plot_data,
+                ["Treatment", "Control"],
+                tmp_path,
+                plot_settings,
+            )
+
+        assert kde_paths == [tmp_path / "distance_kde_pair_1.png"]
+        assert threshold_paths == [tmp_path / "distance_threshold_bars.png"]
+        assert state_paths == [tmp_path / "distance_state_pair_1.png"]
+        assert colors.call_args_list[0].args[0] == ["Control", "Treatment"]
+        assert grouped.call_args_list[0].args[2][0][0] == "Control"
+        assert grouped.call_args_list[0].args[3] == ["#111111", "#ff7f0e"]
+        assert grouped.call_args_list[1].args[2][0][0].startswith("Below")
+        assert grouped.call_args_list[1].args[3] != ["#111111", "#ff7f0e"]
+
 
 # ---------------------------------------------------------------------------
 # Plot loader cache filtering

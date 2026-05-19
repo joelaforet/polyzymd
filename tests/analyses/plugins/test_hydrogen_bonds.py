@@ -3973,6 +3973,105 @@ def test_plot_timeseries_smoke(tmp_path: Path) -> None:
     assert path.exists()
 
 
+def test_condition_plots_use_semantic_colors_but_composition_remains_categorical(
+    tmp_path: Path,
+) -> None:
+    """H-bond condition plots should not reuse semantic colors for composition partitions."""
+    pytest.importorskip("matplotlib")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import to_rgba
+
+    from polyzymd.analyses.hydrogen_bonds import _plotters
+
+    output_dir = tmp_path / "plots"
+    output_dir.mkdir(parents=True)
+    results = {
+        "Treatment": HydrogenBondAggregatedResult(
+            replicates=[1],
+            n_replicates=1,
+            summaries=[_make_aggregated_summary("protein_polymer", 4.0, 0.1, [4.0])],
+            composition_entries=[
+                AggregatedCompositionEntry(
+                    donor_partition="protein",
+                    acceptor_partition="polymer",
+                    mean_hbonds_per_frame=2.0,
+                    sem_hbonds_per_frame=0.0,
+                    per_replicate_hbonds=[2.0],
+                    mean_fraction_of_total=1.0,
+                    sem_fraction_of_total=0.0,
+                    per_replicate_fraction=[1.0],
+                )
+            ],
+        ),
+        "Control": HydrogenBondAggregatedResult(
+            replicates=[1],
+            n_replicates=1,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0])],
+            composition_entries=[
+                AggregatedCompositionEntry(
+                    donor_partition="protein",
+                    acceptor_partition="polymer",
+                    mean_hbonds_per_frame=1.0,
+                    sem_hbonds_per_frame=0.0,
+                    per_replicate_hbonds=[1.0],
+                    mean_fraction_of_total=1.0,
+                    sem_fraction_of_total=0.0,
+                    per_replicate_fraction=[1.0],
+                )
+            ],
+        ),
+    }
+    plot_settings = PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "order": ["Control", "Treatment"],
+            "conditions": {
+                "Control": {"role": "control"},
+                "Treatment": {"color": "#ff7f0e"},
+            },
+            "control_color": "#111111",
+        }
+    )
+    captured = []
+
+    def _capture_save_figure(fig, output_path, settings):
+        captured.append(fig)
+        return output_path
+
+    with patch.object(_plotters, "save_figure", side_effect=_capture_save_figure):
+        summary_path = _plotters.plot_summary_comparison(
+            results,
+            ["Treatment", "Control"],
+            output_dir,
+            plot_settings,
+            control_label="Control",
+        )
+        composition_path = _plotters.plot_composition_absolute(
+            results,
+            ["Treatment", "Control"],
+            output_dir,
+            plot_settings,
+        )
+
+    assert summary_path == output_dir / "hbond_summary_comparison.png"
+    assert composition_path == output_dir / "hbond_composition_absolute.png"
+    summary_ax = captured[0].axes[0]
+    composition_ax = captured[1].axes[0]
+    assert [tick.get_text() for tick in summary_ax.get_xticklabels()] == [
+        "Control",
+        "Treatment",
+    ]
+    assert to_rgba(summary_ax.patches[0].get_facecolor())[:3] == to_rgba("#111111")[:3]
+    assert to_rgba(summary_ax.patches[1].get_facecolor())[:3] == to_rgba("#ff7f0e")[:3]
+    assert [tick.get_text() for tick in composition_ax.get_xticklabels()] == [
+        "Control",
+        "Treatment",
+    ]
+    assert to_rgba(composition_ax.patches[0].get_facecolor())[:3] != to_rgba("#111111")[:3]
+    for fig in captured:
+        plt.close(fig)
+
+
 def test_rank_conditions_neutral_sorted_by_value_descending() -> None:
     """Neutral rankings should be ordered by descending metric values."""
     metrics = {

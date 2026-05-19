@@ -1423,7 +1423,11 @@ class HydrogenBondsAnalysis(Analysis):
         summary_names = self._get_summary_names(loaded, labels_with_data)
 
         summary_plot = plot_summary_comparison(
-            loaded, labels_with_data, ctx.output_dir, ctx.plot_settings
+            loaded,
+            labels_with_data,
+            ctx.output_dir,
+            ctx.plot_settings,
+            control_label=ctx.control_label,
         )
         if summary_plot is not None:
             plots.append(summary_plot)
@@ -1436,6 +1440,7 @@ class HydrogenBondsAnalysis(Analysis):
                 summary_name,
                 ctx.output_dir,
                 ctx.plot_settings,
+                control_label=ctx.control_label,
             )
             if timeseries_plot is not None:
                 plots.append(timeseries_plot)
@@ -1447,6 +1452,7 @@ class HydrogenBondsAnalysis(Analysis):
                 ctx.output_dir,
                 ctx.plot_settings,
                 top_n=ctx.settings.top_n_pairs,
+                control_label=ctx.control_label,
             )
             if top_pairs_plot is not None:
                 plots.append(top_pairs_plot)

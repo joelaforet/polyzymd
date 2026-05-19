@@ -16,9 +16,11 @@ import numpy as np
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
+    get_condition_colors,
     get_output_path,
     get_theme,
     grouped_bars,
+    order_condition_labels,
     save_figure,
     scatter_replicate_values,
     suppress_singleton_errors,
@@ -62,7 +64,7 @@ def _plot_ss_timeline_heatmap(
     bounds = [-0.5, 0.5, 1.5, 2.5]
     norm = mcolors.BoundaryNorm(bounds, cmap.N)
 
-    for label in labels:
+    for label in order_condition_labels(labels, plot_settings):
         cond_data = data.get(label)
         if cond_data is None:
             continue
@@ -143,7 +145,8 @@ def _plot_ss_content_bars(
     strand_reps: list[list[float]] = []
     coil_reps: list[list[float]] = []
 
-    for label, artifact in _condition_artifacts(data, labels):
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    for label, artifact in _condition_artifacts(data, ordered_labels):
         payload = artifact.payload
         cond_labels.append(label)
         helix_means.append(float(payload.get("mean_overall_helix", 0.0)))
@@ -212,7 +215,8 @@ def _plot_ss_individual_bars(
         "coil": {"means": [], "sems": [], "reps": []},
     }
 
-    for label, artifact in _condition_artifacts(data, labels):
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    for label, artifact in _condition_artifacts(data, ordered_labels):
         payload = artifact.payload
         cond_labels.append(label)
         ss_data["helix"]["means"].append(float(payload.get("mean_overall_helix", 0.0)))
@@ -236,6 +240,7 @@ def _plot_ss_individual_bars(
         ss_data,
         output_dir,
         plot_settings,
+        control_label=_control_label_from_data(data),
         has_reps=has_reps,
     )
 
@@ -252,7 +257,8 @@ def _plot_ss_persistence_diff_heatmap(
     t = get_theme(plot_settings)
     persistence_data: dict[str, dict[str, Any]] = {}
 
-    for label, artifact in _condition_artifacts(data, labels):
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    for label, artifact in _condition_artifacts(data, ordered_labels):
         payload = artifact.payload
         helix_persist = payload.get("mean_persistence_helix")
         residue_ids = payload.get("residue_ids")
@@ -269,7 +275,7 @@ def _plot_ss_persistence_diff_heatmap(
     meta = data.get("__meta__", {})
     control_label: str | None = meta.get("control_label")
 
-    available_labels = [lbl for lbl in labels if lbl in persistence_data]
+    available_labels = [lbl for lbl in ordered_labels if lbl in persistence_data]
     if not available_labels:
         return []
 
@@ -361,6 +367,14 @@ def _condition_artifacts(data: dict[str, Any], labels: Sequence[str]) -> list[tu
     return artifacts
 
 
+def _control_label_from_data(data: dict[str, Any]) -> str | None:
+    """Return the framework-provided control label when available."""
+
+    meta = data.get("__meta__", {})
+    control_label = meta.get("control_label")
+    return control_label if isinstance(control_label, str) else None
+
+
 def _load_ss_timeline_matrix(cond_data: dict[str, Any]) -> tuple[np.ndarray | None, list[int]]:
     """Load a per-frame SS matrix from canonical replicate artifacts."""
     from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
@@ -395,6 +409,7 @@ def _render_ss_individual_plots(
     output_dir: Path,
     plot_settings: Any,
     *,
+    control_label: str | None,
     has_reps: bool,
 ) -> list[Path]:
     """Render one bar chart per SS type."""
@@ -404,8 +419,11 @@ def _render_ss_individual_plots(
     generated: list[Path] = []
     x = np.arange(n)
 
-    tab10 = plt.cm.get_cmap("tab10")
-    condition_colors = [tab10(i % 10) for i in range(n)]
+    condition_colors = get_condition_colors(
+        cond_labels,
+        plot_settings,
+        control_label=control_label,
+    )
 
     for internal_key, display_name, _bar_color in _SS_INDIVIDUAL_SPECS:
         means = ss_data[internal_key]["means"]
