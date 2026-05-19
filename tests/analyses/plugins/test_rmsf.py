@@ -703,6 +703,57 @@ class TestRMSFArtifacts:
         assert result.payload["metric_metadata"][MEAN_RMSF_METRIC]["higher_is_better"] is False
         assert not (tmp_path / "aggregated" / "result.json").exists()
 
+    def test_aggregate_stores_reference_secondary_structure_annotation(
+        self,
+        condition: Condition,
+        tmp_path: Path,
+    ) -> None:
+        """Aggregation should store aligned external-reference annotations."""
+
+        ref_path = tmp_path / "ref.pdb"
+        ref_path.write_text("HEADER TEST\n", encoding="utf-8")
+        settings = RMSFSettings(reference_mode="external", reference_file=str(ref_path))
+        fingerprint = RMSFAnalysis._make_settings_cache_tag(settings)
+        reference = {
+            "reference_mode": "external",
+            "reference_frame": None,
+            "reference_file": str(ref_path),
+            "reference_file_identity": external_reference_file_identity(ref_path),
+        }
+        artifacts = []
+        for replicate, values in ((1, [1.0, 1.5, 2.0]), (2, [2.0, 2.5, 3.0])):
+            artifact = _replicate_artifact(tmp_path, condition, replicate, values)
+            artifacts.append(
+                artifact.model_copy(
+                    update={
+                        "payload": {**artifact.payload, "reference": reference},
+                        "metadata": {**artifact.metadata, "settings_fingerprint": fingerprint},
+                    }
+                )
+            )
+        annotation = {
+            "residue_ids": [1, 2, 3],
+            "states": ["H", "E", "C"],
+            "source": "mdtraj.compute_dssp",
+            "reference_file": str(ref_path),
+        }
+
+        with patch(
+            "polyzymd.analyses.rmsf._mda.reference_secondary_structure_payload",
+            return_value=(annotation, []),
+        ):
+            result = aggregate_rmsf_artifacts(
+                condition_label=condition.label,
+                replicates=condition.replicates,
+                settings=settings,
+                equilibration="0ns",
+                output_dir=tmp_path / "aggregated",
+                artifacts=artifacts,
+                settings_fingerprint=fingerprint,
+            )
+
+        assert result.payload["reference_secondary_structure"] == annotation
+
     def test_aggregate_rejects_residue_identity_mismatch(
         self,
         condition: Condition,
@@ -940,7 +991,15 @@ class TestRMSFCompareFormatPlot:
                     "mean_rmsf_per_residue": [1.0, 1.5, 2.0],
                     "sem_rmsf_per_residue": [0.1, 0.1, 0.1],
                     "n_replicates": 2,
-                }
+                },
+                "condition_artifact": SimpleNamespace(
+                    payload={
+                        "reference_secondary_structure": {
+                            "residue_ids": [1, 2, 3],
+                            "states": ["H", "E", "C"],
+                        }
+                    }
+                ),
             },
         }
 
@@ -957,6 +1016,91 @@ class TestRMSFCompareFormatPlot:
 
         assert len(plots) == 1
         assert plots[0].name.startswith("rmsf_profile")
+
+    def test_profile_plotter_draws_reference_secondary_structure_strip(
+        self, tmp_path: Path
+    ) -> None:
+        """Profile plotting should add a cached reference strip when present."""
+
+        import matplotlib.pyplot as plt
+
+        from polyzymd.analyses.rmsf import _plotters
+        from polyzymd.config.comparison import PlotSettings
+
+        data = {
+            "Control": {
+                "aggregated_result": {
+                    "residue_ids": [1, 2, 3],
+                    "mean_rmsf_per_residue": [1.0, 1.5, 2.0],
+                    "sem_rmsf_per_residue": [0.1, 0.1, 0.1],
+                    "n_replicates": 2,
+                },
+                "condition_artifact": SimpleNamespace(
+                    payload={
+                        "reference_secondary_structure": {
+                            "residue_ids": [1, 2, 3],
+                            "states": ["H", "E", "C"],
+                        }
+                    }
+                ),
+            }
+        }
+        captured = []
+
+        def _capture_save_figure(fig, output_path, settings):
+            captured.append(fig)
+            return output_path
+
+        with patch.object(_plotters, "save_figure", side_effect=_capture_save_figure):
+            plots = _plotters._plot_rmsf_profile(
+                data,
+                ["Control"],
+                tmp_path,
+                PlotSettings(),
+            )
+
+        assert plots == [tmp_path / "rmsf_profile.png"]
+        assert len(captured[0].axes) == 2
+        assert len(captured[0].axes[1].patches) == 3
+        plt.close(captured[0])
+
+    def test_profile_plotter_without_reference_secondary_structure_stays_single_axis(
+        self, tmp_path: Path
+    ) -> None:
+        """Profile plotting should preserve one-axis output without annotations."""
+
+        import matplotlib.pyplot as plt
+
+        from polyzymd.analyses.rmsf import _plotters
+        from polyzymd.config.comparison import PlotSettings
+
+        data = {
+            "Control": {
+                "aggregated_result": {
+                    "residue_ids": [1, 2, 3],
+                    "mean_rmsf_per_residue": [1.0, 1.5, 2.0],
+                    "sem_rmsf_per_residue": [0.1, 0.1, 0.1],
+                    "n_replicates": 2,
+                }
+            }
+        }
+        captured = []
+
+        def _capture_save_figure(fig, output_path, settings):
+            captured.append(fig)
+            return output_path
+
+        with patch.object(_plotters, "save_figure", side_effect=_capture_save_figure):
+            plots = _plotters._plot_rmsf_profile(
+                data,
+                ["Control"],
+                tmp_path,
+                PlotSettings(),
+            )
+
+        assert plots == [tmp_path / "rmsf_profile.png"]
+        assert len(captured[0].axes) == 1
+        plt.close(captured[0])
 
     def test_plotters_apply_semantic_order_and_condition_colors(self, tmp_path: Path) -> None:
         """RMSF condition plots should honor semantic condition order and colors."""

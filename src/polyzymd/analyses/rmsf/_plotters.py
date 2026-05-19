@@ -80,7 +80,22 @@ def _plot_rmsf_profile(
         logger.warning("No per-residue RMSF data found for profile plot")
         return []
 
-    fig, ax_rmsf = plt.subplots(figsize=plot_settings.rmsf.figsize_profile)
+    reference_ss = _reference_secondary_structure_from_data(data, ordered_labels)
+    show_reference_ss = bool(
+        plot_settings.rmsf.show_reference_secondary_structure and reference_ss is not None
+    )
+    if show_reference_ss:
+        width, height = plot_settings.rmsf.figsize_profile
+        fig, (ax_rmsf, ax_ss) = plt.subplots(
+            2,
+            1,
+            figsize=(width, height + 0.9),
+            sharex=True,
+            gridspec_kw={"height_ratios": [1.0, 0.12], "hspace": 0.08},
+        )
+    else:
+        fig, ax_rmsf = plt.subplots(figsize=plot_settings.rmsf.figsize_profile)
+        ax_ss = None
 
     for idx, label in enumerate(ordered_labels):
         if label not in profiles:
@@ -117,7 +132,11 @@ def _plot_rmsf_profile(
     apply_axis_style(ax_rmsf, plot_settings, title="Per-Residue RMSF Comparison", ylabel="RMSF (Å)")
     apply_legend(ax_rmsf, plot_settings)
 
-    ax_rmsf.set_xlabel("Residue Number", fontsize=t.label_fontsize)
+    if show_reference_ss and ax_ss is not None and reference_ss is not None:
+        _draw_reference_secondary_structure_strip(ax_ss, reference_ss, plot_settings)
+        ax_rmsf.set_xlabel("")
+    else:
+        ax_rmsf.set_xlabel("Residue Number", fontsize=t.label_fontsize)
 
     plt.tight_layout()
 
@@ -303,6 +322,92 @@ def _control_label_from_data(data: dict[str, Any]) -> str | None:
     meta = data.get("__meta__", {})
     control_label = meta.get("control_label")
     return control_label if isinstance(control_label, str) else None
+
+
+def _reference_secondary_structure_from_data(
+    data: dict[str, Any], labels: Sequence[str]
+) -> dict[str, Any] | None:
+    """Return the first cached reference secondary-structure annotation.
+
+    Parameters
+    ----------
+    data : dict[str, Any]
+        Plot data keyed by condition label.
+    labels : sequence of str
+        Condition labels in plotting order.
+
+    Returns
+    -------
+    dict or None
+        Cached annotation payload when present.
+    """
+
+    for label in labels:
+        cond_data = data.get(label)
+        if not isinstance(cond_data, dict):
+            continue
+        artifact = cond_data.get("condition_artifact")
+        artifact_payload = getattr(artifact, "payload", None)
+        if isinstance(artifact_payload, dict):
+            annotation = artifact_payload.get("reference_secondary_structure")
+            if isinstance(annotation, dict):
+                return annotation
+        aggregated_result = cond_data.get("aggregated_result")
+        annotation = _get_first_available_field(
+            aggregated_result,
+            "reference_secondary_structure",
+        )
+        if isinstance(annotation, dict):
+            return annotation
+    return None
+
+
+def _draw_reference_secondary_structure_strip(
+    ax: Any,
+    annotation: dict[str, Any],
+    plot_settings: Any,
+) -> None:
+    """Draw a cached reference secondary-structure strip below the RMSF profile.
+
+    Parameters
+    ----------
+    ax : Any
+        Matplotlib axis for the strip.
+    annotation : dict[str, Any]
+        Cached secondary-structure payload from the condition artifact.
+    plot_settings : Any
+        Resolved comparison plot settings.
+    """
+
+    from matplotlib.patches import Rectangle
+
+    residue_ids = [int(residue_id) for residue_id in annotation.get("residue_ids", [])]
+    states = [str(state) for state in annotation.get("states", [])]
+    if len(residue_ids) != len(states) or not residue_ids:
+        logger.warning("Skipping RMSF reference secondary-structure strip with invalid annotation")
+        return
+
+    colors = {"H": "#d62728", "E": "#1f77b4", "C": "#bdbdbd"}
+    for residue_id, state in zip(residue_ids, states, strict=True):
+        ax.add_patch(
+            Rectangle(
+                (float(residue_id) - 0.5, 0.0),
+                1.0,
+                1.0,
+                facecolor=colors.get(state, colors["C"]),
+                edgecolor="none",
+            )
+        )
+
+    theme = plot_settings.theme
+    ax.set_ylim(0.0, 1.0)
+    ax.set_xlim(min(residue_ids) - 0.5, max(residue_ids) + 0.5)
+    ax.set_yticks([])
+    ax.set_ylabel("Ref SS", fontsize=theme.small_fontsize, rotation=0, labelpad=24, va="center")
+    ax.set_xlabel("Residue Number", fontsize=theme.label_fontsize)
+    ax.tick_params(axis="x", labelsize=theme.tick_fontsize)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
 
 
 def _rmsf_profile_from_aggregated(data: Any) -> dict | None:

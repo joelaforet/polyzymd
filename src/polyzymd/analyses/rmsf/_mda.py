@@ -298,33 +298,41 @@ def aggregate_rmsf_artifacts(
         str(replicate): {MEAN_RMSF_METRIC: value}
         for replicate, value in zip(legacy_result.replicates, values, strict=True)
     }
+    reference_ss, reference_ss_warnings = reference_secondary_structure_payload(
+        settings=settings,
+        residue_ids=legacy_result.residue_ids,
+    )
+    payload = {
+        "profile": {
+            "residue_ids": legacy_result.residue_ids,
+            "residue_names": legacy_result.residue_names,
+            "residue_indices": ordered_artifacts[0].payload["profile"]["residue_indices"],
+            "identity_keys": ordered_artifacts[0].payload["profile"]["identity_keys"],
+            "mean_rmsf_per_residue": legacy_result.mean_rmsf_per_residue,
+            "sem_rmsf_per_residue": legacy_result.sem_rmsf_per_residue,
+        },
+        "residue_ids": legacy_result.residue_ids,
+        "residue_names": legacy_result.residue_names,
+        "mean_rmsf_per_residue": legacy_result.mean_rmsf_per_residue,
+        "sem_rmsf_per_residue": legacy_result.sem_rmsf_per_residue,
+        "per_replicate_mean_rmsf": values,
+        "overall_mean_rmsf": legacy_result.overall_mean_rmsf,
+        "overall_sem_rmsf": legacy_result.overall_sem_rmsf,
+        "overall_min_rmsf": legacy_result.overall_min_rmsf,
+        "overall_max_rmsf": legacy_result.overall_max_rmsf,
+        "metrics": {MEAN_RMSF_METRIC: metric},
+        "replicate_metrics": replicate_metrics,
+        "metric_metadata": {MEAN_RMSF_METRIC: RMSF_METRIC_METADATA},
+        "n_replicates": legacy_result.n_replicates,
+    }
+    if reference_ss is not None:
+        payload["reference_secondary_structure"] = reference_ss
+    warnings = _unique_warnings([*_combined_warnings(ordered_artifacts), *reference_ss_warnings])
     artifact = ConditionArtifact(
         analysis_name="rmsf",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
-        payload={
-            "profile": {
-                "residue_ids": legacy_result.residue_ids,
-                "residue_names": legacy_result.residue_names,
-                "residue_indices": ordered_artifacts[0].payload["profile"]["residue_indices"],
-                "identity_keys": ordered_artifacts[0].payload["profile"]["identity_keys"],
-                "mean_rmsf_per_residue": legacy_result.mean_rmsf_per_residue,
-                "sem_rmsf_per_residue": legacy_result.sem_rmsf_per_residue,
-            },
-            "residue_ids": legacy_result.residue_ids,
-            "residue_names": legacy_result.residue_names,
-            "mean_rmsf_per_residue": legacy_result.mean_rmsf_per_residue,
-            "sem_rmsf_per_residue": legacy_result.sem_rmsf_per_residue,
-            "per_replicate_mean_rmsf": values,
-            "overall_mean_rmsf": legacy_result.overall_mean_rmsf,
-            "overall_sem_rmsf": legacy_result.overall_sem_rmsf,
-            "overall_min_rmsf": legacy_result.overall_min_rmsf,
-            "overall_max_rmsf": legacy_result.overall_max_rmsf,
-            "metrics": {MEAN_RMSF_METRIC: metric},
-            "replicate_metrics": replicate_metrics,
-            "metric_metadata": {MEAN_RMSF_METRIC: RMSF_METRIC_METADATA},
-            "n_replicates": legacy_result.n_replicates,
-        },
+        payload=payload,
         provenance={
             "source": "rmsf_replicate_artifact_aggregation",
             "frame_selection": ordered_artifacts[0].provenance.get("frame_selection"),
@@ -354,7 +362,7 @@ def aggregate_rmsf_artifacts(
             }
             for replicate in replicates
         ],
-        warnings=_combined_warnings(ordered_artifacts),
+        warnings=warnings,
     )
     return artifact
 
@@ -664,6 +672,192 @@ def external_reference_file_identity(reference_file: str | Path | None) -> dict[
         }
     )
     return identity
+
+
+def reference_secondary_structure_payload(
+    *,
+    settings: RMSFSettings,
+    residue_ids: Sequence[int],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Return external-reference secondary structure aligned to RMSF residues.
+
+    Parameters
+    ----------
+    settings : RMSFSettings
+        Active RMSF settings.
+    residue_ids : sequence of int
+        RMSF residue IDs that define the profile x-axis order.
+
+    Returns
+    -------
+    tuple of dict or None and list of str
+        JSON-compatible secondary-structure annotation and non-fatal warnings.
+    """
+
+    if settings.reference_mode != "external" or settings.reference_file is None:
+        return None, []
+    reference_path = Path(settings.reference_file).expanduser()
+    if not reference_path.exists():
+        warning = (
+            "RMSF reference secondary structure omitted because the external reference file "
+            f"does not exist: {reference_path}"
+        )
+        LOGGER.warning(warning)
+        return None, [warning]
+
+    try:
+        aligned = _compute_reference_secondary_structure(reference_path, residue_ids)
+    except (ImportError, OSError, ValueError, RuntimeError) as exc:
+        warning = f"RMSF reference secondary structure omitted: {exc}"
+        LOGGER.warning(warning)
+        return None, [warning]
+
+    payload = {
+        "residue_ids": [int(residue_id) for residue_id in residue_ids],
+        "states": aligned,
+        "state_labels": {
+            "H": "helix",
+            "E": "beta_sheet",
+            "C": "coil",
+        },
+        "source": "mdtraj.compute_dssp",
+        "reference_file": str(settings.reference_file),
+    }
+    return payload, []
+
+
+def _compute_reference_secondary_structure(
+    reference_path: Path,
+    residue_ids: Sequence[int],
+) -> list[str]:
+    """Compute simplified DSSP states and align them to RMSF residue IDs.
+
+    Parameters
+    ----------
+    reference_path : Path
+        External reference structure path.
+    residue_ids : sequence of int
+        RMSF residue IDs defining the target order.
+
+    Returns
+    -------
+    list of str
+        Simplified states aligned to ``residue_ids``.
+    """
+
+    import mdtraj as md
+
+    trajectory = md.load(str(reference_path))
+    dssp = np.asarray(md.compute_dssp(trajectory, simplified=True))
+    if dssp.ndim != 2 or dssp.shape[0] == 0:
+        raise ValueError("mdtraj returned no secondary-structure states")
+    states = [str(state) for state in dssp[0].tolist()]
+    reference_residue_ids = _mdtraj_residue_ids(trajectory)
+    if len(reference_residue_ids) != len(states):
+        raise ValueError(
+            "mdtraj secondary-structure residue count does not match the reference topology"
+        )
+    return _align_secondary_structure_states(
+        reference_residue_ids=reference_residue_ids,
+        states=states,
+        residue_ids=residue_ids,
+    )
+
+
+def _mdtraj_residue_ids(trajectory: Any) -> list[int]:
+    """Return residue sequence numbers from an mdtraj trajectory topology.
+
+    Parameters
+    ----------
+    trajectory : Any
+        mdtraj trajectory with topology metadata.
+
+    Returns
+    -------
+    list of int
+        Residue sequence numbers with one-indexed fallbacks.
+    """
+
+    residue_ids: list[int] = []
+    for fallback_index, residue in enumerate(trajectory.topology.residues, start=1):
+        residue_ids.append(int(getattr(residue, "resSeq", fallback_index) or fallback_index))
+    return residue_ids
+
+
+def _align_secondary_structure_states(
+    *,
+    reference_residue_ids: Sequence[int],
+    states: Sequence[str],
+    residue_ids: Sequence[int],
+) -> list[str]:
+    """Align simplified secondary-structure states by residue ID.
+
+    Parameters
+    ----------
+    reference_residue_ids : sequence of int
+        Residue IDs from the reference topology.
+    states : sequence of str
+        Simplified states in reference topology order.
+    residue_ids : sequence of int
+        RMSF residue IDs defining the target order.
+
+    Returns
+    -------
+    list of str
+        States aligned to ``residue_ids``.
+    """
+
+    target_ids = [int(residue_id) for residue_id in residue_ids]
+    reference_ids = [int(residue_id) for residue_id in reference_residue_ids]
+    if len(reference_ids) == len(target_ids) and reference_ids == target_ids:
+        return [_simplify_secondary_structure_state(state) for state in states]
+
+    seen_ids: set[int] = set()
+    duplicate_ids: set[int] = set()
+    for residue_id in reference_ids:
+        if residue_id in seen_ids:
+            duplicate_ids.add(residue_id)
+        seen_ids.add(residue_id)
+    if duplicate_ids:
+        raise ValueError(
+            "external reference contains duplicate residue IDs, so secondary-structure states "
+            "cannot be aligned unambiguously"
+        )
+    state_by_residue = {
+        residue_id: _simplify_secondary_structure_state(state)
+        for residue_id, state in zip(reference_ids, states, strict=True)
+    }
+    missing = [residue_id for residue_id in target_ids if residue_id not in state_by_residue]
+    if missing:
+        preview = ", ".join(str(residue_id) for residue_id in missing[:5])
+        suffix = "" if len(missing) <= 5 else ", ..."
+        raise ValueError(
+            "external reference secondary-structure states do not cover RMSF residue IDs "
+            f"{preview}{suffix}"
+        )
+    return [state_by_residue[residue_id] for residue_id in target_ids]
+
+
+def _simplify_secondary_structure_state(state: str) -> str:
+    """Normalize mdtraj DSSP output to helix, beta-sheet, or coil states.
+
+    Parameters
+    ----------
+    state : str
+        mdtraj DSSP state.
+
+    Returns
+    -------
+    str
+        ``H``, ``E``, or ``C``.
+    """
+
+    normalized = state.strip().upper()
+    if normalized == "H":
+        return "H"
+    if normalized == "E":
+        return "E"
+    return "C"
 
 
 def artifact_to_rmsf_result(artifact: ReplicateArtifact) -> RMSFResult:
