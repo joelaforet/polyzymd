@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -37,6 +38,7 @@ from polyzymd.analyses.secondary_structure import (
 from polyzymd.analyses.secondary_structure._mda import (
     DSSP_MATRIX_SIDECAR,
     SecondaryStructureArtifactCollector,
+    _compute_dssp_state_matrix,
     aggregate_secondary_structure_artifacts,
     build_secondary_structure_jobs,
     encode_dssp_matrix,
@@ -83,6 +85,40 @@ def test_dssp_encoding() -> None:
 
     assert encoded.dtype == np.int8
     assert encoded.tolist() == [[0, 1, 2], [1, 0, 2]]
+
+
+def test_dssp_trajectory_uses_mdtraj_topology_keyword(monkeypatch) -> None:
+    """DSSP should construct MDTraj trajectories with the supported topology keyword."""
+
+    captured: dict[str, object] = {}
+    topology = object()
+    trajectory = object()
+
+    def fake_trajectory(*, xyz, topology):
+        captured["xyz"] = xyz
+        captured["topology"] = topology
+        return trajectory
+
+    def fake_compute_dssp(traj, *, simplified):
+        captured["trajectory"] = traj
+        captured["simplified"] = simplified
+        return np.asarray([["H", "C"]])
+
+    monkeypatch.setitem(
+        sys.modules,
+        "mdtraj",
+        SimpleNamespace(Trajectory=fake_trajectory, compute_dssp=fake_compute_dssp),
+    )
+
+    encoded = _compute_dssp_state_matrix(np.ones((1, 2, 3), dtype=np.float32), topology)
+
+    assert captured["topology"] is topology
+    assert captured["trajectory"] is trajectory
+    assert captured["simplified"] is True
+    assert np.asarray(captured["xyz"]) == pytest.approx(
+        np.asarray([[[0.1, 0.1, 0.1], [0.1, 0.1, 0.1]]])
+    )
+    assert encoded.tolist() == [[1, 0]]
 
 
 def test_build_mda_jobs_uses_frame_selection(monkeypatch, tmp_path, condition, settings) -> None:

@@ -526,7 +526,7 @@ def _compute_dssp_state_matrix(
     import mdtraj as md
 
     trajectory = md.Trajectory(
-        xyz=np.asarray(positions_angstrom, dtype=np.float32) / 10.0, top=topology
+        xyz=np.asarray(positions_angstrom, dtype=np.float32) / 10.0, topology=topology
     )
     raw_dssp = md.compute_dssp(trajectory, simplified=True)
     return encode_dssp_matrix(raw_dssp)
