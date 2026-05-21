@@ -88,10 +88,14 @@ class _FakeTrajectory:
         *,
         current_frame: int = 0,
         expose_time: bool = True,
+        raw_times_ps: list[float] | None = None,
     ) -> None:
         self.times_ps = times_ps
+        self.raw_times_ps = raw_times_ps
         self.frame = current_frame
         self.expose_time = expose_time
+        self.ts = SimpleNamespace(frame=current_frame, data={})
+        self._update_timestep()
 
     def __len__(self) -> int:
         """Return the number of fake frames."""
@@ -104,6 +108,7 @@ class _FakeTrajectory:
         if frame_index < 0 or frame_index >= len(self.times_ps):
             raise IndexError(frame_index)
         self.frame = frame_index
+        self._update_timestep()
         return SimpleNamespace(time=self.times_ps[frame_index], frame=frame_index)
 
     @property
@@ -113,6 +118,15 @@ class _FakeTrajectory:
         if not self.expose_time:
             raise AttributeError("time")
         return self.times_ps[self.frame]
+
+    def _update_timestep(self) -> None:
+        """Update raw timestep metadata for the current fake frame."""
+
+        self.ts.frame = self.frame
+        if self.raw_times_ps is None:
+            self.ts.data = {}
+            return
+        self.ts.data = {"time": self.raw_times_ps[self.frame]}
 
 
 def _loader_for_trajectory(trajectory: _FakeTrajectory) -> TrajectoryLoader:
@@ -159,6 +173,19 @@ class TestTrajectoryTimingMetadata:
 
         assert loader.get_first_frame_time(1) == pytest.approx(198_400.0)
         assert trajectory.frame == 2
+
+    def test_get_first_frame_time_prefers_raw_timestep_metadata(self) -> None:
+        """Raw timestep times should win over normalized ChainReader times."""
+
+        trajectory = _FakeTrajectory(
+            [0.0, 400.0],
+            raw_times_ps=[198_400.0, 198_800.0],
+            current_frame=1,
+        )
+        loader = _loader_for_trajectory(trajectory)
+
+        assert loader.get_first_frame_time(1) == pytest.approx(198_400.0)
+        assert trajectory.frame == 1
 
     def test_get_timestep_restores_current_frame(self) -> None:
         """Timestep probing should restore the previous reader frame when feasible."""

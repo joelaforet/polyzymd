@@ -20,6 +20,7 @@ import logging
 import math
 import re
 from dataclasses import dataclass, field
+from numbers import Real
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator, Sequence
 
@@ -123,6 +124,163 @@ def _restore_trajectory_frame(trajectory: Any, frame_index: int | None) -> None:
         trajectory[frame_index]
     except (AttributeError, IndexError, TypeError, ValueError):
         return
+
+
+def _finite_numeric_time(value: object) -> float | None:
+    """Return a finite real-valued time or ``None``.
+
+    Parameters
+    ----------
+    value : object
+        Candidate time value from MDAnalysis metadata.
+
+    Returns
+    -------
+    float | None
+        Finite time value, or ``None`` when the value is missing, non-real, or
+        non-finite.
+    """
+
+    if value is None or isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    time_value = float(value)
+    if not math.isfinite(time_value):
+        return None
+    return time_value
+
+
+def _trajectory_raw_time(trajectory: Any) -> float | None:
+    """Return raw timestamp metadata from a trajectory timestep.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+
+    Returns
+    -------
+    float | None
+        Raw finite timestep time from ``ts.data['time']``, or ``None`` when it is
+        unavailable.
+    """
+
+    ts = getattr(trajectory, "ts", None)
+    data = getattr(ts, "data", None)
+    if not isinstance(data, dict):
+        return None
+    return _finite_numeric_time(data.get("time"))
+
+
+def _trajectory_time(trajectory: Any) -> float | None:
+    """Return the best finite timestamp exposed by a trajectory reader.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+
+    Returns
+    -------
+    float | None
+        Raw timestep time when available, otherwise ``trajectory.time`` when it
+        is finite.
+    """
+
+    raw_time = _trajectory_raw_time(trajectory)
+    if raw_time is not None:
+        return raw_time
+    return _finite_numeric_time(getattr(trajectory, "time", None))
+
+
+class _TimestampPreservingTrajectory:
+    """Proxy that exposes raw MDAnalysis timestep timestamps.
+
+    Some MDAnalysis multi-DCD ``ChainReader`` instances normalize
+    ``reader.time`` to a loaded-frame-relative origin even though each timestep
+    keeps the absolute source timestamp in ``reader.ts.data['time']``. This proxy
+    preserves the reader protocol while making ``time`` return that raw timestamp
+    when available.
+    """
+
+    def __init__(self, reader: Any) -> None:
+        """Store the wrapped trajectory reader.
+
+        Parameters
+        ----------
+        reader : Any
+            MDAnalysis trajectory reader to wrap.
+        """
+
+        object.__setattr__(self, "_reader", reader)
+
+    def __len__(self) -> int:
+        """Return the wrapped trajectory length."""
+
+        return len(self._reader)
+
+    def __iter__(self) -> Iterator[Any]:
+        """Iterate over the wrapped trajectory reader."""
+
+        return iter(self._reader)
+
+    def __getitem__(self, item: Any) -> Any:
+        """Delegate frame and slice access to the wrapped reader."""
+
+        return self._reader[item]
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate unknown attributes to the wrapped reader."""
+
+        return getattr(self._reader, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Delegate mutable reader attributes to the wrapped reader."""
+
+        if name == "_reader":
+            object.__setattr__(self, name, value)
+            return
+        setattr(self._reader, name, value)
+
+    @property
+    def time(self) -> float:
+        """Return raw timestep time when available."""
+
+        raw_time = _trajectory_raw_time(self._reader)
+        if raw_time is not None:
+            return raw_time
+        return self._reader.time
+
+
+def _wrap_timestamp_preserving_trajectory(trajectory: Any) -> Any:
+    """Wrap trajectory readers that hide raw source timestamps.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader.
+
+    Returns
+    -------
+    Any
+        Original reader when no correction is needed, otherwise a proxy that
+        exposes raw timestamp metadata through ``time``.
+    """
+
+    previous_frame = _trajectory_frame_index(trajectory)
+    try:
+        trajectory[0]
+        raw_time = _trajectory_raw_time(trajectory)
+        reported_time = _finite_numeric_time(getattr(trajectory, "time", None))
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return trajectory
+    finally:
+        _restore_trajectory_frame(trajectory, previous_frame)
+
+    if raw_time is None or reported_time is None:
+        return trajectory
+    if math.isclose(raw_time, reported_time, rel_tol=1e-12, abs_tol=1e-12):
+        return trajectory
+    return _TimestampPreservingTrajectory(trajectory)
 
 
 @dataclass
@@ -507,6 +665,7 @@ class TrajectoryLoader:
                 str(info.topology_file),
                 [str(f) for f in info.trajectory_files],
             )
+        u.trajectory = _wrap_timestamp_preserving_trajectory(u.trajectory)
 
         if cache:
             self._universe_cache[replicate] = u
@@ -595,11 +754,13 @@ class TrajectoryLoader:
         previous_frame = _trajectory_frame_index(trajectory)
         try:
             trajectory[0]
-            t0 = trajectory.time
+            t0 = _trajectory_time(trajectory)
             trajectory[1]
-            t1 = trajectory.time
+            t1 = _trajectory_time(trajectory)
         finally:
             _restore_trajectory_frame(trajectory, previous_frame)
+        if t0 is None or t1 is None:
+            raise ValueError("Trajectory timestamps are unavailable for timestep detection")
 
         dt = t1 - t0  # in ps (MDAnalysis default)
 
@@ -645,13 +806,13 @@ class TrajectoryLoader:
         previous_frame = _trajectory_frame_index(trajectory)
         try:
             trajectory[0]
-            time_ps = float(trajectory.time)
+            time_ps = _trajectory_time(trajectory)
         except (AttributeError, IndexError, TypeError, ValueError):
             return None
         finally:
             _restore_trajectory_frame(trajectory, previous_frame)
 
-        if not math.isfinite(time_ps):
+        if time_ps is None:
             return None
         if unit == "ns":
             return time_ps / 1000.0
