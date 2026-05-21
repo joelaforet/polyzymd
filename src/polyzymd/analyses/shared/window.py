@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from numbers import Real
 from typing import TYPE_CHECKING
 
 from polyzymd.analyses.shared.diagnostics import validate_equilibration_time
@@ -41,6 +42,29 @@ def _equilibration_start_frame(equilibration_ps: float, timestep_ps: float) -> i
     if math.isclose(frame_position, rounded_position, rel_tol=1e-12, abs_tol=1e-12):
         return int(rounded_position)
     return int(math.floor(frame_position)) + 1
+
+
+def _finite_time_or_none(value: object) -> float | None:
+    """Return a finite real-valued timestamp or ``None``.
+
+    Parameters
+    ----------
+    value : object
+        Candidate timestamp from trajectory metadata or a test double.
+
+    Returns
+    -------
+    float | None
+        Finite timestamp value, or ``None`` for missing, non-real, boolean, or
+        non-finite inputs.
+    """
+
+    if value is None or isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    time_ps = float(value)
+    if not math.isfinite(time_ps):
+        return None
+    return time_ps
 
 
 @dataclass(frozen=True)
@@ -233,11 +257,7 @@ def resolve_trajectory_window(
 
     eq_value, eq_unit = parse_time_string(equilibration)
     equilibration_ps = convert_time(eq_value, eq_unit, "ps")
-    finite_first_frame_time_ps = (
-        float(first_frame_time_ps)
-        if first_frame_time_ps is not None and math.isfinite(float(first_frame_time_ps))
-        else None
-    )
+    finite_first_frame_time_ps = _finite_time_or_none(first_frame_time_ps)
     if finite_first_frame_time_ps is None:
         equilibration_offset_ps = equilibration_ps
         time_reference = "loaded_frame_zero"

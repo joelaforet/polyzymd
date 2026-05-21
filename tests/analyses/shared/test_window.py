@@ -171,9 +171,9 @@ def test_resolve_trajectory_window_uses_absolute_first_frame_timestamp() -> None
     assert window.equilibration_time_reference == "trajectory_timestamp"
 
 
-@pytest.mark.parametrize("first_frame_time_ps", [None, float("nan"), float("inf")])
+@pytest.mark.parametrize("first_frame_time_ps", [None, float("nan"), float("inf"), "invalid"])
 def test_resolve_trajectory_window_falls_back_without_valid_timestamp(
-    first_frame_time_ps: float | None,
+    first_frame_time_ps: object,
 ) -> None:
     """Missing or non-finite timestamps should preserve legacy behavior."""
 
