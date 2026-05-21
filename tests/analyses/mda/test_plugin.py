@@ -65,7 +65,15 @@ def _collector_context(tmp_path: Path) -> MDACollectorContext:
     return MDACollectorContext(
         analysis_name="example",
         replicate_context=replicate_context,
-        frame_selection=FrameSelection(start=1, stop=5, step=2, n_frames_total=8),
+        frame_selection=FrameSelection(
+            start=1,
+            stop=5,
+            step=2,
+            n_frames_total=8,
+            first_frame_time_ps=198_400.0,
+            selected_start_time_ps=198_800.0,
+            equilibration_time_reference="trajectory_timestamp",
+        ),
         universe_policy=MDAUniversePolicy(condition_label="Cond", replicate=1),
         artifact_store=ArtifactStore(tmp_path / "run_1"),
         settings_fingerprint="abc123",
@@ -140,6 +148,9 @@ def test_frame_selection_payload_is_json_safe(tmp_path: Path) -> None:
     assert payload["stop"] == 5
     assert payload["step"] == 2
     assert payload["n_frames_selected"] == 2
+    assert payload["first_frame_time_ps"] == 198_400.0
+    assert payload["selected_start_time_ps"] == 198_800.0
+    assert payload["equilibration_time_reference"] == "trajectory_timestamp"
 
 
 def test_strict_json_payload_rejects_raw_mdanalysis_results() -> None:

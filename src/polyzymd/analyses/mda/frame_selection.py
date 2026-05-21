@@ -216,6 +216,13 @@ class FrameSelection:
         Equilibration time converted to picoseconds.
     timestep_ps : float | None, optional
         Trajectory timestep in picoseconds.
+    first_frame_time_ps : float | None, optional
+        Absolute MDAnalysis timestamp of loaded frame 0 in picoseconds, when
+        available.
+    selected_start_time_ps : float | None, optional
+        Timestamp of the selected start frame in the active time reference.
+    equilibration_time_reference : str | None, optional
+        Time reference used to interpret ``equilibration``.
     n_frames_total : int | None, optional
         Total trajectory frame count when known.
     warning_message : str | None, optional
@@ -230,6 +237,9 @@ class FrameSelection:
     equilibration_start: int | None = None
     equilibration_ps: float | None = None
     timestep_ps: float | None = None
+    first_frame_time_ps: float | None = None
+    selected_start_time_ps: float | None = None
+    equilibration_time_reference: str | None = None
     n_frames_total: int | None = None
     warning_message: str | None = None
     n_frames_selected: int | None = field(default=None, init=False)
@@ -298,6 +308,9 @@ class FrameSelection:
             equilibration_start=window.equilibration_start,
             equilibration_ps=window.equilibration_ps,
             timestep_ps=window.timestep_ps,
+            first_frame_time_ps=window.first_frame_time_ps,
+            selected_start_time_ps=window.selected_start_time_ps,
+            equilibration_time_reference=window.equilibration_time_reference,
             n_frames_total=window.n_frames_total,
             warning_message=window.warning_message,
         )
@@ -313,8 +326,13 @@ class FrameSelection:
         stop: int | None = None,
         step: int = 1,
         min_frames: int = 1,
+        first_frame_time_ps: float | None = None,
     ) -> FrameSelection:
         """Resolve PolyzyMD equilibration/window settings to a frame selection.
+
+        Finite first-frame timestamps make equilibration absolute in MDAnalysis
+        trajectory time; missing timestamps keep the legacy loaded-frame-relative
+        origin.
 
         Parameters
         ----------
@@ -334,6 +352,8 @@ class FrameSelection:
             Frame stride, by default 1.
         min_frames : int, optional
             Minimum required number of selected frames, by default 1.
+        first_frame_time_ps : float | None, optional
+            Absolute MDAnalysis timestamp of loaded frame 0 in picoseconds.
 
         Returns
         -------
@@ -349,6 +369,7 @@ class FrameSelection:
             stop=stop,
             step=step,
             min_frames=min_frames,
+            first_frame_time_ps=first_frame_time_ps,
         )
         selection = cls.from_trajectory_window(window)
         object.__setattr__(selection, "equilibration", equilibration)

@@ -166,6 +166,9 @@ def test_from_trajectory_window_preserves_window_values() -> None:
     assert selection.equilibration_start == 5
     assert selection.equilibration_ps == 500.0
     assert selection.timestep_ps == 100.0
+    assert selection.first_frame_time_ps is None
+    assert selection.selected_start_time_ps == pytest.approx(500.0)
+    assert selection.equilibration_time_reference == "loaded_frame_zero"
     assert selection.n_frames_total == 10
     assert selection.n_frames_selected == 2
 
@@ -197,3 +200,22 @@ def test_from_equilibration_preserves_warning_message() -> None:
 
     assert selection.warning_message is not None
     assert "Skipping 60.0% of trajectory" in selection.warning_message
+
+
+def test_from_equilibration_preserves_timestamp_fields() -> None:
+    """FrameSelection should expose timestamp-aware window provenance."""
+
+    selection = FrameSelection.from_equilibration(
+        equilibration="200ns",
+        n_frames_total=14,
+        timestep_ps=400.0,
+        first_frame_time_ps=198_400.0,
+    )
+
+    assert selection.run_kwargs() == {"start": 4, "stop": 14, "step": 1}
+    assert selection.equilibration == "200ns"
+    assert selection.equilibration_start == 4
+    assert selection.equilibration_ps == 200_000.0
+    assert selection.first_frame_time_ps == 198_400.0
+    assert selection.selected_start_time_ps == pytest.approx(200_000.0)
+    assert selection.equilibration_time_reference == "trajectory_timestamp"
