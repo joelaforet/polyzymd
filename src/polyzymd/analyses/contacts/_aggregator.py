@@ -303,6 +303,11 @@ def _validate_artifact_frame_selection(artifact: ReplicateArtifact, ctx: Aggrega
         expected=ctx.equilibration,
         label=f"replicate {artifact.replicate} frame selection",
     )
+    _validate_frame_selection_equilibration_ps(
+        frame_selection=frame_selection,
+        expected=ctx.equilibration,
+        replicate=artifact.replicate,
+    )
     stored_metadata_equilibration = artifact.metadata.get("equilibration")
     if stored_metadata_equilibration is not None:
         _validate_equilibration_provenance(
@@ -353,6 +358,42 @@ def _equilibration_to_ps(value: Any) -> float:
     except ValueError as exc:
         raise MDAAggregationError(f"contacts: invalid equilibration provenance {value!r}") from exc
     return float(convert_time(numeric_value, unit, "ps"))
+
+
+def _validate_frame_selection_equilibration_ps(
+    *, frame_selection: Mapping[str, Any], expected: str, replicate: int
+) -> None:
+    """Validate numeric equilibration provenance against the active window.
+
+    Parameters
+    ----------
+    frame_selection : Mapping[str, Any]
+        Frame-selection provenance payload from the artifact.
+    expected : str
+        Requested aggregation equilibration window.
+    replicate : int
+        Replicate identifier used in error messages.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when the stored picosecond offset is missing, invalid, or stale.
+    """
+
+    stored_equilibration_ps = _numeric_frame_selection_value(
+        frame_selection, "equilibration_ps", replicate=str(replicate)
+    )
+    expected_equilibration_ps = _equilibration_to_ps(expected)
+    if not math.isclose(
+        stored_equilibration_ps,
+        expected_equilibration_ps,
+        rel_tol=1e-12,
+        abs_tol=1e-9,
+    ):
+        raise MDAAggregationError(
+            f"contacts: frame-selection equilibration_ps mismatch for replicate {replicate}: "
+            f"stored {stored_equilibration_ps!r}, expected {expected_equilibration_ps!r}"
+        )
 
 
 def _validate_artifact_detection_payload(
@@ -406,7 +447,7 @@ def _validate_loaded_compatibility(
     first_time_policy = first.artifact.metadata.get("time_axis_policy")
     first_identity = _protein_identity(first.data)
     for item in loaded:
-        _validate_loaded_frame_window(item)
+        _validate_loaded_frame_window(item, ctx)
     for item in loaded[1:]:
         _validate_frame_selection_compatibility(
             reference=first_frame_selection,
@@ -422,7 +463,6 @@ def _validate_loaded_compatibility(
                 f"contacts: protein residue identity/order mismatch for replicate "
                 f"{item.artifact.replicate}"
             )
-    del ctx
 
 
 def _validate_frame_selection_compatibility(
@@ -687,8 +727,21 @@ def _numeric_frame_selection_value(
     return numeric_value
 
 
-def _validate_loaded_frame_window(item: _LoadedContactArtifact) -> None:
-    """Validate sidecar frame counts against artifact frame-selection provenance."""
+def _validate_loaded_frame_window(item: _LoadedContactArtifact, ctx: AggregateContext) -> None:
+    """Validate sidecar frame counts against frame-selection provenance.
+
+    Parameters
+    ----------
+    item : _LoadedContactArtifact
+        Loaded contacts artifact and sidecar data.
+    ctx : AggregateContext
+        Current aggregation context carrying the requested equilibration window.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when sidecar frame counts or legacy frame windows are inconsistent.
+    """
 
     frame_indices = np.asarray(item.data["frame_indices"])
     frame_selection = item.artifact.provenance.get("frame_selection")
@@ -696,7 +749,9 @@ def _validate_loaded_frame_window(item: _LoadedContactArtifact) -> None:
         raise MDAAggregationError(
             f"contacts: replicate {item.artifact.replicate} lacks frame-selection provenance"
         )
-    loaded_frame_zero_count = _validate_loaded_frame_zero_artifact_window(item, frame_selection)
+    loaded_frame_zero_count = _validate_loaded_frame_zero_artifact_window(
+        item, frame_selection, ctx
+    )
     if loaded_frame_zero_count is not None:
         expected_count = loaded_frame_zero_count
         if frame_indices.size != expected_count:
@@ -725,7 +780,9 @@ def _validate_loaded_frame_window(item: _LoadedContactArtifact) -> None:
 
 
 def _validate_loaded_frame_zero_artifact_window(
-    item: _LoadedContactArtifact, frame_selection: Mapping[str, Any]
+    item: _LoadedContactArtifact,
+    frame_selection: Mapping[str, Any],
+    ctx: AggregateContext,
 ) -> int | None:
     """Validate one loaded-frame-relative contacts frame window.
 
@@ -738,6 +795,8 @@ def _validate_loaded_frame_zero_artifact_window(
         Loaded contacts artifact and sidecar data.
     frame_selection : Mapping[str, Any]
         Frame-selection provenance payload from the artifact.
+    ctx : AggregateContext
+        Current aggregation context carrying the requested equilibration window.
 
     Returns
     -------
@@ -784,8 +843,19 @@ def _validate_loaded_frame_zero_artifact_window(
             f"contacts: replicate {replicate} has invalid frame-selection equilibration_ps "
             f"{equilibration_ps!r}"
         )
+    requested_equilibration_ps = _equilibration_to_ps(ctx.equilibration)
+    if not math.isclose(
+        equilibration_ps,
+        requested_equilibration_ps,
+        rel_tol=1e-12,
+        abs_tol=1e-9,
+    ):
+        raise MDAAggregationError(
+            f"contacts: frame-selection equilibration_ps mismatch for replicate {replicate}: "
+            f"stored {equilibration_ps!r}, expected {requested_equilibration_ps!r}"
+        )
 
-    expected_equilibration_start = int(math.ceil(equilibration_ps / timestep_ps))
+    expected_equilibration_start = int(math.ceil(requested_equilibration_ps / timestep_ps))
     if equilibration_start != expected_equilibration_start:
         raise MDAAggregationError(
             f"contacts: frame-selection equilibration_start mismatch for replicate {replicate}: "

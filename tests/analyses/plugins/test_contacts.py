@@ -1108,6 +1108,50 @@ class TestAggregate:
         ):
             ContactsAnalysis().aggregate(ctx, [artifact])
 
+    def test_aggregate_rejects_loaded_frame_zero_stale_equilibration_ps(self, tmp_path):
+        """Aggregation should validate stored offsets against requested equilibration."""
+
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda.aggregation import MDAAggregationError
+
+        settings = ContactsSettings()
+        analysis_dir = tmp_path / "contacts"
+        stale_loaded_frame_zero_window = {
+            "start": 0,
+            "equilibration_start": 0,
+            "equilibration_ps": 0.0,
+            "first_frame_time_ps": None,
+            "selected_start_time_ps": 0.0,
+            "equilibration_time_reference": "loaded_frame_zero",
+        }
+        artifact = _write_contacts_replicate_artifact(
+            analysis_dir,
+            settings,
+            replicate=1,
+            equilibration="10ns",
+            frame_selection_overrides=stale_loaded_frame_zero_window,
+        )
+        condition = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1,),
+            sim_config=_make_hashable_sim_config(tmp_path),
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1,),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="10ns",
+            settings=settings,
+        )
+
+        with pytest.raises(
+            MDAAggregationError,
+            match="frame-selection equilibration_ps mismatch for replicate 1",
+        ):
+            ContactsAnalysis().aggregate(ctx, [artifact])
+
     def test_aggregate_rejects_matching_stale_legacy_loaded_frame_zero_windows(self, tmp_path):
         """Aggregation should not trust the first stale artifact as the baseline."""
 
