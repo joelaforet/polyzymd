@@ -108,6 +108,12 @@ Each entry describes one simulation condition to include in the comparison.
 | `posthoc_method` | `"ttest_bh"` or `"tukey_hsd"` | `"ttest_bh"` | Post-hoc pairwise comparison method. See {doc}`posthoc_testing` for details. |
 | `ttest_method` | `"student"` or `"welch"` | `"student"` | Two-sample t-test variance assumption. Only used when `posthoc_method` is `"ttest_bh"`. |
 
+`equilibration_time` is interpreted as an absolute MDAnalysis trajectory
+timestamp when the loaded trajectory exposes finite frame times. This handles
+continuation runs where the first loaded segment may begin after 0 ps. If frame
+timestamps are unavailable, PolyzyMD falls back to the legacy behavior and treats
+the first loaded frame as time zero.
+
 ## `mda_backend_policy`
 
 The default policy is empty and forwards no backend-related keyword arguments to

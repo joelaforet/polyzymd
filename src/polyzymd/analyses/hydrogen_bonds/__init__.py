@@ -947,14 +947,16 @@ class HydrogenBondsAnalysis(Analysis):
             Validated trajectory window.
         """
 
-        from polyzymd.analyses.shared.window import resolve_trajectory_window
+        from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
 
         timestep_ps = (
             float(ctx.settings.timestep_ps)
             if ctx.settings.timestep_ps is not None
-            else float(loader.get_timestep(replicate, unit="ps"))
+            else None
         )
-        return resolve_trajectory_window(
+        return resolve_replicate_trajectory_window(
+            loader=loader,
+            replicate=replicate,
             equilibration=ctx.equilibration,
             n_frames_total=len(universe.trajectory),
             timestep_ps=timestep_ps,

@@ -39,9 +39,8 @@ def get_trajectory_window(
         Resolved trajectory window.
     """
 
-    from polyzymd.analyses.shared.window import resolve_trajectory_window
+    from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
 
-    del replicate
     try:
         timestep_ps = float(universe.trajectory.dt)
         if timestep_ps <= 0:
@@ -52,7 +51,9 @@ def get_trajectory_window(
         except (AttributeError, TypeError, ValueError):
             timestep_ps = 1.0
 
-    return resolve_trajectory_window(
+    return resolve_replicate_trajectory_window(
+        loader=loader,
+        replicate=replicate,
         equilibration=ctx.equilibration,
         n_frames_total=len(universe.trajectory),
         timestep_ps=timestep_ps,
