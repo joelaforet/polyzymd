@@ -48,6 +48,7 @@ CONTACTS_LEGACY_RECOMPUTE_GUIDANCE = (
     "with recompute enabled or clear stale contacts caches."
 )
 _ABSOLUTE_TIMESTAMP_REFERENCES = frozenset({"trajectory_timestamp"})
+_FRAME_TIME_ABS_TOL_PS = 1e-6
 
 
 def _compute_sem(values: Sequence[float]) -> tuple[float, float]:
@@ -308,6 +309,8 @@ def _validate_artifact_frame_selection(artifact: ReplicateArtifact, ctx: Aggrega
         expected=ctx.equilibration,
         replicate=artifact.replicate,
     )
+    if _uses_absolute_timestamp_reference(frame_selection):
+        _validate_timestamp_artifact_window(artifact, frame_selection, ctx)
     stored_metadata_equilibration = artifact.metadata.get("equilibration")
     if stored_metadata_equilibration is not None:
         _validate_equilibration_provenance(
@@ -749,6 +752,11 @@ def _validate_loaded_frame_window(item: _LoadedContactArtifact, ctx: AggregateCo
         raise MDAAggregationError(
             f"contacts: replicate {item.artifact.replicate} lacks frame-selection provenance"
         )
+    if _uses_absolute_timestamp_reference(frame_selection):
+        expected_count = _validate_timestamp_artifact_window(item.artifact, frame_selection, ctx)
+        _validate_timestamp_sidecar_window(item, frame_selection, expected_count)
+        return
+
     loaded_frame_zero_count = _validate_loaded_frame_zero_artifact_window(
         item, frame_selection, ctx
     )
@@ -886,6 +894,216 @@ def _validate_loaded_frame_zero_artifact_window(
             f"stored {n_frames_selected!r}, expected {expected_selected_count!r}"
         )
     return expected_selected_count
+
+
+def _validate_timestamp_artifact_window(
+    artifact: ReplicateArtifact,
+    frame_selection: Mapping[str, Any],
+    ctx: AggregateContext,
+) -> int:
+    """Validate one timestamp-relative contacts frame window.
+
+    Timestamp-relative artifacts carry per-replicate absolute trajectory time
+    metadata. Each artifact must independently match the requested equilibration
+    because cross-replicate compatibility allows different resolved starts.
+
+    Parameters
+    ----------
+    artifact : ReplicateArtifact
+        Contacts replicate artifact to validate.
+    frame_selection : Mapping[str, Any]
+        Frame-selection provenance payload from the artifact.
+    ctx : AggregateContext
+        Current aggregation context carrying the requested equilibration window.
+
+    Returns
+    -------
+    int
+        Validated selected-frame count.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when the stored timestamp-relative window does not match the
+        requested equilibration-derived selection.
+    """
+
+    replicate = artifact.replicate
+    start = _integer_frame_selection_value(frame_selection, "start", replicate=str(replicate))
+    stop = _integer_frame_selection_value(frame_selection, "stop", replicate=str(replicate))
+    step = _normalized_frame_selection_step(frame_selection)
+    equilibration_start = _integer_frame_selection_value(
+        frame_selection, "equilibration_start", replicate=str(replicate)
+    )
+    n_frames_selected = _integer_frame_selection_value(
+        frame_selection, "n_frames_selected", replicate=str(replicate)
+    )
+    timestep_ps = _numeric_frame_selection_value(
+        frame_selection, "timestep_ps", replicate=str(replicate)
+    )
+    equilibration_ps = _numeric_frame_selection_value(
+        frame_selection, "equilibration_ps", replicate=str(replicate)
+    )
+    first_frame_time_ps = _numeric_frame_selection_value(
+        frame_selection, "first_frame_time_ps", replicate=str(replicate)
+    )
+    selected_start_time_ps = _numeric_frame_selection_value(
+        frame_selection, "selected_start_time_ps", replicate=str(replicate)
+    )
+    if timestep_ps <= 0.0:
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} has invalid frame-selection timestep_ps "
+            f"{timestep_ps!r}"
+        )
+    if equilibration_ps < 0.0:
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} has invalid frame-selection equilibration_ps "
+            f"{equilibration_ps!r}"
+        )
+
+    requested_equilibration_ps = _equilibration_to_ps(ctx.equilibration)
+    if not math.isclose(
+        equilibration_ps,
+        requested_equilibration_ps,
+        rel_tol=1e-12,
+        abs_tol=1e-9,
+    ):
+        raise MDAAggregationError(
+            f"contacts: frame-selection equilibration_ps mismatch for replicate {replicate}: "
+            f"stored {equilibration_ps!r}, expected {requested_equilibration_ps!r}"
+        )
+
+    equilibration_offset_ps = max(0.0, requested_equilibration_ps - first_frame_time_ps)
+    expected_start = _ceil_frame_position(equilibration_offset_ps, timestep_ps)
+    if start != expected_start:
+        raise MDAAggregationError(
+            f"contacts: frame-selection start mismatch for replicate {replicate}: "
+            f"stored {start!r}, expected {expected_start!r}"
+        )
+    if equilibration_start != expected_start:
+        raise MDAAggregationError(
+            f"contacts: frame-selection equilibration_start mismatch for replicate {replicate}: "
+            f"stored {equilibration_start!r}, expected {expected_start!r}"
+        )
+
+    expected_start_time_ps = first_frame_time_ps + start * timestep_ps
+    if not math.isclose(
+        selected_start_time_ps,
+        expected_start_time_ps,
+        rel_tol=1e-12,
+        abs_tol=_FRAME_TIME_ABS_TOL_PS,
+    ):
+        raise MDAAggregationError(
+            f"contacts: frame-selection selected_start_time_ps mismatch for replicate {replicate}: "
+            f"stored {selected_start_time_ps!r}, expected {expected_start_time_ps!r}"
+        )
+
+    expected_selected_count = len(range(start, stop, step))
+    if n_frames_selected != expected_selected_count:
+        raise MDAAggregationError(
+            f"contacts: frame-selection n_frames_selected mismatch for replicate {replicate}: "
+            f"stored {n_frames_selected!r}, expected {expected_selected_count!r}"
+        )
+    return expected_selected_count
+
+
+def _ceil_frame_position(offset_ps: float, timestep_ps: float) -> int:
+    """Return the first frame at or after a time offset."""
+
+    frame_position = offset_ps / timestep_ps
+    rounded_position = round(frame_position)
+    if math.isclose(frame_position, rounded_position, rel_tol=1e-12, abs_tol=1e-12):
+        return int(rounded_position)
+    return int(math.floor(frame_position)) + 1
+
+
+def _validate_timestamp_sidecar_window(
+    item: _LoadedContactArtifact,
+    frame_selection: Mapping[str, Any],
+    expected_count: int,
+) -> None:
+    """Validate timestamp sidecar arrays against frame-selection provenance.
+
+    Parameters
+    ----------
+    item : _LoadedContactArtifact
+        Loaded contacts artifact and event sidecar arrays.
+    frame_selection : Mapping[str, Any]
+        Frame-selection provenance payload from the artifact.
+    expected_count : int
+        Validated selected-frame count.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when sidecar frame or time arrays are stale relative to the stored
+        timestamp-aware frame-selection window.
+    """
+
+    replicate = item.artifact.replicate
+    start = _integer_frame_selection_value(frame_selection, "start", replicate=str(replicate))
+    stop = _integer_frame_selection_value(frame_selection, "stop", replicate=str(replicate))
+    step = _normalized_frame_selection_step(frame_selection)
+    timestep_ps = _numeric_frame_selection_value(
+        frame_selection, "timestep_ps", replicate=str(replicate)
+    )
+    first_frame_time_ps = _numeric_frame_selection_value(
+        frame_selection, "first_frame_time_ps", replicate=str(replicate)
+    )
+    selected_start_time_ps = _numeric_frame_selection_value(
+        frame_selection, "selected_start_time_ps", replicate=str(replicate)
+    )
+
+    frame_indices = np.asarray(item.data["frame_indices"])
+    if frame_indices.size != expected_count:
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar frame count mismatch: "
+            f"sidecar has {frame_indices.size}, validated window reports {expected_count}. "
+            "Recompute contacts."
+        )
+    expected_frame_indices = np.asarray(list(range(start, stop, step)), dtype=np.int64)
+    if not np.array_equal(frame_indices.astype(np.int64, copy=False), expected_frame_indices):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar frame_indices mismatch: "
+            "sidecar does not match frame-selection window. Recompute contacts."
+        )
+
+    if "time_ps" not in item.data:
+        return
+    time_ps = np.asarray(item.data["time_ps"], dtype=np.float64)
+    if time_ps.size != expected_count:
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar time count mismatch: "
+            f"sidecar has {time_ps.size}, validated window reports {expected_count}. "
+            "Recompute contacts."
+        )
+    if not np.all(np.isfinite(time_ps)):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar time_ps contains non-finite values. "
+            "Recompute contacts."
+        )
+    expected_time_ps = first_frame_time_ps + expected_frame_indices.astype(np.float64) * timestep_ps
+    if time_ps.size and not math.isclose(
+        float(time_ps[0]),
+        selected_start_time_ps,
+        rel_tol=1e-12,
+        abs_tol=_FRAME_TIME_ABS_TOL_PS,
+    ):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar first time mismatch: "
+            f"stored {float(time_ps[0])!r}, expected {selected_start_time_ps!r}. "
+            "Recompute contacts."
+        )
+    if not np.allclose(
+        time_ps,
+        expected_time_ps,
+        rtol=1e-12,
+        atol=_FRAME_TIME_ABS_TOL_PS,
+    ):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar time_ps mismatch: "
+            "sidecar times do not align with frame indices and timestep. Recompute contacts."
+        )
 
 
 def _protein_identity(data: Mapping[str, Any]) -> tuple[tuple[int, str, str, str], ...]:

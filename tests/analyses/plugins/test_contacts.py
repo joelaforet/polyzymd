@@ -671,25 +671,43 @@ def _write_contacts_replicate_artifact(
     if frame_selection_overrides is not None:
         frame_selection.update(frame_selection_overrides)
     n_frames_selected = int(frame_selection["n_frames_selected"])
+    start = int(frame_selection["start"])
+    stop = int(frame_selection["stop"])
+    step = int(frame_selection.get("step") or 1)
+    timestep_ps = float(frame_selection["timestep_ps"])
+    first_frame_time_ps = frame_selection.get("first_frame_time_ps")
+    time_reference = str(frame_selection.get("equilibration_time_reference"))
+    time_origin_ps = (
+        float(first_frame_time_ps)
+        if time_reference == "trajectory_timestamp" and first_frame_time_ps is not None
+        else 0.0
+    )
+    frame_indices = np.arange(start, stop, step, dtype=np.int64)
+    if frame_indices.size != n_frames_selected:
+        frame_indices = frame_indices[:n_frames_selected]
+    time_ps = time_origin_ps + frame_indices.astype(np.float64) * timestep_ps
     protein_resids = np.arange(1, len(fractions) + 1, dtype=np.int64)
     protein_resnames = np.asarray(["ALA", "ASP"][: len(fractions)], dtype="U16")
     protein_groups = np.asarray(["nonpolar", "charged"][: len(fractions)], dtype="U32")
     polymer_resnames = np.asarray(["PEG"], dtype="U16")
     start_indices = np.arange(len(events), dtype=np.int64)
+    event_start_frames = (
+        frame_indices[start_indices] if frame_indices.size >= start_indices.size else start_indices
+    )
     durations_ns = np.asarray([event[2] for event in events], dtype=np.float64)
     protein_indices = np.asarray([event[0] for event in events], dtype=np.int64)
     sidecar = store.write_npz_sidecar(
         "sidecars/contact_events.npz",
         event_start_sample_index=start_indices,
-        event_start_frame=start_indices,
+        event_start_frame=event_start_frames,
         event_duration_samples=np.ones(len(events), dtype=np.int64),
         event_duration_ps=durations_ns * 1000.0,
         event_duration_ns=durations_ns,
         protein_residue_index=protein_indices,
         polymer_residue_index=np.zeros(len(events), dtype=np.int64),
         polymer_chain_index=np.zeros(len(events), dtype=np.int64),
-        frame_indices=np.arange(n_frames_selected, dtype=np.int64),
-        time_ps=np.arange(n_frames_selected, dtype=np.float64) * 1000.0,
+        frame_indices=frame_indices,
+        time_ps=time_ps,
         protein_resids=protein_resids,
         protein_resnames=protein_resnames,
         protein_groups=protein_groups,
@@ -911,9 +929,15 @@ class TestAggregate:
                 analysis_dir,
                 settings,
                 replicate=1,
+                equilibration="200ns",
                 frame_selection_overrides={
+                    "start": 4,
+                    "stop": 14,
+                    "equilibration_start": 4,
+                    "timestep_ps": 400.0,
                     "first_frame_time_ps": 198_400.0,
                     "selected_start_time_ps": 200_000.0,
+                    "n_frames_total": 20,
                     "warning_message": "replicate 1 warning",
                 },
             ),
@@ -921,9 +945,14 @@ class TestAggregate:
                 analysis_dir,
                 settings,
                 replicate=2,
+                equilibration="200ns",
                 frame_selection_overrides={
+                    "start": 0,
+                    "stop": 10,
+                    "equilibration_start": 0,
+                    "timestep_ps": 400.0,
                     "first_frame_time_ps": 202_400.0,
-                    "selected_start_time_ps": 204_000.0,
+                    "selected_start_time_ps": 202_400.0,
                     "warning_message": "replicate 2 warning",
                 },
             ),
@@ -938,7 +967,7 @@ class TestAggregate:
             condition=cond,
             replicates=(1, 2),
             output_dir=analysis_dir / "aggregated",
-            equilibration="10ns",
+            equilibration="200ns",
             settings=settings,
         )
 
@@ -1000,6 +1029,47 @@ class TestAggregate:
         result = ContactsAnalysis().aggregate(ctx, artifacts)
 
         assert result.payload["total_frames_per_replicate"] == [10, 10]
+
+    def test_aggregate_rejects_stale_timestamp_window_for_requested_equilibration(self, tmp_path):
+        """Aggregation should validate timestamp-derived starts per artifact."""
+
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda.aggregation import MDAAggregationError
+
+        settings = ContactsSettings()
+        analysis_dir = tmp_path / "contacts"
+        artifact = _write_contacts_replicate_artifact(
+            analysis_dir,
+            settings,
+            replicate=1,
+            equilibration="200ns",
+            frame_selection_overrides={
+                "start": 0,
+                "stop": 10,
+                "equilibration_start": 0,
+                "timestep_ps": 400.0,
+                "first_frame_time_ps": 198_400.0,
+                "selected_start_time_ps": 198_400.0,
+                "n_frames_total": 20,
+            },
+        )
+        cond = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1,),
+            sim_config=_make_hashable_sim_config(tmp_path),
+        )
+        ctx = AggregateContext(
+            condition=cond,
+            replicates=(1,),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="200ns",
+            settings=settings,
+        )
+
+        with pytest.raises(MDAAggregationError, match="frame-selection start mismatch"):
+            ContactsAnalysis().aggregate(ctx, [artifact])
 
     @pytest.mark.parametrize(
         ("candidate_overrides", "message"),
