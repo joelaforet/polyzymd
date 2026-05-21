@@ -950,9 +950,7 @@ class HydrogenBondsAnalysis(Analysis):
         from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
 
         timestep_ps = (
-            float(ctx.settings.timestep_ps)
-            if ctx.settings.timestep_ps is not None
-            else None
+            float(ctx.settings.timestep_ps) if ctx.settings.timestep_ps is not None else None
         )
         return resolve_replicate_trajectory_window(
             loader=loader,

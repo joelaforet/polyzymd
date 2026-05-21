@@ -175,7 +175,9 @@ def resolve_replicate_trajectory_window(
     """
 
     resolved_timestep_ps = (
-        float(timestep_ps) if timestep_ps is not None else float(loader.get_timestep(replicate, unit="ps"))
+        float(timestep_ps)
+        if timestep_ps is not None
+        else float(loader.get_timestep(replicate, unit="ps"))
     )
     try:
         first_frame_time_ps = loader.get_first_frame_time(replicate, unit="ps")
