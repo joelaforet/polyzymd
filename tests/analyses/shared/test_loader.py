@@ -187,6 +187,21 @@ class TestTrajectoryTimingMetadata:
         assert loader.get_first_frame_time(1) == pytest.approx(198_400.0)
         assert trajectory.frame == 1
 
+    def test_get_frame_times_prefers_raw_timestep_metadata_and_restores_frame(self) -> None:
+        """Frame-time extraction should use raw timestamps and restore reader position."""
+
+        trajectory = _FakeTrajectory(
+            [0.0, 400.0, 800.0],
+            raw_times_ps=[198_400.0, 198_800.0, 199_200.0],
+            current_frame=1,
+        )
+        loader = _loader_for_trajectory(trajectory)
+
+        times = loader.get_frame_times(1, unit="ps")
+
+        assert times.tolist() == pytest.approx([198_400.0, 198_800.0, 199_200.0])
+        assert trajectory.frame == 1
+
     def test_get_timestep_restores_current_frame(self) -> None:
         """Timestep probing should restore the previous reader frame when feasible."""
 

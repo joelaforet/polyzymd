@@ -717,9 +717,22 @@ class TrajectoryLoader:
             Array of time values for each frame
         """
         u = self.load_universe(replicate)
+        trajectory = u.trajectory
 
-        # Get times from trajectory
-        times = np.array([ts.time for ts in u.trajectory], dtype=np.float64)
+        previous_frame = _trajectory_frame_index(trajectory)
+        try:
+            times_ps = []
+            for frame_index in range(len(trajectory)):
+                trajectory[frame_index]
+                time_ps = _trajectory_time(trajectory)
+                if time_ps is None:
+                    raise ValueError(
+                        "Trajectory timestamps are unavailable for frame-time extraction"
+                    )
+                times_ps.append(time_ps)
+        finally:
+            _restore_trajectory_frame(trajectory, previous_frame)
+        times = np.array(times_ps, dtype=np.float64)
 
         # Convert units (MDAnalysis uses ps internally)
         if unit == "ns":
