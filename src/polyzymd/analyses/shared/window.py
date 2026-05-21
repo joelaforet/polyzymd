@@ -246,6 +246,20 @@ def resolve_trajectory_window(
         time_reference = "trajectory_timestamp"
     equilibration_ns = equilibration_offset_ps / 1000.0
     trajectory_ns = (n_frames_total * timestep_ps) / 1000.0
+    if finite_first_frame_time_ps is not None:
+        last_frame_time_ps = finite_first_frame_time_ps + (n_frames_total - 1) * timestep_ps
+        if equilibration_ps > last_frame_time_ps and not math.isclose(
+            equilibration_ps,
+            last_frame_time_ps,
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        ):
+            raise ValueError(
+                "Equilibration time "
+                f"({equilibration_ps:.3f} ps) leaves no frame at or after equilibration "
+                f"in loaded trajectory timestamps {finite_first_frame_time_ps:.3f} ps to "
+                f"{last_frame_time_ps:.3f} ps with timestep {timestep_ps:.3f} ps"
+            )
 
     is_valid, warning_message = validate_equilibration_time(equilibration_ns, trajectory_ns)
     if not is_valid:
@@ -260,7 +274,6 @@ def resolve_trajectory_window(
                 f"equilibration in a {n_frames_total}-frame trajectory with timestep "
                 f"{timestep_ps:.3f} ps"
             )
-        last_frame_time_ps = finite_first_frame_time_ps + (n_frames_total - 1) * timestep_ps
         raise ValueError(
             "Equilibration time "
             f"({equilibration_ps:.3f} ps) leaves no frame at or after equilibration "
