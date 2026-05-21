@@ -1001,6 +1001,71 @@ class TestAggregate:
 
         assert result.payload["total_frames_per_replicate"] == [10, 10]
 
+    @pytest.mark.parametrize(
+        ("candidate_overrides", "message"),
+        [
+            (
+                {"start": 11, "stop": 21, "selected_start_time_ps": 11_000.0},
+                "frame-selection start mismatch",
+            ),
+            ({"equilibration_start": 11}, "frame-selection equilibration_start mismatch"),
+        ],
+    )
+    def test_aggregate_rejects_legacy_frame_selection_window_mismatch(
+        self,
+        tmp_path,
+        candidate_overrides,
+        message,
+    ):
+        """Aggregation should reject mismatched loaded-frame-relative windows."""
+
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda.aggregation import MDAAggregationError
+
+        settings = ContactsSettings()
+        analysis_dir = tmp_path / "contacts"
+        loaded_frame_zero_window = {
+            "start": 10,
+            "stop": 20,
+            "equilibration_start": 10,
+            "first_frame_time_ps": None,
+            "selected_start_time_ps": 10_000.0,
+            "equilibration_time_reference": "loaded_frame_zero",
+            "n_frames_total": 20,
+            "n_frames_selected": 10,
+        }
+        artifacts = [
+            _write_contacts_replicate_artifact(
+                analysis_dir,
+                settings,
+                replicate=1,
+                frame_selection_overrides=loaded_frame_zero_window,
+            ),
+            _write_contacts_replicate_artifact(
+                analysis_dir,
+                settings,
+                replicate=2,
+                frame_selection_overrides=loaded_frame_zero_window | candidate_overrides,
+            ),
+        ]
+        cond = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=_make_hashable_sim_config(tmp_path),
+        )
+        ctx = AggregateContext(
+            condition=cond,
+            replicates=(1, 2),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="10ns",
+            settings=settings,
+        )
+
+        with pytest.raises(MDAAggregationError, match=message):
+            ContactsAnalysis().aggregate(ctx, artifacts)
+
     def test_aggregate_passes_disabled_residence_time_setting(self, tmp_path):
         import numpy as np
 

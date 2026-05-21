@@ -47,6 +47,7 @@ CONTACTS_LEGACY_RECOMPUTE_GUIDANCE = (
     "Legacy ContactResult/AggregatedContactResult caches are not compatible; rerun contacts "
     "with recompute enabled or clear stale contacts caches."
 )
+_ABSOLUTE_TIMESTAMP_REFERENCES = frozenset({"trajectory_timestamp"})
 
 
 def _compute_sem(values: Sequence[float]) -> tuple[float, float]:
@@ -433,8 +434,9 @@ def _validate_frame_selection_compatibility(
     """Validate scientifically relevant frame-selection compatibility.
 
     Per-replicate timestamp provenance can differ when trajectories begin at
-    different absolute times. Aggregation only requires matching selector mode,
-    stride, time reference policy, timestep, and equilibration duration.
+    different absolute times. Legacy loaded-frame-relative provenance must keep
+    matching resolved frame windows because offsets are interpreted against each
+    loaded trajectory origin.
 
     Parameters
     ----------
@@ -485,6 +487,115 @@ def _validate_frame_selection_compatibility(
                 f"contacts: frame-selection {field} mismatch for replicate {replicate}: "
                 f"stored {candidate_value!r}, expected {reference_value!r}"
             )
+
+    if not reference_uses_frames and not _uses_absolute_timestamp_reference(reference):
+        _validate_loaded_frame_zero_window_compatibility(
+            reference=reference,
+            candidate=candidate,
+            replicate=replicate,
+        )
+
+
+def _uses_absolute_timestamp_reference(frame_selection: Mapping[str, Any]) -> bool:
+    """Return whether frame selection uses absolute trajectory timestamps.
+
+    Parameters
+    ----------
+    frame_selection : Mapping[str, Any]
+        Frame-selection provenance payload.
+
+    Returns
+    -------
+    bool
+        ``True`` when the equilibration time reference is based on absolute
+        trajectory timestamps.
+    """
+
+    return _normalized_time_reference(frame_selection) in _ABSOLUTE_TIMESTAMP_REFERENCES
+
+
+def _validate_loaded_frame_zero_window_compatibility(
+    *,
+    reference: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+    replicate: int,
+) -> None:
+    """Validate loaded-frame-relative slice windows use matching offsets.
+
+    Parameters
+    ----------
+    reference : Mapping[str, Any]
+        Frame-selection provenance from the first replicate artifact.
+    candidate : Mapping[str, Any]
+        Frame-selection provenance from the candidate replicate artifact.
+    replicate : int
+        Candidate replicate identifier used in error messages.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when loaded-frame-relative fields define different analysis
+        windows across replicate artifacts.
+    """
+
+    for field in ("start", "equilibration_start", "n_frames_selected"):
+        reference_value = _integer_frame_selection_value(reference, field, replicate="reference")
+        candidate_value = _integer_frame_selection_value(candidate, field, replicate=str(replicate))
+        if candidate_value != reference_value:
+            raise MDAAggregationError(
+                f"contacts: frame-selection {field} mismatch for replicate {replicate}: "
+                f"stored {candidate_value!r}, expected {reference_value!r}"
+            )
+
+    reference_start_time = _numeric_frame_selection_value(
+        reference, "selected_start_time_ps", replicate="reference"
+    )
+    candidate_start_time = _numeric_frame_selection_value(
+        candidate, "selected_start_time_ps", replicate=str(replicate)
+    )
+    if not math.isclose(reference_start_time, candidate_start_time, rel_tol=1e-12, abs_tol=1e-9):
+        raise MDAAggregationError(
+            f"contacts: frame-selection selected_start_time_ps mismatch for replicate {replicate}: "
+            f"stored {candidate_start_time!r}, expected {reference_start_time!r}"
+        )
+
+
+def _integer_frame_selection_value(
+    frame_selection: Mapping[str, Any], field: str, *, replicate: str
+) -> int:
+    """Return an integer frame-selection value.
+
+    Parameters
+    ----------
+    frame_selection : Mapping[str, Any]
+        Frame-selection provenance payload.
+    field : str
+        Integer field to read.
+    replicate : str
+        Replicate label used in error messages.
+
+    Returns
+    -------
+    int
+        Integer provenance value.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when the value is missing, noninteger, or negative.
+    """
+
+    value = frame_selection.get(field)
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} has invalid frame-selection {field} {value!r}"
+        )
+    integer_value = int(value)
+    if integer_value < 0:
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} has invalid frame-selection {field} {value!r}"
+        )
+    return integer_value
 
 
 def _normalized_frame_selection_step(frame_selection: Mapping[str, Any]) -> int:
