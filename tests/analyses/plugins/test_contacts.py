@@ -606,8 +606,34 @@ def _write_contacts_replicate_artifact(
     equilibration: str = "10ns",
     contact_fractions: list[float] | None = None,
     event_durations_ns: list[tuple[int, str, float]] | None = None,
+    frame_selection_overrides: dict[str, object] | None = None,
 ):
-    """Write a synthetic contacts replicate artifact and event sidecar."""
+    """Write a synthetic contacts replicate artifact and event sidecar.
+
+    Parameters
+    ----------
+    analysis_dir : Path
+        Contacts analysis directory that will receive ``run_<replicate>`` artifacts.
+    settings : Any
+        Contacts settings used to build detection identity metadata.
+    condition_label : str, optional
+        Condition label for the artifact, by default ``"test"``.
+    replicate : int, optional
+        Replicate identifier, by default ``1``.
+    equilibration : str, optional
+        Equilibration window string, by default ``"10ns"``.
+    contact_fractions : list[float] | None, optional
+        Synthetic per-residue contact fractions, by default ``None``.
+    event_durations_ns : list[tuple[int, str, float]] | None, optional
+        Synthetic residence-time events, by default ``None``.
+    frame_selection_overrides : dict[str, object] | None, optional
+        Frame-selection provenance fields to override, by default ``None``.
+
+    Returns
+    -------
+    ReplicateArtifact
+        Written contacts replicate artifact.
+    """
 
     import numpy as np
 
@@ -618,11 +644,33 @@ def _write_contacts_replicate_artifact(
         contacts_detection_identity_payload,
     )
     from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
+    from polyzymd.analyses.shared.loader import convert_time, parse_time_string
 
     fractions = contact_fractions or [0.5, 0.0]
     events = event_durations_ns or []
     run_dir = analysis_dir / f"run_{replicate}"
     store = ArtifactStore(run_dir)
+    equilibration_value, equilibration_unit = parse_time_string(equilibration)
+    equilibration_ps = float(convert_time(equilibration_value, equilibration_unit, "ps"))
+    frame_selection = {
+        "start": 0,
+        "stop": 10,
+        "step": 1,
+        "frames": None,
+        "equilibration": equilibration,
+        "equilibration_start": 0,
+        "equilibration_ps": equilibration_ps,
+        "timestep_ps": 1000.0,
+        "first_frame_time_ps": equilibration_ps,
+        "selected_start_time_ps": equilibration_ps,
+        "equilibration_time_reference": "trajectory_timestamp",
+        "n_frames_total": 10,
+        "n_frames_selected": 10,
+        "warning_message": None,
+    }
+    if frame_selection_overrides is not None:
+        frame_selection.update(frame_selection_overrides)
+    n_frames_selected = int(frame_selection["n_frames_selected"])
     protein_resids = np.arange(1, len(fractions) + 1, dtype=np.int64)
     protein_resnames = np.asarray(["ALA", "ASP"][: len(fractions)], dtype="U16")
     protein_groups = np.asarray(["nonpolar", "charged"][: len(fractions)], dtype="U32")
@@ -640,8 +688,8 @@ def _write_contacts_replicate_artifact(
         protein_residue_index=protein_indices,
         polymer_residue_index=np.zeros(len(events), dtype=np.int64),
         polymer_chain_index=np.zeros(len(events), dtype=np.int64),
-        frame_indices=np.arange(10, dtype=np.int64),
-        time_ps=np.arange(10, dtype=np.float64) * 1000.0,
+        frame_indices=np.arange(n_frames_selected, dtype=np.int64),
+        time_ps=np.arange(n_frames_selected, dtype=np.float64) * 1000.0,
         protein_resids=protein_resids,
         protein_resnames=protein_resnames,
         protein_groups=protein_groups,
@@ -668,7 +716,7 @@ def _write_contacts_replicate_artifact(
                 "mean_contact_fraction": sum(fractions) / len(fractions),
             },
             "n_frames_total": 10,
-            "n_frames_used": 10,
+            "n_frames_used": n_frames_selected,
             "n_contact_events": len(events),
             "n_contacted_residues": sum(value > 0 for value in fractions),
             "n_protein_residues": len(fractions),
@@ -694,15 +742,7 @@ def _write_contacts_replicate_artifact(
         },
         sidecars=[sidecar],
         provenance={
-            "frame_selection": {
-                "start": 0,
-                "stop": 10,
-                "step": 1,
-                "equilibration": equilibration,
-                "n_frames_total": 10,
-                "n_frames_selected": 10,
-                "timestep_ps": 1000.0,
-            },
+            "frame_selection": frame_selection,
             "detection_identity": detection,
             "protein_selection": detection["protein_selection"],
             "polymer_selection": detection["polymer_selection"],
@@ -856,6 +896,110 @@ class TestAggregate:
         assert ArtifactStore(output_dir).validate_sidecar(result.sidecars[0]).exists()
         assert result.payload["metrics"]["coverage"]["values"] == [1.0, 1.0, 0.5]
         assert result.payload["metrics"]["mean_contact_fraction"]["n"] == 3
+
+    def test_aggregate_accepts_timestamp_provenance_differences(self, tmp_path):
+        """Aggregation should allow per-replicate timestamp provenance values."""
+
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda import ConditionArtifact
+
+        settings = ContactsSettings()
+        analysis_dir = tmp_path / "contacts"
+        artifacts = [
+            _write_contacts_replicate_artifact(
+                analysis_dir,
+                settings,
+                replicate=1,
+                frame_selection_overrides={
+                    "first_frame_time_ps": 198_400.0,
+                    "selected_start_time_ps": 200_000.0,
+                    "warning_message": "replicate 1 warning",
+                },
+            ),
+            _write_contacts_replicate_artifact(
+                analysis_dir,
+                settings,
+                replicate=2,
+                frame_selection_overrides={
+                    "first_frame_time_ps": 202_400.0,
+                    "selected_start_time_ps": 204_000.0,
+                    "warning_message": "replicate 2 warning",
+                },
+            ),
+        ]
+        cond = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=_make_hashable_sim_config(tmp_path),
+        )
+        ctx = AggregateContext(
+            condition=cond,
+            replicates=(1, 2),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="10ns",
+            settings=settings,
+        )
+
+        result = ContactsAnalysis().aggregate(ctx, artifacts)
+
+        assert isinstance(result, ConditionArtifact)
+        assert result.payload["metrics"]["mean_contact_fraction"]["n"] == 2
+
+    def test_aggregate_accepts_mixed_timestamp_derived_starts(self, tmp_path):
+        """Aggregation should allow timestamp-derived start-frame differences."""
+
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        settings = ContactsSettings()
+        analysis_dir = tmp_path / "contacts"
+        artifacts = [
+            _write_contacts_replicate_artifact(
+                analysis_dir,
+                settings,
+                replicate=1,
+                frame_selection_overrides={
+                    "start": 4,
+                    "stop": 14,
+                    "equilibration_start": 4,
+                    "first_frame_time_ps": 6_000.0,
+                    "selected_start_time_ps": 10_000.0,
+                    "n_frames_total": 20,
+                },
+            ),
+            _write_contacts_replicate_artifact(
+                analysis_dir,
+                settings,
+                replicate=2,
+                frame_selection_overrides={
+                    "start": 0,
+                    "stop": 10,
+                    "equilibration_start": 0,
+                    "first_frame_time_ps": 10_000.0,
+                    "selected_start_time_ps": 10_000.0,
+                    "n_frames_total": 10,
+                },
+            ),
+        ]
+        cond = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=_make_hashable_sim_config(tmp_path),
+        )
+        ctx = AggregateContext(
+            condition=cond,
+            replicates=(1, 2),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="10ns",
+            settings=settings,
+        )
+
+        result = ContactsAnalysis().aggregate(ctx, artifacts)
+
+        assert result.payload["total_frames_per_replicate"] == [10, 10]
 
     def test_aggregate_passes_disabled_residence_time_setting(self, tmp_path):
         import numpy as np

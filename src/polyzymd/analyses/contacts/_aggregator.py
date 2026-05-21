@@ -22,7 +22,9 @@ References
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
+from numbers import Integral, Real
 from typing import Any
 
 import numpy as np
@@ -405,10 +407,11 @@ def _validate_loaded_compatibility(
     for item in loaded:
         _validate_loaded_frame_window(item)
     for item in loaded[1:]:
-        if item.artifact.provenance.get("frame_selection") != first_frame_selection:
-            raise MDAAggregationError(
-                f"contacts: frame-selection provenance mismatch for replicate {item.artifact.replicate}"
-            )
+        _validate_frame_selection_compatibility(
+            reference=first_frame_selection,
+            candidate=item.artifact.provenance.get("frame_selection"),
+            replicate=item.artifact.replicate,
+        )
         if item.artifact.metadata.get("time_axis_policy") != first_time_policy:
             raise MDAAggregationError(
                 f"contacts: time-axis policy mismatch for replicate {item.artifact.replicate}"
@@ -419,6 +422,158 @@ def _validate_loaded_compatibility(
                 f"{item.artifact.replicate}"
             )
     del ctx
+
+
+def _validate_frame_selection_compatibility(
+    *,
+    reference: Any,
+    candidate: Any,
+    replicate: int,
+) -> None:
+    """Validate scientifically relevant frame-selection compatibility.
+
+    Per-replicate timestamp provenance can differ when trajectories begin at
+    different absolute times. Aggregation only requires matching selector mode,
+    stride, time reference policy, timestep, and equilibration duration.
+
+    Parameters
+    ----------
+    reference : Any
+        Frame-selection provenance from the first replicate artifact.
+    candidate : Any
+        Frame-selection provenance from the candidate replicate artifact.
+    replicate : int
+        Candidate replicate identifier used in error messages.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when compatibility-critical frame-selection fields differ.
+    """
+
+    if not isinstance(reference, Mapping) or not isinstance(candidate, Mapping):
+        raise MDAAggregationError(
+            f"contacts: frame-selection provenance mismatch for replicate {replicate}"
+        )
+
+    reference_uses_frames = reference.get("frames") is not None
+    candidate_uses_frames = candidate.get("frames") is not None
+    if reference_uses_frames != candidate_uses_frames:
+        raise MDAAggregationError(
+            f"contacts: frame-selection mode mismatch for replicate {replicate}"
+        )
+    if reference_uses_frames:
+        if candidate.get("frames") != reference.get("frames"):
+            raise MDAAggregationError(
+                f"contacts: explicit frame-selection mismatch for replicate {replicate}"
+            )
+    elif _normalized_frame_selection_step(candidate) != _normalized_frame_selection_step(reference):
+        raise MDAAggregationError(
+            f"contacts: frame-selection step mismatch for replicate {replicate}"
+        )
+
+    if _normalized_time_reference(candidate) != _normalized_time_reference(reference):
+        raise MDAAggregationError(
+            f"contacts: equilibration time-reference mismatch for replicate {replicate}"
+        )
+
+    for field in ("timestep_ps", "equilibration_ps"):
+        reference_value = _numeric_frame_selection_value(reference, field, replicate="reference")
+        candidate_value = _numeric_frame_selection_value(candidate, field, replicate=str(replicate))
+        if not math.isclose(reference_value, candidate_value, rel_tol=1e-12, abs_tol=1e-9):
+            raise MDAAggregationError(
+                f"contacts: frame-selection {field} mismatch for replicate {replicate}: "
+                f"stored {candidate_value!r}, expected {reference_value!r}"
+            )
+
+
+def _normalized_frame_selection_step(frame_selection: Mapping[str, Any]) -> int:
+    """Return normalized slice step for frame-selection compatibility checks.
+
+    Parameters
+    ----------
+    frame_selection : Mapping[str, Any]
+        Frame-selection provenance payload.
+
+    Returns
+    -------
+    int
+        Positive stride with missing values normalized to ``1``.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when the stride is missing an integer-compatible value.
+    """
+
+    value = frame_selection.get("step", 1)
+    if value is None:
+        return 1
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise MDAAggregationError(f"contacts: invalid frame-selection step {value!r}")
+    step = int(value)
+    if step < 1:
+        raise MDAAggregationError(f"contacts: invalid frame-selection step {value!r}")
+    return step
+
+
+def _normalized_time_reference(frame_selection: Mapping[str, Any]) -> str:
+    """Return normalized equilibration time-reference policy.
+
+    Parameters
+    ----------
+    frame_selection : Mapping[str, Any]
+        Frame-selection provenance payload.
+
+    Returns
+    -------
+    str
+        Time-reference policy with missing values normalized to
+        ``"loaded_frame_zero"``.
+    """
+
+    value = frame_selection.get("equilibration_time_reference", "loaded_frame_zero")
+    if value is None:
+        return "loaded_frame_zero"
+    return str(value)
+
+
+def _numeric_frame_selection_value(
+    frame_selection: Mapping[str, Any], field: str, *, replicate: str
+) -> float:
+    """Return a finite numeric frame-selection value.
+
+    Parameters
+    ----------
+    frame_selection : Mapping[str, Any]
+        Frame-selection provenance payload.
+    field : str
+        Numeric field to read.
+    replicate : str
+        Replicate label used in error messages.
+
+    Returns
+    -------
+    float
+        Finite numeric provenance value.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when the value is missing, nonnumeric, or non-finite.
+    """
+
+    value = frame_selection.get(field)
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} has invalid frame-selection {field} {value!r}"
+        )
+    numeric_value = float(value)
+    if not math.isfinite(numeric_value):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} has invalid frame-selection {field} {value!r}"
+        )
+    return numeric_value
 
 
 def _validate_loaded_frame_window(item: _LoadedContactArtifact) -> None:
