@@ -1066,6 +1066,93 @@ class TestAggregate:
         with pytest.raises(MDAAggregationError, match=message):
             ContactsAnalysis().aggregate(ctx, artifacts)
 
+    def test_aggregate_rejects_single_stale_legacy_loaded_frame_zero_window(self, tmp_path):
+        """Aggregation should validate the first artifact against the requested window."""
+
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda.aggregation import MDAAggregationError
+
+        settings = ContactsSettings()
+        analysis_dir = tmp_path / "contacts"
+        stale_loaded_frame_zero_window = {
+            "start": 0,
+            "equilibration_start": 0,
+            "first_frame_time_ps": None,
+            "selected_start_time_ps": 0.0,
+            "equilibration_time_reference": "loaded_frame_zero",
+        }
+        artifact = _write_contacts_replicate_artifact(
+            analysis_dir,
+            settings,
+            replicate=1,
+            frame_selection_overrides=stale_loaded_frame_zero_window,
+        )
+        cond = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1,),
+            sim_config=_make_hashable_sim_config(tmp_path),
+        )
+        ctx = AggregateContext(
+            condition=cond,
+            replicates=(1,),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="10ns",
+            settings=settings,
+        )
+
+        with pytest.raises(
+            MDAAggregationError,
+            match="frame-selection equilibration_start mismatch for replicate 1",
+        ):
+            ContactsAnalysis().aggregate(ctx, [artifact])
+
+    def test_aggregate_rejects_matching_stale_legacy_loaded_frame_zero_windows(self, tmp_path):
+        """Aggregation should not trust the first stale artifact as the baseline."""
+
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda.aggregation import MDAAggregationError
+
+        settings = ContactsSettings()
+        analysis_dir = tmp_path / "contacts"
+        stale_loaded_frame_zero_window = {
+            "start": 0,
+            "equilibration_start": 0,
+            "first_frame_time_ps": None,
+            "selected_start_time_ps": 0.0,
+            "equilibration_time_reference": "loaded_frame_zero",
+        }
+        artifacts = [
+            _write_contacts_replicate_artifact(
+                analysis_dir,
+                settings,
+                replicate=replicate,
+                frame_selection_overrides=stale_loaded_frame_zero_window,
+            )
+            for replicate in (1, 2)
+        ]
+        cond = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1, 2),
+            sim_config=_make_hashable_sim_config(tmp_path),
+        )
+        ctx = AggregateContext(
+            condition=cond,
+            replicates=(1, 2),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="10ns",
+            settings=settings,
+        )
+
+        with pytest.raises(
+            MDAAggregationError,
+            match="frame-selection equilibration_start mismatch for replicate 1",
+        ):
+            ContactsAnalysis().aggregate(ctx, artifacts)
+
     def test_aggregate_passes_disabled_residence_time_setting(self, tmp_path):
         import numpy as np
 

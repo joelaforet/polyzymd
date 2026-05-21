@@ -696,6 +696,17 @@ def _validate_loaded_frame_window(item: _LoadedContactArtifact) -> None:
         raise MDAAggregationError(
             f"contacts: replicate {item.artifact.replicate} lacks frame-selection provenance"
         )
+    loaded_frame_zero_count = _validate_loaded_frame_zero_artifact_window(item, frame_selection)
+    if loaded_frame_zero_count is not None:
+        expected_count = loaded_frame_zero_count
+        if frame_indices.size != expected_count:
+            raise MDAAggregationError(
+                f"contacts: replicate {item.artifact.replicate} sidecar frame count mismatch: "
+                f"sidecar has {frame_indices.size}, validated window reports {expected_count}. "
+                "Recompute contacts."
+            )
+        return
+
     expected = frame_selection.get("n_frames_selected", item.artifact.payload.get("n_frames_used"))
     if expected is None:
         return
@@ -711,6 +722,100 @@ def _validate_loaded_frame_window(item: _LoadedContactArtifact) -> None:
             f"sidecar has {frame_indices.size}, provenance reports {expected_count}. "
             "Recompute contacts."
         )
+
+
+def _validate_loaded_frame_zero_artifact_window(
+    item: _LoadedContactArtifact, frame_selection: Mapping[str, Any]
+) -> int | None:
+    """Validate one loaded-frame-relative contacts frame window.
+
+    Timestamp-relative artifacts may carry per-replicate start-frame differences,
+    so they are intentionally excluded from these legacy-window checks.
+
+    Parameters
+    ----------
+    item : _LoadedContactArtifact
+        Loaded contacts artifact and sidecar data.
+    frame_selection : Mapping[str, Any]
+        Frame-selection provenance payload from the artifact.
+
+    Returns
+    -------
+    int | None
+        Validated selected-frame count for loaded-frame-relative artifacts, or
+        ``None`` for timestamp-relative artifacts.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when the stored loaded-frame-relative window does not match the
+        requested equilibration-derived selection.
+    """
+
+    if _uses_absolute_timestamp_reference(frame_selection):
+        return None
+
+    replicate = item.artifact.replicate
+    start = _integer_frame_selection_value(frame_selection, "start", replicate=str(replicate))
+    stop = _integer_frame_selection_value(frame_selection, "stop", replicate=str(replicate))
+    step = _normalized_frame_selection_step(frame_selection)
+    equilibration_start = _integer_frame_selection_value(
+        frame_selection, "equilibration_start", replicate=str(replicate)
+    )
+    n_frames_selected = _integer_frame_selection_value(
+        frame_selection, "n_frames_selected", replicate=str(replicate)
+    )
+    timestep_ps = _numeric_frame_selection_value(
+        frame_selection, "timestep_ps", replicate=str(replicate)
+    )
+    equilibration_ps = _numeric_frame_selection_value(
+        frame_selection, "equilibration_ps", replicate=str(replicate)
+    )
+    selected_start_time_ps = _numeric_frame_selection_value(
+        frame_selection, "selected_start_time_ps", replicate=str(replicate)
+    )
+    if timestep_ps <= 0.0:
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} has invalid frame-selection timestep_ps "
+            f"{timestep_ps!r}"
+        )
+    if equilibration_ps < 0.0:
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} has invalid frame-selection equilibration_ps "
+            f"{equilibration_ps!r}"
+        )
+
+    expected_equilibration_start = int(math.ceil(equilibration_ps / timestep_ps))
+    if equilibration_start != expected_equilibration_start:
+        raise MDAAggregationError(
+            f"contacts: frame-selection equilibration_start mismatch for replicate {replicate}: "
+            f"stored {equilibration_start!r}, expected {expected_equilibration_start!r}"
+        )
+    if start != equilibration_start:
+        raise MDAAggregationError(
+            f"contacts: frame-selection start mismatch for replicate {replicate}: "
+            f"stored {start!r}, expected {equilibration_start!r}"
+        )
+
+    expected_start_time_ps = start * timestep_ps
+    if not math.isclose(
+        selected_start_time_ps,
+        expected_start_time_ps,
+        rel_tol=1e-12,
+        abs_tol=1e-9,
+    ):
+        raise MDAAggregationError(
+            f"contacts: frame-selection selected_start_time_ps mismatch for replicate {replicate}: "
+            f"stored {selected_start_time_ps!r}, expected {expected_start_time_ps!r}"
+        )
+
+    expected_selected_count = len(range(start, stop, step))
+    if n_frames_selected != expected_selected_count:
+        raise MDAAggregationError(
+            f"contacts: frame-selection n_frames_selected mismatch for replicate {replicate}: "
+            f"stored {n_frames_selected!r}, expected {expected_selected_count!r}"
+        )
+    return expected_selected_count
 
 
 def _protein_identity(data: Mapping[str, Any]) -> tuple[tuple[int, str, str, str], ...]:
