@@ -15,6 +15,7 @@ class _FakeLoader:
 
     def __init__(self, timestep_ps: float = 100.0) -> None:
         self.timestep_ps = timestep_ps
+        self.first_frame_time_ps: float | None = None
         self.calls: list[tuple[int, str]] = []
 
     def get_timestep(self, replicate: int, unit: str = "ps") -> float:
@@ -24,6 +25,14 @@ class _FakeLoader:
         if unit != "ps":
             raise ValueError(f"Unexpected unit: {unit}")
         return self.timestep_ps
+
+    def get_first_frame_time(self, replicate: int, unit: str = "ps") -> float | None:
+        """Return a fixed first-frame timestamp and record the query."""
+
+        self.calls.append((replicate, f"first:{unit}"))
+        if unit != "ps":
+            raise ValueError(f"Unexpected unit: {unit}")
+        return self.first_frame_time_ps
 
 
 def test_resolve_trajectory_window_applies_equilibration_defaults() -> None:
@@ -114,7 +123,7 @@ def test_resolve_replicate_trajectory_window_uses_loader_timestep() -> None:
         step=2,
     )
 
-    assert loader.calls == [(3, "ps")]
+    assert loader.calls == [(3, "ps"), (3, "first:ps")]
     assert window.start == 2
     assert window.stop == 8
     assert window.step == 2
@@ -143,3 +152,84 @@ def test_resolve_trajectory_window_rejects_nonintegral_equilibration_near_end() 
             n_frames_total=10,
             timestep_ps=1000.0,
         )
+
+
+def test_resolve_trajectory_window_uses_absolute_first_frame_timestamp() -> None:
+    """Finite timestamps should make equilibration absolute trajectory time."""
+
+    window = resolve_trajectory_window(
+        equilibration="200ns",
+        n_frames_total=14,
+        timestep_ps=400.0,
+        first_frame_time_ps=198_400.0,
+    )
+
+    assert window.start == 4
+    assert window.equilibration_start == 4
+    assert window.first_frame_time_ps == 198_400.0
+    assert window.selected_start_time_ps == pytest.approx(200_000.0)
+    assert window.equilibration_time_reference == "trajectory_timestamp"
+
+
+@pytest.mark.parametrize("first_frame_time_ps", [None, float("nan"), float("inf")])
+def test_resolve_trajectory_window_falls_back_without_valid_timestamp(
+    first_frame_time_ps: float | None,
+) -> None:
+    """Missing or non-finite timestamps should preserve legacy behavior."""
+
+    window = resolve_trajectory_window(
+        equilibration="200ns",
+        n_frames_total=600,
+        timestep_ps=400.0,
+        first_frame_time_ps=first_frame_time_ps,
+    )
+
+    assert window.start == 500
+    assert window.selected_start_time_ps == pytest.approx(200_000.0)
+    assert window.equilibration_time_reference == "loaded_frame_zero"
+
+
+def test_resolve_trajectory_window_clamps_when_equilibration_precedes_first_frame() -> None:
+    """Absolute equilibration before the loaded segment should start at frame zero."""
+
+    window = resolve_trajectory_window(
+        equilibration="100ns",
+        n_frames_total=14,
+        timestep_ps=400.0,
+        first_frame_time_ps=198_400.0,
+    )
+
+    assert window.start == 0
+    assert window.selected_start_time_ps == pytest.approx(198_400.0)
+    assert window.equilibration_time_reference == "trajectory_timestamp"
+
+
+def test_resolve_trajectory_window_rejects_absolute_equilibration_after_end() -> None:
+    """Absolute equilibration beyond the last loaded timestamp should fail clearly."""
+
+    with pytest.raises(ValueError, match="loaded trajectory timestamps"):
+        resolve_trajectory_window(
+            equilibration="205ns",
+            n_frames_total=14,
+            timestep_ps=400.0,
+            first_frame_time_ps=198_400.0,
+        )
+
+
+def test_resolve_replicate_trajectory_window_accepts_timestep_override() -> None:
+    """Loader-backed helper should preserve caller timestep override behavior."""
+
+    loader = _FakeLoader(timestep_ps=999.0)
+    loader.first_frame_time_ps = 198_400.0
+
+    window = resolve_replicate_trajectory_window(
+        loader=loader,
+        replicate=3,
+        equilibration="200ns",
+        n_frames_total=14,
+        timestep_ps=400.0,
+    )
+
+    assert loader.calls == [(3, "first:ps")]
+    assert window.timestep_ps == 400.0
+    assert window.start == 4

@@ -65,6 +65,17 @@ class TrajectoryWindow:
         Trajectory timestep in picoseconds.
     equilibration_ps : float
         Equilibration time converted to picoseconds.
+    equilibration : str | None, optional
+        Original equilibration time string used to resolve the window.
+    first_frame_time_ps : float | None, optional
+        Absolute MDAnalysis timestamp of the first loaded frame in
+        picoseconds, when available.
+    selected_start_time_ps : float | None, optional
+        Timestamp of the selected start frame in the active time reference.
+    equilibration_time_reference : str, optional
+        Time reference used to interpret ``equilibration``. ``"trajectory_timestamp"``
+        means absolute MDAnalysis timestamps were available; ``"loaded_frame_zero"``
+        means the legacy loaded-frame-relative origin was used.
     warning_message : str | None
         Non-fatal equilibration warning generated during validation.
     """
@@ -77,6 +88,10 @@ class TrajectoryWindow:
     n_frames_selected: int
     timestep_ps: float
     equilibration_ps: float
+    equilibration: str | None = None
+    first_frame_time_ps: float | None = None
+    selected_start_time_ps: float | None = None
+    equilibration_time_reference: str = "loaded_frame_zero"
     warning_message: str | None = None
 
     def run_kwargs(self) -> dict[str, int]:
@@ -101,8 +116,9 @@ def resolve_replicate_trajectory_window(
     stop: int | None = None,
     step: int = 1,
     min_frames: int = 1,
+    timestep_ps: float | None = None,
 ) -> TrajectoryWindow:
-    """Resolve a validated window using a ``TrajectoryLoader`` timestep.
+    """Resolve a validated window using loader trajectory timing metadata.
 
     Parameters
     ----------
@@ -124,6 +140,9 @@ def resolve_replicate_trajectory_window(
         Frame stride, by default 1.
     min_frames : int, optional
         Minimum required number of selected frames, by default 1.
+    timestep_ps : float | None, optional
+        Explicit timestep override in picoseconds. When ``None``, the loader
+        timestep is used.
 
     Returns
     -------
@@ -131,11 +150,18 @@ def resolve_replicate_trajectory_window(
         Validated trajectory window with materialized ``run()`` arguments.
     """
 
-    timestep_ps = float(loader.get_timestep(replicate, unit="ps"))
+    resolved_timestep_ps = (
+        float(timestep_ps) if timestep_ps is not None else float(loader.get_timestep(replicate, unit="ps"))
+    )
+    try:
+        first_frame_time_ps = loader.get_first_frame_time(replicate, unit="ps")
+    except (AttributeError, TypeError, ValueError):
+        first_frame_time_ps = None
     return resolve_trajectory_window(
         equilibration=equilibration,
         n_frames_total=n_frames_total,
-        timestep_ps=timestep_ps,
+        timestep_ps=resolved_timestep_ps,
+        first_frame_time_ps=first_frame_time_ps,
         start=start,
         stop=stop,
         step=step,
@@ -152,8 +178,15 @@ def resolve_trajectory_window(
     stop: int | None = None,
     step: int = 1,
     min_frames: int = 1,
+    first_frame_time_ps: float | None = None,
 ) -> TrajectoryWindow:
     """Resolve and validate a trajectory frame window.
+
+    When the first loaded frame has a finite MDAnalysis timestamp,
+    ``equilibration`` is interpreted as an absolute trajectory time. The start
+    frame is the first loaded frame whose timestamp is greater than or equal to
+    the equilibration time. When timestamp metadata is unavailable, the legacy
+    loaded-frame-relative origin is used.
 
     Parameters
     ----------
@@ -173,6 +206,9 @@ def resolve_trajectory_window(
         Frame stride, by default 1.
     min_frames : int, optional
         Minimum required number of selected frames, by default 1.
+    first_frame_time_ps : float | None, optional
+        Absolute MDAnalysis timestamp of loaded frame 0 in picoseconds. Non-finite
+        values are ignored and use the legacy loaded-frame-relative behavior.
 
     Returns
     -------
@@ -197,19 +233,39 @@ def resolve_trajectory_window(
 
     eq_value, eq_unit = parse_time_string(equilibration)
     equilibration_ps = convert_time(eq_value, eq_unit, "ps")
-    equilibration_ns = convert_time(eq_value, eq_unit, "ns")
+    finite_first_frame_time_ps = (
+        float(first_frame_time_ps)
+        if first_frame_time_ps is not None and math.isfinite(float(first_frame_time_ps))
+        else None
+    )
+    if finite_first_frame_time_ps is None:
+        equilibration_offset_ps = equilibration_ps
+        time_reference = "loaded_frame_zero"
+    else:
+        equilibration_offset_ps = max(0.0, equilibration_ps - finite_first_frame_time_ps)
+        time_reference = "trajectory_timestamp"
+    equilibration_ns = equilibration_offset_ps / 1000.0
     trajectory_ns = (n_frames_total * timestep_ps) / 1000.0
 
     is_valid, warning_message = validate_equilibration_time(equilibration_ns, trajectory_ns)
     if not is_valid:
         raise ValueError(warning_message or "Invalid equilibration window")
 
-    equilibration_start = _equilibration_start_frame(equilibration_ps, timestep_ps)
+    equilibration_start = _equilibration_start_frame(equilibration_offset_ps, timestep_ps)
     if equilibration_start >= n_frames_total:
+        if finite_first_frame_time_ps is None:
+            raise ValueError(
+                "Equilibration time "
+                f"({equilibration_ps / 1000.0:.3f} ns) leaves no frame at or after "
+                f"equilibration in a {n_frames_total}-frame trajectory with timestep "
+                f"{timestep_ps:.3f} ps"
+            )
+        last_frame_time_ps = finite_first_frame_time_ps + (n_frames_total - 1) * timestep_ps
         raise ValueError(
             "Equilibration time "
-            f"({equilibration_ps / 1000.0:.3f} ns) leaves no frame at or after equilibration "
-            f"in a {n_frames_total}-frame trajectory with timestep {timestep_ps:.3f} ps"
+            f"({equilibration_ps:.3f} ps) leaves no frame at or after equilibration "
+            f"in loaded trajectory timestamps {finite_first_frame_time_ps:.3f} ps to "
+            f"{last_frame_time_ps:.3f} ps with timestep {timestep_ps:.3f} ps"
         )
 
     resolved_start = equilibration_start if start is None else start
@@ -239,6 +295,12 @@ def resolve_trajectory_window(
             f"need at least {min_frames}"
         )
 
+    selected_start_time_ps = (
+        finite_first_frame_time_ps + resolved_start * timestep_ps
+        if finite_first_frame_time_ps is not None
+        else resolved_start * timestep_ps
+    )
+
     return TrajectoryWindow(
         start=resolved_start,
         stop=resolved_stop,
@@ -248,5 +310,9 @@ def resolve_trajectory_window(
         n_frames_selected=n_frames_selected,
         timestep_ps=float(timestep_ps),
         equilibration_ps=float(equilibration_ps),
+        equilibration=equilibration,
+        first_frame_time_ps=finite_first_frame_time_ps,
+        selected_start_time_ps=float(selected_start_time_ps),
+        equilibration_time_reference=time_reference,
         warning_message=warning_message,
     )

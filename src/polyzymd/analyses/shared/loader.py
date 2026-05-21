@@ -17,10 +17,11 @@ Key Features
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -78,6 +79,50 @@ def _require_matplotlib(feature_name: str = "plotting") -> None:
             "Ensure matplotlib is available in the PolyzyMD pixi environment "
             '(for example: pixi run -e build python -c "import matplotlib")'
         ) from None
+
+
+def _trajectory_frame_index(trajectory: Any) -> int | None:
+    """Return the current trajectory frame index when available.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+
+    Returns
+    -------
+    int | None
+        Current frame index, or ``None`` when it cannot be determined.
+    """
+
+    for owner in (trajectory, getattr(trajectory, "ts", None)):
+        frame = getattr(owner, "frame", None)
+        if isinstance(frame, bool):
+            continue
+        try:
+            return int(frame)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _restore_trajectory_frame(trajectory: Any, frame_index: int | None) -> None:
+    """Restore a trajectory reader to a previous frame when possible.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+    frame_index : int | None
+        Frame index captured before a metadata probe.
+    """
+
+    if frame_index is None:
+        return
+    try:
+        trajectory[frame_index]
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return
 
 
 @dataclass
@@ -541,15 +586,20 @@ class TrajectoryLoader:
             Time between consecutive frames
         """
         u = self.load_universe(replicate)
+        trajectory = u.trajectory
 
         # Get timestep from trajectory
-        if len(u.trajectory) < 2:
+        if len(trajectory) < 2:
             raise ValueError("Need at least 2 frames to determine timestep")
 
-        u.trajectory[0]
-        t0 = u.trajectory.time
-        u.trajectory[1]
-        t1 = u.trajectory.time
+        previous_frame = _trajectory_frame_index(trajectory)
+        try:
+            trajectory[0]
+            t0 = trajectory.time
+            trajectory[1]
+            t1 = trajectory.time
+        finally:
+            _restore_trajectory_frame(trajectory, previous_frame)
 
         dt = t1 - t0  # in ps (MDAnalysis default)
 
@@ -559,6 +609,53 @@ class TrajectoryLoader:
             raise ValueError(f"Unknown time unit: {unit}")
 
         return float(dt)
+
+    def get_first_frame_time(self, replicate: int, unit: str = "ps") -> float | None:
+        """Return the first loaded frame timestamp when available.
+
+        MDAnalysis reports trajectory times in picoseconds. This method probes
+        cached Universe metadata without changing the caller-visible current
+        frame when the reader exposes a restorable frame index.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
+        unit : str, optional
+            Time unit for output. Options are ``"ps"`` and ``"ns"``, by default
+            ``"ps"``.
+
+        Returns
+        -------
+        float | None
+            Finite first-frame timestamp in the requested unit, or ``None`` when
+            the trajectory does not expose a usable timestamp.
+
+        Raises
+        ------
+        ValueError
+            Raised when ``unit`` is not ``"ps"`` or ``"ns"``.
+        """
+
+        if unit not in {"ps", "ns"}:
+            raise ValueError(f"Unknown time unit: {unit}")
+
+        u = self.load_universe(replicate)
+        trajectory = u.trajectory
+        previous_frame = _trajectory_frame_index(trajectory)
+        try:
+            trajectory[0]
+            time_ps = float(trajectory.time)
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+        finally:
+            _restore_trajectory_frame(trajectory, previous_frame)
+
+        if not math.isfinite(time_ps):
+            return None
+        if unit == "ns":
+            return time_ps / 1000.0
+        return time_ps
 
     def clear_cache(self) -> None:
         """Clear the Universe cache to free memory."""

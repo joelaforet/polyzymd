@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -76,6 +77,97 @@ def _create_gromacs_flat(run_dir: Path, *, use_gro: bool = False) -> None:
     else:
         (gromacs_dir / "solvated_system.pdb").write_text("ATOM topology")
     (gromacs_dir / "prod.xtc").write_bytes(b"\x00")
+
+
+class _FakeTrajectory:
+    """Minimal trajectory double with frame and time metadata."""
+
+    def __init__(
+        self,
+        times_ps: list[float],
+        *,
+        current_frame: int = 0,
+        expose_time: bool = True,
+    ) -> None:
+        self.times_ps = times_ps
+        self.frame = current_frame
+        self.expose_time = expose_time
+
+    def __len__(self) -> int:
+        """Return the number of fake frames."""
+
+        return len(self.times_ps)
+
+    def __getitem__(self, frame_index: int) -> SimpleNamespace:
+        """Move to a fake frame and return a timestamp object."""
+
+        if frame_index < 0 or frame_index >= len(self.times_ps):
+            raise IndexError(frame_index)
+        self.frame = frame_index
+        return SimpleNamespace(time=self.times_ps[frame_index], frame=frame_index)
+
+    @property
+    def time(self) -> float:
+        """Return the current fake frame time."""
+
+        if not self.expose_time:
+            raise AttributeError("time")
+        return self.times_ps[self.frame]
+
+
+def _loader_for_trajectory(trajectory: _FakeTrajectory) -> TrajectoryLoader:
+    """Build a loader instance backed by a fake trajectory."""
+
+    loader = TrajectoryLoader.__new__(TrajectoryLoader)
+    loader.load_universe = MagicMock(return_value=SimpleNamespace(trajectory=trajectory))
+    return loader
+
+
+class TestTrajectoryTimingMetadata:
+    """Loader timing helpers preserve timestamps and reader position."""
+
+    def test_get_first_frame_time_returns_ps_and_ns(self) -> None:
+        """First-frame timestamps should be converted from MDAnalysis picoseconds."""
+
+        trajectory = _FakeTrajectory([198_400.0, 198_800.0], current_frame=1)
+        loader = _loader_for_trajectory(trajectory)
+
+        assert loader.get_first_frame_time(1, unit="ps") == pytest.approx(198_400.0)
+        assert loader.get_first_frame_time(1, unit="ns") == pytest.approx(198.4)
+
+    @pytest.mark.parametrize(
+        ("times_ps", "expose_time"),
+        [([float("nan"), 400.0], True), ([0.0, 400.0], False)],
+    )
+    def test_get_first_frame_time_returns_none_for_unusable_time(
+        self,
+        times_ps: list[float],
+        expose_time: bool,
+    ) -> None:
+        """Non-finite or missing trajectory times should return ``None``."""
+
+        trajectory = _FakeTrajectory(times_ps, current_frame=1, expose_time=expose_time)
+        loader = _loader_for_trajectory(trajectory)
+
+        assert loader.get_first_frame_time(1) is None
+
+    def test_get_first_frame_time_restores_current_frame(self) -> None:
+        """Timestamp probing should restore the previous reader frame when feasible."""
+
+        trajectory = _FakeTrajectory([198_400.0, 198_800.0, 199_200.0], current_frame=2)
+        loader = _loader_for_trajectory(trajectory)
+
+        assert loader.get_first_frame_time(1) == pytest.approx(198_400.0)
+        assert trajectory.frame == 2
+
+    def test_get_timestep_restores_current_frame(self) -> None:
+        """Timestep probing should restore the previous reader frame when feasible."""
+
+        trajectory = _FakeTrajectory([198_400.0, 198_800.0, 199_200.0], current_frame=2)
+        loader = _loader_for_trajectory(trajectory)
+
+        assert loader.get_timestep(1, unit="ps") == pytest.approx(400.0)
+        assert trajectory.frame == 2
 
 
 # ---------------------------------------------------------------------------
