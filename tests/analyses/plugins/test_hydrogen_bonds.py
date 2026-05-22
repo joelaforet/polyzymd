@@ -3614,7 +3614,9 @@ def test_plot_top_pairs_uses_sem_occupancy_for_xerr(tmp_path: Path) -> None:
         )
 
     assert path is not None
-    assert [kwargs["xerr"] for kwargs in captured_kwargs] == pytest.approx([[0.04], [0.06]])
+    assert len(captured_kwargs) == 2
+    assert captured_kwargs[0]["xerr"] == pytest.approx([0.04])
+    assert captured_kwargs[1]["xerr"] == pytest.approx([0.06])
     assert all(kwargs["capsize"] == PlotSettings().theme.bar_capsize for kwargs in captured_kwargs)
 
 
