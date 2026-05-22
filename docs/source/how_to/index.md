@@ -95,6 +95,7 @@ Customize publication-quality figures and debug common issues.
 :maxdepth: 1
 
 Customizing Plots for Publication <publication_plots>
+Create Custom Plots from Analysis Artifacts <custom_artifact_plotting>
 Broken Molecule Debugging <broken_molecules_debugging>
 Troubleshoot Common Problems <troubleshooting>
 ```
