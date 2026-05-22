@@ -46,6 +46,7 @@ from polyzymd.analyses.hydrogen_bonds._results import (
     HydrogenBondReplicateSummary,
     HydrogenBondResult,
     ResidueRef,
+    UndirectedPairAggregate,
     UndirectedResiduePairResult,
 )
 from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact, ReplicateArtifact
@@ -3554,6 +3555,100 @@ def test_extract_metrics_preserves_replicate_values() -> None:
     )
     metric = analysis.extract_metrics(summary)["mean_hbonds_protein_polymer"]
     assert metric.replicate_values == pytest.approx([2.5, 3.0, 3.5])
+
+
+def _make_aggregated_result_with_pair(
+    mean_occupancy: float,
+    sem_occupancy: float,
+    per_replicate_occupancy: list[float],
+) -> HydrogenBondAggregatedResult:
+    """Build an aggregated result containing one top-pair candidate."""
+
+    summary = _make_aggregated_summary(
+        "protein_polymer",
+        mean_occupancy,
+        sem_occupancy,
+        per_replicate_occupancy,
+    )
+    pair = UndirectedPairAggregate(
+        residue_a=ResidueRef(chain_id="A", resid=10, resname="SER"),
+        residue_b=ResidueRef(chain_id="C", resid=100, resname="OEG"),
+        mean_occupancy=mean_occupancy,
+        sem_occupancy=sem_occupancy,
+        mean_events_per_frame=mean_occupancy,
+        sem_events_per_frame=sem_occupancy,
+        per_replicate_occupancy=per_replicate_occupancy,
+    )
+    return HydrogenBondAggregatedResult(
+        replicates=list(range(1, len(per_replicate_occupancy) + 1)),
+        n_replicates=len(per_replicate_occupancy),
+        summaries=[summary.model_copy(update={"undirected_pairs": [pair]})],
+    )
+
+
+def test_plot_top_pairs_uses_sem_occupancy_for_xerr(tmp_path: Path) -> None:
+    """Top-pairs plot should pass aggregate SEM values as horizontal xerr."""
+    pytest.importorskip("matplotlib")
+    import matplotlib.axes
+
+    from polyzymd.analyses.hydrogen_bonds._plotters import plot_top_pairs
+
+    results = {
+        "CondA": _make_aggregated_result_with_pair(0.35, 0.04, [0.31, 0.39]),
+        "CondB": _make_aggregated_result_with_pair(0.55, 0.06, [0.49, 0.61]),
+    }
+    captured_kwargs: list[dict[str, Any]] = []
+    original_barh = matplotlib.axes.Axes.barh
+
+    def _capture_barh(self: Any, *args: Any, **kwargs: Any) -> Any:
+        captured_kwargs.append(kwargs.copy())
+        return original_barh(self, *args, **kwargs)
+
+    with patch("matplotlib.axes.Axes.barh", autospec=True, side_effect=_capture_barh):
+        path = plot_top_pairs(
+            results,
+            ["CondA", "CondB"],
+            "protein_polymer",
+            tmp_path / "plots",
+            PlotSettings(),
+        )
+
+    assert path is not None
+    assert [kwargs["xerr"] for kwargs in captured_kwargs] == pytest.approx([[0.04], [0.06]])
+    assert all(kwargs["capsize"] == PlotSettings().theme.bar_capsize for kwargs in captured_kwargs)
+
+
+def test_plot_top_pairs_suppresses_singleton_errorbars(tmp_path: Path) -> None:
+    """Top-pairs plot should omit xerr when only singleton replicate data exist."""
+    pytest.importorskip("matplotlib")
+    import matplotlib.axes
+
+    from polyzymd.analyses.hydrogen_bonds._plotters import plot_top_pairs
+
+    results = {
+        "CondA": _make_aggregated_result_with_pair(0.35, 0.04, [0.35]),
+        "CondB": _make_aggregated_result_with_pair(0.55, 0.06, [0.55]),
+    }
+    captured_kwargs: list[dict[str, Any]] = []
+    original_barh = matplotlib.axes.Axes.barh
+
+    def _capture_barh(self: Any, *args: Any, **kwargs: Any) -> Any:
+        captured_kwargs.append(kwargs.copy())
+        return original_barh(self, *args, **kwargs)
+
+    with patch("matplotlib.axes.Axes.barh", autospec=True, side_effect=_capture_barh):
+        path = plot_top_pairs(
+            results,
+            ["CondA", "CondB"],
+            "protein_polymer",
+            tmp_path / "plots",
+            PlotSettings(),
+        )
+
+    assert path is not None
+    assert captured_kwargs
+    assert all("xerr" not in kwargs for kwargs in captured_kwargs)
+    assert all("capsize" not in kwargs for kwargs in captured_kwargs)
 
 
 def test_plot_summary_comparison_smoke(tmp_path: Path) -> None:

@@ -267,10 +267,15 @@ def plot_top_pairs(
     for idx, label in enumerate(labels):
         summary = _find_summary(results[label], summary_name) if label in results else None
         occupancy_by_pair: dict[str, float] = {}
+        sem_by_pair: dict[str, float] = {}
         replicate_values_by_pair: dict[str, list[float]] = {}
         if summary is not None:
             occupancy_by_pair = {
                 f"{pair.residue_a.label} — {pair.residue_b.label}": float(pair.mean_occupancy)
+                for pair in summary.undirected_pairs
+            }
+            sem_by_pair = {
+                f"{pair.residue_a.label} — {pair.residue_b.label}": float(pair.sem_occupancy)
                 for pair in summary.undirected_pairs
             }
             replicate_values_by_pair = {
@@ -281,21 +286,25 @@ def plot_top_pairs(
             }
 
         values = [occupancy_by_pair.get(pair_label, 0.0) for pair_label in top_labels]
+        sems = [sem_by_pair.get(pair_label, 0.0) for pair_label in top_labels]
         replicate_values = [
             replicate_values_by_pair.get(pair_label, []) for pair_label in top_labels
         ]
+        xerr = suppress_singleton_errors(sems, replicate_values)
         offset = (idx - n_conditions / 2 + 0.5) * bar_height
         bar_positions = y + offset
-        ax.barh(
-            bar_positions,
-            values,
-            height=bar_height,
-            color=colors[idx],
-            alpha=plot_settings.theme.bar_alpha,
-            edgecolor=plot_settings.theme.bar_edgecolor,
-            linewidth=plot_settings.theme.bar_linewidth,
-            label=label,
-        )
+        bar_kwargs = {
+            "height": bar_height,
+            "color": colors[idx],
+            "alpha": plot_settings.theme.bar_alpha,
+            "edgecolor": plot_settings.theme.bar_edgecolor,
+            "linewidth": plot_settings.theme.bar_linewidth,
+            "label": label,
+        }
+        if xerr is not None:
+            bar_kwargs["xerr"] = xerr
+            bar_kwargs["capsize"] = plot_settings.theme.bar_capsize
+        ax.barh(bar_positions, values, **bar_kwargs)
         scatter_replicate_values(
             ax,
             bar_positions,
