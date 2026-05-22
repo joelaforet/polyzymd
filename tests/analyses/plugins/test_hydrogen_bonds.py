@@ -3593,9 +3593,12 @@ def test_plot_top_pairs_uses_sem_occupancy_for_xerr(tmp_path: Path) -> None:
 
     from polyzymd.analyses.hydrogen_bonds._plotters import plot_top_pairs
 
+    cond_a_sem = 0.123
+    cond_b_sem = 0.217
+    # Sentinels intentionally differ from SEMs recomputed from replicate values
     results = {
-        "CondA": _make_aggregated_result_with_pair(0.35, 0.04, [0.31, 0.39]),
-        "CondB": _make_aggregated_result_with_pair(0.55, 0.06, [0.49, 0.61]),
+        "CondA": _make_aggregated_result_with_pair(0.35, cond_a_sem, [0.31, 0.39]),
+        "CondB": _make_aggregated_result_with_pair(0.55, cond_b_sem, [0.49, 0.61]),
     }
     captured_kwargs: list[dict[str, Any]] = []
     original_barh = matplotlib.axes.Axes.barh
@@ -3615,8 +3618,8 @@ def test_plot_top_pairs_uses_sem_occupancy_for_xerr(tmp_path: Path) -> None:
 
     assert path is not None
     assert len(captured_kwargs) == 2
-    assert captured_kwargs[0]["xerr"] == pytest.approx([0.04])
-    assert captured_kwargs[1]["xerr"] == pytest.approx([0.06])
+    assert captured_kwargs[0]["xerr"] == pytest.approx([cond_a_sem])
+    assert captured_kwargs[1]["xerr"] == pytest.approx([cond_b_sem])
     assert all(kwargs["capsize"] == PlotSettings().theme.bar_capsize for kwargs in captured_kwargs)
 
 
