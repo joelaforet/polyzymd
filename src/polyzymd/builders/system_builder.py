@@ -82,6 +82,7 @@ class SystemBuilder:
         self._n_enzyme_molecules: int = 0
         self._n_substrate_molecules: int = 0
         self._n_polymer_chains: int = 0
+        self._preserve_enzyme_chain_ids: bool = False
 
     @property
     def interchange(self) -> Optional[Interchange]:
@@ -273,8 +274,10 @@ class SystemBuilder:
         # Create combined topology
         self._combined_topology = Topology.from_molecules(molecules)
 
-        # Re-number chains
-        self._renumber_chains(self._combined_topology)
+        # Re-number legacy solutes. Pablo-ingested conjugates already carry
+        # protein/polymer chain IDs that must survive packing and solvation.
+        if not self._preserve_enzyme_chain_ids:
+            self._renumber_chains(self._combined_topology)
 
         LOGGER.info(
             f"Combined topology: {self._combined_topology.n_molecules} molecules, "
@@ -358,8 +361,11 @@ class SystemBuilder:
             retain_working_files=True,
         )
 
-        # Re-number chains
-        self._renumber_chains(packed_top)
+        # Re-number legacy systems only. Conjugate workflows carry mixed
+        # protein/polymer chain IDs inside the first molecule and must preserve
+        # that metadata through packing.
+        if not self._preserve_enzyme_chain_ids:
+            self._renumber_chains(packed_top)
 
         self._combined_topology = packed_top
 
@@ -771,12 +777,19 @@ class SystemBuilder:
                 mol = self._solvated_topology.molecule(mol_idx)
                 residue_map: dict[str, int] = {}
                 for atom_index, atom in enumerate(mol.atoms):
-                    atom.metadata["chain_id"] = PROTEIN_CHAIN
-                    residue_token = self._get_original_residue_token(atom, atom_index)
-                    if residue_token not in residue_map:
-                        residue_map[residue_token] = protein_residue_num
-                        protein_residue_num += 1
-                    atom.metadata["residue_number"] = str(residue_map[residue_token])
+                    if self._preserve_enzyme_chain_ids:
+                        atom.metadata.setdefault("chain_id", PROTEIN_CHAIN)
+                        if "residue_number" in atom.metadata:
+                            atom.metadata["residue_number"] = str(
+                                atom.metadata["residue_number"]
+                            )
+                    else:
+                        atom.metadata["chain_id"] = PROTEIN_CHAIN
+                        residue_token = self._get_original_residue_token(atom, atom_index)
+                        if residue_token not in residue_map:
+                            residue_map[residue_token] = protein_residue_num
+                            protein_residue_num += 1
+                        atom.metadata["residue_number"] = str(residue_map[residue_token])
                 mol_idx += 1
 
         # 2. Substrate always uses chain B and residue 1
@@ -797,7 +810,10 @@ class SystemBuilder:
             )
 
             # Track residue number across all polymer chains (continue, don't restart)
-            polymer_residue_num = 1
+            polymer_residue_num = self._next_residue_number_for_chain(
+                POLYMER_CHAIN,
+                end_mol_idx=mol_idx,
+            )
 
             for _ in range(self._n_polymer_chains):
                 mol = self._solvated_topology.molecule(mol_idx)
@@ -874,6 +890,22 @@ class SystemBuilder:
 
         metadata[_ORIGINAL_RESIDUE_TOKEN_KEY] = residue_token
         return residue_token
+
+    def _next_residue_number_for_chain(self, chain_id: str, *, end_mol_idx: int) -> int:
+        """Return the next residue number after preserved solute residues on a chain."""
+        if self._solvated_topology is None or not self._preserve_enzyme_chain_ids:
+            return 1
+
+        max_residue_number = 0
+        for mol_idx in range(end_mol_idx):
+            mol = self._solvated_topology.molecule(mol_idx)
+            for atom in mol.atoms:
+                if str(atom.metadata.get("chain_id", "")).upper() != chain_id:
+                    continue
+                residue_number = _metadata_residue_number(atom.metadata)
+                if residue_number is not None:
+                    max_residue_number = max(max_residue_number, residue_number)
+        return max_residue_number + 1
 
     def _assign_solvent_identifiers(
         self,
@@ -1063,6 +1095,7 @@ class SystemBuilder:
                 tolerance=packing.tolerance,
                 movebadrandom=packing.movebadrandom,
                 working_directory=self._working_dir,
+                box_vectors_nm=packing.box_vectors,
             )
 
         # 5. Solvate
@@ -1411,3 +1444,16 @@ class SystemBuilder:
             polymer_chain_id="C",
             solvent_start_chain_id="D",
         )
+
+
+def _metadata_residue_number(metadata: dict[str, Any]) -> int | None:
+    """Return an integer residue number from OpenFF atom metadata when present."""
+    for key in ("residue_number", "res_seq"):
+        value = metadata.get(key)
+        if value is None:
+            continue
+        try:
+            return int(str(value).strip())
+        except ValueError:
+            continue
+    return None
