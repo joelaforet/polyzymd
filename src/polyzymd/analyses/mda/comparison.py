@@ -44,8 +44,7 @@ class MDAComparisonContext:
             duplicates = sorted({label for label in labels if labels.count(label) > 1})
             if duplicates:
                 raise MDAComparisonError(
-                    "Expected condition labels must be unique; "
-                    f"duplicates: {', '.join(duplicates)}"
+                    f"Expected condition labels must be unique; duplicates: {', '.join(duplicates)}"
                 )
             object.__setattr__(self, "expected_condition_labels", labels)
         if self.expected_replicates_by_condition is not None:
@@ -544,8 +543,7 @@ def _metric_metadata_for(
         metadata["higher_is_better"], (bool, type(None))
     ):
         raise MDAComparisonError(
-            f"{artifact.analysis_name}: metric {metric_key!r} higher_is_better must be "
-            "bool or None"
+            f"{artifact.analysis_name}: metric {metric_key!r} higher_is_better must be bool or None"
         )
     if "direction_labels" in metadata:
         labels = metadata["direction_labels"]

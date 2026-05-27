@@ -424,8 +424,7 @@ class FrameSelection:
         if self.n_frames_total is not None:
             if self.start is not None and self.start >= self.n_frames_total:
                 raise ValueError(
-                    f"start={self.start} is outside the trajectory range "
-                    f"[0, {self.n_frames_total})"
+                    f"start={self.start} is outside the trajectory range [0, {self.n_frames_total})"
                 )
             if self.stop is not None and self.stop > self.n_frames_total:
                 raise ValueError(

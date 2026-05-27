@@ -135,8 +135,7 @@ class HydrogenBondMDAAnalysis:
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise ValueError(
-                "hydrogen_bonds does not support MDAnalysis backend/run kwargs yet: "
-                f"{unsupported}"
+                f"hydrogen_bonds does not support MDAnalysis backend/run kwargs yet: {unsupported}"
             )
         if stop is None:
             stop = len(self.universe.trajectory)

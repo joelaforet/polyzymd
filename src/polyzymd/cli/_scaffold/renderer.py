@@ -64,8 +64,7 @@ def render_scaffold(spec: ScaffoldSpec, project_root: Path) -> dict[Path, str]:
         files = {
             plugin_dir / "__init__.py": render_template("advanced_plugin_init.py.jinja", spec),
             plugin_dir / "_mda.py": render_template("advanced_mda.py.jinja", spec),
-            tests_dir
-            / f"test_{spec.name}.py": render_template(
+            tests_dir / f"test_{spec.name}.py": render_template(
                 "test_advanced_plugin.py.jinja",
                 spec,
             ),
@@ -76,8 +75,7 @@ def render_scaffold(spec: ScaffoldSpec, project_root: Path) -> dict[Path, str]:
 
     return {
         analyses_root / f"{spec.name}.py": render_template("simple_mda_plugin.py.jinja", spec),
-        tests_dir
-        / f"test_{spec.name}.py": render_template(
+        tests_dir / f"test_{spec.name}.py": render_template(
             "test_simple_mda_plugin.py.jinja",
             spec,
         ),
