@@ -230,6 +230,54 @@ def test_real_polymerist_generation_smoke(tmp_path):
     assert result.atom_count is None or result.atom_count > 0
 
 
+def test_polymer_generator_forwards_energy_minimize_flag(monkeypatch, tmp_path):
+    """Polymer generation should let callers skip Polymerist minimization."""
+    from polyzymd.builders import polymer_generator as polymer_generator_module
+
+    calls = []
+
+    class FakeMonomerGroup:
+        def __init__(self, monomers):
+            self.monomers = monomers
+            self.term_orient = {}
+
+    class FakeSourceGroup:
+        monomers = {"A_1-site": object(), "A_2-site": object()}
+
+    def fake_build_linear_polymer(**kwargs):
+        calls.append(kwargs)
+        return object()
+
+    def fake_write_pdb(path, chain, *, resname_map=None):
+        path.write_text("END\n")
+
+    monkeypatch.setattr(polymer_generator_module, "MonomerGroup", FakeMonomerGroup)
+    monkeypatch.setattr(
+        polymer_generator_module,
+        "build_linear_polymer",
+        fake_build_linear_polymer,
+    )
+    monkeypatch.setattr(polymer_generator_module, "mbmol_to_rdmol", lambda chain: object())
+    monkeypatch.setattr(polymer_generator_module, "summarize_ring_piercing", lambda mol: {})
+    monkeypatch.setattr(polymer_generator_module, "mbmol_to_openmm_pdb", fake_write_pdb)
+
+    generator = polymer_generator_module.PolymerGenerator.__new__(
+        polymer_generator_module.PolymerGenerator
+    )
+    generator.monomer_group = FakeSourceGroup()
+    generator.cache_directory = tmp_path
+    generator.max_retries = 1
+
+    _, pdb_path = generator._build_polymer_structure(
+        sequence="AAA",
+        monomer_names={"A": "A"},
+        energy_minimize=False,
+    )
+
+    assert pdb_path.exists()
+    assert calls[0]["energy_minimize"] is False
+
+
 def test_rdkit_sdf_sidecar_write_failure_surfaces(monkeypatch, tmp_path):
     """SDF sidecar writer failures should fail clearly instead of being swallowed."""
 
