@@ -450,3 +450,47 @@ class TestSystemBuilderConjugationHook:
         with pytest.raises(ConjugationNotImplementedError, match="usable topology"):
             builder._apply_conjugation(config)
         assert calls == [source]
+
+    def test_pack_polymers_preserves_conjugate_chain_ids(self, monkeypatch):
+        """PACKMOL should not overwrite chain IDs on pre-linked conjugates."""
+        from polyzymd.builders.system_builder import SystemBuilder
+        from polyzymd.utils import packmol as packmol_module
+
+        class FakeAtom:
+            def __init__(self, chain_id: str) -> None:
+                self.metadata = {"chain_id": chain_id}
+
+        class FakeMolecule:
+            def __init__(self, atoms: list[FakeAtom]) -> None:
+                self.atoms = atoms
+
+        class FakeTopology:
+            def __init__(self, molecules: list[FakeMolecule]) -> None:
+                self.molecules = molecules
+                self.n_atoms = sum(len(mol.atoms) for mol in molecules)
+
+        protein_atom = FakeAtom("A")
+        attached_polymer_atom = FakeAtom("C")
+        free_polymer_atom = FakeAtom("X")
+        packed_topology = FakeTopology(
+            [
+                FakeMolecule([protein_atom, attached_polymer_atom]),
+                FakeMolecule([free_polymer_atom]),
+            ]
+        )
+
+        def fake_pack_polymers(**kwargs):
+            return packed_topology
+
+        monkeypatch.setattr(packmol_module, "pack_polymers", fake_pack_polymers)
+
+        builder = SystemBuilder.__new__(SystemBuilder)
+        builder._combined_topology = object()
+        builder._polymer_molecules = [object()]
+        builder._polymer_counts = [1]
+        builder._preserve_enzyme_chain_ids = True
+
+        assert builder.pack_polymers(box_vectors_nm=[1.0, 1.0, 1.0]) is packed_topology
+        assert protein_atom.metadata["chain_id"] == "A"
+        assert attached_polymer_atom.metadata["chain_id"] == "C"
+        assert free_polymer_atom.metadata["chain_id"] == "X"
