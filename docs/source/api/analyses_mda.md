@@ -24,16 +24,3 @@ perform heavy imports lazily when they actually build or run an analysis.
 | Comparison | `compare_condition_artifacts`, `MDAComparisonContext` | {doc}`analyses_mda/aggregation_comparison` |
 | Universe provenance | `UniverseProvider`, `UniverseProvenance`, `FileIdentity` | {doc}`analyses_mda/universe_primitives` |
 | Shared primitives | `AnalysisBaseLike`, `MDARunKwargs`, `PairDistanceSpec`, `build_pair_distance_analysis` | {doc}`analyses_mda/universe_primitives` |
-
-```{toctree}
-:maxdepth: 1
-:caption: MDAnalysis Extension Layer
-
-analyses_mda/facade
-analyses_mda/jobs
-analyses_mda/frame_selection
-analyses_mda/lifecycle
-analyses_mda/artifacts_store
-analyses_mda/aggregation_comparison
-analyses_mda/universe_primitives
-```
