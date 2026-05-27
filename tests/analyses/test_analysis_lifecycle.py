@@ -183,7 +183,11 @@ class _FakeMDAWindow:
     equilibration_start = 2
     equilibration_ps = 10.0
     timestep_ps = 5.0
+    first_frame_time_ps = None
+    selected_start_time_ps = 10.0
+    equilibration_time_reference = "loaded_frame_zero"
     n_frames_total = 8
+    n_frames_selected = 3
     warning_message = None
 
     def run_kwargs(self) -> dict[str, int]:
@@ -1032,8 +1036,7 @@ def test_public_plot_only_returns_paths_and_failures(
     assert failing_failures == [
         (
             "failing_plot_lifecycle",
-            "failing_plot_lifecycle: plot failed for comparison='project': "
-            "ValueError: plot boom",
+            "failing_plot_lifecycle: plot failed for comparison='project': ValueError: plot boom",
         )
     ]
 
