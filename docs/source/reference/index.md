@@ -79,7 +79,7 @@ Experimental Analyses Archive <experimental_analyses_archive>
 Full Python API documentation.
 
 ```{toctree}
-:maxdepth: 1
+:maxdepth: 2
 
 API Reference <../api/index>
 ```
