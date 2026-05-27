@@ -82,21 +82,7 @@ Full Python API documentation.
 :maxdepth: 1
 
 API Reference <../api/index>
-API Overview <../api/overview>
-Configuration Module <../api/config>
-Builders Module <../api/builders>
-Simulation Module <../api/simulation>
-Workflow Module <../api/workflow>
-Core Module <../api/core>
-Analyses Plugin System API <../api/analyses>
-MDAnalysis Extension-Layer API <../api/analyses_mda>
-Public facade <../api/analyses_mda/facade>
-Job execution <../api/analyses_mda/jobs>
-Frame selection <../api/analyses_mda/frame_selection>
-Plugin lifecycle and collectors <../api/analyses_mda/lifecycle>
-Artifact envelopes and store <../api/analyses_mda/artifacts_store>
-Aggregation and comparison <../api/analyses_mda/aggregation_comparison>
-Universe provenance and shared MDAnalysis primitives <../api/analyses_mda/universe_primitives>
-Analysis Base Classes <../api/analyses_base>
-Analysis Shared Utilities <../api/analyses_shared>
+Package and workflow APIs <../api/package_api>
+Analysis APIs <../api/analysis_api>
+MDAnalysis extension-layer APIs <../api/mda_api>
 ```

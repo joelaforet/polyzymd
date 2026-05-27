@@ -3,20 +3,11 @@ API Reference
 
 Use these pages for module-level API documentation.
 
-- :doc:`API Overview <overview>`
-- :doc:`Configuration Module <config>`
-- :doc:`Builders Module <builders>`
-- :doc:`Simulation Module <simulation>`
-- :doc:`Workflow Module <workflow>`
-- :doc:`Core Module <core>`
-- :doc:`Analyses Plugin System API <analyses>`
-- :doc:`MDAnalysis Extension-Layer API <analyses_mda>`
-- :doc:`MDAnalysis public facade <analyses_mda/facade>`
-- :doc:`MDAnalysis job execution <analyses_mda/jobs>`
-- :doc:`MDAnalysis frame selection <analyses_mda/frame_selection>`
-- :doc:`MDAnalysis plugin lifecycle and collectors <analyses_mda/lifecycle>`
-- :doc:`MDAnalysis artifact envelopes and store <analyses_mda/artifacts_store>`
-- :doc:`MDAnalysis aggregation and comparison <analyses_mda/aggregation_comparison>`
-- :doc:`MDAnalysis universe provenance and shared primitives <analyses_mda/universe_primitives>`
-- :doc:`Analysis Base Classes <analyses_base>`
-- :doc:`Analysis Shared Utilities <analyses_shared>`
+Start with one of the grouped API sections below.
+
+- :doc:`Package and workflow APIs <package_api>` — configuration, builders,
+  simulation, workflow, and core shared types.
+- :doc:`Analysis APIs <analysis_api>` — plugin discovery, base classes, and
+  shared analysis utilities.
+- :doc:`MDAnalysis extension-layer APIs <mda_api>` — job execution, frame
+  selection, artifacts, aggregation, comparison, and MDAnalysis primitives.
