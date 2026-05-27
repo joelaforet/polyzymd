@@ -863,6 +863,7 @@ class PolymerGenerator:
         sequence: str,
         monomer_names: dict[str, str],
         residue_names: dict[str, str] | None = None,
+        energy_minimize: bool = True,
     ) -> tuple[Any, Path]:
         """Build a polymer 3D structure from sequence.
 
@@ -883,6 +884,9 @@ class PolymerGenerator:
             Mapping of sequence labels to monomer names.
         residue_names : dict[str, str] | None, optional
             Optional mapping of monomer names to 3-char residue names.
+        energy_minimize : bool, optional
+            Whether Polymerist should run its built-in fragment minimization during
+            structure generation, by default ``True``.
 
         Returns
         -------
@@ -954,7 +958,7 @@ class PolymerGenerator:
                 n_monomers=len(sequence),
                 sequence=middle_sequence,
                 sequence_map=sequence_map,
-                energy_minimize=True,
+                energy_minimize=energy_minimize,
                 allow_partial_sequences=True,
             )
 
