@@ -331,6 +331,7 @@ def generate_polymerist_smoke_polymer(
     *,
     force_regenerate: bool = False,
     max_retries: int = 3,
+    energy_minimize: bool = True,
 ) -> PolymeristGenerationSmokeResult:
     """Generate a small Polymerist-backed polymer artifact from a recipe.
 
@@ -348,6 +349,9 @@ def generate_polymerist_smoke_polymer(
         Rebuild cached Polymerist fragments when possible, by default ``False``.
     max_retries : int, optional
         Maximum Polymerist structure-building attempts, by default 3.
+    energy_minimize : bool, optional
+        Whether Polymerist should run its built-in minimization during structure
+        generation, by default ``True``.
 
     Returns
     -------
@@ -388,6 +392,7 @@ def generate_polymerist_smoke_polymer(
         sequence=sequence,
         monomer_names=recipe.to_sequence_monomer_names(),
         residue_names=recipe.to_polymerist_residue_names(),
+        energy_minimize=energy_minimize,
     )
     if pdb_path is not None:
         _write_rdkit_sdf_sidecar(polymer_object, pdb_path.with_suffix(".sdf"))
