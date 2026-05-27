@@ -154,6 +154,13 @@ from polyzymd.builders.conjugation.smoke import (
     validate_finite_energy,
     validate_finite_positions,
 )
+from polyzymd.builders.conjugation.system_workflow import (
+    ConjugatedPolymerSystemResult,
+    ConjugatedPolymerSystemSettings,
+    build_conjugated_polymer_system_from_config,
+    build_conjugated_polymer_system_from_config_path,
+    topology_with_pdb_positions,
+)
 from polyzymd.builders.conjugation.structure_normalization import (
     PDBChainNormalizationAction,
     PDBCleanlinessIssue,
@@ -177,6 +184,8 @@ __all__ = [
     "ConjugationError",
     "ConjugationMetadata",
     "ConjugationNotImplementedError",
+    "ConjugatedPolymerSystemResult",
+    "ConjugatedPolymerSystemSettings",
     "CrosslinkedPdbAssemblyOptions",
     "CrosslinkedPdbAssemblyResult",
     "CrosslinkValidationResult",
@@ -245,6 +254,8 @@ __all__ = [
     "VacuumSmokeSettings",
     "save_metadata",
     "canonicalize_poc_residue_name",
+    "build_conjugated_polymer_system_from_config",
+    "build_conjugated_polymer_system_from_config_path",
     "construct_modifier_linked_protein",
     "construct_explicit_pdb_linkage",
     "create_interchange_from_pablo_topology",
@@ -278,6 +289,7 @@ __all__ = [
     "resolve_modifier_reactive_atom",
     "run_restrained_vacuum_smoke",
     "sbma_egpma_nhs_recipe",
+    "topology_with_pdb_positions",
     "validate_finite_energy",
     "validate_finite_positions",
     "write_normalized_pdb",
