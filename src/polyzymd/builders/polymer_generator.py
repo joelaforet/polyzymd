@@ -157,6 +157,7 @@ class PolymerGenerator:
         sequence: str,
         monomer_names: Dict[str, str],
         residue_names: Optional[Dict[str, str]] = None,
+        energy_minimize: bool = True,
     ) -> Tuple[any, Path]:
         """Build a polymer 3D structure from sequence.
 
@@ -173,6 +174,8 @@ class PolymerGenerator:
             sequence: Polymer sequence string (e.g., "ABCAB")
             monomer_names: Mapping of sequence labels to monomer names
             residue_names: Optional mapping of monomer names to 3-char residue names
+            energy_minimize: Whether Polymerist should run its built-in fragment
+                minimization during structure generation.
 
         Returns:
             Tuple of (mbuild compound, path to PDB file)
@@ -238,7 +241,7 @@ class PolymerGenerator:
                     n_monomers=len(sequence),
                     sequence=middle_sequence if middle_sequence else "A",
                     sequence_map=sequence_map,
-                    energy_minimize=True,
+                    energy_minimize=energy_minimize,
                     allow_partial_sequences=True,
                 )
             except Exception as exc:
