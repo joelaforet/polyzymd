@@ -4,7 +4,7 @@ API Reference
 Use these pages for module-level API documentation.
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
 
    overview
    config
