@@ -13,23 +13,141 @@ APIs for contributor plugins.
 
 ## Public API map
 
-| Need | Import from | Docs link |
-|------|-------------|-----------|
-| Subclass the plugin base class, receive lifecycle contexts, describe scalar metrics, or return comparison models | `polyzymd.analyses.base` | {doc}`../../api/analyses_base` |
-| Build MDAnalysis-native replicate jobs and function adapters | `polyzymd.analyses.mda` | {doc}`../../api/analyses_mda` |
-| Select frames for trajectory work | `polyzymd.analyses.mda.FrameSelection` | {doc}`../../api/analyses_mda` |
-| Convert completed MDAnalysis jobs into canonical replicate artifacts | `polyzymd.analyses.mda.MDACollectorContext`, `polyzymd.analyses.mda.MDAArtifactCollector`, `polyzymd.analyses.mda.ReplicateArtifact` | {doc}`../../api/analyses_mda` |
-| Write and read artifact JSON, manifests, and validated sidecars | `polyzymd.analyses.mda.ArtifactStore`, `polyzymd.analyses.mda.ArtifactSidecarRef` | {doc}`../../api/analyses_mda` |
-| Use default replicate-to-condition aggregation or condition-artifact comparison | `polyzymd.analyses.mda.aggregate_replicate_artifacts`, `polyzymd.analyses.mda.compare_condition_artifacts` | {doc}`../../api/analyses_mda` |
-| Discover plugin classes by name in tests, CLI helpers, or developer diagnostics | `polyzymd.analyses.get_analysis`, `polyzymd.analyses.list_analyses`; detailed helpers in `polyzymd.analyses.discovery` | {doc}`../../api/analyses` |
-| Use reusable scalar comparison and CLI formatting helpers | `polyzymd.analyses.stats` | {doc}`../../api/analyses` |
-| Locate trajectories and resolve analysis windows | `polyzymd.analyses.shared.loader`, `polyzymd.analyses.shared.window` | {doc}`../../api/analyses_shared` |
-| Use documented autocorrelation, summary-statistic, inferential-test, or convergence utilities | `polyzymd.analyses.shared.autocorrelation`, `polyzymd.analyses.shared.statistics`, `polyzymd.analyses.shared.inferential_statistics`, `polyzymd.analyses.shared.convergence` | {doc}`../../api/analyses_shared` |
-| Apply shared plotting themes, figure paths, axis helpers, legends, grouped bars, or matrix annotations | `polyzymd.analyses.shared.plotting` | {doc}`../../api/analyses_shared` |
-| Reuse documented selection parsing, selector implementations, residue-classification, or centroid helpers | `polyzymd.analyses.shared.selections`; selector submodules `polyzymd.analyses.shared.selectors.base`, `polyzymd.analyses.shared.selectors.protein`, `polyzymd.analyses.shared.selectors.polymer`, `polyzymd.analyses.shared.selectors.solvent`; `polyzymd.analyses.shared.aa_classification`; `polyzymd.analyses.shared.centroid` | {doc}`../../api/analyses_shared` |
-| Use multi-run comparison or formatting helpers for analyses with several named runs per condition | `polyzymd.analyses.shared.multi_run_comparison`, `polyzymd.analyses.shared.multi_run_formatting` | {doc}`../../api/analyses_shared` |
-| Scaffold a new analysis plugin and matching tests | Command: `pixi run -e build polyzymd new-analysis <name>` | {ref}`CLI new-analysis reference <polyzymd-new-analysis>` |
-| Look up built-in plugin settings in `comparison.yaml` | `plugins.<plugin_name>` settings keys in YAML | {doc}`../../reference/analysis_plugin_settings` |
+Use the public facades below as your default imports. They keep contributor
+plugins insulated from internal framework changes while still covering the
+common plugin lifecycle tasks.
+
+### Create a plugin class
+
+Import lifecycle classes and comparison vocabulary from
+`polyzymd.analyses.base`.
+
+```python
+from polyzymd.analyses.base import Analysis, MetricValue
+```
+
+Use this surface when you need to:
+
+- subclass `Analysis`;
+- receive lifecycle contexts such as `AggregateContext`, `ComparisonContext`,
+  or `PlotContext`;
+- describe scalar metrics with `MetricValue`;
+- return framework comparison models such as `ComparisonResult`.
+
+See {doc}`../../api/analyses_base`.
+
+### Build MDAnalysis-native replicate jobs
+
+Import trajectory-native job helpers from `polyzymd.analyses.mda`.
+
+```python
+from polyzymd.analyses.mda import FrameSelection, MDAAnalysisJob
+```
+
+Use this surface when you need to:
+
+- build replicate jobs around MDAnalysis `AnalysisBase`-compatible work;
+- adapt simple trajectory functions into framework jobs;
+- select frames with `FrameSelection`;
+- receive MDAnalysis job context objects from the framework.
+
+See {doc}`../../api/analyses_mda`.
+
+### Emit artifacts and sidecars
+
+Import artifact, collector, and sidecar helpers from `polyzymd.analyses.mda`.
+
+```python
+from polyzymd.analyses.mda import ArtifactStore, MDAArtifactCollector
+from polyzymd.analyses.mda import MDACollectorContext, ReplicateArtifact
+```
+
+Use this surface when you need to:
+
+- convert completed MDAnalysis jobs into canonical replicate artifacts;
+- write and read artifact JSON and manifests;
+- attach validated sidecars with `ArtifactSidecarRef`;
+- use default replicate-to-condition aggregation;
+- compare condition artifacts without inventing plugin-specific cache files.
+
+See {doc}`../../api/analyses_mda`.
+
+### Discover and test plugins
+
+Import plugin discovery helpers from `polyzymd.analyses`.
+
+```python
+from polyzymd.analyses import get_analysis, list_analyses
+```
+
+Use this surface in tests, CLI helpers, and developer diagnostics when you need
+to confirm that a plugin is auto-discovered or retrieve a plugin class by name.
+
+See {doc}`../../api/analyses`.
+
+### Compare scalar metrics
+
+Import reusable scalar comparison and formatting helpers from
+`polyzymd.analyses.stats`.
+
+```python
+from polyzymd.analyses.stats import default_scalar_comparison
+from polyzymd.analyses.stats import format_scalar_comparison
+```
+
+Use this surface when a plugin reports one or more scalar `MetricValue` entries
+and can use the framework's default t-tests, ANOVA, ranking, and CLI summary
+formatting.
+
+See {doc}`../../api/analyses`.
+
+### Reuse shared analysis helpers
+
+Use only the shared helpers documented on {doc}`../../api/analyses_shared`.
+These modules are public contributor surfaces when imported from
+`polyzymd.analyses.shared.*`.
+
+For trajectory setup and analysis windows:
+
+```python
+from polyzymd.analyses.shared.loader import TrajectoryLoader
+from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
+```
+
+For selections, selectors, and molecular group helpers:
+
+```python
+from polyzymd.analyses.shared import aa_classification, centroid, selections
+from polyzymd.analyses.shared.selectors import base, polymer, protein, solvent
+```
+
+For statistics and convergence checks:
+
+```python
+from polyzymd.analyses.shared import autocorrelation, convergence
+from polyzymd.analyses.shared import inferential_statistics, statistics
+```
+
+For plotting and multi-run summaries:
+
+```python
+from polyzymd.analyses.shared import multi_run_comparison
+from polyzymd.analyses.shared import multi_run_formatting, plotting
+```
+
+### Start from scaffolding and configuration reference
+
+Use the scaffold command when you want a working plugin skeleton and matching
+tests before filling in analysis-specific logic.
+
+```bash
+pixi run -e build polyzymd new-analysis <name>
+```
+
+- See {ref}`CLI new-analysis reference <polyzymd-new-analysis>` for command
+  options.
+- See {doc}`../../reference/analysis_plugin_settings` for built-in
+  `comparison.yaml` plugin settings under `plugins.<plugin_name>`.
 
 ## Stable import boundaries
 
