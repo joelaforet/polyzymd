@@ -28,6 +28,9 @@ comparison, and artifact-only plotting.
   how to add an MDAnalysis-native analysis plugin with `MDAAnalysisJob`,
   `ReplicateArtifact`, default artifact aggregation, comparison, formatting,
   and artifact-only plotting
+- **[Store large analysis outputs with artifact sidecars](analysis_plugins/sidecars.md)** —
+  how to persist arrays, tables, and plotting inputs through registered
+  `ArtifactStore` sidecars instead of plugin-specific cache files
 
 ## Contributor Mindset
 

@@ -1,4 +1,4 @@
-# Store arrays and tables with sidecars
+# Store large analysis outputs with artifact sidecars
 
 This how-to is for contributors whose analysis produces arrays, per-frame
 profiles, event tables, or other data that should not be stored directly in an
@@ -8,24 +8,54 @@ Use sidecars when you need durable data for aggregation, comparison, or plots,
 but the data is too large or too structured for the small JSON summary in a
 `ReplicateArtifact` or `ConditionArtifact`.
 
-## Decide what goes in the payload and what goes in a sidecar
+## Choose payload fields vs artifact sidecars
 
 Keep the artifact payload small and JSON-compatible. Put enough information in
 the payload to identify and summarize the result; put bulky data in sidecars and
 register those sidecars on the artifact.
 
-| Data | Put it in | Why |
-| --- | --- | --- |
-| Scalar metrics used by default aggregation | `payload["metrics"]` | Aggregation can combine finite replicate scalars directly. |
-| Counts, labels, selections, dimensions, and compact summaries | `payload` or `metadata` | These make the artifact readable without opening large files. |
-| Per-frame arrays, residue-by-frame matrices, distance matrices | NPZ sidecar | Arrays stay typed and compact, with a stored hash and size. |
-| Event rows, contact tables, or per-frame tabular records | CSV or other table sidecar | Tables stay streamable and do not bloat JSON. |
-| Raw MDAnalysis `Results` objects | Neither | Map them to JSON primitives and sidecars before constructing the artifact. |
+### Put scalar metrics in the artifact payload
+
+Store finite scalar values used by default aggregation in `payload["metrics"]`.
+This lets aggregation combine replicate-level values directly without opening a
+large sidecar file.
+
+### Put compact labels and dimensions in the payload or metadata
+
+Counts, labels, selections, dimensions, and compact summaries can live in the
+artifact `payload` or `metadata`. These fields make the artifact readable and
+auditable without loading arrays or tables.
+
+### Put arrays in NPZ sidecars
+
+Per-frame arrays, residue-by-frame matrices, distance matrices, profiles, and
+other bulky numeric outputs belong in NPZ sidecars. NPZ keeps arrays typed and
+compact, and the artifact store records validation metadata for the file.
+
+### Put event tables in CSV or table sidecars
+
+Event rows, contact tables, and per-frame tabular records belong in registered
+CSV or other table sidecars. Tables stay streamable and do not bloat the JSON
+payload.
+
+### Never store raw MDAnalysis Results objects
+
+Raw MDAnalysis `Results` objects do not belong in the payload, metadata, or
+sidecars. They are runtime containers, not durable artifacts. Map their contents
+to JSON primitives, NPZ arrays, and registered table sidecars before constructing
+the artifact.
+
+## Use store-relative sidecar paths
 
 Sidecar paths are artifact-store-relative paths such as
 `sidecars/pair_distances.npz`. Do not store absolute paths in artifact payloads.
 Use the `ArtifactSidecarRef` returned by `ArtifactStore`; it records the
 relative path, SHA-256 digest, size, media type, and metadata.
+
+Store-relative paths make artifacts portable across machines and build
+directories. Later aggregation, comparison, and plotting code should resolve and
+validate sidecars through `ArtifactStore`, not by joining absolute paths saved in
+payload fields.
 
 ## Write an NPZ array sidecar from a collector
 
@@ -231,6 +261,10 @@ aggregated or compared are the bytes used for the figure.
 
 ## Avoid these anti-patterns
 
+Keep these failure modes out of contributor plugins.
+
+### Do not put large arrays in JSON payloads
+
 ```python
 # Wrong: huge JSON payloads make artifacts slow to read, diff, and validate.
 ReplicateArtifact(
@@ -241,6 +275,8 @@ ReplicateArtifact(
 )
 ```
 
+### Do not store raw MDAnalysis results
+
 ```python
 # Wrong: raw MDAnalysis Results objects are runtime containers, not artifacts.
 ReplicateArtifact(
@@ -250,6 +286,8 @@ ReplicateArtifact(
     payload={"results": job.results},
 )
 ```
+
+### Do not discover plugin-specific cache files by filename
 
 ```python
 # Wrong: arbitrary file discovery bypasses artifact validation and provenance.

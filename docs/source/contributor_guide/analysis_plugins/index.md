@@ -41,8 +41,9 @@ placeholder logic with real analysis code.
 Use these pages when a working plugin needs richer stored data or a larger module
 shape.
 
-- [Store arrays and tables with sidecars](sidecars.md) — persist NPZ arrays, CSV
-  tables, and other bulky outputs beside artifacts without bloating JSON.
+- [Store large analysis outputs with artifact sidecars](sidecars.md) — persist
+  NPZ arrays, CSV tables, and other bulky outputs beside artifacts without
+  bloating JSON.
 - [Convert a plugin into an advanced package](advanced_package.md) — split a
   single-file plugin into `_mda.py`, `_plotters.py`, `_results.py`, or
   `_formatters.py` helpers when reviewability improves.
@@ -93,7 +94,7 @@ package is an internal implementation detail behind the public facades.
 How PolyzyMD analysis plugins work <architecture>
 Scaffold your first analysis plugin <first_scaffold>
 Build a simple scalar analysis plugin <simple_scalar_plugin>
-Store arrays and tables with sidecars <sidecars>
+Store large analysis outputs with artifact sidecars <sidecars>
 Convert a plugin into an advanced package <advanced_package>
 Test your analysis plugin contribution <testing>
 API map for analysis plugin contributors <api_map>
