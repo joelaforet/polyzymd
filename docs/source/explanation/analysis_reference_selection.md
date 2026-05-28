@@ -1,29 +1,45 @@
 # How RMSF reference selection changes interpretation
 
 Root mean square fluctuation (RMSF) is not an absolute property of a protein.
-It is a measurement of motion **relative to a chosen reference** after removing
-overall translation and rotation by structural alignment. Changing the
-reference changes the scientific question the number answers.
+In PolyzyMD's standard non-external modes, it measures motion around the
+**trajectory mean positions after alignment**. The selected `reference_mode`
+controls how the trajectory is aligned and how the alignment/reference structure
+is generated; it does not make centroid, average, or frame modes compute direct
+deviations from those fixed coordinates.
 
 For new contributors, this is the most important point: two RMSF analyses can
 use the same trajectory and the same atoms but produce different values because
-they define a different baseline for "fluctuation." Those differences are not
-implementation noise; they are part of the interpretation.
+alignment choices change the coordinates whose mean and fluctuations are
+estimated. Only `external` mode supplies fixed RMSF reference positions and
+should be interpreted as an RMSF-like deviation from an external structure.
 
 ## The reference defines the question
 
-RMSF asks how far an atom or residue is, on average, from a reference position:
+In standard PolyzyMD RMSF modes (`centroid`, `average`, and `frame`), RMSF asks
+how far an atom or residue is, on average, from its mean position in the aligned
+analyzed trajectory:
 
 $$
 \text{RMSF}_i = \sqrt{\frac{1}{T} \sum_{t=1}^{T}
-\left(\mathbf{r}_i(t) - \mathbf{r}_i^{\text{ref}}\right)^2}
+\left(\mathbf{r}_i^{\text{aligned}}(t) - \left\langle \mathbf{r}_i^{\text{aligned}} \right\rangle\right)^2}
 $$
 
-The meaning of $\mathbf{r}_i^{\text{ref}}$ depends on the reference choice. A
-trajectory-derived reference asks about motion around states sampled by the
-simulation. A specific-frame reference asks about deviation from one chosen
-conformation. An external reference asks how the simulated ensemble departs from
-an independently supplied structure.
+Here $\left\langle \mathbf{r}_i^{\text{aligned}} \right\rangle$ is computed from
+the aligned frames that enter the RMSF calculation. For non-external modes,
+`reference_mode` affects how frames are superposed before this mean is computed.
+It does not replace the mean with centroid-frame coordinates or a selected
+trajectory frame.
+
+External mode is different. It can use mapped external coordinates as fixed RMSF
+reference positions:
+
+$$
+\text{RMSF-like deviation}_i = \sqrt{\frac{1}{T} \sum_{t=1}^{T}
+\left(\mathbf{r}_i^{\text{aligned}}(t) - \mathbf{r}_i^{\text{external}}\right)^2}
+$$
+
+That external quantity includes both fluctuations within the simulated ensemble
+and systematic displacement from the external structure.
 
 PolyzyMD exposes these choices through settings such as `reference_mode`,
 `reference_frame`, `reference_file`, `alignment_selection`, and
@@ -31,17 +47,20 @@ PolyzyMD exposes these choices through settings such as `reference_mode`,
 through the CLI; this page explains why the choice matters rather than how to
 configure every option.
 
-## Centroid reference: fluctuation around a sampled central structure
+## Centroid mode: sampled-frame alignment, trajectory-mean RMSF
 
-The default centroid reference chooses a **real sampled frame** that is closest
-to an aligned mean or cluster center. In PolyzyMD's current RMSF implementation,
-centroid mode uses k-means clustering with `k=1` over the centroid selection and
-then selects the sampled frame nearest that center.
+The default centroid mode chooses a **real sampled frame** that is closest to an
+aligned mean or cluster center for alignment/reference generation. In PolyzyMD's
+current RMSF implementation, centroid mode uses k-means clustering with `k=1`
+over the centroid selection and then selects the sampled frame nearest that
+center.
 
-This is useful because the reference is an actual conformation from the
-trajectory, not a synthetic average structure. It often gives an intuitive
-baseline for a stable, single-basin simulation: residues with larger RMSF values
-are the residues that depart more from a representative sampled structure.
+This is useful because the alignment reference is an actual conformation from
+the trajectory, not a synthetic average structure. After alignment, however,
+standard PolyzyMD RMSF is still computed as fluctuation around the aligned
+trajectory mean positions. Residues with larger RMSF values are residues with
+larger fluctuations around that aligned mean, not necessarily residues with the
+largest direct deviation from the centroid frame.
 
 The caveat is that `k=1` should not be interpreted as "the most populated
 conformational state." In a multimodal trajectory, a single cluster center can
@@ -49,11 +68,12 @@ fall between basins or be biased by transitions. The selected frame is closest
 to the global center under the chosen alignment and atom selection; it may not
 represent the dominant basin.
 
-## Average reference: fluctuation around the trajectory mean
+## Average mode: average-structure alignment, trajectory-mean RMSF
 
-An average reference uses the mean position of each selected atom across the
-aligned trajectory. This asks how much each atom fluctuates around the
-trajectory mean.
+Average mode uses a trajectory-derived average structure for alignment/reference
+generation. Because standard RMSF is also computed around the aligned trajectory
+mean positions, this mode has the most direct interpretation as fluctuation
+around the sampled mean.
 
 For a stationary trajectory sampling one conformational basin, this can
 approximate a thermal-like fluctuation measure. That interpretation becomes
@@ -66,32 +86,35 @@ lengths, angles, or side-chain conformations.
 Average-based RMSF is therefore best understood as fluctuation around the
 sampled mean, not as a guaranteed measurement of pure thermal fluctuations.
 
-## Frame reference: deviation from a chosen simulated conformation
+## Frame mode: selected-frame alignment, trajectory-mean RMSF
 
-A frame reference uses one specified frame from the trajectory as the baseline.
-This changes the interpretation from "how flexible is this region around a
-central sampled structure?" to "how much does this region depart from this
-particular conformation?"
+Frame mode uses one specified frame from the trajectory for alignment/reference
+generation. In the current non-external RMSF path, it does **not** compute RMSF
+as direct deviation from that frame's coordinates. After alignment, PolyzyMD
+computes standard RMSF around the mean positions of the aligned analyzed
+trajectory.
 
-That can be scientifically useful when the selected frame has independent
+That can still be scientifically useful when the selected frame has independent
 meaning, such as a catalytically competent active-site geometry, a ligand-bound
-pose, or a conformation immediately before a transition. The resulting RMSF
-values describe persistence or loss of that chosen geometry over the analyzed
-ensemble.
+pose, or a conformation immediately before a transition, because the chosen
+frame defines the alignment basis. The resulting RMSF values describe
+fluctuation around the aligned trajectory mean under that alignment choice, not
+persistence or loss of the selected frame geometry as a fixed coordinate target.
 
 The weakness is that a single frame may contain transient noise. A frame chosen
 because it is visually appealing or because it occurs at a convenient time point
 can overstate biological meaning. Contributors should describe why a selected
 `reference_frame` is scientifically meaningful whenever they use this mode.
 
-## External PDB
+## External PDB: fixed-reference RMSF-like deviation
 
 An external reference uses coordinates from an external structure file, commonly
-a prepared crystal or model structure, as the aligned baseline. This asks how
-the simulated ensemble deviates from that external conformation.
+a prepared crystal or model structure, as mapped fixed RMSF reference positions.
+This asks how the simulated ensemble deviates from that external conformation
+after alignment.
 
-This is not the same interpretation as conventional trajectory-mean RMSF. The
-value combines two effects:
+This is not the same interpretation as standard trajectory-mean RMSF. The value
+combines two effects:
 
 1. fluctuations within the simulated ensemble; and
 2. systematic offset between the simulation ensemble and the external
@@ -122,9 +145,10 @@ body. This is not wrong, but it changes the question from whole-protein
 flexibility to domain-relative displacement.
 
 The same principle applies to `centroid_selection`: the atoms used to choose the
-centroid frame influence which sampled structure is considered central. A
-centroid chosen from all protein atoms can be influenced by side-chain or loop
-motions, while a backbone-only centroid emphasizes the folded core.
+centroid frame influence which sampled structure is used for alignment/reference
+generation. A centroid chosen from all protein atoms can be influenced by
+side-chain or loop motions, while a backbone-only centroid emphasizes the folded
+core.
 
 ## External references require structural equivalence
 
@@ -150,16 +174,16 @@ the wrong atoms or embed a systematic structural artifact in every RMSF value.
 The best reference is the one that matches the claim you want the RMSF plot to
 support.
 
-| Scientific question | Reference interpretation |
-|---------------------|--------------------------|
-| Which residues move most around a representative sampled structure? | Use a centroid-style trajectory reference, with caution for multimodal trajectories. |
-| How much does each residue fluctuate around the sampled mean? | Use an average reference, and state whether the trajectory appears stationary and single-basin. |
-| How strongly does the ensemble depart from a selected functional conformation? | Use a justified frame reference. |
-| Which conditions preserve or depart from an independently known structure? | Use an external reference, while treating the result as deviation from that structure rather than conventional RMSF. |
+| Scientific question | Mode interpretation |
+|---------------------|---------------------|
+| Which residues fluctuate most after alignment to a representative sampled frame? | Use `centroid`, with caution for multimodal trajectories. RMSF is still around the aligned trajectory mean. |
+| How much does each residue fluctuate around the sampled mean after average-structure alignment? | Use `average`, and state whether the trajectory appears stationary and single-basin. |
+| How do fluctuations look after alignment to a scientifically chosen trajectory frame? | Use `frame` with a justified `reference_frame`. Do not interpret it as direct deviation from that frame. |
+| Which conditions preserve or depart from an independently known structure? | Use `external`, while treating the result as fixed-reference RMSF-like deviation rather than conventional trajectory-mean RMSF. |
 
 When comparing conditions, keep the reference logic consistent across the
 comparison. A condition-independent external reference can make offsets from the
-same structure visible. A condition-specific trajectory reference can emphasize
-within-condition flexibility but may hide differences in mean structure between
-conditions. Neither choice is universally better; they answer different
-scientific questions.
+same structure visible. A condition-specific non-external reference can
+emphasize within-condition fluctuation after alignment but may hide differences
+in mean structure between conditions. Neither choice is universally better; they
+answer different scientific questions.

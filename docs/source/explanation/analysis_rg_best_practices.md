@@ -204,12 +204,14 @@ than just the mean Rg.
 ## How PolyzyMD Handles Autocorrelation
 
 Rg timeseries are correlated — adjacent frames are similar because MD
-evolves continuously. PolyzyMD automatically accounts for this:
+evolves continuously. PolyzyMD reports correlation-aware diagnostics and
+uncertainty estimates for the Rg timeseries:
 
 1. **Computes Rg timeseries** using MDAnalysis `AtomGroup.radius_of_gyration()`
-2. **Estimates correlation time (τ)** via autocorrelation function integration
-3. **Computes effective sample size** — `n_independent = n_frames / (2τ)`
-4. **Reports autocorrelation-corrected SEM** — `SEM = σ / √n_independent`
+2. **Estimates correlation behavior** using autocorrelation-based diagnostics
+3. **Reports an effective-sample-size estimate** based on statistical
+   inefficiency rather than raw frame count
+4. **Reports correlation-aware SEM estimates** for within-trajectory summaries
 
 ### Example Autocorrelation Output
 
@@ -222,9 +224,17 @@ Run: Whole Protein
 ```
 
 This means:
-- Rg values decorrelate over ~3.8 ns timescales
-- You effectively have 19 independent measurements from 9000 frames
-- The reported SEM properly accounts for this correlation
+- Rg values appear to decorrelate on roughly nanosecond timescales for this
+  analyzed window
+- The raw 9000 frames contain far less independent information than the frame
+  count alone suggests
+- The reported SEM is a correlation-aware estimate, not a guarantee that all
+  sampling limitations have been removed
+
+These estimates depend on stationarity, sampling quality, and the reliability of
+the autocorrelation estimate. If the trajectory drifts, switches slowly between
+states, or samples too few transitions, correlation-aware uncertainty can still
+understate the true uncertainty in the condition-level conclusion.
 
 ```{seealso}
 For the mathematical details of autocorrelation functions and the LiveCoMS
@@ -301,18 +311,27 @@ like before. Use both for comprehensive structural analysis.
 
 | Multiple Replicates | Single Long Simulation |
 |--------------------|------------------------|
-| Truly independent starting points | Frames remain correlated |
+| Independently initialized trajectories when setup supports it | Frames remain correlated |
 | Tests reproducibility of compactness | May be trapped in metastable state |
-| Robust SEM from replicate means | SEM requires autocorrelation correction |
+| Replicate-level SEM when runs are independent and comparably equilibrated | SEM requires autocorrelation correction |
 | Parallelizable | Sequential |
 
 ### How Many Replicates?
 
-| Replicates | Statistical Power | Practical Guidance |
-|------------|-----------------|-------------------|
-| 1 | Descriptive only | Exploratory — no inferential statistics |
-| 3 | Large effects (d > 2) | Minimum for publication |
-| 5 | Medium effects (d > 1.3) | Recommended standard |
+There is no universal replicate count that guarantees publishable or definitive
+Rg comparisons. The needed sampling depends on the system, effect size,
+timescales, equilibration quality, expected heterogeneity, and field-specific
+standards. Practical guidance is:
+
+| Replicates | What the result can usually support |
+|------------|-------------------------------------|
+| 1 | Descriptive checks, debugging, or exploratory summaries; no between-replicate uncertainty |
+| 2-3 | Preliminary evidence for large, reproducible effects, with substantial caution |
+| 4+ | More stable replicate-level uncertainty estimates, but still dependent on independent setup and adequate sampling |
+
+Use the smallest table entry that honestly matches the claim. Strong mechanistic
+claims generally require more evidence than descriptive screening, especially
+when condition differences are small or trajectories show slow transitions.
 
 ```{note}
 With only 1 replicate, PolyzyMD still computes Rg and includes the condition in
@@ -365,13 +384,14 @@ Ranking (lower = more compact):
 100% EGMA vs No Polymer:
   Change: +3.5% (expansion), p=0.0078*, d=2.14 (large)
 
-ANOVA: F=22.31, p=0.0018* (significant across all conditions)
+ANOVA: F=22.31, p=0.0018* (evidence of differences across conditions)
 ```
 
 **Reading this output:**
 - SBMA is associated with lower whole-protein Rg for this selection.
 - EGMA is associated with higher whole-protein Rg for this selection.
-- The ANOVA confirms at least one condition differs from the others
+- The ANOVA suggests evidence that at least one condition differs from the
+  others, subject to model assumptions and sampling quality.
 - Large Cohen's d values mean the replicate-level Rg differences are large
   relative to replicate variation.
 
@@ -388,12 +408,11 @@ then check structural mechanisms with visualization and complementary analyses.
 
 **Cause:** Including the initial equilibration phase biases the mean.
 
-**Solution:** Plot the Rg timeseries (or RMSD timeseries) and visually
-identify when the plateau begins. Set `--eq-time` to skip the transient:
-
-```bash
-polyzymd compare run rg -f comparison.yaml --eq-time 20ns
-```
+**Solution:** Plot the Rg timeseries (or RMSD timeseries), visually assess when
+the initial transient appears to end, and choose an equilibration cutoff before
+interpreting condition differences. For command syntax, see the
+[Rg quickstart](../how_to/analysis_rg_quickstart.md) and
+[compare workflow guide](../how_to/analysis_compare_conditions.md).
 
 ### 2. Comparing Different Selections
 
@@ -425,8 +444,9 @@ identical selections.
 **Cause:** Two conditions can have the same mean Rg but very different
 dynamics (one stable, one drifting upward then returning).
 
-**Solution:** Always examine the Rg timeseries plots. Use
-`polyzymd compare plot-all` to generate them automatically.
+**Solution:** Always examine the Rg timeseries plots produced by the comparison
+workflow. See the [compare workflow guide](../how_to/analysis_compare_conditions.md)
+for plotting commands and artifact locations.
 
 ### 5. Confusing Rg with RMSD
 
@@ -445,8 +465,10 @@ relative deviation measure. A 1 Å change in Rg is typically a smaller
 
 **Cause:** Treating autocorrelation-corrected SEM as sufficient.
 
-**Solution:** Use replicate-based statistics when available. The replicate
-SEM captures system-level variability that within-trajectory analysis cannot:
+**Solution:** Use replicate-based statistics when available. Replicate SEM is
+often the most interpretable uncertainty summary when replicates are
+independently initialized and comparably equilibrated, because it captures
+between-run variability that within-trajectory analysis cannot:
 
 ```text
 Replicate 1: mean Rg = 18.234 Å
@@ -454,8 +476,12 @@ Replicate 2: mean Rg = 18.291 Å
 Replicate 3: mean Rg = 18.244 Å
 
 Replicate mean: 18.256 Å
-Replicate SEM:  0.044 Å  ← This is the gold standard uncertainty
+Replicate SEM:  0.044 Å  ← Often preferable when replicates are independent
 ```
+
+Replicate SEM can still mislead if all replicates share the same setup bias,
+remain trapped in the same metastable state, or are not comparably equilibrated.
+Treat it as one uncertainty summary, not as automatic proof of convergence.
 
 ### 7. Using Inappropriate Selections
 
@@ -500,21 +526,16 @@ plugins:
         calculation_mode: fragments
 ```
 
-### Verify Fragment Count
+### Verify Fragment Count Conceptually
 
-Before running large production analyses, verify that MDAnalysis detects the
-expected number of fragments with a quick test:
-
-```python
-import MDAnalysis as mda
-
-u = mda.Universe("topology.pdb", "trajectory.dcd")
-ag = u.select_atoms("resname SBM or resname EGM or resname EGP")
-print(f"Atoms: {len(ag)}, Fragments: {len(ag.fragments)}")
-```
-
-If the fragment count does not match the expected number of independent
-polymer chains, check your topology for unexpected bonds bridging chains.
+Before relying on fragment-mode results, confirm that the topology represents
+the physical fragments you intend to analyze. The number of detected fragments
+should match the expected number of independent polymer chains or oligomeric
+units. If it does not, check for unexpected bonds bridging chains, missing bonds
+within chains, or a selection that includes atoms outside the intended fragment
+population. Use the [Rg quickstart](../how_to/analysis_rg_quickstart.md) and
+[Rg reference](../reference/analysis_rg_reference.md) for task-oriented setup
+and field-level configuration details.
 
 ### When to Use Each Mode
 

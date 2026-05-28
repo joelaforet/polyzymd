@@ -31,6 +31,14 @@ where $\mathbf{r}_i(t)$ is the position of atom or residue $i$ at time $t$,
 $\langle \mathbf{r}_i \rangle$ is its time-averaged position, and $T$ is the
 number of frames used in the estimate.
 
+This is the standard PolyzyMD interpretation for non-external reference modes:
+`centroid`, `average`, and `frame` affect alignment/reference generation, but
+RMSF is computed as fluctuation around the mean positions of the aligned
+analyzed trajectory. Those modes should not be read as direct deviation from a
+centroid frame or a selected trajectory frame. See
+[reference structure selection](analysis_reference_selection.md) for the
+mode-by-mode interpretation.
+
 Low RMSF often indicates a relatively rigid region, such as a buried core or
 structured secondary element. High RMSF often indicates a flexible region, such
 as a loop, terminus, or mobile binding-site element. These are interpretations,
@@ -209,26 +217,30 @@ experimental activity data.
 ## External-reference RMSF-like deviations
 
 PolyzyMD supports reference modes that change the scientific meaning of the
-reported values. Standard trajectory-mean or centroid-style RMSF asks how much
-a residue fluctuates around a trajectory-derived reference. An external
-reference mode instead measures an RMSF-like per-residue deviation from a fixed
-external structure, such as a crystal model of a catalytically competent state.
+reported values. Standard non-external RMSF asks how much a residue fluctuates
+around the aligned trajectory mean; `centroid`, `average`, and `frame` change how
+the trajectory is aligned and how the alignment/reference structure is generated.
+External mode is the special fixed-reference path: it uses mapped external
+coordinates as the RMSF reference positions and measures an RMSF-like
+per-residue deviation from a fixed external structure, such as a crystal model of
+a catalytically competent state.
 
 That external-reference quantity is useful, but it is not the same as standard
-RMSF around the trajectory mean. A low value means the residue remains close to
-the chosen external structure; a high value means it departs from that
+RMSF around the aligned trajectory mean. A low value means the residue remains
+close to the chosen external structure; a high value means it departs from that
 structure. This can be appropriate for questions about maintaining catalytic
-geometry, while standard RMSF is better for questions about flexibility within
-each sampled ensemble.
+geometry, while standard non-external RMSF is better for questions about
+flexibility within each sampled ensemble.
 
 Use both views when they answer different questions:
 
-- standard RMSF: "Which regions are flexible in this condition?"
+- standard non-external RMSF: "Which regions are flexible in this condition
+  after the chosen alignment?"
 - external-reference deviation: "Which condition remains closest to a chosen
   functional structure?"
 
 For setup details, see the
-[external PDB section](analysis_reference_selection.md#external-pdb) of the
+[external PDB section](analysis_reference_selection.md#external-pdb-fixed-reference-rmsf-like-deviation) of the
 reference selection guide.
 
 ## Common interpretation pitfalls

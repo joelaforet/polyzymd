@@ -225,10 +225,15 @@ experimental activity or other mechanistic validation.
 The current plugin plot lifecycle reads existing artifacts and generates
 high-level comparison figures. The primary outputs are:
 
-- `triad_kde_panel.png` — per-pair distance distributions across conditions,
+- `triad_kde_panel.<format>` — per-pair distance distributions across conditions,
   with the configured threshold shown as a visual reference.
-- `triad_threshold_bars.png` — grouped summaries of fractions below threshold,
+- `triad_threshold_bars.<format>` — grouped summaries of fractions below threshold,
   including the simultaneous contact metric and per-pair contact behavior.
+
+The plot file format is configurable through PolyzyMD plot settings. Supported
+formats include `png`, `pdf`, and `svg`; `png` is the default. For example, the
+default filenames are `triad_kde_panel.png` and `triad_threshold_bars.png`, while
+PDF output would use `triad_kde_panel.pdf` and `triad_threshold_bars.pdf`.
 
 Use these plots to understand whether a scalar difference is driven by a broad
 distributional shift, a small subpopulation, or one limiting pair. The plots are

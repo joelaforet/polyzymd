@@ -13,8 +13,8 @@ MDAnalysis provides a built-in
 [`RMSF`](https://docs.mdanalysis.org/stable/documentation_pages/analysis/rms.html#MDAnalysis.analysis.rms.RMSF)
 class, but it cannot support two features PolyzyMD requires:
 
-1. **Autocorrelation-based frame subsampling.** PolyzyMD identifies
-   statistically independent frames via autocorrelation analysis
+1. **Autocorrelation-based frame subsampling.** PolyzyMD selects approximately
+   decorrelated frames using an autocorrelation-based heuristic
    (following [Grossfield et al., 2018](https://doi.org/10.33011/livecoms.1.1.5067)),
    producing arbitrary non-uniform frame indices. MDAnalysis's `RMSF`
    class only accepts uniform `start/stop/step` slicing.
