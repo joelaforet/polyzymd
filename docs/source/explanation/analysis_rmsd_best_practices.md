@@ -1,7 +1,10 @@
-# RMSD Analysis: Best Practices
+# RMSD Interpretation: Use, Limits, and Cautions
 
-A guide to interpreting RMSD results, choosing reference structures,
-understanding autocorrelation, and comparing conditions rigorously.
+RMSD is a useful structural similarity diagnostic, but it is not proof of
+thermodynamic equilibration, statistical convergence, or biological stability by
+itself. This page explains what RMSD can and cannot support when interpreting
+PolyzyMD trajectories, with emphasis on reference choice, atom selection,
+autocorrelation, and cautious condition-level comparison.
 
 ```{versionadded} 1.3.0
 The RMSD analysis plugin was added in PolyzyMD 1.3.0.
@@ -17,8 +20,8 @@ for copy-paste commands and minimal setup.
 the difference between means vs. variances), see the
 [Statistics Best Practices Guide](analysis_statistics_best_practices.md).
 
-This page focuses on **RMSD-specific** guidance: what the values mean,
-how to interpret timeseries behavior, and how to compare conditions.
+This page focuses on **RMSD-specific** interpretation: what the values mean,
+which assumptions they depend on, and where the conclusions can be ambiguous.
 ```
 
 ## What is RMSD?
@@ -31,57 +34,67 @@ $$
 $$
 
 Where:
+
 - $\mathbf{r}_i(t)$ is the position of atom $i$ at time $t$
 - $\mathbf{r}_i^{\text{ref}}$ is the position of atom $i$ in the reference structure
 - $N$ is the number of atoms in the selection
 
-Unlike RMSF (which averages over time to give one value per residue), RMSD
-gives **one value per frame** — a timeseries that tracks how the structure
-evolves relative to its reference.
+Unlike RMSF, which averages over time to give one value per residue, RMSD gives
+one value per frame. The result is a timeseries describing how a selected set of
+atoms moves relative to a chosen reference.
 
-### What RMSD Measures
+### What RMSD can and cannot tell you
 
-| RMSD Behavior | Structural Interpretation |
-|---------------|--------------------------|
-| Low and stable | Structure stays near reference; rigid or well-equilibrated |
-| Gradually increasing | Conformational drift — may indicate slow unfolding |
-| Plateau after rise | Equilibration followed by stable sampling |
-| Sudden jump | Conformational transition or partial unfolding event |
-| Oscillating | Sampling between multiple conformational states |
+RMSD measures distance from a chosen reference for a chosen atom selection. It
+does not directly measure free energy, functional activity, or thermodynamic
+stability. The same RMSD value can arise from different molecular motions, and a
+single RMSD timeseries can hide local rearrangements that matter biologically.
+
+| RMSD behavior | Cautious structural interpretation |
+|---------------|------------------------------------|
+| Low and stable | Selected atoms remain close to the chosen reference over the sampled interval. |
+| Gradually increasing | Possible drift away from the reference; the cause is not unique. |
+| Plateau after rise | Suggests structural stationarity for the selected atoms/reference, not full thermodynamic equilibration. |
+| Sudden jump | May reflect a transition, alignment artifact, domain motion, ligand event, or unfolding; inspect structures. |
+| Oscillating | May indicate repeated conformational motion or reference/alignment sensitivity; not necessarily two-state behavior. |
 
 ## Interpreting RMSD Values
 
-### Typical Ranges for Enzyme Systems
+### Rough Cα RMSD heuristics for folded globular proteins
 
-| RMSD (Å) | Interpretation | Typical Origin |
-|----------|----------------|----------------|
-| 0.5 – 1.5 | Very stable | Well-folded globular protein, strong crystal contacts |
-| 1.5 – 2.5 | Normal | Typical for soluble enzymes at 300 K |
-| 2.5 – 3.5 | Moderate deviation | Flexible loops, domain motions, lid opening |
-| 3.5 – 5.0 | Large deviation | Significant conformational change, partial unfolding |
-| > 5.0 | Very large | Major structural rearrangement or unfolding |
+The following values are rough heuristics for **Cα RMSD of small-to-medium
+folded globular proteins**. They are not universal quality thresholds and should
+not be used to label a system as stable or unstable without additional context.
+
+| Cα RMSD (Å) | Possible interpretation | Common contributors |
+|-------------|------------------------|---------------------|
+| 0.5 – 1.5 | Close to reference for the selected atoms | Rigid core, short trajectory, restrained or crystal-like geometry |
+| 1.5 – 2.5 | Modest deviation from reference | Typical backbone fluctuations for many compact proteins |
+| 2.5 – 3.5 | Larger deviation from reference | Flexible loops, termini, lid opening, domain motion |
+| 3.5 – 5.0 | Large reference-relative change | Domain rearrangement, alignment sensitivity, partial unfolding |
+| > 5.0 | Very large reference-relative change | Major rearrangement, unfolding, or different conformational basin |
 
 ```{note}
-These ranges assume Cα RMSD for proteins of 100–400 residues. Larger
-proteins tend to have higher RMSD due to more flexible regions. Always
-compare like-with-like: same selection, same reference mode, same atoms.
+These heuristics assume comparable atom selections, alignment choices,
+reference modes, protein sizes, simulation lengths, and force-field contexts.
+Always compare like-with-like: same selection, same reference mode, same atoms.
 ```
 
-### Selection Matters
+### Selection matters
 
 The choice of atoms for RMSD calculation strongly affects the result:
 
-| Selection | Typical RMSD | Best For |
-|-----------|-------------|----------|
-| `protein and name CA` | 1–3 Å | Overall backbone stability |
-| `protein and backbone` | 1–3 Å | Backbone conformation (includes N, C, O) |
-| `protein and name CA and resid 50:150` | 0.5–2 Å | Core region, excluding flexible termini |
-| Active site residues | 0.5–2 Å | Catalytic geometry maintenance |
-| `chainid C and not name H*` | Variable | Polymer conformation tracking |
+| Selection | Typical use | Interpretation caution |
+|-----------|-------------|------------------------|
+| `protein and name CA` | Global backbone similarity | Flexible termini and domain motions can dominate. |
+| `protein and backbone` | Backbone conformation | Includes more atoms than Cα and can change the scale. |
+| `protein and name CA and resid 50:150` | Core-region similarity | Excludes regions that may be scientifically important. |
+| Active site residues | Local catalytic-geometry proxy | Low RMSD does not prove catalytic competence. |
+| `chainid C and not name H*` | Polymer conformation relative to reference | Polymer RMSD can be highly reference- and alignment-dependent. |
 
-## RMSD vs Time: What to Look For
+## RMSD vs Time: Interpreting Patterns Cautiously
 
-### Plateau Behavior (Ideal)
+### Plateau-like behavior
 
 ```text
 RMSD
@@ -95,11 +108,12 @@ RMSD
    0    10   20   30   40 ns
 ```
 
-The initial rise is **equilibration** — the system relaxing from the starting
-structure. The plateau indicates **stable sampling** of an equilibrium
-ensemble. Set `--eq-time` to skip the rise phase.
+An initial rise followed by an apparent plateau can suggest that the selected
+atoms have reached a reference-relative stationary regime. This is useful, but
+limited: it does not prove thermodynamic equilibration, convergence of other
+observables, or adequate sampling of all relevant conformations.
 
-### Conformational Drift
+### Conformational drift
 
 ```text
 RMSD
@@ -112,62 +126,51 @@ RMSD
  0 +----------------------→ Time
 ```
 
-A continuously rising RMSD suggests the system has not equilibrated or is
-slowly unfolding. Possible responses:
-- Extend the simulation to see if it eventually plateaus
-- Check temperature, pressure, and force field parameters
-- The system may genuinely be unstable under these conditions
+A continuously rising RMSD suggests ongoing movement away from the reference for
+the selected atoms. Possible explanations include slow relaxation, domain
+motion, unfolding, reference mismatch, alignment choices, or insufficient
+sampling. RMSD alone usually cannot identify which explanation is correct.
 
-### Sudden Jumps
+### Sudden jumps
 
-A sharp RMSD increase mid-trajectory typically indicates a conformational
-transition. Check the structure at the jump to understand what happened:
-- Loop flipping or lid opening
-- Domain rearrangement
-- Ligand unbinding
-- Partial unfolding
+A sharp RMSD increase mid-trajectory indicates a rapid change in
+reference-relative geometry, but the molecular cause is non-unique. It may
+reflect loop flipping, lid opening, domain rearrangement, ligand motion,
+alignment sensitivity, imaging artifacts, or partial unfolding.
 
 ```{tip}
-When you observe a jump, load the trajectory in a molecular viewer (e.g.,
-VMD, PyMOL) and examine frames around the transition. This often reveals
-biologically meaningful events.
+When you observe a jump, load the trajectory in a molecular viewer and examine
+frames around the transition. Visual inspection can distinguish chemically
+meaningful events from alignment, imaging, or selection artifacts.
 ```
 
 ### Oscillations
 
-Regular RMSD oscillations suggest the system samples between two or more
-metastable states. This is often seen with:
-- Hinge-bending motions
-- Active site lid dynamics
-- Allosteric transitions
+Regular RMSD oscillations can be consistent with repeated motion between
+reference-relative geometries, but they do not by themselves establish discrete
+metastable states. Hinge bending, active-site lid dynamics, allosteric motion,
+alignment choices, and periodic boundary artifacts can all produce oscillatory
+patterns.
 
-For oscillating systems, report the **range and period** of oscillation rather
-than just the mean RMSD.
+For oscillating systems, the range and timescale of the oscillation often convey
+more than the mean RMSD alone.
 
 ## How PolyzyMD Handles Autocorrelation
 
-RMSD timeseries are correlated — adjacent frames are similar because MD
-evolves continuously. PolyzyMD automatically accounts for this:
+RMSD timeseries are autocorrelated because adjacent MD frames are not
+independent samples. A trajectory with many saved frames can still contain far
+fewer statistically independent observations.
 
-1. **Computes RMSD timeseries** after alignment to the reference structure
-2. **Estimates correlation time (τ)** via autocorrelation function integration
-3. **Computes effective sample size** — `n_independent = n_frames / (2τ)`
-4. **Reports autocorrelation-corrected SEM** — `SEM = σ / √n_independent`
+PolyzyMD reports uncertainty in terms of statistical inefficiency where
+possible. Conceptually, the effective sample size is `N_eff = N / g`, where `g`
+is the statistical inefficiency. For a simple integrated autocorrelation-time
+estimate, `g ≈ 1 + 2τ/dt`, with `τ` the integrated autocorrelation time and `dt`
+the frame spacing. Larger `g` means stronger correlation and fewer effective
+samples.
 
-### Example Autocorrelation Output
-
-```text
-Run: Protein Backbone
-  Correlation time: 4521 ps (4.5 ns)
-  Statistical inefficiency: 562.7
-  Independent samples: 16 (from 9000 frames)
-  SEM (corrected): 0.078 Å
-```
-
-This means:
-- RMSD values decorrelate over ~4.5 ns timescales
-- You effectively have 16 independent measurements from 9000 frames
-- The reported SEM properly accounts for this correlation
+This correction helps avoid treating adjacent frames as independent, but it
+does not replace independent replicate simulations or guarantee convergence of
+the underlying conformational ensemble.
 
 ```{seealso}
 For the mathematical details of autocorrelation functions and the LiveCoMS
@@ -175,48 +178,37 @@ recommendations, see the
 [Statistics Best Practices Guide](analysis_statistics_best_practices.md).
 ```
 
-## Multi-Run Analysis: Why and When
-
-### Why Multiple Runs?
+## Multi-Run Analysis: Why It Helps Interpretation
 
 Different RMSD selections answer different questions:
 
 | Run Label | Selection | Question |
 |-----------|-----------|----------|
-| "Protein Backbone" | `protein and name CA` | Overall protein stability? |
-| "Active Site" | Catalytic residues CA | Catalytic geometry maintenance? |
-| "Polymer Core" | `chainid C and not name H*` | Polymer conformation stability? |
-| "Crystal Deviation" | `protein and name CA` (external ref) | Distance from functional state? |
-
-### When to Use Multi-Run
-
-- **Always** include a global protein backbone run as a baseline
-- **Add active site runs** when studying enzyme catalysis
-- **Add polymer runs** when studying enzyme-polymer conjugates
-- **Add external reference runs** when comparing to a known functional state
-
-### Independent Ranking
+| "Protein Backbone" | `protein and name CA` | How close is the global backbone to this reference? |
+| "Active Site" | Catalytic residues CA | How close is the local active-site geometry to this reference? |
+| "Polymer Core" | `chainid C and not name H*` | How close is the polymer conformation to this reference? |
+| "Crystal Deviation" | `protein and name CA` (external ref) | How close is the protein to an external structural state? |
 
 Each run is ranked independently across conditions. This prevents averaging
-RMSD from structurally different selections (which would be meaningless):
+RMSD from structurally different selections, which would be difficult to
+interpret:
 
 ```text
 Rankings:
-  Protein Backbone: With Polymer < No Polymer (stabilizing)
-  Active Site:      With Polymer < No Polymer (stabilizing)
+  Protein Backbone: With Polymer < No Polymer (closer to reference)
+  Active Site:      With Polymer < No Polymer (closer to reference)
   Polymer Core:     No Polymer — (single condition only)
 ```
 
 ## External Reference for Catalytic Competence
 
-When studying enzyme catalysis across multiple conditions (polymer baths,
-temperatures, mutants), the standard reference modes (`centroid`, `average`)
-use a **condition-specific** reference — each condition's trajectory determines
-its own reference structure.
+When studying enzyme catalysis across multiple conditions, the standard
+reference modes (`centroid`, `average`) use a **condition-specific** reference:
+each condition's trajectory determines its own reference structure.
 
 The `external` reference mode uses a **condition-independent** reference,
-typically a crystal structure representing the catalytically competent
-geometry. RMSD then measures deviation from the functional state:
+typically a crystal structure representing a specific geometry of interest. RMSD
+then measures deviation from that external structure:
 
 $$
 \text{RMSD}^{\text{ext}}(t) = \sqrt{\frac{1}{N} \sum_{i=1}^{N} \left\| \mathbf{r}_i(t) - \mathbf{r}_i^{\text{crystal}} \right\|^2}
@@ -226,133 +218,121 @@ $$
 
 | Metric | Standard RMSD (centroid/average) | External Reference RMSD |
 |--------|----------------------------------|------------------------|
-| Low value | Structure stays near its own equilibrium | Structure stays near crystal geometry |
-| High value | Structure deviates from its equilibrium | Structure deviates from functional state |
-| Condition comparison | Which condition is more structurally stable? | Which condition best maintains catalytic geometry? |
+| Low value | Structure stays near its own trajectory-derived reference | Structure stays near the external geometry |
+| High value | Structure deviates from its trajectory-derived reference | Structure deviates from the external geometry |
+| Condition comparison | Which condition remains closer to its chosen internal reference? | Which condition remains closer to the external structure? |
 
 ```{tip}
-**Which reference mode for enzymes?** Use `centroid` or `average` to answer
-"how stable is the protein?" Use `external` to answer "how well does the
-protein maintain its catalytically competent geometry?" These are complementary
-questions — consider running both as separate runs in the same analysis.
+**Which reference mode for enzymes?** Use `centroid` or `average` for
+trajectory-internal reference-relative motion. Use `external` to ask whether a
+trajectory remains close to a specific known structure. External-reference RMSD
+does not make "closer" inherently better or more stable unless the external
+structure is justified as the relevant state for the scientific question.
 ```
 
 ## Replicates vs Longer Simulations
 
-### The LiveCoMS Recommendation
+### The LiveCoMS recommendation
 
 > "Multiple independent simulations are preferable to a single long simulation"
 > — Grossfield et al. (2018)
 
-### Why Replicates Matter for RMSD
+### Why replicates matter for RMSD
 
 | Multiple Replicates | Single Long Simulation |
 |--------------------|------------------------|
-| Truly independent starting points | Frames remain correlated |
-| Tests reproducibility of drift/plateau | May be trapped in metastable state |
-| Robust SEM from replicate means | SEM requires autocorrelation correction |
+| Independent starting points | Frames remain correlated |
+| Tests reproducibility of drift/plateau patterns | May remain trapped in one metastable state |
+| Supports uncertainty from replicate means | Requires autocorrelation correction within trajectory |
 | Parallelizable | Sequential |
-
-### How Many Replicates?
-
-| Replicates | Statistical Power | Practical Guidance |
-|------------|-----------------|-------------------|
-| 1 | Descriptive only | Exploratory — no inferential statistics |
-| 3 | Large effects (d > 2) | Minimum for publication |
-| 5 | Medium effects (d > 1.3) | Recommended standard |
 
 ```{note}
 With only 1 replicate, PolyzyMD still computes RMSD and includes the condition
-in descriptive summaries and rankings. Replicate SEM is unavailable and shown
-as n/a because variability across independent simulations cannot be estimated
-from a singleton. Pairwise inferential tests require at least 2 replicates per
-condition.
+in descriptive summaries and rankings. Replicate SEM is unavailable because
+variability across independent simulations cannot be estimated from a singleton.
+Pairwise inferential tests require at least 2 replicates per condition.
 ```
 
 ## Comparing Conditions
 
-### What PolyzyMD Computes
+### What PolyzyMD computes
 
 For each RMSD run, the comparison produces:
 
 | Statistic | Description |
 |-----------|-------------|
-| **Ranking** | Conditions sorted by mean RMSD (lowest = most stable) |
+| **Ranking** | Conditions sorted by mean RMSD (lowest = closest to the chosen reference) |
 | **Percent change** | Relative to control condition |
-| **Direction** | `stabilizing` (< −1%), `destabilizing` (> +1%), or `unchanged` |
+| **Direction** | Plugin labels such as `stabilizing`, `destabilizing`, or `unchanged`; interpret as reference-relative unless separately justified |
 | **t-statistic** | Two-sample t-test on replicate means |
 | **p-value** | Two-tailed significance |
 | **Cohen's d** | Effect size magnitude |
 | **ANOVA** | Omnibus F-test when 3+ conditions (per-run) |
 
-### Direction Labels
+### Direction labels
 
-PolyzyMD classifies the direction of change based on percent change in mean
-RMSD relative to control:
+PolyzyMD classifies the direction of change based on percent change in mean RMSD
+relative to control. For RMSD, these labels are shorthand and should be read as
+changes in closeness to the chosen reference, not proof of biological stability.
 
 | Percent Change | Direction | Meaning |
 |---------------|-----------|---------|
-| < −1% | `stabilizing` | Treatment reduces structural deviation |
-| > +1% | `destabilizing` | Treatment increases structural deviation |
-| −1% to +1% | `unchanged` | No meaningful difference |
+| < −1% | `stabilizing` | Treatment reduces reference-relative deviation |
+| > +1% | `destabilizing` | Treatment increases reference-relative deviation |
+| −1% to +1% | `unchanged` | No meaningful difference by this threshold |
 
-### Interpreting the Comparison
+### Interpreting the comparison
 
-```text
-RMSD Comparison — Protein Backbone
-===================================
-Ranking (lower = more stable):
-  1. 100% SBMA:   1.612 ± 0.028 Å
-  2. No Polymer:  1.856 ± 0.034 Å
-  3. 100% EGMA:   2.103 ± 0.051 Å
+When one condition has lower mean RMSD than another, the most direct statement
+is that it stayed closer to the chosen reference for the selected atoms over the
+analyzed interval. Stronger claims, such as improved stability or functional
+preservation, require supporting evidence from the scientific context and other
+observables.
 
-100% SBMA vs No Polymer:
-  Change: -13.1% (stabilizing), p=0.0089*, d=2.41 (large)
+PolyzyMD writes canonical RMSD artifacts through the analysis lifecycle. The
+stable locations are:
 
-100% EGMA vs No Polymer:
-  Change: +13.3% (destabilizing), p=0.0142*, d=1.98 (large)
+- `analysis/<sanitized_condition_label>/rmsd/run_<N>/result.json` for
+  replicate-level artifacts
+- `analysis/<sanitized_condition_label>/rmsd/aggregated/result.json` for
+  condition-level artifacts
+- `comparison/rmsd/result.json` for comparison artifacts
 
-ANOVA: F=18.42, p=0.0031* (significant across all conditions)
-```
-
-**Reading this output:**
-- SBMA polymer significantly stabilizes the enzyme (lower RMSD)
-- EGMA polymer significantly destabilizes it (higher RMSD)
-- The ANOVA confirms at least one condition differs from the others
-- Large Cohen's d values mean these are substantial effects
+Treat artifact contents as structured payloads and provenance that may refer to
+sidecars for larger data. Avoid depending on undocumented raw JSON field names
+unless they are described in reference documentation.
 
 ## Common Pitfalls
 
-### 1. Insufficient Equilibration
+### 1. Treating a plateau as proof of equilibration
 
-**Symptom:** RMSD mean and comparison results change with different
-`--eq-time` values.
+**Symptom:** A plateau-like RMSD trace is described as complete equilibration.
 
-**Cause:** Including the initial equilibration rise biases the mean upward.
+**Caution:** A plateau suggests stationarity of the selected atoms relative to
+the chosen reference. Other coordinates, slow modes, ligand states, solvent
+structure, or functional observables may still be unequilibrated.
 
-**Solution:** Plot the RMSD timeseries and visually identify when the plateau
-begins. Set `--eq-time` to skip the rise phase:
+**Better interpretation:** "RMSD reached an apparent plateau for this selection
+and reference after the initial relaxation period."
 
-```bash
-polyzymd compare run rmsd -f comparison.yaml --eq-time 20ns
-```
-
-### 2. Comparing Different Selections
+### 2. Comparing different selections
 
 **Symptom:** RMSD values are not comparable across runs or publications.
 
 **Cause:** Different atom selections yield different RMSD magnitudes.
 
-**Solution:** Always report the exact selection string. Compare only runs with
-identical selections.
+**Better interpretation:** Always report the exact selection string. Compare
+only runs with identical selections, references, and alignment conventions.
 
-### 3. Over-Interpreting Small Differences
+### 3. Over-interpreting small differences
 
 **Symptom:** Claiming significance for 0.05 Å differences.
 
 **Cause:** Not accounting for uncertainty.
 
-**Solution:** Always report uncertainty and check statistical significance:
+**Better interpretation:** Report uncertainty and avoid implying meaningful
+structural differences when confidence intervals overlap substantially or
+replicate variation dominates:
 
 ```text
 # WRONG: "Condition A (1.856 Å) is less stable than B (1.861 Å)"
@@ -360,135 +340,108 @@ identical selections.
 #         are not significantly different (p = 0.91, unchanged)"
 ```
 
-### 4. Ignoring Timeseries Shape
+### 4. Ignoring timeseries shape
 
 **Symptom:** Reporting only mean RMSD without inspecting the timeseries.
 
 **Cause:** Two conditions can have the same mean RMSD but very different
-dynamics (one plateaued, one drifting).
+dynamics, such as one plateau-like trace and one drifting trace.
 
-**Solution:** Always examine the RMSD timeseries plots. Use
-`polyzymd compare plot-all` to generate them automatically.
+**Better interpretation:** Inspect the timeseries shape before reducing the
+trajectory to a mean. Similar means can arise from stationary, drifting, or
+multi-regime trajectories.
 
-### 5. Using All-Atom RMSD Without Justification
+### 5. Using all-atom RMSD without justification
 
-**Symptom:** Very high RMSD values even for stable proteins.
+**Symptom:** Very high RMSD values even for compact proteins.
 
-**Cause:** Side-chain motions dominate all-atom RMSD, obscuring backbone
+**Cause:** Side-chain motions can dominate all-atom RMSD, obscuring backbone
 changes.
 
-**Solution:** Use Cα or backbone atoms unless you have a specific reason to
-include side chains:
+**Better interpretation:** Use Cα, backbone, all-atom, or local selections
+according to the scientific question. Side-chain-rich selections are valid when
+side-chain rearrangements are the intended observable, but their RMSD scale is
+not interchangeable with Cα RMSD.
 
-```yaml
-selection: "protein and name CA"         # Recommended default
-# NOT: selection: "protein"              # All-atom, noisy
-```
-
-### 6. Ignoring Replicate Variation
+### 6. Ignoring replicate variation
 
 **Symptom:** Reporting within-trajectory SEM as the total uncertainty.
 
 **Cause:** Treating autocorrelation-corrected SEM as sufficient.
 
-**Solution:** Use replicate-based statistics when available. The replicate
-SEM captures system-level variability that within-trajectory analysis cannot:
+**Better interpretation:** Use independent replicate statistics when available.
+Within-trajectory uncertainty can account for adjacent-frame correlation, but
+replicate-to-replicate variability better reflects sensitivity to initial
+conditions and sampling path.
 
-```text
-Replicate 1: mean RMSD = 1.823 Å
-Replicate 2: mean RMSD = 1.891 Å
-Replicate 3: mean RMSD = 1.854 Å
-
-Replicate mean: 1.856 Å
-Replicate SEM:  0.034 Å  ← This is the gold standard uncertainty
-```
-
-### 7. Choosing Wrong Reference Mode
+### 7. Choosing the wrong reference mode
 
 **Symptom:** Unexpected or hard-to-interpret comparison results.
 
-**Cause:** Using `centroid` when `external` is more appropriate (or vice versa).
+**Cause:** Using `centroid` when `external` is more appropriate for the
+scientific question, or interpreting external-reference RMSD as inherently
+better when it is merely closer to the supplied structure.
 
-**Solution:** Match reference mode to your scientific question:
-- Stability question → `centroid` or `average`
-- Functional geometry question → `external` with crystal structure
+**Better interpretation:** Match reference mode to your scientific question:
 
-### 8. Treating Automated Convergence as Ground Truth
+- Trajectory-internal reference-relative motion → `centroid` or `average`
+- Closeness to a specified structural state → `external` with a justified
+  reference structure
 
-**Symptom:** Trusting the `converged: true` flag without further inspection.
+### 8. Treating automated convergence as ground truth
 
-**Cause:** The sliding-window heuristic is parameter-dependent and can
-miss slow drift, metastable trapping, or convergence issues in observables
-other than RMSD.
+**Symptom:** Trusting an automated convergence diagnostic without further
+inspection.
 
-**Solution:** Use convergence detection as one input among several. Always
-inspect the RMSD timeseries visually, run multiple independent replicates,
-and check convergence of other relevant observables (Rg, SASA, active site
-distances). See {doc}`/explanation/convergence_detection` for a full
+**Cause:** A sliding-window heuristic is parameter-dependent and can miss slow
+drift, metastable trapping, or convergence issues in observables other than
+RMSD.
+
+**Better interpretation:** Use convergence diagnostics as one input among
+several. Inspect the RMSD timeseries, run multiple independent replicates when
+possible, and check other relevant observables such as Rg, SASA, contacts, or
+active-site distances. See {doc}`/explanation/convergence_detection` for a full
 discussion of limitations.
 
-## RMSD as an Equilibration Diagnostic
+## RMSD as one equilibration diagnostic
 
-RMSD is the standard diagnostic for determining when equilibration is
-complete. The principle is simple: when RMSD stops increasing and reaches
-a stable plateau, the system is equilibrated.
-
-As of v1.3.0, PolyzyMD also provides **automated convergence detection** — a
-sliding-window slope heuristic that quantifies whether the RMSD timeseries has
-plateaued. This runs automatically alongside every RMSD computation and reports
-convergence status in the result JSON. See
-{doc}`/explanation/convergence_detection` for the full conceptual discussion.
-
-### Practical Workflow
-
-1. Run RMSD with `--eq-time 0ns` (no equilibration skip) to see the full
-   timeseries
-2. Identify the plateau onset visually from the timeseries plot
-3. Re-run with `--eq-time <plateau_onset>` for production analysis
-
-```bash
-# Step 1: Full timeseries
-polyzymd compare run rmsd -f comparison.yaml --eq-time 0ns
-polyzymd compare plot-all -f comparison.yaml
-
-# Step 2: Inspect plots, identify plateau at ~10 ns
-
-# Step 3: Production analysis
-polyzymd compare run rmsd -f comparison.yaml --eq-time 10ns --recompute
-```
+RMSD is commonly used as an equilibration diagnostic because large structural
+relaxations often appear as changes in reference-relative distance. Its role is
+diagnostic, not definitive. A plateau can support the claim that the selected
+atoms are no longer drifting relative to the reference on the observed
+timescale, but it does not establish thermodynamic equilibration or convergence
+of all relevant observables.
 
 ```{tip}
-If RMSD never plateaus within your simulation time, the system may need longer
-equilibration, or the conditions may genuinely prevent equilibration (e.g.,
-protein unfolding). Consider extending the simulation or investigating the
-cause.
+If RMSD never appears stationary within the simulation time, possible
+explanations include slow relaxation, reference mismatch, large-amplitude domain
+motion, unfolding, or simply insufficient sampling. Distinguish these by
+inspecting structures and complementary observables.
 ```
 
-### Automated Convergence Detection
+### Automated convergence detection
 
 ```{versionadded} 1.3.0
 ```
 
-In addition to the manual workflow above, PolyzyMD automatically runs a
-sliding-window convergence diagnostic on every RMSD timeseries. The algorithm
-divides the timeseries into overlapping windows, computes the slope between
-successive window means, and declares convergence when the slope remains below
-a threshold for a sustained duration.
-
-The convergence result is stored in the per-replicate JSON (`converged`,
-`convergence_time_ns`, `convergence_message`) and aggregated across replicates
-(`n_converged_replicates`, `convergence_fraction`,
-`mean_convergence_time_ns`). Optional convergence diagnostic plots — showing
-the RMSD timeseries alongside the sliding slope trace — can be enabled with
-`show_convergence_plots: true` in `plot_settings.rmsd`.
+PolyzyMD can run a sliding-window convergence diagnostic on RMSD timeseries. The
+diagnostic evaluates whether reference-relative RMSD changes remain below a
+configured threshold over a sustained interval. The resulting information is
+stored as part of the canonical RMSD artifact payload and provenance, with
+condition-level summaries represented in aggregated artifacts. Larger timeseries
+or plot-ready data may be represented through sidecars referenced by the
+artifact.
 
 **This is a diagnostic tool, not a definitive convergence proof.** The
 heuristic can miss slow drift below the slope threshold, and convergence in
 RMSD does not guarantee convergence of other observables. Always use multiple
 replicates and visual inspection alongside automated diagnostics.
 
-For a full conceptual treatment — including the algorithm, parameters, tuning
-guidance, and limitations — see {doc}`/explanation/convergence_detection`.
+For command-oriented usage, see the
+[RMSD Quick Start Guide](../how_to/analysis_rmsd_quickstart.md). For a full
+conceptual treatment of convergence diagnostics — including the algorithm,
+parameters, tuning guidance, and limitations — see
+{doc}`/explanation/convergence_detection`.
 
 ## References
 
