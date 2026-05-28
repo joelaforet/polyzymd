@@ -238,8 +238,10 @@ def build_solvent_shell_analysis(universe, *, settings):
             self._counts.append(len(self._atoms))
 
         def _conclude(self):
-            self.results.metrics = {"mean_shell_count": float(sum(self._counts))}
-            self.results.n_frames = len(self._counts)
+            n_frames = len(self._counts)
+            mean_shell_count = float(sum(self._counts) / n_frames) if n_frames else 0.0
+            self.results.metrics = {"mean_shell_count": mean_shell_count}
+            self.results.n_frames = n_frames
 
     return SolventShellAnalysisBase(universe, settings=settings)
 ```
