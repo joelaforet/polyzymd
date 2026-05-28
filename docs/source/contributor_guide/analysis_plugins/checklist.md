@@ -102,6 +102,15 @@ plugins.
   plugin writes arrays or tables.
 - [ ] Tests that require real trajectory data are marked `@pytest.mark.slow`.
 
+## Documentation and user-facing surfaces
+
+- [ ] New plugins, settings, public APIs, CLI options, or user workflows update
+  the relevant docs, reference pages, CLI help, and configuration examples.
+- [ ] New analysis settings are documented where users look up
+  `comparison.yaml` plugin options.
+- [ ] Stable versus experimental behavior is labeled clearly when the feature is
+  not yet a settled default workflow.
+
 ## Commands before PR
 
 Run the focused checks for your plugin and the project-level checks relevant to
