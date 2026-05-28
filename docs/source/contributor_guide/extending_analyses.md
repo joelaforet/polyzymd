@@ -139,8 +139,8 @@ def measure_solvent_shell(
 
     atoms = universe.select_atoms(settings.selection)
     n_frames = _selected_frame_count(universe, start=start, stop=stop, step=step, frames=frames)
-    value = float(len(atoms) * n_frames) * settings.scale
-    return {"metrics": {METRIC_NAME: value}, "n_frames": n_frames}
+    mean_shell_count = float(len(atoms)) * settings.scale
+    return {"metrics": {METRIC_NAME: mean_shell_count}, "n_frames": n_frames}
 
 
 class SolventShellArtifactCollector:
