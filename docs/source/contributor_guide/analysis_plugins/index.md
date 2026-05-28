@@ -8,59 +8,69 @@ Use it if you know Python and molecular simulation concepts, but are still
 learning how PolyzyMD connects MDAnalysis trajectory work to replicate
 artifacts, condition aggregation, cross-condition comparison, and plotting.
 
-## Recommended order
+## Start
 
-1. **Set up the contributor environment.** Start with
-   [Set Up a Contributor Environment](../setup.md) so commands run inside the
-   managed `pixi` environment.
-2. **Read the project contribution basics.** Use
-   [Contributing to PolyzyMD](../contributing.md) for project workflow and review
-   expectations.
-3. **Orient to the package architecture.** Read
-   [Architecture](../../explanation/architecture.md) for the high-level package
-   layout before focusing on analyses.
-4. **Understand how analysis plugins work.** Read
-   [How PolyzyMD analysis plugins work](architecture.md) to learn why plugins
-   use `MDAAnalysisJob`, collectors, artifacts, sidecars, and artifact-only
-   plotting before you start editing code.
-5. **Scaffold your first plugin.** Follow
-   [Scaffold your first analysis plugin](first_scaffold.md) to generate one
-   default single-file plugin and matching tests with the throwaway name
-   `solvent_shell`.
-6. **Build one small scalar plugin.** Follow
-   [Build a simple scalar analysis plugin](simple_scalar_plugin.md) to learn how
-   a function job, collector, default aggregation, and `MetricValue` fit together.
-7. **Store arrays and tables as sidecars.** Use
-   [Store arrays and tables with sidecars](sidecars.md) when your collector needs
-   to persist NPZ arrays, CSV tables, or other bulky data beside an artifact.
-8. **Split larger plugins into packages when needed.** Use
-   [Convert a plugin into an advanced package](advanced_package.md) when a
-   working single-file plugin has grown enough to need `_mda.py`, `_plotters.py`,
-   `_results.py`, or `_formatters.py` helpers.
-9. **Test the plugin contract.** Use
-    [Test your analysis plugin contribution](testing.md) to cover discovery,
-    settings validation, MDAnalysis jobs, collectors, artifacts, sidecars,
-    aggregation, comparison metrics, and artifact-only plotting.
-10. **Look up stable API surfaces.** Use
-     [API map for analysis plugin contributors](api_map.md) when you need the
-     public import path, API reference page, scaffold command, or plugin-settings
-     reference without browsing internals.
-11. **Check your contribution before review.** Use
-     [Analysis plugin contribution checklist](checklist.md) for the PR-ready
-     plugin contract and reviewer checklist.
-12. **Use the current full analysis extension guide.** The supported detailed
-     guide is [Extend PolyzyMD with MDAnalysis-native analyses](../extending_analyses.md).
-     It covers the current scaffold, public imports, `MDAAnalysisJob`, collectors,
-     artifacts, default comparison, and artifact-only plotting.
-13. **Use the API reference directly when needed.** Use the API pages for
-      [analysis plugins](../../api/analyses.md),
-      [analysis base classes](../../api/analyses_base.md),
-      [MDAnalysis integration](../../api/analyses_mda.md), and
-      [shared analysis utilities](../../api/analyses_shared.md).
-14. **Check CLI and configuration reference material.** Use the
-       [CLI reference](../../reference/cli_reference.md) and
-       [analysis plugin settings reference](../../reference/analysis_plugin_settings.md)
-       when you need command or configuration lookup.
+Begin here when you are new to contributing analysis code.
+
+- [Set Up a Contributor Environment](../setup.md) — install the pixi-managed
+  environment used by docs, tests, and local development.
+- [Contributing to PolyzyMD](../contributing.md) — learn the branch, review, and
+  verification expectations for small, reviewable changes.
+- [Architecture](../../explanation/architecture.md) — orient to the package
+  layout before narrowing in on analysis plugins.
+- [How PolyzyMD analysis plugins work](architecture.md) — understand the plugin
+  lifecycle, public facades, artifacts, sidecars, and artifact-only plotting.
+
+## Build
+
+Use these pages when you are creating your first plugin or replacing scaffolded
+placeholder logic with real analysis code.
+
+- [Scaffold your first analysis plugin](first_scaffold.md) — generate a
+  single-file plugin and matching tests with a throwaway name such as
+  `solvent_shell`.
+- [Build a simple scalar analysis plugin](simple_scalar_plugin.md) — connect one
+  function job, collector, default aggregation path, and scalar comparison.
+- [Extend PolyzyMD with MDAnalysis-native analyses](../extending_analyses.md) —
+  use the full implementation guide for current scaffold patterns, public
+  imports, `MDAAnalysisJob`, collectors, artifacts, default comparison, and
+  artifact-only plotting.
+
+## Scale
+
+Use these pages when a working plugin needs richer stored data or a larger module
+shape.
+
+- [Store arrays and tables with sidecars](sidecars.md) — persist NPZ arrays, CSV
+  tables, and other bulky outputs beside artifacts without bloating JSON.
+- [Convert a plugin into an advanced package](advanced_package.md) — split a
+  single-file plugin into `_mda.py`, `_plotters.py`, `_results.py`, or
+  `_formatters.py` helpers when reviewability improves.
+
+## Verify
+
+Use these pages before opening a pull request or reviewing one.
+
+- [Test your analysis plugin contribution](testing.md) — cover discovery,
+  settings validation, MDAnalysis jobs, collectors, artifacts, sidecars,
+  aggregation, comparison metrics, and artifact-only plotting.
+- [Analysis plugin contribution checklist](checklist.md) — confirm the plugin
+  contract, import boundaries, tests, docs updates, and PR-ready commands.
+
+## Reference
+
+Use these lookup pages when you need exact import paths, commands, or settings.
+
+- [API map for analysis plugin contributors](api_map.md) — find stable public
+  imports and the nearest API reference page without browsing internals.
+- [Analysis plugin API](../../api/analyses.md),
+  [analysis base classes](../../api/analyses_base.md),
+  [MDAnalysis integration](../../api/analyses_mda.md), and
+  [shared analysis utilities](../../api/analyses_shared.md) — inspect the API
+  reference directly.
+- [CLI reference](../../reference/cli_reference.md) and
+  [analysis plugin settings reference](../../reference/analysis_plugin_settings.md)
+  — look up commands and `comparison.yaml` plugin options.
 
 ## Public and private import guardrails
 
