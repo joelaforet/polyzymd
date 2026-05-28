@@ -172,18 +172,65 @@ the wrong atoms or embed a systematic structural artifact in every RMSF value.
 ## Choosing a reference by scientific question
 
 The best reference is the one that matches the claim you want the RMSF plot to
-support.
+support. Start from the question, then choose the mode whose interpretation fits
+that question.
 
-| Scientific question | Mode interpretation |
-|---------------------|---------------------|
-| Which residues fluctuate most after alignment to a representative sampled frame? | Use `centroid`, with caution for multimodal trajectories. RMSF is still around the aligned trajectory mean. |
-| How much does each residue fluctuate around the sampled mean after average-structure alignment? | Use `average`, and state whether the trajectory appears stationary and single-basin. |
-| How do fluctuations look after alignment to a scientifically chosen trajectory frame? | Use `frame` with a justified `reference_frame`. Do not interpret it as direct deviation from that frame. |
-| Which conditions preserve or depart from an independently known structure? | Use `external`, while treating the result as fixed-reference RMSF-like deviation rather than conventional trajectory-mean RMSF. |
+### To ask which residues fluctuate most after representative-frame alignment
 
-When comparing conditions, keep the reference logic consistent across the
-comparison. A condition-independent external reference can make offsets from the
-same structure visible. A condition-specific non-external reference can
-emphasize within-condition fluctuation after alignment but may hide differences
-in mean structure between conditions. Neither choice is universally better; they
-answer different scientific questions.
+Choose `centroid`.
+
+This is appropriate when you want alignment/reference generation based on a real
+sampled conformation that represents the trajectory under the chosen centroid
+selection. Interpret the RMSF values as fluctuations around the aligned
+trajectory mean, not as direct deviations from the centroid frame.
+
+Use extra caution for multimodal trajectories: the selected centroid frame may
+sit near a global center rather than represent the most populated state.
+
+### To ask how residues fluctuate around the sampled mean
+
+Choose `average`.
+
+This gives the most direct trajectory-mean interpretation among the
+non-external modes because both the alignment/reference generation and the RMSF
+calculation are tied to trajectory-derived mean structure. It is most
+straightforward for stationary, single-basin trajectories.
+
+If the trajectory samples multiple long-lived conformations, the result mixes
+within-state fluctuation with between-state heterogeneity.
+
+### To ask how fluctuations look under a meaningful trajectory-frame alignment
+
+Choose `frame`.
+
+This is useful when a particular trajectory frame has independent scientific
+meaning, such as a catalytically competent geometry, a ligand-bound pose, or a
+pre-transition conformation. The selected frame defines the alignment basis.
+
+Do not interpret `frame` mode as direct deviation from that frame. In the
+standard non-external RMSF path, PolyzyMD still reports fluctuations around the
+aligned trajectory mean.
+
+### To ask whether conditions preserve an independently known structure
+
+Choose `external`.
+
+This is the fixed-reference case. It is appropriate when the scientific claim is
+about preservation of, or departure from, a prepared crystal structure or other
+external model.
+
+Interpret the result as an RMSF-like deviation from fixed external coordinates,
+not as conventional trajectory-mean RMSF. The value combines ensemble
+fluctuation with systematic offset from the external structure.
+
+### When comparing conditions
+
+Keep the reference logic consistent with the comparison claim.
+
+A condition-independent external reference makes offsets from the same structure
+visible across conditions. A condition-specific non-external reference emphasizes
+within-condition fluctuation after alignment, but can hide differences in mean
+structure between conditions.
+
+Neither choice is universally better. They answer different scientific
+questions.
