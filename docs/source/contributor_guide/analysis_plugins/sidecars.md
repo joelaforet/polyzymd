@@ -59,6 +59,9 @@ class DistanceMatrixCollector:
         job = completed_jobs[0]
         distances = np.asarray(job.results["distances_nm"], dtype=np.float64)
         frames = np.asarray(job.results["frames"], dtype=np.int64)
+        metadata = {"result_kind": "distance_matrix_replicate"}
+        if ctx.settings_fingerprint is not None:
+            metadata["settings_fingerprint"] = ctx.settings_fingerprint
 
         sidecar = ctx.artifact_store.write_npz_sidecar(
             "sidecars/distance_matrix.npz",
@@ -90,7 +93,7 @@ class DistanceMatrixCollector:
                     analysis_name=ctx.analysis_name,
                 ),
             },
-            metadata={"result_kind": "distance_matrix_replicate"},
+            metadata=metadata,
             warnings=list(ctx.warnings),
         )
 ```

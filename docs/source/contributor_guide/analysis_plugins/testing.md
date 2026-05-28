@@ -41,10 +41,14 @@ def test_solvent_shell_is_discoverable() -> None:
 
 def test_settings_defaults_and_validation() -> None:
     settings = SolventShellSettings()
-    assert settings.selection == "protein and chainid A"
+    assert settings.selection == "protein and name CA"
+    assert settings.scale == 1.0
 
     with pytest.raises(ValueError):
-        SolventShellSettings(cutoff_nm=-1.0)
+        SolventShellSettings(selection="")
+
+    with pytest.raises(ValueError):
+        SolventShellSettings(scale=0.0)
 ```
 
 Keep discovery tests lightweight. They should not load trajectories or require
@@ -86,7 +90,7 @@ def test_build_mda_jobs_returns_named_jobs() -> None:
     )
     ctx = SimpleNamespace(
         universe=FakeUniverse(),
-        settings=SolventShellSettings(selection="protein and chainid A"),
+        settings=SolventShellSettings(selection="protein and name CA", scale=1.0),
         frame_selection=FrameSelection(start=0, stop=10, step=2, n_frames_total=10),
         replicate_context=SimpleNamespace(condition=condition),
         replicate=1,
@@ -157,7 +161,11 @@ def test_collector_returns_replicate_artifact(tmp_path: Path) -> None:
     job = MDAJobResult(
         name="solvent_shell",
         analysis=SimpleNamespace(),
-        results={"mean_shell_count": 4.0, "n_frames": 5},
+        results={
+            "metrics": {"mean_shell_count": 4.0},
+            "mean_shell_count": 4.0,
+            "n_frames": 5,
+        },
         run_kwargs={},
         frame_selection=collector_ctx.frame_selection,
         backend_policy=MDABackendPolicy(),
@@ -266,7 +274,7 @@ or run MDAnalysis jobs.
 
 ```python
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from polyzymd.analyses.base import Condition, PlotContext
 from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact
@@ -302,16 +310,16 @@ def test_plot_reads_condition_artifacts_only(tmp_path: Path) -> None:
         settings=SolventShellSettings(),
     )
 
-    with patch("MDAnalysis.Universe", side_effect=AssertionError("plot must not load trajectories")):
-        paths = SolventShellAnalysis().plot(ctx)
+    paths = SolventShellAnalysis().plot(ctx)
 
     assert paths
     assert all(path.exists() for path in paths)
 ```
 
-If your plugin imports MDAnalysis lazily inside compute helpers only, the patch
-may not be needed. The important test behavior is that plot inputs are artifacts
-and registered sidecars, not trajectories.
+Prefer asserting artifact-only inputs and outputs over patching
+`MDAnalysis.Universe`, because that patch can be fragile when plugins import
+MDAnalysis lazily or never import it during plotting. Add a targeted trajectory
+loader patch only if your plugin has a known plotting regression to guard.
 
 ## Validate sidecars where relevant
 

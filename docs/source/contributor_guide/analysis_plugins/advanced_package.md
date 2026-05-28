@@ -167,7 +167,11 @@ def calculate_shell_counts(
 
     atoms = universe.select_atoms(selection)
     values: list[float] = []
-    iterator = universe.trajectory[frames] if frames is not None else universe.trajectory[start:stop:step]
+    iterator = (
+        universe.trajectory[frames]
+        if frames is not None
+        else universe.trajectory[start:stop:step]
+    )
 
     for _ts in iterator:
         values.append(float(np.asarray(atoms.positions).shape[0]))
@@ -199,13 +203,17 @@ class SolventShellCollector:
     ) -> ReplicateArtifact:
         job = completed_jobs[0]
         mean_count = float(job.results["mean_count"])
+        metadata = {"result_kind": "solvent_shell_replicate"}
+        if ctx.settings_fingerprint is not None:
+            metadata["settings_fingerprint"] = ctx.settings_fingerprint
+
         return ReplicateArtifact(
             analysis_name=ctx.analysis_name,
             condition_label=ctx.condition_label,
             replicate=ctx.replicate,
             payload={"metrics": {"mean_shell_count": mean_count}},
             provenance={"frame_selection": frame_selection_payload(ctx.frame_selection)},
-            metadata={"result_kind": "solvent_shell_replicate"},
+            metadata=metadata,
             warnings=list(ctx.warnings),
         )
 ```
