@@ -141,8 +141,10 @@ Use the scaffold command when you want a working plugin skeleton and matching
 tests before filling in analysis-specific logic.
 
 ```bash
-pixi run -e build polyzymd new-analysis <name>
+pixi run -e build polyzymd new-analysis solvent_shell
 ```
+
+Replace `solvent_shell` with the desired plugin name.
 
 - See {ref}`CLI new-analysis reference <polyzymd-new-analysis>` for command
   options.
