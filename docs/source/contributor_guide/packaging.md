@@ -1,470 +1,214 @@
-# Package Structure and Development Guide
+# Package Structure and Release Guide
 
-This guide explains how PolyzyMD is structured as a Python package, the design decisions behind it, and how to contribute or create similar packages.
+Use this page when you need to understand how PolyzyMD is packaged, why the
+project is pixi-first, and what release automation expects from contributors.
 
-## Overview
+## Packaging model
 
-PolyzyMD is designed to be:
+PolyzyMD uses standard Python packaging for metadata and distributions, but the
+full molecular-simulation stack is managed by pixi. A wheel can be built with
+`pyproject.toml`, but pip alone is not the recommended full install path because
+OpenMM, OpenFF, MDAnalysis, AmberTools, RDKit, PACKMOL, and related scientific
+packages are resolved most reliably from conda-forge.
 
-- **pip-installable**: `pip install polyzymd`
-- **pixi-first for heavy scientific dependencies**: use `pixi install -e <env>`
-  for the reproducible OpenMM/OpenFF stack
-- **Testable in CI**: Works with GitHub Actions for automated testing
-- **Developer-friendly**: Clear structure for contributors
+For contributor and user workflows, prefer:
 
-This document explains the key concepts that make this work.
-
----
-
-## Package Layout
-
-### The `src/` Layout
-
-PolyzyMD uses a **src layout**, which is considered best practice for pip-installable packages:
-
-```
-polyzymd/                    # Repository root
-├── src/
-│   └── polyzymd/            # The actual Python package
-│       ├── __init__.py
-│       ├── config/
-│       ├── builders/
-│       ├── simulation/
-│       └── ...
-├── tests/                   # Test suite (outside the package)
-├── docs/                    # Documentation
-├── devtools/                # Development tools and helper scripts
-├── pyproject.toml           # Package metadata and build config
-├── README.md
-└── LICENSE
+```bash
+pixi install -e build
+pixi run -e build polyzymd --help
 ```
 
-### Why `src/` Layout?
+Use pip-only installs only for package metadata checks, lightweight import
+checks, or release validation jobs that intentionally avoid the simulation
+stack.
 
-The `src/` layout has several advantages over a "flat" layout:
+## Repository layout
 
-| Aspect | src/ Layout | Flat Layout |
-|--------|-------------|-------------|
-| **Import safety** | Forces testing against installed package | Can accidentally import local directory |
-| **Editable installs** | Works correctly with `pip install -e .` | May have import conflicts |
-| **Clear separation** | Package code is isolated | Package mixed with repo files |
+PolyzyMD uses the `src/` layout so tests import the installed package instead of
+accidentally importing files from the repository root.
 
-**Example of the problem with flat layout:**
-
-```python
-# With flat layout, this might import local files instead of installed package:
-import polyzymd  # Which polyzymd? Local or installed?
+```text
+polyzymd/
+├── .github/workflows/        # CI, full-test, and release workflows
+├── docs/source/              # Sphinx + MyST documentation
+│   ├── get_started/          # Installation and quickstart pages
+│   ├── tutorials/            # Learning-oriented walkthroughs
+│   ├── how_to/               # Task-oriented guides
+│   ├── reference/            # CLI, schema, and data-layout reference
+│   ├── explanation/          # Architecture and design rationale
+│   ├── contributor_guide/    # Contributor documentation
+│   └── api/                  # Autodoc API pages
+├── src/polyzymd/
+│   ├── analyses/             # Analysis plugin system and built-in plugins
+│   ├── builders/             # Molecular system construction
+│   ├── cli/                  # Click command-line interface
+│   ├── config/               # Pydantic configuration schema and loading
+│   ├── core/                 # Shared core types
+│   ├── data/                 # Bundled data and solvent/co-solvent libraries
+│   ├── engines/              # Engine-specific execution/export helpers
+│   ├── exporters/            # Format exporters
+│   ├── simulation/           # Simulation runners and continuation support
+│   ├── templates/            # Project and config templates
+│   ├── utils/                # Shared utilities
+│   └── workflow/             # SLURM and orchestration helpers
+├── tests/
+│   ├── analyses/             # Plugin and analysis-framework tests
+│   ├── cli/                  # CLI tests
+│   ├── config/               # Configuration tests
+│   ├── engines/              # Engine integration/export tests
+│   ├── exporters/            # Exporter tests
+│   ├── regression/           # Regression coverage
+│   ├── simulation/           # Runner and continuation tests
+│   ├── utils/                # Utility tests
+│   └── workflow/             # SLURM/workflow tests
+├── pixi.toml                 # Conda-forge environments and tasks
+├── pyproject.toml            # Python package metadata and tool config
+└── README.md
 ```
 
-With `src/` layout, you must install the package (even in editable mode) before imports work, ensuring you always test the real package.
+## `pyproject.toml`
 
-### Alternative: Flat Layout
-
-Some packages (like Polymerist) use a flat layout:
-
-```
-polymerist/                  # Repository root
-├── polymerist/              # Package has same name as repo
-│   ├── __init__.py
-│   └── ...
-├── pyproject.toml
-└── ...
-```
-
-This is simpler but requires more care to avoid import issues.
-
----
-
-## The `pyproject.toml` File
-
-The `pyproject.toml` file is the modern standard for Python package configuration. It replaces the older `setup.py` approach.
-
-### Key Sections
-
-#### Build System
+`pyproject.toml` defines the Python package metadata, build backend, CLI entry
+point, and development-tool configuration.
 
 ```toml
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-```
 
-This tells pip which tool to use for building the package. Common options:
-- **hatchling**: Modern, fast, good defaults (what PolyzyMD uses)
-- **setuptools**: Traditional, widely supported
-- **flit**: Simple, minimal configuration
-
-#### Project Metadata
-
-```toml
 [project]
 name = "polyzymd"
-version = "1.0.0"
-description = "Molecular dynamics simulation toolkit for enzyme-polymer systems"
-readme = "README.md"
-license = "MIT"
-authors = [
-    { name = "Joseph R. Laforet Jr.", email = "jola3134@colorado.edu" }
-]
+version = "1.3.0"
 requires-python = ">=3.10"
-```
 
-#### Dependencies
-
-```toml
-dependencies = [
-    # Core dependencies that pip can install
-    "pydantic>=2.0.0",
-    "pyyaml>=6.0",
-    "click>=8.0.0",
-    "numpy>=1.21.0,<2.0.0",
-]
-
-[project.optional-dependencies]
-# Groups of optional dependencies
-dev = ["pytest>=7.0.0", "ruff>=0.1.0"]
-docs = ["sphinx>=6.0.0", "myst-parser>=1.0.0"]
-```
-
-#### Entry Points (CLI Commands)
-
-```toml
 [project.scripts]
 polyzymd = "polyzymd.cli.main:main"
 ```
 
-This creates the `polyzymd` command that users can run from terminal.
+The project currently keeps the release version in three places:
 
----
+- `pyproject.toml`
+- `pixi.toml`
+- `src/polyzymd/__init__.py`
 
-## Handling Heavy Dependencies
+When preparing a release, update all three to the same version, for example
+`1.3.1`.
 
-### The Challenge
+## Pixi environments
 
-PolyzyMD depends on packages that are difficult or impossible to install via pip:
+Current pixi environments are:
 
-- **OpenMM**: GPU-accelerated MD engine (resolved from conda-forge via pixi)
-- **OpenFF Toolkit**: Force field tools (resolved from conda-forge via pixi)
-- **RDKit**: Chemistry toolkit (managed in the pixi environment)
-- **PACKMOL**: Molecular packing (resolved from conda-forge via pixi)
-- **AmberTools**: Optional, for AM1-BCC charging backend (resolved from conda-forge via pixi)
+| Environment | Use |
+|-------------|-----|
+| `build` | Local contributor environment with docs, tests, packaging tools, and flexible non-CUDA OpenMM. Use this for editing, docs, configuration, system-building checks, and most tests. |
+| `cuda-12-4` | Cluster/GPU workflow for systems whose driver supports CUDA 12.4, including OpenMM pinned for that stack. |
+| `cuda-12-6` | Cluster/GPU workflow for systems whose driver supports CUDA 12.6, including OpenMM pinned for that stack. |
 
-If we list these in `dependencies`, `pip install polyzymd` will fail.
-
-### The Solution: Lazy Imports
-
-We use **lazy imports** so the package can be imported without these heavy dependencies:
-
-```python
-# polyzymd/__init__.py
-
-__version__ = "1.0.0"
-
-def __getattr__(name):
-    """Lazy import heavy modules only when accessed."""
-    if name == "SystemBuilder":
-        from polyzymd.builders.system_builder import SystemBuilder
-        return SystemBuilder
-    raise AttributeError(f"module 'polyzymd' has no attribute {name!r}")
-```
-
-This means:
-
-```python
-import polyzymd                    # Works without OpenFF installed
-print(polyzymd.__version__)        # Works - just returns "1.0.0"
-
-from polyzymd import SystemBuilder  # NOW imports OpenFF (fails if not installed)
-```
-
-### Why This Matters
-
-1. **CI can run basic tests** without a full simulation environment
-2. **Users can install** the package and see helpful error messages
-3. **Documentation builds** don't require simulation dependencies
-
-### Recommended Installation
-
-We recommend users install via pixi so the heavy scientific dependencies are
-resolved reproducibly from `pixi.toml`:
+Install the local contributor environment with:
 
 ```bash
-git clone https://github.com/joelaforet/polyzymd.git
-cd polyzymd
 pixi install -e build
-pixi shell -e build
 ```
 
-### Optional Charging Backends
+For GPU cluster work, choose the CUDA environment that does not exceed the
+cluster driver version:
 
-PolyzyMD defaults to **NAGL** for partial charge assignment, which is fast and
-doesn't require additional dependencies beyond the OpenFF stack.
+```bash
+pixi install -e cuda-12-6
+pixi shell -e cuda-12-6
+```
 
-For AM1-BCC charges, you can optionally install additional backends:
+Heavy scientific dependencies must remain pixi-managed. Do not add OpenMM,
+OpenFF, MDAnalysis, AmberTools, PACKMOL, or RDKit installation instructions that
+ask contributors to install them into a system Python.
 
-#### AmberTools (sqm)
+## Lazy imports for heavy dependencies
 
-AmberTools is already included in the PolyzyMD pixi environments, so no extra
-installation step is usually required.
-
-Then use in your code:
+PolyzyMD keeps package imports lightweight by importing heavy dependencies only
+inside functions or methods that need them. This lets CI, docs, and metadata
+checks import modules that do not actually run simulations.
 
 ```python
-from polyzymd.utils.charging import get_charger
+def load_trajectory(topology_path, trajectory_path):
+    import MDAnalysis as mda
 
-# Use AmberTools for AM1-BCC
-charger = get_charger("am1bcc", toolkit="ambertools")
-charged_mol = charger.charge_molecule(molecule)
+    return mda.Universe(str(topology_path), str(trajectory_path))
 ```
 
-#### OpenEye Toolkit (Commercial)
+Avoid module-level imports of OpenMM, OpenFF, MDAnalysis, ParmEd, PDBFixer, or
+other simulation-stack packages in new code.
 
-If you have an OpenEye license:
+## CI workflows
 
-```python
-charger = get_charger("am1bcc", toolkit="openeye")
+### `ci.yml`
+
+The main CI workflow runs on pushes and pull requests to `main` and `dev`.
+
+- **Lint:** installs `black` and `ruff`, then runs `ruff check`, `black --check`,
+  and `ruff format --check` against the source tree.
+- **Type check:** installs lightweight Python dependencies and runs mypy against
+  `src/polyzymd/config/`. This job is informational and currently uses
+  `continue-on-error` because many simulation-stack packages do not provide full
+  type stubs.
+- **Build package:** builds the sdist/wheel with `python -m build` and validates
+  distributions with `twine check`.
+- **Docs build:** uses the pixi `build` environment and treats Sphinx warnings as
+  errors with `SPHINXOPTS="-W --keep-going"`.
+- **Test installation:** installs the built wheel, checks basic imports, and
+  verifies `polyzymd --help` and `polyzymd --version`.
+
+### `full-test.yml`
+
+The full test workflow runs on pushes and pull requests to `main` and `dev`, on a
+weekly schedule, and by manual dispatch. It uses the pixi `build` environment on
+Ubuntu and macOS with Python 3.11, then runs:
+
+```bash
+pixi run -e build pytest -v --cov=polyzymd --cov-report=xml --color=yes tests/
 ```
 
-Note: NAGL is recommended for most use cases as it's faster and produces
-comparable results to AM1-BCC.
+Coverage upload is attempted with Codecov but does not fail the workflow if the
+upload fails.
 
----
+### `release.yml`
 
-## Continuous Integration (CI)
+The release workflow runs when a tag matching `v*.*.*` is pushed. It:
 
-### Two-Tier CI Strategy
+1. builds and `twine check`s the distributions,
+2. publishes non-prerelease tags to PyPI through trusted publishing, and
+3. creates a GitHub release with generated notes and attached distributions.
 
-PolyzyMD uses a two-tier CI approach:
+## Release checklist
 
-#### Tier 1: Basic CI (Runs on Every PR)
+For a normal version bump:
 
-Fast checks that don't require conda:
+1. Update the version in `pyproject.toml`, `pixi.toml`, and
+   `src/polyzymd/__init__.py`.
+2. Run focused checks for the changed files, then at minimum run the docs build
+   before handing off for release review:
 
-- **Linting**: Code style with `ruff`
-- **Type checking**: Static analysis with `mypy`
-- **Build verification**: Ensure package builds correctly
-- **Import tests**: Test that config module imports
-
-```yaml
-# .github/workflows/ci.yml
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-      - run: pip install ruff
-      - run: ruff check src/polyzymd/
-      
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - run: pip install build
-      - run: python -m build
-```
-
-#### Tier 2: Full CI (Runs Weekly or on Release)
-
-Comprehensive tests with the full pixi-managed simulation environment:
-
-```yaml
-# .github/workflows/full-test.yml
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: prefix-dev/setup-pixi@v0
-      - run: pixi install -e build
-      - run: pixi run -e build pip install . --no-deps
-      - run: pixi run -e build pytest tests/
-```
-
-### The Pixi Manifest
-
-Environment definitions live in `pixi.toml`:
-
-```toml
-[workspace]
-name = "polyzymd"
-channels = ["conda-forge"]
-
-[environments]
-build = { features = ["base", "build", "test", "docs"] }
-cuda-12-4 = { features = ["base", "cuda-12-4", "test", "docs"] }
-cuda-12-6 = { features = ["base", "cuda-12-6", "test", "docs"] }
-```
-
----
-
-## Version Management
-
-### Simple Approach (Current)
-
-PolyzyMD uses a simple hardcoded version:
-
-```python
-# polyzymd/__init__.py
-__version__ = "1.0.0"
-```
-
-```toml
-# pyproject.toml
-[project]
-version = "1.0.0"
-```
-
-When releasing a new version, update both files.
-
-### Dynamic Versioning (Alternative)
-
-Some packages use tools like `versioningit` or `setuptools-scm` to derive version from git tags:
-
-```toml
-[project]
-dynamic = ["version"]
-
-[tool.versioningit]
-default-version = "1+unknown"
-
-[tool.versioningit.write]
-file = "polymerist/_version.py"
-```
-
-```python
-from importlib.metadata import version
-__version__ = version(__name__)
-```
-
-**Pros**: Version always matches git tags, no manual updates
-**Cons**: More complex, requires understanding of the tooling
-
----
-
-## Creating a Release
-
-### Steps for a New Release
-
-1. **Update version numbers**
    ```bash
-   # Edit pyproject.toml and src/polyzymd/__init__.py
-   # Change version = "1.0.0" to version = "1.1.0"
+   pixi run -e build make -C docs clean html
    ```
 
-2. **Commit the version bump**
-   ```bash
-   git add pyproject.toml src/polyzymd/__init__.py
-   git commit -m "Bump version to 1.1.0"
-   git push origin main
-   ```
+3. Commit the version bump with a focused message, such as
+   `chore(release): bump version to 1.3.1`.
+4. After review, tag the release, for example `v1.3.1`. The tag triggers
+   `release.yml`.
 
-3. **Create and push a git tag**
-   ```bash
-   git tag -a v1.1.0 -m "Release 1.1.0"
-   git push origin v1.1.0
-   ```
+## Best practices
 
-4. **GitHub Actions handles the rest**
-   - Builds the package
-   - Publishes to PyPI
-   - Creates GitHub release
+- Keep `__init__.py` lightweight and preserve lazy imports.
+- Keep the full simulation stack in pixi environments.
+- Use `src/` layout conventions for new package modules.
+- Update docs, tests, CLI help, and configuration reference pages when behavior
+  changes.
+- Do not commit generated caches, trajectories, build artifacts, or local
+  environment files.
 
-### PyPI Publishing
+## See also
 
-The release workflow uses "trusted publishing" - no API tokens needed:
-
-```yaml
-# .github/workflows/release.yml
-- name: Publish to PyPI
-  uses: pypa/gh-action-pypi-publish@release/v1
-  # Uses OIDC authentication - configure at pypi.org
-```
-
-To set up trusted publishing:
-1. Go to https://pypi.org/manage/project/polyzymd/settings/publishing/
-2. Add a new "pending publisher" with:
-   - Owner: `joelaforet`
-   - Repository: `polyzymd`
-   - Workflow: `release.yml`
-
----
-
-## Directory Structure Reference
-
-```
-polyzymd/
-├── .github/
-│   └── workflows/
-│       ├── ci.yml           # Basic CI (lint, build, import tests)
-│       ├── release.yml      # Publish to PyPI on tag
-│       └── full-test.yml    # Full pixi test suite
-│
-├── devtools/                # Optional helper scripts / dev tooling
-│
-├── docs/
-│   ├── source/
-│   │   ├── conf.py          # Sphinx configuration
-│   │   ├── index.rst        # Documentation index
-│   │   └── tutorials/       # User guides
-│   └── requirements.txt     # Docs build dependencies
-│
-├── src/
-│   └── polyzymd/
-│       ├── __init__.py      # Package init (lazy imports)
-│       ├── config/          # Configuration (pydantic schemas)
-│       ├── builders/        # System building
-│       ├── simulation/      # MD runners
-│       ├── workflow/        # SLURM/HPC integration
-│       ├── exporters/       # GROMACS export
-│       ├── cli/             # Command-line interface
-│       └── data/            # Bundled data files
-│
-├── tests/
-│   ├── __init__.py
-│   ├── test_imports.py      # Basic import tests
-│   └── test_config.py       # Configuration tests
-│
-├── .gitignore
-├── .readthedocs.yaml        # ReadTheDocs configuration
-├── LICENSE
-├── README.md
-└── pyproject.toml           # Package metadata and build config
-```
-
----
-
-## Best Practices Summary
-
-### Do
-
-- Use `src/` layout for clear package boundaries
-- Use lazy imports for heavy dependencies
-- Keep `__init__.py` lightweight
-- Separate fast CI (lint) from slow CI (full tests)
-- Use `pyproject.toml` for all configuration
-- Document installation requirements clearly
-
-### Don't
-
-- Don't assume pip alone can provision the full OpenMM/OpenFF stack
-- Don't eagerly import heavy modules at package init
-- Don't mix test artifacts with source code
-- Don't hardcode paths - use `importlib.resources` for data files
-- Don't commit generated files (`.pyc`, `__pycache__`, etc.)
-
----
-
-## Further Reading
-
-- [Python Packaging User Guide](https://packaging.python.org/)
-- [PyPA Sample Project](https://github.com/pypa/sampleproject)
-- [Hatchling Documentation](https://hatch.pypa.io/)
-- [Scientific Python Library Development Guide](https://learn.scientific-python.org/development/)
-- [Polymerist Repository](https://github.com/timbernat/polymerist) - Reference implementation
-
----
-
-## See Also
-
-- {doc}`contributing` - How to contribute to PolyzyMD
-- {doc}`../explanation/architecture` - Internal architecture overview
-- {doc}`../get_started/installation` - User installation guide
+- {doc}`setup` — contributor environment setup
+- {doc}`contributing` — contribution workflow and review expectations
+- {doc}`../get_started/installation` — user installation guide
+- {doc}`../explanation/architecture` — architecture overview
