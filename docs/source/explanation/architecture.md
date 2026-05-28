@@ -311,7 +311,7 @@ into module-level details or API reference pages.
 - contributor workflows: {doc}`../contributor_guide/contributing`
 - extending analyses: {doc}`../contributor_guide/extending_analyses`
 - SLURM usage: {doc}`../how_to/hpc_slurm`
-- API details: {doc}`../api/overview`
+- API reference: {doc}`../api/index`
 
 <!-- IMAGE OPPORTUNITY: Add a left-to-right architecture diagram showing
 `config -> builders -> simulation/workflow -> analysis -> analyses -> comparison workflows -> plots`,
