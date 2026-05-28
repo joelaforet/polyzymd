@@ -1,55 +1,99 @@
 # Explanation
 
-Explanation pages help you understand *why* PolyzyMD works the way it does, how
-to interpret outputs, and what assumptions or tradeoffs matter.
+Use Explanation when you need the reasoning behind PolyzyMD: design choices,
+analysis assumptions, statistical interpretation, and plugin-specific caveats.
+If you want commands for a task, start with {doc}`../how_to/index`. If you need
+to look up options, file layouts, or schemas, use {doc}`../reference/index`.
 
 ```{tip}
-Looking for step-by-step instructions? Go to {doc}`../how_to/index`.
-Need to look up a setting or option? Go to {doc}`../reference/index`.
+New to the analysis plugin system? Start with {doc}`analysis_concepts`, then
+read the statistical and reference-selection pages listed in the contributor
+pathway below.
 ```
 
 ::::{grid} 2
 :gutter: 3
 
-:::{grid-item-card} Concepts and Design
+:::{grid-item-card} New contributor path
 :link: analysis_concepts
 :link-type: doc
 
-How the analysis pipeline, chain conventions, and plugin architecture fit
-together.
+Read the concepts, statistics, convergence, and reference-selection pages that
+shape analysis-plugin design.
 :::
 
-:::{grid-item-card} Interpretation and Best Practices
+:::{grid-item-card} Statistical interpretation
 :link: analysis_statistics_best_practices
 :link-type: doc
 
-Replication, convergence, multiple testing, and per-plugin best practices.
+Understand replication, uncertainty, multiple comparisons, and convergence
+before comparing simulation conditions.
+:::
+
+:::{grid-item-card} RMSF interpretation
+:link: analysis_rmsf_best_practices
+:link-type: doc
+
+Learn why RMSF depends on alignment, residue mapping, replicate treatment, and
+the selected structural reference.
+:::
+
+:::{grid-item-card} Architecture and conventions
+:link: architecture
+:link-type: doc
+
+See the design rationale, chain conventions, and implementation constraints
+that keep PolyzyMD analyses consistent.
 :::
 
 ::::
+
+## New contributor pathway
+
+If you are adding or reviewing an analysis plugin, read these pages first:
+
+1. {doc}`analysis_concepts` for the analysis lifecycle and plugin boundaries.
+2. {doc}`analysis_statistics_best_practices` for replicate-level interpretation
+   and statistical expectations.
+3. {doc}`convergence_detection` for deciding whether trajectory summaries are
+   interpretable.
+4. {doc}`analysis_reference_selection` for how structural references affect
+   RMSF and related fluctuation metrics.
 
 ## Concepts and Design
 
 ```{toctree}
 :maxdepth: 1
 
-Analysis System Concepts <analysis_concepts>
-Architecture <architecture>
-Residue Assignment and Chain Conventions <residue_assignment>
-Colored Logging <colored_logging>
+Analysis system concepts <analysis_concepts>
+Architecture and design rationale <architecture>
+Residue assignment and chain conventions <residue_assignment>
+Why PolyzyMD uses colored logging <colored_logging>
 ```
 
 ## Interpretation and Best Practices
 
+Start with the cross-cutting interpretation pages, then use the plugin-specific
+pages for caveats tied to particular metrics.
+
+### Foundations
+
 ```{toctree}
 :maxdepth: 1
 
-Statistical Best Practices for Analysis <analysis_statistics_best_practices>
-RMSD Best Practices <analysis_rmsd_best_practices>
-Convergence Detection <convergence_detection>
-Rg Best Practices <analysis_rg_best_practices>
-RMSF Best Practices <analysis_rmsf_best_practices>
-RMSF Reference Selection <analysis_reference_selection>
-RMSF Verification <analysis_rmsf_verification>
-Catalytic Triad Best Practices <analysis_triad_best_practices>
+Statistics best practices for MD analysis <analysis_statistics_best_practices>
+Establishing convergence in MD simulations <convergence_detection>
+```
+
+### Metric and plugin caveats
+
+```{toctree}
+:maxdepth: 1
+
+RMSD interpretation: use, limits, and cautions <analysis_rmsd_best_practices>
+Rg analysis: best practices <analysis_rg_best_practices>
+RMSF analysis: statistical best practices <analysis_rmsf_best_practices>
+How RMSF reference selection changes interpretation <analysis_reference_selection>
+RMSF implementation verification <analysis_rmsf_verification>
+Catalytic triad analysis: interpretation and best practices <analysis_triad_best_practices>
 ```
