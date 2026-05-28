@@ -1,9 +1,11 @@
 # RMSF Implementation Verification
 
-PolyzyMD uses a custom NumPy-based RMSF implementation rather than
-MDAnalysis's built-in `RMSF` analysis class. This page documents the
-3-way benchmark that validates the custom implementation against two
-industry-standard tools.
+PolyzyMD uses a custom NumPy-based RMSF implementation rather than relying
+directly on MDAnalysis's built-in `RMSF` analysis class. This page summarizes
+the design rationale and benchmark evidence from representative LipA cases. It
+records what those checks support, and just as importantly, what they do not
+prove about every possible topology, atom selection, trajectory format, or
+reference-mapping workflow.
 
 ## Why a Custom Implementation?
 
@@ -29,24 +31,25 @@ $$
 \text{RMSF}_i = \sqrt{\frac{1}{N}\sum_{t=1}^{N} \left|\mathbf{r}_i(t) - \mathbf{r}_i^{\text{ref}}\right|^2}
 $$
 
-## Source Code
+## Implementation boundary
 
-The RMSF and RMSD calculations now live in the RMSF plugin package:
+The supported contributor interface is the public `RMSFAnalysis` plugin and the
+general PolyzyMD analysis lifecycle documented in the contributor guide. The RMSF
+plugin package contains private implementation files that are useful provenance
+for maintainers, but they are not stable extension points and should not be
+imported by contributor plugins.
 
-- **RMSF + RMSD workflow:** RMSF MDAnalysis job construction and artifact
-  collection in
-  `src/polyzymd/analyses/rmsf/__init__.py`, with trajectory-native logic in the
-  AnalysisBase-compatible helper module
-  `src/polyzymd/analyses/rmsf/_mda.py`. The implementation writes canonical
-  replicate and condition artifacts while preserving the same two-pass RMSF
-  logic and internal RMSD timeseries calculation for autocorrelation analysis.
-
-The numerical RMSF kernel remains a plain NumPy calculation inside the current
-MDAnalysis job/artifact lifecycle.
+Conceptually, the RMSF workflow is part of the MDAnalysis job/artifact lifecycle:
+it constructs trajectory-native jobs, computes an internal RMSD time series for
+autocorrelation analysis, applies the selected frame policy, and writes
+canonical replicate and condition artifacts. The numerical RMSF kernel remains a
+plain NumPy calculation inside that lifecycle.
 
 ## Benchmark Methodology
 
-A 3-way benchmark was performed comparing:
+The benchmark evidence includes 3-way comparisons for trajectory-average
+reference modes and an independent reference-kernel check for external-reference
+mode:
 
 | Method | Implementation | Notes |
 |--------|---------------|-------|
@@ -63,22 +66,26 @@ A 3-way benchmark was performed comparing:
 
 ### Modes Tested
 
-Three RMSF reference modes were benchmarked:
+Three RMSF reference modes were checked in the benchmarked workflow:
 
 | Mode | Alignment Reference | RMSF Reference | Methods |
 |------|-------------------|---------------|---------|
 | **Average** | Trajectory average structure | Trajectory average positions | 3-way |
 | **Centroid** | K-Means centroid frame (k=1) | Trajectory average positions | 3-way |
-| **External** | External crystal PDB | External PDB positions | 2-way |
+| **External** | External crystal PDB | External PDB positions | independent reference-kernel check |
 
-GROMACS is excluded from external mode because `gmx rmsf` always
-computes RMSF relative to the trajectory average — the `-s` file is
-used only for fitting, not as the RMSF reference. There is no option
-to override this behavior.
+GROMACS is excluded from external mode because `gmx rmsf` always computes RMSF
+relative to the trajectory average — the `-s` file is used only for fitting, not
+as the RMSF reference. There is no option to override this behavior. Native
+MDAnalysis `RMSF` also does not validate PolyzyMD's external-reference mode,
+because the MDAnalysis class uses trajectory-average positions internally. The
+external-reference path was therefore checked against an independent
+NumPy/reference-kernel calculation using the same aligned coordinate arrays and
+external reference mapping.
 
 ### Procedure
 
-For each mode:
+For average and centroid modes:
 
 1. Load the trajectory and align all frames to the reference using
    MDAnalysis `AlignTraj` (in-memory).
@@ -88,6 +95,10 @@ For each mode:
    `gmx rmsf -nofit -res`, convert output from nm to Angstroms.
 4. Compare per-residue values: Pearson correlation, mean absolute
    difference, maximum absolute difference.
+
+For external-reference mode, the same aligned coordinate arrays were compared
+against an independent NumPy/reference-kernel calculation rather than against
+native MDAnalysis `RMSF` or GROMACS.
 
 ## Results
 
@@ -107,47 +118,38 @@ For each mode:
 | PolyzyMD vs GROMACS | 0.99999998 | 0.000249 | 0.000616 |
 | MDAnalysis vs GROMACS | 0.99999998 | 0.000249 | 0.000616 |
 
-### External Mode (2-way)
+### External Mode (independent check)
 
 | Comparison | Pearson *r* | Mean \|delta\| (Angstrom) | Max \|delta\| (Angstrom) |
 |---|---|---|---|
-| PolyzyMD vs MDAnalysis | 1.00000000 | 0.000000 | 0.000000 |
+| PolyzyMD vs independent reference kernel | 1.00000000 | 0.000000 | 0.000000 |
 
 ## Interpretation
 
-**PolyzyMD and MDAnalysis produce bit-identical results** in all three
-modes. This is expected — both run in the same Python process on the
-same NumPy arrays, and the RMSF formula is deterministic.
+**PolyzyMD and MDAnalysis produce bit-identical results** for the benchmarked
+average and centroid modes. This is expected — both run in the same Python
+process on the same NumPy arrays, and the RMSF formula is deterministic once the
+alignment and frame set are fixed.
 
-**GROMACS differs by < 0.0007 Angstrom** (max absolute deviation across all
-residues and modes). This small discrepancy is fully explained by the
-GRO coordinate format, which truncates positions to 3 decimal places
-in nanometers (0.001 nm = 0.01 Angstrom precision). The residual pattern
-is consistent with rounding noise, not a systematic bias.
+**GROMACS differs by < 0.0007 Angstrom** in the average and centroid
+benchmarks. This small discrepancy is fully explained by the GRO coordinate
+format, which truncates positions to 3 decimal places in nanometers (0.001 nm =
+0.01 Angstrom precision). The residual pattern is consistent with rounding
+noise, not a systematic bias.
 
-**Conclusion:** PolyzyMD's custom RMSF implementation is verified correct
-against both MDAnalysis (bit-identical) and GROMACS (limited only by
-coordinate format precision). The custom implementation is functionally
-equivalent to industry-standard tools while supporting the additional
-features (non-uniform frame subsampling, external reference positions)
-that PolyzyMD requires.
+**Conclusion:** The custom RMSF implementation is validated for the benchmarked
+LipA C-alpha selection, aligned workflow, and tested reference modes within the
+tolerances shown above. These results support the design choice to keep a custom
+kernel while adding features PolyzyMD requires, especially non-uniform frame
+subsampling and external-reference handling. They are not a universal guarantee
+for every topology, atom selection, periodic-boundary treatment, reference
+mapping, or trajectory format.
 
-## Reproducing the Benchmark
+## Benchmark availability
 
-The benchmark script is located at `scripts/benchmark_rmsf_3way.py` in the
-repository root. To reproduce:
-
-```bash
-pixi run -e build python scripts/benchmark_rmsf_3way.py
-```
-
-Requirements:
-- PolyzyMD `build` pixi environment (MDAnalysis, NumPy, scikit-learn, matplotlib)
-- GROMACS >= 2020 (`gmx rmsf`) — configure the `GMX` variable at the top of the script
-- A simulation directory with topology (PDB) and trajectory (DCD) files
-
-The script outputs per-mode CSV data and a publication-quality benchmark
-figure to `scripts/benchmark_rmsf_output/`.
+The original benchmark script and input/output assets are not currently tracked
+in the repository. This page records the validation result and its scope until a
+maintained, reproducible benchmark is added to the project.
 
 ## See Also
 
