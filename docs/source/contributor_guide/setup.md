@@ -35,7 +35,7 @@ up immediately. If you want an interactive shell inside the environment, run
 ## 3. Run the Core Contributor Checks
 
 ```bash
-pixi run -e build pytest tests/ -x -q --tb=short --ignore=tests/test_packmol.py
+pixi run -e build pytest tests/ -x -q --tb=short --ignore=tests/utils/test_packmol.py
 pixi run -e build ruff check src/
 pixi run -e build black --check src/
 pixi run -e build make -C docs clean html
@@ -48,9 +48,12 @@ pixi run -e build make -C docs clean html
 If you have an OpenEye license and want the commercial charging backend:
 
 ```bash
-pixi shell -e build
-pip install openeye-toolkits
+pixi run -e build python -m pip install openeye-toolkits
 ```
+
+If you prefer an interactive shell, enter it first with `pixi shell -e build`
+and then run `python -m pip install openeye-toolkits` inside that shell. Avoid
+installing OpenEye into a system Python that PolyzyMD will not use.
 
 ### CUDA Environments for Cluster Work
 
