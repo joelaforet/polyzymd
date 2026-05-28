@@ -44,6 +44,16 @@ to {doc}`../setup` and make sure you are using the `build` pixi environment.
 
 ## 2. Generate the default scaffold
 
+Before generating files, check whether the tutorial paths already exist:
+
+```bash
+git status --short src/polyzymd/analyses/solvent_shell.py tests/analyses/plugins/test_solvent_shell.py
+```
+
+If either path is already present, stop and inspect it before continuing. The
+scaffold may fail, or you may need to understand the scaffold's `--force` option
+before replacing anything. Do not overwrite work you intend to keep.
+
 Run the scaffold with the default options:
 
 ```bash
@@ -51,7 +61,11 @@ pixi run -e build polyzymd new-analysis solvent_shell
 ```
 
 The command creates a default MDAnalysis-native, single-file plugin and matching
-tests. The generated paths are:
+tests.
+
+## 3. Confirm the generated files
+
+Confirm that the scaffold created exactly these two tutorial files:
 
 ```text
 src/polyzymd/analyses/solvent_shell.py
@@ -61,20 +75,87 @@ tests/analyses/plugins/test_solvent_shell.py
 That is the expected outcome for this tutorial: one analysis module and one test
 module.
 
-## 3. Tour the generated plugin file
+You can also check the same paths with Git:
+
+```bash
+git status --short src/polyzymd/analyses/solvent_shell.py tests/analyses/plugins/test_solvent_shell.py
+```
+
+```{warning}
+These generated files are scratch content. Do not commit them unless you are
+intentionally continuing from this scaffold as a real `solvent_shell` plugin.
+```
+
+## 4. Inspect the generated plugin
 
 Open `src/polyzymd/analyses/solvent_shell.py` and skim it from top to bottom.
 You do not need to edit anything yet.
 
-Notice these pieces:
+### Settings
 
-| Generated piece | What to look for |
-| --- | --- |
-| Settings model | A Pydantic settings class with placeholder options such as an MDAnalysis atom selection and a scale factor. |
-| Measurement function | A small placeholder function that receives a loaded universe and frame-selection arguments. This is where domain-specific MDAnalysis logic will eventually replace the placeholder atom-frame count. |
-| Collector | A collector class that converts one completed MDAnalysis job into a `ReplicateArtifact`. |
-| Analysis subclass | A `SolventShellAnalysis` class with `name = "solvent_shell"`, a `Settings` class, `build_mda_jobs()`, `build_mda_collector()`, and `extract_metrics()`. The generated `extract_metrics()` is compatibility/fallback support for non-artifact summaries; default artifact comparison reads condition-artifact metrics first. |
-| Helper functions | Small private helpers used by the scaffold to count selected frames, validate JSON-compatible metrics, and read default aggregate summaries. |
+Find the generated settings model. It should include placeholder options for the
+first working scaffold:
+
+- `selection` with default value `"protein and name CA"`
+- `scale` with default value `1.0`
+
+These settings are intentionally generic. In a real plugin, replace or extend
+them with options that describe your analysis.
+
+### Placeholder measurement
+
+Find the small placeholder measurement function. It receives a loaded universe
+and frame-selection arguments, then computes a scaffold metric rather than a
+scientific solvent-shell measurement.
+
+The generated metric is named `solvent_shell_value`.
+
+```{note}
+Treat the placeholder measurement as a wiring check. Replace it with
+domain-specific MDAnalysis logic before developing a scientific plugin.
+```
+
+### MDAnalysis job and collector
+
+Look for the MDAnalysis job wiring:
+
+- `MDAAnalysisJob` wraps the per-trajectory work.
+- Collector logic converts completed job output into a `ReplicateArtifact`.
+- The collector keeps raw trajectory handling out of later aggregation and
+  comparison steps.
+
+This is the scaffold's main lesson: trajectory-native plugins should hand
+per-replicate results to PolyzyMD's artifact lifecycle instead of inventing a
+separate cache format.
+
+### Analysis class
+
+Find the `SolventShellAnalysis` class. It should define:
+
+- `name = "solvent_shell"`
+- a `Settings` class
+- `build_mda_jobs()`
+- `build_mda_collector()`
+- `extract_metrics()`
+
+The generated `extract_metrics()` is compatibility and fallback support for
+non-artifact summaries. Default artifact comparison reads condition-artifact
+metrics first.
+
+### Metrics and aggregation
+
+The scaffold includes small private helpers that keep the generated example
+complete enough to test:
+
+- count selected frames for the placeholder calculation
+- validate JSON-compatible metrics
+- read default aggregate summaries
+
+The generated plugin exposes the scalar metric through `MetricValue`, and the
+default aggregation path can combine replicate artifacts into condition-level
+results.
+
+### Public import boundaries
 
 The most important breadcrumb is the import boundary. The generated plugin uses
 public contributor-facing imports such as:
@@ -88,26 +169,44 @@ It should not import from `polyzymd.analyses._framework`. That package is an
 internal implementation detail behind the public facades described in
 {doc}`architecture`.
 
-## 4. Tour the generated tests
+## 5. Inspect the generated tests
 
 Open `tests/analyses/plugins/test_solvent_shell.py` next. The tests are part of
 the scaffold because a new plugin contribution should start with executable
 contract checks, not only a Python module.
 
-Skim for these test groups:
+### Discovery and settings tests
 
-| Test group | What it proves |
-| --- | --- |
-| Discovery tests | The plugin can be discovered by name and subclasses `Analysis`. |
-| Settings tests | The generated settings defaults and validation rules work. |
-| MDAnalysis job tests | `build_mda_jobs()` returns an `MDAAnalysisJob` and the placeholder function can run against fake universe objects. |
-| Collector tests | The generated collector returns a `ReplicateArtifact`. |
-| Aggregation tests | Default aggregation can read replicate artifacts and expose scalar metrics for comparison. |
+Skim the first tests for discovery and settings behavior. They prove that:
+
+- the plugin can be discovered by the name `solvent_shell`
+- the discovered class subclasses `Analysis`
+- generated settings defaults and validation rules work
+
+### MDAnalysis job tests
+
+Find the tests for `build_mda_jobs()`. They prove that the generated plugin can
+return an `MDAAnalysisJob` and that the placeholder measurement can run against
+small fake universe objects.
+
+### Collector and aggregation tests
+
+Find the tests for collector and aggregation behavior. They prove that:
+
+- the generated collector returns a `ReplicateArtifact`
+- default aggregation can read replicate artifacts
+- aggregated output exposes scalar metrics for comparison
+
+### Why the tests use fakes
 
 The tests use small fakes instead of real trajectories. That keeps the first
 success fast and reviewable.
 
-## 5. Run the generated tests
+The fakes are enough for this scaffold because the tutorial checks plugin
+wiring, artifact flow, and default aggregation behavior. Real analysis tests can
+add trajectory-backed cases later when the scientific implementation exists.
+
+## 6. Run the generated tests
 
 Run only the generated test file:
 
@@ -122,11 +221,26 @@ default aggregation path.
 Your exact pytest timing may differ, but the important success state is that the
 generated `test_solvent_shell.py` tests pass.
 
-## 6. Leave your checkout clean
+## 7. Clean up the scratch scaffold
 
 For this tutorial, `solvent_shell` is a throwaway name. Before you commit any
 real work, either continue developing it into an intentional plugin or remove the
-generated files:
+generated files.
+
+If you are done with the tutorial, remove only these two files:
+
+```bash
+rm src/polyzymd/analyses/solvent_shell.py
+rm tests/analyses/plugins/test_solvent_shell.py
+```
+
+Then confirm your checkout no longer contains the scratch scaffold:
+
+```bash
+git status --short src/polyzymd/analyses/solvent_shell.py tests/analyses/plugins/test_solvent_shell.py
+```
+
+These are the only files this tutorial asked you to create:
 
 ```text
 src/polyzymd/analyses/solvent_shell.py
@@ -145,8 +259,8 @@ question.
 - **Starting from a real analysis name too early.** Use `solvent_shell` as the
   throwaway learning name, then choose an intentional name for real work.
 - **Importing from private framework modules.** Contributor plugins should use
-  `polyzymd.analyses.base`, `polyzymd.analyses.mda`, and documented shared
-  utilities, not `polyzymd.analyses._framework`.
+  `polyzymd.analyses.base` and `polyzymd.analyses.mda`, not
+  `polyzymd.analyses._framework`.
 - **Treating the placeholder metric as science.** The generated atom-frame count
   is only a scaffold. Replace it before opening a scientific plugin PR.
 - **Committing scratch scaffold files.** If this was only a tutorial run, remove
