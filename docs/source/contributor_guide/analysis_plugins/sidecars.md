@@ -140,6 +140,9 @@ def write_contact_events(
             "columns": ["frame", "protein_resid", "polymer_atom", "distance_nm"],
         },
     )
+    metadata = {"result_kind": "contact_events_replicate"}
+    if ctx.settings_fingerprint is not None:
+        metadata["settings_fingerprint"] = ctx.settings_fingerprint
 
     return ReplicateArtifact(
         analysis_name=ctx.analysis_name,
@@ -151,7 +154,7 @@ def write_contact_events(
         },
         sidecars=[sidecar],
         provenance={"source": "contact_event_collector"},
-        metadata={"result_kind": "contact_events_replicate"},
+        metadata=metadata,
         warnings=list(ctx.warnings),
     )
 ```

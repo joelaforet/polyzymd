@@ -272,6 +272,12 @@ Plot tests should create cached artifacts or sidecars, call `plot()`, and assert
 that figures are written. They should not create a universe, read trajectories,
 or run MDAnalysis jobs.
 
+The scaffolded `SolventShellAnalysis` returns no plots until you implement a
+`plot()` hook. Use this test pattern only after adding an artifact-only hook that
+loads condition artifacts or sidecars and returns at least one output path. A
+minimal hook can live in the plugin itself; the test below defines it inline only
+to make the expected behavior explicit.
+
 ```python
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -279,6 +285,29 @@ from unittest.mock import MagicMock
 from polyzymd.analyses.base import Condition, PlotContext
 from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact
 from polyzymd.analyses.solvent_shell import SolventShellAnalysis, SolventShellSettings
+
+
+class PlottingSolventShellAnalysis(SolventShellAnalysis):
+    def plot(self, ctx: PlotContext) -> list[Path]:
+        import matplotlib.pyplot as plt
+
+        labels: list[str] = []
+        means: list[float] = []
+        for label, analysis_dir in ctx.analysis_dirs.items():
+            artifact = ArtifactStore(analysis_dir).read_condition_result("result.json")
+            metric = artifact.payload["metrics"]["mean_shell_count"]
+            labels.append(label)
+            means.append(float(metric["mean"]))
+
+        ctx.output_dir.mkdir(parents=True, exist_ok=True)
+        path = ctx.output_dir / "mean_shell_count.png"
+        fig, ax = plt.subplots()
+        ax.bar(labels, means)
+        ax.set_ylabel("Mean shell count")
+        fig.tight_layout()
+        fig.savefig(path)
+        plt.close(fig)
+        return [path]
 
 
 def test_plot_reads_condition_artifacts_only(tmp_path: Path) -> None:
@@ -310,7 +339,7 @@ def test_plot_reads_condition_artifacts_only(tmp_path: Path) -> None:
         settings=SolventShellSettings(),
     )
 
-    paths = SolventShellAnalysis().plot(ctx)
+    paths = PlottingSolventShellAnalysis().plot(ctx)
 
     assert paths
     assert all(path.exists() for path in paths)

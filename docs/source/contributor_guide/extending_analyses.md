@@ -158,6 +158,9 @@ class SolventShellArtifactCollector:
         metrics = result_payload.get("metrics")
         if not isinstance(metrics, dict):
             raise PluginContractError("Job results must include a metrics mapping.")
+        metadata = {"result_kind": "solvent_shell_replicate"}
+        if ctx.settings_fingerprint is not None:
+            metadata["settings_fingerprint"] = ctx.settings_fingerprint
         return ReplicateArtifact(
             analysis_name=ctx.analysis_name,
             condition_label=ctx.condition_label,
@@ -170,6 +173,7 @@ class SolventShellArtifactCollector:
                     ctx.universe_policy.as_dict(), analysis_name=ctx.analysis_name
                 ),
             },
+            metadata=metadata,
             warnings=list(ctx.warnings),
         )
 
