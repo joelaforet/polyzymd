@@ -1,10 +1,35 @@
 # Analysis plugin contribution checklist
 
-Use this reference checklist before opening or reviewing an analysis plugin pull
-request. It summarizes the expected contract for new and substantially revised
-plugins.
+Use this page to copy a review checklist into a GitHub issue or pull request
+body. The rendered documentation shows the instructions, while the checklist
+itself lives in a copy-pasteable template so contributors can check items in
+GitHub.
 
-## Placement and shape
+## How to use this checklist
+
+Replace `PLUGIN_NAME` with your plugin's stable lowercase name, paste the
+template into a GitHub issue or PR body, and check boxes in GitHub as you work.
+Delete irrelevant items or mark them `N/A` when a lifecycle stage does not apply
+to your plugin.
+
+## What this checklist covers
+
+The template covers the expected contributor contract for analysis plugins:
+source placement, public imports, lifecycle hooks, MDAnalysis jobs, artifacts,
+aggregation, comparison, plotting, formatting, tests, user-facing documentation,
+and pre-PR commands.
+
+## Copy-paste checklist template
+
+````markdown
+## Analysis plugin checklist
+
+Plugin: `PLUGIN_NAME`
+
+Use this checklist before opening or reviewing an analysis plugin pull request.
+Delete items that do not apply, or mark them `N/A` with a short reason.
+
+### Placement and shape
 
 - [ ] The plugin lives under `src/polyzymd/analyses/` as either one readable
   module or one package with a public `__init__.py`.
@@ -14,7 +39,7 @@ plugins.
   `_formatters.py` exist only when they have clear responsibilities.
 - [ ] The plugin name is stable, lowercase, and matches CLI/config usage.
 
-## Public imports
+### Public imports
 
 - [ ] Contributor-facing code imports lifecycle classes from
   `polyzymd.analyses.base`.
@@ -27,7 +52,7 @@ plugins.
 - [ ] Heavy dependencies such as MDAnalysis and matplotlib are imported lazily
   inside functions or methods that need them.
 
-## Plugin contract
+### Plugin contract
 
 - [ ] `Settings` is a Pydantic model with defaults, field descriptions, and
   validation for invalid values.
@@ -40,7 +65,7 @@ plugins.
 - [ ] MDAnalysis selections use project conventions such as `chainid A` for
   protein, `chainid B` for substrate, and `chainid C` for polymer.
 
-## MDAnalysis jobs
+### MDAnalysis jobs
 
 - [ ] Jobs are `MDAAnalysisJob` objects built from the public MDAnalysis layer.
 - [ ] Function-adapter jobs respect `frames` and `start`/`stop`/`step` frame
@@ -51,7 +76,7 @@ plugins.
 - [ ] Job results are converted to JSON-compatible values or sidecars before they
   become artifacts.
 
-## Artifacts and sidecars
+### Artifacts and sidecars
 
 - [ ] Collectors return `ReplicateArtifact` objects.
 - [ ] Scalar values intended for default aggregation are finite numbers under
@@ -63,7 +88,7 @@ plugins.
   validation helpers.
 - [ ] Raw MDAnalysis `Results` objects are never serialized.
 
-## Aggregation and comparison
+### Aggregation and comparison
 
 - [ ] Simple scalar artifact plugins rely on default aggregation to build a
   `ConditionArtifact` when that contract is sufficient.
@@ -76,7 +101,7 @@ plugins.
 - [ ] Metric names, units, and higher/lower-is-better interpretation are explicit
   where scientific comparison depends on them.
 
-## Plotting and formatting
+### Plotting and formatting
 
 - [ ] `plot()` reads cached artifacts and registered sidecars only.
 - [ ] Plotting does not load trajectories, run MDAnalysis jobs, or recompute
@@ -87,7 +112,7 @@ plugins.
 - [ ] Plot and format behavior is covered by focused tests or intentionally left
   absent for plugins that do not provide them.
 
-## Tests
+### Tests
 
 - [ ] Discovery test covers `list_analyses()` and `get_analysis()`.
 - [ ] Settings tests cover defaults and invalid values.
@@ -102,7 +127,7 @@ plugins.
   plugin writes arrays or tables.
 - [ ] Tests that require real trajectory data are marked `@pytest.mark.slow`.
 
-## Documentation and user-facing surfaces
+### Documentation and user-facing surfaces
 
 - [ ] New plugins, settings, public APIs, CLI options, or user workflows update
   the relevant docs, reference pages, CLI help, and configuration examples.
@@ -111,18 +136,21 @@ plugins.
 - [ ] Stable versus experimental behavior is labeled clearly when the feature is
   not yet a settled default workflow.
 
-## Commands before PR
+### Commands before PR
 
 Run the focused checks for your plugin and the project-level checks relevant to
 analysis contributions:
 
 ```bash
-pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v
+PLUGIN_NAME=my_plugin
+
+pixi run -e build pytest "tests/analyses/plugins/test_${PLUGIN_NAME}.py" -v
 pixi run -e build pytest tests/analyses/ -v
-pixi run -e build ruff check src/ tests/analyses/plugins/test_<name>.py
-pixi run -e build black src/ tests/analyses/plugins/test_<name>.py --check
+pixi run -e build ruff check src/ "tests/analyses/plugins/test_${PLUGIN_NAME}.py"
+pixi run -e build black src/ "tests/analyses/plugins/test_${PLUGIN_NAME}.py" --check
 pixi run -e build make -C docs clean html
 ```
 
 If you changed documentation, the clean Sphinx build must complete with zero
 warnings before review.
+````
