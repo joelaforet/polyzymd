@@ -25,7 +25,8 @@ You also need the architecture vocabulary from {doc}`architecture`:
 - Default aggregation reads scalar replicate metrics from
   `payload["metrics"]` and writes a `ConditionArtifact`.
 - Default comparison sees the `ConditionArtifact` and uses the MDAnalysis
-  artifact comparison path before any legacy `extract_metrics()` hook.
+  artifact comparison path before any compatibility/fallback `extract_metrics()`
+  hook.
 
 ## 1. Define a tiny settings model
 
@@ -92,7 +93,11 @@ def calculate_mean_x(
     atoms = universe.select_atoms(selection)
     values: list[float] = []
 
-    iterator = universe.trajectory[frames] if frames is not None else universe.trajectory[start:stop:step]
+    iterator = (
+        universe.trajectory[frames]
+        if frames is not None
+        else universe.trajectory[start:stop:step]
+    )
     for _ts in iterator:
         if len(atoms) == 0:
             raise ValueError(f"Selection matched no atoms: {selection!r}")
@@ -188,8 +193,11 @@ class MeanProteinXCollector:
             warnings=list(ctx.warnings),
         )
 
+```
 
-class MeanProteinXAnalysis(MeanProteinXAnalysis):
+Then add the collector hook to the `MeanProteinXAnalysis` class above:
+
+```python
     def build_mda_collector(self, ctx: MDACollectorContext):
         del ctx
         return MeanProteinXCollector()
@@ -230,17 +238,17 @@ replicate values, mean, standard deviation, and SEM for each named scalar metric
 
 ## 6. Let artifact comparison use the condition metrics
 
-For this simple MDAnalysis artifact tutorial, do not implement
-`extract_metrics()`. When the aggregate result is a `ConditionArtifact`,
+For this simple MDAnalysis artifact tutorial, `extract_metrics()` is not the
+primary metric path. When the aggregate result is a `ConditionArtifact`,
 PolyzyMD's default comparison path short-circuits to
 `compare_condition_artifacts()`. That artifact comparison code reads
 `payload["metrics"]`, builds the internal `MetricValue` inputs from the stored
 means, SEMs, and replicate values, and returns a comparison artifact.
 
-The older `extract_metrics()` hook is still relevant for plugins whose
-aggregation returns a non-`ConditionArtifact` result, such as a custom Pydantic
-model or a plain dictionary. It is not required for this simple
-`ReplicateArtifact` → `ConditionArtifact` path.
+The scaffold currently includes an `extract_metrics()` method as a
+compatibility/fallback helper for aggregate summaries that are not
+`ConditionArtifact` objects. Contributors should not rely on it as the main
+metric source for a normal `ReplicateArtifact` → `ConditionArtifact` plugin.
 
 Because the teaching metric has no scientific direction, treat any comparison
 output as a lifecycle check only. For a real plugin, define metric direction and
@@ -257,8 +265,10 @@ You have the pieces of a simple scalar plugin when:
   `payload["metrics"]`.
 - You do not override `aggregate()` because default aggregation can create the
   `ConditionArtifact` from replicate metrics.
-- You do not implement `extract_metrics()` for this artifact path; default
-  comparison reads the `ConditionArtifact` metrics directly.
+- You do not rely on `extract_metrics()` for this artifact path; default
+  comparison reads the `ConditionArtifact` metrics directly. If scaffolded code
+  includes `extract_metrics()`, keep it as compatibility/fallback support rather
+  than the primary contract.
 
 ## Common mistakes
 

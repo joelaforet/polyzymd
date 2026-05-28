@@ -73,7 +73,7 @@ Notice these pieces:
 | Settings model | A Pydantic settings class with placeholder options such as an MDAnalysis atom selection and a scale factor. |
 | Measurement function | A small placeholder function that receives a loaded universe and frame-selection arguments. This is where domain-specific MDAnalysis logic will eventually replace the placeholder atom-frame count. |
 | Collector | A collector class that converts one completed MDAnalysis job into a `ReplicateArtifact`. |
-| Analysis subclass | A `SolventShellAnalysis` class with `name = "solvent_shell"`, a `Settings` class, `build_mda_jobs()`, `build_mda_collector()`, and `extract_metrics()`. |
+| Analysis subclass | A `SolventShellAnalysis` class with `name = "solvent_shell"`, a `Settings` class, `build_mda_jobs()`, `build_mda_collector()`, and `extract_metrics()`. The generated `extract_metrics()` is compatibility/fallback support for non-artifact summaries; default artifact comparison reads condition-artifact metrics first. |
 | Helper functions | Small private helpers used by the scaffold to count selected frames, validate JSON-compatible metrics, and read default aggregate summaries. |
 
 The most important breadcrumb is the import boundary. The generated plugin uses
