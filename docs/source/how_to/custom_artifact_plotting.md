@@ -160,8 +160,9 @@ H-bond.
 
 ```{note}
 Artifact payload shapes are plugin- and version-specific. This example uses the
-documented hydrogen-bond summary fields from the current hydrogen-bond artifact
-output.
+current hydrogen-bond artifact summary fields. Inspect `artifact.payload` and
+the plugin documentation for your PolyzyMD version before adapting the field
+names.
 ```
 
 ```python
@@ -341,7 +342,7 @@ for condition, artifact in condition_artifacts.items():
 - {doc}`publication_plots` for built-in plot settings and regenerated plots.
 - {doc}`hydrogen_bonds` for configuring hydrogen-bond summaries.
 - {doc}`../reference/analysis_hydrogen_bonds_reference` for hydrogen-bond
-  settings and documented output fields.
+  settings and the generated output files and plots.
 - {doc}`../reference/comparison_yaml` for `comparison.yaml` schema details.
 - {doc}`../reference/analysis_comparison_reference` for comparison output paths
   and plotting behavior.
