@@ -95,7 +95,7 @@ Customize publication-quality figures and debug common issues.
 Want to use the PolyzyMD artifacts to make your own plots? See
 {doc}`custom_artifact_plotting` for a post-processing workflow that reads cached
 analysis artifacts and sidecars. Start with {doc}`publication_plots` if you want
-to customize PolyzyMD's built-in regenerated plots.
+to customize PolyzyMD's standard analysis plots.
 ```
 
 ```{toctree}

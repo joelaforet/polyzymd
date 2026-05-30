@@ -21,7 +21,7 @@ pixi run -e build jupyter lab
 ```{important}
 This is a post-processing workflow for existing artifacts and sidecars. It does
 not customize a plugin's `plot()` method, load trajectories, or rerun
-MDAnalysis. To customize PolyzyMD's regenerated built-in plots, start with
+MDAnalysis. To adjust PolyzyMD's standard analysis plots, start with
 {doc}`publication_plots` instead.
 ```
 
@@ -339,7 +339,8 @@ for condition, artifact in condition_artifacts.items():
 
 ## See also
 
-- {doc}`publication_plots` for built-in plot settings and regenerated plots.
+- {doc}`publication_plots` for settings that control PolyzyMD's standard
+  analysis plots.
 - {doc}`hydrogen_bonds` for configuring hydrogen-bond summaries.
 - {doc}`../reference/analysis_hydrogen_bonds_reference` for hydrogen-bond
   settings and the generated output files and plots.
