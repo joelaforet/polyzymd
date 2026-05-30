@@ -1,9 +1,10 @@
 # Create Custom Plots from Analysis Artifacts
 
-Use this guide when you already have PolyzyMD analysis artifacts and want to
-make a notebook-specific matplotlib figure without rerunning an analysis. The
-example loads cached hydrogen-bond aggregate artifacts and combines the
-`ser_his` and `asp_his` summaries on one graph.
+Want to use the PolyzyMD artifacts to make your own plots? Use this guide when
+you already have cached analysis artifacts and sidecars and want to make your
+own matplotlib plots from those existing results. The example loads cached
+hydrogen-bond aggregate artifacts and combines the `ser_his` and `asp_his`
+summaries on one graph without rerunning the analysis.
 
 This workflow is intended for JupyterLab, Jupyter Notebook, VS Code notebooks,
 or an IPython session.
@@ -17,9 +18,15 @@ pixi run -e build jupyter lab
 ```
 ::::
 
+```{important}
+This is a post-processing workflow for existing artifacts and sidecars. It does
+not customize a plugin's `plot()` method, load trajectories, or rerun
+MDAnalysis. To customize PolyzyMD's regenerated built-in plots, start with
+{doc}`publication_plots` instead.
+```
+
 The code below reads small JSON artifacts from
-`analysis/<sanitized-condition-label>/hydrogen_bonds/aggregated/result.json`.
-It does not load trajectories and does not rerun MDAnalysis.
+`analysis/<condition-directory>/hydrogen_bonds/aggregated/result.json`.
 
 ## Prepare a notebook context cell
 
@@ -44,15 +51,14 @@ import numpy as np
 import pandas as pd
 
 from polyzymd.analyses.mda import ArtifactStore
-from polyzymd.analyses.shared.paths import sanitize_label
 ```
 
 ## Set the project paths and summaries
 
-Edit `project_dir` and `conditions` to match the directory that contains your
-`comparison.yaml` and `analysis/` tree. The condition labels should match the
-labels in `comparison.yaml`; PolyzyMD derives directory names under `analysis/`
-with `sanitize_label()`.
+Edit `project_dir`, `conditions`, and `condition_dirs` to match the directory
+that contains your `comparison.yaml` and `analysis/` tree. The condition labels
+should match the labels in `comparison.yaml`. The directory values should match
+the corresponding directories under `analysis/`.
 
 ```python
 project_dir = Path("/path/to/polyzymd/project").expanduser().resolve()
@@ -67,15 +73,27 @@ conditions = [
     "10% EGPMA",
 ]
 
+condition_dirs = {
+    "No Polymer": "no_polymer",
+    "100% SBMA": "100_sbma",
+    "100% EGMA": "100_egma",
+    "1% EGPMA": "1_egpma",
+    "2% EGPMA": "2_egpma",
+    "5% EGPMA": "5_egpma",
+    "10% EGPMA": "10_egpma",
+    # Edit these to match directories under analysis/
+}
+
 summary_names = ["ser_his", "asp_his"]
 ```
 
-If you are unsure how labels map to directories, run this optional diagnostic
-cell and compare the output with the directories under `analysis/`.
+If you are unsure how labels map to directories, list the available analysis
+directories and update `condition_dirs` to match them.
 
 ```python
-for condition in conditions:
-    print(f"{condition} -> {sanitize_label(condition)}")
+for path in sorted((project_dir / "analysis").iterdir()):
+    if path.is_dir():
+        print(path.name)
 ```
 
 This example is useful when the built-in hydrogen-bond plot for
@@ -88,7 +106,7 @@ named summaries directly lets you plot only Ser-His and Asp-His occupancy.
 artifact_paths = {
     condition: project_dir
     / "analysis"
-    / sanitize_label(condition)
+    / condition_dirs[condition]
     / "hydrogen_bonds"
     / "aggregated"
     / "result.json"
@@ -139,6 +157,12 @@ This cell extracts one row per condition and summary. The occupancy fields mean:
 For this example, `ser_his` is the fraction of frames with at least one Ser-His
 H-bond, and `asp_his` is the fraction of frames with at least one Asp-His
 H-bond.
+
+```{note}
+Artifact payload shapes are plugin- and version-specific. This example uses the
+documented hydrogen-bond summary fields from the current hydrogen-bond artifact
+output.
+```
 
 ```python
 rows = []
@@ -259,8 +283,9 @@ figure_path
 ## Adapt this pattern
 
 - Change condition labels and order by editing the `conditions` list. Use the
-  display labels from `comparison.yaml`; artifact directory names are derived
-  with `sanitize_label(condition)`.
+  display labels from `comparison.yaml`.
+- Change artifact directory names by editing `condition_dirs` to match the
+  directories under `analysis/`.
 - Change which hydrogen-bond summaries appear by editing `summary_names`.
 - Summary names must match the names configured in `comparison.yaml`.
 - If artifacts live on an HPC filesystem, copy the small JSON artifact files to
@@ -291,12 +316,13 @@ to the directory containing `analysis/`:
 pixi run -e build polyzymd compare run hydrogen_bonds -f comparison.yaml
 ```
 
-Also print the sanitized condition labels and compare them with the directories
-under `analysis/`:
+Also list the directories under `analysis/` and compare them with
+`condition_dirs`:
 
 ```python
-for condition in conditions:
-    print(condition, "->", sanitize_label(condition))
+for path in sorted((project_dir / "analysis").iterdir()):
+    if path.is_dir():
+        print(path.name)
 ```
 
 ### `KeyError` for a summary name
@@ -315,7 +341,7 @@ for condition, artifact in condition_artifacts.items():
 - {doc}`publication_plots` for built-in plot settings and regenerated plots.
 - {doc}`hydrogen_bonds` for configuring hydrogen-bond summaries.
 - {doc}`../reference/analysis_hydrogen_bonds_reference` for hydrogen-bond
-  artifact outputs and plugin fields.
+  settings and documented output fields.
 - {doc}`../reference/comparison_yaml` for `comparison.yaml` schema details.
 - {doc}`../reference/analysis_comparison_reference` for comparison output paths
   and plotting behavior.
