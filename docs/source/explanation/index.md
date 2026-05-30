@@ -42,8 +42,9 @@ the selected structural reference.
 :link: architecture
 :link-type: doc
 
-See the design rationale, chain conventions, and implementation constraints
-that keep PolyzyMD analyses consistent.
+See the design rationale and implementation constraints that keep PolyzyMD
+analyses consistent. Chain conventions are covered in the residue-assignment
+page.
 :::
 
 ::::

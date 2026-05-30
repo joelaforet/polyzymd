@@ -1,28 +1,26 @@
 # Architecture
 
 This page explains how PolyzyMD is organized, why the major subsystems are
-separated, and where contributors should look when they need to extend a
-workflow.
+separated, and which boundaries matter when extending the project. It is a
+conceptual map, not a step-by-step contributor tutorial.
 
 ## The high-level shape of the project
 
-PolyzyMD is organized around a simulation lifecycle:
+PolyzyMD follows the lifecycle of an enzyme-polymer molecular dynamics study:
 
 1. load and validate configuration
 2. build a molecular system
 3. run simulation workflows locally or through SLURM
-4. analyze trajectories
-5. compare conditions and plot results
+4. analyze trajectories into durable artifacts
+5. compare conditions and create plots or reports
 
-That lifecycle is reflected in the package layout:
+That lifecycle is reflected in the active package layout:
 
 ```text
 src/polyzymd/
-├── analysis/      # legacy/specialized analysis support
-├── analyses/      # artifact-native analysis plugin system
+├── analyses/      # artifact-native analysis and comparison plugin system
 ├── builders/      # molecular system construction
 ├── cli/           # command-line entry points
-├── compare/       # legacy comparison components
 ├── config/        # simulation and comparison configuration
 ├── core/          # shared domain types
 ├── data/          # bundled package data
@@ -34,75 +32,54 @@ src/polyzymd/
 └── workflow/      # orchestration and SLURM support
 ```
 
-## What each area is responsible for
+Older `analysis/` and `compare/` directories may still exist in the source tree,
+but they are not the primary architecture for new analysis or comparison work.
+Current analysis and comparison behavior is concentrated in `analyses/`,
+`config/comparison.py`, and `cli/compare.py`.
 
-### `cli/`
+## Why the code is split this way
 
-Defines the command-line interface and maps user commands onto the lower-level
-workflow code.
+The main boundary is between defining a study, running simulations, and
+interpreting results. Keeping these responsibilities separate lets users and
+contributors change one phase without accidentally coupling it to another.
 
-### `analysis/`
+### Configuration describes intent
 
-Contains older or specialized analysis support that has not become the primary
-contributor extension surface. New user-facing analysis plugins should generally
-target `analyses/` unless maintainers point to a compatibility path here.
+`config/` holds schema and loading logic for YAML configuration, including
+comparison configuration. It validates what a study should do before lower-level
+builders or analysis plugins act on it.
 
-### `compare/`
+### Builders create simulation-ready systems
 
-Holds legacy comparison, plotting, and result components used by parts of the
-older comparison stack. The current plugin lifecycle concentrates new analysis
-comparison behavior under `analyses/`.
+`builders/` turns input structures into simulation-ready molecular systems by
+assembling enzyme, substrate, polymer, solvent, and related components. The
+builder layer stays focused on construction; it does not own long-running job
+or analysis policy.
 
-### `config/`
+### Simulation and workflow execute the study
 
-Holds the schema and loading logic for YAML configuration. If a user-facing
-setting needs validation, this is usually the first place to inspect.
+`simulation/` runs local minimization, equilibration, checkpointing,
+continuation, and production segments. `workflow/` handles orchestration around
+those runs, especially SLURM job generation, resubmission, and recovery flows.
 
-### `builders/`
+`engines/` isolates engine-specific integration details such as OpenMM or
+GROMACS support. This keeps high-level workflows from depending directly on one
+engine's file formats or object model.
 
-Turns input structures into a simulation-ready system by assembling enzyme,
-substrate, polymer, and solvent components.
+### Analyses interpret completed trajectories
 
-### `simulation/`
+`analyses/` is the current analysis and comparison architecture. It is both a
+plugin system and an artifact lifecycle. Plugins measure trajectories, produce
+replicate artifacts, aggregate those artifacts per condition, compare conditions,
+and optionally plot or format results.
 
-Runs minimization, equilibration, continuation, checkpoints, and production
-segments.
+This design keeps trajectory processing separate from ensemble interpretation:
+MDAnalysis handles per-trajectory analysis idioms, while PolyzyMD handles study
+structure, artifact identity, aggregation, comparison, and CLI integration.
 
-### `workflow/`
+## The current `analyses/` boundary
 
-Handles orchestration around the simulation engine, especially SLURM job
-generation, resubmission, and recovery flows.
-
-### `engines/`
-
-Provides engine-specific integration points, including OpenMM and GROMACS
-support modules. It is a boundary for engine details rather than the place where
-high-level workflows are defined.
-
-### `data/`
-
-Stores bundled package data such as force-field or template resources that need
-to ship with PolyzyMD. It is supporting material for code paths elsewhere, not a
-user results directory.
-
-### `templates/`
-
-Contains packaged templates and examples used by scaffolding and setup flows.
-These are starting points for generated files, not the authoritative runtime
-configuration schema.
-
-### `analyses/`
-
-The **plugin system** — the primary extension point for contributors. The
-default contributor path is artifact-native and MDAnalysis-backed: a plugin
-subclasses `Analysis`, builds `MDAAnalysisJob` objects, and provides collectors
-that convert completed jobs into `ReplicateArtifact` objects. PolyzyMD then owns
-Universe loading, cache identity, default artifact aggregation, cross-condition
-comparison, statistics, and CLI output. Each analysis plugin still participates
-in a unified lifecycle, but not every plugin uses every stage:
-compute → aggregate → compare → plot → format.
-
-The analysis package itself is split by responsibility:
+The analysis package is split by public surface and private implementation:
 
 ```text
 src/polyzymd/analyses/
@@ -110,117 +87,126 @@ src/polyzymd/analyses/
 ├── discovery.py     # plugin auto-discovery
 ├── orchestrator.py  # comparison workflow orchestration facade
 ├── stats.py         # default scalar comparison pipeline
+├── mda/             # public MDAnalysis extension layer
+├── shared/          # reusable utilities shared by plugins
 ├── _framework/      # private/internal lifecycle, I/O, and contracts
-├── mda/             # public MDAnalysis job, frame-selection, artifact layer
-├── shared/          # contributor-shared reusable utilities
 └── <plugin>/        # built-in and contributed analysis plugins
 ```
 
-The private `_framework/` modules support the public facade; they are not the
-contributor import surface. Contributor-facing docs and plugins should use
-`polyzymd.analyses.base`, `polyzymd.analyses.mda`, and documented shared
-utilities instead.
+The important public/private boundary is intentional:
 
-Within that lifecycle, PolyzyMD now draws a sharper boundary between
-trajectory-level work and ensemble-level work:
+- `polyzymd.analyses.base` is the stable contributor facade for `Analysis`,
+  lifecycle contexts, metrics, and comparison result models.
+- `polyzymd.analyses.mda` is the public MDAnalysis extension layer for jobs,
+  frame selection, artifacts, artifact storage, aggregation, and Universe
+  handling.
+- `_framework/` modules are private implementation details behind the public
+  facade.
+- Plugin helper modules named `_*.py` are private to their plugin package unless
+  that plugin explicitly documents them as public.
 
-- **MDAnalysis owns per-trajectory analysis** through function-adapter jobs or
-  AnalysisBase-compatible ``run(...)`` objects
-- **PolyzyMD owns ensemble/comparison workflow** including replicate discovery,
-  caching, default artifact aggregation, cross-condition statistics, and CLI
-  output
-- **Collectors turn completed MDAnalysis jobs into `ReplicateArtifact` objects**
-  with payload, metadata, provenance, warnings, and sidecar references
-- **Scalar metrics for default comparison live in `payload["metrics"]`** so the
-  artifact aggregator can preserve replicate-level values without reducing raw
-  arrays or event tables implicitly
-- **Default aggregation combines replicate artifacts into a `ConditionArtifact`**
-  for each condition before cross-condition comparison
-- **Comparison produces a `ComparisonArtifact`** on the canonical path, or an
-  explicitly active custom output contract for plugins that still expose one
-- **Composition is preferred over mixins or deep inheritance** so trajectory-
-  native plugins can provide small hooks instead of re-implementing the full
-  framework lifecycle
-- **Advanced trajectory-native plugins keep per-trajectory logic in
-  MDAnalysis-compatible job modules**
-- **Derived analyses stay outside `Analysis` unless they truly process
-  trajectories**; post-processing of already-aggregated outputs should remain a
-  higher-level PolyzyMD concern
+Contributors should not import from `_framework/` or rely on another plugin's
+private helper modules. The stable import surface is deliberately narrower than
+the internal package layout so PolyzyMD can evolve lifecycle internals without
+breaking plugins.
 
-To add a new analysis, run `polyzymd new-analysis <name>` to scaffold the
-single-file artifact-native pattern. The public default path:
+## How the MDAnalysis lifecycle is divided
 
-- subclasses `Analysis`
-- builds `MDAAnalysisJob` objects, often with `MDAAnalysisJob.from_function(...)`
-- implements `build_mda_collector(...)` so completed jobs become
-  `ReplicateArtifact` objects
-- places scalar metrics for the default comparison pipeline in
-  `payload["metrics"]`
-- stores large arrays, event tables, or other rich outputs as artifact payloads
-  or validated sidecars that plots can read later
+PolyzyMD and MDAnalysis share responsibility during trajectory analysis, but not
+at the same layer.
 
-Advanced packages use the explicit MDAnalysis job lifecycle:
+PolyzyMD resolves topology and trajectory paths from the study context, applies
+frame-selection policy, and provides or caches loaded MDAnalysis `Universe`
+objects through the MDA lifecycle. It also owns replicate discovery, cache
+identity, artifact storage, aggregation, cross-condition comparison, and CLI
+output.
 
-- implement `build_mda_jobs(...)` and, when needed, `build_mda_collector(...)`
-  for trajectory-native replicate work
-- set `has_compute_stage = False` for compare-only plugins
-- implement `aggregate()` only when `has_aggregate_stage = True`
+MDAnalysis owns the per-trajectory analysis idioms: selecting atoms, iterating
+frames, running `AnalysisBase`-compatible work, and producing MDAnalysis-style
+`Results` objects. PolyzyMD collectors then translate completed MDAnalysis jobs
+into project-level artifacts.
 
-`extract_metrics()` remains useful for compatibility with non-artifact aggregate
-results and older default-comparison plugins, but it is not the preferred place
-to put scalar metrics for new artifact-native analyses. New plugins should make
-their default-comparison metrics explicit in artifact payloads and let PolyzyMD
-perform the standard aggregation, statistics, ranking, formatting, and CLI
-presentation.
+Conceptually, the current analysis flow is:
 
-Plots have the same boundary: they should read cached artifacts and sidecars,
-not reload trajectories or rerun compute-stage analyses.
+```text
+config -> builders -> simulation/workflow -> analyses/artifacts -> comparison -> plots
+```
 
-See {doc}`../contributor_guide/extending_analyses` for the full guide.
+Within `analyses/`, that becomes:
 
-### Comparison infrastructure (distributed)
+```text
+MDA jobs
+  -> MDAnalysis work and Results
+  -> collectors
+  -> ReplicateArtifact objects
+  -> condition artifacts
+  -> comparison artifacts or documented custom outputs
+  -> plots and formatted CLI output
+```
 
-Comparison functionality is split across focused modules:
+Most trajectory-native plugins implement `build_mda_jobs()` and usually provide
+a collector so completed jobs become `ReplicateArtifact` objects. Those
+replicate artifacts aggregate into per-condition artifacts, which then feed
+default comparison artifacts or a plugin's documented custom comparison output.
+Plots should read cached artifacts and sidecars rather than reloading
+trajectories or rerunning compute-stage analysis.
 
-- `config/comparison.py` for comparison config and plotting settings
-- `cli/compare.py` for `polyzymd compare` subcommands
-- `analyses/stats.py` for the default scalar comparison pipeline, condition
-  summaries, rankings, pairwise comparisons, and human-readable formatting
-- `analyses/shared/inferential_statistics.py` for lower-level statistical
-  primitives such as t-tests, ANOVA, and effect sizes
-- `analyses/mda/` for MDAnalysis jobs, frame selection, artifacts, artifact
-  storage, aggregation, and comparison inputs
-- `analyses/shared/paths.py` for label/path helpers such as `sanitize_label()`
+For concrete commands and code examples, see
+{doc}`../contributor_guide/extending_analyses`.
 
-Established analysis package plugins often delegate plotting to `_plotters.py`
-modules, but that is optional organization for larger plugins. Simple
-single-file plugins can keep plotting in `plot()` when they need figures at all.
+## Comparison infrastructure is distributed
+
+There is no separate active comparison stack that new plugins should target.
+Comparison behavior is distributed across focused modules:
+
+- `config/comparison.py` describes comparison and plotting settings.
+- `cli/compare.py` exposes the `polyzymd compare` command group.
+- `analyses/stats.py` implements the default scalar comparison pipeline,
+  including summaries, rankings, pairwise comparisons, and formatting helpers.
+- `analyses/shared/inferential_statistics.py` provides lower-level statistical
+  primitives such as t-tests, ANOVA, and effect sizes.
+- `analyses/mda/` provides the artifact layer that carries replicate,
+  condition, and comparison data through the lifecycle.
+
+This distribution keeps comparison close to the artifacts it consumes while
+still allowing the CLI and configuration layers to remain stable entry points.
+
+## Supporting packages
 
 ### `core/` and `utils/`
 
-Provide shared infrastructure such as common types, experimental workflow
-labeling, and helper functionality that should not be duplicated across the
-package.
+`core/` and `utils/` provide shared infrastructure such as common types,
+experimental workflow labeling, and helper functionality that should not be
+duplicated across the package.
+
+### `data/` and `templates/`
+
+`data/` stores bundled package resources such as force-field or template data
+that need to ship with PolyzyMD. It is not a user results directory.
+
+`templates/` contains packaged templates and examples used by scaffolding and
+setup flows. These are starting points for generated files, not the
+authoritative runtime schema.
 
 ### `exporters/`
 
-Contains format-export support for moving PolyzyMD outputs into other molecular
-simulation ecosystems. Exporters sit at the edge of the package rather than in
-the core build or simulation lifecycle.
+`exporters/` contains format-export support for moving PolyzyMD outputs into
+other molecular simulation ecosystems. Exporters sit at the edge of the package
+rather than in the core build or simulation lifecycle.
 
 ## How data moves through the system
 
-At a conceptual level, the flow looks like this:
+At a conceptual level, data moves from declared intent to generated evidence:
 
 ```text
 config.yaml
-  -> config schema
+  -> validated config objects
   -> system builders
-  -> OpenMM-ready simulation objects
+  -> simulation objects and run directories
   -> local or SLURM execution
   -> ReplicateArtifact files and sidecars
-  -> ConditionArtifact files
-  -> ComparisonArtifact or active custom comparison output
+  -> condition artifacts
+  -> comparison artifacts or documented custom outputs
   -> plots and reports
 ```
 
@@ -229,90 +215,76 @@ This separation is intentional:
 - users can stop after building or running
 - analysis can be repeated without rebuilding simulations
 - comparison workflows can reuse cached analysis outputs
-- plotting can be rerun without recomputing the underlying statistics
+- plotting can be rerun without recomputing statistics
+- plugin internals can change while public artifact and facade contracts remain
+  stable
 
 ## Design patterns you will encounter
 
 ### Lazy imports for heavy dependencies
 
-Modules that depend on OpenMM or MDAnalysis often import those packages inside
-functions or methods instead of at module import time. This keeps lightweight
-CLI operations usable even when optional heavy dependencies are absent.
+Modules that depend on OpenMM, OpenFF, MDAnalysis, or other heavy scientific
+packages often import those packages inside functions or methods instead of at
+module import time. This keeps lightweight CLI and documentation operations
+usable even when optional heavy dependencies are absent.
 
 ### Plugin-based extension points
 
-Analysis is the primary extensibility axis. New analyses are usually single
-files or packages that subclass `Analysis`. The framework discovers both shapes
-automatically via `pkgutil` — no registries, no decorators, no imports needed.
-Use `polyzymd new-analysis <name>` for the default single-file MDAnalysis-native
-scaffold, or `--advanced` for a package scaffold with lazy `_mda.py` helpers.
+Analysis is the primary extensibility axis. Plugins are single files or packages
+under `analyses/` that subclass `Analysis`. The framework discovers both shapes
+automatically via `pkgutil`, so contributors do not need registries, decorators,
+or core imports to make a plugin available.
 
-### Separation between per-condition and cross-condition work
+The reason for this design is the open-closed principle: new analyses should be
+added by extension, not by modifying the orchestrator or CLI every time a metric
+is introduced.
 
-The unified `analyses/` lifecycle still handles both scopes in one plugin
-contract. Public plugins usually:
+### Public facade over private lifecycle internals
 
-- use `MDAAnalysisJob.from_function(...)` when one function-adapter job is
-  sufficient
-- collect completed jobs into `ReplicateArtifact` objects with scalar default
-  comparison metrics stored under `payload["metrics"]`
+The analysis framework uses private modules internally because lifecycle code,
+artifact I/O, and validation contracts are implementation details. The public
+facade keeps contributor imports stable while giving maintainers room to improve
+internals.
 
-Advanced plugins can also:
-
-- use the MDAnalysis job path with `build_mda_jobs(...)` and
-  `build_mda_collector(...)`
-- skip compute entirely with `has_compute_stage = False`
-
-Per-condition aggregation is likewise optional and is required only when
-`has_aggregate_stage = True`. Cross-condition work still happens through
-`compare()`, `plot()`, and `format()`.
-
-The important migration rule is that simple contributors should not reimplement
-the lifecycle. The default scaffold creates a single-file `Analysis` plugin
-that uses `MDAAnalysisJob.from_function(...)`, returns a `ReplicateArtifact`,
-stores default scalar metrics in the artifact payload, and lets PolyzyMD own
-replicate discovery, caching, artifact aggregation, cross-condition statistics,
-formatting, and CLI output. Advanced package plugins use
-`AnalysisBase`-compatible jobs when MDAnalysis should own per-frame trajectory
-iteration directly.
+This is why documentation points contributors to `polyzymd.analyses.base` and
+`polyzymd.analyses.mda`, not to `_framework/`.
 
 ## Where contributors usually need to look
 
-- **Add or validate config fields:** start in `src/polyzymd/config/`.
-- **Change build behavior:** start in `src/polyzymd/builders/`.
-- **Change run or restart behavior:** start in `src/polyzymd/simulation/` and
-  `src/polyzymd/workflow/`.
-- **Add an analysis type:** start in `src/polyzymd/analyses/`. New plugins
-  usually subclass `Analysis`, build `MDAAnalysisJob` objects, return
-  `ReplicateArtifact` objects through collectors, and let the artifact layer
-  handle default aggregation and comparison.
-- **Add comparison statistics:** use `src/polyzymd/analyses/stats.py` for
-  default scalar comparison behavior and
-  `src/polyzymd/analyses/shared/inferential_statistics.py` for lower-level
-  statistical tests and effect-size primitives.
-- **Add or change CLI commands:** start in `src/polyzymd/cli/`.
+- **Configuration behavior:** `src/polyzymd/config/`
+- **Build behavior:** `src/polyzymd/builders/`
+- **Run, restart, or cluster behavior:** `src/polyzymd/simulation/` and
+  `src/polyzymd/workflow/`
+- **Analysis and comparison plugins:** `src/polyzymd/analyses/`
+- **Comparison configuration and CLI entry points:** `config/comparison.py` and
+  `cli/compare.py`
+- **CLI commands:** `src/polyzymd/cli/`
+
+For the chain-ID convention used by selections and interpretation, see
+{doc}`residue_assignment`.
 
 ## A practical mental model
 
-If you are new to the codebase, it helps to think in layers:
+If you are new to the codebase, think in layers:
 
 - `config` describes what should happen
 - `builders` and `simulation` make it happen for one system
 - `workflow` makes it practical on clusters
 - `engines` isolates engine-specific details where possible
-- `analyses` plugins measure and compare what happened through artifacts
-- comparison workflows interpret differences across studies
+- `analyses` plugins measure trajectories and preserve evidence as artifacts
+- comparison workflows interpret differences across study conditions
 
-That mental model is usually enough to find the right subsystem before you dive
+That mental model is usually enough to find the right subsystem before diving
 into module-level details or API reference pages.
 
 ## Related pages
 
 - contributor workflows: {doc}`../contributor_guide/contributing`
 - extending analyses: {doc}`../contributor_guide/extending_analyses`
+- chain conventions: {doc}`residue_assignment`
 - SLURM usage: {doc}`../how_to/hpc_slurm`
 - API reference: {doc}`../api/index`
 
 <!-- IMAGE OPPORTUNITY: Add a left-to-right architecture diagram showing
-`config -> builders -> simulation/workflow -> analysis -> analyses -> comparison workflows -> plots`,
+`config -> builders -> simulation/workflow -> analyses/artifacts -> comparison -> plots`,
 with extension points called out at `analyses` and `workflow`. -->
