@@ -243,14 +243,13 @@ class TestPlotThemeValidation:
 
 
 class TestPlotStylePresets:
-    """Plot style presets should use canonical names with deprecated aliases."""
+    """Plot style presets should use canonical names only."""
 
-    def test_default_style_is_compact_with_publication_values(self) -> None:
+    def test_default_style_is_compact(self) -> None:
         """Omitted style should use the compact preset values."""
         settings = PlotSettings()
 
         assert settings.style == "compact"
-        assert settings.theme == PlotTheme.publication()
         assert settings.theme == PlotTheme.compact()
 
     @pytest.mark.parametrize(
@@ -273,55 +272,28 @@ class TestPlotStylePresets:
         assert settings.theme == expected_theme
 
     @pytest.mark.parametrize(
-        ("alias", "canonical"),
+        "style",
         [
-            ("publication", "compact"),
-            ("presentation", "large_elements"),
-            ("minimal", "low_ink"),
+            "publication",
+            "presentation",
+            "minimal",
         ],
     )
-    def test_deprecated_aliases_warn_and_canonicalize(
-        self,
-        alias: str,
-        canonical: str,
-    ) -> None:
-        """Deprecated aliases should warn and store canonical names."""
-        with pytest.warns(FutureWarning, match=f"{alias}.*{canonical}"):
-            settings = PlotSettings(style=alias)
+    def test_old_aliases_raise_value_error(self, style: str) -> None:
+        """Old style aliases should be rejected as invalid strings."""
+        with pytest.raises(ValueError, match="compact.*large_elements.*low_ink"):
+            PlotSettings(style=style)
 
-        assert settings.style == canonical
-
-    @pytest.mark.parametrize(
-        ("alias", "canonical"),
-        [
-            ("publication", "compact"),
-            ("presentation", "large_elements"),
-            ("minimal", "low_ink"),
-        ],
-    )
-    def test_alias_theme_values_equal_canonical_equivalents(
-        self,
-        alias: str,
-        canonical: str,
-    ) -> None:
-        """Deprecated aliases should resolve to canonical preset values."""
-        with pytest.warns(FutureWarning):
-            alias_settings = PlotSettings(style=alias)
-        canonical_settings = PlotSettings(style=canonical)
-
-        assert alias_settings.theme == canonical_settings.theme
-
-    def test_theme_overrides_merge_after_alias_normalization(self) -> None:
-        """Theme overrides should layer on top of deprecated alias presets."""
-        with pytest.warns(FutureWarning):
-            settings = PlotSettings(style="presentation", theme={"dot_size": 40})
+    def test_theme_overrides_merge_after_canonical_style(self) -> None:
+        """Theme overrides should layer on top of canonical presets."""
+        settings = PlotSettings(style="large_elements", theme={"dot_size": 40})
 
         assert settings.style == "large_elements"
         assert settings.theme.dot_size == 40
         assert settings.theme.title_fontsize == PlotTheme.large_elements().title_fontsize
 
     def test_invalid_style_string_raises_value_error(self) -> None:
-        """Invalid style strings should list allowed canonical values and aliases."""
+        """Invalid style strings should list allowed canonical values."""
         with pytest.raises(ValueError, match="compact.*large_elements.*low_ink"):
             PlotSettings(style="poster")
 

@@ -333,9 +333,7 @@ and usable element metadata.
 
 `style` selects a PolyzyMD built-in theme preset for standard analysis plots. It
 is not a matplotlib or seaborn stylesheet, and it does not control `format`,
-`dpi`, per-analysis figure sizes, or color palettes. Deprecated aliases are
-accepted with a `FutureWarning`: `publication` maps to `compact`,
-`presentation` maps to `large_elements`, and `minimal` maps to `low_ink`.
+`dpi`, per-analysis figure sizes, or color palettes.
 
 `theme` values are merged on top of the selected preset, so you can choose a
 base style and override only the fields that need project-specific changes.

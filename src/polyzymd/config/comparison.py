@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import warnings
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -21,19 +20,11 @@ from polyzymd.utils.templates import render_package_template
 logger = logging.getLogger(__name__)
 
 CANONICAL_PLOT_STYLES: tuple[str, ...] = ("compact", "large_elements", "low_ink")
-DEPRECATED_PLOT_STYLE_ALIASES: dict[str, str] = {
-    "publication": "compact",
-    "presentation": "large_elements",
-    "minimal": "low_ink",
-}
-_PLOT_STYLE_ALLOWED_MESSAGE = (
-    "allowed values are 'compact', 'large_elements', and 'low_ink' "
-    "(deprecated aliases: 'publication', 'presentation', 'minimal')"
-)
+_PLOT_STYLE_ALLOWED_MESSAGE = "allowed values are 'compact', 'large_elements', and 'low_ink'"
 
 
 def _normalize_plot_style(value: Any) -> str:
-    """Normalize plot style presets before Pydantic stores them.
+    """Validate plot style presets before Pydantic stores them.
 
     Parameters
     ----------
@@ -50,7 +41,7 @@ def _normalize_plot_style(value: Any) -> str:
     TypeError
         If the style is not a string.
     ValueError
-        If the style string is not a canonical style or deprecated alias.
+        If the style string is not a canonical style.
     """
     if not isinstance(value, str):
         raise TypeError(
@@ -60,14 +51,6 @@ def _normalize_plot_style(value: Any) -> str:
 
     if value in CANONICAL_PLOT_STYLES:
         return value
-    if value in DEPRECATED_PLOT_STYLE_ALIASES:
-        canonical = DEPRECATED_PLOT_STYLE_ALIASES[value]
-        warnings.warn(
-            f"plot_settings.style '{value}' is deprecated; use '{canonical}' instead.",
-            FutureWarning,
-            stacklevel=3,
-        )
-        return canonical
 
     raise ValueError(f"Invalid plot_settings.style '{value}'; {_PLOT_STYLE_ALLOWED_MESSAGE}")
 
@@ -348,15 +331,11 @@ class PlotTheme(BaseModel):
     marker sizes, spine visibility, etc.) across all plugin ``plot()`` methods
     with a single configurable Pydantic model.
 
-    Canonical presets are available via class methods, with deprecated alias
-    methods retained for backward compatibility:
+    Canonical presets are available via class methods:
 
     - ``PlotTheme.compact()`` — default; print-ready sizes and weights.
     - ``PlotTheme.large_elements()`` — ~1.3x larger fonts/dots/lines for slides.
     - ``PlotTheme.low_ink()`` — no dots, no bar edges, thinner lines.
-    - ``PlotTheme.publication()`` — deprecated alias for ``compact``.
-    - ``PlotTheme.presentation()`` — deprecated alias for ``large_elements``.
-    - ``PlotTheme.minimal()`` — deprecated alias for ``low_ink``.
 
     Users can override individual values in ``comparison.yaml``::
 
@@ -474,26 +453,11 @@ class PlotTheme(BaseModel):
     @classmethod
     def compact(cls) -> PlotTheme:
         """Compact preset with print-ready sizes and weights."""
-        return cls.publication()
+        return cls()
 
     @classmethod
     def large_elements(cls) -> PlotTheme:
         """Large-elements preset with slide-oriented fonts, dots, and lines."""
-        return cls.presentation()
-
-    @classmethod
-    def low_ink(cls) -> PlotTheme:
-        """Low-ink preset with no dots, no bar edges, and thinner lines."""
-        return cls.minimal()
-
-    @classmethod
-    def publication(cls) -> PlotTheme:
-        """Deprecated alias for the compact preset."""
-        return cls()
-
-    @classmethod
-    def presentation(cls) -> PlotTheme:
-        """Deprecated alias for the large-elements preset."""
         return cls(
             title_fontsize=18,
             suptitle_fontsize=20,
@@ -511,8 +475,8 @@ class PlotTheme(BaseModel):
         )
 
     @classmethod
-    def minimal(cls) -> PlotTheme:
-        """Deprecated alias for the low-ink preset."""
+    def low_ink(cls) -> PlotTheme:
+        """Low-ink preset with no dots, no bar edges, and thinner lines."""
         return cls(
             dot_size=0,
             dot_alpha=0.0,
@@ -543,9 +507,7 @@ class PlotSettings(BaseModel):
         Resolution for raster formats (PNG)
     style : str
         Canonical plot style preset: "compact", "large_elements", or
-        "low_ink". Deprecated aliases "publication", "presentation", and
-        "minimal" are accepted with a ``FutureWarning`` and stored as their
-        canonical equivalents.
+        "low_ink".
     color_palette : str
         Seaborn/matplotlib color palette name
     theme : PlotTheme
@@ -604,9 +566,8 @@ class PlotSettings(BaseModel):
 
         Theme resolution: the ``style`` field selects a canonical preset
         (compact, large_elements, or low_ink) and then any user-supplied
-        ``theme:`` overrides are merged on top. Deprecated aliases are
-        accepted with ``FutureWarning`` and normalized before storage. This
-        allows ``style: large_elements`` with ``theme: {dot_size: 40}`` to use
+        ``theme:`` overrides are merged on top. This allows
+        ``style: large_elements`` with ``theme: {dot_size: 40}`` to use
         the large-elements preset but override just the dot size.
 
         Parameters

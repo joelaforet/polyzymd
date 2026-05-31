@@ -38,10 +38,7 @@ These fields are defined in PolyzyMD's `PlotSettings` model:
   - Primarily affects raster output (`png`)
 - `style`
   - PolyzyMD built-in theme preset for standard analysis plots
-  - Allowed canonical values: `compact`, `large_elements`, `low_ink`
-  - Deprecated aliases are still accepted with a `FutureWarning`:
-    `publication` maps to `compact`, `presentation` maps to
-    `large_elements`, and `minimal` maps to `low_ink`
+  - Allowed values: `compact`, `large_elements`, `low_ink`
 
 `style` is a PolyzyMD theme preset selector, not a matplotlib or seaborn
 stylesheet name. It does not choose the output `format`, `dpi`, figure sizes, or
