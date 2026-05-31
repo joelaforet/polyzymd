@@ -1,8 +1,8 @@
 # Customizing Plots for Publication
 
 PolyzyMD generates plots automatically when you run analyses. This guide shows
-you how to control output format, resolution, figure size, and style using
-`plot_settings` in `comparison.yaml`.
+you how to control output format, resolution, figure size, and PolyzyMD theme
+presets using `plot_settings` in `comparison.yaml`.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -24,7 +24,7 @@ Add this block to `comparison.yaml`:
 plot_settings:
   format: "png"              # or "pdf", "svg"
   dpi: 300
-  style: "publication"       # or "presentation", "minimal"
+  style: "compact"           # or "large_elements", "low_ink"
 ```
 
 These fields are defined in PolyzyMD's `PlotSettings` model:
@@ -37,8 +37,44 @@ These fields are defined in PolyzyMD's `PlotSettings` model:
   - Allowed range: `50` to `600`
   - Primarily affects raster output (`png`)
 - `style`
-  - Global style preset
-  - Allowed values: `publication`, `presentation`, `minimal`
+  - PolyzyMD built-in theme preset for standard analysis plots
+  - Allowed canonical values: `compact`, `large_elements`, `low_ink`
+  - Deprecated aliases are still accepted with a `FutureWarning`:
+    `publication` maps to `compact`, `presentation` maps to
+    `large_elements`, and `minimal` maps to `low_ink`
+
+`style` is a PolyzyMD theme preset selector, not a matplotlib or seaborn
+stylesheet name. It does not choose the output `format`, `dpi`, figure sizes, or
+condition color palettes. Use `format`, `dpi`, per-plugin `figsize` settings,
+and `color_palette` or `semantic_colors` for those choices.
+
+The built-in presets are:
+
+- `compact` — the default compact print-style preset.
+- `large_elements` — larger fonts, markers, lines, error-bar caps, and fill
+  opacity for slides or high-visibility output.
+- `low_ink` — removes or reduces replicate dots, bar edges, and heavy reference
+  lines for simpler figures.
+
+Use `theme` to override individual visual values on top of the selected preset.
+For example, this starts from `large_elements` and then changes only the listed
+fields:
+
+```yaml
+plot_settings:
+  format: "png"
+  dpi: 300
+  style: "large_elements"
+  theme:
+    dot_size: 40
+    title_fontsize: 20
+    show_watermark: false
+```
+
+Standard PolyzyMD plots are designed for consistent screening and reporting.
+Final manuscript figures may still need custom plotting from saved analysis
+artifacts when a journal, panel layout, or statistical annotation requires
+bespoke styling.
 
 You can also set these optional global fields:
 
@@ -53,7 +89,7 @@ plot_settings:
   output_dir: "figures/"
   format: "png"
   dpi: 300
-  style: "publication"
+  style: "compact"
   color_palette: "tab10"
 ```
 
@@ -92,7 +128,7 @@ conditions:
 control: "No Polymer"
 
 plot_settings:
-  style: "publication"
+  style: "compact"
   semantic_colors:
     enabled: true
 
@@ -189,7 +225,7 @@ Switch file format by changing `plot_settings.format`.
 plot_settings:
   format: "png"
   dpi: 300
-  style: "publication"
+  style: "compact"
 ```
 
 Use PNG for quick drafts, sharing in chat/slides, and embedding in docs.
@@ -200,7 +236,7 @@ Use PNG for quick drafts, sharing in chat/slides, and embedding in docs.
 plot_settings:
   format: "pdf"
   dpi: 300
-  style: "publication"
+  style: "compact"
 ```
 
 PDF is vector output, so it scales cleanly.
@@ -211,7 +247,7 @@ PDF is vector output, so it scales cleanly.
 plot_settings:
   format: "svg"
   dpi: 300
-  style: "publication"
+  style: "compact"
 ```
 
 SVG is vector output and is convenient for web use and post-editing.
@@ -224,7 +260,7 @@ Set `plot_settings.dpi` to control raster resolution.
 plot_settings:
   format: "png"
   dpi: 150
-  style: "publication"
+  style: "compact"
 ```
 
 Common ranges:
@@ -243,7 +279,7 @@ In addition to global settings, plugins can define their own plot options under
 ```yaml
 plot_settings:
   format: "pdf"
-  style: "publication"
+  style: "compact"
   rmsd:
     show_per_replicate: true
     figsize: [10, 6]
@@ -262,7 +298,7 @@ What changes:
 
 ```yaml
 plot_settings:
-  style: "publication"
+  style: "compact"
   rmsf:
     show_error: true
     highlight_residues: [77, 133, 156]
@@ -280,7 +316,7 @@ What changes:
 
 ```yaml
 plot_settings:
-  style: "publication"
+  style: "compact"
   contacts:
     generate_contact_fraction_profile: true
     generate_residence_time_profile: true

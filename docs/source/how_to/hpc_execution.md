@@ -166,7 +166,7 @@ plugins:
 plot_settings:
   format: "png"
   dpi: 300
-  style: "publication"
+  style: "compact"
 ```
 
 ## Step 1: Dry Run

@@ -326,10 +326,19 @@ and usable element metadata.
 | `output_dir` | path | `"figures/"` | Directory for generated plots (relative to `comparison.yaml`) |
 | `format` | string | `"png"` | Image format: `"png"`, `"pdf"`, or `"svg"` |
 | `dpi` | int | `300` | Resolution for raster formats. Range: 50–600. |
-| `style` | string | `"publication"` | Style preset: `"publication"`, `"presentation"`, or `"minimal"` |
+| `style` | string | `"compact"` | PolyzyMD theme preset: `"compact"`, `"large_elements"`, or `"low_ink"` |
 | `color_palette` | string | `"tab10"` | Seaborn/matplotlib color palette name |
 | `semantic_colors` | mapping | disabled | Optional condition-label color and display-order rules for condition-series plots |
 | `theme` | mapping | from style preset | Visual theme overrides (see below) |
+
+`style` selects a PolyzyMD built-in theme preset for standard analysis plots. It
+is not a matplotlib or seaborn stylesheet, and it does not control `format`,
+`dpi`, per-analysis figure sizes, or color palettes. Deprecated aliases are
+accepted with a `FutureWarning`: `publication` maps to `compact`,
+`presentation` maps to `large_elements`, and `minimal` maps to `low_ink`.
+
+`theme` values are merged on top of the selected preset, so you can choose a
+base style and override only the fields that need project-specific changes.
 
 ### `plot_settings.semantic_colors`
 
@@ -395,64 +404,48 @@ may still use categorical palettes or plot-specific colormaps.
 
 ### `plot_settings.theme`
 
-All fields are optional — defaults are drawn from the selected `style` preset.
+All fields are optional. Defaults are drawn from the selected `style` preset,
+then any values under `theme:` override individual fields.
 
-**Font sizes:**
+#### Theme presets
 
-| Field | publication | presentation | Description |
-|-------|------------|-------------|-------------|
-| `title_fontsize` | 13 | 18 | Axes title font size |
-| `suptitle_fontsize` | 14 | 20 | Figure suptitle font size |
-| `label_fontsize` | 11 | 15 | Axis label font size |
-| `tick_fontsize` | 9 | 12 | Tick label font size |
-| `legend_fontsize` | 9 | 12 | Legend entry font size |
-| `annotation_fontsize` | 9 | 12 | Heatmap annotation font size |
-| `small_fontsize` | 8 | 10 | Secondary annotation font size |
-| `tiny_fontsize` | 7 | 9 | Fine-grained annotation font size |
+| Preset | Use when | Notes |
+|--------|----------|-------|
+| `compact` | You want the default compact print-style output. | Uses moderate fonts, replicate dots, bar edges, and reference lines. |
+| `large_elements` | You need slides, posters, or high-visibility figures. | Increases font sizes, replicate dot size, bar line width, error-bar caps, reference-line width, and fill opacity. |
+| `low_ink` | You want simpler, lower-ink plots. | Hides replicate dots, removes bar edges, and reduces reference-line width and fill opacity. |
 
-**Bar chart:**
+#### Tweakable `PlotTheme` fields
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `bar_alpha` | `0.85` | Bar fill opacity |
-| `bar_edgecolor` | `"black"` | Bar edge color |
-| `bar_linewidth` | `0.5` | Bar edge line width |
-| `bar_capsize` | `4` | Error bar cap size in points |
-
-**Replicate dots:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `dot_size` | `18` (minimal: `0`) | Scatter marker size |
-| `dot_alpha` | `0.7` (minimal: `0`) | Dot opacity |
-| `dot_color` | `"black"` | Dot color |
-
-**Lines:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `line_alpha` | `0.8` | Line plot opacity |
-| `fill_alpha` | `0.25` (presentation: `0.3`, minimal: `0.15`) | fill_between band opacity |
-| `reference_line_color` | `"black"` | Reference line color |
-| `reference_line_style` | `"--"` | Reference line style |
-| `reference_line_width` | `1.5` (presentation: `2.0`, minimal: `1.0`) | Reference line width |
-| `highlight_line_alpha` | `0.5` | Vertical highlight line opacity |
-
-**Axes chrome:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `hide_top_spine` | `true` | Hide top axis spine |
-| `hide_right_spine` | `true` | Hide right axis spine |
-
-**Title & legend:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `title_fontweight` | `"bold"` | Title font weight |
-| `legend_loc` | `"center left"` | Matplotlib legend location |
-| `legend_bbox` | `[1.02, 0.5]` | bbox_to_anchor for legend placement |
-| `show_watermark` | `true` | Render "Made by PolyzyMD" watermark |
+| Field | `compact` | `large_elements` | `low_ink` | Description |
+|-------|-----------|------------------|-----------|-------------|
+| `title_fontsize` | `13` | `18` | `13` | Axes title font size |
+| `suptitle_fontsize` | `14` | `20` | `14` | Figure suptitle font size |
+| `label_fontsize` | `11` | `15` | `11` | Axis label font size |
+| `tick_fontsize` | `9` | `12` | `9` | Tick label font size |
+| `legend_fontsize` | `9` | `12` | `9` | Legend entry font size |
+| `annotation_fontsize` | `9` | `12` | `9` | Heatmap annotation font size |
+| `small_fontsize` | `8` | `10` | `8` | Secondary annotation font size |
+| `tiny_fontsize` | `7` | `9` | `7` | Fine-grained annotation font size |
+| `bar_alpha` | `0.85` | `0.85` | `0.85` | Bar fill opacity |
+| `bar_edgecolor` | `"black"` | `"black"` | `"none"` | Bar edge color |
+| `bar_linewidth` | `0.5` | `0.8` | `0.0` | Bar edge line width |
+| `bar_capsize` | `4` | `5` | `3` | Error bar cap size in points |
+| `dot_size` | `18` | `30` | `0` | Scatter marker size for replicate dots |
+| `dot_alpha` | `0.7` | `0.7` | `0.0` | Replicate dot opacity |
+| `dot_color` | `"black"` | `"black"` | `"black"` | Replicate dot color |
+| `line_alpha` | `0.8` | `0.8` | `0.8` | Line plot opacity |
+| `fill_alpha` | `0.25` | `0.3` | `0.15` | `fill_between` band opacity |
+| `reference_line_color` | `"black"` | `"black"` | `"black"` | Reference line color |
+| `reference_line_style` | `"--"` | `"--"` | `"--"` | Reference line style |
+| `reference_line_width` | `1.5` | `2.0` | `1.0` | Reference line width |
+| `highlight_line_alpha` | `0.5` | `0.5` | `0.5` | Vertical highlight line opacity |
+| `hide_top_spine` | `true` | `true` | `true` | Hide top axis spine |
+| `hide_right_spine` | `true` | `true` | `true` | Hide right axis spine |
+| `title_fontweight` | `"bold"` | `"bold"` | `"bold"` | Title font weight |
+| `legend_loc` | `"center left"` | `"center left"` | `"center left"` | Matplotlib legend location |
+| `legend_bbox` | `[1.02, 0.5]` | `[1.02, 0.5]` | `[1.02, 0.5]` | `bbox_to_anchor` for legend placement |
+| `show_watermark` | `true` | `true` | `true` | Render the "Made by PolyzyMD" watermark |
 
 ### Per-Analysis Plot Settings
 
