@@ -438,7 +438,7 @@ without requiring `--allow-partial`.
 For true runtime data loss (failed/missing condition outputs), strict behavior
 still applies and you must pass `--allow-partial`.
 
-### MDAnalysis ChainReader errors (F13)
+### MDAnalysis ChainReader errors
 
 If a worker fails with MDAnalysis ChainReader exceptions, this is usually an
 external reader/data issue rather than a PolyzyMD logic bug.
@@ -449,7 +449,7 @@ Recommended checks:
 - verify topology/trajectory atom ordering consistency
 - re-run with a single replicate to isolate the broken input file
 
-### SLURM association and job-limit failures (for example MaxJobs=0, F15)
+### SLURM association and job-limit failures
 
 If `sbatch` rejects jobs due to association, account, or quota limits, inspect
 your scheduler associations:
