@@ -24,12 +24,22 @@ class _WorkerSettings(BaseModel):
     scale: float = 1.0
 
 
-class _WorkerAnalysis(Analysis):
+class _MDAContractMixin:
+    """Provide the required MDA lifecycle seam for direct compute fakes."""
+
+    def build_mda_jobs(self, ctx):
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+
+class _WorkerAnalysis(_MDAContractMixin, Analysis):
     name: ClassVar[str] = "worker_toy"
     Settings: ClassVar[type] = _WorkerSettings
     min_replicates: ClassVar[int] = 1
 
-    def run_replicate(self, ctx: Any, replicate: int) -> dict[str, Any]:
+    def _run_compute_stage(self, ctx: Any, replicate: int) -> dict[str, Any]:
         return {"value": float(replicate) * float(ctx.settings.scale), "replicate": replicate}
 
     def aggregate(self, ctx, results) -> dict[str, Any]:
@@ -97,7 +107,8 @@ def _worker_aggregate_payload(
 
 
 class _FailingWorkerAnalysis(_WorkerAnalysis):
-    def run_replicate(self, ctx: Any, replicate: int) -> dict[str, Any]:
+    def _run_compute_stage(self, ctx: Any, replicate: int) -> dict[str, Any]:
+        del ctx, replicate
         raise RuntimeError("test error")
 
 
@@ -127,7 +138,7 @@ def test_run_analysis_raises_structured_replicate_error_on_worker_exception(tmp_
     condition = Condition("Cond", tmp_path / "cfg.yaml", (1,), cast(Any, SimpleNamespace()))
     settings = _WorkerSettings(scale=1.0)
 
-    with pytest.raises(ReplicateError, match="run_replicate failed"):
+    with pytest.raises(ReplicateError, match="compute stage failed"):
         run_analysis(
             analysis=analysis,
             condition=condition,
@@ -509,7 +520,7 @@ class _TypedAggregatedResult(BaseModel):
     settings_fingerprint: str | None = None
 
 
-class _TypedWorkerAnalysis(Analysis):
+class _TypedWorkerAnalysis(_MDAContractMixin, Analysis):
     """Analysis plugin that uses Pydantic models for replicate results."""
 
     name: ClassVar[str] = "typed_worker_toy"
@@ -518,7 +529,7 @@ class _TypedWorkerAnalysis(Analysis):
     AggregatedResultClass: ClassVar[type | None] = _TypedAggregatedResult
     min_replicates: ClassVar[int] = 1
 
-    def run_replicate(self, ctx: Any, replicate: int) -> _TypedReplicateResult:
+    def _run_compute_stage(self, ctx: Any, replicate: int) -> _TypedReplicateResult:
         return _TypedReplicateResult(
             value=float(replicate) * float(ctx.settings.scale),
             replicate=replicate,

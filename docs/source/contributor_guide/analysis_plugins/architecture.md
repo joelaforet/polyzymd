@@ -33,11 +33,11 @@ storage, and cross-condition behavior.
 
 ## Why plugins build MDAAnalysisJob objects
 
-Earlier or simpler designs can put all trajectory work in `run_replicate()` as
-a direct loop over frames. That is easy to imagine, but it makes every plugin
-responsible for concerns that are not specific to its science: frame selection,
-job identity, cache behavior, artifact shape, provenance, aggregation inputs,
-parallel execution, and safe plotting inputs.
+Direct loops over frames inside a plugin-specific replicate hook are easy to
+imagine, but they make every plugin responsible for concerns that are not
+specific to its science: frame selection, job identity, cache behavior, artifact
+shape, provenance, aggregation inputs, parallel execution, and safe plotting
+inputs.
 
 PolyzyMD instead asks compute-stage plugins to build `MDAAnalysisJob` objects
 and collectors. This keeps the frame-level calculation close to MDAnalysis while

@@ -48,12 +48,18 @@ class _ToyAnalysis(Analysis):
     name: ClassVar[str] = "toy_slurm"
     Settings: ClassVar[type] = _Settings
 
-    def run_replicate(
+    def build_mda_jobs(self, ctx: Any) -> list[Any]:
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+    def _run_compute_stage(
         self,
         ctx: Any,
         replicate: int,
     ) -> dict[str, Any]:
-        """Return a serializable replicate result.
+        """Return a serializable compute-stage result.
 
         Parameters
         ----------

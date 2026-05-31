@@ -295,7 +295,7 @@ class TestTriadAggregationAndComparison:
         )
 
         with pytest.raises(PluginContractError, match=r"build_mda_jobs\(\) returned None"):
-            triad_analysis.run_replicate(ctx, replicate=1)
+            triad_analysis._run_compute_stage(ctx, replicate=1)
 
     def test_direct_scalar_runner_path_is_removed(
         self,

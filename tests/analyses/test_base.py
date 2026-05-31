@@ -6,7 +6,6 @@ without requiring heavy dependencies (OpenMM, MDAnalysis, etc.).
 
 from __future__ import annotations
 
-import warnings
 from pathlib import Path
 from typing import ClassVar, Sequence
 
@@ -63,7 +62,17 @@ class ToyAggregatedResult(BaseModel):
         return cls.model_validate_json(path.read_text())
 
 
-class ToyAnalysis(Analysis):
+class _MDAContractMixin:
+    """Provide the required MDA lifecycle seam for direct compute fakes."""
+
+    def build_mda_jobs(self, ctx):
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+
+class ToyAnalysis(_MDAContractMixin, Analysis):
     """Concrete analysis for testing the plugin system."""
 
     name: ClassVar[str] = "toy"
@@ -73,7 +82,7 @@ class ToyAnalysis(Analysis):
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
 
-    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+    def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
         return ToyResult(value=replicate * 1.5, replicate=replicate)
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[ToyResult]) -> ToyAggregatedResult:
@@ -137,11 +146,8 @@ class TestAnalysisABC:
         """Subclass without 'name' should fail at class creation."""
         with pytest.raises(TypeError, match="must define 'name'"):
 
-            class BadAnalysis(Analysis):
+            class BadAnalysis(_MDAContractMixin, Analysis):
                 Settings = ToySettings
-
-                def run_replicate(self, ctx, replicate):
-                    pass
 
                 def aggregate(self, ctx, results):
                     pass
@@ -150,11 +156,8 @@ class TestAnalysisABC:
         """Subclass without 'Settings' should fail at class creation."""
         with pytest.raises(TypeError, match="must define 'Settings'"):
 
-            class BadAnalysis(Analysis):
+            class BadAnalysis(_MDAContractMixin, Analysis):
                 name = "bad"
-
-                def run_replicate(self, ctx, replicate):
-                    pass
 
                 def aggregate(self, ctx, results):
                     pass
@@ -172,12 +175,11 @@ class TestAnalysisABC:
         assert hasattr(AbstractMiddle, "__abstractmethods__")
 
     def test_concrete_subclass_requires_compute_contract(self) -> None:
-        """Concrete plugins must provide a replicate entry point or MDA jobs."""
+        """Compute-stage plugins must provide MDA jobs."""
 
         with pytest.raises(
             TypeError,
-            match=r"public plugins must implement build_mda_jobs\(\) or override "
-            r"run_replicate\(\) when has_compute_stage=True",
+            match=r"public plugins must implement build_mda_jobs\(\) when has_compute_stage=True",
         ):
 
             class BadComputeContractAnalysis(Analysis):
@@ -194,8 +196,7 @@ class TestAnalysisABC:
 
         with pytest.raises(
             TypeError,
-            match=r"public plugins must implement build_mda_jobs\(\) or override "
-            r"run_replicate\(\)",
+            match=r"public plugins must implement build_mda_jobs\(\)",
         ):
 
             class LegacyComputeOnlyAnalysis(Analysis):
@@ -208,63 +209,78 @@ class TestAnalysisABC:
                 def aggregate(self, ctx, results):
                     return {"dummy": True}
 
-    def test_concrete_subclass_can_use_run_replicate(self) -> None:
-        """Concrete plugins can implement the canonical replicate entry point."""
+    def test_run_replicate_override_is_rejected(self) -> None:
+        """Concrete plugins cannot define the removed replicate hook."""
 
-        with pytest.warns(DeprecationWarning, match="directly defines analysis lifecycle"):
+        with pytest.raises(TypeError, match=r"defines removed hook run_replicate\(\)"):
 
-            class RunReplicateAnalysis(Analysis):
-                """Analysis that implements the canonical replicate hook only."""
-
-                name: ClassVar[str] = "run_replicate_only"
+            class RunReplicateAnalysis(_MDAContractMixin, Analysis):
+                name: ClassVar[str] = "run_replicate_removed"
                 Settings: ClassVar[type] = ToySettings
 
                 def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
-                    """Return a simple per-replicate result."""
-
                     del ctx
                     return {"value": float(replicate)}
 
                 def aggregate(self, ctx, results):
-                    """Return a simple aggregate result."""
-
                     del ctx, results
                     return {"dummy": True}
 
-        plugin = RunReplicateAnalysis()
-        assert plugin.name == "run_replicate_only"
+    def test_run_replicate_inherited_from_mixin_is_rejected(self) -> None:
+        """Concrete plugins cannot inherit the removed replicate hook from mixins."""
 
-    def test_direct_lifecycle_override_deprecation_skips_abstract_classes(self) -> None:
-        """Abstract classes should not emit direct lifecycle deprecation warnings."""
-        from abc import abstractmethod
+        class RemovedHookMixin:
+            def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+                """Legacy hook that should be rejected after MRO resolution."""
 
-        with warnings.catch_warnings(record=True) as captured:
-            warnings.simplefilter("always")
+                del ctx
+                return {"value": float(replicate)}
 
-            class AbstractLegacyAnalysis(Analysis):
-                name: ClassVar[str] = "abstract_legacy"
+        with pytest.raises(TypeError, match=r"inherits removed hook run_replicate\(\)"):
+
+            class InheritedRunReplicateAnalysis(_MDAContractMixin, RemovedHookMixin, Analysis):
+                name: ClassVar[str] = "inherited_run_replicate_removed"
                 Settings: ClassVar[type] = ToySettings
 
-                @abstractmethod
-                def extra_method(self):
-                    """Force the class to remain abstract."""
-
-                def run_replicate(self, ctx, replicate):
-                    """Return a simple per-replicate result."""
-
-                    del ctx
-                    return {"replicate": replicate}
-
                 def aggregate(self, ctx, results):
-                    """Return a simple aggregate result."""
-
                     del ctx, results
                     return {"dummy": True}
 
-        assert not [item for item in captured if issubclass(item.category, DeprecationWarning)]
+    def test_run_replicate_inherited_from_abstract_intermediate_is_rejected(self) -> None:
+        """Concrete plugins cannot inherit the removed hook from abstract bases."""
 
-    def test_run_replicate_uses_canonical_override(self, toy_analysis, toy_condition) -> None:
-        """run_replicate should use the canonical plugin override."""
+        from abc import abstractmethod
+
+        class AbstractLegacyRunReplicate(Analysis):
+            @abstractmethod
+            def extra_method(self) -> None:
+                """Keep the intermediate class abstract during definition."""
+
+            def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+                """Legacy hook that should be rejected once concrete."""
+
+                del ctx
+                return {"value": float(replicate)}
+
+        assert getattr(AbstractLegacyRunReplicate, "__abstractmethods__", None)
+
+        with pytest.raises(TypeError, match=r"inherits removed hook run_replicate\(\)"):
+
+            class ConcreteLegacyRunReplicate(_MDAContractMixin, AbstractLegacyRunReplicate):
+                name: ClassVar[str] = "concrete_inherited_run_replicate_removed"
+                Settings: ClassVar[type] = ToySettings
+
+                def extra_method(self) -> None:
+                    """Implement the abstract method to trigger concrete validation."""
+
+                def aggregate(self, ctx, results):
+                    del ctx, results
+                    return {"dummy": True}
+
+    def test_internal_compute_dispatch_uses_mda_lifecycle(
+        self, toy_analysis, toy_condition
+    ) -> None:
+        """The internal compute dispatcher should run the configured compute seam."""
         ctx = ReplicateContext(
             condition=toy_condition,
             replicate=2,
@@ -275,7 +291,7 @@ class TestAnalysisABC:
             settings=ToySettings(),
         )
 
-        result = toy_analysis.run_replicate(ctx, replicate=2)
+        result = toy_analysis._run_compute_stage(ctx, replicate=2)
 
         assert result == ToyResult(value=3.0, replicate=2)
 
@@ -385,7 +401,7 @@ class TestAnalysisABC:
     def test_subclass_can_set_slurm_resource_hint(self) -> None:
         """Subclass should be able to provide SLURM defaults."""
 
-        class SlurmHintAnalysis(Analysis):
+        class SlurmHintAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "slurm_hint"
             Settings: ClassVar[type] = ToySettings
             slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(
@@ -394,7 +410,8 @@ class TestAnalysisABC:
                 cpus_per_task=4,
             )
 
-            def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+            def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+                del ctx
                 return {"value": float(replicate)}
 
             def aggregate(
@@ -652,11 +669,11 @@ class TestDefaultCompareContract:
     def test_compare_raises_on_empty_extract_metrics(self, tmp_path: Path) -> None:
         """Empty metric extraction should raise PluginContractError."""
 
-        class EmptyMetricsAnalysis(Analysis):
+        class EmptyMetricsAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "empty_metrics"
             Settings: ClassVar[type] = ToySettings
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -697,11 +714,11 @@ class TestDefaultCompareContract:
     def test_compare_raises_when_extract_metrics_returns_non_dict(self, tmp_path: Path) -> None:
         """extract_metrics must return a dict mapping metric names to MetricValue."""
 
-        class BadTypeAnalysis(Analysis):
+        class BadTypeAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "bad_type"
             Settings: ClassVar[type] = ToySettings
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -748,11 +765,11 @@ class TestDefaultCompareContract:
     ) -> None:
         """extract_metrics values must be MetricValue instances."""
 
-        class BadValueAnalysis(Analysis):
+        class BadValueAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "bad_value"
             Settings: ClassVar[type] = ToySettings
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):

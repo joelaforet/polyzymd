@@ -19,12 +19,23 @@ class _HintSettings(BaseModel):
     value: float = 1.0
 
 
-class _DefaultHintAnalysis(Analysis):
+class _MDAContractMixin:
+    """Provide the required MDA lifecycle seam for direct compute fakes."""
+
+    def build_mda_jobs(self, ctx):
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+
+class _DefaultHintAnalysis(_MDAContractMixin, Analysis):
     name: ClassVar[str] = "hint_default"
     Settings: ClassVar[type] = _HintSettings
     min_replicates: ClassVar[int] = 1
 
-    def run_replicate(self, ctx, replicate: int) -> dict[str, Any]:
+    def _run_compute_stage(self, ctx, replicate: int) -> dict[str, Any]:
+        del ctx
         return {"value": float(replicate)}
 
     def aggregate(self, ctx, results) -> dict[str, Any]:

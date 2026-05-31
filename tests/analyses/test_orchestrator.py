@@ -41,12 +41,22 @@ class _ParallelSettings(BaseModel):
     factor: float = 1.0
 
 
-class _ParallelAnalysis(Analysis):
+class _MDAContractMixin:
+    """Provide the required MDA lifecycle seam for direct compute fakes."""
+
+    def build_mda_jobs(self, ctx):
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+
+class _ParallelAnalysis(_MDAContractMixin, Analysis):
     name: ClassVar[str] = "parallel_toy"
     Settings: ClassVar[type] = _ParallelSettings
     min_replicates: ClassVar[int] = 1
 
-    def run_replicate(self, ctx, replicate: int) -> dict[str, Any]:
+    def _run_compute_stage(self, ctx, replicate: int) -> dict[str, Any]:
         return {"value": float(replicate) * float(ctx.settings.factor), "replicate": replicate}
 
     def aggregate(self, ctx, results) -> dict[str, Any]:
@@ -101,7 +111,7 @@ class ToyAggregatedResult(BaseModel):
     settings_fingerprint: str | None = None
 
 
-class ToyAnalysis(Analysis):
+class ToyAnalysis(_MDAContractMixin, Analysis):
     """Concrete analysis for orchestrator tests."""
 
     name: ClassVar[str] = "toy"
@@ -110,7 +120,7 @@ class ToyAnalysis(Analysis):
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
 
-    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+    def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
         return ToyResult(value=replicate * 1.5, replicate=replicate)
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[ToyResult]) -> ToyAggregatedResult:
@@ -127,14 +137,14 @@ class ToyAnalysis(Analysis):
         )
 
 
-class ToyDependentAnalysis(Analysis):
+class ToyDependentAnalysis(_MDAContractMixin, Analysis):
     """Analysis that depends on ToyAnalysis."""
 
     name: ClassVar[str] = "toy_dependent"
     Settings: ClassVar[type] = ToySettings
     dependencies: ClassVar[tuple[str, ...]] = ("toy",)
 
-    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+    def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
         return ToyResult(value=replicate * 2.0, replicate=replicate)
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[ToyResult]) -> ToyAggregatedResult:
@@ -508,10 +518,10 @@ class TestOrchestrator:
         toy_settings,
         tmp_path,
     ):
-        """run_replicate_once should call the canonical entry point."""
+        """run_replicate_once should call the compute-stage dispatcher."""
 
-        class CanonicalRunAnalysis(Analysis):
-            """Analysis that tracks canonical entry point calls."""
+        class CanonicalRunAnalysis(_MDAContractMixin, Analysis):
+            """Analysis that tracks compute-stage calls."""
 
             name: ClassVar[str] = "canonical_run"
             Settings: ClassVar[type] = ToySettings
@@ -522,8 +532,8 @@ class TestOrchestrator:
 
                 self.called_replicates: list[int] = []
 
-            def run_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
-                """Return a result through the canonical hook."""
+            def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+                """Return a result through the compute-stage dispatcher."""
 
                 del ctx
                 self.called_replicates.append(replicate)
@@ -567,12 +577,12 @@ class TestOrchestrator:
     def test_run_analysis_partial_failure(self, toy_condition, toy_settings, tmp_path):
         """If some replicates fail but min_replicates is met, continue."""
 
-        class FailingAnalysis(Analysis):
+        class FailingAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "failing"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 if replicate == 2:
                     raise FileNotFoundError("Trajectory not found")
                 return ToyResult(value=float(replicate), replicate=replicate)
@@ -605,12 +615,12 @@ class TestOrchestrator:
     ):
         """ReplicateSkippedError should skip replicate without aborting condition."""
 
-        class SkipReplicateAnalysis(Analysis):
+        class SkipReplicateAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "skip_replicate"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 if replicate == 2:
                     raise ReplicateSkippedError("No trajectory data found for replicate 2")
                 return ToyResult(value=float(replicate), replicate=replicate)
@@ -638,12 +648,12 @@ class TestOrchestrator:
     def test_run_analysis_below_minimum_raises(self, toy_condition, toy_settings, tmp_path):
         """If fewer than min_replicates succeed, raise ValueError."""
 
-        class AlwaysFailAnalysis(Analysis):
+        class AlwaysFailAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "always_fail"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 2
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 raise FileNotFoundError("Missing trajectory")
 
             def aggregate(self, ctx, results):
@@ -661,12 +671,12 @@ class TestOrchestrator:
     def test_run_analysis_all_skipped_fails_minimum(self, toy_condition, toy_settings, tmp_path):
         """When all replicates skip, minimum replicate validation should fail."""
 
-        class AllSkippedAnalysis(Analysis):
+        class AllSkippedAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "all_skipped"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 raise ReplicateSkippedError(f"No trajectory data found for replicate {replicate}")
 
             def aggregate(self, ctx, results):
@@ -686,11 +696,11 @@ class TestOrchestrator:
     ):
         """Unexpected compute failures should raise structured ReplicateError."""
 
-        class ExplodingAnalysis(Analysis):
+        class ExplodingAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "exploding"
             Settings: ClassVar[type] = ToySettings
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 raise RuntimeError("boom")
 
             def aggregate(self, ctx, results):
@@ -708,18 +718,18 @@ class TestOrchestrator:
     def test_run_analysis_rejects_invalid_compute_return_type(self, toy_condition, tmp_path):
         """Invalid compute return types should fail plugin contract validation."""
 
-        class InvalidComputeAnalysis(Analysis):
+        class InvalidComputeAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "invalid_compute"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return ["not", "valid"]
 
             def aggregate(self, ctx, results):
                 return {"ok": True}
 
-        with pytest.raises(PluginContractError, match="invalid_compute.run_replicate"):
+        with pytest.raises(PluginContractError, match="invalid_compute.compute_stage"):
             run_analysis(
                 InvalidComputeAnalysis(),
                 toy_condition,
@@ -731,12 +741,12 @@ class TestOrchestrator:
     def test_run_analysis_rejects_invalid_aggregate_return_type(self, toy_condition, tmp_path):
         """Invalid aggregate return types should fail plugin contract validation."""
 
-        class InvalidAggregateAnalysis(Analysis):
+        class InvalidAggregateAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "invalid_aggregate"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -769,23 +779,23 @@ class TestOrchestrator:
     def test_topological_sort_circular_raises(self):
         from polyzymd.analyses.orchestrator import _topological_sort
 
-        class CircA(Analysis):
+        class CircA(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "circ_a"
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("circ_b",)
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 pass
 
             def aggregate(self, ctx, results):
                 pass
 
-        class CircB(Analysis):
+        class CircB(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "circ_b"
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("circ_a",)
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 pass
 
             def aggregate(self, ctx, results):
@@ -797,24 +807,24 @@ class TestOrchestrator:
     def test_order_analyses_for_execution_returns_dependency_order(self, monkeypatch) -> None:
         """Public ordering helper should return canonical dependency order."""
 
-        class _A(Analysis):
+        class _A(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "a"
             aliases: ClassVar[tuple[str, ...]] = ("alias_a",)
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ()
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
                 return {"n": len(results)}
 
-        class _B(Analysis):
+        class _B(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "b"
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("a",)
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -835,23 +845,23 @@ class TestOrchestrator:
     def test_order_analyses_allows_satisfied_external_dependencies(self, monkeypatch) -> None:
         """Ordering should allow dependencies satisfied outside the run list."""
 
-        class _Contacts(Analysis):
+        class _Contacts(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "contacts"
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ()
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
                 return {"n": len(results)}
 
-        class _DependentAnalysis(Analysis):
+        class _DependentAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "dependent_analysis"
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("contacts",)
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -913,14 +923,15 @@ class TestOrchestrator:
 class TestContractEnforcement:
     """Tests for plugin contract violation detection."""
 
-    def test_run_replicate_none_raises_contract_error(self, tmp_path: Path) -> None:
-        """run_replicate() returning None should raise PluginContractError."""
+    def test_compute_stage_none_raises_contract_error(self, tmp_path: Path) -> None:
+        """A compute-stage result of None should raise PluginContractError."""
 
-        class NoneComputeAnalysis(Analysis):
+        class NoneComputeAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "none_compute"
             Settings: ClassVar[type] = ToySettings
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
+                del ctx, replicate
                 return None
 
             def aggregate(self, ctx, results):
@@ -936,7 +947,7 @@ class TestContractEnforcement:
 
         with pytest.raises(
             PluginContractError,
-            match=r"none_compute.run_replicate\(\) returned None",
+            match=r"none_compute.compute_stage\(\) returned None",
         ):
             run_replicate_once(
                 analysis,
@@ -951,12 +962,13 @@ class TestContractEnforcement:
     def test_contract_error_not_wrapped_as_replicate_error(self, tmp_path: Path) -> None:
         """PluginContractError should propagate, not be wrapped as ReplicateError."""
 
-        class RaisesContractAnalysis(Analysis):
+        class RaisesContractAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "raises_contract"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
+                del ctx, replicate
                 raise PluginContractError("contract boom")
 
             def aggregate(self, ctx, results):
@@ -981,12 +993,13 @@ class TestContractEnforcement:
     def test_run_comparison_fails_fast_on_contract_error(self, monkeypatch, tmp_path: Path) -> None:
         """Contract violations should abort the comparison, not drop a condition."""
 
-        class NoneComputeAnalysis(Analysis):
+        class NoneComputeAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "none_compute_comparison"
             Settings: ClassVar[type] = _ParallelSettings
             min_replicates: ClassVar[int] = 1
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
+                del ctx, replicate
                 return None
 
             def aggregate(self, ctx, results):
@@ -1017,12 +1030,12 @@ class TestContractEnforcement:
         """A contract error in one condition should stop processing subsequent conditions."""
         processed_labels: list[str] = []
 
-        class FailsOnFirstCondition(Analysis):
+        class FailsOnFirstCondition(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "contract_stop"
             Settings: ClassVar[type] = _ParallelSettings
             min_replicates: ClassVar[int] = 1
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 del replicate
                 processed_labels.append(ctx.condition.label)
                 if ctx.condition.label == "A":

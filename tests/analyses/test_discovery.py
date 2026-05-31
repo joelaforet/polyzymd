@@ -21,13 +21,24 @@ class ToySettings(BaseModel):
     threshold: float = 1.0
 
 
-class ToyAnalysis(Analysis):
+class _MDAContractMixin:
+    """Provide the required MDA lifecycle seam for direct compute fakes."""
+
+    def build_mda_jobs(self, ctx):
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+
+class ToyAnalysis(_MDAContractMixin, Analysis):
     """Concrete analysis used by _is_concrete_analysis tests."""
 
     name: ClassVar[str] = "toy"
     Settings: ClassVar[type] = ToySettings
 
-    def run_replicate(self, ctx, replicate):
+    def _run_compute_stage(self, ctx, replicate):
+        del ctx
         return {"replicate": replicate}
 
     def aggregate(self, ctx, results):
@@ -58,7 +69,10 @@ def _plugin_source(class_name: str, plugin_name: str, aliases: tuple[str, ...] =
             Settings: ClassVar[type] = TempSettings
             aliases: ClassVar[tuple[str, ...]] = {aliases!r}
 
-            def run_replicate(self, ctx, replicate):
+            def build_mda_jobs(self, ctx):
+                return []
+
+            def _run_compute_stage(self, ctx, replicate):
                 return {{"replicate": replicate}}
 
             def aggregate(self, ctx, results):
@@ -180,11 +194,12 @@ class TestDiscovery:
 
         good_mod = types.ModuleType("polyzymd.analyses.fake_good")
 
-        class GoodAnalysis(Analysis):
+        class GoodAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "fake_good"
             Settings: ClassVar[type] = ToySettings
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
+                del ctx
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -333,11 +348,12 @@ class TestDiscoveryRobustness:
         module_name = "polyzymd.analyses.single_file_plugin"
         single_file_mod = types.ModuleType(module_name)
 
-        class SingleFilePlugin(Analysis):
+        class SingleFilePlugin(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "single_file_plugin"
             Settings: ClassVar[type] = ToySettings
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
+                del ctx
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -361,11 +377,12 @@ class TestDiscoveryRobustness:
 
         good_mod = types.ModuleType("polyzymd.analyses.fake_plugin")
 
-        class FakePlugin(Analysis):
+        class FakePlugin(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "fake_plugin"
             Settings: ClassVar[type] = ToySettings
 
-            def run_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
+                del ctx
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):

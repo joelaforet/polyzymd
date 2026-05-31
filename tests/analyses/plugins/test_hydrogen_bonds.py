@@ -632,8 +632,8 @@ def test_residue_ref_label() -> None:
     assert residue.label == "SER123:A"
 
 
-def test_run_replicate_basic(tmp_path: Path) -> None:
-    """run_replicate should return populated summary metrics."""
+def test_compute_stage_basic(tmp_path: Path) -> None:
+    """Compute stage should return populated summary metrics."""
 
     instances: list[MockHydrogenBondAnalysis] = []
 
@@ -697,7 +697,7 @@ def test_run_replicate_basic(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        artifact = analysis.run_replicate(ctx, 1)
+        artifact = analysis._run_compute_stage(ctx, 1)
         result = _as_hydrogen_bond_result(artifact)
 
     assert isinstance(artifact, ReplicateArtifact)
@@ -723,7 +723,7 @@ def test_run_replicate_basic(tmp_path: Path) -> None:
     assert instances[0].run_args["start"] == 0
 
 
-def test_run_replicate_warns_once_for_default_groups_and_summaries(
+def test_compute_stage_warns_once_for_default_groups_and_summaries(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Default groups/summaries should emit one warning per analysis run."""
@@ -788,14 +788,14 @@ def test_run_replicate_warns_once_for_default_groups_and_summaries(
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        analysis.run_replicate(ctx_1, 1)
-        analysis.run_replicate(ctx_2, 2)
+        analysis._run_compute_stage(ctx_1, 1)
+        analysis._run_compute_stage(ctx_2, 2)
 
     assert caplog.text.count("No explicit groups/summaries in YAML config — using defaults") == 1
 
 
-def test_run_replicate_empty_selection(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    """run_replicate should handle empty groups with zeroed summaries."""
+def test_compute_stage_empty_selection(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Compute stage should handle empty groups with zeroed summaries."""
 
     class MockHydrogenBondAnalysis:
         def __init__(self, **kwargs) -> None:
@@ -840,7 +840,7 @@ def test_run_replicate_empty_selection(tmp_path: Path, caplog: pytest.LogCapture
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
+        result = _as_hydrogen_bond_result(analysis._run_compute_stage(ctx, 1))
 
     assert isinstance(result, HydrogenBondResult)
     assert len(result.summaries) == 1
@@ -851,7 +851,7 @@ def test_run_replicate_empty_selection(tmp_path: Path, caplog: pytest.LogCapture
     assert "No atoms selected for any summary" in caplog.text
 
 
-def test_run_replicate_skips_only_empty_summary_and_keeps_other_summaries(
+def test_compute_stage_skips_only_empty_summary_and_keeps_other_summaries(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Empty-group summaries should be skipped without failing other summaries."""
@@ -913,7 +913,7 @@ def test_run_replicate_skips_only_empty_summary_and_keeps_other_summaries(
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
+        result = _as_hydrogen_bond_result(analysis._run_compute_stage(ctx, 1))
 
     assert isinstance(result, HydrogenBondResult)
     summaries = {summary.name: summary for summary in result.summaries}
@@ -931,7 +931,7 @@ def test_run_replicate_skips_only_empty_summary_and_keeps_other_summaries(
     assert "condition='No Polymer (Control)' replicate=1" in caplog.text
 
 
-def test_run_replicate_empty_group_raises_by_default(tmp_path: Path) -> None:
+def test_compute_stage_empty_group_raises_by_default(tmp_path: Path) -> None:
     """Empty group selections should raise when strict mode is enabled."""
 
     class MockHydrogenBondAnalysis:
@@ -976,7 +976,7 @@ def test_run_replicate_empty_group_raises_by_default(tmp_path: Path) -> None:
         mock_loader.get_timestep.return_value = 10.0
 
         with pytest.raises(Exception, match="allow_empty_groups: true"):
-            analysis.run_replicate(ctx, 1)
+            analysis._run_compute_stage(ctx, 1)
 
 
 def test_load_replicate_result_ignores_legacy_custom_cache(tmp_path: Path) -> None:
@@ -1036,7 +1036,7 @@ def test_equilibration_exceeds_trajectory_raises(tmp_path: Path) -> None:
         mock_loader.get_timestep.return_value = 10.0
 
         with pytest.raises(ValueError) as exc_info:
-            analysis.run_replicate(ctx, 1)
+            analysis._run_compute_stage(ctx, 1)
 
     message = str(exc_info.value)
     assert "Equilibration time" in message
@@ -1102,7 +1102,7 @@ def test_equilibration_leaves_one_frame_warns(
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
+        result = _as_hydrogen_bond_result(analysis._run_compute_stage(ctx, 1))
 
     assert isinstance(result, HydrogenBondResult)
     assert result.summaries[0].counts_per_frame == [1]
@@ -1176,7 +1176,7 @@ def test_intra_residue_exclusion(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
+        result = _as_hydrogen_bond_result(analysis._run_compute_stage(ctx, 1))
 
     summary = result.summaries[0]
     assert summary.mean_hbonds_per_frame == 0.0
@@ -1360,7 +1360,7 @@ def test_dynamic_selection_policy_recorded_in_artifact(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        artifact = analysis.run_replicate(ctx, 1)
+        artifact = analysis._run_compute_stage(ctx, 1)
 
     assert isinstance(artifact, ReplicateArtifact)
     policy = artifact.provenance["dynamic_selection_policy"]
@@ -1430,7 +1430,7 @@ def test_dynamic_composition_warning_recorded_in_artifact(tmp_path: Path) -> Non
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        artifact = analysis.run_replicate(ctx, 1)
+        artifact = analysis._run_compute_stage(ctx, 1)
 
     assert isinstance(artifact, ReplicateArtifact)
     expected = "Composition partition 'dynamic' uses coordinate-dependent selection"
@@ -1588,7 +1588,7 @@ def test_aggregate_composition() -> None:
 
 
 def test_composition_not_configured(tmp_path: Path) -> None:
-    """run_replicate should emit no composition entries when unset."""
+    """Compute stage should emit no composition entries when unset."""
 
     class MockHydrogenBondAnalysis:
         def __init__(self, **kwargs) -> None:
@@ -1639,7 +1639,7 @@ def test_composition_not_configured(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
+        result = _as_hydrogen_bond_result(analysis._run_compute_stage(ctx, 1))
 
     assert result.composition_entries == []
 
@@ -3161,7 +3161,7 @@ def test_undirected_pair_result_roundtrip(tmp_path: Path) -> None:
 
 
 def test_compute_no_hbonds_found(tmp_path: Path) -> None:
-    """run_replicate should return zero summaries when no events are found."""
+    """Compute stage should return zero summaries when no events are found."""
 
     class MockHydrogenBondAnalysis:
         def __init__(self, **kwargs) -> None:
@@ -3211,7 +3211,7 @@ def test_compute_no_hbonds_found(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
+        result = _as_hydrogen_bond_result(analysis._run_compute_stage(ctx, 1))
 
     summary = result.summaries[0]
     assert summary.mean_hbonds_per_frame == pytest.approx(0.0)
@@ -3278,7 +3278,7 @@ def test_compute_between_mode_classification(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
+        result = _as_hydrogen_bond_result(analysis._run_compute_stage(ctx, 1))
 
     summary = result.summaries[0]
     assert summary.counts_per_frame == [1, 1, 0]
@@ -3351,7 +3351,7 @@ def test_compute_within_mode_classification(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
+        result = _as_hydrogen_bond_result(analysis._run_compute_stage(ctx, 1))
 
     summary = result.summaries[0]
     assert summary.counts_per_frame == [1, 0, 0]
@@ -3424,7 +3424,7 @@ def test_compute_multiple_summaries(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
+        result = _as_hydrogen_bond_result(analysis._run_compute_stage(ctx, 1))
 
     by_name = {summary.name: summary for summary in result.summaries}
     assert by_name["protein_polymer"].counts_per_frame == [1, 0, 0]
@@ -4253,7 +4253,7 @@ def test_unique_pairs_metric_and_aggregation(tmp_path: Path) -> None:
 
 
 def test_replicate_does_not_truncate_pairs_before_aggregation(tmp_path: Path) -> None:
-    """run_replicate should keep all pairs and defer top_n truncation."""
+    """Compute stage should keep all pairs and defer top_n truncation."""
 
     class MockHydrogenBondAnalysis:
         def __init__(self, **kwargs) -> None:
@@ -4312,7 +4312,7 @@ def test_replicate_does_not_truncate_pairs_before_aggregation(tmp_path: Path) ->
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = _as_hydrogen_bond_result(analysis.run_replicate(ctx, 1))
+        result = _as_hydrogen_bond_result(analysis._run_compute_stage(ctx, 1))
 
     assert len(result.summaries[0].directed_residue_pairs) == 2
     assert len(result.summaries[0].undirected_residue_pairs) == 2
@@ -4403,8 +4403,8 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
         mock_loader.load_universe.side_effect = [universe_1, universe_2]
         mock_loader.get_timestep.return_value = 10.0
 
-        rep_result_1 = analysis.run_replicate(rep_ctx_1, 1)
-        rep_result_2 = analysis.run_replicate(rep_ctx_2, 2)
+        rep_result_1 = analysis._run_compute_stage(rep_ctx_1, 1)
+        rep_result_2 = analysis._run_compute_stage(rep_ctx_2, 2)
 
     aggregate_ctx = AggregateContext(
         condition=condition,
@@ -4455,8 +4455,8 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
     assert "Hydrogen Bond Analysis" in formatted
 
 
-def test_run_replicate_hydrogens_sel_explicit(tmp_path: Path) -> None:
-    """run_replicate should pass explicit element H selection, not None."""
+def test_compute_stage_hydrogens_sel_explicit(tmp_path: Path) -> None:
+    """Compute stage should pass explicit element H selection, not None."""
 
     captured_kwargs: list[dict] = []
 
@@ -4512,7 +4512,7 @@ def test_run_replicate_hydrogens_sel_explicit(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        analysis.run_replicate(ctx, 1)
+        analysis._run_compute_stage(ctx, 1)
 
     assert len(captured_kwargs) == 1
     hydrogens_sel = captured_kwargs[0]["hydrogens_sel"]

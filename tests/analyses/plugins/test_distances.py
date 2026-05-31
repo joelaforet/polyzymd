@@ -1,6 +1,6 @@
 """Tests for the distances analysis plugin.
 
-Covers discovery, settings, run_replicate, aggregate, compare (full override),
+Covers discovery, settings, compute-stage dispatch, aggregate, compare (full override),
 plot delegation, AggregatedResultClass, artifact deserialization, and lifecycle.
 """
 
@@ -659,7 +659,7 @@ class TestDistanceResultFactories:
 
 
 class TestRunReplicate:
-    """run_replicate delegates to the MDAnalysis job seam."""
+    """The compute-stage dispatcher delegates to the MDAnalysis job seam."""
 
     def test_delegates_to_mda_job_seam(self, tmp_path):
         from polyzymd.analyses.base import Condition, ReplicateContext
@@ -707,7 +707,7 @@ class TestRunReplicate:
             "polyzymd.analyses.mda.lifecycle.run_mda_replicate_jobs",
             return_value=artifact,
         ) as mock_run:
-            result = analysis.run_replicate(ctx, 1)
+            result = analysis._run_compute_stage(ctx, 1)
 
         assert result is artifact
         mock_run.assert_called_once_with(analysis, ctx, 1)

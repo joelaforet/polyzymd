@@ -547,7 +547,7 @@ def test_run_reports_plugin_contract_error(monkeypatch, tmp_path: Path) -> None:
     )
 
     def _raise_contract(*args, **kwargs):
-        raise PluginContractError("toy.run_replicate() returned None")
+        raise PluginContractError("toy.compute_stage() returned None")
 
     monkeypatch.setattr("polyzymd.analyses.orchestrator.run_comparison", _raise_contract)
 

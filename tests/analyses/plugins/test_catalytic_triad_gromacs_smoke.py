@@ -154,7 +154,7 @@ class TestCatalyticTriadGromacsSmoke:
                 recompute=True,
                 settings=settings,
             )
-            result = analysis.run_replicate(ctx, replicate=1)
+            result = analysis._run_compute_stage(ctx, replicate=1)
 
         assert resolve_spy.call_count >= 1
         assert isinstance(result, ReplicateArtifact)

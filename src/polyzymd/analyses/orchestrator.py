@@ -64,7 +64,7 @@ def run_replicate_once(
     recompute: bool,
     backend_policy: "MDABackendPolicy | None" = None,
 ) -> Any:
-    """Run ``run_replicate()`` for a single replicate and save canonical output.
+    """Run a single replicate compute stage and save canonical output.
 
     Parameters
     ----------

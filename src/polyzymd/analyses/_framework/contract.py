@@ -2,35 +2,14 @@
 
 from __future__ import annotations
 
-import warnings
 from typing import Any
 
 from pydantic import BaseModel
-
-_LEGACY_LIFECYCLE_HOOKS = (
-    "run_replicate",
-    "aggregate",
-    "compare",
-    "plot",
-    "filter_conditions",
-)
 
 _REMOVED_RUNNER_HOOKS = (
     "build_runner",
     "summarize_replicate",
     "_run_replicate_via_runner",
-)
-
-_BUILTIN_PLUGIN_MODULE_PREFIXES = (
-    "polyzymd.analyses.catalytic_triad",
-    "polyzymd.analyses.contacts",
-    "polyzymd.analyses.distances",
-    "polyzymd.analyses.hydrogen_bonds",
-    "polyzymd.analyses.rg",
-    "polyzymd.analyses.rmsd",
-    "polyzymd.analyses.rmsf",
-    "polyzymd.analyses.sasa",
-    "polyzymd.analyses.secondary_structure",
 )
 
 
@@ -44,8 +23,7 @@ def validate_analysis_subclass(cls: type, *, base_cls: type, kwargs: dict[str, A
     base_cls : type
         Public facade base class.
     kwargs : dict[str, Any]
-        Original subclass keyword arguments, retained for compatibility with
-        the previous validation seam.
+        Original subclass keyword arguments supplied during class creation.
     """
     del kwargs
     if cls is base_cls:
@@ -78,63 +56,56 @@ def validate_analysis_subclass(cls: type, *, base_cls: type, kwargs: dict[str, A
         raise TypeError(
             f"Analysis subclass {cls.__name__} defines removed runner hook(s): "
             f"{', '.join(removed_hooks)}. Implement build_mda_jobs() for the "
-            "MDAnalysis job lifecycle or override run_replicate() explicitly."
+            "MDAnalysis job lifecycle with build_mda_collector(), or set "
+            "has_compute_stage=False for compare-only plugins."
         )
 
-    uses_run_replicate = cls.run_replicate is not base_cls.run_replicate
+    run_replicate_owner = _find_removed_run_replicate_owner(cls, base_cls=base_cls)
+    if run_replicate_owner is cls:
+        raise TypeError(
+            f"Analysis subclass {cls.__name__} defines removed hook run_replicate(). "
+            "Plugins must not override or inherit run_replicate(); implement "
+            "build_mda_jobs() with build_mda_collector(), or set has_compute_stage=False "
+            "for compare-only plugins."
+        )
+    if run_replicate_owner is not None:
+        raise TypeError(
+            f"Analysis subclass {cls.__name__} inherits removed hook run_replicate() "
+            f"from {run_replicate_owner.__name__}. Plugins must not override or inherit "
+            "run_replicate(); implement build_mda_jobs() with build_mda_collector(), or set "
+            "has_compute_stage=False for compare-only plugins."
+        )
+
     uses_mda_jobs = cls.build_mda_jobs is not base_cls.build_mda_jobs
 
-    if cls.has_compute_stage and not uses_run_replicate:
-        if not uses_mda_jobs:
-            raise TypeError(
-                f"Analysis subclass {cls.__name__} public plugins must implement "
-                "build_mda_jobs() or override run_replicate() when has_compute_stage=True; "
-                "set has_compute_stage=False for compare-only plugins."
-            )
-
-    _warn_on_direct_lifecycle_overrides(cls)
+    if cls.has_compute_stage and not uses_mda_jobs:
+        raise TypeError(
+            f"Analysis subclass {cls.__name__} public plugins must implement "
+            "build_mda_jobs() when has_compute_stage=True; set has_compute_stage=False "
+            "for compare-only plugins."
+        )
 
 
-def _warn_on_direct_lifecycle_overrides(cls: type) -> None:
-    """Warn when a concrete external plugin defines lifecycle hooks directly.
+def _find_removed_run_replicate_owner(cls: type, *, base_cls: type) -> type | None:
+    """Return the MRO class that provides the removed ``run_replicate`` hook.
 
     Parameters
     ----------
     cls : type
-        Concrete analysis subclass being validated.
-    """
-
-    if _is_shipped_plugin_module(cls.__module__):
-        return
-    hooks = [name for name in _LEGACY_LIFECYCLE_HOOKS if name in cls.__dict__]
-    if not hooks:
-        return
-    warnings.warn(
-        f"{cls.__name__} directly defines analysis lifecycle hook(s): "
-        f"{', '.join(hooks)}. Direct lifecycle overrides remain supported for "
-        "advanced/internal integrations; prefer build_mda_jobs() for trajectory-native "
-        "compute-stage plugins.",
-        DeprecationWarning,
-        stacklevel=3,
-    )
-
-
-def _is_shipped_plugin_module(module_name: str) -> bool:
-    """Return whether a module belongs to an existing shipped plugin.
-
-    Parameters
-    ----------
-    module_name : str
-        Module path defining an analysis subclass.
+        Subclass being validated.
+    base_cls : type
+        Public analysis base class whose own definitions are framework-owned.
 
     Returns
     -------
-    bool
-        ``True`` for built-in plugin modules that should not emit import-time
-        deprecation warnings during the transition.
+    type | None
+        Class in the effective MRO that defines ``run_replicate``, excluding
+        the public analysis base class and ``object``.
     """
 
-    return any(
-        module_name == prefix or module_name.startswith(prefix + ".")
-        for prefix in _BUILTIN_PLUGIN_MODULE_PREFIXES
-    )
+    for mro_cls in cls.__mro__:
+        if mro_cls in {base_cls, object}:
+            continue
+        if "run_replicate" in mro_cls.__dict__:
+            return mro_cls
+    return None

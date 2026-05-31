@@ -25,7 +25,7 @@ class TestContactsGromacsSmoke:
     """Smoke tests for contacts GROMACS path handling."""
 
     def test_run_replicate_uses_gromacs_layout(self, tmp_path: Path) -> None:
-        """run_replicate resolves flat GROMACS topology and trajectory."""
+        """The compute stage resolves flat GROMACS topology and trajectory."""
         config = make_gromacs_config(tmp_path)
         create_gromacs_layout(tmp_path / "run_1")
 
@@ -66,7 +66,7 @@ class TestContactsGromacsSmoke:
                 recompute=True,
                 settings=settings,
             )
-            result = analysis.run_replicate(ctx, replicate=1)
+            result = analysis._run_compute_stage(ctx, replicate=1)
 
         assert result.analysis_name == "contacts"
         assert result.payload["plugin"] == "contacts"

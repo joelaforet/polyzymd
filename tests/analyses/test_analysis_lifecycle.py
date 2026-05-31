@@ -48,7 +48,17 @@ class _LifecycleSettings(BaseModel):
     scale: float = 1.0
 
 
-class _OrderAnalysis(Analysis):
+class _MDAContractMixin:
+    """Provide the required MDA lifecycle seam for direct compute fakes."""
+
+    def build_mda_jobs(self, ctx):
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+
+class _OrderAnalysis(_MDAContractMixin, Analysis):
     """Analysis that records compute and aggregate lifecycle calls."""
 
     name: ClassVar[str] = "lifecycle_order"
@@ -58,7 +68,7 @@ class _OrderAnalysis(Analysis):
     def __init__(self) -> None:
         self.events: list[str] = []
 
-    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, Any]:
+    def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> dict[str, Any]:
         """Record replicate execution and return a scalar payload."""
 
         self.events.append(f"run:{replicate}")
@@ -152,7 +162,7 @@ class _ContractReplicateAnalysis(_OrderAnalysis):
 
     name: ClassVar[str] = "contract_replicate_lifecycle"
 
-    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, Any]:
+    def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> dict[str, Any]:
         """Raise a plugin contract error without lifecycle wrapping."""
 
         del ctx, replicate

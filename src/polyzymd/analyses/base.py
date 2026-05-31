@@ -134,9 +134,9 @@ del _public_class
 class Analysis(ABC):
     """Base class for all PolyzyMD analyses.
 
-    Subclasses represent a complete analysis lifecycle: per-replicate
-    computation, aggregation across replicates, cross-condition comparison,
-    plotting, and CLI formatting.
+    Subclasses represent a complete analysis lifecycle: MDAnalysis-backed
+    per-replicate computation, aggregation across replicates, cross-condition
+    comparison, plotting, and CLI formatting.
     """
 
     name: ClassVar[str]
@@ -153,12 +153,12 @@ class Analysis(ABC):
     slurm_resource_hint: ClassVar[SlurmResourceHint | None] = None
     settings_path_fields: ClassVar[tuple[str, ...]] = ()
 
-    def run_replicate(
+    def _run_compute_stage(
         self,
         ctx: ReplicateContext,
         replicate: int,
     ) -> Any:
-        """Run analysis for a single replicate.
+        """Run the per-replicate compute stage.
 
         Parameters
         ----------
@@ -174,34 +174,13 @@ class Analysis(ABC):
         """
         if not type(self).has_compute_stage:
             return None
-        return self._run_replicate_default(ctx, replicate)
-
-    def _run_replicate_default(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-    ) -> Any:
-        """Run the default per-replicate dispatch path.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided context with paths, config, and settings.
-        replicate : int
-            One-indexed replicate number.
-
-        Returns
-        -------
-        Any
-            Per-replicate result, or ``None`` when compute is disabled.
-        """
         if type(self).build_mda_jobs is Analysis.build_mda_jobs:
             raise NotImplementedError(
                 f"{type(self).__name__} public plugins must implement build_mda_jobs() "
-                "or override run_replicate() when has_compute_stage=True; set "
-                "has_compute_stage = False for compare-only plugins."
+                "when has_compute_stage=True; set has_compute_stage = False for "
+                "compare-only plugins."
             )
-        return self._run_replicate_via_mda_jobs(ctx, replicate)
+        return self._run_compute_stage_via_mda_jobs(ctx, replicate)
 
     def aggregate(
         self,
@@ -551,7 +530,7 @@ class Analysis(ABC):
         """
         return load_aggregated_result(self, aggregated_dir)
 
-    def _run_replicate_via_mda_jobs(
+    def _run_compute_stage_via_mda_jobs(
         self,
         ctx: ReplicateContext,
         replicate: int,
@@ -560,7 +539,7 @@ class Analysis(ABC):
         if type(self).build_mda_jobs is Analysis.build_mda_jobs:
             raise PluginContractError(
                 f"{type(self).__name__} must implement build_mda_jobs() for the default "
-                "compute path, override run_replicate(), or set has_compute_stage = False."
+                "compute path, or set has_compute_stage = False."
             )
 
         from polyzymd.analyses.mda.lifecycle import run_mda_replicate_jobs
@@ -569,8 +548,8 @@ class Analysis(ABC):
         if result is None:
             raise PluginContractError(
                 f"{type(self).__name__}.build_mda_jobs() returned None for a compute-stage "
-                "plugin. Return a sequence of MDAAnalysisJob objects, override run_replicate(), "
-                "or set has_compute_stage = False."
+                "plugin. Return a sequence of MDAAnalysisJob objects or set "
+                "has_compute_stage = False."
             )
         return result
 

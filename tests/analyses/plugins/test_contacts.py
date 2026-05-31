@@ -1,6 +1,6 @@
 """Tests for the contacts analysis plugin.
 
-Covers discovery, settings, run_replicate, aggregate, compare (full override),
+Covers discovery, settings, compute-stage dispatch, aggregate, compare (full override),
 filter_conditions, plot delegation, AggregatedResultClass, and per-replicate
 metric helpers.
 """
@@ -2855,7 +2855,8 @@ class TestLifecycle:
         from polyzymd.analyses.contacts import ContactsAnalysis
 
         analysis = ContactsAnalysis()
-        assert callable(analysis.run_replicate)
+        assert callable(analysis.build_mda_jobs)
+        assert callable(analysis.build_mda_collector)
         assert callable(analysis.aggregate)
         assert callable(analysis.compare)
         assert callable(analysis.plot)

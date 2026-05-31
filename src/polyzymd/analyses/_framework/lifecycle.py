@@ -2,7 +2,7 @@
 
 This module keeps the framework-owned lifecycle order explicit while preserving
 the public ``polyzymd.analyses.orchestrator`` wrapper API. It is an internal
-compatibility layer and is not re-exported from ``base.py``.
+lifecycle engine and is not re-exported from ``base.py``.
 """
 
 from __future__ import annotations
@@ -65,8 +65,8 @@ FinalizeRun = Callable[..., dict[str, Any]]
 ExecutionSummary = Callable[["Analysis", list[Condition], BaseModel, str], None]
 
 
-class AnalysisCompatibilityAdapter:
-    """Delegate lifecycle operations to the existing ``Analysis`` hooks.
+class AnalysisLifecycleAdapter:
+    """Delegate lifecycle operations to an ``Analysis`` instance.
 
     Parameters
     ----------
@@ -100,8 +100,8 @@ class AnalysisCompatibilityAdapter:
 
         return self.analysis.filter_conditions(conditions, settings=settings)
 
-    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Delegate per-replicate compute to ``Analysis.run_replicate``.
+    def run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> Any:
+        """Delegate per-replicate compute to the internal analysis dispatcher.
 
         Parameters
         ----------
@@ -116,7 +116,7 @@ class AnalysisCompatibilityAdapter:
             Plugin result for the replicate.
         """
 
-        return self.analysis.run_replicate(ctx, replicate)
+        return self.analysis._run_compute_stage(ctx, replicate)
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
         """Delegate aggregation to ``Analysis.aggregate``.
@@ -192,23 +192,23 @@ class AnalysisLifecycle:
 
     The orchestrator remains the public API and multi-analysis scheduling owner.
     This private engine owns the order for a single analysis and delegates
-    plugin-specific work through ``AnalysisCompatibilityAdapter``.
+    plugin-specific work through ``AnalysisLifecycleAdapter``.
 
     Parameters
     ----------
     analysis : Analysis
         Analysis plugin instance.
-    adapter : AnalysisCompatibilityAdapter | None, optional
-        Adapter used for hook delegation. When omitted, a compatibility adapter
+    adapter : AnalysisLifecycleAdapter | None, optional
+        Adapter used for lifecycle delegation. When omitted, a lifecycle adapter
         is created for ``analysis``.
     settings_resolver : callable | None, optional
         Function that resolves plugin settings from a comparison config.
     prepare_comparison_run : callable | None, optional
-        Optional wrapper callback used by public orchestrator compatibility.
+        Optional wrapper callback used by the analysis lifecycle.
     run_analysis : callable | None, optional
-        Optional condition-run callback used by public orchestrator compatibility.
+        Optional condition-run callback used by the analysis lifecycle.
     finalize_comparison_from_disk : callable | None, optional
-        Optional finalize callback used by public orchestrator compatibility.
+        Optional finalize callback used by the analysis lifecycle.
     execution_summary : callable | None, optional
         Optional logging callback for execution summaries.
     """
@@ -217,7 +217,7 @@ class AnalysisLifecycle:
         self,
         analysis: Analysis,
         *,
-        adapter: AnalysisCompatibilityAdapter | None = None,
+        adapter: AnalysisLifecycleAdapter | None = None,
         settings_resolver: SettingsResolver | None = None,
         prepare_comparison_run: PrepareRun | None = None,
         run_analysis: RunCondition | None = None,
@@ -225,7 +225,7 @@ class AnalysisLifecycle:
         execution_summary: ExecutionSummary | None = None,
     ) -> None:
         self.analysis = analysis
-        self.adapter = adapter or AnalysisCompatibilityAdapter(analysis)
+        self.adapter = adapter or AnalysisLifecycleAdapter(analysis)
         self._settings_resolver = settings_resolver or _resolve_settings
         self._prepare_comparison_run = prepare_comparison_run
         self._run_analysis = run_analysis
@@ -274,7 +274,7 @@ class AnalysisLifecycle:
         recompute: bool,
         backend_policy: MDABackendPolicy | None = None,
     ) -> Any:
-        """Run one replicate and save the canonical ``result.json``.
+        """Run one replicate compute stage and save the canonical ``result.json``.
 
         Parameters
         ----------
@@ -313,7 +313,7 @@ class AnalysisLifecycle:
             backend_policy=backend_policy or _default_mda_backend_policy(),
         )
         try:
-            result = self.adapter.run_replicate(ctx, replicate)
+            result = self.adapter.run_compute_stage(ctx, replicate)
         except (FileNotFoundError, OSError):
             raise
         except ReplicateSkippedError:
@@ -322,10 +322,10 @@ class AnalysisLifecycle:
             raise
         except Exception as e:
             raise ReplicateError(
-                f"{self.analysis.name}: run_replicate failed for "
+                f"{self.analysis.name}: compute stage failed for "
                 f"condition='{condition.label}' replicate={replicate}: {type(e).__name__}: {e}"
             ) from e
-        _check_compute_result(result, "run_replicate", self.analysis.name)
+        _check_compute_result(result, "compute_stage", self.analysis.name)
         try:
             _save_replicate_result(self.analysis, result, output_dir, result_path)
         except OSError as save_err:
@@ -1102,7 +1102,7 @@ class AnalysisLifecycle:
         config: ComparisonConfig,
         settings: BaseModel,
     ) -> tuple[list[Condition], list[Condition], list[Condition], dict[str, Condition]]:
-        """Build and filter conditions with compatibility validation.
+        """Build and filter conditions with lifecycle validation.
 
         Parameters
         ----------

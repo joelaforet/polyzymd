@@ -86,7 +86,6 @@ Required hooks depend on the plugin mode:
 | Hook | When Used | Signature / Notes |
 |------|-----------|-------------------|
 | `build_mda_jobs()` + `build_mda_collector()` | Public compute-stage plugins with `has_compute_stage=True` | MDAnalysis owns per-trajectory iteration; collectors map completed jobs to `ReplicateArtifact`; PolyzyMD owns `ArtifactStore`, `ConditionArtifact`, `ComparisonArtifact`, statistics, and plotting |
-| `run_replicate()` | Exceptional direct-replicate adapters only | Avoid for trajectory-native plugins; prefer MDAnalysis jobs and collectors |
 | `aggregate()` | Only when `has_aggregate_stage=True` | `(ctx: AggregateContext, results: Sequence[Any]) -> Any` |
 
 Compare-only or no-compute plugins set `has_compute_stage=False` and skip the
@@ -151,7 +150,7 @@ Plugins receive framework-provided context objects — never load configs yourse
 
 | Context | Passed To | Key Attributes |
 |---------|-----------|----------------|
-| `ReplicateContext` | lower-level context access and rare direct-replicate adapters | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
+| `ReplicateContext` | lower-level lifecycle context access | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
 | `AggregateContext` | `aggregate()` | `.condition`, `.replicates`, `.output_dir`, `.settings`, `.result_path` |
 | `ComparisonContext` | `compare()` | `.conditions`, `.analysis_dirs`, `.results_dir`, `.effective_control`, `.settings` |
 | `PlotContext` | `plot()` | `.conditions`, `.analysis_dirs`, `.output_dir`, `.settings`, `.plot_settings` |
