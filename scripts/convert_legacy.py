@@ -1405,7 +1405,7 @@ def _build_plot_settings() -> dict:
         "output_dir": "figures/",
         "format": "png",
         "dpi": 300,
-        "style": "publication",
+        "style": "compact",
         "color_palette": "tab10",
         "rmsf": {
             "show_error": True,
