@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
@@ -30,7 +30,6 @@ from polyzymd.analyses.base import (
 from polyzymd.analyses.hydrogen_bonds._mda import (
     HydrogenBondArtifactCollector,
     aggregate_hydrogen_bond_artifacts,
-    artifact_to_hydrogen_bond_payload,
     build_hydrogen_bond_jobs,
     compute_composition,
     validate_and_order_replicate_artifacts,
@@ -42,7 +41,6 @@ from polyzymd.analyses.hydrogen_bonds._models import (
     DirectedResiduePairResult,
     HydrogenBondAggregatedSummary,
     HydrogenBondConditionPayload,
-    HydrogenBondReplicatePayload,
     HydrogenBondReplicateSummary,
     ResidueRef,
     UndirectedPairAggregate,
@@ -68,75 +66,9 @@ COORDINATE_DEPENDENT_SELECTION_KEYWORDS = frozenset(
 DEFAULT_GROUPS = {"protein": "chainid A", "polymer": "chainid C"}
 
 
-def _validate_aggregate_replicate_identity(
-    ctx: AggregateContext,
-    results: Sequence[Any],
-) -> list[HydrogenBondReplicatePayload]:
-    """Validate and order hydrogen-bond replicate results by replicate ID.
-
-    Parameters
-    ----------
-    ctx : AggregateContext
-        Framework-provided aggregation context.
-    results : Sequence[Any]
-        Per-replicate hydrogen-bond results.
-
-    Returns
-    -------
-    list[HydrogenBondReplicatePayload]
-        Results ordered to match ``ctx.replicates``.
-
-    Raises
-    ------
-    ValueError
-        Raised when replicate IDs are missing, duplicated, unexpected, or not
-        present on one or more results.
-    """
-    if not results:
-        raise ValueError("Cannot aggregate hydrogen-bond results: no replicate results provided")
-
-    expected_replicates = list(ctx.replicates)
-    observed_replicates = [
-        result.replicate for result in results if getattr(result, "replicate", None) is not None
-    ]
-    observed_counter = Counter(observed_replicates)
-    duplicate_replicates = sorted(
-        replicate for replicate, count in observed_counter.items() if count > 1
-    )
-    missing_replicates = sorted(set(expected_replicates) - set(observed_replicates))
-    unexpected_replicates = sorted(set(observed_replicates) - set(expected_replicates))
-    missing_metadata_count = len(results) - len(observed_replicates)
-
-    if (
-        missing_replicates
-        or unexpected_replicates
-        or duplicate_replicates
-        or missing_metadata_count
-    ):
-        details: list[str] = []
-        if missing_replicates:
-            details.append(f"missing replicates {missing_replicates}")
-        if unexpected_replicates:
-            details.append(f"unexpected replicates {unexpected_replicates}")
-        if duplicate_replicates:
-            details.append(f"duplicate replicates {duplicate_replicates}")
-        if missing_metadata_count:
-            details.append(f"results without replicate identifiers {missing_metadata_count}")
-        detail_text = "; ".join(details)
-        raise ValueError(
-            f"Hydrogen-bond aggregation for condition '{ctx.condition.label}' is incomplete. "
-            f"Expected replicate results for {expected_replicates}; observed "
-            f"{sorted(observed_replicates)} ({detail_text}). Recompute missing replicates or "
-            "clear stale caches before aggregating."
-        )
-
-    result_by_replicate = {result.replicate: result for result in results}
-    return [result_by_replicate[replicate] for replicate in expected_replicates]
-
-
 def _validate_aggregate_summary_completeness(
     ctx: AggregateContext,
-    ordered_results: Sequence[HydrogenBondReplicatePayload],
+    ordered_results: Sequence[dict[str, Any]],
     expected_summaries: Sequence[HydrogenBondSummarySettings],
 ) -> dict[str, list[HydrogenBondReplicateSummary]]:
     """Validate configured summary coverage across replicate results.
@@ -145,8 +77,8 @@ def _validate_aggregate_summary_completeness(
     ----------
     ctx : AggregateContext
         Framework-provided aggregation context.
-    ordered_results : Sequence[HydrogenBondReplicatePayload]
-        Replicate results ordered to match ``ctx.replicates``.
+    ordered_results : Sequence[dict[str, Any]]
+        Validated replicate payload mappings ordered to match ``ctx.replicates``.
     expected_summaries : Sequence[HydrogenBondSummarySettings]
         Summary specifications configured for this aggregation.
 
@@ -171,7 +103,8 @@ def _validate_aggregate_summary_completeness(
 
     for rep_result in ordered_results:
         observed_by_name: dict[str, list[HydrogenBondReplicateSummary]] = defaultdict(list)
-        for rep_summary in rep_result.summaries:
+        replicate_id = int(rep_result["replicate"])
+        for rep_summary in rep_result["summaries"]:
             observed_by_name[rep_summary.name].append(rep_summary)
 
         unexpected_summary_names = sorted(
@@ -180,15 +113,15 @@ def _validate_aggregate_summary_completeness(
             if summary_name not in summaries_by_name
         )
         if unexpected_summary_names:
-            unexpected_by_replicate[rep_result.replicate] = unexpected_summary_names
+            unexpected_by_replicate[replicate_id] = unexpected_summary_names
 
         for summary_name in expected_summary_names:
             matches = observed_by_name.get(summary_name, [])
             if not matches:
-                missing_by_summary[summary_name].append(rep_result.replicate)
+                missing_by_summary[summary_name].append(replicate_id)
                 continue
             if len(matches) > 1:
-                duplicates_by_summary[summary_name].append(rep_result.replicate)
+                duplicates_by_summary[summary_name].append(replicate_id)
                 continue
             summaries_by_name[summary_name].append(matches[0])
 
@@ -287,44 +220,44 @@ def _optional_int(value: Any) -> int | None:
     return None if value is None else int(value)
 
 
-def _condition_payload_from_artifact(artifact: ConditionArtifact) -> HydrogenBondConditionPayload:
-    """Build a typed domain payload view from a canonical condition artifact.
+def _validated_replicate_payload_mapping(
+    artifact: ReplicateArtifact,
+) -> dict[str, Any]:
+    """Build a validated payload mapping from a replicate artifact.
 
     Parameters
     ----------
-    artifact : ConditionArtifact
-        Canonical condition artifact whose payload contains hydrogen-bond
-        summaries and composition entries.
+    artifact : ReplicateArtifact
+        Canonical replicate artifact whose payload contains hydrogen-bond
+        summaries and optional composition entries.
 
     Returns
     -------
-    HydrogenBondConditionPayload
-        Typed domain payload used by plotting helpers.
+    dict[str, Any]
+        Validated payload mapping enriched with metadata used during
+        aggregation.
     """
 
     metadata = artifact.metadata
-    return HydrogenBondConditionPayload(
-        config_hash=str(metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(metadata.get("polyzymd_version", "unknown")),
-        replicate=0,
-        equilibration_time=float(metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(metadata.get("equilibration_unit", "ns")),
-        selection_string=str(metadata.get("selection_string", "")),
-        settings_fingerprint=metadata.get("settings_fingerprint"),
-        timestep_ps=_optional_float(metadata.get("timestep_ps")),
-        raw_timestep_ps=_optional_float(metadata.get("raw_timestep_ps")),
-        frame_stride=_optional_int(metadata.get("frame_stride")),
-        replicates=[int(replicate) for replicate in artifact.replicates],
-        n_replicates=int(artifact.payload.get("n_replicates", len(artifact.replicates))),
-        summaries=[
-            HydrogenBondAggregatedSummary.model_validate(summary)
+    return {
+        "config_hash": str(metadata.get("config_hash", "unknown")),
+        "replicate": artifact.replicate,
+        "equilibration_time": float(metadata.get("equilibration_time") or 0.0),
+        "equilibration_unit": str(metadata.get("equilibration_unit", "ns")),
+        "selection_string": str(metadata.get("selection_string", "")),
+        "settings_fingerprint": metadata.get("settings_fingerprint"),
+        "timestep_ps": _optional_float(metadata.get("timestep_ps")),
+        "raw_timestep_ps": _optional_float(metadata.get("raw_timestep_ps")),
+        "frame_stride": _optional_int(metadata.get("frame_stride")),
+        "summaries": [
+            HydrogenBondReplicateSummary.model_validate(summary)
             for summary in artifact.payload.get("summaries", [])
         ],
-        composition_entries=[
-            AggregatedCompositionEntry.model_validate(entry)
+        "composition_entries": [
+            CompositionEntry.model_validate(entry)
             for entry in artifact.payload.get("composition_entries", [])
         ],
-    )
+    }
 
 
 class HydrogenBondSummarySettings(BaseModel):
@@ -602,64 +535,6 @@ class HydrogenBondsAnalysis(Analysis):
     _defaults_warned: ClassVar[bool] = False
 
     @classmethod
-    def _validate_replicate_result_settings_identity(
-        cls,
-        ctx: AggregateContext,
-        results: Sequence[HydrogenBondReplicatePayload],
-    ) -> None:
-        """Validate settings fingerprints on per-replicate hydrogen-bond results.
-
-        Parameters
-        ----------
-        ctx : AggregateContext
-            Framework-provided aggregation context.
-        results : Sequence[HydrogenBondReplicatePayload]
-            Per-replicate hydrogen-bond results.
-
-        Raises
-        ------
-        ValueError
-            Raised when replicate results are missing settings fingerprints or
-            were computed with different settings.
-        """
-
-        expected_fingerprint = _settings_hash(ctx.settings)
-        missing_fingerprint_replicates: list[int] = []
-        mismatched_fingerprints: list[str] = []
-
-        for result in results:
-            replicate = getattr(result, "replicate", None)
-            stored_fingerprint = getattr(result, "settings_fingerprint", None)
-            if stored_fingerprint is None:
-                stored_fingerprint = getattr(result, "settings_fp", None)
-
-            if stored_fingerprint is None:
-                if replicate is not None:
-                    missing_fingerprint_replicates.append(replicate)
-                continue
-
-            if stored_fingerprint != expected_fingerprint:
-                mismatched_fingerprints.append(
-                    f"replicate {replicate}: stored={stored_fingerprint} current={expected_fingerprint}"
-                )
-
-        if missing_fingerprint_replicates:
-            raise ValueError(
-                f"Hydrogen-bond aggregation for condition '{ctx.condition.label}' cannot use "
-                "non-canonical cached replicate results missing settings fingerprints. Affected "
-                f"replicates: {sorted(missing_fingerprint_replicates)}. Recompute the "
-                "condition to refresh settings-sensitive caches before aggregating."
-            )
-
-        if mismatched_fingerprints:
-            mismatch_text = "; ".join(mismatched_fingerprints)
-            raise ValueError(
-                f"Hydrogen-bond aggregation for condition '{ctx.condition.label}' detected "
-                f"settings fingerprint mismatches ({mismatch_text}). Recompute the condition "
-                "or clear stale caches before aggregating."
-            )
-
-    @classmethod
     def _coerce_and_validate_aggregated_result(
         cls,
         result: Any,
@@ -695,31 +570,6 @@ class HydrogenBondsAnalysis(Analysis):
 
         if isinstance(result, dict) and result.get("artifact_type") == "condition":
             result = ConditionArtifact.model_validate(result)
-
-        if isinstance(result, HydrogenBondConditionPayload):
-            stored_fingerprint = result.settings_fingerprint
-            current_fingerprint = _settings_hash(settings)
-            condition_text = (
-                f" for condition '{condition_label}'" if condition_label is not None else ""
-            )
-            source_text = f" at {source}" if source is not None else ""
-            if stored_fingerprint is None:
-                raise ValueError(
-                    "Aggregated hydrogen-bond result"
-                    f"{condition_text} is missing a settings fingerprint{source_text}. "
-                    "Non-canonical hydrogen-bond aggregated caches are not compatible with "
-                    "settings-sensitive compare/plot loading. Recompute the condition before "
-                    "comparing or plotting."
-                )
-            if stored_fingerprint != current_fingerprint:
-                raise ValueError(
-                    "Aggregated hydrogen-bond result"
-                    f"{condition_text} was computed with settings fingerprint "
-                    f"{stored_fingerprint}, but current settings require {current_fingerprint}"
-                    f"{source_text}. Recompute the condition or clear stale caches before "
-                    "comparing or plotting."
-                )
-            return result
 
         if not isinstance(result, ConditionArtifact):
             raise PluginContractError(
@@ -1084,15 +934,8 @@ class HydrogenBondsAnalysis(Analysis):
             analysis_dir=ctx.output_dir.parent,
         )
         ordered_results = [
-            artifact_to_hydrogen_bond_payload(
-                artifact,
-                settings_fingerprint=_settings_hash(ctx.settings),
-                validate_sidecars=True,
-                store_root=ctx.output_dir.parent,
-            )
-            for artifact in ordered_artifacts
+            _validated_replicate_payload_mapping(artifact) for artifact in ordered_artifacts
         ]
-        self._validate_replicate_result_settings_identity(ctx, ordered_results)
 
         settings: HydrogenBondSettings = ctx.settings
         n_replicates = len(ordered_results)
@@ -1221,21 +1064,21 @@ class HydrogenBondsAnalysis(Analysis):
                 )
             )
 
-        if any(result.composition_entries for result in ordered_results):
+        if any(result["composition_entries"] for result in ordered_results):
             aggregated_composition = self._aggregate_composition(ordered_results)
         else:
             aggregated_composition = []
 
         agg_result = HydrogenBondConditionPayload(
-            config_hash=ordered_results[0].config_hash,
+            config_hash=ordered_results[0]["config_hash"],
             settings_fingerprint=_settings_hash(settings),
             replicate=0,
-            equilibration_time=ordered_results[0].equilibration_time,
-            equilibration_unit=ordered_results[0].equilibration_unit,
-            selection_string=ordered_results[0].selection_string,
-            timestep_ps=ordered_results[0].timestep_ps,
-            raw_timestep_ps=ordered_results[0].raw_timestep_ps,
-            frame_stride=ordered_results[0].frame_stride,
+            equilibration_time=ordered_results[0]["equilibration_time"],
+            equilibration_unit=ordered_results[0]["equilibration_unit"],
+            selection_string=ordered_results[0]["selection_string"],
+            timestep_ps=ordered_results[0]["timestep_ps"],
+            raw_timestep_ps=ordered_results[0]["raw_timestep_ps"],
+            frame_stride=ordered_results[0]["frame_stride"],
             replicates=list(ctx.replicates),
             n_replicates=n_replicates,
             summaries=aggregated_summaries,
@@ -1276,14 +1119,14 @@ class HydrogenBondsAnalysis(Analysis):
 
     def _aggregate_composition(
         self,
-        results: Sequence[HydrogenBondReplicatePayload],
+        results: Sequence[dict[str, Any]],
     ) -> list[AggregatedCompositionEntry]:
         """Aggregate composition entries across replicates.
 
         Parameters
         ----------
-        results : Sequence[HydrogenBondReplicatePayload]
-            Replicate-level hydrogen-bond results.
+        results : Sequence[dict[str, Any]]
+            Validated replicate payload mappings.
 
         Returns
         -------
@@ -1295,7 +1138,12 @@ class HydrogenBondsAnalysis(Analysis):
         composition_map: dict[tuple[str, str], dict[str, list[float]]] = {}
 
         for replicate_idx, result in enumerate(results):
-            for entry in result.composition_entries:
+            entries = (
+                result["composition_entries"]
+                if isinstance(result, dict)
+                else result.composition_entries
+            )
+            for entry in entries:
                 pair_key = (entry.donor_partition, entry.acceptor_partition)
                 if pair_key not in composition_map:
                     composition_map[pair_key] = {
@@ -1344,10 +1192,8 @@ class HydrogenBondsAnalysis(Analysis):
             summaries = summary.payload.get("summaries", [])
         elif isinstance(summary, dict) and summary.get("artifact_type") == "condition":
             summaries = ConditionArtifact.model_validate(summary).payload.get("summaries", [])
-        elif isinstance(summary, dict):
-            summaries = summary.get("summaries", [])
-        elif isinstance(summary, HydrogenBondConditionPayload):
-            summaries = summary.summaries
+        elif isinstance(summary, BaseModel):
+            summaries = summary.model_dump(mode="json").get("summaries", [])
         else:
             logger.warning("Unexpected result type for extract_metrics: %s", type(summary))
             return {}
@@ -1360,13 +1206,10 @@ class HydrogenBondsAnalysis(Analysis):
                 sem_val = float(item.get("sem_hbonds_per_frame", 0.0))
                 replicate_values = [float(v) for v in item.get("per_replicate_mean_hbonds", [])]
             else:
-                item_data = item.model_dump(mode="json")
-                name = str(item_data.get("name", "unknown"))
-                mean_val = float(item_data.get("mean_hbonds_per_frame", 0.0))
-                sem_val = float(item_data.get("sem_hbonds_per_frame", 0.0))
-                replicate_values = [
-                    float(v) for v in item_data.get("per_replicate_mean_hbonds", [])
-                ]
+                raise PluginContractError(
+                    "Hydrogen-bond condition artifact payload summaries must be mappings, got "
+                    f"{type(item).__name__}"
+                )
 
             metric_key = f"mean_hbonds_{name}"
             metrics[metric_key] = MetricValue(
@@ -1462,7 +1305,7 @@ class HydrogenBondsAnalysis(Analysis):
 
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
-        loaded: dict[str, HydrogenBondConditionPayload] = {}
+        loaded: dict[str, ConditionArtifact] = {}
         for label in labels:
             cond_data = data.get(label)
             if cond_data is None:
@@ -1496,9 +1339,19 @@ class HydrogenBondsAnalysis(Analysis):
                 continue
 
             if isinstance(loaded_result, ConditionArtifact):
-                loaded[label] = _condition_payload_from_artifact(loaded_result)
-            elif isinstance(loaded_result, HydrogenBondConditionPayload):
                 loaded[label] = loaded_result
+            elif isinstance(loaded_result, BaseModel):
+                payload = loaded_result.model_dump(mode="json")
+                loaded[label] = ConditionArtifact(
+                    analysis_name=self.name,
+                    condition_label=label,
+                    replicates=[int(rep) for rep in payload.get("replicates", [])],
+                    payload=payload,
+                    metadata={
+                        "settings_fingerprint": payload.get("settings_fingerprint"),
+                        "timestep_ps": payload.get("timestep_ps"),
+                    },
+                )
 
         labels_with_data = [label for label in labels if label in loaded]
         if not labels_with_data:
@@ -1547,7 +1400,9 @@ class HydrogenBondsAnalysis(Analysis):
             if top_pairs_plot is not None:
                 plots.append(top_pairs_plot)
 
-        has_composition = any(result.composition_entries for result in loaded.values())
+        has_composition = any(
+            result.payload.get("composition_entries", []) for result in loaded.values()
+        )
         if has_composition:
             composition_absolute_plot = plot_composition_absolute(
                 loaded,
@@ -1635,9 +1490,9 @@ class HydrogenBondsAnalysis(Analysis):
 
         Returns
         -------
-        ReplicateArtifact, HydrogenBondReplicatePayload, or None
-            Deserialized canonical artifact/result, or ``None`` if no canonical
-            result file is present.
+        ReplicateArtifact or None
+            Deserialized canonical artifact, or ``None`` if no canonical result
+            file is present.
         """
 
         result_path = self.replicate_result_path(run_dir)
@@ -1744,15 +1599,15 @@ class HydrogenBondsAnalysis(Analysis):
 
     @staticmethod
     def _get_summary_names(
-        loaded: dict[str, HydrogenBondConditionPayload],
+        loaded: dict[str, ConditionArtifact],
         labels: Sequence[str],
     ) -> list[str]:
         """Collect summary names in first-seen order across conditions.
 
         Parameters
         ----------
-        loaded : dict[str, HydrogenBondConditionPayload]
-            Loaded aggregated results by condition.
+        loaded : dict[str, ConditionArtifact]
+            Loaded condition artifacts by condition.
         labels : Sequence[str]
             Condition labels in plotting order.
 
@@ -1767,8 +1622,11 @@ class HydrogenBondsAnalysis(Analysis):
             result = loaded.get(label)
             if result is None:
                 continue
-            for summary in result.summaries:
-                if summary.name not in seen:
-                    seen.add(summary.name)
-                    names.append(summary.name)
+            for summary in result.payload.get("summaries", []):
+                if not isinstance(summary, dict):
+                    continue
+                summary_name = str(summary.get("name", "unknown"))
+                if summary_name not in seen:
+                    seen.add(summary_name)
+                    names.append(summary_name)
         return names

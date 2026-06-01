@@ -1,4 +1,4 @@
-"""MDAnalysis-native hydrogen-bond jobs and artifact adapters."""
+"""MDAnalysis-native hydrogen-bond jobs and artifact helpers."""
 
 from __future__ import annotations
 
@@ -16,12 +16,9 @@ from numpy.typing import NDArray
 from polyzymd.analyses._framework.cache_identity import compute_config_hash
 from polyzymd.analyses._framework.results_base import get_polyzymd_version
 from polyzymd.analyses.hydrogen_bonds._models import (
-    AggregatedCompositionEntry,
     CompositionEntry,
     DirectedResiduePairResult,
-    HydrogenBondAggregatedSummary,
     HydrogenBondConditionPayload,
-    HydrogenBondReplicatePayload,
     HydrogenBondReplicateSummary,
     ResidueRef,
     UndirectedResiduePairResult,
@@ -509,110 +506,6 @@ def validate_and_order_replicate_artifacts(
             f"replicates {expected}: missing {missing}, unexpected {unexpected}"
         )
     return [by_replicate[rep] for rep in expected]
-
-
-def artifact_to_hydrogen_bond_payload(
-    artifact: ReplicateArtifact,
-    *,
-    settings_fingerprint: str | None = None,
-    validate_sidecars: bool = False,
-    store_root: Path | None = None,
-) -> HydrogenBondReplicatePayload:
-    """Convert a replicate artifact to the established result model.
-
-    Parameters
-    ----------
-    artifact : ReplicateArtifact
-        Replicate artifact to adapt.
-    settings_fingerprint : str or None, optional
-        Expected settings fingerprint.
-    validate_sidecars : bool, optional
-        Whether to validate NPZ sidecars, by default False.
-    store_root : Path or None, optional
-        Artifact store root used when ``validate_sidecars`` is true.
-
-    Returns
-    -------
-    HydrogenBondReplicatePayload
-        Established in-memory replicate result model.
-    """
-
-    if artifact.analysis_name != "hydrogen_bonds":
-        raise ValueError(f"Expected hydrogen_bonds artifact, got {artifact.analysis_name!r}")
-    stored_fingerprint = artifact.metadata.get("settings_fingerprint")
-    if settings_fingerprint is not None and stored_fingerprint != settings_fingerprint:
-        raise ValueError(
-            "Hydrogen-bond replicate artifact was computed with settings fingerprint "
-            f"{stored_fingerprint}, but current settings require {settings_fingerprint}"
-        )
-    if validate_sidecars:
-        _validate_event_sidecar(artifact, analysis_dir=store_root)
-    return HydrogenBondReplicatePayload(
-        config_hash=str(artifact.metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(artifact.metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=artifact.replicate,
-        equilibration_time=float(artifact.metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(artifact.metadata.get("equilibration_unit", "ns")),
-        selection_string=str(artifact.metadata.get("selection_string", "")),
-        settings_fingerprint=stored_fingerprint,
-        timestep_ps=_optional_float(artifact.metadata.get("timestep_ps")),
-        raw_timestep_ps=_optional_float(artifact.metadata.get("raw_timestep_ps")),
-        frame_stride=_optional_int(artifact.metadata.get("frame_stride")),
-        summaries=[
-            HydrogenBondReplicateSummary.model_validate(summary)
-            for summary in artifact.payload.get("summaries", [])
-        ],
-        composition_entries=[
-            CompositionEntry.model_validate(entry)
-            for entry in artifact.payload.get("composition_entries", [])
-        ],
-    )
-
-
-def condition_artifact_to_condition_payload(artifact: Any) -> HydrogenBondConditionPayload:
-    """Convert a condition artifact to the established aggregate model.
-
-    Parameters
-    ----------
-    artifact : Any
-        Condition artifact or established aggregate model.
-
-    Returns
-    -------
-    HydrogenBondConditionPayload
-        Established in-memory aggregate result model.
-    """
-
-    if isinstance(artifact, HydrogenBondConditionPayload):
-        return artifact
-    if not isinstance(artifact, ConditionArtifact):
-        raise TypeError(
-            "Hydrogen-bond condition adapter expected ConditionArtifact, got "
-            f"{type(artifact).__name__}"
-        )
-    metadata = artifact.metadata
-    return HydrogenBondConditionPayload(
-        config_hash=str(metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=0,
-        equilibration_time=float(metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(metadata.get("equilibration_unit", "ns")),
-        selection_string=str(metadata.get("selection_string", "")),
-        settings_fingerprint=metadata.get("settings_fingerprint"),
-        timestep_ps=_optional_float(metadata.get("timestep_ps")),
-        raw_timestep_ps=_optional_float(metadata.get("raw_timestep_ps")),
-        frame_stride=_optional_int(metadata.get("frame_stride")),
-        replicates=[int(rep) for rep in artifact.replicates],
-        n_replicates=len(artifact.replicates),
-        summaries=[
-            HydrogenBondAggregatedSummary.model_validate(summary)
-            for summary in artifact.payload.get("summaries", [])
-        ],
-        composition_entries=[
-            AggregatedCompositionEntry.model_validate(entry)
-            for entry in artifact.payload.get("composition_entries", [])
-        ],
-    )
 
 
 def compute_composition(
@@ -1387,25 +1280,6 @@ def _validate_event_sidecar(
     raise ValueError(
         f"Hydrogen-bond artifact replicate {artifact.replicate} is missing an event sidecar"
     )
-
-
-def _optional_float(value: Any) -> float | None:
-    """Return ``value`` as a finite float or ``None``."""
-
-    if value is None:
-        return None
-    float_value = float(value)
-    if not math.isfinite(float_value):
-        raise ValueError(f"Expected finite float metadata, got {value!r}")
-    return float_value
-
-
-def _optional_int(value: Any) -> int | None:
-    """Return ``value`` as an int or ``None``."""
-
-    if value is None:
-        return None
-    return int(value)
 
 
 def _is_coordinate_dependent_selection(selection: str) -> bool:

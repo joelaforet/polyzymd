@@ -35,7 +35,6 @@ from polyzymd.analyses.hydrogen_bonds import (
 from polyzymd.analyses.hydrogen_bonds._mda import (
     HBOND_EVENT_COLUMNS,
     HydrogenBondMDAAnalysis,
-    artifact_to_hydrogen_bond_payload,
 )
 from polyzymd.analyses.hydrogen_bonds._models import (
     AggregatedCompositionEntry,
@@ -150,7 +149,27 @@ def _as_hydrogen_bond_result(value: Any) -> HydrogenBondReplicatePayload:
     """Adapt MDA replicate artifacts to the canonical assertion model."""
 
     if isinstance(value, ReplicateArtifact):
-        return artifact_to_hydrogen_bond_payload(value)
+        metadata = value.metadata
+        return HydrogenBondReplicatePayload(
+            config_hash=metadata.get("config_hash"),
+            polyzymd_version=metadata.get("polyzymd_version"),
+            replicate=value.replicate,
+            equilibration_time=metadata.get("equilibration_time"),
+            equilibration_unit=metadata.get("equilibration_unit"),
+            selection_string=metadata.get("selection_string"),
+            settings_fingerprint=metadata.get("settings_fingerprint"),
+            timestep_ps=metadata.get("timestep_ps"),
+            raw_timestep_ps=metadata.get("raw_timestep_ps"),
+            frame_stride=metadata.get("frame_stride"),
+            summaries=[
+                HydrogenBondReplicateSummary.model_validate(summary)
+                for summary in value.payload.get("summaries", [])
+            ],
+            composition_entries=[
+                CompositionEntry.model_validate(entry)
+                for entry in value.payload.get("composition_entries", [])
+            ],
+        )
     if isinstance(value, HydrogenBondReplicatePayload):
         return value
     raise TypeError(f"Expected hydrogen-bond result or artifact, got {type(value).__name__}")
@@ -160,9 +179,29 @@ def _as_hydrogen_bond_aggregate(value: Any) -> HydrogenBondConditionPayload:
     """Adapt MDA condition artifacts to the canonical assertion model."""
 
     if isinstance(value, ConditionArtifact):
-        from polyzymd.analyses.hydrogen_bonds._mda import condition_artifact_to_condition_payload
-
-        return condition_artifact_to_condition_payload(value)
+        metadata = value.metadata
+        return HydrogenBondConditionPayload(
+            config_hash=metadata.get("config_hash"),
+            polyzymd_version=metadata.get("polyzymd_version"),
+            replicate=0,
+            equilibration_time=metadata.get("equilibration_time"),
+            equilibration_unit=metadata.get("equilibration_unit"),
+            selection_string=metadata.get("selection_string"),
+            settings_fingerprint=metadata.get("settings_fingerprint"),
+            timestep_ps=metadata.get("timestep_ps"),
+            raw_timestep_ps=metadata.get("raw_timestep_ps"),
+            frame_stride=metadata.get("frame_stride"),
+            replicates=list(value.replicates),
+            n_replicates=int(value.payload.get("n_replicates", len(value.replicates))),
+            summaries=[
+                HydrogenBondAggregatedSummary.model_validate(summary)
+                for summary in value.payload.get("summaries", [])
+            ],
+            composition_entries=[
+                AggregatedCompositionEntry.model_validate(entry)
+                for entry in value.payload.get("composition_entries", [])
+            ],
+        )
     if isinstance(value, HydrogenBondConditionPayload):
         return value
     raise TypeError(f"Expected hydrogen-bond aggregate or artifact, got {type(value).__name__}")
@@ -451,9 +490,7 @@ def test_replicate_artifact_preserves_timing_metadata(tmp_path: Path) -> None:
     )
 
     del analysis, ctx
-    result = artifact_to_hydrogen_bond_payload(
-        artifact, settings_fingerprint=_settings_hash(settings)
-    )
+    result = _as_hydrogen_bond_result(artifact)
 
     assert result.timestep_ps == pytest.approx(30.0)
     assert result.raw_timestep_ps == pytest.approx(10.0)
@@ -468,8 +505,8 @@ def test_angle_cutoff_validation() -> None:
         HydrogenBondSettings(angle_cutoff=181)
 
 
-def test_replicate_result_save_load(tmp_path: Path) -> None:
-    """Replicate result models should round-trip with save/load."""
+def test_replicate_payload_model_round_trip(tmp_path: Path) -> None:
+    """Replicate payload fragments should validate serialized JSON."""
     settings = HydrogenBondSettings()
     result = HydrogenBondReplicatePayload(
         replicate=1,
@@ -487,8 +524,9 @@ def test_replicate_result_save_load(tmp_path: Path) -> None:
         ],
     )
 
-    path = result.save(tmp_path / "hbonds_replicate.json")
-    loaded = HydrogenBondReplicatePayload.load(path)
+    path = tmp_path / "hbonds_replicate.json"
+    path.write_text(result.model_dump_json(), encoding="utf-8")
+    loaded = HydrogenBondReplicatePayload.model_validate_json(path.read_text(encoding="utf-8"))
 
     assert loaded.replicate == 1
     assert loaded.settings_fingerprint == _settings_hash(settings)
@@ -496,8 +534,8 @@ def test_replicate_result_save_load(tmp_path: Path) -> None:
     assert loaded.summaries[0].mean_hbonds_per_frame == pytest.approx(3.2)
 
 
-def test_aggregated_result_save_load(tmp_path: Path) -> None:
-    """Aggregated result models should round-trip with save/load."""
+def test_condition_payload_model_round_trip(tmp_path: Path) -> None:
+    """Condition payload fragments should validate serialized JSON."""
     settings = HydrogenBondSettings()
     result = HydrogenBondConditionPayload(
         settings_fingerprint=_settings_hash(settings),
@@ -519,8 +557,9 @@ def test_aggregated_result_save_load(tmp_path: Path) -> None:
         ],
     )
 
-    path = result.save(tmp_path / "hbonds_aggregated.json")
-    loaded = HydrogenBondConditionPayload.load(path)
+    path = tmp_path / "hbonds_aggregated.json"
+    path.write_text(result.model_dump_json(), encoding="utf-8")
+    loaded = HydrogenBondConditionPayload.model_validate_json(path.read_text(encoding="utf-8"))
 
     assert loaded.n_replicates == 2
     assert loaded.replicates == [1, 2]
@@ -560,12 +599,15 @@ def test_load_aggregated_result_ignores_noncanonical_json(tmp_path: Path) -> Non
     analysis = HydrogenBondsAnalysis()
     aggregated_dir = tmp_path / "aggregated"
     aggregated_dir.mkdir()
-    HydrogenBondConditionPayload(
+    noncanonical_payload = HydrogenBondConditionPayload(
         settings_fingerprint=_settings_hash(HydrogenBondSettings()),
         replicates=[1, 2],
         n_replicates=2,
         summaries=[_make_aggregated_summary("protein_polymer", 3.0, 0.2, [2.8, 3.2])],
-    ).save(aggregated_dir / "noncanonical_summary.json")
+    )
+    (aggregated_dir / "noncanonical_summary.json").write_text(
+        noncanonical_payload.model_dump_json(), encoding="utf-8"
+    )
 
     assert analysis._load_aggregated_result(aggregated_dir) is None
 
@@ -611,7 +653,7 @@ def test_aggregated_summary_deserializes_new_sem_unique_pairs_field() -> None:
 
 
 def test_result_summary() -> None:
-    """Result summary should return a non-empty string."""
+    """Replicate payload fragments should expose validated summaries."""
     result = HydrogenBondReplicatePayload(
         summaries=[
             HydrogenBondReplicateSummary(
@@ -625,9 +667,8 @@ def test_result_summary() -> None:
             )
         ]
     )
-    text = result.summary()
-    assert isinstance(text, str)
-    assert text
+    assert result.summaries[0].name == "protein_polymer"
+    assert result.summaries[0].mean_hbonds_per_frame == pytest.approx(1.2)
 
 
 def test_residue_ref_label() -> None:
@@ -987,8 +1028,9 @@ def test_load_replicate_result_ignores_noncanonical_custom_cache(tmp_path: Path)
     """Non-canonical custom hbonds_eq caches should not be active after MDA migration."""
     run_dir = tmp_path / "run_1"
     run_dir.mkdir()
-    HydrogenBondReplicatePayload(replicate=1, config_hash="abc123", summaries=[]).save(
-        run_dir / "hbonds_eq0ns_deadbeef.json"
+    noncanonical_payload = HydrogenBondReplicatePayload(replicate=1, summaries=[])
+    (run_dir / "hbonds_eq0ns_deadbeef.json").write_text(
+        noncanonical_payload.model_dump_json(), encoding="utf-8"
     )
     analysis = HydrogenBondsAnalysis()
 
@@ -2305,21 +2347,32 @@ def test_extract_metrics_multiple_summaries() -> None:
     }
 
 
-def test_extract_metrics_dict_input() -> None:
-    """extract_metrics should support dict-style aggregated summaries."""
+def test_extract_metrics_canonical_artifact_dict_input(tmp_path: Path) -> None:
+    """extract_metrics should support serialized canonical condition artifacts."""
     analysis = HydrogenBondsAnalysis()
-    metrics = analysis.extract_metrics(
-        {
-            "summaries": [
-                {
-                    "name": "protein_polymer",
-                    "mean_hbonds_per_frame": 2.0,
-                    "sem_hbonds_per_frame": 0.25,
-                    "per_replicate_mean_hbonds": [1.8, 2.2],
-                }
-            ]
-        }
+    artifact = _write_hbond_condition_artifact(
+        tmp_path / "aggregated",
+        condition_label="CondA",
+        result=HydrogenBondConditionPayload(
+            replicates=[1, 2],
+            n_replicates=2,
+            summaries=[
+                HydrogenBondAggregatedSummary(
+                    name="protein_polymer",
+                    mode="between",
+                    group_names=["protein", "polymer"],
+                    n_replicates=2,
+                    mean_hbonds_per_frame=2.0,
+                    sem_hbonds_per_frame=0.25,
+                    per_replicate_mean_hbonds=[1.8, 2.2],
+                    mean_fraction_with_any=0.0,
+                    sem_fraction_with_any=0.0,
+                    per_replicate_fraction_with_any=[0.0, 0.0],
+                )
+            ],
+        ),
     )
+    metrics = analysis.extract_metrics(artifact.model_dump(mode="json"))
 
     metric = metrics["mean_hbonds_protein_polymer"]
     assert metric.mean == pytest.approx(2.0)
@@ -2662,6 +2715,16 @@ def test_compare_rejects_stale_preloaded_aggregated_result(tmp_path: Path) -> No
         replicates=(1, 2),
         sim_config=MagicMock(),
     )
+    stale_artifact = _write_hbond_condition_artifact(
+        tmp_path / "analysis" / "conda" / "hydrogen_bonds" / "aggregated",
+        condition_label="CondA",
+        result=HydrogenBondConditionPayload(
+            settings_fingerprint=_settings_hash(stale_settings),
+            replicates=[1, 2],
+            n_replicates=2,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [1.8, 2.2])],
+        ),
+    )
 
     ctx = ComparisonContext(
         name="hbonds_compare",
@@ -2673,14 +2736,7 @@ def test_compare_rejects_stale_preloaded_aggregated_result(tmp_path: Path) -> No
         equilibration="10ns",
         settings=current_settings,
         recompute=False,
-        aggregated_results={
-            "CondA": HydrogenBondConditionPayload(
-                settings_fingerprint=_settings_hash(stale_settings),
-                replicates=[1, 2],
-                n_replicates=2,
-                summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [1.8, 2.2])],
-            )
-        },
+        aggregated_results={"CondA": stale_artifact},
     )
 
     with pytest.raises(ValueError, match="current settings require"):
@@ -2752,7 +2808,7 @@ def test_plot_rejects_noncanonical_replicate_cache_from_disk(tmp_path: Path) -> 
         ),
     )
 
-    HydrogenBondReplicatePayload(
+    noncanonical_payload = HydrogenBondReplicatePayload(
         config_hash="cfg123",
         replicate=1,
         equilibration_time=10.0,
@@ -2769,7 +2825,8 @@ def test_plot_rejects_noncanonical_replicate_cache_from_disk(tmp_path: Path) -> 
                 counts_per_frame=[1, 2, 3],
             )
         ],
-    ).save(run_dir / "result.json")
+    )
+    (run_dir / "result.json").write_text(noncanonical_payload.model_dump_json(), encoding="utf-8")
 
     ctx = PlotContext(
         conditions=[condition],
@@ -3128,7 +3185,6 @@ def test_result_empty_summaries() -> None:
     """Replicate result should support an empty summaries list."""
     result = HydrogenBondReplicatePayload(summaries=[])
     assert result.summaries == []
-    assert "0 summaries" in result.summary()
 
 
 def test_aggregated_result_zero_replicates_field() -> None:

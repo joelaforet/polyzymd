@@ -7,12 +7,14 @@ This private module keeps plotting logic separate from the plugin lifecycle in
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
+from pydantic import BaseModel
 
-from polyzymd.analyses.hydrogen_bonds._models import HydrogenBondConditionPayload
+from polyzymd.analyses.mda import ConditionArtifact
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
@@ -36,13 +38,44 @@ def _safe_name(name: str) -> str:
     return name.replace(" ", "_").replace("/", "-")
 
 
-def _find_summary(result: HydrogenBondConditionPayload, summary_name: str) -> Any | None:
+HydrogenBondPlotPayload = ConditionArtifact | Mapping[str, Any]
+
+
+def _payload(result: HydrogenBondPlotPayload) -> Mapping[str, Any]:
+    """Return the canonical payload mapping for a plot input."""
+
+    if isinstance(result, ConditionArtifact):
+        return result.payload
+    if isinstance(result, BaseModel):
+        return result.model_dump(mode="python")
+    return result
+
+
+def _get_attr(mapping: Mapping[str, Any], key: str, default: Any = None) -> Any:
+    """Read a mapping key or model-like attribute."""
+
+    if isinstance(mapping, Mapping):
+        return mapping.get(key, default)
+    return getattr(mapping, key, default)
+
+
+def _residue_label(residue: Mapping[str, Any]) -> str:
+    """Return a compact residue label from a canonical residue mapping."""
+
+    return f"{residue.get('resname', '')}{residue.get('resid', '')}:{residue.get('chain_id', '')}"
+
+
+def _find_summary(result: HydrogenBondPlotPayload, summary_name: str) -> Mapping[str, Any] | None:
     """Find a named summary in an aggregated result."""
-    return next((summary for summary in result.summaries if summary.name == summary_name), None)
+    summaries = _payload(result).get("summaries", [])
+    return next(
+        (summary for summary in summaries if _get_attr(summary, "name") == summary_name),
+        None,
+    )
 
 
 def plot_summary_comparison(
-    results: dict[str, HydrogenBondConditionPayload],
+    results: dict[str, HydrogenBondPlotPayload],
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -61,10 +94,11 @@ def plot_summary_comparison(
         result = results.get(label)
         if result is None:
             continue
-        for summary in result.summaries:
-            if summary.name not in seen:
-                seen.add(summary.name)
-                summary_names.append(summary.name)
+        for summary in _payload(result).get("summaries", []):
+            summary_name = str(_get_attr(summary, "name", "unknown"))
+            if summary_name not in seen:
+                seen.add(summary_name)
+                summary_names.append(summary_name)
 
     if not summary_names:
         return None
@@ -89,10 +123,12 @@ def plot_summary_comparison(
         for label in labels:
             result = results.get(label)
             summary = _find_summary(result, summary_name) if result is not None else None
-            means.append(float(summary.mean_hbonds_per_frame) if summary is not None else 0.0)
-            sems.append(float(summary.sem_hbonds_per_frame) if summary is not None else 0.0)
+            means.append(
+                float(_get_attr(summary, "mean_hbonds_per_frame", 0.0)) if summary else 0.0
+            )
+            sems.append(float(_get_attr(summary, "sem_hbonds_per_frame", 0.0)) if summary else 0.0)
             replicate_values.append(
-                list(summary.per_replicate_mean_hbonds) if summary is not None else []
+                list(_get_attr(summary, "per_replicate_mean_hbonds", [])) if summary else []
             )
 
         yerr = suppress_singleton_errors(sems, replicate_values)
@@ -132,7 +168,7 @@ def plot_summary_comparison(
 
 
 def plot_timeseries(
-    results: dict[str, HydrogenBondConditionPayload],
+    results: dict[str, HydrogenBondPlotPayload],
     replicate_data: dict[str, dict[str, list[list[int]]]],
     labels: Sequence[str],
     summary_name: str,
@@ -172,7 +208,9 @@ def plot_timeseries(
 
         trimmed = [np.asarray(trace[:min_len], dtype=float) for trace in traces]
         timestep_ps = (
-            float(result.timestep_ps) if result is not None and result.timestep_ps else 1.0
+            float(result.metadata.get("timestep_ps"))
+            if isinstance(result, ConditionArtifact) and result.metadata.get("timestep_ps")
+            else 1.0
         )
         time_ns = np.arange(min_len, dtype=float) * timestep_ps / 1000.0
 
@@ -213,7 +251,7 @@ def plot_timeseries(
 
 
 def plot_top_pairs(
-    results: dict[str, HydrogenBondConditionPayload],
+    results: dict[str, HydrogenBondPlotPayload],
     labels: Sequence[str],
     summary_name: str,
     output_dir: Path,
@@ -236,9 +274,13 @@ def plot_top_pairs(
         if summary is None:
             continue
         seen_in_condition: set[str] = set()
-        for pair in summary.undirected_pairs:
-            pair_label = f"{pair.residue_a.label} — {pair.residue_b.label}"
-            scores[pair_label] = max(scores.get(pair_label, 0.0), float(pair.mean_occupancy))
+        for pair in _get_attr(summary, "undirected_pairs", []):
+            residue_a = _get_attr(pair, "residue_a", {})
+            residue_b = _get_attr(pair, "residue_b", {})
+            pair_label = f"{_residue_label(residue_a)} — {_residue_label(residue_b)}"
+            scores[pair_label] = max(
+                scores.get(pair_label, 0.0), float(_get_attr(pair, "mean_occupancy", 0.0))
+            )
             seen_in_condition.add(pair_label)
         for pair_label in seen_in_condition:
             presence_count[pair_label] = presence_count.get(pair_label, 0) + 1
@@ -271,18 +313,22 @@ def plot_top_pairs(
         replicate_values_by_pair: dict[str, list[float]] = {}
         if summary is not None:
             occupancy_by_pair = {
-                f"{pair.residue_a.label} — {pair.residue_b.label}": float(pair.mean_occupancy)
-                for pair in summary.undirected_pairs
+                f"{_residue_label(_get_attr(pair, 'residue_a', {}))} — {_residue_label(_get_attr(pair, 'residue_b', {}))}": float(
+                    _get_attr(pair, "mean_occupancy", 0.0)
+                )
+                for pair in _get_attr(summary, "undirected_pairs", [])
             }
             sem_by_pair = {
-                f"{pair.residue_a.label} — {pair.residue_b.label}": float(pair.sem_occupancy)
-                for pair in summary.undirected_pairs
+                f"{_residue_label(_get_attr(pair, 'residue_a', {}))} — {_residue_label(_get_attr(pair, 'residue_b', {}))}": float(
+                    _get_attr(pair, "sem_occupancy", 0.0)
+                )
+                for pair in _get_attr(summary, "undirected_pairs", [])
             }
             replicate_values_by_pair = {
-                f"{pair.residue_a.label} — {pair.residue_b.label}": list(
-                    pair.per_replicate_occupancy
+                f"{_residue_label(_get_attr(pair, 'residue_a', {}))} — {_residue_label(_get_attr(pair, 'residue_b', {}))}": list(
+                    _get_attr(pair, "per_replicate_occupancy", [])
                 )
-                for pair in summary.undirected_pairs
+                for pair in _get_attr(summary, "undirected_pairs", [])
             }
 
         values = [occupancy_by_pair.get(pair_label, 0.0) for pair_label in top_labels]
@@ -331,7 +377,7 @@ def plot_top_pairs(
 
 
 def plot_composition_absolute(
-    results: dict[str, HydrogenBondConditionPayload],
+    results: dict[str, HydrogenBondPlotPayload],
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -353,7 +399,10 @@ def plot_composition_absolute(
     fig, ax = plt.subplots(figsize=(max(7.0, 1.8 * len(labels)), 5.0))
     bottom = np.zeros(len(labels), dtype=float)
     replicate_bases_by_label = {
-        label: [0.0] * (results[label].n_replicates if label in results else 0) for label in labels
+        label: (
+            [0.0] * int(_payload(results[label]).get("n_replicates", 0)) if label in results else []
+        )
+        for label in labels
     }
 
     for idx, key in enumerate(keys):
@@ -368,13 +417,16 @@ def plot_composition_absolute(
             entry = next(
                 (
                     item
-                    for item in result.composition_entries
-                    if (item.donor_partition, item.acceptor_partition) == key
+                    for item in _payload(result).get("composition_entries", [])
+                    if (_get_attr(item, "donor_partition"), _get_attr(item, "acceptor_partition"))
+                    == key
                 ),
                 None,
             )
-            values.append(float(entry.mean_hbonds_per_frame) if entry is not None else 0.0)
-            replicate_values.append(list(entry.per_replicate_hbonds) if entry is not None else [])
+            values.append(float(_get_attr(entry, "mean_hbonds_per_frame", 0.0)) if entry else 0.0)
+            replicate_values.append(
+                list(_get_attr(entry, "per_replicate_hbonds", [])) if entry else []
+            )
 
         values_arr = np.asarray(values, dtype=float)
         ax.bar(
@@ -420,7 +472,7 @@ def plot_composition_absolute(
 
 
 def plot_composition_fraction(
-    results: dict[str, HydrogenBondConditionPayload],
+    results: dict[str, HydrogenBondPlotPayload],
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -442,7 +494,10 @@ def plot_composition_fraction(
     fig, ax = plt.subplots(figsize=(max(7.0, 1.8 * len(labels)), 5.0))
     bottom = np.zeros(len(labels), dtype=float)
     replicate_bases_by_label = {
-        label: [0.0] * (results[label].n_replicates if label in results else 0) for label in labels
+        label: (
+            [0.0] * int(_payload(results[label]).get("n_replicates", 0)) if label in results else []
+        )
+        for label in labels
     }
 
     for idx, key in enumerate(keys):
@@ -457,13 +512,16 @@ def plot_composition_fraction(
             entry = next(
                 (
                     item
-                    for item in result.composition_entries
-                    if (item.donor_partition, item.acceptor_partition) == key
+                    for item in _payload(result).get("composition_entries", [])
+                    if (_get_attr(item, "donor_partition"), _get_attr(item, "acceptor_partition"))
+                    == key
                 ),
                 None,
             )
-            values.append(float(entry.mean_fraction_of_total) if entry is not None else 0.0)
-            replicate_values.append(list(entry.per_replicate_fraction) if entry is not None else [])
+            values.append(float(_get_attr(entry, "mean_fraction_of_total", 0.0)) if entry else 0.0)
+            replicate_values.append(
+                list(_get_attr(entry, "per_replicate_fraction", [])) if entry else []
+            )
 
         values_arr = np.asarray(values, dtype=float)
         ax.bar(
@@ -519,7 +577,7 @@ def plot_composition_fraction(
 
 
 def _composition_keys(
-    results: dict[str, HydrogenBondConditionPayload],
+    results: dict[str, HydrogenBondPlotPayload],
     labels: Sequence[str],
 ) -> list[tuple[str, str]]:
     """Return composition pair keys in deterministic order."""
@@ -528,6 +586,11 @@ def _composition_keys(
         result = results.get(label)
         if result is None:
             continue
-        for entry in result.composition_entries:
-            keys.add((entry.donor_partition, entry.acceptor_partition))
+        for entry in _payload(result).get("composition_entries", []):
+            keys.add(
+                (
+                    str(_get_attr(entry, "donor_partition")),
+                    str(_get_attr(entry, "acceptor_partition")),
+                )
+            )
     return sorted(keys)
