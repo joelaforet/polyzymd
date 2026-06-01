@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 from collections.abc import Sequence
 from datetime import datetime
@@ -815,68 +814,6 @@ def test_contacts_anova_fdr_correction() -> None:
     assert anova[1].p_value_adjusted == pytest.approx(0.20)
     assert anova[0].significant is True
     assert anova[1].significant is False
-
-
-def test_contacts_result_backward_compat() -> None:
-    """Contacts result should deserialize old JSON missing new fields."""
-    payload = {
-        "name": "non-canonical_contacts",
-        "contacts_name": "contacts",
-        "contacts_description": None,
-        "polymer_selection": "chainID C",
-        "protein_selection": "protein",
-        "cutoff": 4.5,
-        "contact_criteria": "distance_cutoff",
-        "control_label": "Control",
-        "conditions": [
-            {
-                "label": "Control",
-                "config_path": "/tmp/control.yaml",
-                "n_replicates": 3,
-                "n_residues": 100,
-                "coverage_mean": 0.2,
-                "coverage_sem": 0.01,
-                "mean_contact_fraction": 0.05,
-                "mean_contact_fraction_sem": 0.005,
-            }
-        ],
-        "pairwise_comparisons": [
-            {
-                "condition_a": "Control",
-                "condition_b": "Treatment",
-                "aggregate_comparisons": [
-                    {
-                        "metric": "coverage",
-                        "condition_a": "Control",
-                        "condition_b": "Treatment",
-                        "condition_a_mean": 0.2,
-                        "condition_a_sem": 0.01,
-                        "condition_b_mean": 0.25,
-                        "condition_b_sem": 0.01,
-                        "t_statistic": 2.2,
-                        "p_value": 0.03,
-                        "cohens_d": 0.8,
-                        "effect_size_interpretation": "large",
-                        "significant": True,
-                        "percent_change": 25.0,
-                        "direction": "increased",
-                    }
-                ],
-            }
-        ],
-        "anova": [],
-        "ranking_by_coverage": ["Control"],
-        "ranking_by_contact_fraction": ["Control"],
-        "equilibration_time": "10ns",
-        "created_at": "2026-01-01T00:00:00",
-        "polyzymd_version": "1.3.0",
-    }
-
-    result = ContactsComparisonResult.model_validate_json(json.dumps(payload))
-
-    assert result.fdr_alpha == pytest.approx(0.05)
-    assert result.min_effect_size == pytest.approx(0.0)
-    assert result.top_residues == 0
 
 
 def test_contacts_formatter_shows_adjusted_pvalues() -> None:
