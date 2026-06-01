@@ -255,13 +255,6 @@ def get_analysis(name: str) -> type["Analysis"]:
     registry = _cached_registry()
     if name in registry:
         return registry[name]
-    from polyzymd.core.archived_features import (
-        format_archived_analysis_message,
-        get_archived_analysis_plugin,
-    )
-
-    if get_archived_analysis_plugin(name) is not None:
-        raise KeyError(format_archived_analysis_message(name, context="analysis lookup"))
 
     available = sorted(registry.keys())
     raise KeyError(f"Unknown analysis {name!r}.  Available: {', '.join(available)}")

@@ -29,10 +29,6 @@ from polyzymd.config.comparison import (
     ComparisonConfig,
     generate_comparison_template,
 )
-from polyzymd.core.archived_features import (
-    format_archived_analysis_message,
-    get_archived_analysis_plugin,
-)
 from polyzymd.core.branding import prepend_file_header
 from polyzymd.core.experimental import (
     echo_experimental_warning,
@@ -106,24 +102,6 @@ def _plugin_contract_click_exception(
         "This is likely a PolyzyMD/plugin bug, not missing trajectory data. "
         "Please report it with the command and configuration used."
     )
-
-
-def _archived_analysis_click_exception(analysis_name: str, *, context: str) -> click.ClickException:
-    """Build a Click exception for archived analysis requests.
-
-    Parameters
-    ----------
-    analysis_name : str
-        User-provided analysis name.
-    context : str
-        CLI context where the analysis was requested.
-
-    Returns
-    -------
-    click.ClickException
-        User-facing exception with archive recovery information.
-    """
-    return click.ClickException(format_archived_analysis_message(analysis_name, context=context))
 
 
 def _resolve_submit_resources_with_hints(
@@ -386,7 +364,7 @@ place only comparison-wide references in this directory.
         click.echo(f"  2. cd {_display_path(project_dir)}")
         click.echo("  3. Run comparisons:")
         click.echo("     polyzymd compare run rmsf      # Compare flexibility")
-        click.echo("     polyzymd compare run triad     # Compare triad geometry")
+        click.echo("     polyzymd compare run catalytic_triad  # Compare triad geometry")
         click.echo("     polyzymd compare run contacts  # Compare polymer-protein contacts")
         click.echo()
         click.echo("  On an HPC cluster, submit as SLURM jobs instead:")
@@ -596,12 +574,6 @@ def run_comparison(
     try:
         analysis_cls = get_analysis(comparison_type)
     except KeyError:
-        if get_archived_analysis_plugin(comparison_type) is not None:
-            raise _archived_analysis_click_exception(
-                comparison_type,
-                context="CLI comparison lookup",
-            ) from None
-
         available = list_all_names()
         click.echo(f"Error: Unknown comparison type '{comparison_type}'", err=True)
         click.echo(f"Available types: {', '.join(available)}", err=True)
@@ -781,12 +753,6 @@ def plot_all(
         try:
             get_analysis(analysis_type)
         except KeyError:
-            if get_archived_analysis_plugin(analysis_type) is not None:
-                raise _archived_analysis_click_exception(
-                    analysis_type,
-                    context="CLI plot lookup",
-                ) from None
-
             from polyzymd.analyses.discovery import list_all_names
 
             available = list_all_names()
@@ -1085,19 +1051,6 @@ def submit_analysis_hpc(
 
     _echo_qos_tip_if_needed(partition, qos)
 
-    if get_archived_analysis_plugin(analysis) is not None:
-        raise _archived_analysis_click_exception(
-            analysis,
-            context="CLI submission lookup",
-        )
-
-    if not dry_run and shutil.which("sbatch") is None:
-        raise click.ClickException(
-            "SLURM is not available: 'sbatch' not found on PATH. The HPC submission "
-            "commands require a SLURM cluster. Run analysis locally with "
-            "'polyzymd compare run' instead."
-        )
-
     try:
         config = ComparisonConfig.from_yaml(config_file)
     except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
@@ -1113,6 +1066,13 @@ def submit_analysis_hpc(
             f"Unknown analysis type '{analysis}'. Available: {', '.join(sorted(available))}"
         )
     plugin = analysis_cls()
+
+    if not dry_run and shutil.which("sbatch") is None:
+        raise click.ClickException(
+            "SLURM is not available: 'sbatch' not found on PATH. The HPC submission "
+            "commands require a SLURM cluster. Run analysis locally with "
+            "'polyzymd compare run' instead."
+        )
 
     dependencies = tuple(getattr(analysis_cls, "dependencies", ()))
     if dependencies:
@@ -1443,12 +1403,6 @@ def analysis_hpc_status(analysis: str, config_file: Path, reconcile: bool, as_js
     try:
         analysis_cls = get_analysis(analysis)
     except KeyError:
-        if get_archived_analysis_plugin(analysis) is not None:
-            raise _archived_analysis_click_exception(
-                analysis,
-                context="CLI status lookup",
-            ) from None
-
         from polyzymd.analyses.discovery import list_all_names
 
         available = list_all_names()
@@ -1546,12 +1500,6 @@ def finalize_analysis_hpc(
     try:
         analysis_cls = get_analysis(analysis)
     except KeyError:
-        if get_archived_analysis_plugin(analysis) is not None:
-            raise _archived_analysis_click_exception(
-                analysis,
-                context="CLI finalize lookup",
-            ) from None
-
         from polyzymd.analyses.discovery import list_all_names
 
         available = list_all_names()
@@ -1668,11 +1616,6 @@ def worker_replicate(
     try:
         analysis_cls = get_analysis(manifest.analysis_name)
     except KeyError:
-        if get_archived_analysis_plugin(manifest.analysis_name) is not None:
-            raise _archived_analysis_click_exception(
-                manifest.analysis_name,
-                context="CLI worker lookup",
-            ) from None
         raise
     plugin = analysis_cls()
     valid_conditions, equilibration, analysis_root = validate_manifest_snapshot(
@@ -1722,11 +1665,6 @@ def worker_aggregate(manifest_path: Path, condition_index: int):
     try:
         analysis_cls = get_analysis(manifest.analysis_name)
     except KeyError:
-        if get_archived_analysis_plugin(manifest.analysis_name) is not None:
-            raise _archived_analysis_click_exception(
-                manifest.analysis_name,
-                context="CLI worker lookup",
-            ) from None
         raise
     plugin = analysis_cls()
     valid_conditions, equilibration, analysis_root = validate_manifest_snapshot(
@@ -1767,11 +1705,6 @@ def worker_finalize(manifest_path: Path):
     try:
         analysis_cls = get_analysis(manifest.analysis_name)
     except KeyError:
-        if get_archived_analysis_plugin(manifest.analysis_name) is not None:
-            raise _archived_analysis_click_exception(
-                manifest.analysis_name,
-                context="CLI worker lookup",
-            ) from None
         raise
     plugin = analysis_cls()
     valid_conditions, equilibration, analysis_root = validate_manifest_snapshot(

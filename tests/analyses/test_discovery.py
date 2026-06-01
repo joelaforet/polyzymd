@@ -128,8 +128,8 @@ class TestDiscovery:
         assert analyses["rmsf"] is RMSFAnalysis
         assert analyses["contacts"] is ContactsAnalysis
 
-    def test_discovery_excludes_archived_plugins(self):
-        """Archived plugins and aliases should not be discoverable as active code."""
+    def test_discovery_excludes_removed_plugins(self):
+        """Removed plugins and aliases should not be discoverable as active code."""
         from polyzymd.analyses.discovery import (
             clear_cache,
             get_analysis,
@@ -158,7 +158,7 @@ class TestDiscovery:
         ):
             assert name not in active_plugins
             assert name not in active_names
-            with pytest.raises(KeyError, match="archive_experimental_analysis"):
+            with pytest.raises(KeyError, match="Unknown analysis"):
                 get_analysis(name)
 
         for name in ("contacts", "rmsf", "sasa"):

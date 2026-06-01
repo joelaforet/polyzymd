@@ -156,9 +156,9 @@ class TestSettings:
     def test_archived_binding_preference_settings_rejected(self, key, value):
         from polyzymd.analyses.contacts import ContactsSettings
 
-        with pytest.raises(ValueError, match="archive_experimental_analysis") as excinfo:
+        with pytest.raises(ValueError, match="not shipped as an active PolyzyMD") as excinfo:
             ContactsSettings.model_validate({key: value})
-        assert "feature/mda-analysis-migration" in str(excinfo.value)
+        assert "feature/mda-analysis-migration" not in str(excinfo.value)
 
     @pytest.mark.parametrize(
         "key,value",
@@ -182,9 +182,9 @@ class TestSettings:
     def test_archived_binding_preference_plot_settings_rejected(self, key, value):
         from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
 
-        with pytest.raises(ValueError, match="archive_experimental_analysis") as excinfo:
+        with pytest.raises(ValueError, match="not shipped as active PolyzyMD") as excinfo:
             ContactsPlotSettings.model_validate({key: value})
-        assert "feature/mda-analysis-migration" in str(excinfo.value)
+        assert "feature/mda-analysis-migration" not in str(excinfo.value)
 
     def test_retained_contacts_plot_settings_still_validate(self):
         from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings

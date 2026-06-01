@@ -28,9 +28,8 @@ ARCHIVED_BINDING_PREFERENCE_PLOT_SETTINGS: frozenset[str] = frozenset(
 )
 
 ARCHIVE_DIAGNOSTIC = (
-    "Contacts binding-preference plots have been archived and are no longer shipped as "
-    "active PolyzyMD contacts plots. To recover the archived implementation, use git tag "
-    "'archive_experimental_analysis' from branch 'feature/mda-analysis-migration'."
+    "Contacts binding-preference plots are not shipped as active PolyzyMD contacts "
+    "plots. Remove these settings and use the current contacts plot settings."
 )
 
 

@@ -369,8 +369,8 @@ class TestSemanticColorSettings:
             SemanticFamilyColorConfig(colormap_range=(0.8, 0.2))
 
 
-class TestArchivedAnalysisDiagnostics:
-    """Archived analyses should fail with recovery diagnostics."""
+class TestUnknownAnalysisDiagnostics:
+    """Unknown analyses should fail with uniform plugin diagnostics."""
 
     @pytest.mark.parametrize(
         "analysis_name",
@@ -384,17 +384,17 @@ class TestArchivedAnalysisDiagnostics:
             "bridging",
         ],
     )
-    def test_plugins_archived_analysis_reports_archive_location(
+    def test_plugins_unknown_analysis_reports_available_plugins(
         self,
         analysis_name: str,
         tmp_path: Path,
     ) -> None:
-        """Archived plugin settings should explain where the archived code lives."""
+        """Unknown plugin settings should report the standard plugin error."""
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
                 {
-                    "name": "archive-test",
+                    "name": "unknown-plugin-test",
                     "conditions": [
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
@@ -407,9 +407,9 @@ class TestArchivedAnalysisDiagnostics:
             ComparisonConfig.from_yaml(yaml_path)
 
         message = str(excinfo.value)
-        assert "plugins section" in message
-        assert "archive_experimental_analysis" in message
-        assert "feature/mda-analysis-migration" in message
+        assert f"Unknown analysis plugin '{analysis_name}'" in message
+        assert "Available plugins:" in message
+        assert "feature/mda-analysis-migration" not in message
 
     @pytest.mark.parametrize(
         "analysis_name",
@@ -423,17 +423,17 @@ class TestArchivedAnalysisDiagnostics:
             "bridging",
         ],
     )
-    def test_plot_settings_archived_analysis_reports_archive_location(
+    def test_plot_settings_unknown_analysis_reports_unknown_key(
         self,
         analysis_name: str,
         tmp_path: Path,
     ) -> None:
-        """Archived plot settings should explain where the archived code lives."""
+        """Unknown plot settings should report the standard plot key error."""
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
                 {
-                    "name": "archive-test",
+                    "name": "unknown-plot-test",
                     "conditions": [
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
@@ -447,9 +447,9 @@ class TestArchivedAnalysisDiagnostics:
             ComparisonConfig.from_yaml(yaml_path)
 
         message = str(excinfo.value)
-        assert "plot_settings section" in message
-        assert "archive_experimental_analysis" in message
-        assert "feature/mda-analysis-migration" in message
+        assert f"Unknown plot settings key '{analysis_name}'" in message
+        assert "discovered analysis type with PlotSettingsModel" in message
+        assert "feature/mda-analysis-migration" not in message
 
 
 class TestPluginSettingsCanonicalNames:

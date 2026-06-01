@@ -74,9 +74,9 @@ ARCHIVED_BINDING_PREFERENCE_SETTINGS: frozenset[str] = frozenset(
 )
 
 ARCHIVE_DIAGNOSTIC = (
-    "Contacts binding-preference support has been archived and is no longer shipped as "
-    "an active PolyzyMD contacts subpipeline. To recover the archived implementation, "
-    "use git tag 'archive_experimental_analysis' from branch 'feature/mda-analysis-migration'."
+    "Contacts binding-preference support is not shipped as an active PolyzyMD "
+    "contacts subpipeline. Remove these settings and use the current contacts, "
+    "distances, or SASA plugins for supported comparison workflows."
 )
 
 

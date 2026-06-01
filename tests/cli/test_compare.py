@@ -43,7 +43,7 @@ def _write_minimal_comparison_config(path: Path) -> None:
     path.write_text(
         yaml.dump(
             {
-                "name": "archive-cli-test",
+                "name": "cli-diagnostics-test",
                 "conditions": [
                     {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                 ],
@@ -54,11 +54,11 @@ def _write_minimal_comparison_config(path: Path) -> None:
     )
 
 
-def _assert_archive_recovery_guidance(output: str, analysis_name: str) -> None:
-    """Assert archived-analysis diagnostics include recovery location details."""
-    assert f"Analysis plugin '{analysis_name}'" in output
-    assert "archive_experimental_analysis" in output
-    assert "feature/mda-analysis-migration" in output
+def _assert_unknown_analysis_diagnostic(output: str, analysis_name: str) -> None:
+    """Assert unknown-analysis diagnostics use the standard available-types path."""
+    assert analysis_name in output
+    assert "Unknown" in output
+    assert "feature/mda-analysis-migration" not in output
 
 
 def test_compare_init_renders_comparison_scaffold(tmp_path: Path) -> None:
@@ -606,21 +606,21 @@ def test_run_all_plot_phase_receives_eq_time_override(monkeypatch, tmp_path: Pat
         "bridging",
     ],
 )
-def test_run_archived_analysis_reports_archive_diagnostic(
+def test_run_unknown_analysis_reports_standard_diagnostic(
     analysis_name: str,
     tmp_path: Path,
 ) -> None:
-    """compare run should report the archive tag and source branch."""
+    """compare run should report the standard unknown-name diagnostic."""
     runner = CliRunner()
 
     result = runner.invoke(compare, ["run", analysis_name, "-f", str(tmp_path / "missing.yaml")])
 
     assert result.exit_code != 0
-    _assert_archive_recovery_guidance(result.output, analysis_name)
+    _assert_unknown_analysis_diagnostic(result.output, analysis_name)
 
 
-def test_plot_all_analysis_archived_analysis_reports_archive_diagnostic(tmp_path: Path) -> None:
-    """compare plot-all -a should report the archive tag and source branch."""
+def test_plot_all_unknown_analysis_reports_standard_diagnostic(tmp_path: Path) -> None:
+    """compare plot-all -a should report the standard unknown-name diagnostic."""
     runner = CliRunner()
     config_path = tmp_path / "comparison.yaml"
     _write_minimal_comparison_config(config_path)
@@ -628,27 +628,29 @@ def test_plot_all_analysis_archived_analysis_reports_archive_diagnostic(tmp_path
     result = runner.invoke(compare, ["plot-all", "-f", str(config_path), "-a", "polymer_bridging"])
 
     assert result.exit_code != 0
-    _assert_archive_recovery_guidance(result.output, "polymer_bridging")
+    _assert_unknown_analysis_diagnostic(result.output, "polymer_bridging")
 
 
-def test_submit_archived_analysis_reports_archive_diagnostic_before_sbatch(
+def test_submit_unknown_analysis_reports_standard_diagnostic_before_sbatch(
     tmp_path: Path,
 ) -> None:
-    """compare submit should not mask archived analyses with SLURM prechecks."""
+    """compare submit should not mask unknown analyses with SLURM prechecks."""
     runner = CliRunner()
+    config_path = tmp_path / "comparison.yaml"
+    _write_minimal_comparison_config(config_path)
 
     result = runner.invoke(
         compare,
-        ["submit", "polymer_bridging", "-f", str(tmp_path / "missing.yaml")],
+        ["submit", "polymer_bridging", "-f", str(config_path)],
     )
 
     assert result.exit_code != 0
-    _assert_archive_recovery_guidance(result.output, "polymer_bridging")
+    _assert_unknown_analysis_diagnostic(result.output, "polymer_bridging")
     assert "sbatch" not in result.output
 
 
-def test_status_archived_analysis_reports_archive_diagnostic(tmp_path: Path) -> None:
-    """compare status should report the archive tag and source branch."""
+def test_status_unknown_analysis_reports_standard_diagnostic(tmp_path: Path) -> None:
+    """compare status should report the standard unknown-name diagnostic."""
     runner = CliRunner()
     config_path = tmp_path / "comparison.yaml"
     _write_minimal_comparison_config(config_path)
@@ -656,11 +658,11 @@ def test_status_archived_analysis_reports_archive_diagnostic(tmp_path: Path) -> 
     result = runner.invoke(compare, ["status", "polymer_bridging", "-f", str(config_path)])
 
     assert result.exit_code != 0
-    _assert_archive_recovery_guidance(result.output, "polymer_bridging")
+    _assert_unknown_analysis_diagnostic(result.output, "polymer_bridging")
 
 
-def test_finalize_archived_analysis_reports_archive_diagnostic(tmp_path: Path) -> None:
-    """compare finalize should report the archive tag and source branch."""
+def test_finalize_unknown_analysis_reports_standard_diagnostic(tmp_path: Path) -> None:
+    """compare finalize should report the standard unknown-name diagnostic."""
     runner = CliRunner()
     config_path = tmp_path / "comparison.yaml"
     _write_minimal_comparison_config(config_path)
@@ -668,19 +670,19 @@ def test_finalize_archived_analysis_reports_archive_diagnostic(tmp_path: Path) -
     result = runner.invoke(compare, ["finalize", "polymer_bridging", "-f", str(config_path)])
 
     assert result.exit_code != 0
-    _assert_archive_recovery_guidance(result.output, "polymer_bridging")
+    _assert_unknown_analysis_diagnostic(result.output, "polymer_bridging")
 
 
-def test_submit_all_archived_plugin_config_reports_archive_diagnostic_before_sbatch(
+def test_submit_all_unknown_plugin_config_reports_standard_diagnostic_before_sbatch(
     tmp_path: Path,
 ) -> None:
-    """compare submit-all config handling should surface archived plugin diagnostics."""
+    """compare submit-all config handling should surface unknown plugin diagnostics."""
     runner = CliRunner()
     config_path = tmp_path / "comparison.yaml"
     config_path.write_text(
         yaml.dump(
             {
-                "name": "archive-cli-test",
+                "name": "unknown-cli-test",
                 "conditions": [
                     {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                 ],
@@ -693,7 +695,7 @@ def test_submit_all_archived_plugin_config_reports_archive_diagnostic_before_sba
     result = runner.invoke(compare, ["submit-all", "-f", str(config_path)])
 
     assert result.exit_code != 0
-    _assert_archive_recovery_guidance(result.output, "polymer_bridging")
+    _assert_unknown_analysis_diagnostic(result.output, "polymer_bridging")
     assert "sbatch" not in result.output
 
 
@@ -1204,6 +1206,16 @@ def test_submit_without_sbatch(monkeypatch, tmp_path: Path) -> None:
     """CLI submit should fail cleanly when sbatch is unavailable."""
     runner = CliRunner()
 
+    class _FakeAnalysis:
+        name = "toy"
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
+        lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis", lambda name: lambda: _FakeAnalysis()
+    )
     monkeypatch.setattr("shutil.which", lambda name: None if name == "sbatch" else "/usr/bin/other")
     result = runner.invoke(
         compare,

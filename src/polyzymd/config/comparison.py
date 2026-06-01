@@ -9,10 +9,6 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analyses.base import BasePlotSettings
-from polyzymd.core.archived_features import (
-    format_archived_analysis_message,
-    get_archived_analysis_plugin,
-)
 from polyzymd.core.branding import prepend_file_header
 from polyzymd.utils.templates import render_package_template
 
@@ -136,8 +132,6 @@ class PluginSettingsContainer(BaseModel):
         parsed_settings: dict[str, Any] = {}
         for key, value in data.items():
             key_lower = str(key).lower()
-            if get_archived_analysis_plugin(key_lower) is not None:
-                raise ValueError(format_archived_analysis_message(key, context="plugins section"))
             if value is None:
                 continue
             try:
@@ -552,7 +546,7 @@ class PlotSettings(BaseModel):
         **data : Any
             Plot settings from YAML.  Keys matching discovered analysis
             types are parsed into their settings classes; global keys are
-            handled by Pydantic; unknown keys are logged and skipped.
+            handled by Pydantic; unknown keys raise ``ValueError``.
         """
         from polyzymd.analyses.discovery import list_analyses
 
@@ -564,27 +558,6 @@ class PlotSettings(BaseModel):
                 and analysis_cls.PlotSettingsModel is not None
             ):
                 _plot_models[analysis_name] = analysis_cls.PlotSettingsModel
-
-        # Check for deprecated "triad" key and give helpful warning
-        if "triad" in data and "triad" not in _plot_models:
-            import warnings
-
-            warnings.warn(
-                "plot_settings key 'triad' has been renamed to 'catalytic_triad'. "
-                "Please update your comparison.yaml to use 'catalytic_triad' instead.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            # Do NOT silently remap — raise the normal unknown-key error below
-
-        for key in data:
-            if (
-                key not in PlotSettings._GLOBAL_FIELDS
-                and get_archived_analysis_plugin(key) is not None
-            ):
-                raise ValueError(
-                    format_archived_analysis_message(key, context="plot_settings section")
-                )
 
         global_data: dict[str, Any] = {}
         per_analysis: dict[str, BasePlotSettings] = {}
