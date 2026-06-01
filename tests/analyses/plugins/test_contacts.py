@@ -1564,6 +1564,7 @@ class TestFilterConditions:
         (run_dir / "solvated_system.pdb").write_text("ATOM ...")
 
         mock_sim_config = MagicMock()
+        mock_sim_config.engine = "openmm"
         mock_sim_config.output.projects_directory = projects_dir
         mock_sim_config.get_working_directory.return_value = run_dir
 
@@ -1599,6 +1600,7 @@ class TestFilterConditions:
         run_dir.mkdir()
 
         mock_sim_config = MagicMock()
+        mock_sim_config.engine = "openmm"
         mock_sim_config.output.projects_directory = projects_dir
         mock_sim_config.get_working_directory.return_value = run_dir
 
@@ -1652,6 +1654,7 @@ class TestFilterConditions:
         run_dir.mkdir()
 
         mock_sim_config = MagicMock()
+        mock_sim_config.engine = "openmm"
         mock_sim_config.output.projects_directory = tmp_path / "projects"
         mock_sim_config.get_working_directory.return_value = run_dir
         cond = Condition(
