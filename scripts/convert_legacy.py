@@ -541,6 +541,7 @@ def rewrite_topology(
     """Rewrite topology PDB with corrected chain IDs and protein atom names.
 
     Chain assignment convention:
+
     - A: protein (standard amino acid residues)
     - B: substrate (resname RBY)
     - C: polymer (resnames SBM, EGM, EGP, or other known polymer residues)
@@ -718,6 +719,7 @@ def generate_config_yaml(
         "description": (
             f"Legacy simulation converted for PolyzyMD analysis. Original: {metadata.folder_name}"
         ),
+        "engine": "openmm",
         # Enzyme
         "enzyme": {
             "name": metadata.enzyme_name,
@@ -884,6 +886,7 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
     """Validate the converted output directory.
 
     Checks:
+
     1. solvated_system.pdb exists and is loadable
     2. config.yaml exists and is parseable
     3. Trajectory files are discoverable via symlinks
@@ -901,8 +904,6 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
     bool
         True if validation passes.
     """
-    import MDAnalysis as mda
-
     success = True
 
     # Check solvated_system.pdb
@@ -913,8 +914,9 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
 
     # Load and verify chain assignments
     try:
+        import MDAnalysis as mda
+
         u = mda.Universe(str(topo_path))
-        chains = set(u.atoms.chainIDs)
 
         # Must have chain A (protein)
         prot = u.select_atoms("protein and chainID A")
@@ -993,7 +995,8 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
     except ImportError:
         logger.info("  SKIP: PolyzyMD not importable, skipping config validation")
     except Exception as e:
-        logger.warning(f"  WARN: PolyzyMD config validation failed: {e}")
+        logger.error(f"  FAIL: PolyzyMD config validation failed: {e}")
+        success = False
 
     return success
 
@@ -1296,6 +1299,13 @@ def generate_comparison_yaml(
             allow_unicode=True,
         )
 
+    from polyzymd.config.comparison import ComparisonConfig
+
+    comparison = ComparisonConfig.from_yaml(comparison_yaml_path)
+    errors = comparison.validate_config()
+    if errors:
+        raise ValueError("Generated comparison.yaml failed validation: " + "; ".join(errors))
+
     # --- Summary ---
     logger.info(f"\n  Comparison project created at: {comparison_dir}")
     logger.info(f"  comparison.yaml: {comparison_yaml_path}")
@@ -1396,7 +1406,7 @@ def _build_plot_settings() -> dict:
             "figsize_profile": [14, 4],
             "figsize_comparison": [8, 6],
         },
-        "triad": {
+        "catalytic_triad": {
             "generate_kde_panel": True,
             "generate_bars": True,
             "figsize_bars": [10, 6],
@@ -1512,9 +1522,9 @@ def convert_simulation(
     if valid:
         logger.info(f"\n  SUCCESS: {folder_name}")
     else:
-        logger.warning(f"\n  WARNINGS during conversion of {folder_name}")
+        logger.error(f"\n  FAIL: Validation failed for {folder_name}")
 
-    return True
+    return valid
 
 
 def find_legacy_sim_dirs(parent_dir: Path) -> list[Path]:

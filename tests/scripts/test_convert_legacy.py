@@ -8,6 +8,10 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+import yaml
+
+from polyzymd.config.comparison import ComparisonConfig
+from polyzymd.config.schema import SimulationConfig
 
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "convert_legacy.py"
 
@@ -98,6 +102,138 @@ def test_discover_files_rejects_arbitrary_names(convert_legacy: ModuleType, tmp_
 
     with pytest.raises(FileNotFoundError, match="No topology PDB found"):
         convert_legacy.discover_files(sim_dir, metadata)
+
+
+def test_generate_config_yaml_includes_engine_and_loads(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Generated simulation config should include canonical OpenMM engine."""
+    metadata = convert_legacy.SimMetadata(
+        folder_name="10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+        restraint_distance="10A",
+        enzyme_name="LipA",
+        substrate_name="Resorufin-Butyrate",
+        temperature_K=363.0,
+        replicate=1,
+        equilibration=convert_legacy.PhaseParams(
+            ensemble="NVT",
+            duration_ns=0.5,
+            samples=10,
+            time_step_fs=2.0,
+            temperature_K=363.0,
+            pressure_atm=1.0,
+        ),
+        production=convert_legacy.PhaseParams(
+            ensemble="NPT",
+            duration_ns=1000.0,
+            samples=2500,
+            time_step_fs=2.0,
+            temperature_K=363.0,
+            pressure_atm=1.0,
+        ),
+    )
+    config_path = tmp_path / "config.yaml"
+
+    convert_legacy.generate_config_yaml(metadata, tmp_path, config_path)
+
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert data["engine"] == "openmm"
+    config = SimulationConfig.from_yaml(config_path)
+    assert config.engine == "openmm"
+
+
+def test_generate_comparison_yaml_uses_canonical_plot_key(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Generated comparison config should use catalytic_triad plot settings."""
+    converted = tmp_path / "converted"
+    sim_dir = converted / (
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1"
+    )
+    sim_dir.mkdir(parents=True)
+    (sim_dir / "config.yaml").write_text("name: legacy\n", encoding="utf-8")
+
+    comparison_yaml = convert_legacy.generate_comparison_yaml(
+        output_dir=converted,
+        comparison_dir=tmp_path / "comparison",
+        project_name="legacy_compare",
+        control_label="No Polymer (Control)",
+    )
+
+    data = yaml.safe_load(comparison_yaml.read_text(encoding="utf-8"))
+    assert "catalytic_triad" in data["plot_settings"]
+    assert "triad" not in data["plot_settings"]
+    config = ComparisonConfig.from_yaml(comparison_yaml)
+    assert config.validate_config() == []
+
+
+def test_validate_output_config_validation_failure_returns_false(
+    convert_legacy: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Invalid generated simulation config should fail output validation."""
+
+    class FakeAtomGroup:
+        def __init__(self, size: int) -> None:
+            self._size = size
+
+        def __len__(self) -> int:
+            return self._size
+
+    class FakeUniverse:
+        def __init__(self, _path: str) -> None:
+            self.atoms = type("FakeAtoms", (), {"chainIDs": ["A"]})()
+
+        def select_atoms(self, selection: str) -> FakeAtomGroup:
+            if selection in {"protein and chainID A", "protein and name CA"}:
+                return FakeAtomGroup(1)
+            return FakeAtomGroup(0)
+
+    fake_mda = type("FakeMDAnalysis", (), {"Universe": FakeUniverse})()
+    monkeypatch.setitem(sys.modules, "MDAnalysis", fake_mda)
+
+    output_sim_dir = tmp_path / "converted"
+    output_sim_dir.mkdir()
+    (output_sim_dir / "solvated_system.pdb").write_text("ATOM\n", encoding="utf-8")
+    (output_sim_dir / "config.yaml").write_text("name: invalid\n", encoding="utf-8")
+    metadata = convert_legacy.SimMetadata(
+        folder_name="legacy",
+        restraint_distance="10A",
+        enzyme_name="LipA",
+        substrate_name="Resorufin-Butyrate",
+        temperature_K=363.0,
+        replicate=1,
+    )
+
+    assert convert_legacy.validate_output(output_sim_dir, metadata) is False
+
+
+def test_convert_simulation_returns_false_when_validation_fails(
+    convert_legacy: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Conversion should fail when converted output validation fails."""
+
+    def fake_discover_files(_sim_dir: Path, metadata: object) -> None:
+        metadata.production_dirs = []
+        metadata.topology_path = tmp_path / "topology.pdb"
+
+    monkeypatch.setattr(convert_legacy, "discover_files", fake_discover_files)
+    monkeypatch.setattr(convert_legacy, "read_parameters_json", lambda *_args: None)
+    monkeypatch.setattr(convert_legacy, "rewrite_topology", lambda *_args: None)
+    monkeypatch.setattr(convert_legacy, "generate_config_yaml", lambda *_args: None)
+    monkeypatch.setattr(convert_legacy, "create_symlinks", lambda *_args: None)
+    monkeypatch.setattr(convert_legacy, "validate_output", lambda *_args: False)
+    sim_dir = tmp_path / (
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1"
+    )
+    sim_dir.mkdir()
+
+    success = convert_legacy.convert_simulation(
+        sim_dir=sim_dir,
+        output_dir=tmp_path / "converted",
+        reference_pdb=tmp_path / "reference.pdb",
+    )
+
+    assert success is False
 
 
 def test_conversion_guidance_uses_canonical_compare_commands(
