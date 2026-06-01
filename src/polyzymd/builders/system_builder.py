@@ -1011,7 +1011,13 @@ class SystemBuilder:
         # Check if we have config for MDP generation
         config = getattr(self, "_config", None)
 
-        if generate_mdps and config is not None:
+        if generate_mdps and config is None:
+            raise RuntimeError(
+                "GROMACS MDP generation requires a validated SimulationConfig. "
+                "Pass generate_mdps=False to export coordinates and topology only."
+            )
+
+        if generate_mdps:
             # Use GromacsExporter for full export with MDP generation
             from polyzymd.exporters.gromacs import GromacsExporter
 
@@ -1038,19 +1044,18 @@ class SystemBuilder:
             )
 
             return result
-        else:
-            # Legacy mode: just export coordinates and topology
-            return self._export_gromacs_minimal(output_dir, prefix)
+        # Build-only export without MDP generation
+        return self._export_gromacs_minimal(output_dir, prefix)
 
     def _export_gromacs_minimal(
         self,
         output_dir: Path,
         prefix: str,
     ) -> Dict[str, Any]:
-        """Export minimal GROMACS files (coordinates and topology only).
+        """Export GROMACS coordinates and topology only.
 
-        This is the legacy export mode used when no config is available
-        or when generate_mdps=False.
+        This build-only mode lets users export ``.gro``, ``.top``, and
+        ``.itp`` files and then manage downstream GROMACS inputs themselves.
 
         Args:
             output_dir: Output directory.
