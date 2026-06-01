@@ -54,7 +54,7 @@ class PairwiseResult(BaseModel):
     metric: str = "default"
     t_statistic: float
     p_value: float
-    p_value_adjusted: float | None = None
+    p_value_adjusted: float | None
     posthoc_method: str = "ttest_bh"
     cohens_d: float
     effect_size_interpretation: str
@@ -230,39 +230,23 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
                 return condition
         raise KeyError(f"Condition '{label}' not found")
 
-    def get_comparison(self, label: str | tuple[str, str]) -> TPairwiseResult | None:
+    def get_comparison(self, label: tuple[str, str]) -> TPairwiseResult | None:
         """Get a pairwise comparison by condition pair.
 
         Parameters
         ----------
-        label : str or tuple[str, str]
-            Either a treatment label for non-canonical lookup or an explicit
-            ``(condition_a, condition_b)`` pair.
+        label : tuple[str, str]
+            Explicit ``(condition_a, condition_b)`` pair.
 
         Returns
         -------
         TPairwiseResult or None
             The matching comparison, or ``None`` if not found.
         """
-        if isinstance(label, tuple):
-            condition_a, condition_b = label
-            for comparison in self.pairwise_comparisons:
-                if comparison.condition_a == condition_a and comparison.condition_b == condition_b:
-                    return comparison
-            noncanonical_label = condition_b
-        else:
-            noncanonical_label = label
-
-        matches = [
-            comparison
-            for comparison in self.pairwise_comparisons
-            if comparison.condition_b == noncanonical_label
-        ]
-        if not matches:
-            return None
-        if len(matches) > 1:
-            raise ValueError(
-                f"Ambiguous non-canonical comparison lookup for label '{noncanonical_label}': "
-                f"found {len(matches)} matches; use tuple lookup (condition_a, condition_b)."
-            )
-        return matches[0]
+        if not isinstance(label, tuple):
+            raise TypeError("Comparison lookup requires a (condition_a, condition_b) tuple")
+        condition_a, condition_b = label
+        for comparison in self.pairwise_comparisons:
+            if comparison.condition_a == condition_a and comparison.condition_b == condition_b:
+                return comparison
+        return None

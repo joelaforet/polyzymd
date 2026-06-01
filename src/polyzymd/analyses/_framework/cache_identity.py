@@ -216,7 +216,7 @@ def validate_settings_fingerprint(
     *,
     warn: bool = True,
     source: str | Path | None = None,
-    allow_missing: bool = True,
+    allow_missing: bool = False,
 ) -> bool:
     """Validate cached settings fingerprint against current analysis settings.
 
@@ -231,8 +231,8 @@ def validate_settings_fingerprint(
     source : str or Path or None, optional
         Optional cache source path for diagnostics.
     allow_missing : bool, optional
-        Treat missing fingerprints as non-canonical-compatible, by default True.
-        Strict cache callers can set this to False to reject missing identity.
+        Treat missing fingerprints as compatible, by default False. Callers can
+        opt in only when intentionally reading trusted legacy caches.
 
     Returns
     -------
@@ -242,10 +242,9 @@ def validate_settings_fingerprint(
 
     Notes
     -----
-    Non-canonical cache files may not encode settings fingerprints. By default these
-    files are treated as compatible for backward compatibility, with a warning
-    to encourage recomputation. Strict callers can disable this compatibility
-    path with ``allow_missing=False``.
+    Cache files without settings fingerprints cannot prove they were generated
+    from the current analysis settings. They are rejected by default so stale
+    compatibility caches do not silently influence new comparisons.
     """
     current_fingerprint = settings_fingerprint(current_settings)
     source_text = f" ({source})" if source is not None else ""
@@ -253,15 +252,13 @@ def validate_settings_fingerprint(
     if stored_fingerprint is None:
         if warn:
             action = (
-                "loading non-canonical cache without strict validation"
-                if allow_missing
-                else "rejecting cache without strict validation"
+                "loading legacy cache by explicit opt-in" if allow_missing else "rejecting cache"
             )
             warnings.warn(
                 "Cached analysis result is missing settings fingerprint"
-                f"{source_text}; {action}. This non-canonical cache cannot prove it matches "
-                "the current analysis settings. Use --recompute or clear the analysis cache "
-                "if settings changed.",
+                f"{source_text}; {action}. This cache cannot prove it matches the current "
+                "analysis settings. Use --recompute or clear the analysis cache to refresh "
+                "derived files.",
                 UserWarning,
                 stacklevel=2,
             )

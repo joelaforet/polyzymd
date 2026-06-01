@@ -172,16 +172,17 @@ class TestSettingsFingerprintValidation:
             valid = validate_settings_fingerprint("deadbeef", settings)
         assert valid is False
 
-    def test_validate_settings_fingerprint_allows_noncanonical_missing_with_warning(self):
-        """Missing fingerprint should remain backward-compatible."""
+    def test_validate_settings_fingerprint_rejects_missing_by_default(self):
+        """Missing fingerprint should be rejected by default."""
         settings = SimpleSettings(cutoff=4.5)
-        with pytest.warns(UserWarning, match="missing settings fingerprint"):
+        with pytest.warns(UserWarning, match="rejecting cache"):
             valid = validate_settings_fingerprint(None, settings)
-        assert valid is True
-
-    def test_validate_settings_fingerprint_can_reject_missing_strictly(self):
-        """Strict callers should be able to reject missing fingerprints."""
-        settings = SimpleSettings(cutoff=4.5)
-        with pytest.warns(UserWarning, match="rejecting cache without strict validation"):
-            valid = validate_settings_fingerprint(None, settings, allow_missing=False)
         assert valid is False
+
+    def test_validate_settings_fingerprint_can_allow_missing_by_opt_in(self):
+        """Legacy callers can explicitly allow missing fingerprints."""
+        settings = SimpleSettings(cutoff=4.5)
+        allow_missing = True
+        with pytest.warns(UserWarning, match="explicit opt-in"):
+            valid = validate_settings_fingerprint(None, settings, allow_missing=allow_missing)
+        assert valid is True

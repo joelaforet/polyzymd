@@ -6,6 +6,7 @@ import json
 import math
 
 import pytest
+from pydantic import ValidationError
 
 from polyzymd.analyses.base import (
     ANOVAResult,
@@ -375,8 +376,8 @@ def test_format_scalar_comparison_includes_adjusted_pvalues_in_text_and_markdown
     assert "0.0400" in markdown_output
 
 
-def test_format_scalar_comparison_backward_compatible_without_adjusted_pvalues() -> None:
-    """Formatter should keep existing output when adjusted p-values are absent."""
+def test_comparison_result_rejects_missing_adjusted_pvalues() -> None:
+    """ComparisonResult should reject pairwise entries without adjusted p-values."""
     noncanonical_payload = {
         "analysis_type": "test",
         "name": "unstamped",
@@ -406,24 +407,8 @@ def test_format_scalar_comparison_backward_compatible_without_adjusted_pvalues()
         "created_at": "2026-01-01T00:00:00",
         "polyzymd_version": "test",
     }
-    condition_model = ComparisonResult.model_validate_json(json.dumps(noncanonical_payload))
-
-    text_output = format_scalar_comparison(
-        condition_model, output_format="text", metric_key="metric"
-    )
-    markdown_output = format_scalar_comparison(
-        condition_model,
-        output_format="markdown",
-        metric_key="metric",
-    )
-
-    assert "p (adj)" not in text_output
-    assert "p (adj)" not in markdown_output
-    assert "p-value" in text_output
-    assert "* p <= 0.05" in text_output
-    assert (
-        "| Comparison | % Change | t-stat | p-value | Cohen's d | Effect | Sig |" in markdown_output
-    )
+    with pytest.raises(ValidationError, match="p_value_adjusted"):
+        ComparisonResult.model_validate_json(json.dumps(noncanonical_payload))
 
 
 def test_bh_boundary_inclusive(monkeypatch) -> None:

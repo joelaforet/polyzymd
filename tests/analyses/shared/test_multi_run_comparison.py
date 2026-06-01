@@ -66,6 +66,7 @@ def test_base_comparison_get_comparison_prefers_pair_lookup() -> None:
                 condition_b="C",
                 t_statistic=1.0,
                 p_value=0.20,
+                p_value_adjusted=None,
                 cohens_d=0.2,
                 effect_size_interpretation="small",
                 direction="increased",
@@ -77,6 +78,7 @@ def test_base_comparison_get_comparison_prefers_pair_lookup() -> None:
                 condition_b="C",
                 t_statistic=2.0,
                 p_value=0.01,
+                p_value_adjusted=0.02,
                 cohens_d=0.8,
                 effect_size_interpretation="large",
                 direction="decreased",
@@ -96,8 +98,8 @@ def test_base_comparison_get_comparison_prefers_pair_lookup() -> None:
     assert exact.condition_b == "C"
 
 
-def test_base_comparison_get_comparison_supports_noncanonical_condition_b_lookup() -> None:
-    """String lookup should remain available for backward compatibility."""
+def test_base_comparison_get_comparison_rejects_string_lookup() -> None:
+    """String lookup should be rejected to require explicit condition pairs."""
     result = _ComparisonResult(
         metric="mean_value",
         name="test_project",
@@ -121,6 +123,7 @@ def test_base_comparison_get_comparison_supports_noncanonical_condition_b_lookup
                 condition_b="Treatment",
                 t_statistic=3.0,
                 p_value=0.02,
+                p_value_adjusted=0.02,
                 cohens_d=1.0,
                 effect_size_interpretation="large",
                 direction="decreased",
@@ -134,14 +137,13 @@ def test_base_comparison_get_comparison_supports_noncanonical_condition_b_lookup
         polyzymd_version="1.2.1",
     )
 
-    noncanonical = result.get_comparison("Treatment")
-    assert noncanonical is not None
-    assert noncanonical.condition_a == "Control"
-    assert noncanonical.condition_b == "Treatment"
+    lookup_label = "Treatment"
+    with pytest.raises(TypeError, match="requires a"):
+        result.get_comparison(lookup_label)  # type: ignore[arg-type]
 
 
-def test_base_comparison_get_comparison_noncanonical_lookup_raises_on_ambiguity() -> None:
-    """Non-canonical single-label lookup should raise when multiple matches exist."""
+def test_base_comparison_get_comparison_rejects_ambiguous_string_lookup() -> None:
+    """String lookup should be rejected before any ambiguity handling."""
     result = _ComparisonResult(
         metric="mean_value",
         name="test_project",
@@ -172,6 +174,7 @@ def test_base_comparison_get_comparison_noncanonical_lookup_raises_on_ambiguity(
                 condition_b="C",
                 t_statistic=1.0,
                 p_value=0.20,
+                p_value_adjusted=None,
                 cohens_d=0.2,
                 effect_size_interpretation="small",
                 direction="increased",
@@ -183,6 +186,7 @@ def test_base_comparison_get_comparison_noncanonical_lookup_raises_on_ambiguity(
                 condition_b="C",
                 t_statistic=2.0,
                 p_value=0.01,
+                p_value_adjusted=0.02,
                 cohens_d=0.8,
                 effect_size_interpretation="large",
                 direction="decreased",
@@ -196,12 +200,13 @@ def test_base_comparison_get_comparison_noncanonical_lookup_raises_on_ambiguity(
         polyzymd_version="1.2.1",
     )
 
-    with pytest.raises(ValueError, match="Ambiguous non-canonical comparison lookup"):
-        result.get_comparison("C")
+    lookup_label = "C"
+    with pytest.raises(TypeError, match="requires a"):
+        result.get_comparison(lookup_label)  # type: ignore[arg-type]
 
 
-def test_base_comparison_get_comparison_tuple_falls_back_to_condition_b_lookup() -> None:
-    """Tuple lookup should fall back to non-canonical condition_b behavior when needed."""
+def test_base_comparison_get_comparison_returns_none_for_missing_tuple() -> None:
+    """Tuple lookup should return None when the explicit pair is absent."""
     result = _ComparisonResult(
         metric="mean_value",
         name="test_project",
@@ -225,6 +230,7 @@ def test_base_comparison_get_comparison_tuple_falls_back_to_condition_b_lookup()
                 condition_b="Treatment",
                 t_statistic=3.0,
                 p_value=0.02,
+                p_value_adjusted=0.02,
                 cohens_d=1.0,
                 effect_size_interpretation="large",
                 direction="decreased",
@@ -238,10 +244,7 @@ def test_base_comparison_get_comparison_tuple_falls_back_to_condition_b_lookup()
         polyzymd_version="1.2.1",
     )
 
-    fallback = result.get_comparison(("NotControl", "Treatment"))
-    assert fallback is not None
-    assert fallback.condition_a == "Control"
-    assert fallback.condition_b == "Treatment"
+    assert result.get_comparison(("NotControl", "Treatment")) is None
 
 
 def test_filter_summaries_with_run_keeps_only_matching_entries() -> None:
