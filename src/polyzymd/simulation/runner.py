@@ -1255,9 +1255,7 @@ class SimulationRunner:
                 _now = _time.monotonic()
 
                 # Adaptive sub-chunk calibration (once, after first interval)
-                if (
-                    not _adapted and (_now - _loop_start) >= checkpoint_interval_s
-                ):
+                if not _adapted and (_now - _loop_start) >= checkpoint_interval_s:
                     elapsed = _now - _loop_start
                     steps_per_sec = steps_done / elapsed if elapsed > 0 else 1.0
                     # Target sub-chunk duration = checkpoint_interval / 4
