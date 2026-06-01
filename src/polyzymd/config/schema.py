@@ -866,31 +866,13 @@ class SimulationPhasesConfig(BaseModel):
         production: Production phase settings
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     equilibration_stages: list[EquilibrationStageConfig] | None = Field(
         None, description="Multi-stage equilibration protocol with position restraints"
     )
 
     production: SimulationPhaseConfig = Field(..., description="Production settings")
-
-    @model_validator(mode="before")
-    @classmethod
-    def warn_deprecated_segments(cls, data: Any) -> Any:
-        """Warn if the deprecated 'segments' field is present and remove it."""
-        if isinstance(data, dict) and "segments" in data:
-            import warnings
-
-            warnings.warn(
-                "The 'segments' field in simulation_phases is deprecated and ignored. "
-                "Simulation segmenting is now handled automatically by the self-resubmitting "
-                "job architecture. Remove 'segments' from your config YAML to suppress "
-                "this warning.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            data.pop("segments", None)
-        return data
 
     @model_validator(mode="after")
     def validate_equilibration_mode(self) -> "SimulationPhasesConfig":

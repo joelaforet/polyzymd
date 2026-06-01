@@ -240,6 +240,27 @@ class TestSimulationPhasesConfig:
         with pytest.raises(ValidationError, match="must contain at least one stage"):
             SimulationPhasesConfig(equilibration_stages=[], production=production)
 
+    def test_rejects_legacy_segments_field(self):
+        """Legacy simulation_phases.segments should be rejected."""
+        from pydantic import ValidationError
+
+        from polyzymd.config.schema import EquilibrationStageConfig, SimulationPhasesConfig
+
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            SimulationPhasesConfig(
+                equilibration_stages=[
+                    EquilibrationStageConfig(
+                        name="heating",
+                        ensemble="NVT",
+                        duration=1.0,
+                        samples=10,
+                        temperature=300.0,
+                    )
+                ],
+                production={"ensemble": "NPT", "duration": 1.0, "samples": 10},
+                segments=[],
+            )
+
 
 # ---------------------------------------------------------------------------
 # B13 – statepoint export handles concentration-based co-solvents
