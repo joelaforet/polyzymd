@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from polyzymd.engines.openmm.engine import OpenMMEngine
 
 
@@ -32,6 +34,7 @@ class TestOpenMMTopologySearch:
         prod0 = tmp_path / "production_0"
         prod0.mkdir()
         (prod0 / "production_0_topology.pdb").write_text("ATOM")
+        (prod0 / "production_0_trajectory.dcd").write_bytes(b"DCD")
 
         engine = _make_engine()
         layout = engine.resolve_trajectory_layout(tmp_path, replicate=1)
@@ -43,6 +46,7 @@ class TestOpenMMTopologySearch:
         prod0 = tmp_path / "production_0"
         prod0.mkdir()
         (prod0 / "production_0_topology.pdb").write_text("ATOM")
+        (prod0 / "production_0_trajectory.dcd").write_bytes(b"DCD")
 
         engine = _make_engine()
         layout = engine.resolve_trajectory_layout(tmp_path, replicate=1)
@@ -73,6 +77,7 @@ class TestOpenMMTopologySearch:
         prod = tmp_path / "production_0"
         prod.mkdir()
         (prod / "custom_topology.pdb").write_text("ATOM")
+        (prod / "production_0_trajectory.dcd").write_bytes(b"DCD")
 
         engine = _make_engine()
         layout = engine.resolve_trajectory_layout(tmp_path, replicate=1)
@@ -111,6 +116,27 @@ class TestOpenMMTrajectorySearch:
         layout = engine.resolve_trajectory_layout(tmp_path, replicate=1)
         assert len(layout.trajectory_paths) == 1
         assert layout.trajectory_paths[0].name == "production_trajectory.dcd"
+
+    def test_rejects_empty_daisy_chain_segment(self, tmp_path: Path) -> None:
+        """Empty canonical daisy-chain trajectories are rejected."""
+        prod0 = tmp_path / "production_0"
+        prod0.mkdir()
+        (prod0 / "production_0_trajectory.dcd").write_bytes(b"")
+
+        engine = _make_engine()
+        with pytest.raises(ValueError, match="Empty OpenMM trajectory segment"):
+            engine.resolve_trajectory_layout(tmp_path, replicate=1)
+
+    def test_rejects_gapped_daisy_chain_segments(self, tmp_path: Path) -> None:
+        """Canonical daisy-chain segment indices must be contiguous."""
+        for i in [0, 2]:
+            directory = tmp_path / f"production_{i}"
+            directory.mkdir()
+            (directory / f"production_{i}_trajectory.dcd").write_bytes(b"DCD")
+
+        engine = _make_engine()
+        with pytest.raises(ValueError, match="production_1"):
+            engine.resolve_trajectory_layout(tmp_path, replicate=1)
 
     def test_rejects_arbitrary_recursive_production_trajectory(self, tmp_path: Path) -> None:
         """Recursive production trajectory globs are intentionally not used."""

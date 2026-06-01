@@ -348,6 +348,41 @@ def _format_missing_paths(paths: list[Path]) -> str:
     return "\n".join(f"  - {path}" for path in paths)
 
 
+def _is_nonempty_file(path: Path) -> bool:
+    """Return whether ``path`` is a regular file with content.
+
+    Parameters
+    ----------
+    path : Path
+        Path to validate.
+
+    Returns
+    -------
+    bool
+        True when the path exists, is a file, and has non-zero size.
+    """
+    return path.is_file() and path.stat().st_size > 0
+
+
+def _split_invalid_trajectory_paths(paths: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Split trajectory paths into missing/non-file and empty files.
+
+    Parameters
+    ----------
+    paths : list[Path]
+        Trajectory paths to validate.
+
+    Returns
+    -------
+    tuple[list[Path], list[Path]]
+        Paths that are missing or not regular files, followed by existing files
+        whose size is zero bytes.
+    """
+    missing_or_nonfile = [path for path in paths if not path.is_file()]
+    empty = [path for path in paths if path.is_file() and path.stat().st_size == 0]
+    return missing_or_nonfile, empty
+
+
 def discover_files(sim_dir: Path, metadata: SimMetadata) -> None:
     """Discover topology, trajectory, and production directories in a legacy sim folder.
 
@@ -378,13 +413,17 @@ def discover_files(sim_dir: Path, metadata: SimMetadata) -> None:
         missing_paths.extend(path for path in expected_dirs if not path.is_dir())
         if not required_topology.exists():
             missing_paths.append(required_topology)
-        missing_paths.extend(path for path in trajectories if not path.exists())
+        missing_trajectories, empty_trajectories = _split_invalid_trajectory_paths(trajectories)
+        missing_paths.extend(missing_trajectories)
 
         if missing_paths:
             missing = _format_missing_paths(missing_paths)
             raise FileNotFoundError(
                 "Missing required contiguous daisy-chain production path(s):\n" f"{missing}"
             )
+        if empty_trajectories:
+            empty = _format_missing_paths(empty_trajectories)
+            raise ValueError("Empty daisy-chain trajectory file(s):\n" f"{empty}")
 
         metadata.production_dirs = expected_dirs
         metadata.n_segments = len(expected_dirs)
@@ -451,8 +490,10 @@ def discover_files(sim_dir: Path, metadata: SimMetadata) -> None:
     else:
         # Single production: production/production_trajectory.dcd
         traj = sim_dir / "production" / "production_trajectory.dcd"
-        if traj.exists():
+        if _is_nonempty_file(traj):
             trajectories.append(traj)
+        elif traj.is_file():
+            raise ValueError(f"Empty production trajectory found at {traj}")
         else:
             raise FileNotFoundError(f"No production trajectory found in {sim_dir}")
 
@@ -1071,8 +1112,11 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
             if not segment_dir.exists():
                 logger.error(f"  FAIL: Production symlink missing: {segment_dir}")
                 success = False
-            if traj_path.exists():
+            if _is_nonempty_file(traj_path):
                 logger.info(f"  OK: Trajectory accessible: {segment_dir.name}/{traj_path.name}")
+            elif traj_path.is_file():
+                logger.error(f"  FAIL: Trajectory is empty at expected path: {traj_path}")
+                success = False
             else:
                 logger.error(f"  FAIL: Trajectory not found at expected path: {traj_path}")
                 success = False
@@ -1084,10 +1128,13 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
                 success = False
             else:
                 traj_path = link / "production_trajectory.dcd"
-                if traj_path.exists():
+                if _is_nonempty_file(traj_path):
                     logger.info(
                         f"  OK: Trajectory accessible: {prod_dir.name}/production_trajectory.dcd"
                     )
+                elif traj_path.is_file():
+                    logger.error(f"  FAIL: Trajectory is empty at expected path: {traj_path}")
+                    success = False
                 else:
                     logger.error(f"  FAIL: Trajectory not found at expected path: {traj_path}")
                     success = False

@@ -232,21 +232,35 @@ class OpenMMEngine(SimulationEngine):
         list[Path]
             Ordered list of trajectory files.
         """
-        prod_re = re.compile(r"production_(\d+)[/\\]production_\d+_trajectory\.dcd$")
-        segments: dict[int, Path] = {}
-        for file_path in working_dir.glob("production_*/production_*_trajectory.dcd"):
-            if file_path.stat().st_size == 0:
-                continue
-            match = prod_re.search(str(file_path))
-            if match:
-                segments[int(match.group(1))] = file_path
+        prod_re = re.compile(r"production_(\d+)$")
+        segment_dirs = {
+            int(match.group(1)): path
+            for path in working_dir.iterdir()
+            if path.is_dir() and (match := prod_re.fullmatch(path.name)) is not None
+        }
 
-        if segments:
-            return [segments[index] for index in sorted(segments.keys())]
+        if segment_dirs:
+            max_index = max(segment_dirs)
+            trajectory_paths = []
+            for index in range(max_index + 1):
+                segment_dir = working_dir / f"production_{index}"
+                file_path = segment_dir / f"production_{index}_trajectory.dcd"
+                if not segment_dir.is_dir():
+                    raise ValueError(f"Missing OpenMM production segment directory: {segment_dir}")
+                if not file_path.is_file():
+                    raise ValueError(f"Missing OpenMM trajectory segment: {file_path}")
+                if file_path.stat().st_size == 0:
+                    raise ValueError(f"Empty OpenMM trajectory segment: {file_path}")
+                trajectory_paths.append(file_path)
+            return trajectory_paths
 
         # Keep exact read-only support for expensive JRL 2025 LipA pre-PolyzyMD data
         single_production = working_dir / "production" / "production_trajectory.dcd"
-        if single_production.exists() and single_production.stat().st_size > 0:
+        if single_production.exists():
+            if not single_production.is_file():
+                raise ValueError(f"OpenMM trajectory path is not a file: {single_production}")
+            if single_production.stat().st_size == 0:
+                raise ValueError(f"Empty OpenMM trajectory: {single_production}")
             return [single_production]
 
         # Broad recursive globs are intentionally disallowed so old datasets

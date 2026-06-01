@@ -110,6 +110,34 @@ def test_discover_files_rejects_incomplete_daisy_chain_segment(
     assert metadata.trajectory_paths == []
 
 
+def test_discover_files_rejects_empty_daisy_chain_segment(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Daisy-chain discovery fails before assigning empty segment trajectories."""
+    sim_dir = tmp_path / "legacy"
+    prod0 = sim_dir / "production_0"
+    prod1 = sim_dir / "production_1"
+    prod0.mkdir(parents=True)
+    prod1.mkdir()
+    (prod0 / "production_0_topology.pdb").write_text("ATOM\n", encoding="utf-8")
+    (prod0 / "production_0_trajectory.dcd").write_bytes(b"DCD")
+    (prod1 / "production_1_trajectory.dcd").write_bytes(b"")
+
+    metadata = convert_legacy.SimMetadata(
+        folder_name="legacy",
+        restraint_distance="10A",
+        enzyme_name="LipA",
+        substrate_name="Resorufin-Butyrate",
+        temperature_K=363.0,
+        replicate=1,
+    )
+
+    with pytest.raises(ValueError, match="production_1_trajectory.dcd"):
+        convert_legacy.discover_files(sim_dir, metadata)
+
+    assert metadata.trajectory_paths == []
+
+
 def test_discover_files_rejects_non_contiguous_daisy_chain_segments(
     convert_legacy: ModuleType, tmp_path: Path
 ) -> None:
@@ -191,6 +219,29 @@ def test_discover_files_rejects_missing_first_segment_topology(
     )
 
     with pytest.raises(FileNotFoundError, match="production_0_topology.pdb"):
+        convert_legacy.discover_files(sim_dir, metadata)
+
+
+def test_discover_files_rejects_empty_single_production_trajectory(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Single-production discovery should reject empty trajectory files."""
+    sim_dir = tmp_path / "legacy"
+    prod = sim_dir / "production"
+    prod.mkdir(parents=True)
+    (prod / "production_topology.pdb").write_text("ATOM\n", encoding="utf-8")
+    (prod / "production_trajectory.dcd").write_bytes(b"")
+
+    metadata = convert_legacy.SimMetadata(
+        folder_name="legacy",
+        restraint_distance="10A",
+        enzyme_name="LipA",
+        substrate_name="Resorufin-Butyrate",
+        temperature_K=363.0,
+        replicate=1,
+    )
+
+    with pytest.raises(ValueError, match="Empty production trajectory"):
         convert_legacy.discover_files(sim_dir, metadata)
 
 
@@ -561,6 +612,71 @@ def test_validate_output_missing_expected_segment_trajectory_returns_false(
     )
 
     assert convert_legacy.validate_output(output_sim_dir, metadata) is False
+    assert "production_1/production_1_trajectory.dcd" in caplog.text
+
+
+def test_validate_output_empty_expected_segment_trajectory_returns_false(
+    convert_legacy: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    """Validation should fail when an expected segment trajectory is empty."""
+
+    class FakeAtomGroup:
+        def __init__(self, size: int) -> None:
+            self._size = size
+
+        def __len__(self) -> int:
+            return self._size
+
+    class FakeUniverse:
+        def __init__(self, _path: str) -> None:
+            self.atoms = type("FakeAtoms", (), {"chainIDs": ["A"]})()
+
+        def select_atoms(self, selection: str) -> FakeAtomGroup:
+            if selection in {"protein and chainID A", "protein and name CA"}:
+                return FakeAtomGroup(1)
+            return FakeAtomGroup(0)
+
+    class FakeConfig:
+        def get_working_directory(self, _replicate: int) -> Path:
+            return output_sim_dir
+
+    class FakeSimulationConfig:
+        @staticmethod
+        def from_yaml(_path: Path) -> FakeConfig:
+            return FakeConfig()
+
+    fake_mda = type("FakeMDAnalysis", (), {"Universe": FakeUniverse})()
+    monkeypatch.setitem(sys.modules, "MDAnalysis", fake_mda)
+    monkeypatch.setattr("polyzymd.config.schema.SimulationConfig", FakeSimulationConfig)
+    caplog.set_level("ERROR", logger=convert_legacy.logger.name)
+
+    output_sim_dir = tmp_path / "converted"
+    output_sim_dir.mkdir()
+    (output_sim_dir / "solvated_system.pdb").write_text("ATOM\n", encoding="utf-8")
+    (output_sim_dir / "config.yaml").write_text("name: legacy\n", encoding="utf-8")
+    prod0 = output_sim_dir / "production_0"
+    prod1 = output_sim_dir / "production_1"
+    prod0.mkdir()
+    prod1.mkdir()
+    (prod0 / "production_0_trajectory.dcd").write_bytes(b"DCD")
+    (prod1 / "production_1_trajectory.dcd").write_bytes(b"")
+
+    metadata = convert_legacy.SimMetadata(
+        folder_name="legacy",
+        restraint_distance="10A",
+        enzyme_name="LipA",
+        substrate_name="Resorufin-Butyrate",
+        temperature_K=363.0,
+        replicate=1,
+        n_segments=2,
+        production_dirs=[Path("production_0"), Path("production_1")],
+    )
+
+    assert convert_legacy.validate_output(output_sim_dir, metadata) is False
+    assert "Trajectory is empty" in caplog.text
     assert "production_1/production_1_trajectory.dcd" in caplog.text
 
 

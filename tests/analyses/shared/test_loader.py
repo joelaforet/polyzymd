@@ -274,7 +274,8 @@ class TestOpenMMDaisyChain:
         for i, f in enumerate(info.trajectory_files):
             assert f.name == f"production_{i}_trajectory.dcd"
 
-    def test_skips_zero_byte_segments(self, tmp_path):
+    def test_rejects_zero_byte_segments(self, tmp_path):
+        """Loader should surface empty canonical OpenMM trajectory segments."""
         run_dir = tmp_path / "run_1"
         _create_openmm_daisy_chain(run_dir, n_segments=3)
         empty_segment = run_dir / "production_3"
@@ -283,13 +284,8 @@ class TestOpenMMDaisyChain:
         config = _make_openmm_config(tmp_path)
         loader = TrajectoryLoader(config)
 
-        info = loader.get_trajectory_info(replicate=1)
-
-        assert [path.name for path in info.trajectory_files] == [
-            "production_0_trajectory.dcd",
-            "production_1_trajectory.dcd",
-            "production_2_trajectory.dcd",
-        ]
+        with pytest.raises(FileNotFoundError, match="Empty OpenMM trajectory segment"):
+            loader.get_trajectory_info(replicate=1)
 
     def test_replicate_routing(self, tmp_path):
         for rep in (1, 3):
