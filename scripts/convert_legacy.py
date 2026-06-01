@@ -1776,14 +1776,14 @@ def convert_simulation(
     # Step 5: Rewrite topology
     try:
         rewrite_topology(metadata, reference_pdb, solvated_pdb)
-    except Exception as e:
+    except OSError as e:
         logger.error(f"  FAIL: Topology rewrite failed: {e}")
         return False
 
     # Step 6: Generate config.yaml
     try:
         generate_config_yaml(metadata, output_dir, config_yaml)
-    except Exception as e:
+    except OSError as e:
         logger.error(f"  FAIL: Config generation failed: {e}")
         return False
 

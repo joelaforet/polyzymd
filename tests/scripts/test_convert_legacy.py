@@ -709,6 +709,88 @@ def test_convert_simulation_returns_false_when_validation_fails(
     assert success is False
 
 
+def test_convert_simulation_propagates_topology_validation_error(
+    convert_legacy: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Topology validation errors should propagate after discovery succeeds."""
+
+    def fake_discover_files(_sim_dir: Path, metadata: object) -> None:
+        metadata.production_dirs = []
+        metadata.topology_path = tmp_path / "topology.pdb"
+
+    def fake_rewrite_topology(*_args: object) -> None:
+        raise ValueError("invalid chain assignment")
+
+    monkeypatch.setattr(convert_legacy, "discover_files", fake_discover_files)
+    monkeypatch.setattr(convert_legacy, "read_parameters_json", lambda *_args: None)
+    monkeypatch.setattr(convert_legacy, "rewrite_topology", fake_rewrite_topology)
+    sim_dir = tmp_path / (
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1"
+    )
+    sim_dir.mkdir()
+
+    with pytest.raises(ValueError, match="invalid chain assignment"):
+        convert_legacy.convert_simulation(
+            sim_dir=sim_dir,
+            output_dir=tmp_path / "converted",
+            reference_pdb=tmp_path / "reference.pdb",
+        )
+
+
+def test_convert_simulation_propagates_config_validation_error(
+    convert_legacy: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Config validation errors should propagate after discovery succeeds."""
+
+    def fake_discover_files(_sim_dir: Path, metadata: object) -> None:
+        metadata.production_dirs = []
+        metadata.topology_path = tmp_path / "topology.pdb"
+
+    def fake_generate_config_yaml(*_args: object) -> None:
+        raise ValueError("invalid config")
+
+    monkeypatch.setattr(convert_legacy, "discover_files", fake_discover_files)
+    monkeypatch.setattr(convert_legacy, "read_parameters_json", lambda *_args: None)
+    monkeypatch.setattr(convert_legacy, "rewrite_topology", lambda *_args: None)
+    monkeypatch.setattr(convert_legacy, "generate_config_yaml", fake_generate_config_yaml)
+    sim_dir = tmp_path / (
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1"
+    )
+    sim_dir.mkdir()
+
+    with pytest.raises(ValueError, match="invalid config"):
+        convert_legacy.convert_simulation(
+            sim_dir=sim_dir,
+            output_dir=tmp_path / "converted",
+            reference_pdb=tmp_path / "reference.pdb",
+        )
+
+
+def test_convert_simulation_returns_false_for_discovery_validation_error(
+    convert_legacy: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Discovery validation errors should fail before creating output."""
+
+    def fake_discover_files(*_args: object) -> None:
+        raise ValueError("empty trajectory")
+
+    monkeypatch.setattr(convert_legacy, "discover_files", fake_discover_files)
+    sim_dir = tmp_path / (
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1"
+    )
+    sim_dir.mkdir()
+    converted = tmp_path / "converted"
+
+    success = convert_legacy.convert_simulation(
+        sim_dir=sim_dir,
+        output_dir=converted,
+        reference_pdb=tmp_path / "reference.pdb",
+    )
+
+    assert success is False
+    assert not (converted / sim_dir.name).exists()
+
+
 def test_convert_simulation_returns_false_for_gapped_daisy_chain_before_output(
     convert_legacy: ModuleType, tmp_path: Path
 ) -> None:
