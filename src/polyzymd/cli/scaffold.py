@@ -209,49 +209,13 @@ def _source_target_paths(files: dict[Path, str], project_root: Path) -> set[Path
     return paths
 
 
-def _path_has_scaffold_signature(path: Path) -> bool:
-    """Return whether an existing file looks like scaffold output.
-
-    Parameters
-    ----------
-    path : Path
-        Existing source path to inspect.
-
-    Returns
-    -------
-    bool
-        True when the file contains scaffold-specific placeholder text.
-    """
-    if not path.exists() or not path.is_file():
-        return False
-
-    text = path.read_text(encoding="utf-8")
-    signatures = (
-        "Generated MDAnalysis-native analysis plugin",
-        "Generated advanced MDAnalysis-native analysis package",
-    )
-    return any(signature in text for signature in signatures)
-
-
-def _check_registered_name_conflict(
-    spec: ScaffoldSpec,
-    files: dict[Path, str],
-    project_root: Path,
-    *,
-    force: bool,
-) -> None:
-    """Reject registered-name collisions unless force targets scaffold files.
+def _check_registered_name_conflict(spec: ScaffoldSpec) -> None:
+    """Reject registered-name collisions uniformly.
 
     Parameters
     ----------
     spec : ScaffoldSpec
         Validated scaffold rendering specification.
-    files : dict[Path, str]
-        Rendered scaffold files keyed by output path.
-    project_root : Path
-        Repository root for the scaffold operation.
-    force : bool
-        Whether existing scaffold files may be overwritten.
 
     Raises
     ------
@@ -260,43 +224,24 @@ def _check_registered_name_conflict(
         analysis registration.
     """
     try:
-        from polyzymd.analyses.discovery import get_analysis, list_all_names
+        from polyzymd.analyses.discovery import list_all_names
 
-        if spec.name not in list_all_names():
-            return
-
-        if not force:
+        if spec.name in list_all_names():
             raise ValueError(f"'{spec.name}' already exists as a registered analysis plugin.")
-
-        analysis_cls = get_analysis(spec.name)
     except ModuleNotFoundError as exc:
         if exc.name not in ("polyzymd.analyses", "polyzymd.analyses.discovery"):
             raise
-        return
-
-    if getattr(analysis_cls, "name", None) != spec.name:
-        raise ValueError(
-            f"'{spec.name}' already exists as an analysis alias and cannot be overwritten."
-        )
-
-    module_file = Path(
-        __import__(analysis_cls.__module__, fromlist=["__file__"]).__file__
-    ).resolve()
-    source_paths = _source_target_paths(files=files, project_root=project_root)
-    if module_file not in source_paths or not _path_has_scaffold_signature(module_file):
-        raise ValueError(
-            f"'{spec.name}' already exists as a registered analysis plugin and is not a "
-            "matching scaffold target. Choose a different name."
-        )
 
 
-def _check_target_conflicts(files: dict[Path, str], *, force: bool) -> None:
+def _check_target_conflicts(files: dict[Path, str], project_root: Path, *, force: bool) -> None:
     """Preflight all scaffold output paths before writing.
 
     Parameters
     ----------
     files : dict[Path, str]
         Rendered scaffold files keyed by output path.
+    project_root : Path
+        Repository root for the scaffold operation.
     force : bool
         Whether existing files may be overwritten.
 
@@ -328,6 +273,17 @@ def _check_target_conflicts(files: dict[Path, str], *, force: bool) -> None:
         )
 
     existing_files = [path for path in files if path.exists()]
+    existing_source_files = [
+        path
+        for path in existing_files
+        if path.resolve() in _source_target_paths(files, project_root)
+    ]
+    if existing_source_files:
+        raise FileExistsError(
+            f"Scaffold source target already exists: {_format_paths(existing_source_files)}. "
+            "Choose a different analysis name."
+        )
+
     if existing_files and not force:
         raise FileExistsError(
             f"Scaffold target path already exists: {_format_paths(existing_files)}. "
@@ -410,8 +366,8 @@ def generate_scaffold(
     spec = _build_spec(name=name, class_name=class_name, style=style, advanced=advanced)
     _check_layout_conflicts(spec=spec, project_root=project_root)
     files = render_scaffold(spec=spec, project_root=project_root)
-    _check_registered_name_conflict(spec=spec, files=files, project_root=project_root, force=force)
-    _check_target_conflicts(files=files, force=force)
+    _check_registered_name_conflict(spec=spec)
+    _check_target_conflicts(files=files, project_root=project_root, force=force)
 
     created: list[Path] = []
     for path, content in files.items():

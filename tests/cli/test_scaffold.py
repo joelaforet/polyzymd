@@ -257,41 +257,21 @@ class TestGenerateScaffold:
         assert not test_path.exists()
         assert collision_path.read_text(encoding="utf-8") == "# parent collision\n"
 
-    def test_force_overwrites(self, tmp_path: Path):
+    def test_force_rejects_existing_plugin_source(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
         generate_scaffold("solvent_shell", tmp_path)
         plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+        original_text = plugin_path.read_text(encoding="utf-8")
         plugin_path.write_text(
-            plugin_path.read_text(encoding="utf-8") + "\n# stale local edit\n",
+            original_text + "\n# local edit\n",
             encoding="utf-8",
         )
-        created = generate_scaffold("solvent_shell", tmp_path, force=True)
-        assert len(created) == 2
-        assert "stale local edit" not in plugin_path.read_text(encoding="utf-8")
 
-    @pytest.mark.parametrize(
-        "legacy_marker",
-        [
-            "Replace this placeholder with domain-specific " + "measurement logic",
-            "Replace this placeholder with domain-specific " + "MDAnalysis logic",
-            "Uses plain " + "dicts for result containers",
-            "Uses typed Pydantic " + "result models for validation",
-        ],
-    )
-    def test_force_rejects_legacy_scaffold_signatures(
-        self,
-        tmp_path: Path,
-        legacy_marker: str,
-    ):
-        _prepare_project(tmp_path)
-        plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
-        plugin_path.write_text(f"# {legacy_marker}\n", encoding="utf-8")
-
-        with pytest.raises(FileExistsError, match="already exists"):
+        with pytest.raises(FileExistsError, match="source target already exists"):
             generate_scaffold("solvent_shell", tmp_path, force=True)
 
-        assert plugin_path.read_text(encoding="utf-8") == f"# {legacy_marker}\n"
+        assert plugin_path.read_text(encoding="utf-8") == original_text + "\n# local edit\n"
 
     def test_dry_run_creates_no_files(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -386,7 +366,7 @@ class TestStyleValidation:
 class TestLayoutCollisionChecks:
     """Cross-layout collision behavior for module and package scaffolds."""
 
-    def test_compatibility_style_refuses_existing_package_even_with_force(self, tmp_path: Path):
+    def test_simple_style_refuses_existing_package_even_with_force(self, tmp_path: Path):
         _prepare_project(tmp_path)
         package_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
         package_dir.mkdir()
@@ -816,9 +796,11 @@ class TestNewAnalysisCLI:
         plugin_path = self.root / "src" / "polyzymd" / "analyses" / "density.py"
         assert "class MassDensityAnalysis(Analysis):" in plugin_path.read_text(encoding="utf-8")
 
-    def test_force_overwrites(self, runner: CliRunner, cli):
+    def test_force_rejects_existing_plugin_source(self, runner: CliRunner, cli):
         result = runner.invoke(cli, ["solvent_shell", "--project-root", str(self.root)])
         assert result.exit_code == 0
+        plugin_path = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+        original_text = plugin_path.read_text(encoding="utf-8")
 
         result = runner.invoke(cli, ["solvent_shell", "--project-root", str(self.root)])
         assert result.exit_code != 0
@@ -828,7 +810,9 @@ class TestNewAnalysisCLI:
             cli,
             ["solvent_shell", "--project-root", str(self.root), "--force"],
         )
-        assert result.exit_code == 0, result.output
+        assert result.exit_code != 0
+        assert "source target already exists" in result.output
+        assert plugin_path.read_text(encoding="utf-8") == original_text
 
     @pytest.mark.parametrize(
         ("plugin_name", "style_args", "stale_path_parts"),
@@ -841,7 +825,7 @@ class TestNewAnalysisCLI:
             ),
         ],
     )
-    def test_force_overwrites_discoverable_scaffold_after_fresh_discovery(
+    def test_force_rejects_registered_scaffold_after_fresh_discovery(
         self,
         runner: CliRunner,
         cli,
@@ -874,8 +858,9 @@ class TestNewAnalysisCLI:
                 cli,
                 [plugin_name, *style_args, "--project-root", str(self.root), "--force"],
             )
-            assert result.exit_code == 0, result.output
-            assert "stale local edit" not in plugin_path.read_text(encoding="utf-8")
+            assert result.exit_code != 0
+            assert "registered analysis plugin" in result.output
+            assert "stale local edit" in plugin_path.read_text(encoding="utf-8")
         finally:
             clear_cache()
             sys.modules.pop(f"polyzymd.analyses.{plugin_name}", None)
