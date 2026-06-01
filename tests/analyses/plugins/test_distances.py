@@ -957,30 +957,11 @@ class TestAggregate:
 
         mock_results = _make_distance_artifacts(tmp_path, "test", settings, n_reps=3)
 
-        with patch("polyzymd.analyses.distances._mda.aggregate_distance_pair_stats") as mock_agg:
-            # Create mock return for aggregate_distance_pair_stats
-            mock_stats = MagicMock()
-            mock_stats.mean_stats.mean = 3.5
-            mock_stats.mean_stats.sem = 0.05
-            mock_stats.median_stats.mean = 3.4
-            mock_stats.per_rep_means = [3.49, 3.50, 3.51]
-            mock_stats.per_rep_stds = [0.5, 0.5, 0.5]
-            mock_stats.per_rep_medians = [3.39, 3.40, 3.41]
-            mock_stats.fraction_stats = MagicMock()
-            mock_stats.fraction_stats.mean = 0.6
-            mock_stats.fraction_stats.sem = 0.02
-            mock_stats.per_rep_fractions = [0.58, 0.60, 0.62]
-            mock_stats.kde_peak_stats = MagicMock()
-            mock_stats.kde_peak_stats.mean = 3.3
-            mock_stats.kde_peak_stats.sem = 0.03
-            mock_stats.per_rep_kde_peaks = [3.29, 3.30, 3.31]
-            mock_agg.return_value = mock_stats
-
-            with patch(
-                "polyzymd.analyses._framework.results_base.get_polyzymd_version",
-                return_value="1.0.0-test",
-            ):
-                result = analysis.aggregate(ctx, mock_results)
+        with patch(
+            "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+            return_value="1.0.0-test",
+        ):
+            result = analysis.aggregate(ctx, mock_results)
 
         assert result is not None
         assert result.metadata["n_replicates"] == 3
@@ -1033,25 +1014,11 @@ class TestAggregate:
 
         mock_results = _make_distance_artifacts(tmp_path, "test", settings, n_reps=2)
 
-        with patch("polyzymd.analyses.distances._mda.aggregate_distance_pair_stats") as mock_agg:
-            mock_stats = MagicMock()
-            mock_stats.mean_stats.mean = 3.5
-            mock_stats.mean_stats.sem = 0.05
-            mock_stats.median_stats.mean = 3.4
-            mock_stats.per_rep_means = [3.49, 3.51]
-            mock_stats.per_rep_stds = [0.5, 0.5]
-            mock_stats.per_rep_medians = [3.39, 3.41]
-            mock_stats.fraction_stats = None
-            mock_stats.per_rep_fractions = None
-            mock_stats.kde_peak_stats = None
-            mock_stats.per_rep_kde_peaks = None
-            mock_agg.return_value = mock_stats
-
-            with patch(
-                "polyzymd.analyses._framework.results_base.get_polyzymd_version",
-                return_value="1.0.0-test",
-            ):
-                result = analysis.aggregate(ctx, mock_results)
+        with patch(
+            "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+            return_value="1.0.0-test",
+        ):
+            result = analysis.aggregate(ctx, mock_results)
 
         assert result is not None
         json_files = list(output_dir.glob("*.json"))
@@ -1144,9 +1111,10 @@ class TestAggregate:
 
 
 def _make_mock_agg_result(n_pairs: int = 2, n_reps: int = 3, offset: float = 0.0):
-    """Create a mock DistanceAggregatedResult for comparison tests."""
+    """Create a canonical condition artifact for comparison tests."""
     from polyzymd.analyses._framework.cache_identity import settings_fingerprint
     from polyzymd.analyses.distances import DistancePairSettings, DistancesSettings
+    from polyzymd.analyses.mda import ConditionArtifact
 
     labels = ["Alpha", "Beta", "Gamma", "Delta"]
     settings = DistancesSettings(
@@ -1159,33 +1127,82 @@ def _make_mock_agg_result(n_pairs: int = 2, n_reps: int = 3, offset: float = 0.0
             for i in range(n_pairs)
         ]
     )
-    mock = MagicMock()
-    mock.config_hash = "unknown"
-    mock.equilibration_time = 100.0
-    mock.equilibration_unit = "ns"
-    mock.settings_fingerprint = settings_fingerprint(settings)
-    mock.replicates = list(range(1, n_reps + 1))
-    mock.n_replicates = n_reps
-
     pair_results = []
     for i in range(n_pairs):
-        pr = MagicMock()
-        pr.pair_label = f"pair{i}"
-        pr.selection1 = f"sel_a_{i}"
-        pr.selection2 = f"sel_b_{i}"
-        pr.overall_mean = 3.5 + i * 0.5 + offset
-        pr.overall_sem = 0.05
-        pr.threshold = 3.5
-        pr.overall_fraction_below = 0.6 - i * 0.1 - offset * 0.1
-        pr.sem_fraction_below = 0.02
-        pr.per_replicate_means = [3.5 + i * 0.5 + offset + j * 0.01 for j in range(n_reps)]
-        pr.per_replicate_fractions_below = [
-            0.6 - i * 0.1 - offset * 0.1 + j * 0.005 for j in range(n_reps)
-        ]
-        pair_results.append(pr)
+        pair_results.append(
+            {
+                "pair_label": f"pair{i}",
+                "selection1": f"sel_a_{i}",
+                "selection2": f"sel_b_{i}",
+                "overall_mean": 3.5 + i * 0.5 + offset,
+                "overall_sem": 0.05,
+                "threshold": 3.5,
+                "overall_fraction_below": 0.6 - i * 0.1 - offset * 0.1,
+                "sem_fraction_below": 0.02,
+                "per_replicate_means": [3.5 + i * 0.5 + offset + j * 0.01 for j in range(n_reps)],
+                "per_replicate_fractions_below": [
+                    0.6 - i * 0.1 - offset * 0.1 + j * 0.005 for j in range(n_reps)
+                ],
+                "replicates": list(range(1, n_reps + 1)),
+                "n_replicates": n_reps,
+            }
+        )
 
-    mock.pair_results = pair_results
-    return mock
+    return ConditionArtifact(
+        analysis_name="distances",
+        condition_label="mock",
+        replicates=list(range(1, n_reps + 1)),
+        payload={"pair_results": pair_results, "pairs": pair_results, "n_replicates": n_reps},
+        metadata={
+            "settings_fingerprint": settings_fingerprint(settings),
+            "config_hash": "unknown",
+            "equilibration_time": 100.0,
+            "equilibration_unit": "ns",
+        },
+    )
+
+
+def _distance_condition_artifact_from_pair_objects(
+    pairs: list[object], replicates: list[int], settings_fingerprint: str
+):
+    """Create a canonical distances condition artifact from pair-like objects."""
+
+    from polyzymd.analyses.mda import ConditionArtifact
+
+    pair_payloads = []
+    for pair in pairs:
+        pair_payloads.append(
+            {
+                "pair_label": pair.pair_label,
+                "selection1": pair.selection1,
+                "selection2": pair.selection2,
+                "threshold": pair.threshold,
+                "overall_mean": pair.overall_mean,
+                "overall_sem": pair.overall_sem,
+                "overall_fraction_below": pair.overall_fraction_below,
+                "sem_fraction_below": pair.sem_fraction_below,
+                "per_replicate_means": list(pair.per_replicate_means),
+                "per_replicate_fractions_below": list(pair.per_replicate_fractions_below),
+                "replicates": replicates,
+                "n_replicates": len(replicates),
+            }
+        )
+    return ConditionArtifact(
+        analysis_name="distances",
+        condition_label="Control",
+        replicates=replicates,
+        payload={
+            "pair_results": pair_payloads,
+            "pairs": pair_payloads,
+            "n_replicates": len(replicates),
+        },
+        metadata={
+            "settings_fingerprint": settings_fingerprint,
+            "config_hash": "unknown",
+            "equilibration_time": 100.0,
+            "equilibration_unit": "ns",
+        },
+    )
 
 
 class TestCompare:
@@ -1464,7 +1481,10 @@ class TestCompare:
             pair_result.per_replicate_fractions_below = [0.5, 0.55, 0.45]
             aggregate.pair_results.append(pair_result)
 
-        with patch.object(analysis, "_load_aggregated_result", return_value=aggregate):
+        artifact = _distance_condition_artifact_from_pair_objects(
+            aggregate.pair_results, aggregate.replicates, aggregate.settings_fingerprint
+        )
+        with patch.object(analysis, "_load_aggregated_result", return_value=artifact):
             result = analysis.compare(ctx)
 
         assert result is not None
@@ -1547,7 +1567,10 @@ class TestCompare:
             pair_result.per_replicate_fractions_below = [0.5, 0.55, 0.45]
             aggregate.pair_results.append(pair_result)
 
-        with patch.object(analysis, "_load_aggregated_result", return_value=aggregate):
+        artifact = _distance_condition_artifact_from_pair_objects(
+            aggregate.pair_results, aggregate.replicates, aggregate.settings_fingerprint
+        )
+        with patch.object(analysis, "_load_aggregated_result", return_value=artifact):
             result = analysis.compare(ctx)
 
         assert result is not None
@@ -1649,9 +1672,8 @@ class TestDeserializeResult:
 
     def test_aggregated_result_class_set(self):
         from polyzymd.analyses.distances import DistancesAnalysis
-        from polyzymd.analyses.distances._results import DistanceAggregatedResult
 
-        assert DistancesAnalysis.AggregatedResultClass is DistanceAggregatedResult
+        assert DistancesAnalysis.AggregatedResultClass is None
 
     def test_rejects_legacy_aggregate_json(self, tmp_path):
         from polyzymd.analyses.distances import DistancesAnalysis
@@ -2201,25 +2223,11 @@ class TestLifecycle:
             settings=settings,
         )
 
-        with patch("polyzymd.analyses.distances._mda.aggregate_distance_pair_stats") as mock_agg:
-            mock_stats = MagicMock()
-            mock_stats.mean_stats.mean = 3.5
-            mock_stats.mean_stats.sem = 0.05
-            mock_stats.median_stats.mean = 3.4
-            mock_stats.per_rep_means = [3.49, 3.51]
-            mock_stats.per_rep_stds = [0.5, 0.5]
-            mock_stats.per_rep_medians = [3.39, 3.41]
-            mock_stats.fraction_stats = None
-            mock_stats.per_rep_fractions = None
-            mock_stats.kde_peak_stats = None
-            mock_stats.per_rep_kde_peaks = None
-            mock_agg.return_value = mock_stats
-
-            with patch(
-                "polyzymd.analyses._framework.results_base.get_polyzymd_version",
-                return_value="1.0.0-test",
-            ):
-                agg_result = analysis.aggregate(agg_ctx, rep_results)
+        with patch(
+            "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+            return_value="1.0.0-test",
+        ):
+            agg_result = analysis.aggregate(agg_ctx, rep_results)
 
         assert agg_result is not None
         assert agg_result.metadata["n_replicates"] == 2

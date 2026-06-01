@@ -14,13 +14,7 @@ from numpy.typing import NDArray
 
 from polyzymd.analyses._framework.cache_identity import compute_config_hash
 from polyzymd.analyses._framework.results_base import get_polyzymd_version
-from polyzymd.analyses.distances._results import (
-    DistanceAggregatedResult,
-    DistancePairAggregatedResult,
-    DistancePairResult,
-    DistanceResult,
-    DistanceResultMetadata,
-)
+from polyzymd.analyses.distances._results import DistancePairResult, DistanceResultMetadata
 from polyzymd.analyses.mda import (
     ArtifactStore,
     ConditionArtifact,
@@ -33,7 +27,6 @@ from polyzymd.analyses.mda import (
     build_pair_distance_analysis,
     pair_distance_version,
 )
-from polyzymd.analyses.mda.pair_distance import aggregate_distance_pair_stats
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
 from polyzymd.analyses.shared.loader import parse_time_string
 
@@ -374,26 +367,21 @@ def aggregate_distance_artifacts(
         artifacts=artifacts,
         analysis_dir=output_dir.parent,
     )
-    legacy_result = _aggregate_legacy_result(
-        condition_label=condition_label,
-        replicates=replicates,
-        settings=settings,
-        equilibration=equilibration,
-        artifacts=ordered_artifacts,
-        settings_fingerprint=settings_fingerprint,
-    )
-    sidecar = _write_condition_sidecar(output_dir, ordered_artifacts, legacy_result)
-    metrics, replicate_metrics = _condition_metrics(legacy_result)
+    eq_value, eq_unit = parse_time_string(equilibration)
+    pair_results = _aggregate_pair_payloads(ordered_artifacts, settings.get_pair_thresholds())
+    sidecar = _write_condition_sidecar(output_dir, ordered_artifacts, pair_results)
+    metrics, replicate_metrics = _condition_metrics(pair_results, [int(rep) for rep in replicates])
+    first_metadata = ordered_artifacts[0].metadata
     return ConditionArtifact(
         analysis_name="distances",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
         payload={
-            "pairs": [pair.model_dump(mode="json") for pair in legacy_result.pair_results],
-            "pair_results": [pair.model_dump(mode="json") for pair in legacy_result.pair_results],
+            "pairs": pair_results,
+            "pair_results": pair_results,
             "metrics": metrics,
             "replicate_metrics": replicate_metrics,
-            "n_replicates": legacy_result.n_replicates,
+            "n_replicates": len(replicates),
         },
         sidecars=[sidecar],
         provenance={
@@ -403,18 +391,18 @@ def aggregate_distance_artifacts(
         metadata={
             "result_kind": "distances_mda_condition",
             "settings_fingerprint": settings_fingerprint,
-            "config_hash": legacy_result.config_hash,
-            "polyzymd_version": legacy_result.polyzymd_version,
+            "config_hash": str(first_metadata.get("config_hash", "unknown")),
+            "polyzymd_version": get_polyzymd_version(),
             "mdanalysis_version": mdanalysis_version(),
             "pair_distance_version": pair_distance_version(),
-            "equilibration_time": legacy_result.equilibration_time,
-            "equilibration_unit": legacy_result.equilibration_unit,
-            "selection_string": legacy_result.selection_string,
+            "equilibration_time": eq_value,
+            "equilibration_unit": eq_unit,
+            "selection_string": _combined_selection(settings.get_pair_selections()),
             "source_result_files": [
                 str(output_dir.parent / f"run_{replicate}" / "result.json")
                 for replicate in replicates
             ],
-            "n_replicates": legacy_result.n_replicates,
+            "n_replicates": len(replicates),
         },
         source_replicates=[
             {
@@ -424,54 +412,6 @@ def aggregate_distance_artifacts(
             for replicate in replicates
         ],
         warnings=_combined_warnings(ordered_artifacts),
-    )
-
-
-def artifact_to_distance_result(artifact: ReplicateArtifact) -> DistanceResult:
-    """Convert a replicate artifact to the established distance result model."""
-
-    if artifact.analysis_name != "distances":
-        raise ValueError(f"Expected distances artifact, got {artifact.analysis_name!r}")
-    metadata = artifact.metadata
-    payload = artifact.payload
-    return DistanceResult(
-        config_hash=str(metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=artifact.replicate,
-        equilibration_time=float(metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(metadata.get("equilibration_unit", "ns")),
-        selection_string=str(metadata.get("selection_string", "")),
-        pair_results=[DistancePairResult.model_validate(pair) for pair in payload.get("pairs", [])],
-        n_frames_total=int(payload.get("n_frames_total", 0) or 0),
-        n_frames_used=int(payload.get("n_frames_used", 0) or 0),
-        settings_fingerprint=metadata.get("settings_fingerprint"),
-        trajectory_files=[],
-    )
-
-
-def condition_artifact_to_legacy_result(artifact: Any) -> DistanceAggregatedResult:
-    """Convert a condition artifact to the established aggregate model."""
-
-    if isinstance(artifact, DistanceAggregatedResult):
-        return artifact
-    if not isinstance(artifact, ConditionArtifact):
-        return artifact
-    metadata = artifact.metadata
-    return DistanceAggregatedResult(
-        config_hash=str(metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=None,
-        equilibration_time=float(metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(metadata.get("equilibration_unit", "ns")),
-        selection_string=str(metadata.get("selection_string", "")),
-        replicates=[int(rep) for rep in artifact.replicates],
-        n_replicates=len(artifact.replicates),
-        pair_results=[
-            DistancePairAggregatedResult.model_validate(pair)
-            for pair in artifact.payload.get("pairs", [])
-        ],
-        settings_fingerprint=metadata.get("settings_fingerprint"),
-        source_result_files=[str(path) for path in metadata.get("source_result_files", [])],
     )
 
 
@@ -611,15 +551,73 @@ def _write_replicate_sidecar(
     )
 
 
+def _aggregate_pair_payloads(
+    artifacts: Sequence[ReplicateArtifact], thresholds: Sequence[float | None]
+) -> list[dict[str, Any]]:
+    """Aggregate canonical replicate pair payloads into condition summaries."""
+
+    first_pairs = list(artifacts[0].payload.get("pairs", []))
+    aggregated: list[dict[str, Any]] = []
+    for pair_index, first_pair in enumerate(first_pairs):
+        per_means = [
+            float(artifact.payload.get("pairs", [])[pair_index].get("mean_distance", 0.0))
+            for artifact in artifacts
+        ]
+        per_stds = [
+            float(artifact.payload.get("pairs", [])[pair_index].get("std_distance", 0.0))
+            for artifact in artifacts
+        ]
+        per_medians = [
+            float(artifact.payload.get("pairs", [])[pair_index].get("median_distance", 0.0))
+            for artifact in artifacts
+        ]
+        per_kde = [
+            artifact.payload.get("pairs", [])[pair_index].get("kde_peak") for artifact in artifacts
+        ]
+        fraction_values = [
+            artifact.payload.get("pairs", [])[pair_index].get("fraction_below_threshold")
+            for artifact in artifacts
+        ]
+        finite_kde = [float(value) for value in per_kde if value is not None]
+        finite_fraction = [float(value) for value in fraction_values if value is not None]
+        aggregate = {
+            "pair_label": str(first_pair.get("pair_label", f"Pair {pair_index}")),
+            "selection1": str(first_pair.get("selection1", "")),
+            "selection2": str(first_pair.get("selection2", "")),
+            "threshold": (
+                thresholds[pair_index]
+                if pair_index < len(thresholds)
+                else first_pair.get("threshold")
+            ),
+            "overall_mean": _mean(per_means),
+            "overall_sem": _sem(per_means),
+            "overall_std_mean": _mean(per_stds),
+            "overall_median": _mean(per_medians),
+            "overall_kde_peak": _mean(finite_kde) if finite_kde else None,
+            "sem_kde_peak": _sem(finite_kde) if len(finite_kde) > 1 else None,
+            "overall_fraction_below": _mean(finite_fraction) if finite_fraction else None,
+            "sem_fraction_below": _sem(finite_fraction) if len(finite_fraction) > 1 else None,
+            "per_replicate_means": per_means,
+            "per_replicate_stds": per_stds,
+            "per_replicate_medians": per_medians,
+            "per_replicate_fractions_below": finite_fraction if finite_fraction else None,
+            "per_replicate_kde_peaks": finite_kde if finite_kde else None,
+            "replicates": [int(artifact.replicate) for artifact in artifacts],
+            "n_replicates": len(artifacts),
+        }
+        aggregated.append(aggregate)
+    return aggregated
+
+
 def _write_condition_sidecar(
     output_dir: Path,
     artifacts: Sequence[ReplicateArtifact],
-    legacy_result: DistanceAggregatedResult,
+    pair_results: Sequence[Mapping[str, Any]],
 ) -> ArtifactSidecarRef:
     """Write pooled condition-level pair-distance sidecar arrays."""
 
     arrays_by_pair: dict[int, list[NDArray[np.float64]]] = {
-        idx: [] for idx in range(len(legacy_result.pair_results))
+        idx: [] for idx in range(len(pair_results))
     }
     replicate_ids: list[int] = []
     for artifact in artifacts:
@@ -635,7 +633,7 @@ def _write_condition_sidecar(
 
     sidecar_arrays: dict[str, Any] = {
         "replicates": np.asarray(replicate_ids, dtype=np.int64),
-        "pair_labels": np.asarray([pair.pair_label for pair in legacy_result.pair_results]),
+        "pair_labels": np.asarray([str(pair.get("pair_label", "pair")) for pair in pair_results]),
     }
     for pair_index, arrays in arrays_by_pair.items():
         sidecar_arrays[f"pair_{pair_index}_distances"] = np.concatenate(arrays).astype(np.float64)
@@ -643,50 +641,6 @@ def _write_condition_sidecar(
         "sidecars/pooled_distances.npz",
         metadata={"kind": "pooled_distance_matrices", "layout": "pair_index_concatenated"},
         **sidecar_arrays,
-    )
-
-
-def _aggregate_legacy_result(
-    *,
-    condition_label: str,
-    replicates: Sequence[int],
-    settings: DistancesSettings,
-    equilibration: str,
-    artifacts: Sequence[ReplicateArtifact],
-    settings_fingerprint: str,
-) -> DistanceAggregatedResult:
-    """Build the established aggregate model from replicate artifacts."""
-
-    eq_value, eq_unit = parse_time_string(equilibration)
-    legacy_results = [artifact_to_distance_result(artifact) for artifact in artifacts]
-    first = legacy_results[0]
-    metadata = DistanceResultMetadata(
-        config_hash=first.config_hash,
-        polyzymd_version=get_polyzymd_version(),
-        replicate=None,
-        equilibration_time=eq_value,
-        equilibration_unit=eq_unit,
-    )
-    aggregated_pairs: list[DistancePairAggregatedResult] = []
-    thresholds = settings.get_pair_thresholds()
-    for pair_idx, pair in enumerate(first.pair_results):
-        stats = aggregate_distance_pair_stats(legacy_results, pair_idx)
-        aggregated_pairs.append(
-            DistancePairAggregatedResult.from_aggregated_stats(
-                metadata,
-                pair,
-                stats,
-                replicates=replicates,
-                threshold=thresholds[pair_idx] if pair_idx < len(thresholds) else None,
-            )
-        )
-    return DistanceAggregatedResult.from_pair_results(
-        metadata,
-        aggregated_pairs,
-        replicates=replicates,
-        source_result_files=[],
-        settings_fingerprint=settings_fingerprint,
-        selection_string=_combined_selection(settings.get_pair_selections()),
     )
 
 
@@ -811,32 +765,53 @@ def _replicate_metrics(pair_payloads: Sequence[Mapping[str, Any]]) -> dict[str, 
 
 
 def _condition_metrics(
-    legacy_result: DistanceAggregatedResult,
+    pair_results: Sequence[Mapping[str, Any]], replicates: Sequence[int]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, float]]]:
-    """Build condition metric dictionaries from an aggregate model."""
+    """Build condition metric dictionaries from canonical pair summaries."""
 
     metrics: dict[str, dict[str, Any]] = {}
     replicate_metrics: dict[str, dict[str, float]] = {
-        str(replicate): {} for replicate in legacy_result.replicates
+        str(replicate): {} for replicate in replicates
     }
-    for pair in legacy_result.pair_results:
-        mean_name = f"{pair.pair_label}.mean_distance"
-        values = [float(value) for value in pair.per_replicate_means]
-        metrics[mean_name] = _metric_summary(mean_name, values, pair.overall_mean, pair.overall_sem)
-        for replicate, value in zip(pair.replicates, values, strict=True):
+    for pair in pair_results:
+        label = str(pair.get("pair_label", "pair"))
+        mean_name = f"{label}.mean_distance"
+        values = [float(value) for value in pair.get("per_replicate_means", [])]
+        metrics[mean_name] = _metric_summary(
+            mean_name,
+            values,
+            float(pair.get("overall_mean", 0.0)),
+            float(pair.get("overall_sem", 0.0) or 0.0),
+        )
+        for replicate, value in zip(replicates, values, strict=True):
             replicate_metrics.setdefault(str(replicate), {})[mean_name] = float(value)
-        if pair.per_replicate_fractions_below is not None:
-            frac_name = f"{pair.pair_label}.fraction_below_threshold"
-            frac_values = [float(value) for value in pair.per_replicate_fractions_below]
+        if pair.get("per_replicate_fractions_below") is not None:
+            frac_name = f"{label}.fraction_below_threshold"
+            frac_values = [float(value) for value in pair.get("per_replicate_fractions_below", [])]
             metrics[frac_name] = _metric_summary(
                 frac_name,
                 frac_values,
-                float(pair.overall_fraction_below or 0.0),
-                float(pair.sem_fraction_below or 0.0),
+                float(pair.get("overall_fraction_below") or 0.0),
+                float(pair.get("sem_fraction_below") or 0.0),
             )
-            for replicate, value in zip(pair.replicates, frac_values, strict=True):
+            for replicate, value in zip(replicates, frac_values, strict=True):
                 replicate_metrics.setdefault(str(replicate), {})[frac_name] = float(value)
     return metrics, replicate_metrics
+
+
+def _mean(values: Sequence[float]) -> float:
+    """Return the arithmetic mean of finite values."""
+
+    return float(np.mean(np.asarray(values, dtype=np.float64))) if values else 0.0
+
+
+def _sem(values: Sequence[float]) -> float:
+    """Return the standard error across replicate values."""
+
+    array = np.asarray(values, dtype=np.float64)
+    if array.size <= 1:
+        return 0.0
+    return float(np.std(array, ddof=1) / np.sqrt(float(array.size)))
 
 
 def _metric_summary(name: str, values: Sequence[float], mean: float, sem: float) -> dict[str, Any]:

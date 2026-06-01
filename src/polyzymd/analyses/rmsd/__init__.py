@@ -27,10 +27,8 @@ from polyzymd.analyses.rmsd._mda import (
     RMSDArtifactCollector,
     aggregate_rmsd_artifacts,
     build_rmsd_jobs,
-    condition_artifact_to_legacy_result,
 )
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
-from polyzymd.analyses.rmsd._results import RMSDAggregatedResult
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
@@ -191,7 +189,7 @@ class RMSDAnalysis(Analysis):
     min_replicates: ClassVar[int] = 1
     Settings: ClassVar[type] = RMSDSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RMSDPlotSettings
-    AggregatedResultClass: ClassVar[type] = RMSDAggregatedResult
+    AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
@@ -219,8 +217,8 @@ class RMSDAnalysis(Analysis):
         *,
         condition_label: str | None = None,
         source: Path | None = None,
-    ) -> RMSDAggregatedResult:
-        """Coerce an aggregated result and validate its settings identity.
+    ) -> ConditionArtifact:
+        """Validate a canonical aggregated RMSD condition artifact.
 
         Parameters
         ----------
@@ -235,8 +233,8 @@ class RMSDAnalysis(Analysis):
 
         Returns
         -------
-        RMSDAggregatedResult
-            Validated aggregated result.
+        ConditionArtifact
+            Validated canonical condition artifact.
 
         Raises
         ------
@@ -244,22 +242,15 @@ class RMSDAnalysis(Analysis):
             Raised when the aggregated result is missing a settings
             fingerprint or was computed with different settings.
         """
-        if isinstance(result, ConditionArtifact):
-            result = condition_artifact_to_legacy_result(result)
-        elif isinstance(result, dict) and result.get("artifact_type") == "condition":
-            result = condition_artifact_to_legacy_result(ConditionArtifact.model_validate(result))
-        elif isinstance(result, dict):
-            result = RMSDAggregatedResult.model_validate(result)
-
-        if not isinstance(result, RMSDAggregatedResult):
+        if isinstance(result, dict) and result.get("artifact_type") == "condition":
+            result = ConditionArtifact.model_validate(result)
+        if not isinstance(result, ConditionArtifact):
             raise TypeError(
-                f"RMSD aggregated result loader expected RMSDAggregatedResult, got "
-                f"{type(result).__name__}"
+                "RMSD aggregated result loader expected a canonical ConditionArtifact, "
+                f"got {type(result).__name__}"
             )
 
-        stored_fingerprint = getattr(result, "settings_fingerprint", None)
-        if stored_fingerprint is None:
-            stored_fingerprint = getattr(result, "settings_fp", None)
+        stored_fingerprint = result.metadata.get("settings_fingerprint")
 
         current_fingerprint = cls._make_settings_cache_tag(settings)
         condition_text = (
@@ -349,17 +340,17 @@ class RMSDAnalysis(Analysis):
     @staticmethod
     def _validate_aggregated_result_completeness(
         condition: Any,
-        agg_result: RMSDAggregatedResult,
+        agg_result: ConditionArtifact,
         configured_run_labels: Sequence[str],
     ) -> None:
-        """Validate that an aggregated RMSD result is complete for comparison.
+        """Validate that a canonical RMSD condition artifact is complete.
 
         Parameters
         ----------
         condition : Any
             Condition associated with the aggregated result.
-        agg_result : RMSDAggregatedResult
-            Aggregated RMSD result to validate.
+        agg_result : ConditionArtifact
+            Aggregated RMSD condition artifact to validate.
         configured_run_labels : Sequence[str]
             Run labels defined in the RMSD settings.
 
@@ -370,7 +361,8 @@ class RMSDAnalysis(Analysis):
             incomplete per-run replicate data.
         """
         expected_run_labels = set(configured_run_labels)
-        observed_run_labels = {run_result.run_label for run_result in agg_result.run_results}
+        run_results = list(agg_result.payload.get("runs", []))
+        observed_run_labels = {str(run_result.get("run_label", "")) for run_result in run_results}
         missing_runs = sorted(expected_run_labels - observed_run_labels)
         unexpected_runs = sorted(observed_run_labels - expected_run_labels)
         if missing_runs or unexpected_runs:
@@ -388,48 +380,47 @@ class RMSDAnalysis(Analysis):
 
         expected_replicates = sorted(condition.replicates)
         observed_replicates = sorted(agg_result.replicates)
-        if (
-            agg_result.n_replicates != len(expected_replicates)
-            or observed_replicates != expected_replicates
-        ):
+        n_replicates = int(agg_result.payload.get("n_replicates", len(agg_result.replicates)))
+        if n_replicates != len(expected_replicates) or observed_replicates != expected_replicates:
             raise ValueError(
                 f"Aggregated RMSD result for condition '{condition.label}' has incomplete "
                 f"replicate coverage. Expected replicates {expected_replicates}, found "
-                f"{observed_replicates} with n_replicates={agg_result.n_replicates}. Recompute "
+                f"{observed_replicates} with n_replicates={n_replicates}. Recompute "
                 "the condition or clear stale caches before comparing."
             )
 
-        for run_result in agg_result.run_results:
-            run_replicates = sorted(run_result.replicates)
+        for run_result in run_results:
+            run_label = str(run_result.get("run_label", ""))
+            run_replicates = sorted(int(rep) for rep in run_result.get("replicates", []))
             counts = {
-                "per_replicate_means": len(run_result.per_replicate_means),
-                "per_replicate_stds": len(run_result.per_replicate_stds),
-                "per_replicate_medians": len(run_result.per_replicate_medians),
+                "per_replicate_means": len(run_result.get("per_replicate_means", [])),
+                "per_replicate_stds": len(run_result.get("per_replicate_stds", [])),
+                "per_replicate_medians": len(run_result.get("per_replicate_medians", [])),
                 "per_replicate_convergence_times_ns": len(
-                    run_result.per_replicate_convergence_times_ns
+                    run_result.get("per_replicate_convergence_times_ns", [])
                 ),
                 "per_replicate_convergence_assessable": len(
-                    run_result.per_replicate_convergence_assessable
+                    run_result.get("per_replicate_convergence_assessable", [])
                 ),
             }
             mismatched_fields = {
                 name: count for name, count in counts.items() if count != len(expected_replicates)
             }
             if (
-                run_result.n_replicates != len(expected_replicates)
+                int(run_result.get("n_replicates", len(run_replicates))) != len(expected_replicates)
                 or run_replicates != expected_replicates
             ):
                 raise ValueError(
-                    f"Aggregated RMSD run '{run_result.run_label}' for condition "
+                    f"Aggregated RMSD run '{run_label}' for condition "
                     f"'{condition.label}' has incomplete replicate metadata. Expected "
                     f"replicates {expected_replicates}, found {run_replicates} with "
-                    f"n_replicates={run_result.n_replicates}. Recompute the condition or "
+                    f"n_replicates={run_result.get('n_replicates')}. Recompute the condition or "
                     "clear stale caches before comparing."
                 )
 
             if mismatched_fields:
                 raise ValueError(
-                    f"Aggregated RMSD run '{run_result.run_label}' for condition "
+                    f"Aggregated RMSD run '{run_label}' for condition "
                     f"'{condition.label}' has incomplete replicate values: {mismatched_fields}. "
                     f"Expected {len(expected_replicates)} entries per field. Recompute the "
                     "condition or clear stale caches before comparing."
@@ -556,28 +547,37 @@ class RMSDAnalysis(Analysis):
 
             self._validate_aggregated_result_completeness(condition, agg_result, run_labels)
 
-            run_summaries = [
-                RMSDRunSummary(
-                    label=run_result.run_label,
-                    selection=run_result.selection,
-                    mean_rmsd=run_result.overall_mean,
-                    sem_rmsd=run_result.overall_sem,
-                    per_replicate_means=run_result.per_replicate_means,
-                    n_converged_replicates=run_result.n_converged_replicates,
-                    n_assessable_replicates=run_result.n_assessable_replicates,
-                    convergence_fraction=run_result.convergence_fraction,
-                    all_converged=run_result.all_converged,
-                    mean_convergence_time_ns=run_result.mean_convergence_time_ns,
-                    median_convergence_time_ns=run_result.median_convergence_time_ns,
+            run_summaries = []
+            for run_result in agg_result.payload.get("runs", []):
+                run_summaries.append(
+                    RMSDRunSummary(
+                        label=str(run_result.get("run_label", "")),
+                        selection=str(run_result.get("selection", "")),
+                        mean_rmsd=float(run_result.get("overall_mean", 0.0)),
+                        sem_rmsd=float(run_result.get("overall_sem", 0.0) or 0.0),
+                        per_replicate_means=[
+                            float(value) for value in run_result.get("per_replicate_means", [])
+                        ],
+                        n_converged_replicates=int(
+                            run_result.get("n_converged_replicates", 0) or 0
+                        ),
+                        n_assessable_replicates=int(
+                            run_result.get("n_assessable_replicates", 0) or 0
+                        ),
+                        convergence_fraction=run_result.get("convergence_fraction"),
+                        all_converged=bool(run_result.get("all_converged", False)),
+                        mean_convergence_time_ns=run_result.get("mean_convergence_time_ns"),
+                        median_convergence_time_ns=run_result.get("median_convergence_time_ns"),
+                    )
                 )
-                for run_result in agg_result.run_results
-            ]
 
             summaries.append(
                 RMSDConditionSummary(
                     label=condition.label,
                     config_path=str(condition.config_path),
-                    n_replicates=agg_result.n_replicates,
+                    n_replicates=int(
+                        agg_result.payload.get("n_replicates", len(agg_result.replicates))
+                    ),
                     run_summaries=run_summaries,
                 )
             )

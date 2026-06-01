@@ -40,7 +40,6 @@ from polyzymd.analyses.rmsd._formatters import format_rmsd_comparison
 from polyzymd.analyses.rmsd._mda import (
     _build_rmsd_analysis,
     _sidecar_filename,
-    condition_artifact_to_legacy_result,
 )
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
 from polyzymd.analyses.rmsd._plotters import (
@@ -77,6 +76,55 @@ def _make_run_settings() -> list[RMSDRunSettings]:
 def _settings_hash(settings: RMSDSettings) -> str:
     """Return the shared settings fingerprint used by RMSD caches."""
     return settings_fingerprint(settings)
+
+
+def _condition_artifact_summary(artifact: ConditionArtifact) -> SimpleNamespace:
+    """Return attribute-style access to canonical RMSD condition payloads."""
+
+    return SimpleNamespace(
+        n_replicates=artifact.payload.get("n_replicates", len(artifact.replicates)),
+        settings_fingerprint=artifact.metadata.get("settings_fingerprint"),
+        run_results=[SimpleNamespace(**run) for run in artifact.payload.get("runs", [])],
+    )
+
+
+def _canonical_aggregated_result(label: str, result: object) -> ConditionArtifact:
+    """Convert test aggregate fixtures to canonical RMSD condition artifacts."""
+
+    if isinstance(result, ConditionArtifact):
+        return result
+    if hasattr(result, "model_dump"):
+        payload = result.model_dump(mode="json")
+    elif isinstance(result, dict):
+        payload = dict(result)
+    else:
+        raise TypeError(f"Unsupported RMSD aggregate fixture: {type(result).__name__}")
+    runs = payload.get("run_results", payload.get("runs", []))
+    return ConditionArtifact(
+        analysis_name="rmsd",
+        condition_label=label,
+        replicates=[int(rep) for rep in payload.get("replicates", [])],
+        payload={
+            "runs": runs,
+            "metrics": {},
+            "replicate_metrics": {},
+            "n_replicates": int(payload.get("n_replicates", len(payload.get("replicates", [])))),
+        },
+        metadata={
+            "settings_fingerprint": payload.get("settings_fingerprint"),
+            "config_hash": payload.get("config_hash", "hash123"),
+            "polyzymd_version": payload.get("polyzymd_version", "test"),
+            "equilibration_time": payload.get("equilibration_time", 10.0),
+            "equilibration_unit": payload.get("equilibration_unit", "ns"),
+            "selection_string": payload.get("selection_string", ""),
+        },
+    )
+
+
+def _canonical_aggregated_results(results: dict[str, object]) -> dict[str, ConditionArtifact]:
+    """Convert a mapping of aggregate fixtures to canonical artifacts."""
+
+    return {label: _canonical_aggregated_result(label, result) for label, result in results.items()}
 
 
 def _make_stretch_universe() -> object:
@@ -791,7 +839,8 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
         settings=settings,
         equilibration="10ns",
     )
-    aggregated = condition_artifact_to_legacy_result(analysis.aggregate(aggregate_ctx, [artifact]))
+    aggregated_artifact = analysis.aggregate(aggregate_ctx, [artifact])
+    aggregated = _condition_artifact_summary(aggregated_artifact)
     assert aggregated.run_results[0].overall_mean == pytest.approx(expected_mean_rmsd)
     assert aggregated.settings_fingerprint == settings_hash
 
@@ -804,7 +853,7 @@ def test_mda_rmsd_job_synthetic_universe_matches_expected_artifacts(
         control_label=condition.label,
         equilibration="10ns",
         recompute=False,
-        aggregated_results={condition.label: aggregated},
+        aggregated_results={condition.label: aggregated_artifact},
     )
     comparison = analysis.compare(comparison_ctx)
 
@@ -1260,7 +1309,7 @@ def test_aggregate_single_replicate(
     with caplog.at_level("WARNING"):
         aggregated = analysis.aggregate(ctx, [artifact])
 
-    legacy = condition_artifact_to_legacy_result(aggregated)
+    legacy = _condition_artifact_summary(aggregated)
     assert aggregated.replicates == [1]
     assert legacy.n_replicates == 1
     assert len(legacy.run_results) == 2
@@ -1305,7 +1354,7 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
         for rep in (1, 2, 3)
     ]
 
-    aggregated = condition_artifact_to_legacy_result(analysis.aggregate(ctx, results))
+    aggregated = _condition_artifact_summary(analysis.aggregate(ctx, results))
 
     assert aggregated.n_replicates == 3
     backbone = next(run for run in aggregated.run_results if run.run_label == "protein_backbone")
@@ -1342,7 +1391,7 @@ def test_aggregate_orders_complete_out_of_order_inputs(
         for rep in (3, 1, 2)
     ]
 
-    aggregated = condition_artifact_to_legacy_result(analysis.aggregate(ctx, results))
+    aggregated = _condition_artifact_summary(analysis.aggregate(ctx, results))
 
     backbone = aggregated.run_results[0]
     assert backbone.replicates == [1, 2, 3]
@@ -1442,7 +1491,7 @@ def test_aggregate_overall_median_uses_median(condition: Condition, tmp_path: Pa
         for rep in (1, 2, 3)
     ]
 
-    aggregated = condition_artifact_to_legacy_result(analysis.aggregate(ctx, results))
+    aggregated = _condition_artifact_summary(analysis.aggregate(ctx, results))
     backbone = next(run for run in aggregated.run_results if run.run_label == "protein_backbone")
     assert backbone.overall_median == pytest.approx(2.0)
 
@@ -1497,7 +1546,9 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
         control_label="Control",
         equilibration="10ns",
         recompute=False,
-        aggregated_results={"Control": control_agg, "Treated": treated_agg},
+        aggregated_results=_canonical_aggregated_results(
+            {"Control": control_agg, "Treated": treated_agg}
+        ),
     )
 
     comparison = analysis.compare(ctx)
@@ -1578,7 +1629,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
         control_label="Control",
         equilibration="10ns",
         recompute=False,
-        aggregated_results=aggregated_results,
+        aggregated_results=_canonical_aggregated_results(aggregated_results),
     )
 
     comparison = analysis.compare(ctx)
@@ -1656,7 +1707,7 @@ def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
         control_label="Control",
         equilibration="10ns",
         recompute=False,
-        aggregated_results=aggregated_results,
+        aggregated_results=_canonical_aggregated_results(aggregated_results),
     )
 
     comparison = analysis.compare(ctx)
@@ -1717,7 +1768,9 @@ def test_compare_missing_configured_run_raises(tmp_path: Path) -> None:
         control_label="Control",
         equilibration="10ns",
         recompute=False,
-        aggregated_results={"Control": control_agg, "Treated": treated_agg},
+        aggregated_results=_canonical_aggregated_results(
+            {"Control": control_agg, "Treated": treated_agg}
+        ),
     )
 
     with pytest.raises(
@@ -1760,7 +1813,7 @@ def test_compare_missing_condition_aggregated_result_raises(tmp_path: Path) -> N
         control_label="Control",
         equilibration="10ns",
         recompute=False,
-        aggregated_results={"Control": control_agg},
+        aggregated_results=_canonical_aggregated_results({"Control": control_agg}),
     )
 
     with pytest.raises(
@@ -1817,7 +1870,9 @@ def test_compare_incomplete_run_replicate_values_raise(tmp_path: Path) -> None:
         control_label="Control",
         equilibration="10ns",
         recompute=False,
-        aggregated_results={"Control": control_agg, "Treated": treated_agg},
+        aggregated_results=_canonical_aggregated_results(
+            {"Control": control_agg, "Treated": treated_agg}
+        ),
     )
 
     with pytest.raises(
@@ -1876,7 +1931,7 @@ def test_compare_rejects_preloaded_invalid_aggregated_results(
         control_label="CondA",
         equilibration="10ns",
         recompute=False,
-        aggregated_results={"CondA": preloaded_result},
+        aggregated_results=_canonical_aggregated_results({"CondA": preloaded_result}),
     )
 
     with pytest.raises(ValueError, match=error_match):
@@ -1895,7 +1950,7 @@ def test_compare_rejects_stale_aggregated_result_from_disk(tmp_path: Path) -> No
     aggregated_dir = analysis_dir / "aggregated"
     aggregated_dir.mkdir(parents=True)
 
-    RMSDAggregatedResult(
+    stale_result = RMSDAggregatedResult(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1907,7 +1962,10 @@ def test_compare_rejects_stale_aggregated_result_from_disk(tmp_path: Path) -> No
         run_results=[_make_aggregated_run("protein_backbone", "protein", [1.1, 1.2])],
         settings_fingerprint=_settings_hash(stale_settings),
         source_result_files=[],
-    ).save(aggregated_dir / "result.json")
+    )
+    ArtifactStore(aggregated_dir).write_condition_result(
+        _canonical_aggregated_result("CondA", stale_result)
+    )
 
     ctx = make_comparison_context(
         name="rmsd_compare",

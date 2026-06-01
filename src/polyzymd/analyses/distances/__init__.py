@@ -51,7 +51,6 @@ from polyzymd.analyses.distances._mda import (
     aggregate_distance_artifacts,
     build_distance_jobs,
     compute_distance_payloads,
-    condition_artifact_to_legacy_result,
 )
 from polyzymd.analyses.distances._plot_settings import DistancesPlotSettings
 from polyzymd.analyses.distances._plotters import (
@@ -61,13 +60,16 @@ from polyzymd.analyses.distances._plotters import (
     build_distance_plot_data,
 )
 from polyzymd.analyses.distances._results import (
-    DistanceAggregatedResult,
-    DistancePairAggregatedResult,
     DistancePairResult,
     DistanceResult,
     DistanceResultMetadata,
 )
-from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext, ReplicateArtifact
+from polyzymd.analyses.mda import (
+    ConditionArtifact,
+    MDACollectorContext,
+    MDAReplicateJobContext,
+    ReplicateArtifact,
+)
 from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
 
 if TYPE_CHECKING:
@@ -982,7 +984,7 @@ class DistancesAnalysis(Analysis):
     name: ClassVar[str] = "distances"
     Settings: ClassVar[type] = DistancesSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = DistancesPlotSettings
-    AggregatedResultClass: ClassVar[type] = DistanceAggregatedResult
+    AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
@@ -1054,7 +1056,7 @@ class DistancesAnalysis(Analysis):
         Returns
         -------
         ConditionArtifact
-            Aggregated condition artifact with legacy-compatible pair summaries.
+            Aggregated condition artifact with canonical pair summaries.
         """
 
         if not results:
@@ -1208,7 +1210,12 @@ class DistancesAnalysis(Analysis):
                 logger.warning(f"No aggregated result found for '{cond.label}' — skipping.")
                 continue
 
-            agg_result = condition_artifact_to_legacy_result(agg_result)
+            if not isinstance(agg_result, ConditionArtifact):
+                raise TypeError(
+                    f"Distances comparison for condition '{cond.label}' requires canonical "
+                    "MDAnalysis condition artifacts. Non-artifact aggregate inputs are "
+                    "incompatible; recompute the condition or clear stale caches before comparing."
+                )
             agg_result = self.validate_aggregated_result(
                 agg_result,
                 condition=cond,
@@ -1219,24 +1226,34 @@ class DistancesAnalysis(Analysis):
                 allow_replicate_subset=True,
             )
 
+            pair_results = list(agg_result.payload.get("pair_results", []))
             pair_summaries = []
-            for pair_index, pr in enumerate(agg_result.pair_results):
+            for pair_index, pr in enumerate(pair_results):
                 expected_label = pair_labels[pair_index] if pair_index < len(pair_labels) else None
-                user_label = pr.pair_label if pr.pair_label == expected_label else expected_label
+                pair_label = str(pr.get("pair_label", f"Pair {pair_index}"))
+                user_label = pair_label if pair_label == expected_label else expected_label
                 if user_label is None:
-                    user_label = pr.pair_label
+                    user_label = pair_label
                 pair_summaries.append(
                     DistancePairSummary(
                         label=user_label,
-                        selection_a=pr.selection1,
-                        selection_b=pr.selection2,
-                        threshold=pr.threshold,
-                        mean_distance=pr.overall_mean,
-                        sem_distance=pr.overall_sem,
-                        fraction_below_threshold=pr.overall_fraction_below,
-                        sem_fraction_below=pr.sem_fraction_below,
-                        per_replicate_means=pr.per_replicate_means,
-                        per_replicate_fractions=pr.per_replicate_fractions_below,
+                        selection_a=str(pr.get("selection1", "")),
+                        selection_b=str(pr.get("selection2", "")),
+                        threshold=pr.get("threshold"),
+                        mean_distance=float(pr.get("overall_mean", pr.get("mean_distance", 0.0))),
+                        sem_distance=float(
+                            pr.get("overall_sem", pr.get("sem_distance", 0.0)) or 0.0
+                        ),
+                        fraction_below_threshold=pr.get("overall_fraction_below"),
+                        sem_fraction_below=pr.get("sem_fraction_below"),
+                        per_replicate_means=[
+                            float(value) for value in pr.get("per_replicate_means", [])
+                        ],
+                        per_replicate_fractions=(
+                            [float(value) for value in pr.get("per_replicate_fractions_below", [])]
+                            if pr.get("per_replicate_fractions_below") is not None
+                            else None
+                        ),
                     )
                 )
 
@@ -1244,7 +1261,9 @@ class DistancesAnalysis(Analysis):
                 DistanceConditionSummary(
                     label=cond.label,
                     config_path=str(cond.config_path),
-                    n_replicates=agg_result.n_replicates,
+                    n_replicates=int(
+                        agg_result.payload.get("n_replicates", len(agg_result.replicates))
+                    ),
                     pair_summaries=pair_summaries,
                 )
             )

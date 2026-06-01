@@ -28,10 +28,8 @@ from polyzymd.analyses.rg._mda import (
     RgArtifactCollector,
     aggregate_rg_artifacts,
     build_rg_jobs,
-    condition_artifact_to_legacy_result,
 )
 from polyzymd.analyses.rg._plot_settings import RgPlotSettings
-from polyzymd.analyses.rg._results import RgAggregatedResult
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
@@ -118,7 +116,7 @@ class RgAnalysis(Analysis):
     min_replicates: ClassVar[int] = 1
     Settings: ClassVar[type] = RgSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RgPlotSettings
-    AggregatedResultClass: ClassVar[type] = RgAggregatedResult
+    AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
@@ -147,8 +145,8 @@ class RgAnalysis(Analysis):
         *,
         condition_label: str | None = None,
         source: Path | None = None,
-    ) -> RgAggregatedResult:
-        """Coerce an aggregated result and validate its settings identity.
+    ) -> ConditionArtifact:
+        """Validate a canonical aggregated Rg condition artifact.
 
         Parameters
         ----------
@@ -163,8 +161,8 @@ class RgAnalysis(Analysis):
 
         Returns
         -------
-        RgAggregatedResult
-            Validated aggregated result.
+        ConditionArtifact
+            Validated canonical condition artifact.
 
         Raises
         ------
@@ -172,22 +170,15 @@ class RgAnalysis(Analysis):
             Raised when the aggregated result is missing a settings
             fingerprint or was computed with different settings.
         """
-        if isinstance(result, ConditionArtifact):
-            result = condition_artifact_to_legacy_result(result)
-        elif isinstance(result, dict) and result.get("artifact_type") == "condition":
-            result = condition_artifact_to_legacy_result(ConditionArtifact.model_validate(result))
-        elif isinstance(result, dict):
-            result = RgAggregatedResult.model_validate(result)
-
-        if not isinstance(result, RgAggregatedResult):
+        if isinstance(result, dict) and result.get("artifact_type") == "condition":
+            result = ConditionArtifact.model_validate(result)
+        if not isinstance(result, ConditionArtifact):
             raise TypeError(
-                f"Rg aggregated result loader expected RgAggregatedResult, got "
-                f"{type(result).__name__}"
+                "Rg aggregated result loader expected a canonical ConditionArtifact, "
+                f"got {type(result).__name__}"
             )
 
-        stored_fingerprint = getattr(result, "settings_fingerprint", None)
-        if stored_fingerprint is None:
-            stored_fingerprint = getattr(result, "settings_fp", None)
+        stored_fingerprint = result.metadata.get("settings_fingerprint")
 
         current_fingerprint = cls._make_settings_cache_tag(settings)
         condition_text = (
@@ -317,9 +308,25 @@ class RgAnalysis(Analysis):
 
         skipped_by_run: dict[str, set[int]] = {}
         for skipped_run in skipped_runs:
-            if skipped_run.reason_code != "empty_selection":
+            reason_code = (
+                skipped_run.get("reason_code")
+                if isinstance(skipped_run, dict)
+                else getattr(skipped_run, "reason_code", None)
+            )
+            if reason_code != "empty_selection":
                 continue
-            skipped_by_run.setdefault(skipped_run.run_label, set()).add(skipped_run.replicate)
+            run_label = (
+                skipped_run.get("run_label")
+                if isinstance(skipped_run, dict)
+                else getattr(skipped_run, "run_label", None)
+            )
+            replicate = (
+                skipped_run.get("replicate")
+                if isinstance(skipped_run, dict)
+                else getattr(skipped_run, "replicate", None)
+            )
+            if run_label is not None and replicate is not None:
+                skipped_by_run.setdefault(str(run_label), set()).add(int(replicate))
         return skipped_by_run
 
     @staticmethod
@@ -476,7 +483,7 @@ class RgAnalysis(Analysis):
     @staticmethod
     def _validate_aggregated_result_completeness(
         condition: Any,
-        agg_result: RgAggregatedResult,
+        agg_result: ConditionArtifact,
         configured_run_labels: Sequence[str],
     ) -> None:
         """Validate that an aggregated Rg result is complete for comparison.
@@ -485,8 +492,8 @@ class RgAnalysis(Analysis):
         ----------
         condition : Any
             Condition associated with the aggregated result.
-        agg_result : RgAggregatedResult
-            Aggregated Rg result to validate.
+        agg_result : ConditionArtifact
+            Aggregated Rg condition artifact to validate.
         configured_run_labels : Sequence[str]
             Run labels defined in the Rg settings.
 
@@ -497,11 +504,13 @@ class RgAnalysis(Analysis):
             incomplete replicate data.
         """
         expected_run_labels = set(configured_run_labels)
-        observed_run_labels = {run_result.run_label for run_result in agg_result.run_results}
+        run_results = list(agg_result.payload.get("runs", []))
+        skipped_runs = list(agg_result.payload.get("skipped_runs", []))
+        observed_run_labels = {str(run_result.get("run_label", "")) for run_result in run_results}
         missing_runs = sorted(expected_run_labels - observed_run_labels)
         unexpected_runs = sorted(observed_run_labels - expected_run_labels)
         expected_replicates = sorted(condition.replicates)
-        skipped_by_run = RgAnalysis._skipped_replicates_by_run(agg_result.skipped_runs)
+        skipped_by_run = RgAnalysis._skipped_replicates_by_run(skipped_runs)
         missing_without_skip = {
             run_label: [
                 replicate
@@ -529,40 +538,39 @@ class RgAnalysis(Analysis):
             )
 
         observed_replicates = sorted(agg_result.replicates)
-        if (
-            agg_result.n_replicates != len(expected_replicates)
-            or observed_replicates != expected_replicates
-        ):
+        n_replicates = int(agg_result.payload.get("n_replicates", len(agg_result.replicates)))
+        if n_replicates != len(expected_replicates) or observed_replicates != expected_replicates:
             raise ValueError(
                 f"Aggregated Rg result for condition '{condition.label}' has incomplete "
                 f"replicate coverage. Expected replicates {expected_replicates}, found "
-                f"{observed_replicates} with n_replicates={agg_result.n_replicates}. Recompute "
+                f"{observed_replicates} with n_replicates={n_replicates}. Recompute "
                 "the condition or clear stale caches before comparing."
             )
 
-        for run_result in agg_result.run_results:
-            run_replicates = sorted(run_result.replicates)
+        for run_result in run_results:
+            run_label = str(run_result.get("run_label", ""))
+            run_replicates = sorted(int(rep) for rep in run_result.get("replicates", []))
             missing_run_replicates = sorted(set(expected_replicates) - set(run_replicates))
             unexpected_run_replicates = sorted(set(run_replicates) - set(expected_replicates))
             missing_without_skip = [
                 replicate
                 for replicate in missing_run_replicates
-                if replicate not in skipped_by_run.get(run_result.run_label, set())
+                if replicate not in skipped_by_run.get(run_label, set())
             ]
             counts = {
-                "per_replicate_means": len(run_result.per_replicate_means),
-                "per_replicate_stds": len(run_result.per_replicate_stds),
-                "per_replicate_medians": len(run_result.per_replicate_medians),
+                "per_replicate_means": len(run_result.get("per_replicate_means", [])),
+                "per_replicate_stds": len(run_result.get("per_replicate_stds", [])),
+                "per_replicate_medians": len(run_result.get("per_replicate_medians", [])),
             }
-            if run_result.per_replicate_mean_fragments_per_frame is not None:
+            if run_result.get("per_replicate_mean_fragments_per_frame") is not None:
                 counts["per_replicate_mean_fragments_per_frame"] = len(
-                    run_result.per_replicate_mean_fragments_per_frame
+                    run_result.get("per_replicate_mean_fragments_per_frame", [])
                 )
             mismatched_fields = {
                 name: count for name, count in counts.items() if count != len(run_replicates)
             }
             if (
-                run_result.n_replicates != len(run_replicates)
+                int(run_result.get("n_replicates", len(run_replicates))) != len(run_replicates)
                 or unexpected_run_replicates
                 or missing_without_skip
             ):
@@ -573,21 +581,21 @@ class RgAnalysis(Analysis):
                     detail_parts.append(
                         f"missing replicates without skip provenance {missing_without_skip}"
                     )
-                if run_result.n_replicates != len(run_replicates):
+                if int(run_result.get("n_replicates", len(run_replicates))) != len(run_replicates):
                     detail_parts.append(
-                        f"n_replicates={run_result.n_replicates} but listed "
+                        f"n_replicates={run_result.get('n_replicates')} but listed "
                         f"{len(run_replicates)} replicates"
                     )
                 detail_text = "; ".join(detail_parts)
                 raise ValueError(
-                    f"Aggregated Rg run '{run_result.run_label}' for condition "
+                    f"Aggregated Rg run '{run_label}' for condition "
                     f"'{condition.label}' has incomplete replicate metadata: {detail_text}. "
                     "Recompute the condition or clear stale caches before comparing."
                 )
 
             if mismatched_fields:
                 raise ValueError(
-                    f"Aggregated Rg run '{run_result.run_label}' for condition "
+                    f"Aggregated Rg run '{run_label}' for condition "
                     f"'{condition.label}' has incomplete replicate values: {mismatched_fields}. "
                     f"Expected {len(run_replicates)} entries per field. Recompute the "
                     "condition or clear stale caches before comparing."
@@ -740,27 +748,32 @@ class RgAnalysis(Analysis):
                 configured_run_labels,
             )
 
-            run_summaries = [
-                RgRunSummary(
-                    label=run_result.run_label,
-                    selection=run_result.selection,
-                    mean_rg=run_result.overall_mean,
-                    sem_rg=run_result.overall_sem,
-                    per_replicate_means=run_result.per_replicate_means,
-                    replicates=run_result.replicates,
-                    n_replicates=run_result.n_replicates,
-                    calculation_mode=run_result.calculation_mode,
-                    fragment_weighting=run_result.fragment_weighting,
-                    mean_fragments_per_frame=run_result.overall_mean_fragments_per_frame,
+            run_summaries = []
+            for run_result in agg_result.payload.get("runs", []):
+                run_summaries.append(
+                    RgRunSummary(
+                        label=str(run_result.get("run_label", "")),
+                        selection=str(run_result.get("selection", "")),
+                        mean_rg=float(run_result.get("overall_mean", 0.0)),
+                        sem_rg=float(run_result.get("overall_sem", 0.0) or 0.0),
+                        per_replicate_means=[
+                            float(value) for value in run_result.get("per_replicate_means", [])
+                        ],
+                        replicates=[int(rep) for rep in run_result.get("replicates", [])],
+                        n_replicates=int(run_result.get("n_replicates", 0) or 0),
+                        calculation_mode=str(run_result.get("calculation_mode", "selection")),
+                        fragment_weighting=str(run_result.get("fragment_weighting", "equal")),
+                        mean_fragments_per_frame=run_result.get("overall_mean_fragments_per_frame"),
+                    )
                 )
-                for run_result in agg_result.run_results
-            ]
 
             summaries.append(
                 RgConditionSummary(
                     label=condition.label,
                     config_path=str(condition.config_path),
-                    n_replicates=agg_result.n_replicates,
+                    n_replicates=int(
+                        agg_result.payload.get("n_replicates", len(agg_result.replicates))
+                    ),
                     run_summaries=run_summaries,
                 )
             )

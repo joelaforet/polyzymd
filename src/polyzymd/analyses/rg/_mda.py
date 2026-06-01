@@ -25,13 +25,6 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
-from polyzymd.analyses.rg._results import (
-    RgAggregatedResult,
-    RgResult,
-    RgRunAggregatedResult,
-    RgRunResult,
-    RgSkippedRunResult,
-)
 from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.statistics import compute_sem
 
@@ -481,27 +474,28 @@ def aggregate_rg_artifacts(
         artifacts=artifacts,
         analysis_dir=output_dir.parent,
     )
-    legacy_result = _aggregate_legacy_result(
+    eq_value, eq_unit = parse_time_string(equilibration)
+    first = ordered_artifacts[0]
+    config_hash = str(first.metadata.get("config_hash", "unknown"))
+    run_results, skipped_runs = _aggregate_run_payloads(
         condition_label=condition_label,
         replicates=replicates,
         settings=settings,
-        equilibration=equilibration,
         output_dir=output_dir,
         artifacts=ordered_artifacts,
-        settings_fingerprint=settings_fingerprint,
     )
-    metrics, replicate_metrics = _condition_metrics(legacy_result)
+    metrics, replicate_metrics = _condition_metrics(run_results, [int(rep) for rep in replicates])
     source_result_files = _source_result_files(output_dir, replicates)
     return ConditionArtifact(
         analysis_name="rg",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
         payload={
-            "runs": [run.model_dump(mode="json") for run in legacy_result.run_results],
-            "skipped_runs": [skip.model_dump(mode="json") for skip in legacy_result.skipped_runs],
+            "runs": run_results,
+            "skipped_runs": skipped_runs,
             "metrics": metrics,
             "replicate_metrics": replicate_metrics,
-            "n_replicates": legacy_result.n_replicates,
+            "n_replicates": len(replicates),
         },
         provenance={
             "source": "rg_replicate_artifact_aggregation",
@@ -512,98 +506,20 @@ def aggregate_rg_artifacts(
         metadata={
             "result_kind": "rg_mda_condition",
             "settings_fingerprint": settings_fingerprint,
-            "config_hash": legacy_result.config_hash,
-            "polyzymd_version": legacy_result.polyzymd_version,
+            "config_hash": config_hash,
+            "polyzymd_version": get_polyzymd_version(),
             "mdanalysis_version": mdanalysis_version(),
-            "equilibration_time": legacy_result.equilibration_time,
-            "equilibration_unit": legacy_result.equilibration_unit,
-            "selection_string": legacy_result.selection_string,
+            "equilibration_time": eq_value,
+            "equilibration_unit": eq_unit,
+            "selection_string": "; ".join(run.selection for run in settings.runs),
             "source_result_files": [path for _, path in source_result_files],
-            "n_replicates": legacy_result.n_replicates,
+            "n_replicates": len(replicates),
         },
         source_replicates=[
             {"replicate": int(replicate), "path": str(path)}
             for replicate, path in source_result_files
         ],
         warnings=_combined_warnings(ordered_artifacts),
-    )
-
-
-def artifact_to_rg_result(artifact: ReplicateArtifact) -> RgResult:
-    """Convert a replicate artifact to the established Rg result model.
-
-    Parameters
-    ----------
-    artifact : ReplicateArtifact
-        Replicate artifact to adapt.
-
-    Returns
-    -------
-    RgResult
-        Established in-memory replicate result model.
-    """
-
-    if artifact.analysis_name != "rg":
-        raise ValueError(f"Expected rg artifact, got {artifact.analysis_name!r}")
-    metadata = artifact.metadata
-    payload = artifact.payload
-    return RgResult(
-        config_hash=str(metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=artifact.replicate,
-        equilibration_time=float(metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(metadata.get("equilibration_unit", "ns")),
-        selection_string=str(metadata.get("selection_string", "")),
-        run_results=[RgRunResult.model_validate(entry) for entry in payload.get("runs", [])],
-        skipped_runs=[
-            RgSkippedRunResult.model_validate(entry) for entry in payload.get("skipped_runs", [])
-        ],
-        settings_fingerprint=metadata.get("settings_fingerprint"),
-        n_frames_total=int(payload.get("n_frames_total", 0) or 0),
-        n_frames_used=int(payload.get("n_frames_used", 0) or 0),
-        trajectory_files=[],
-    )
-
-
-def condition_artifact_to_legacy_result(artifact: Any) -> RgAggregatedResult:
-    """Convert an Rg condition artifact to the established aggregate model.
-
-    Parameters
-    ----------
-    artifact : Any
-        Condition artifact or established aggregate model.
-
-    Returns
-    -------
-    RgAggregatedResult
-        In-memory compatibility model used by existing comparison formatters.
-    """
-
-    if isinstance(artifact, RgAggregatedResult):
-        return artifact
-    if not isinstance(artifact, ConditionArtifact):
-        raise TypeError(
-            f"Rg condition adapter expected ConditionArtifact, got {type(artifact).__name__}"
-        )
-    metadata = artifact.metadata
-    return RgAggregatedResult(
-        config_hash=str(metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=None,
-        equilibration_time=float(metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(metadata.get("equilibration_unit", "ns")),
-        selection_string=str(metadata.get("selection_string", "")),
-        replicates=[int(rep) for rep in artifact.replicates],
-        n_replicates=len(artifact.replicates),
-        run_results=[
-            RgRunAggregatedResult.model_validate(run) for run in artifact.payload.get("runs", [])
-        ],
-        skipped_runs=[
-            RgSkippedRunResult.model_validate(skip)
-            for skip in artifact.payload.get("skipped_runs", [])
-        ],
-        settings_fingerprint=metadata.get("settings_fingerprint"),
-        source_result_files=_legacy_source_result_files(metadata.get("source_result_files", [])),
     )
 
 
@@ -967,22 +883,17 @@ def _payload_from_analysis(
     )
 
 
-def _aggregate_legacy_result(
+def _aggregate_run_payloads(
     *,
     condition_label: str,
     replicates: Sequence[int],
     settings: RgSettings,
-    equilibration: str,
     output_dir: Path,
     artifacts: Sequence[ReplicateArtifact],
-    settings_fingerprint: str,
-) -> RgAggregatedResult:
-    """Build the established aggregate model from ordered artifacts."""
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Aggregate canonical Rg run payloads from ordered replicate artifacts."""
 
-    eq_value, eq_unit = parse_time_string(equilibration)
     replicate_order = [int(rep) for rep in replicates]
-    first = artifacts[0]
-    config_hash = str(first.metadata.get("config_hash", "unknown"))
     if len(replicate_order) == 1:
         LOGGER.warning(
             "Only one replicate available for Rg aggregation in condition '%s'; "
@@ -990,11 +901,11 @@ def _aggregate_legacy_result(
             condition_label,
         )
     skipped_runs = [
-        RgSkippedRunResult.model_validate(skipped)
+        dict(skipped)
         for artifact in artifacts
         for skipped in artifact.payload.get("skipped_runs", [])
     ]
-    aggregated_runs: list[RgRunAggregatedResult] = []
+    aggregated_runs: list[dict[str, Any]] = []
     for run in settings.runs:
         run_label = run.label
         run_entries: list[Mapping[str, Any]] = []
@@ -1036,51 +947,32 @@ def _aggregate_legacy_result(
         )
         template = run_entries[0]
         aggregated_runs.append(
-            RgRunAggregatedResult(
-                config_hash=config_hash,
-                polyzymd_version=get_polyzymd_version(),
-                replicate=None,
-                equilibration_time=eq_value,
-                equilibration_unit=eq_unit,
-                selection_string=str(template["selection"]),
-                replicates=run_replicates,
-                n_replicates=len(run_replicates),
-                run_label=run_label,
-                selection=str(template["selection"]),
-                overall_mean=mean_stats.mean,
-                overall_sem=mean_stats.sem,
-                overall_median=overall_median,
-                per_replicate_means=per_means,
-                per_replicate_stds=per_stds,
-                per_replicate_medians=per_medians,
-                calculation_mode=str(template.get("calculation_mode", "selection")),
-                fragment_weighting=template.get("fragment_weighting"),
-                overall_mean_fragments_per_frame=histograms["overall_mean_fragments_per_frame"],
-                per_replicate_mean_fragments_per_frame=histograms[
+            {
+                "replicates": run_replicates,
+                "n_replicates": len(run_replicates),
+                "run_label": run_label,
+                "selection": str(template["selection"]),
+                "overall_mean": mean_stats.mean,
+                "overall_sem": mean_stats.sem,
+                "overall_median": overall_median,
+                "per_replicate_means": per_means,
+                "per_replicate_stds": per_stds,
+                "per_replicate_medians": per_medians,
+                "calculation_mode": str(template.get("calculation_mode", "selection")),
+                "fragment_weighting": template.get("fragment_weighting"),
+                "overall_mean_fragments_per_frame": histograms["overall_mean_fragments_per_frame"],
+                "per_replicate_mean_fragments_per_frame": histograms[
                     "per_replicate_mean_fragments_per_frame"
                 ],
-                fragment_histogram_edges=histograms["fragment_histogram_edges"],
-                fragment_histogram_density_mean=histograms["fragment_histogram_density_mean"],
-                fragment_histogram_density_sem=histograms["fragment_histogram_density_sem"],
-                reduced_histogram_edges=histograms["reduced_histogram_edges"],
-                reduced_histogram_density_mean=histograms["reduced_histogram_density_mean"],
-                reduced_histogram_density_sem=histograms["reduced_histogram_density_sem"],
-            )
+                "fragment_histogram_edges": histograms["fragment_histogram_edges"],
+                "fragment_histogram_density_mean": histograms["fragment_histogram_density_mean"],
+                "fragment_histogram_density_sem": histograms["fragment_histogram_density_sem"],
+                "reduced_histogram_edges": histograms["reduced_histogram_edges"],
+                "reduced_histogram_density_mean": histograms["reduced_histogram_density_mean"],
+                "reduced_histogram_density_sem": histograms["reduced_histogram_density_sem"],
+            }
         )
-    return RgAggregatedResult(
-        config_hash=config_hash,
-        polyzymd_version=get_polyzymd_version(),
-        replicate=None,
-        equilibration_time=eq_value,
-        equilibration_unit=eq_unit,
-        selection_string="; ".join(run.selection for run in settings.runs),
-        replicates=replicate_order,
-        n_replicates=len(replicate_order),
-        run_results=aggregated_runs,
-        skipped_runs=skipped_runs,
-        settings_fingerprint=settings_fingerprint,
-        source_result_files=[str(path) for _, path in _source_result_files(output_dir, replicates)],
-    )
+    return aggregated_runs, skipped_runs
 
 
 def _aggregate_histograms(
@@ -1270,22 +1162,22 @@ def _artifact_has_skip(artifact: ReplicateArtifact, run_label: str) -> bool:
 
 
 def _condition_metrics(
-    legacy_result: RgAggregatedResult,
+    run_results: Sequence[Mapping[str, Any]], replicates: Sequence[int]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, float]]]:
-    """Build artifact metric dictionaries from an aggregate model."""
+    """Build artifact metric dictionaries from canonical run summaries."""
 
     metrics: dict[str, dict[str, Any]] = {}
     replicate_metrics: dict[str, dict[str, float]] = {
-        str(replicate): {} for replicate in legacy_result.replicates
+        str(replicate): {} for replicate in replicates
     }
-    for run in legacy_result.run_results:
-        metric_name = f"{run.run_label}.mean_rg"
-        values = [float(value) for value in run.per_replicate_means]
+    for run in run_results:
+        metric_name = f"{run.get('run_label', 'run')}.mean_rg"
+        values = [float(value) for value in run.get("per_replicate_means", [])]
         metrics[metric_name] = {
             "name": metric_name,
             "values": values,
-            "mean": run.overall_mean,
-            "sem": run.overall_sem,
+            "mean": float(run.get("overall_mean", 0.0)),
+            "sem": float(run.get("overall_sem", 0.0) or 0.0),
             "std": (
                 float(np.std(np.asarray(values, dtype=np.float64), ddof=1))
                 if len(values) > 1
@@ -1293,7 +1185,7 @@ def _condition_metrics(
             ),
             "n": len(values),
         }
-        for replicate, value in zip(run.replicates, values, strict=True):
+        for replicate, value in zip(run.get("replicates", []), values, strict=True):
             replicate_metrics.setdefault(str(replicate), {})[metric_name] = value
     return metrics, replicate_metrics
 

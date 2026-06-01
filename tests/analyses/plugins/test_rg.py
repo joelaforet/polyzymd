@@ -927,7 +927,7 @@ def test_plotters_fail_on_completed_run_without_sidecar_metadata(tmp_path) -> No
         _load_replicate_timeseries(tmp_path / "control", "protein_rg", [1])
 
 
-def test_plot_rejects_legacy_aggregated_result_from_disk(tmp_path) -> None:
+def test_plot_rejects_non_artifact_aggregated_result_from_disk(tmp_path) -> None:
     """plot should fail loudly when aggregated Rg cache lacks artifact identity."""
 
     analysis = RgAnalysis()
@@ -977,7 +977,7 @@ def test_plot_rejects_legacy_aggregated_result_from_disk(tmp_path) -> None:
         equilibration="0ns",
     )
 
-    with pytest.raises(ValueError, match="missing a settings fingerprint"):
+    with pytest.raises(TypeError, match="canonical ConditionArtifact"):
         analysis.plot(plot_ctx)
 
 

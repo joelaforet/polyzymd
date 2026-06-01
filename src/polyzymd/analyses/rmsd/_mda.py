@@ -22,7 +22,6 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
-from polyzymd.analyses.rmsd._results import RMSDAggregatedResult, RMSDRunAggregatedResult
 from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
 from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.statistics import compute_sem
@@ -318,42 +317,6 @@ def aggregate_rmsd_artifacts(
             {"replicate": replicate, "path": path} for replicate, path in source_result_files
         ],
         warnings=_combined_warnings(ordered_artifacts),
-    )
-
-
-def condition_artifact_to_legacy_result(artifact: Any) -> RMSDAggregatedResult:
-    """Convert an RMSD condition artifact to the established comparison model.
-
-    Parameters
-    ----------
-    artifact : Any
-        Condition artifact produced by RMSD aggregation.
-
-    Returns
-    -------
-    RMSDAggregatedResult
-        In-memory compatibility model used by existing comparison formatters.
-    """
-
-    if isinstance(artifact, RMSDAggregatedResult):
-        return artifact
-    run_payloads = artifact.payload.get("runs") if hasattr(artifact, "payload") else None
-    if not isinstance(run_payloads, list):
-        raise TypeError("RMSD condition artifact is missing payload['runs']")
-    run_results = [RMSDRunAggregatedResult.model_validate(payload) for payload in run_payloads]
-    metadata = dict(getattr(artifact, "metadata", {}) or {})
-    return RMSDAggregatedResult(
-        config_hash=str(metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=None,
-        equilibration_time=float(metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(metadata.get("equilibration_unit", "ns")),
-        selection_string=str(metadata.get("selection_string", "")),
-        replicates=[int(rep) for rep in artifact.replicates],
-        n_replicates=len(artifact.replicates),
-        run_results=run_results,
-        settings_fingerprint=metadata.get("settings_fingerprint"),
-        source_result_files=[str(entry) for entry in metadata.get("source_result_files", [])],
     )
 
 
