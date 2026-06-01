@@ -384,7 +384,7 @@ def rank_conditions(
 
 
 # ---------------------------------------------------------------------------
-# Default scalar comparison (full pipeline)
+# Scalar comparison utility (full statistical pipeline)
 # ---------------------------------------------------------------------------
 
 
@@ -398,11 +398,14 @@ def default_scalar_comparison(
     ttest_method: str = "student",
     posthoc_method: str = "ttest_bh",
 ) -> ComparisonResult:
-    """Run the standard scalar comparison pipeline.
+    """Run the framework scalar comparison statistics pipeline.
 
-    This is the default implementation used by :meth:`Analysis.compare`
-    for analyses with one or more simple scalar metrics (RMSF, triad,
-    secondary structure).
+    This utility converts condition-level scalar metrics into the legacy
+    ``ComparisonResult`` statistical model used internally by the framework and
+    by tests of the statistical helpers. Built-in MDAnalysis plugins should
+    expose canonical comparison artifacts; the artifact comparison layer calls
+    this function as an implementation detail before wrapping the statistics in
+    a ``ComparisonArtifact``.
 
     For each metric:
     1. Pairwise t-tests + Cohen's d + percent-change.
@@ -594,12 +597,12 @@ def format_scalar_comparison(
     output_format: str = "text",
     higher_is_better: bool | None = True,
 ) -> str:
-    """Format a :class:`ComparisonResult` for CLI display.
+    """Format a framework ``ComparisonResult`` for CLI display.
 
-    This is a generic formatter for analyses that use the default scalar
-    comparison pipeline.  It handles text and markdown output with
-    condition rankings, pairwise statistical tests, ANOVA, and
-    interpretation.
+    This formatter is retained for framework/statistics callers that still work
+    directly with ``ComparisonResult`` instances. Built-in plugin formatters
+    should format canonical ``ComparisonArtifact`` payloads with
+    :func:`format_scalar_comparison_artifact_payload` instead.
 
     Parameters
     ----------
