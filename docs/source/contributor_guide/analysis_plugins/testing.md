@@ -252,19 +252,16 @@ def test_aggregate_or_default_metrics(tmp_path: Path) -> None:
     assert metric["mean"] == 5.0
 
 
-def test_extract_metrics_for_custom_aggregate_model() -> None:
-    metrics = SolventShellAnalysis().extract_metrics(
-        {"mean_shell_count": 5.0, "sem_shell_count": 0.5, "replicate_values": [4.0, 6.0]}
-    )
+def test_extract_metrics_reads_condition_artifact(condition_artifact) -> None:
+    metrics = SolventShellAnalysis().extract_metrics(condition_artifact)
 
     if metrics:
         assert isinstance(metrics["mean_shell_count"], MetricValue)
 ```
 
-The second test is relevant only when your plugin returns a custom aggregate
-model or dictionary and therefore implements `extract_metrics()`. For the
-canonical `ReplicateArtifact` to `ConditionArtifact` path, default comparison can
-read condition artifact metrics directly.
+The second test is relevant only when your plugin customizes metric descriptors
+with `extract_metrics()`. The hook should read the canonical `ConditionArtifact`
+payload produced by aggregation.
 
 ## Test artifact-only plotting
 

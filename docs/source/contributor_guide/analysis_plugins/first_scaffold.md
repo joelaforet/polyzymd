@@ -136,11 +136,10 @@ Find the `SolventShellAnalysis` class. It should define:
 - a `Settings` class
 - `build_mda_jobs()`
 - `build_mda_collector()`
-- `extract_metrics()`
+- `extract_metrics()` when metric metadata needs customization
 
-The generated `extract_metrics()` is compatibility and fallback support for
-non-artifact summaries. Default artifact comparison reads condition-artifact
-metrics first.
+The generated `extract_metrics()` reads canonical condition-artifact payloads for
+the default artifact comparison contract.
 
 ### Metrics and aggregation
 

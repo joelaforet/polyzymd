@@ -24,9 +24,8 @@ You also need the architecture vocabulary from {doc}`architecture`:
 - A collector maps completed jobs to a `ReplicateArtifact`.
 - Default aggregation reads scalar replicate metrics from
   `payload["metrics"]` and writes a `ConditionArtifact`.
-- Default comparison sees the `ConditionArtifact` and uses the MDAnalysis
-  artifact comparison path before any compatibility/fallback `extract_metrics()`
-  hook.
+- Default comparison reads the canonical `ConditionArtifact` payload; use
+  `extract_metrics()` only to customize metric descriptors for that payload.
 
 ## 1. Define a tiny settings model
 
@@ -238,17 +237,11 @@ replicate values, mean, standard deviation, and SEM for each named scalar metric
 
 ## 6. Let artifact comparison use the condition metrics
 
-For this simple MDAnalysis artifact tutorial, `extract_metrics()` is not the
-primary metric path. When the aggregate result is a `ConditionArtifact`,
-PolyzyMD's default comparison path short-circuits to
-`compare_condition_artifacts()`. That artifact comparison code reads
-`payload["metrics"]`, builds the internal `MetricValue` inputs from the stored
-means, SEMs, and replicate values, and returns a comparison artifact.
-
-The scaffold currently includes an `extract_metrics()` method as a
-compatibility/fallback helper for aggregate summaries that are not
-`ConditionArtifact` objects. Contributors should not rely on it as the main
-metric source for a normal `ReplicateArtifact` → `ConditionArtifact` plugin.
+For this simple MDAnalysis artifact tutorial, the default comparison reads the
+canonical `ConditionArtifact.payload["metrics"]`, builds the internal
+`MetricValue` inputs from the stored means, SEMs, and replicate values, and
+returns a comparison artifact. Implement `extract_metrics()` only when you need
+to customize metric direction, labels, or units from the same canonical payload.
 
 Because the teaching metric has no scientific direction, treat any comparison
 output as a lifecycle check only. For a real plugin, define metric direction and
@@ -265,10 +258,8 @@ You have the pieces of a simple scalar plugin when:
   `payload["metrics"]`.
 - You do not override `aggregate()` because default aggregation can create the
   `ConditionArtifact` from replicate metrics.
-- You do not rely on `extract_metrics()` for this artifact path; default
-  comparison reads the `ConditionArtifact` metrics directly. If scaffolded code
-  includes `extract_metrics()`, keep it as compatibility/fallback support rather
-  than the primary contract.
+- Default comparison reads the `ConditionArtifact` metrics directly, or your
+  `extract_metrics()` reads that canonical payload to add metric metadata.
 
 ## Common mistakes
 

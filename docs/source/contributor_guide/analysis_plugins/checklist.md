@@ -94,8 +94,8 @@ Delete items that do not apply, or mark them `N/A` with a short reason.
   `ConditionArtifact` when that contract is sufficient.
 - [ ] Custom aggregation is used only when condition-level data needs a custom
   schema or sidecar handling.
-- [ ] Custom aggregate models or dictionaries implement `extract_metrics()` when
-  they use the default scalar comparison path.
+- [ ] `extract_metrics()` implementations read canonical `ConditionArtifact`
+  payloads and return `MetricValue` objects for default scalar comparison.
 - [ ] Custom `compare()` methods return a saveable comparison result or artifact
   and have tests for missing or incomplete conditions.
 - [ ] Metric names, units, and higher/lower-is-better interpretation are explicit
