@@ -181,10 +181,3 @@ per condition, such as RMSD, radius of gyration, and SASA analyses.
    :show-inheritance:
    :no-index:
 ```
-
-## Compatibility facades
-
-`polyzymd.analyses.shared.config_hash` and `polyzymd.analyses.shared.sasa`
-remain importable as temporary compatibility facades for older callers. They are
-not preferred contributor extension points, and this page intentionally does not
-include autodoc blocks for them.
