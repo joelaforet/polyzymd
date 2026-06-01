@@ -579,6 +579,18 @@ def test_manifest_load_rejects_missing_snapshot_hash(tmp_path: Path) -> None:
         AnalysisJobManifest.load(manifest_path)
 
 
+def test_manifest_load_rejects_missing_recompute(tmp_path: Path) -> None:
+    """Manifests without recompute should fail validation."""
+    manifest = _make_manifest(tmp_path)
+    payload = manifest.model_dump(mode="json")
+    payload.pop("recompute")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError):
+        AnalysisJobManifest.load(manifest_path)
+
+
 def test_manifest_load_rejects_empty_snapshot_hash(tmp_path: Path) -> None:
     """Manifests with empty snapshot_hash should fail validation."""
     manifest = _make_manifest(tmp_path)

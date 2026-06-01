@@ -129,7 +129,7 @@ class AnalysisJobManifest(BaseModel):
     pipeline_mode: Literal["full", "finalize_only"]
     partial_policy: Literal["strict", "allow_partial"]
     equilibration: str
-    recompute: bool = False
+    recompute: bool
     resources: AnalysisSlurmResources
     created_at: str
 
