@@ -12,7 +12,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from polyzymd.analyses.hydrogen_bonds._models import HydrogenBondConditionModel
+from polyzymd.analyses.hydrogen_bonds._models import HydrogenBondConditionPayload
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
@@ -36,13 +36,13 @@ def _safe_name(name: str) -> str:
     return name.replace(" ", "_").replace("/", "-")
 
 
-def _find_summary(result: HydrogenBondConditionModel, summary_name: str) -> Any | None:
+def _find_summary(result: HydrogenBondConditionPayload, summary_name: str) -> Any | None:
     """Find a named summary in an aggregated result."""
     return next((summary for summary in result.summaries if summary.name == summary_name), None)
 
 
 def plot_summary_comparison(
-    results: dict[str, HydrogenBondConditionModel],
+    results: dict[str, HydrogenBondConditionPayload],
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -132,7 +132,7 @@ def plot_summary_comparison(
 
 
 def plot_timeseries(
-    results: dict[str, HydrogenBondConditionModel],
+    results: dict[str, HydrogenBondConditionPayload],
     replicate_data: dict[str, dict[str, list[list[int]]]],
     labels: Sequence[str],
     summary_name: str,
@@ -213,7 +213,7 @@ def plot_timeseries(
 
 
 def plot_top_pairs(
-    results: dict[str, HydrogenBondConditionModel],
+    results: dict[str, HydrogenBondConditionPayload],
     labels: Sequence[str],
     summary_name: str,
     output_dir: Path,
@@ -331,7 +331,7 @@ def plot_top_pairs(
 
 
 def plot_composition_absolute(
-    results: dict[str, HydrogenBondConditionModel],
+    results: dict[str, HydrogenBondConditionPayload],
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -420,7 +420,7 @@ def plot_composition_absolute(
 
 
 def plot_composition_fraction(
-    results: dict[str, HydrogenBondConditionModel],
+    results: dict[str, HydrogenBondConditionPayload],
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -519,7 +519,7 @@ def plot_composition_fraction(
 
 
 def _composition_keys(
-    results: dict[str, HydrogenBondConditionModel],
+    results: dict[str, HydrogenBondConditionPayload],
     labels: Sequence[str],
 ) -> list[tuple[str, str]]:
     """Return composition pair keys in deterministic order."""
