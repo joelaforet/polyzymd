@@ -111,22 +111,6 @@ def format_pct(pct: float) -> str:
     return f"{pct:+.1f}%"
 
 
-def _format_pct(pct: float) -> str:
-    """Backward-compatible alias for ``format_pct``.
-
-    Parameters
-    ----------
-    pct : float
-        Percent change value.
-
-    Returns
-    -------
-    str
-        Formatted percent value.
-    """
-    return format_pct(pct)
-
-
 # ---------------------------------------------------------------------------
 # Pairwise comparisons
 # ---------------------------------------------------------------------------
