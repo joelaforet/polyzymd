@@ -70,8 +70,6 @@ def render_scaffold(spec: ScaffoldSpec, project_root: Path) -> dict[Path, str]:
                 spec,
             ),
         }
-        if spec.uses_pydantic_results:
-            files[plugin_dir / "_results.py"] = render_template("advanced_results.py.jinja", spec)
         return files
 
     test_path = tests_dir / f"test_{spec.name}.py"

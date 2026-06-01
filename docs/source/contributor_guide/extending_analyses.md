@@ -60,13 +60,11 @@ sidecars, multiple metrics, custom aggregation, or custom plotting:
 ```bash
 pixi run -e build polyzymd new-analysis solvent_shell --advanced
 pixi run -e build polyzymd new-analysis solvent_shell --style dict
-pixi run -e build polyzymd new-analysis solvent_shell --style pydantic
 ```
 
-`--advanced`, `--style dict`, and `--style pydantic` generate MDAnalysis-native
-packages. `--style pydantic` validates the artifact metric payload before it is
-stored, but still persists framework-owned `ReplicateArtifact` and
-`ConditionArtifact` files through `ArtifactStore`.
+`--advanced` and `--style dict` generate MDAnalysis-native packages that store
+dict metrics in framework-owned `ReplicateArtifact` and `ConditionArtifact`
+files through `ArtifactStore`.
 
 ## Public imports
 

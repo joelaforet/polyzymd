@@ -9,7 +9,7 @@ Usage::
 
     polyzymd new-analysis my_analysis
     polyzymd new-analysis my_analysis --advanced
-    polyzymd new-analysis my_analysis --style pydantic
+    polyzymd new-analysis my_analysis --style dict
     polyzymd new-analysis my_analysis --dry-run
     polyzymd new-analysis my_analysis --force
 """
@@ -135,8 +135,8 @@ def _build_spec(
         Optional PascalCase class prefix.
     style : str
         Scaffold style name. ``"measurement"`` is a compatibility token for
-        the default single-file MDAnalysis-native scaffold; ``"dict"`` and
-        ``"pydantic"`` request advanced package scaffolds.
+        the default single-file MDAnalysis-native scaffold; ``"dict"`` requests
+        an advanced package scaffold using canonical artifact payloads.
     advanced : bool, optional
         If True, request an advanced package scaffold.
 
@@ -393,9 +393,8 @@ def generate_scaffold(
         default None.
     style : str, optional
         ``"measurement"`` for the historical compatibility alias of the default
-        single-file MDAnalysis-native plugin, ``"dict"`` for advanced plain-dict
-        artifacts, or ``"pydantic"`` for advanced typed helper models, by
-        default ``"measurement"``.
+        single-file MDAnalysis-native plugin, or ``"dict"`` for advanced
+        canonical artifacts, by default ``"measurement"``.
     advanced : bool, optional
         Request an advanced package scaffold, by default False.
     force : bool, optional

@@ -210,12 +210,6 @@ def _extract_job_metrics(result_payload: dict[str, Any]) -> dict[str, float]:
     metrics = result_payload.get("metrics")
     if not isinstance(metrics, dict):
         raise PluginContractError("Job results must include a metrics mapping.")
-{% if spec.uses_pydantic_results %}
-    from ._results import {{ spec.class_name }}Metrics
-
-    validated = {{ spec.class_name }}Metrics.model_validate(metrics)
-    metrics = validated.model_dump(mode="json")
-{% endif %}
     return {name: float(value) for name, value in metrics.items()}
 
 

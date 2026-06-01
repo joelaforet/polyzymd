@@ -3072,9 +3072,9 @@ def info() -> None:
 )
 @click.option(
     "--style",
-    type=click.Choice(["dict", "pydantic"], case_sensitive=False),
+    type=click.Choice(["dict"], case_sensitive=False),
     default=None,
-    help="Advanced package style only; omit for the default single-file scaffold.",
+    help="Advanced package style; only dict canonical artifacts are supported.",
 )
 @click.option(
     "--advanced",

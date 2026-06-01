@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from . import METRIC_NAME, {{ spec.class_name }}Settings
-{% if spec.uses_pydantic_results %}from ._results import {{ spec.class_name }}Metrics
-{% endif %}
 
 
 def build_{{ spec.name }}_analysis(
@@ -62,12 +60,7 @@ def build_{{ spec.name }}_analysis(
             n_frames = len(self._selected_atom_counts)
             n_selected_atoms = len(self._atoms)
             value = float(sum(self._selected_atom_counts)) * self.settings.scale
-{% if spec.uses_pydantic_results %}
-            metric_model = {{ spec.class_name }}Metrics(**{METRIC_NAME: value})
-            metrics = metric_model.model_dump(mode="json")
-{% else %}
             metrics = {METRIC_NAME: value}
-{% endif %}
             self.results.metrics = metrics
             self.results.n_selected_atoms = n_selected_atoms
             self.results.n_frames = n_frames

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 # Historical compatibility token for the default single-file MDAnalysis-native
 # scaffold; this does not refer to the removed scalar-measurement API
 DEFAULT_STYLE = "measurement"
-VALID_STYLES = (DEFAULT_STYLE, "dict", "pydantic")
-ADVANCED_STYLES = ("dict", "pydantic")
+VALID_STYLES = (DEFAULT_STYLE, "dict")
+ADVANCED_STYLES = ("dict",)
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,7 @@ class ScaffoldSpec:
         Scaffold style. ``"measurement"`` is retained as a historical
         compatibility token for the default single-file MDAnalysis-native
         contributor path, not the removed scalar-measurement API. ``"dict"``
-        and ``"pydantic"`` create advanced package scaffolds.
+        creates an advanced package scaffold using canonical artifact payloads.
     """
 
     name: str
@@ -42,17 +42,6 @@ class ScaffoldSpec:
             Plugin title derived from ``name``.
         """
         return self.name.replace("_", " ").title()
-
-    @property
-    def uses_pydantic_results(self) -> bool:
-        """Return whether the scaffold should generate Pydantic results.
-
-        Returns
-        -------
-        bool
-            True when ``style`` is ``"pydantic"``.
-        """
-        return self.style == "pydantic"
 
     @property
     def uses_single_file_layout(self) -> bool:

@@ -680,7 +680,7 @@ polyzymd new-analysis NAME [OPTIONS]
 
 Options:
   --class-name TEXT                 PascalCase class prefix
-  --style [dict|pydantic]           Advanced package style only
+  --style [dict]                    Advanced package style
   --advanced                        Request the advanced MDAnalysis-native package scaffold
   --project-root DIRECTORY          Repository root
   --force                           Overwrite existing files
@@ -698,16 +698,15 @@ Programmatic callers may still pass `style="measurement"` to
 single-file MDAnalysis-native scaffold. It is not a CLI style; omit `--style` to
 use the default scaffold.
 
-`--advanced`, `--style dict`, and `--style pydantic` create a package at
-`src/polyzymd/analyses/<NAME>/` with lifecycle wiring in `__init__.py` and a
-lazy-imported `AnalysisBase` helper in `_mda.py`. The `pydantic` style also adds
-a small typed helper model for validating metric payloads before they are stored
-as canonical artifacts.
+`--advanced` and `--style dict` create a package at
+`src/polyzymd/analyses/<NAME>/` with lifecycle wiring in `__init__.py`, a
+lazy-imported `AnalysisBase` helper in `_mda.py`, and dict metrics stored in
+canonical artifacts.
 
 ```bash
 polyzymd new-analysis solvent_shell
 polyzymd new-analysis solvent_shell --advanced
-polyzymd new-analysis solvent_shell --style pydantic
+polyzymd new-analysis solvent_shell --style dict
 pixi run -e build pytest tests/analyses/plugins/test_solvent_shell.py -v
 ```
 

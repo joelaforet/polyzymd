@@ -331,28 +331,19 @@ class TestGenerateScaffoldAdvancedDict:
         assert (package_dir / "_mda.py").exists()
 
 
-class TestGenerateScaffoldPydantic:
-    """Pydantic advanced scaffolds include typed helper models."""
-
-    def test_style_pydantic_creates_results_model(self, tmp_path: Path):
-        _prepare_project(tmp_path)
-
-        created = generate_scaffold("solvent_shell", tmp_path, style="pydantic")
-
-        assert len(created) == 4
-        package_dir = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell"
-        assert (package_dir / "__init__.py").exists()
-        assert (package_dir / "_mda.py").exists()
-        assert (package_dir / "_results.py").exists()
-
-
 class TestStyleValidation:
     """Style parameter validation."""
 
     def test_valid_styles_constant(self):
         assert "measurement" in VALID_STYLES
         assert "dict" in VALID_STYLES
-        assert "pydantic" in VALID_STYLES
+        assert "pydantic" not in VALID_STYLES
+
+    def test_pydantic_style_raises(self, tmp_path: Path):
+        _prepare_project(tmp_path)
+
+        with pytest.raises(ValueError, match="Invalid style"):
+            generate_scaffold("solvent_shell", tmp_path, style="pydantic")
 
     def test_invalid_style_raises(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -432,7 +423,6 @@ class TestGeneratedCodeQuality:
         [
             ("solvent_shell", "measurement", 2),
             ("scaffold_advanced_dict_e2e", "dict", 3),
-            ("scaffold_pydantic_e2e", "pydantic", 4),
         ],
     )
     def test_generated_files_compile_and_are_formatter_clean(
@@ -704,16 +694,13 @@ class TestNewAnalysisCLI:
         assert "ScalarMeasurementAnalysis" not in text
         assert "SolventShellReplicateRunner" not in text
 
-    def test_style_pydantic(self, runner: CliRunner, cli):
+    def test_style_pydantic_rejected(self, runner: CliRunner, cli):
         result = runner.invoke(
             cli,
             ["solvent_shell", "--style", "pydantic", "--project-root", str(self.root)],
         )
-        assert result.exit_code == 0, result.output
-        package_dir = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell"
-        assert (package_dir / "__init__.py").exists()
-        assert (package_dir / "_mda.py").exists()
-        assert (package_dir / "_results.py").exists()
+        assert result.exit_code != 0
+        assert "Invalid value" in result.output
 
     def test_style_dict_explicit(self, runner: CliRunner, cli):
         result = runner.invoke(
@@ -917,7 +904,8 @@ class TestNewAnalysisCLI:
         assert result.exit_code == 0
         assert "src/polyzymd/analyses/<NAME>.py" in result.output
         assert "src/polyzymd/analyses/<NAME>/__init__.py" in result.output
-        assert "Advanced package style only" in result.output
+        assert "only dict canonical" in result.output
+        assert "artifacts are supported" in result.output
         assert "--style measurement" not in result.output
         assert "_runner.py" not in result.output
         assert "Advanced package scaffolds" in result.output

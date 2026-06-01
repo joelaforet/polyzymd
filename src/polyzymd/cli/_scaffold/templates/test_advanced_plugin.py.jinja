@@ -29,9 +29,6 @@ from polyzymd.analyses.{{ spec.name }} import (
     {{ spec.class_name }}Analysis,
     {{ spec.class_name }}Settings,
 )
-{% if spec.uses_pydantic_results %}
-from polyzymd.analyses.{{ spec.name }}._results import {{ spec.class_name }}Metrics
-{% endif %}
 
 
 class FakeAnalysisBase:
@@ -129,13 +126,6 @@ class TestSettings:
     def test_scale_must_be_positive(self):
         with pytest.raises(ValidationError):
             {{ spec.class_name }}Settings(scale=0.0)
-{% if spec.uses_pydantic_results %}
-
-    def test_pydantic_metric_model_validates(self):
-        metrics = {{ spec.class_name }}Metrics({{ spec.name }}_value=1.5)
-
-        assert metrics.{{ spec.name }}_value == pytest.approx(1.5)
-{% endif %}
 
 
 class TestMDAJobs:
@@ -211,6 +201,9 @@ class TestCollector:
         assert artifact.condition_label == condition.label
         assert artifact.replicate == 1
         assert artifact.payload["metrics"][METRIC_NAME] == pytest.approx(12.0)
+        assert artifact.payload["n_selected_atoms"] == 3
+        assert artifact.payload["n_frames"] == 2
+        assert artifact.sidecars == []
 
 
 class TestDefaultAggregation:
