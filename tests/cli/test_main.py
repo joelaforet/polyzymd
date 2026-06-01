@@ -163,7 +163,7 @@ class TestBuildCommandReplicateFlags:
         assert "--replicates" in result.output
 
     def test_build_help_hides_replicate(self) -> None:
-        """'polyzymd build --help' should NOT show deprecated --replicate."""
+        """'polyzymd build --help' should NOT show removed --replicate."""
         from click.testing import CliRunner
 
         from polyzymd.cli.main import cli
@@ -178,6 +178,17 @@ class TestBuildCommandReplicateFlags:
             # Detect removed singular option without matching the plural option
             if "--replicate" in line and "--replicates" not in line:
                 pytest.fail(f"Removed singular --replicate visible in help: {line}")
+
+    def test_build_gromacs_alias_is_rejected(self, tmp_path: Path) -> None:
+        """Build should reject the removed --gromacs alias as unknown."""
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["build", "-c", str(config_path), "--gromacs"])
+
+        assert result.exit_code != 0
+        assert "No such option: --gromacs" in result.output
 
 
 class TestRunCommandReplicateFlags:
@@ -195,7 +206,7 @@ class TestRunCommandReplicateFlags:
         assert "--replicates" in result.output
 
     def test_run_help_hides_replicate(self) -> None:
-        """'polyzymd run --help' should NOT show deprecated --replicate."""
+        """'polyzymd run --help' should NOT show removed --replicate."""
         from click.testing import CliRunner
 
         from polyzymd.cli.main import cli
@@ -207,6 +218,17 @@ class TestRunCommandReplicateFlags:
         for line in lines:
             if "--replicate" in line and "--replicates" not in line:
                 pytest.fail(f"Removed singular --replicate visible in help: {line}")
+
+    def test_run_replicate_alias_is_rejected(self, tmp_path: Path) -> None:
+        """Run should reject the removed singular --replicate option."""
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["run", "-c", str(config_path), "--replicate", "1"])
+
+        assert result.exit_code != 0
+        assert "No such option: --replicate" in result.output
 
     def test_run_help_shows_engine_flag(self) -> None:
         """'polyzymd run --help' should include required --engine option."""
@@ -521,7 +543,7 @@ class TestCliExceptionHandlingNarrowing:
             )
 
     def test_build_with_replicate_negative_fails(self, tmp_path: Path) -> None:
-        """Negative replicate should fail with positive-integer guidance."""
+        """Removed singular --replicate should fail as an unknown option."""
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
         runner = CliRunner()
@@ -529,9 +551,7 @@ class TestCliExceptionHandlingNarrowing:
         result = runner.invoke(cli, ["build", "-c", str(config_path), "--replicate", "-1"])
 
         assert result.exit_code != 0
-        stderr = getattr(result, "stderr", "")
-        message = f"{result.output}\n{stderr}".lower()
-        assert "positive" in message or "must be" in message
+        assert "No such option: --replicate" in result.output
 
 
 class TestRunEngineGromacs:
