@@ -13,12 +13,9 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, ClassVar, Protocol, Sequence
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
-from polyzymd.analyses._framework.results_base import (
-    AggregatedResultMixin,
-    BaseAnalysisResult,
-)
+from polyzymd.analyses._framework.results_base import BaseAnalysisResult
 
 
 @dataclass(frozen=True)
@@ -83,6 +80,17 @@ class DistanceResultMetadata:
             "equilibration_unit": self.equilibration_unit,
             "selection_string": selection_string,
         }
+
+
+class DistanceArtifactPayloadBase(BaseModel):
+    """Common artifact payload metadata for distance payload fragments."""
+
+    config_hash: str
+    polyzymd_version: str
+    replicate: int | None = None
+    equilibration_time: float
+    equilibration_unit: str
+    selection_string: str
 
 
 class _DistancePairPayloadProtocol(Protocol):
@@ -395,13 +403,11 @@ class DistancePairResult(BaseAnalysisResult):
         return "\n".join(lines)
 
 
-class DistanceReplicatePayload(BaseAnalysisResult):
+class DistanceReplicatePayload(DistanceArtifactPayloadBase):
     """Distance analysis results for multiple pairs in one replicate.
 
     Container for analyzing multiple distance pairs simultaneously.
     """
-
-    analysis_type: ClassVar[str] = "distances"
 
     # Collection of pair results
     pair_results: list[DistancePairResult] = Field(
@@ -469,29 +475,13 @@ class DistanceReplicatePayload(BaseAnalysisResult):
             trajectory_files=_stringify_paths(trajectory_files),
         )
 
-    def summary(self) -> str:
-        """Return human-readable summary."""
-        lines = [
-            f"Distance Analysis (replicate {self.replicate})",
-            "=" * 50,
-            f"Pairs analyzed: {len(self.pair_results)}",
-            f"Equilibration: {self._format_equilibration()}",
-            f"Frames used: {self.n_frames_used}/{self.n_frames_total}",
-            "",
-        ]
-
-        for pr in self.pair_results:
-            lines.append(f"{pr.pair_label}: {pr.mean_distance:.2f} ± {pr.std_distance:.2f} Å")
-
-        return "\n".join(lines)
-
     @property
     def n_pairs(self) -> int:
         """Number of distance pairs analyzed."""
         return len(self.pair_results)
 
 
-class DistancePairAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
+class DistancePairAggregatePayload(DistanceArtifactPayloadBase):
     """Aggregated distance results for one pair across replicates.
 
     Attributes
@@ -507,8 +497,6 @@ class DistancePairAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
     per_replicate_stds : list[float]
         Std dev from each replicate
     """
-
-    analysis_type: ClassVar[str] = "distance_pair_aggregated"
 
     # Replicate info
     replicates: list[int] = Field(..., description="Replicate numbers included")
@@ -618,41 +606,9 @@ class DistancePairAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
             per_replicate_kde_peaks=per_rep_kde_peaks or None,
         )
 
-    def summary(self) -> str:
-        """Return human-readable summary."""
-        rep_range = self.replicate_range
-        lines = [
-            f"Distance Aggregated: {self.pair_label}",
-            "=" * 50,
-            f"Replicates: {rep_range}",
-            f"Equilibration: {self._format_equilibration()}",
-            "",
-            f"Mean: {self.overall_mean:.2f} ± {self.overall_sem:.2f} Å",
-            f"Median: {self.overall_median:.2f} Å",
-        ]
 
-        # KDE peak (mode)
-        if self.overall_kde_peak is not None:
-            sem_str = f" ± {self.sem_kde_peak:.2f}" if self.sem_kde_peak else ""
-            lines.append(f"Mode (KDE peak): {self.overall_kde_peak:.2f}{sem_str} Å")
-
-        if self.threshold is not None and self.overall_fraction_below is not None:
-            pct = self.overall_fraction_below * 100
-            sem_pct = (self.sem_fraction_below or 0) * 100
-            lines.append(f"Below {self.threshold:.1f} Å: {pct:.1f} ± {sem_pct:.1f}%")
-
-        lines.append("")
-        lines.append("Per-replicate means:")
-        for rep, mean in zip(self.replicates, self.per_replicate_means):
-            lines.append(f"  Rep {rep}: {mean:.2f} Å")
-
-        return "\n".join(lines)
-
-
-class DistanceConditionPayload(BaseAnalysisResult, AggregatedResultMixin):
+class DistanceConditionPayload(DistanceArtifactPayloadBase):
     """Aggregated distance results for multiple pairs across replicates."""
-
-    analysis_type: ClassVar[str] = "distances_aggregated"
 
     # Replicate info
     replicates: list[int] = Field(..., description="Replicate numbers included")
@@ -719,23 +675,6 @@ class DistanceConditionPayload(BaseAnalysisResult, AggregatedResultMixin):
             settings_fingerprint=settings_fingerprint,
             source_result_files=_stringify_paths(source_result_files),
         )
-
-    def summary(self) -> str:
-        """Return human-readable summary."""
-        rep_range = self.replicate_range
-        lines = [
-            "Distance Aggregated Analysis",
-            "=" * 50,
-            f"Replicates: {rep_range}",
-            f"Pairs analyzed: {len(self.pair_results)}",
-            f"Equilibration: {self._format_equilibration()}",
-            "",
-        ]
-
-        for pr in self.pair_results:
-            lines.append(f"{pr.pair_label}: {pr.overall_mean:.2f} ± {pr.overall_sem:.2f} Å")
-
-        return "\n".join(lines)
 
     @property
     def n_pairs(self) -> int:

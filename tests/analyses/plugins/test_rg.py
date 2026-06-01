@@ -953,7 +953,7 @@ def test_plot_rejects_non_artifact_aggregated_result_from_disk(tmp_path) -> None
         per_replicate_stds=[0.0, 0.0],
         per_replicate_medians=[1.0, 1.0],
     )
-    RgConditionPayload(
+    noncanonical_payload = RgConditionPayload(
         config_hash="hash",
         polyzymd_version="test",
         replicate=None,
@@ -963,7 +963,10 @@ def test_plot_rejects_non_artifact_aggregated_result_from_disk(tmp_path) -> None
         replicates=[1, 2],
         n_replicates=2,
         run_results=[noncanonical_run],
-    ).save(aggregated_dir / "result.json")
+    )
+    (aggregated_dir / "result.json").write_text(
+        noncanonical_payload.model_dump_json(), encoding="utf-8"
+    )
     results_dir = tmp_path / "comparison"
     results_dir.mkdir()
     _make_comparison_result().save(results_dir / "result.json")

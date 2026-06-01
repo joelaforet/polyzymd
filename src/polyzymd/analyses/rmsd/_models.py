@@ -14,12 +14,20 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
-from polyzymd.analyses._framework.results_base import (
-    AggregatedResultMixin,
-    BaseAnalysisResult,
-)
+from polyzymd.analyses._framework.results_base import BaseAnalysisResult
+
+
+class RMSDArtifactPayloadBase(BaseModel):
+    """Common artifact payload metadata for RMSD payload fragments."""
+
+    config_hash: str
+    polyzymd_version: str
+    replicate: int | None = None
+    equilibration_time: float
+    equilibration_unit: str
+    selection_string: str
 
 
 class RMSDRunResult(BaseAnalysisResult):
@@ -175,13 +183,11 @@ class RMSDRunResult(BaseAnalysisResult):
         return "\n".join(lines)
 
 
-class RMSDReplicatePayload(BaseAnalysisResult):
+class RMSDReplicatePayload(RMSDArtifactPayloadBase):
     """RMSD results for all runs in one replicate.
 
     Container for analyzing multiple RMSD selections simultaneously.
     """
-
-    analysis_type: ClassVar[str] = "rmsd"
 
     # Collection of run results
     run_results: list[RMSDRunResult] = Field(..., description="Results for each RMSD run")
@@ -199,29 +205,13 @@ class RMSDReplicatePayload(BaseAnalysisResult):
         default_factory=list, description="Trajectory files analyzed"
     )
 
-    def summary(self) -> str:
-        """Return human-readable summary."""
-        lines = [
-            f"RMSD Analysis (replicate {self.replicate})",
-            "=" * 50,
-            f"Runs analyzed: {len(self.run_results)}",
-            f"Equilibration: {self._format_equilibration()}",
-            f"Frames used: {self.n_frames_used}/{self.n_frames_total}",
-            "",
-        ]
-
-        for rr in self.run_results:
-            lines.append(f"{rr.run_label}: {rr.mean_rmsd:.3f} +/- {rr.std_rmsd:.3f} A")
-
-        return "\n".join(lines)
-
     @property
     def n_runs(self) -> int:
         """Number of RMSD runs analyzed."""
         return len(self.run_results)
 
 
-class RMSDRunAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
+class RMSDRunAggregatePayload(RMSDArtifactPayloadBase):
     """Aggregated RMSD results for one run across replicates.
 
     Attributes
@@ -239,8 +229,6 @@ class RMSDRunAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
     per_replicate_stds : list[float]
         Std dev from each replicate.
     """
-
-    analysis_type: ClassVar[str] = "rmsd_run_aggregated"
 
     # Replicate info
     replicates: list[int] = Field(..., description="Replicate numbers included")
@@ -271,32 +259,9 @@ class RMSDRunAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
     mean_convergence_time_ns: float | None = Field(default=None)
     median_convergence_time_ns: float | None = Field(default=None)
 
-    def summary(self) -> str:
-        """Return human-readable summary."""
-        rep_range = self.replicate_range
-        lines = [
-            f"RMSD Aggregated: {self.run_label}",
-            "=" * 50,
-            f"Replicates: {rep_range}",
-            f"Selection: {self.selection}",
-            f"Equilibration: {self._format_equilibration()}",
-            "",
-            f"Mean: {self.overall_mean:.3f} +/- {self.overall_sem:.3f} A",
-            f"Median: {self.overall_median:.3f} A",
-            "",
-            "Per-replicate means:",
-        ]
 
-        for rep, mean in zip(self.replicates, self.per_replicate_means):
-            lines.append(f"  Rep {rep}: {mean:.3f} A")
-
-        return "\n".join(lines)
-
-
-class RMSDConditionPayload(BaseAnalysisResult, AggregatedResultMixin):
+class RMSDConditionPayload(RMSDArtifactPayloadBase):
     """Aggregated RMSD results for all runs across replicates."""
-
-    analysis_type: ClassVar[str] = "rmsd_aggregated"
 
     # Replicate info
     replicates: list[int] = Field(..., description="Replicate numbers included")
@@ -317,23 +282,6 @@ class RMSDConditionPayload(BaseAnalysisResult, AggregatedResultMixin):
     source_result_files: list[str] = Field(
         default_factory=list, description="Paths to individual replicate result files"
     )
-
-    def summary(self) -> str:
-        """Return human-readable summary."""
-        rep_range = self.replicate_range
-        lines = [
-            "RMSD Aggregated Analysis",
-            "=" * 50,
-            f"Replicates: {rep_range}",
-            f"Runs analyzed: {len(self.run_results)}",
-            f"Equilibration: {self._format_equilibration()}",
-            "",
-        ]
-
-        for rr in self.run_results:
-            lines.append(f"{rr.run_label}: {rr.overall_mean:.3f} +/- {rr.overall_sem:.3f} A")
-
-        return "\n".join(lines)
 
     @property
     def n_runs(self) -> int:

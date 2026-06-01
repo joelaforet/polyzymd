@@ -1057,9 +1057,8 @@ def test_rmsd_aggregated_result_summary() -> None:
         ],
         source_result_files=[],
     )
-    summary = aggregated.summary()
-    assert "RMSD Aggregated Analysis" in summary
-    assert "Runs analyzed: 1" in summary
+    assert aggregated.n_replicates == 2
+    assert len(aggregated.run_results) == 1
 
 
 def test_rmsd_comparison_result_creation() -> None:
@@ -1991,7 +1990,7 @@ def test_plot_rejects_noncanonical_aggregated_result_from_disk(tmp_path: Path) -
     aggregated_dir = analysis_dir / "aggregated"
     aggregated_dir.mkdir(parents=True)
 
-    RMSDConditionPayload(
+    noncanonical_payload = RMSDConditionPayload(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -2002,7 +2001,10 @@ def test_plot_rejects_noncanonical_aggregated_result_from_disk(tmp_path: Path) -
         n_replicates=2,
         run_results=[_make_aggregated_run("protein_backbone", "protein and name CA", [1.1, 1.2])],
         source_result_files=[],
-    ).save(aggregated_dir / "result.json")
+    )
+    (aggregated_dir / "result.json").write_text(
+        noncanonical_payload.model_dump_json(), encoding="utf-8"
+    )
 
     results_dir = tmp_path / "comparison"
     results_dir.mkdir(parents=True)

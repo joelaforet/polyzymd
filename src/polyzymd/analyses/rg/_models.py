@@ -16,10 +16,18 @@ from typing import ClassVar
 
 from pydantic import BaseModel, Field
 
-from polyzymd.analyses._framework.results_base import (
-    AggregatedResultMixin,
-    BaseAnalysisResult,
-)
+from polyzymd.analyses._framework.results_base import BaseAnalysisResult
+
+
+class RgArtifactPayloadBase(BaseModel):
+    """Common artifact payload metadata for Rg payload fragments."""
+
+    config_hash: str
+    polyzymd_version: str
+    replicate: int | None = None
+    equilibration_time: float
+    equilibration_unit: str
+    selection_string: str
 
 
 class RgSkippedRunResult(BaseModel):
@@ -224,13 +232,11 @@ class RgRunResult(BaseAnalysisResult):
         return "\n".join(lines)
 
 
-class RgReplicatePayload(BaseAnalysisResult):
+class RgReplicatePayload(RgArtifactPayloadBase):
     """Rg results for all runs in one replicate.
 
     Container for analyzing multiple Rg selections simultaneously.
     """
-
-    analysis_type: ClassVar[str] = "rg"
 
     # Collection of run results
     run_results: list[RgRunResult] = Field(..., description="Results for each Rg run")
@@ -252,30 +258,13 @@ class RgReplicatePayload(BaseAnalysisResult):
         default_factory=list, description="Trajectory files analyzed"
     )
 
-    def summary(self) -> str:
-        """Return human-readable summary."""
-        lines = [
-            f"Rg Analysis (replicate {self.replicate})",
-            "=" * 50,
-            f"Runs analyzed: {len(self.run_results)}",
-            f"Runs skipped: {len(self.skipped_runs)}",
-            f"Equilibration: {self._format_equilibration()}",
-            f"Frames used: {self.n_frames_used}/{self.n_frames_total}",
-            "",
-        ]
-
-        for rr in self.run_results:
-            lines.append(f"{rr.run_label}: {rr.mean_rg:.3f} +/- {rr.std_rg:.3f} A")
-
-        return "\n".join(lines)
-
     @property
     def n_runs(self) -> int:
         """Number of Rg runs analyzed."""
         return len(self.run_results)
 
 
-class RgRunAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
+class RgRunAggregatePayload(RgArtifactPayloadBase):
     """Aggregated Rg results for one run across replicates.
 
     Attributes
@@ -313,8 +302,6 @@ class RgRunAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
     reduced_histogram_density_sem : list[float] | None
         SEM of normalized reduced-series histogram density across replicates.
     """
-
-    analysis_type: ClassVar[str] = "rg_run_aggregated"
 
     # Replicate info
     replicates: list[int] = Field(..., description="Replicate numbers included")
@@ -370,32 +357,9 @@ class RgRunAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
         description="SEM of normalized density of reduced series across replicates",
     )
 
-    def summary(self) -> str:
-        """Return human-readable summary."""
-        rep_range = self.replicate_range
-        lines = [
-            f"Rg Aggregated: {self.run_label}",
-            "=" * 50,
-            f"Replicates: {rep_range}",
-            f"Selection: {self.selection}",
-            f"Equilibration: {self._format_equilibration()}",
-            "",
-            f"Mean: {self.overall_mean:.3f} +/- {self.overall_sem:.3f} A",
-            f"Median: {self.overall_median:.3f} A",
-            "",
-            "Per-replicate means:",
-        ]
 
-        for rep, mean in zip(self.replicates, self.per_replicate_means):
-            lines.append(f"  Rep {rep}: {mean:.3f} A")
-
-        return "\n".join(lines)
-
-
-class RgConditionPayload(BaseAnalysisResult, AggregatedResultMixin):
+class RgConditionPayload(RgArtifactPayloadBase):
     """Aggregated Rg results for all runs across replicates."""
-
-    analysis_type: ClassVar[str] = "rg_aggregated"
 
     # Replicate info
     replicates: list[int] = Field(..., description="Replicate numbers included")
@@ -420,23 +384,6 @@ class RgConditionPayload(BaseAnalysisResult, AggregatedResultMixin):
     source_result_files: list[str] = Field(
         default_factory=list, description="Paths to individual replicate result files"
     )
-
-    def summary(self) -> str:
-        """Return human-readable summary."""
-        rep_range = self.replicate_range
-        lines = [
-            "Rg Aggregated Analysis",
-            "=" * 50,
-            f"Replicates: {rep_range}",
-            f"Runs analyzed: {len(self.run_results)}",
-            f"Equilibration: {self._format_equilibration()}",
-            "",
-        ]
-
-        for rr in self.run_results:
-            lines.append(f"{rr.run_label}: {rr.overall_mean:.3f} +/- {rr.overall_sem:.3f} A")
-
-        return "\n".join(lines)
 
     @property
     def n_runs(self) -> int:

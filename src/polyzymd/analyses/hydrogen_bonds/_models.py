@@ -6,11 +6,7 @@ hydrogen-bonds plugin lifecycle.
 
 from __future__ import annotations
 
-from typing import ClassVar
-
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
-
-from polyzymd.analyses._framework.results_base import AggregatedResultMixin, BaseAnalysisResult
 
 
 class ResidueRef(BaseModel):
@@ -90,11 +86,15 @@ class CompositionEntry(BaseModel):
     fraction_of_total: float = Field(..., ge=0, le=1)
 
 
-class HydrogenBondReplicatePayload(BaseAnalysisResult):
-    """Per-replicate hydrogen-bond analysis result."""
+class HydrogenBondReplicatePayload(BaseModel):
+    """Canonical replicate artifact payload fragment for hydrogen bonds."""
 
-    analysis_type: ClassVar[str] = "hydrogen_bonds"
-
+    config_hash: str | None = None
+    polyzymd_version: str | None = None
+    replicate: int | None = None
+    equilibration_time: float | None = None
+    equilibration_unit: str | None = None
+    selection_string: str | None = None
     settings_fingerprint: str | None = Field(
         default=None,
         description="Short fingerprint of hydrogen-bond settings for cache validation",
@@ -113,24 +113,6 @@ class HydrogenBondReplicatePayload(BaseAnalysisResult):
     )
     summaries: list[HydrogenBondReplicateSummary]
     composition_entries: list[CompositionEntry] = Field(default_factory=list)
-
-    def summary(self) -> str:
-        """Return a compact summary string.
-
-        Returns
-        -------
-        str
-            Human-readable summary of replicate-level hydrogen-bond results.
-        """
-
-        lines = [f"Hydrogen bond analysis — {len(self.summaries)} summaries"]
-        for item in self.summaries:
-            lines.append(
-                "  "
-                f"{item.name}: {item.mean_hbonds_per_frame:.2f} mean H-bonds/frame "
-                f"({item.n_frames_used} frames)"
-            )
-        return "\n".join(lines)
 
 
 class DirectedPairAggregate(BaseModel):
@@ -197,11 +179,15 @@ class AggregatedCompositionEntry(BaseModel):
     per_replicate_fraction: list[float]
 
 
-class HydrogenBondConditionPayload(BaseAnalysisResult, AggregatedResultMixin):
-    """Aggregated hydrogen bond condition model across replicates for one condition."""
+class HydrogenBondConditionPayload(BaseModel):
+    """Canonical condition artifact payload fragment for hydrogen bonds."""
 
-    analysis_type: ClassVar[str] = "hydrogen_bonds_aggregated"
-
+    config_hash: str | None = None
+    polyzymd_version: str | None = None
+    replicate: int | None = None
+    equilibration_time: float | None = None
+    equilibration_unit: str | None = None
+    selection_string: str | None = None
     settings_fingerprint: str | None = Field(
         default=None,
         description="Short fingerprint of hydrogen-bond settings for cache validation",
@@ -222,24 +208,3 @@ class HydrogenBondConditionPayload(BaseAnalysisResult, AggregatedResultMixin):
     n_replicates: int
     summaries: list[HydrogenBondAggregatedSummary]
     composition_entries: list[AggregatedCompositionEntry] = Field(default_factory=list)
-
-    def summary(self) -> str:
-        """Return a compact summary string.
-
-        Returns
-        -------
-        str
-            Human-readable summary of condition-level aggregated results.
-        """
-
-        lines = [
-            "Hydrogen bonds aggregated — "
-            f"{self.n_replicates} replicates, {len(self.summaries)} summaries"
-        ]
-        for item in self.summaries:
-            lines.append(
-                "  "
-                f"{item.name}: {item.mean_hbonds_per_frame:.2f} ± "
-                f"{item.sem_hbonds_per_frame:.2f} mean H-bonds/frame"
-            )
-        return "\n".join(lines)
