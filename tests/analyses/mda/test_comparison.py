@@ -40,7 +40,7 @@ class _ArtifactDefaultCompareAnalysis(Analysis):
         return "settings-1"
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-        """Extract legacy metrics and fail if MDA dispatch should have been used."""
+        """Extract non-canonical metrics and fail if MDA dispatch should have been used."""
 
         if isinstance(summary, ConditionArtifact):
             raise AssertionError("MDA condition artifacts must not call extract_metrics")
@@ -429,8 +429,8 @@ def test_default_compare_rejects_mda_artifact_replicates_outside_active_conditio
         analysis.compare(ctx)
 
 
-def test_default_compare_keeps_legacy_extract_metrics_path(tmp_path: Path) -> None:
-    """Default Analysis.compare should keep legacy summaries on the existing path."""
+def test_default_compare_keeps_noncanonical_extract_metrics_path(tmp_path: Path) -> None:
+    """Default Analysis.compare should keep non-canonical summaries on the existing path."""
 
     analysis = _ArtifactDefaultCompareAnalysis()
     conditions = [_condition("Control", tmp_path), _condition("PEG", tmp_path)]
@@ -470,7 +470,7 @@ def test_default_compare_keeps_legacy_extract_metrics_path(tmp_path: Path) -> No
     assert result.conditions[0].label == "Control"
 
 
-def test_default_compare_rejects_mixed_legacy_and_mda_summaries(tmp_path: Path) -> None:
+def test_default_compare_rejects_mixed_noncanonical_and_mda_summaries(tmp_path: Path) -> None:
     """Default compare should not silently mix old aggregate JSON with MDA artifacts."""
 
     analysis = _ArtifactDefaultCompareAnalysis()

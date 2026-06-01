@@ -72,15 +72,15 @@ def default_compare(analysis: Any, ctx: Any) -> BaseModel | None:
     if condition_artifacts:
         if len(condition_artifacts) != len(summaries_by_condition):
             artifact_labels = [artifact.condition_label for artifact in condition_artifacts]
-            legacy_labels = [
+            noncanonical_labels = [
                 label
                 for label, (_, summary, _) in summaries_by_condition.items()
                 if not isinstance(summary, ConditionArtifact)
             ]
             raise MDAComparisonError(
-                f"{analysis.name}: mixed MDA condition artifacts and legacy aggregate results "
+                f"{analysis.name}: mixed MDA condition artifacts and condition aggregate results "
                 f"cannot be compared together; MDA labels={artifact_labels}, "
-                f"legacy labels={legacy_labels}. Recompute this analysis or clear stale "
+                f"stale labels={noncanonical_labels}. Recompute this analysis or clear stale "
                 "aggregate result.json files before comparing."
             )
         return compare_condition_artifacts(

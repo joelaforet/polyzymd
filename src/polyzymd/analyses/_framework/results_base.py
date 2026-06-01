@@ -77,7 +77,7 @@ class BaseAnalysisResult(BaseModel, ABC):
        and ``selection_string`` have sensible defaults for analyzers that
        operate without full config context (e.g., low-level ``ContactAnalyzer``).
 
-    6. **Backward compatibility** — if migrating from a legacy format, keep
+    6. **Backward compatibility** — if migrating from a non-canonical format, keep
        remapping local to the active result class with a
        ``model_validator(mode="before")`` and cover it with focused
        regression tests.

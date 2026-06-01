@@ -4,7 +4,7 @@ This module defines Pydantic models for storing RMSD analysis results:
 - RMSDRunResult: Single run (selection) within a single replicate
 - RMSDResult: All runs for one replicate
 - RMSDRunAggregatedResult: One run aggregated across replicates
-- RMSDAggregatedResult: All runs aggregated across replicates
+- RMSDConditionModel: All runs aggregated across replicates
 
 Supports multiple named RMSD selections (runs) per analysis, following
 the multi-entry pattern established by the distances plugin.
@@ -293,7 +293,7 @@ class RMSDRunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         return "\n".join(lines)
 
 
-class RMSDAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
+class RMSDConditionModel(BaseAnalysisResult, AggregatedResultMixin):
     """Aggregated RMSD results for all runs across replicates."""
 
     analysis_type: ClassVar[str] = "rmsd_aggregated"

@@ -32,17 +32,17 @@ from polyzymd.analyses.rg._mda import (
     RG_PBC_POLICY_WARNING,
     compute_rg_run,
 )
+from polyzymd.analyses.rg._models import (
+    RgConditionModel,
+    RgResult,
+    RgRunAggregatedResult,
+)
 from polyzymd.analyses.rg._plotters import (
     _load_condition_aggregated,
     _load_replicate_timeseries,
     plot_rg_comparison_bars,
     plot_rg_distributions,
     plot_rg_timeseries,
-)
-from polyzymd.analyses.rg._results import (
-    RgAggregatedResult,
-    RgResult,
-    RgRunAggregatedResult,
 )
 from polyzymd.config.comparison import PlotSettings
 from tests._support.analysis_testkit import (
@@ -689,8 +689,8 @@ def test_fragment_mode_lifecycle_records_structured_topology_provenance(
     ]
 
 
-def test_aggregate_rejects_legacy_inputs(tmp_path) -> None:
-    """Rg aggregation should reject legacy RgResult inputs with recompute guidance."""
+def test_aggregate_rejects_noncanonical_inputs(tmp_path) -> None:
+    """Rg aggregation should reject non-canonical RgResult inputs with recompute guidance."""
 
     analysis = RgAnalysis()
     settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
@@ -701,7 +701,7 @@ def test_aggregate_rejects_legacy_inputs(tmp_path) -> None:
         settings=settings,
         equilibration="0ns",
     )
-    legacy = RgResult(
+    noncanonical = RgResult(
         config_hash="hash",
         polyzymd_version="test",
         replicate=1,
@@ -713,8 +713,8 @@ def test_aggregate_rejects_legacy_inputs(tmp_path) -> None:
         n_frames_used=1,
     )
 
-    with pytest.raises(TypeError, match="Legacy Rg replicate caches are incompatible"):
-        analysis.aggregate(ctx, [legacy])
+    with pytest.raises(TypeError, match="Non-canonical Rg replicate caches are incompatible"):
+        analysis.aggregate(ctx, [noncanonical])
 
 
 def test_aggregate_artifacts_and_compare_via_adapter(tmp_path) -> None:
@@ -857,7 +857,7 @@ def test_aggregate_rejects_missing_artifact_sidecar(tmp_path) -> None:
 
 
 def test_plotters_load_canonical_artifacts_only(tmp_path) -> None:
-    """Rg plot helpers should read replicate and condition artifacts, not legacy names."""
+    """Rg plot helpers should read replicate and condition artifacts, not non-canonical names."""
 
     settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
     analysis_dir = tmp_path / "control"
@@ -935,7 +935,7 @@ def test_plot_rejects_non_artifact_aggregated_result_from_disk(tmp_path) -> None
     analysis_dir = tmp_path / "analysis" / "control" / "rg"
     aggregated_dir = analysis_dir / "aggregated"
     aggregated_dir.mkdir(parents=True)
-    legacy_run = RgRunAggregatedResult(
+    noncanonical_run = RgRunAggregatedResult(
         config_hash="hash",
         polyzymd_version="test",
         replicate=None,
@@ -953,7 +953,7 @@ def test_plot_rejects_non_artifact_aggregated_result_from_disk(tmp_path) -> None
         per_replicate_stds=[0.0, 0.0],
         per_replicate_medians=[1.0, 1.0],
     )
-    RgAggregatedResult(
+    RgConditionModel(
         config_hash="hash",
         polyzymd_version="test",
         replicate=None,
@@ -962,7 +962,7 @@ def test_plot_rejects_non_artifact_aggregated_result_from_disk(tmp_path) -> None
         selection_string="protein",
         replicates=[1, 2],
         n_replicates=2,
-        run_results=[legacy_run],
+        run_results=[noncanonical_run],
     ).save(aggregated_dir / "result.json")
     results_dir = tmp_path / "comparison"
     results_dir.mkdir()

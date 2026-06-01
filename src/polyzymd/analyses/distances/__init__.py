@@ -18,7 +18,7 @@ entirely and ``extract_metrics()`` is not used.
 Compatibility API
 -----------------
 The :class:`DistanceCalculator` class remains available for callers that rely
-on the legacy public API. Import it as::
+on the current public API. Import it as::
 
     from polyzymd.analyses.distances import DistanceCalculator
 """
@@ -52,17 +52,17 @@ from polyzymd.analyses.distances._mda import (
     build_distance_jobs,
     compute_distance_payloads,
 )
+from polyzymd.analyses.distances._models import (
+    DistancePairResult,
+    DistanceResult,
+    DistanceResultMetadata,
+)
 from polyzymd.analyses.distances._plot_settings import DistancesPlotSettings
 from polyzymd.analyses.distances._plotters import (
     _plot_distance_kde,
     _plot_distance_state_bars,
     _plot_distance_threshold_bars,
     build_distance_plot_data,
-)
-from polyzymd.analyses.distances._results import (
-    DistancePairResult,
-    DistanceResult,
-    DistanceResultMetadata,
 )
 from polyzymd.analyses.mda import (
     ConditionArtifact,
@@ -210,7 +210,7 @@ def _make_distance_result_filename(
     alignment: Any,
     settings_tag: str | None,
 ) -> str:
-    """Build the legacy distances replicate filename.
+    """Build the non-canonical distances replicate filename.
 
     Parameters
     ----------
@@ -225,7 +225,7 @@ def _make_distance_result_filename(
     alignment : Any
         Alignment configuration object.
     settings_tag : str | None
-        Settings fingerprint suffix. ``None`` preserves the legacy tag.
+        Settings fingerprint suffix. ``None`` preserves the non-canonical tag.
 
     Returns
     -------
@@ -249,7 +249,7 @@ def _make_distance_result_filename(
         settings_parts.append("noalign")
 
     settings_suffix = "_".join(settings_parts)
-    tag = settings_tag or "legacy"
+    tag = settings_tag or "unstamped"
     return f"distances_{pair_label}_{eq_str}_{settings_suffix}_s{tag}.json"
 
 
@@ -523,7 +523,7 @@ class DistanceCalculator:
     - Compute PBC-aware distances for specified atom pairs
     - Calculate distributions and statistics
 
-    This compatibility façade preserves the legacy public API while delegating
+    This compatibility façade preserves the current public API while delegating
     trajectory-native work to the same MDAnalysis-compatible pair-distance
     kernel used by the plugin path.
 
@@ -962,7 +962,7 @@ class DistancesAnalysis(Analysis):
     """Distances analysis: inter-atomic distances from MD trajectories.
 
     This plugin performs full distance computation inline (no delegation
-    to legacy calculator classes), aggregates across replicates, and
+    to non-canonical calculator classes), aggregates across replicates, and
     performs per-pair cross-condition comparison with dual metrics (mean
     distance and fraction below threshold).
 
@@ -1036,7 +1036,7 @@ class DistancesAnalysis(Analysis):
                 return ArtifactStore(path.parent).read_condition_result(path.name)
         raise PluginContractError(
             f"Distances aggregate at {path} is not a canonical MDAnalysis condition artifact. "
-            "Recompute the condition or clear stale legacy distances caches."
+            "Recompute the condition or clear stale non-canonical distances caches."
         )
 
     def aggregate(
@@ -1066,7 +1066,7 @@ class DistancesAnalysis(Analysis):
             )
         if not all(isinstance(result, ReplicateArtifact) for result in results):
             raise TypeError(
-                "Distances aggregation expects MDAnalysis ReplicateArtifact inputs. Legacy "
+                "Distances aggregation expects MDAnalysis ReplicateArtifact inputs. Non-canonical "
                 "distances replicate caches are incompatible with the MDAnalysis artifact "
                 "lifecycle; recompute the condition or clear stale caches before aggregating."
             )
@@ -1458,7 +1458,7 @@ class DistancesAnalysis(Analysis):
         return plots
 
     def format(self, result: Any, output_format: str = "text") -> str:
-        """Format distance comparison results without legacy dispatch."""
+        """Format distance comparison results without compatibility dispatch."""
         from polyzymd.analyses.distances._formatters import format_distances_result
 
         return format_distances_result(result, format=self._normalize_output_format(output_format))

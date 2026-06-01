@@ -145,7 +145,7 @@ class SecondaryStructureAnalysis(Analysis):
         if not all(isinstance(result, ReplicateArtifact) for result in results):
             raise TypeError(
                 "Secondary-structure aggregation expects MDAnalysis ReplicateArtifact inputs. "
-                "Legacy secondary-structure replicate caches are incompatible with the "
+                "Non-canonical secondary-structure replicate caches are incompatible with the "
                 "MDAnalysis artifact lifecycle; recompute the condition or clear stale caches."
             )
         return aggregate_secondary_structure_artifacts(
@@ -176,7 +176,7 @@ class SecondaryStructureAnalysis(Analysis):
         if not isinstance(summary, ConditionArtifact):
             raise TypeError(
                 "Secondary-structure metric extraction requires a canonical MDAnalysis "
-                "condition artifact. Legacy aggregate summaries are incompatible; recompute "
+                "condition artifact. Non-canonical aggregate summaries are incompatible; recompute "
                 "the condition or clear stale caches before comparing."
             )
         metric = summary.payload.get("metrics", {}).get(HELIX_FRACTION_METRIC)
@@ -199,13 +199,13 @@ class SecondaryStructureAnalysis(Analysis):
         }
 
     def compare(self, ctx: Any) -> Any:
-        """Compare canonical condition artifacts and reject legacy aggregates."""
+        """Compare canonical condition artifacts and reject condition aggregates."""
 
         for label, summary in ctx.aggregated_results.items():
             if summary is not None and not isinstance(summary, ConditionArtifact):
                 raise TypeError(
                     f"Secondary-structure comparison for condition '{label}' requires canonical "
-                    "MDAnalysis condition artifacts. Legacy aggregate inputs are incompatible; "
+                    "MDAnalysis condition artifacts. Non-canonical aggregate inputs are incompatible; "
                     "recompute the condition or clear stale caches before comparing."
                 )
         return super().compare(ctx)
@@ -296,7 +296,7 @@ class SecondaryStructureAnalysis(Analysis):
                 return ArtifactStore(path.parent).read_condition_result(path.name)
         raise ValueError(
             f"Secondary-structure aggregate at {path} is not a canonical MDAnalysis condition "
-            "artifact. Recompute the condition or clear stale legacy caches."
+            "artifact. Recompute the condition or clear stale non-canonical caches."
         )
 
 

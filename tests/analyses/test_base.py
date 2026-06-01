@@ -189,8 +189,8 @@ class TestAnalysisABC:
                 def aggregate(self, ctx, results):
                     return {"dummy": True}
 
-    def test_legacy_compute_replicate_hook_is_not_supported(self) -> None:
-        """Legacy compute_replicate-only plugins should not satisfy the contract."""
+    def test_noncanonical_compute_replicate_hook_is_not_supported(self) -> None:
+        """Non-canonical compute_replicate-only plugins should not satisfy the contract."""
 
         assert not hasattr(Analysis, "compute_replicate")
 
@@ -199,8 +199,8 @@ class TestAnalysisABC:
             match=r"public plugins must implement build_mda_jobs\(\)",
         ):
 
-            class LegacyComputeOnlyAnalysis(Analysis):
-                name: ClassVar[str] = "legacy_compute_only"
+            class NoncanonicalComputeOnlyAnalysis(Analysis):
+                name: ClassVar[str] = "noncanonical_compute_only"
                 Settings: ClassVar[type] = ToySettings
 
                 def compute_replicate(self, ctx, replicate):
@@ -231,7 +231,7 @@ class TestAnalysisABC:
 
         class RemovedHookMixin:
             def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
-                """Legacy hook that should be rejected after MRO resolution."""
+                """Non-canonical hook that should be rejected after MRO resolution."""
 
                 del ctx
                 return {"value": float(replicate)}
@@ -251,22 +251,22 @@ class TestAnalysisABC:
 
         from abc import abstractmethod
 
-        class AbstractLegacyRunReplicate(Analysis):
+        class AbstractNoncanonicalRunReplicate(Analysis):
             @abstractmethod
             def extra_method(self) -> None:
                 """Keep the intermediate class abstract during definition."""
 
             def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
-                """Legacy hook that should be rejected once concrete."""
+                """Non-canonical hook that should be rejected once concrete."""
 
                 del ctx
                 return {"value": float(replicate)}
 
-        assert getattr(AbstractLegacyRunReplicate, "__abstractmethods__", None)
+        assert getattr(AbstractNoncanonicalRunReplicate, "__abstractmethods__", None)
 
         with pytest.raises(TypeError, match=r"inherits removed hook run_replicate\(\)"):
 
-            class ConcreteLegacyRunReplicate(_MDAContractMixin, AbstractLegacyRunReplicate):
+            class ConcreteNoncanonicalRunReplicate(_MDAContractMixin, AbstractNoncanonicalRunReplicate):
                 name: ClassVar[str] = "concrete_inherited_run_replicate_removed"
                 Settings: ClassVar[type] = ToySettings
 
@@ -308,7 +308,7 @@ class TestAnalysisABC:
                 Settings: ClassVar[type] = ToySettings
 
                 def build_runner(self, ctx, replicate, universe, window):
-                    """Legacy hook that should be rejected."""
+                    """Non-canonical hook that should be rejected."""
 
                     del ctx, replicate, universe, window
                     return object()

@@ -96,7 +96,7 @@ def test_base_comparison_get_comparison_prefers_pair_lookup() -> None:
     assert exact.condition_b == "C"
 
 
-def test_base_comparison_get_comparison_supports_legacy_condition_b_lookup() -> None:
+def test_base_comparison_get_comparison_supports_noncanonical_condition_b_lookup() -> None:
     """String lookup should remain available for backward compatibility."""
     result = _ComparisonResult(
         metric="mean_value",
@@ -134,14 +134,14 @@ def test_base_comparison_get_comparison_supports_legacy_condition_b_lookup() -> 
         polyzymd_version="1.2.1",
     )
 
-    legacy = result.get_comparison("Treatment")
-    assert legacy is not None
-    assert legacy.condition_a == "Control"
-    assert legacy.condition_b == "Treatment"
+    noncanonical = result.get_comparison("Treatment")
+    assert noncanonical is not None
+    assert noncanonical.condition_a == "Control"
+    assert noncanonical.condition_b == "Treatment"
 
 
-def test_base_comparison_get_comparison_legacy_lookup_raises_on_ambiguity() -> None:
-    """Legacy single-label lookup should raise when multiple matches exist."""
+def test_base_comparison_get_comparison_noncanonical_lookup_raises_on_ambiguity() -> None:
+    """Non-canonical single-label lookup should raise when multiple matches exist."""
     result = _ComparisonResult(
         metric="mean_value",
         name="test_project",
@@ -196,12 +196,12 @@ def test_base_comparison_get_comparison_legacy_lookup_raises_on_ambiguity() -> N
         polyzymd_version="1.2.1",
     )
 
-    with pytest.raises(ValueError, match="Ambiguous legacy comparison lookup"):
+    with pytest.raises(ValueError, match="Ambiguous non-canonical comparison lookup"):
         result.get_comparison("C")
 
 
 def test_base_comparison_get_comparison_tuple_falls_back_to_condition_b_lookup() -> None:
-    """Tuple lookup should fall back to legacy condition_b behavior when needed."""
+    """Tuple lookup should fall back to non-canonical condition_b behavior when needed."""
     result = _ComparisonResult(
         metric="mean_value",
         name="test_project",

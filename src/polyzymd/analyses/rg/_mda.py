@@ -1008,7 +1008,7 @@ def _aggregate_histograms(
             raise ValueError(
                 f"Rg aggregation for run '{run.label}' in condition '{condition_label}' requires "
                 f"canonical artifact sidecar metadata for replicate {replicate}. Recompute "
-                "legacy Rg caches before aggregating."
+                "non-canonical Rg caches before aggregating."
             )
         sidecar_path = _validate_sidecar(output_dir.parent, replicate, sidecar_payload)
         with np.load(sidecar_path) as npz_data:

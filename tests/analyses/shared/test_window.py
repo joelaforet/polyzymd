@@ -175,7 +175,7 @@ def test_resolve_trajectory_window_uses_absolute_first_frame_timestamp() -> None
 def test_resolve_trajectory_window_falls_back_without_valid_timestamp(
     first_frame_time_ps: object,
 ) -> None:
-    """Missing or non-finite timestamps should preserve legacy behavior."""
+    """Missing or non-finite timestamps should preserve non-canonical behavior."""
 
     window = resolve_trajectory_window(
         equilibration="200ns",

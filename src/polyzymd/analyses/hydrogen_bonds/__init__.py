@@ -30,21 +30,21 @@ from polyzymd.analyses.base import (
 from polyzymd.analyses.hydrogen_bonds._mda import (
     HydrogenBondArtifactCollector,
     aggregate_hydrogen_bond_artifacts,
-    artifact_to_hydrogen_bond_result,
+    artifact_to_hydrogen_bond_model,
     build_hydrogen_bond_jobs,
     compute_composition,
-    condition_artifact_to_legacy_result,
+    condition_artifact_to_condition_model,
     validate_and_order_replicate_artifacts,
 )
-from polyzymd.analyses.hydrogen_bonds._results import (
+from polyzymd.analyses.hydrogen_bonds._models import (
     AggregatedCompositionEntry,
     CompositionEntry,
     DirectedPairAggregate,
     DirectedResiduePairResult,
-    HydrogenBondAggregatedResult,
     HydrogenBondAggregatedSummary,
+    HydrogenBondConditionModel,
+    HydrogenBondReplicateModel,
     HydrogenBondReplicateSummary,
-    HydrogenBondResult,
     ResidueRef,
     UndirectedPairAggregate,
     UndirectedResiduePairResult,
@@ -72,7 +72,7 @@ DEFAULT_GROUPS = {"protein": "chainid A", "polymer": "chainid C"}
 def _validate_aggregate_replicate_identity(
     ctx: AggregateContext,
     results: Sequence[Any],
-) -> list[HydrogenBondResult]:
+) -> list[HydrogenBondReplicateModel]:
     """Validate and order hydrogen-bond replicate results by replicate ID.
 
     Parameters
@@ -84,7 +84,7 @@ def _validate_aggregate_replicate_identity(
 
     Returns
     -------
-    list[HydrogenBondResult]
+    list[HydrogenBondReplicateModel]
         Results ordered to match ``ctx.replicates``.
 
     Raises
@@ -137,7 +137,7 @@ def _validate_aggregate_replicate_identity(
 
 def _validate_aggregate_summary_completeness(
     ctx: AggregateContext,
-    ordered_results: Sequence[HydrogenBondResult],
+    ordered_results: Sequence[HydrogenBondReplicateModel],
     expected_summaries: Sequence[HydrogenBondSummarySettings],
 ) -> dict[str, list[HydrogenBondReplicateSummary]]:
     """Validate configured summary coverage across replicate results.
@@ -146,7 +146,7 @@ def _validate_aggregate_summary_completeness(
     ----------
     ctx : AggregateContext
         Framework-provided aggregation context.
-    ordered_results : Sequence[HydrogenBondResult]
+    ordered_results : Sequence[HydrogenBondReplicateModel]
         Replicate results ordered to match ``ctx.replicates``.
     expected_summaries : Sequence[HydrogenBondSummarySettings]
         Summary specifications configured for this aggregation.
@@ -518,7 +518,7 @@ class HydrogenBondsAnalysis(Analysis):
 
     name: ClassVar[str] = "hydrogen_bonds"
     Settings: ClassVar[type] = HydrogenBondSettings
-    AggregatedResultClass: ClassVar[type | None] = HydrogenBondAggregatedResult
+    AggregatedResultClass: ClassVar[type | None] = HydrogenBondConditionModel
     execution_cost_hint: ClassVar[str] = "high"
     aliases: ClassVar[tuple[str, ...]] = ("hbonds", "hbond")
     min_replicates: ClassVar[int] = 1
@@ -532,7 +532,7 @@ class HydrogenBondsAnalysis(Analysis):
     def _validate_replicate_result_settings_identity(
         cls,
         ctx: AggregateContext,
-        results: Sequence[HydrogenBondResult],
+        results: Sequence[HydrogenBondReplicateModel],
     ) -> None:
         """Validate settings fingerprints on per-replicate hydrogen-bond results.
 
@@ -540,7 +540,7 @@ class HydrogenBondsAnalysis(Analysis):
         ----------
         ctx : AggregateContext
             Framework-provided aggregation context.
-        results : Sequence[HydrogenBondResult]
+        results : Sequence[HydrogenBondReplicateModel]
             Per-replicate hydrogen-bond results.
 
         Raises
@@ -573,7 +573,7 @@ class HydrogenBondsAnalysis(Analysis):
         if missing_fingerprint_replicates:
             raise ValueError(
                 f"Hydrogen-bond aggregation for condition '{ctx.condition.label}' cannot use "
-                "legacy cached replicate results missing settings fingerprints. Affected "
+                "non-canonical cached replicate results missing settings fingerprints. Affected "
                 f"replicates: {sorted(missing_fingerprint_replicates)}. Recompute the "
                 "condition to refresh settings-sensitive caches before aggregating."
             )
@@ -594,7 +594,7 @@ class HydrogenBondsAnalysis(Analysis):
         *,
         condition_label: str | None = None,
         source: Path | None = None,
-    ) -> HydrogenBondAggregatedResult:
+    ) -> HydrogenBondConditionModel:
         """Coerce an aggregated result and validate its settings identity.
 
         Parameters
@@ -610,7 +610,7 @@ class HydrogenBondsAnalysis(Analysis):
 
         Returns
         -------
-        HydrogenBondAggregatedResult
+        HydrogenBondConditionModel
             Validated aggregated result.
 
         Raises
@@ -624,15 +624,15 @@ class HydrogenBondsAnalysis(Analysis):
         """
 
         if isinstance(result, ConditionArtifact):
-            result = condition_artifact_to_legacy_result(result)
+            result = condition_artifact_to_condition_model(result)
         elif isinstance(result, dict) and result.get("artifact_type") == "condition":
-            result = condition_artifact_to_legacy_result(ConditionArtifact.model_validate(result))
+            result = condition_artifact_to_condition_model(ConditionArtifact.model_validate(result))
         elif isinstance(result, dict):
-            result = HydrogenBondAggregatedResult.model_validate(result)
+            result = HydrogenBondConditionModel.model_validate(result)
 
-        if not isinstance(result, HydrogenBondAggregatedResult):
+        if not isinstance(result, HydrogenBondConditionModel):
             raise PluginContractError(
-                f"Plugin '{cls.name}' expected HydrogenBondAggregatedResult, got "
+                f"Plugin '{cls.name}' expected HydrogenBondConditionModel, got "
                 f"{type(result).__name__}"
             )
 
@@ -649,7 +649,7 @@ class HydrogenBondsAnalysis(Analysis):
             raise ValueError(
                 "Aggregated hydrogen-bond result"
                 f"{condition_text} is missing a settings fingerprint{source_text}. "
-                "Legacy hydrogen-bond aggregated caches are not compatible with "
+                "Non-canonical hydrogen-bond aggregated caches are not compatible with "
                 "settings-sensitive compare/plot loading. Recompute the condition before "
                 "comparing or plotting."
             )
@@ -672,7 +672,7 @@ class HydrogenBondsAnalysis(Analysis):
         condition_label: str | None = None,
         replicate: int | None = None,
         source: Path | None = None,
-    ) -> HydrogenBondResult:
+    ) -> HydrogenBondReplicateModel:
         """Coerce a replicate result and validate its settings identity.
 
         Parameters
@@ -690,7 +690,7 @@ class HydrogenBondsAnalysis(Analysis):
 
         Returns
         -------
-        HydrogenBondResult
+        HydrogenBondReplicateModel
             Validated replicate result.
 
         Raises
@@ -704,21 +704,21 @@ class HydrogenBondsAnalysis(Analysis):
         """
 
         if isinstance(result, ReplicateArtifact):
-            result = artifact_to_hydrogen_bond_result(
+            result = artifact_to_hydrogen_bond_model(
                 result,
                 settings_fingerprint=_settings_hash(settings),
             )
         elif isinstance(result, dict) and result.get("artifact_type") == "replicate":
-            result = artifact_to_hydrogen_bond_result(
+            result = artifact_to_hydrogen_bond_model(
                 ReplicateArtifact.model_validate(result),
                 settings_fingerprint=_settings_hash(settings),
             )
         elif isinstance(result, dict):
-            result = HydrogenBondResult.model_validate(result)
+            result = HydrogenBondReplicateModel.model_validate(result)
 
-        if not isinstance(result, HydrogenBondResult):
+        if not isinstance(result, HydrogenBondReplicateModel):
             raise PluginContractError(
-                f"Plugin '{cls.name}' expected HydrogenBondResult, got {type(result).__name__}"
+                f"Plugin '{cls.name}' expected HydrogenBondReplicateModel, got {type(result).__name__}"
             )
 
         stored_fingerprint = getattr(result, "settings_fingerprint", None)
@@ -741,7 +741,7 @@ class HydrogenBondsAnalysis(Analysis):
             raise ValueError(
                 "Hydrogen-bond replicate result"
                 f"{condition_text}{replicate_text} is missing a settings fingerprint"
-                f"{source_text}. Legacy hydrogen-bond replicate caches are not compatible "
+                f"{source_text}. Non-canonical hydrogen-bond replicate caches are not compatible "
                 "with settings-sensitive plot loading. Recompute the condition before "
                 "plotting."
             )
@@ -972,7 +972,7 @@ class HydrogenBondsAnalysis(Analysis):
 
         Returns
         -------
-        HydrogenBondAggregatedResult
+        HydrogenBondConditionModel
             Aggregated hydrogen-bond result for one condition.
         """
 
@@ -984,8 +984,8 @@ class HydrogenBondsAnalysis(Analysis):
         if not all(isinstance(result, ReplicateArtifact) for result in results):
             raise TypeError(
                 "Hydrogen-bond aggregation requires ReplicateArtifact inputs from the "
-                "MDAnalysis artifact lifecycle. Received legacy or non-artifact replicate "
-                "results; remove stale legacy caches or rerun with recompute=True before "
+                "MDAnalysis artifact lifecycle. Received non-canonical or non-artifact replicate "
+                "results; remove stale non-canonical caches or rerun with recompute=True before "
                 "aggregating."
             )
 
@@ -997,7 +997,7 @@ class HydrogenBondsAnalysis(Analysis):
             analysis_dir=ctx.output_dir.parent,
         )
         ordered_results = [
-            artifact_to_hydrogen_bond_result(
+            artifact_to_hydrogen_bond_model(
                 artifact,
                 settings_fingerprint=_settings_hash(ctx.settings),
                 validate_sidecars=True,
@@ -1139,7 +1139,7 @@ class HydrogenBondsAnalysis(Analysis):
         else:
             aggregated_composition = []
 
-        agg_result = HydrogenBondAggregatedResult(
+        agg_result = HydrogenBondConditionModel(
             config_hash=ordered_results[0].config_hash,
             settings_fingerprint=_settings_hash(settings),
             replicate=0,
@@ -1160,7 +1160,7 @@ class HydrogenBondsAnalysis(Analysis):
             replicates=ctx.replicates,
             output_dir=ctx.output_dir,
             artifacts=ordered_artifacts,
-            legacy_result=agg_result,
+            condition_model=agg_result,
         )
 
     def _compute_composition(
@@ -1189,13 +1189,13 @@ class HydrogenBondsAnalysis(Analysis):
 
     def _aggregate_composition(
         self,
-        results: Sequence[HydrogenBondResult],
+        results: Sequence[HydrogenBondReplicateModel],
     ) -> list[AggregatedCompositionEntry]:
         """Aggregate composition entries across replicates.
 
         Parameters
         ----------
-        results : Sequence[HydrogenBondResult]
+        results : Sequence[HydrogenBondReplicateModel]
             Replicate-level hydrogen-bond results.
 
         Returns
@@ -1254,14 +1254,14 @@ class HydrogenBondsAnalysis(Analysis):
             One metric per configured summary with mean H-bonds per frame.
         """
         if isinstance(summary, ConditionArtifact):
-            summaries = condition_artifact_to_legacy_result(summary).summaries
+            summaries = condition_artifact_to_condition_model(summary).summaries
         elif isinstance(summary, dict) and summary.get("artifact_type") == "condition":
-            summaries = condition_artifact_to_legacy_result(
+            summaries = condition_artifact_to_condition_model(
                 ConditionArtifact.model_validate(summary)
             ).summaries
         elif isinstance(summary, dict):
             summaries = summary.get("summaries", [])
-        elif isinstance(summary, HydrogenBondAggregatedResult):
+        elif isinstance(summary, HydrogenBondConditionModel):
             summaries = summary.summaries
         else:
             logger.warning("Unexpected result type for extract_metrics: %s", type(summary))
@@ -1374,7 +1374,7 @@ class HydrogenBondsAnalysis(Analysis):
 
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
-        loaded: dict[str, HydrogenBondAggregatedResult] = {}
+        loaded: dict[str, HydrogenBondConditionModel] = {}
         for label in labels:
             cond_data = data.get(label)
             if cond_data is None:
@@ -1407,7 +1407,7 @@ class HydrogenBondsAnalysis(Analysis):
             if loaded_result is None:
                 continue
 
-            if isinstance(loaded_result, HydrogenBondAggregatedResult):
+            if isinstance(loaded_result, HydrogenBondConditionModel):
                 loaded[label] = loaded_result
 
         labels_with_data = [label for label in labels if label in loaded]
@@ -1545,7 +1545,7 @@ class HydrogenBondsAnalysis(Analysis):
 
         Returns
         -------
-        ReplicateArtifact, HydrogenBondResult, or None
+        ReplicateArtifact, HydrogenBondReplicateModel, or None
             Deserialized canonical artifact/result, or ``None`` if no canonical
             result file is present.
         """
@@ -1556,7 +1556,7 @@ class HydrogenBondsAnalysis(Analysis):
         try:
             result = ArtifactStore(run_dir).read_replicate_result("result.json")
         except ArtifactStoreError:
-            result = HydrogenBondResult.model_validate_json(result_path.read_text())
+            result = HydrogenBondReplicateModel.model_validate_json(result_path.read_text())
         if settings is not None:
             return self._coerce_and_validate_replicate_result(
                 result,
@@ -1628,7 +1628,7 @@ class HydrogenBondsAnalysis(Analysis):
 
                 if isinstance(rep_result, dict):
                     try:
-                        rep_result = HydrogenBondResult.model_validate(rep_result)
+                        rep_result = HydrogenBondReplicateModel.model_validate(rep_result)
                     except (
                         json.JSONDecodeError,
                         ValidationError,
@@ -1644,7 +1644,7 @@ class HydrogenBondsAnalysis(Analysis):
                         )
                         continue
 
-                if not isinstance(rep_result, HydrogenBondResult):
+                if not isinstance(rep_result, HydrogenBondReplicateModel):
                     continue
 
                 for summary in rep_result.summaries:
@@ -1659,14 +1659,14 @@ class HydrogenBondsAnalysis(Analysis):
 
     @staticmethod
     def _get_summary_names(
-        loaded: dict[str, HydrogenBondAggregatedResult],
+        loaded: dict[str, HydrogenBondConditionModel],
         labels: Sequence[str],
     ) -> list[str]:
         """Collect summary names in first-seen order across conditions.
 
         Parameters
         ----------
-        loaded : dict[str, HydrogenBondAggregatedResult]
+        loaded : dict[str, HydrogenBondConditionModel]
             Loaded aggregated results by condition.
         labels : Sequence[str]
             Condition labels in plotting order.

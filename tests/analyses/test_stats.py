@@ -376,10 +376,10 @@ def test_format_scalar_comparison_includes_adjusted_pvalues_in_text_and_markdown
 
 
 def test_format_scalar_comparison_backward_compatible_without_adjusted_pvalues() -> None:
-    """Formatter should keep legacy output when adjusted p-values are absent."""
-    legacy_payload = {
+    """Formatter should keep existing output when adjusted p-values are absent."""
+    noncanonical_payload = {
         "analysis_type": "test",
-        "name": "legacy",
+        "name": "unstamped",
         "control_label": "A",
         "conditions": [
             {"label": "A", "n_replicates": 3, "metric_mean": 1.0, "metric_sem": 0.1},
@@ -406,11 +406,11 @@ def test_format_scalar_comparison_backward_compatible_without_adjusted_pvalues()
         "created_at": "2026-01-01T00:00:00",
         "polyzymd_version": "test",
     }
-    legacy_result = ComparisonResult.model_validate_json(json.dumps(legacy_payload))
+    condition_model = ComparisonResult.model_validate_json(json.dumps(noncanonical_payload))
 
-    text_output = format_scalar_comparison(legacy_result, output_format="text", metric_key="metric")
+    text_output = format_scalar_comparison(condition_model, output_format="text", metric_key="metric")
     markdown_output = format_scalar_comparison(
-        legacy_result,
+        condition_model,
         output_format="markdown",
         metric_key="metric",
     )

@@ -99,7 +99,7 @@ class TrajectoryWindow:
     equilibration_time_reference : str, optional
         Time reference used to interpret ``equilibration``. ``"trajectory_timestamp"``
         means absolute MDAnalysis timestamps were available; ``"loaded_frame_zero"``
-        means the legacy loaded-frame-relative origin was used.
+        means the stale loaded-frame-relative origin was used.
     warning_message : str | None
         Non-fatal equilibration warning generated during validation.
     """
@@ -211,7 +211,7 @@ def resolve_trajectory_window(
     When the first loaded frame has a finite MDAnalysis timestamp,
     ``equilibration`` is interpreted as an absolute trajectory time. The start
     frame is the first loaded frame whose timestamp is greater than or equal to
-    the equilibration time. When timestamp metadata is unavailable, the legacy
+    the equilibration time. When timestamp metadata is unavailable, the noncanonical
     loaded-frame-relative origin is used.
 
     Parameters
@@ -234,7 +234,7 @@ def resolve_trajectory_window(
         Minimum required number of selected frames, by default 1.
     first_frame_time_ps : float | None, optional
         Absolute MDAnalysis timestamp of loaded frame 0 in picoseconds. Non-finite
-        values are ignored and use the legacy loaded-frame-relative behavior.
+        values are ignored and use the stale loaded-frame-relative behavior.
 
     Returns
     -------

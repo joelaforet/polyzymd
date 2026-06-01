@@ -36,7 +36,7 @@ class RgRunSummary(BaseModel):
 
     @model_validator(mode="after")
     def populate_replicate_count(self) -> RgRunSummary:
-        """Populate replicate count for legacy summaries without explicit metadata."""
+        """Populate replicate count for non-canonical summaries without explicit metadata."""
 
         if self.n_replicates == 0:
             self.n_replicates = len(self.replicates) or len(self.per_replicate_means)

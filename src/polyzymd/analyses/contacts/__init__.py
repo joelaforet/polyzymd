@@ -384,7 +384,7 @@ class ContactsAnalysis(Analysis):
         return plots
 
     def format(self, result: Any, output_format: str = "text") -> str:
-        """Format contacts comparison results without legacy dispatch."""
+        """Format contacts comparison results without compatibility dispatch."""
         from polyzymd.analyses.contacts._formatters import format_contacts_result
 
         return format_contacts_result(result, format=self._normalize_output_format(output_format))

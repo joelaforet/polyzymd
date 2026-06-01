@@ -112,7 +112,7 @@ def test_validation_rejects_settings_mismatch() -> None:
 
 
 def test_validation_rejects_missing_fingerprint() -> None:
-    """Legacy aggregates without settings identity should be rejected."""
+    """Non-canonical aggregates without settings identity should be rejected."""
 
     settings = DummySettings()
     analysis = DummyAnalysis()

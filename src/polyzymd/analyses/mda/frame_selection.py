@@ -331,7 +331,7 @@ class FrameSelection:
         """Resolve PolyzyMD equilibration/window settings to a frame selection.
 
         Finite first-frame timestamps make equilibration absolute in MDAnalysis
-        trajectory time; missing timestamps keep the legacy loaded-frame-relative
+        trajectory time; missing timestamps keep the stale loaded-frame-relative
         origin.
 
         Parameters

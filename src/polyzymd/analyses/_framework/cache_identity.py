@@ -231,7 +231,7 @@ def validate_settings_fingerprint(
     source : str or Path or None, optional
         Optional cache source path for diagnostics.
     allow_missing : bool, optional
-        Treat missing fingerprints as legacy-compatible, by default True.
+        Treat missing fingerprints as non-canonical-compatible, by default True.
         Strict cache callers can set this to False to reject missing identity.
 
     Returns
@@ -242,7 +242,7 @@ def validate_settings_fingerprint(
 
     Notes
     -----
-    Legacy cache files may not encode settings fingerprints. By default these
+    Non-canonical cache files may not encode settings fingerprints. By default these
     files are treated as compatible for backward compatibility, with a warning
     to encourage recomputation. Strict callers can disable this compatibility
     path with ``allow_missing=False``.
@@ -253,13 +253,13 @@ def validate_settings_fingerprint(
     if stored_fingerprint is None:
         if warn:
             action = (
-                "loading legacy cache without strict validation"
+                "loading non-canonical cache without strict validation"
                 if allow_missing
                 else "rejecting cache without strict validation"
             )
             warnings.warn(
                 "Cached analysis result is missing settings fingerprint"
-                f"{source_text}; {action}. This legacy cache cannot prove it matches "
+                f"{source_text}; {action}. This non-canonical cache cannot prove it matches "
                 "the current analysis settings. Use --recompute or clear the analysis cache "
                 "if settings changed.",
                 UserWarning,

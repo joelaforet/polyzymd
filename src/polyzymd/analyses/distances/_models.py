@@ -2,7 +2,7 @@
 
 This module defines Pydantic models for storing distance analysis results:
 - DistanceResult: Single replicate distance distributions
-- DistanceAggregatedResult: Multi-replicate aggregated results
+- DistanceConditionModel: Multi-replicate aggregated results
 
 Supports both single pair and multiple pair analyses.
 """
@@ -649,7 +649,7 @@ class DistancePairAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         return "\n".join(lines)
 
 
-class DistanceAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
+class DistanceConditionModel(BaseAnalysisResult, AggregatedResultMixin):
     """Aggregated distance results for multiple pairs across replicates."""
 
     analysis_type: ClassVar[str] = "distances_aggregated"
@@ -682,7 +682,7 @@ class DistanceAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         source_result_files: Sequence[str | Path] = (),
         settings_fingerprint: str | None = None,
         selection_string: str | None = None,
-    ) -> DistanceAggregatedResult:
+    ) -> DistanceConditionModel:
         """Construct an aggregated distance result from pair results.
 
         Parameters
@@ -703,7 +703,7 @@ class DistanceAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
 
         Returns
         -------
-        DistanceAggregatedResult
+        DistanceConditionModel
             Flat aggregated result preserving the current serialized schema.
         """
 

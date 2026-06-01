@@ -366,7 +366,7 @@ def _comparison_artifact_to_result(artifact: ComparisonArtifact) -> ComparisonRe
     Returns
     -------
     ComparisonResult
-        Legacy scalar comparison model consumed by the shared formatter.
+        Non-canonical scalar comparison model consumed by the shared formatter.
     """
 
     payload = artifact.payload

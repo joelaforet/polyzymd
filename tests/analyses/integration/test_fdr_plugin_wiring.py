@@ -820,7 +820,7 @@ def test_contacts_anova_fdr_correction() -> None:
 def test_contacts_result_backward_compat() -> None:
     """Contacts result should deserialize old JSON missing new fields."""
     payload = {
-        "name": "legacy_contacts",
+        "name": "non-canonical_contacts",
         "contacts_name": "contacts",
         "contacts_description": None,
         "polymer_selection": "chainID C",

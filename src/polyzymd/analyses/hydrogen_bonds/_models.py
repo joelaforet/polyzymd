@@ -90,7 +90,7 @@ class CompositionEntry(BaseModel):
     fraction_of_total: float = Field(..., ge=0, le=1)
 
 
-class HydrogenBondResult(BaseAnalysisResult):
+class HydrogenBondReplicateModel(BaseAnalysisResult):
     """Per-replicate hydrogen-bond analysis result."""
 
     analysis_type: ClassVar[str] = "hydrogen_bonds"
@@ -197,8 +197,8 @@ class AggregatedCompositionEntry(BaseModel):
     per_replicate_fraction: list[float]
 
 
-class HydrogenBondAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
-    """Aggregated hydrogen bond results across replicates for one condition."""
+class HydrogenBondConditionModel(BaseAnalysisResult, AggregatedResultMixin):
+    """Aggregated hydrogen bond condition model across replicates for one condition."""
 
     analysis_type: ClassVar[str] = "hydrogen_bonds_aggregated"
 

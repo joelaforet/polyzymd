@@ -280,7 +280,7 @@ def _make_distance_cache_result(
     thresholds: list[float | None],
 ):
     """Create a concrete ``DistanceResult`` for cache-identity tests."""
-    from polyzymd.analyses.distances._results import DistancePairResult, DistanceResult
+    from polyzymd.analyses.distances._models import DistancePairResult, DistanceResult
 
     pair_results = []
     for idx, ((selection1, selection2), threshold) in enumerate(
@@ -468,7 +468,7 @@ class TestDistanceResultFactories:
     @staticmethod
     def _make_metadata(replicate: int | None = 1):
         """Create common result metadata for factory tests."""
-        from polyzymd.analyses.distances._results import DistanceResultMetadata
+        from polyzymd.analyses.distances._models import DistanceResultMetadata
 
         return DistanceResultMetadata(
             config_hash="hash123",
@@ -479,7 +479,7 @@ class TestDistanceResultFactories:
         )
 
     def test_pair_factory_matches_direct_constructor_schema(self):
-        from polyzymd.analyses.distances._results import DistancePairResult
+        from polyzymd.analyses.distances._models import DistancePairResult
 
         payload = self._make_payload()
         metadata = self._make_metadata(replicate=None)
@@ -524,7 +524,7 @@ class TestDistanceResultFactories:
         )
 
     def test_pair_factory_can_omit_distributions(self):
-        from polyzymd.analyses.distances._results import DistancePairResult
+        from polyzymd.analyses.distances._models import DistancePairResult
 
         result = DistancePairResult.from_runner_payload(
             self._make_metadata(replicate=None),
@@ -536,7 +536,7 @@ class TestDistanceResultFactories:
         assert result.histogram_counts == [1, 2]
 
     def test_factory_results_have_flat_keys(self):
-        from polyzymd.analyses.distances._results import DistancePairResult
+        from polyzymd.analyses.distances._models import DistancePairResult
 
         result = DistancePairResult.from_runner_payload(
             self._make_metadata(replicate=None),
@@ -551,7 +551,7 @@ class TestDistanceResultFactories:
         assert dumped["pair_label"] == "pair0"
 
     def test_result_factory_stringifies_paths(self):
-        from polyzymd.analyses.distances._results import DistancePairResult, DistanceResult
+        from polyzymd.analyses.distances._models import DistancePairResult, DistanceResult
 
         pair_result = DistancePairResult.from_runner_payload(
             self._make_metadata(replicate=None),
@@ -571,8 +571,8 @@ class TestDistanceResultFactories:
     def test_aggregate_factory_preserves_flat_schema(self):
         from types import SimpleNamespace
 
-        from polyzymd.analyses.distances._results import (
-            DistanceAggregatedResult,
+        from polyzymd.analyses.distances._models import (
+            DistanceConditionModel,
             DistancePairAggregatedResult,
         )
 
@@ -596,7 +596,7 @@ class TestDistanceResultFactories:
             replicates=(1, 2),
             threshold=3.5,
         )
-        result = DistanceAggregatedResult.from_pair_results(
+        result = DistanceConditionModel.from_pair_results(
             self._make_metadata(replicate=None),
             [pair_result],
             replicates=(1, 2),
@@ -611,7 +611,7 @@ class TestDistanceResultFactories:
         assert "stats" not in dumped
 
     def test_direct_constructors_still_supported(self):
-        from polyzymd.analyses.distances._results import DistancePairResult, DistanceResult
+        from polyzymd.analyses.distances._models import DistancePairResult, DistanceResult
 
         pair_result = DistancePairResult(
             config_hash="hash123",
@@ -648,7 +648,7 @@ class TestDistanceResultFactories:
         assert result.pair_results[0].pair_label == "pair0"
 
     def test_distance_pair_factory_replicate_is_none_for_distances(self):
-        from polyzymd.analyses.distances._results import DistancePairResult
+        from polyzymd.analyses.distances._models import DistancePairResult
 
         result = DistancePairResult.from_runner_payload(
             self._make_metadata(replicate=1).with_replicate(None),
@@ -887,7 +887,7 @@ class TestRunReplicate:
 
 
 class TestAggregate:
-    """aggregate produces a DistanceAggregatedResult."""
+    """aggregate produces a DistanceConditionModel."""
 
     def _make_mock_results(self, settings, n_reps: int = 3):
         """Create mock per-replicate results for aggregation."""
@@ -1498,7 +1498,7 @@ class TestCompare:
         assert result.ranking_by_pair["Inner duplicate"] == ["Control"]
         assert result.ranking_by_pair["Outer duplicate"] == ["Control"]
 
-    def test_compare_remaps_duplicate_legacy_auto_labels_by_index(self, tmp_path):
+    def test_compare_remaps_duplicate_auto_labels_by_index(self, tmp_path):
         from polyzymd.analyses._framework.cache_identity import settings_fingerprint
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.distances import (
@@ -1535,7 +1535,7 @@ class TestCompare:
             sim_config=MagicMock(),
         )
         ctx = ComparisonContext(
-            name="duplicate_legacy_auto_labels",
+            name="duplicate_auto_labels",
             conditions=[condition],
             excluded_conditions=[],
             control_label="Control",
@@ -1675,16 +1675,16 @@ class TestDeserializeResult:
 
         assert DistancesAnalysis.AggregatedResultClass is None
 
-    def test_rejects_legacy_aggregate_json(self, tmp_path):
+    def test_rejects_noncanonical_aggregate_json(self, tmp_path):
         from polyzymd.analyses.distances import DistancesAnalysis
         from polyzymd.analyses.exceptions import PluginContractError
 
         analysis = DistancesAnalysis()
-        legacy_path = tmp_path / "distances_legacy.json"
-        legacy_path.write_text('{"analysis_type": "distances_aggregated"}', encoding="utf-8")
+        noncanonical_path = tmp_path / "distances_noncanonical.json"
+        noncanonical_path.write_text('{"analysis_type": "distances_aggregated"}', encoding="utf-8")
 
         with pytest.raises(PluginContractError, match="canonical MDAnalysis condition artifact"):
-            analysis._deserialize_result(legacy_path)
+            analysis._deserialize_result(noncanonical_path)
 
 
 class TestSettingsCacheTag:
@@ -1751,7 +1751,7 @@ class TestDistanceCalculatorCacheIdentity:
                 pairs=[("resid 1 and name CA", "resid 2 and name CA"), ("resid 30", "resid 40")],
             )
 
-        assert calc_a._settings_tag != "legacy"
+        assert calc_a._settings_tag != "unstamped"
         assert calc_a._make_result_filename() != calc_b._make_result_filename()
 
     def test_cached_result_rejected_when_config_hash_validation_fails(self, tmp_path):
@@ -1789,7 +1789,7 @@ class TestDistanceCalculatorCacheIdentity:
         assert reused is None
         mock_validate.assert_called_once_with("stale-config-hash", config)
 
-    def test_stale_legacy_named_cache_is_rejected_when_settings_change(self, tmp_path):
+    def test_stale_noncanonical_named_cache_is_rejected_when_settings_change(self, tmp_path):
         from polyzymd.analyses.distances import DistanceCalculator
 
         config = MagicMock()
@@ -1811,13 +1811,13 @@ class TestDistanceCalculatorCacheIdentity:
                 config,
                 pairs=original_pairs,
                 thresholds=thresholds,
-                settings_tag="legacy",
+                settings_tag="unstamped",
             )
             calc_new = DistanceCalculator(
                 config,
                 pairs=changed_pairs,
                 thresholds=thresholds,
-                settings_tag="legacy",
+                settings_tag="unstamped",
             )
 
         result_file = tmp_path / calc_old._make_result_filename()

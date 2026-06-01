@@ -557,6 +557,8 @@ class SASAArtifactCompatibility:
         Parsed schema version if present.
     selection_hash_matches : bool | None
         Advisory selection hash result when query selections are supplied.
+    is_noncanonical : bool
+        True when the metadata predates the versioned artifact schema.
     mismatched_fields : tuple[str, ...]
         Names of fields that made the artifact incompatible.
     """
@@ -564,6 +566,7 @@ class SASAArtifactCompatibility:
     is_compatible: bool
     schema_version: int | None
     selection_hash_matches: bool | None
+    is_noncanonical: bool
     mismatched_fields: tuple[str, ...]
 
 
@@ -813,8 +816,7 @@ def check_sasa_artifact_compatibility(
             schema_version = None
             mismatched_fields.append("artifact_schema_version")
 
-    if schema_raw is None:
-        mismatched_fields.append("artifact_schema_version")
+    is_noncanonical = schema_raw is None
     if schema_version is not None and schema_version > SASA_ARTIFACT_SCHEMA_VERSION:
         mismatched_fields.append("artifact_schema_version")
 
@@ -883,6 +885,7 @@ def check_sasa_artifact_compatibility(
         is_compatible=len(mismatched_fields) == 0,
         schema_version=schema_version,
         selection_hash_matches=selection_hash_matches,
+        is_noncanonical=is_noncanonical,
         mismatched_fields=tuple(mismatched_fields),
     )
 
@@ -943,6 +946,7 @@ def find_sibling_sasa_artifacts(
     matches.sort(
         key=lambda item: (
             _selection_hash_rank(item.compatibility.selection_hash_matches),
+            item.compatibility.is_noncanonical,
             item.npz_path.name,
         )
     )

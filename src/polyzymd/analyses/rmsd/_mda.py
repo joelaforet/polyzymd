@@ -654,7 +654,7 @@ def _effective_timestep_ps(
     Returns
     -------
     float
-        Median spacing in picoseconds when available, otherwise the legacy
+        Median spacing in picoseconds when available, otherwise the noncanonical
         raw timestep multiplied by frame stride.
     """
 

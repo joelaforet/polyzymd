@@ -1,7 +1,7 @@
 """Regression tests for TrajectoryLoader engine-aware refactor.
 
 Tests cover:
-- OpenMM daisy-chain and legacy directory layouts
+- OpenMM daisy-chain and non-canonical directory layouts
 - GROMACS flat production layout
 - GRO topology chain-ID warning
 - engine_override parameter
@@ -59,8 +59,8 @@ def _create_openmm_daisy_chain(run_dir: Path, n_segments: int = 3) -> None:
         (seg_dir / f"production_{i}_topology.pdb").write_text("ATOM topology")
 
 
-def _create_openmm_legacy(run_dir: Path) -> None:
-    """Populate *run_dir* with a legacy OpenMM single-directory layout."""
+def _create_openmm_noncanonical(run_dir: Path) -> None:
+    """Populate *run_dir* with a non-canonical OpenMM single-directory layout."""
     run_dir.mkdir(parents=True, exist_ok=True)
     prod_dir = run_dir / "production"
     prod_dir.mkdir()
@@ -305,21 +305,21 @@ class TestOpenMMDaisyChain:
         assert info3.replicate == 3
 
 
-class TestOpenMMLegacy:
-    """Loader resolves legacy single-directory OpenMM layout."""
+class TestOpenMMNoncanonical:
+    """Loader resolves non-canonical single-directory OpenMM layout."""
 
-    def test_finds_legacy_topology(self, tmp_path):
+    def test_finds_noncanonical_topology(self, tmp_path):
         run_dir = tmp_path / "run_1"
-        _create_openmm_legacy(run_dir)
+        _create_openmm_noncanonical(run_dir)
         config = _make_openmm_config(tmp_path)
         loader = TrajectoryLoader(config)
 
         info = loader.get_trajectory_info(replicate=1)
         assert info.topology_file.name == "production_topology.pdb"
 
-    def test_finds_legacy_trajectory(self, tmp_path):
+    def test_finds_noncanonical_trajectory(self, tmp_path):
         run_dir = tmp_path / "run_1"
-        _create_openmm_legacy(run_dir)
+        _create_openmm_noncanonical(run_dir)
         config = _make_openmm_config(tmp_path)
         loader = TrajectoryLoader(config)
 

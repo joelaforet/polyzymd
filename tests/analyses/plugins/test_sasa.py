@@ -831,8 +831,8 @@ def test_sasa_aggregate_rejects_residue_identity_mismatch(tmp_path: Path) -> Non
         _aggregate_artifacts(tmp_path, artifacts)
 
 
-def test_sasa_aggregate_rejects_legacy_inputs(tmp_path: Path) -> None:
-    """Aggregation should reject non-artifact legacy replicate results."""
+def test_sasa_aggregate_rejects_noncanonical_inputs(tmp_path: Path) -> None:
+    """Aggregation should reject non-artifact non-canonical replicate results."""
 
     analysis = SASAAnalysis()
     settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
@@ -909,8 +909,8 @@ def test_sasa_compare_and_format_with_condition_artifacts(tmp_path: Path) -> Non
     assert "SASA Comparison" in analysis.format(comparison, "table")
 
 
-def test_sasa_compare_rejects_legacy_aggregate(tmp_path: Path) -> None:
-    """Comparison should fail loudly for legacy aggregate inputs."""
+def test_sasa_compare_rejects_noncanonical_aggregate(tmp_path: Path) -> None:
+    """Comparison should fail loudly for condition aggregate inputs."""
 
     analysis = SASAAnalysis()
     settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
@@ -949,12 +949,12 @@ def test_sasa_timeseries_loader_uses_canonical_artifact_sidecars(tmp_path: Path)
     assert matrix.shape == (1, 3)
 
 
-def test_plot_loader_ignores_legacy_sasa_json_without_result(tmp_path: Path) -> None:
-    """Plot payload loader should not scan legacy SASA JSON files."""
+def test_plot_loader_ignores_noncanonical_sasa_json_without_result(tmp_path: Path) -> None:
+    """Plot payload loader should not scan non-canonical SASA JSON files."""
 
     run_dir = tmp_path / "condition" / "run_1"
     run_dir.mkdir(parents=True)
-    (run_dir / "sasa_legacy.json").write_text('{"run_results": [{"run_label": "protein"}]}')
+    (run_dir / "sasa_noncanonical.json").write_text('{"run_results": [{"run_label": "protein"}]}')
 
     assert _load_condition_result_payloads(tmp_path / "condition") == []
 
@@ -1291,7 +1291,7 @@ def test_run_cache_token_changes_when_stride_changes() -> None:
 
 
 def test_plot_loader_fallback_tie_breaks_are_removed(tmp_path: Path) -> None:
-    """Legacy fallback files should be ignored regardless of mtimes."""
+    """Non-canonical fallback files should be ignored regardless of mtimes."""
 
     run_dir = tmp_path / "condition" / "run_1"
     run_dir.mkdir(parents=True)

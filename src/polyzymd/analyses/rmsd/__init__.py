@@ -261,7 +261,7 @@ class RMSDAnalysis(Analysis):
             raise ValueError(
                 "Aggregated RMSD result"
                 f"{condition_text} is missing a settings fingerprint{source_text}. "
-                "Legacy RMSD aggregated caches are not compatible with "
+                "Non-canonical RMSD aggregated caches are not compatible with "
                 "settings-sensitive compare/plot loading. Recompute the condition before "
                 "comparing or plotting."
             )

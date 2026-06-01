@@ -155,7 +155,7 @@ class TestSettingsFingerprintValidation:
         assert extract_settings_fingerprint_from_path(path) == "1a2b3c4d"
 
     def test_extract_settings_fingerprint_from_path_returns_none_when_absent(self):
-        """Legacy paths without fingerprint should return None."""
+        """Non-canonical paths without fingerprint should return None."""
         path = Path("/tmp/rmsf_eq10ns.json")
         assert extract_settings_fingerprint_from_path(path) is None
 
@@ -172,7 +172,7 @@ class TestSettingsFingerprintValidation:
             valid = validate_settings_fingerprint("deadbeef", settings)
         assert valid is False
 
-    def test_validate_settings_fingerprint_allows_legacy_missing_with_warning(self):
+    def test_validate_settings_fingerprint_allows_noncanonical_missing_with_warning(self):
         """Missing fingerprint should remain backward-compatible."""
         settings = SimpleSettings(cutoff=4.5)
         with pytest.warns(UserWarning, match="missing settings fingerprint"):

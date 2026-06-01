@@ -538,7 +538,7 @@ class TestTriadAggregationAndComparison:
     def test_extract_metrics_preserves_percent_scaling(
         self, triad_analysis: CatalyticTriadAnalysis
     ) -> None:
-        """Legacy metric extraction should still report percentages."""
+        """Non-canonical metric extraction should still report percentages."""
 
         summary = MagicMock(
             overall_simultaneous_contact=0.72,
@@ -554,16 +554,18 @@ class TestTriadAggregationAndComparison:
         assert metric.sem == 4.0
         assert metric.replicate_values == [70.0, 72.0, 74.0]
 
-    def test_deserialize_rejects_legacy_json(
+    def test_deserialize_rejects_noncanonical_json(
         self, triad_analysis: CatalyticTriadAnalysis, tmp_path: Path
     ) -> None:
-        """Legacy triad JSON should not be loaded as a canonical aggregate."""
+        """Non-canonical triad JSON should not be loaded as a canonical aggregate."""
 
-        legacy_path = tmp_path / "triad_legacy.json"
-        legacy_path.write_text('{"analysis_type": "catalytic_triad_aggregated"}', encoding="utf-8")
+        noncanonical_path = tmp_path / "triad_noncanonical.json"
+        noncanonical_path.write_text(
+            '{"analysis_type": "catalytic_triad_aggregated"}', encoding="utf-8"
+        )
 
         with pytest.raises(ValueError, match="canonical MDAnalysis condition artifact"):
-            triad_analysis._deserialize_result(legacy_path)
+            triad_analysis._deserialize_result(noncanonical_path)
 
 
 class TestTriadPlot:

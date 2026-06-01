@@ -67,7 +67,7 @@ def load_canonical_plot_artifacts(
 
     The loader reads ``aggregated/result.json`` and the configured
     ``run_N/result.json`` files through :class:`ArtifactStore`. It never scans
-    directories, opens legacy JSON files, or imports trajectory packages.
+    directories, opens non-canonical JSON files, or imports trajectory packages.
 
     Parameters
     ----------
@@ -304,7 +304,7 @@ def _matplotlib_colormap_colors(colormap_name: str, n: int) -> list:
 
 
 def get_colors(n: int, plot_settings: "PlotSettings") -> list:
-    """Get *n* legacy palette colors.
+    """Get *n* existing palette colors.
 
     This backward-compatible alias preserves the historical behavior of
     ``get_colors()`` while semantic condition color helpers opt in separately.
@@ -404,7 +404,7 @@ def get_condition_color_map(
     """Return a label-to-color map using semantic condition color rules.
 
     Resolution precedence is manual color, condition color, control color,
-    family/value color, missing metadata fallback, then legacy palette fallback.
+    family/value color, missing metadata fallback, then existing palette fallback.
     Invalid color or colormap values warn and continue to a safe fallback.
 
     Parameters

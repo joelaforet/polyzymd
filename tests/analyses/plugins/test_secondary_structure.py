@@ -263,7 +263,7 @@ def test_aggregate_rejects_residue_identity_mismatch(tmp_path, condition, settin
         )
 
 
-def test_plugin_aggregate_rejects_legacy_inputs(tmp_path, condition, settings) -> None:
+def test_plugin_aggregate_rejects_noncanonical_inputs(tmp_path, condition, settings) -> None:
     """Plugin aggregation should reject non-artifact replicate inputs."""
 
     ctx = AggregateContext(
@@ -275,7 +275,7 @@ def test_plugin_aggregate_rejects_legacy_inputs(tmp_path, condition, settings) -
     )
 
     with pytest.raises(TypeError, match="ReplicateArtifact"):
-        SecondaryStructureAnalysis().aggregate(ctx, [{"legacy": True}])
+        SecondaryStructureAnalysis().aggregate(ctx, [{"unstamped": True}])
 
 
 def test_extract_metrics_reads_condition_artifact_payload(condition, settings) -> None:
@@ -294,17 +294,17 @@ def test_extract_metrics_reads_condition_artifact_payload(condition, settings) -
     assert metric.direction_labels == ("destabilizing", "unchanged", "stabilizing")
 
 
-def test_extract_metrics_rejects_legacy_summary() -> None:
-    """Metric extraction should reject legacy-shaped aggregate summaries."""
+def test_extract_metrics_rejects_noncanonical_summary() -> None:
+    """Metric extraction should reject non-canonical-shaped aggregate summaries."""
 
-    legacy_summary = {
+    noncanonical_summary = {
         "mean_overall_helix": 0.3,
         "sem_overall_helix": 0.1,
         "per_replicate_helix": [0.2, 0.4],
     }
 
     with pytest.raises(TypeError, match="canonical MDAnalysis condition artifact"):
-        SecondaryStructureAnalysis().extract_metrics(legacy_summary)
+        SecondaryStructureAnalysis().extract_metrics(noncanonical_summary)
 
 
 def test_default_compare_returns_comparison_artifact(tmp_path, condition, settings) -> None:
@@ -336,8 +336,8 @@ def test_default_compare_returns_comparison_artifact(tmp_path, condition, settin
     assert result.payload["metric_metadata"]["helix_fraction"]["higher_is_better"] is True
 
 
-def test_compare_rejects_legacy_aggregate(tmp_path, condition, settings) -> None:
-    """Comparison should reject legacy aggregate dictionaries."""
+def test_compare_rejects_noncanonical_aggregate(tmp_path, condition, settings) -> None:
+    """Comparison should reject condition aggregate dictionaries."""
 
     ctx = ComparisonContext(
         name="Demo",
@@ -348,7 +348,7 @@ def test_compare_rejects_legacy_aggregate(tmp_path, condition, settings) -> None
         results_dir=tmp_path,
         equilibration="0ns",
         settings=settings,
-        aggregated_results={condition.label: {"legacy": True}},
+        aggregated_results={condition.label: {"unstamped": True}},
     )
 
     with pytest.raises(TypeError, match="canonical MDAnalysis condition artifacts"):
@@ -373,13 +373,13 @@ def test_timeline_loader_uses_canonical_artifacts_only(tmp_path, condition, sett
     assert residue_ids == [1, 2]
 
 
-def test_plot_rejects_legacy_aggregate_file(tmp_path, condition, settings) -> None:
+def test_plot_rejects_noncanonical_aggregate_file(tmp_path, condition, settings) -> None:
     """Plot setup should reject stale non-artifact aggregate files."""
 
     analysis_dir = tmp_path / "secondary_structure"
     aggregated_dir = analysis_dir / "aggregated"
     aggregated_dir.mkdir(parents=True)
-    (aggregated_dir / "result.json").write_text('{"legacy": true}')
+    (aggregated_dir / "result.json").write_text('{"unstamped": true}')
     ctx = PlotContext(
         conditions=[condition],
         analysis_dirs={condition.label: analysis_dir},

@@ -149,10 +149,10 @@ def test_save_load_roundtrip(tmp_path: Path) -> None:
     assert "compatibility_hash" in metadata
 
 
-def test_load_sasa_artifacts_legacy_without_atom_indices(tmp_path: Path) -> None:
-    """Legacy NPZ payloads without atom indices should load with empty arrays."""
-    npz_path = tmp_path / "legacy_sasa.npz"
-    metadata_path = tmp_path / "legacy_sasa.json"
+def test_load_sasa_artifacts_noncanonical_without_atom_indices(tmp_path: Path) -> None:
+    """Non-canonical NPZ payloads without atom indices should load with empty arrays."""
+    npz_path = tmp_path / "non-canonical_sasa.npz"
+    metadata_path = tmp_path / "non-canonical_sasa.json"
 
     atom_sasa_a2 = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
     residue_sasa_a2 = np.asarray([[3.0], [7.0]], dtype=np.float64)
@@ -177,8 +177,8 @@ def test_load_sasa_artifacts_legacy_without_atom_indices(tmp_path: Path) -> None
         residue_resnames=residue_resnames,
     )
 
-    legacy_metadata = {
-        "run_label": "legacy_run",
+    noncanonical_metadata = {
+        "run_label": "noncanonical_run",
         "target_selection": "chainid A",
         "context_selection": "all",
         "units": "A^2",
@@ -186,7 +186,7 @@ def test_load_sasa_artifacts_legacy_without_atom_indices(tmp_path: Path) -> None
         "n_sphere_points": 960,
         "equilibration": "10ns",
     }
-    metadata_path.write_text(json.dumps(legacy_metadata), encoding="utf-8")
+    metadata_path.write_text(json.dumps(noncanonical_metadata), encoding="utf-8")
 
     loaded, _metadata = load_sasa_artifacts(npz_path, metadata_path)
 
@@ -200,7 +200,7 @@ def test_load_sasa_artifacts_legacy_without_atom_indices(tmp_path: Path) -> None
 
 
 def test_save_metadata_contains_versioned_schema_fields(tmp_path: Path) -> None:
-    """Saved metadata should include versioned and legacy schema fields."""
+    """Saved metadata should include versioned and non-canonical schema fields."""
     result = _make_sasa_result()
     npz_path = tmp_path / "sasa.npz"
     metadata_path = tmp_path / "sasa.json"
@@ -228,7 +228,7 @@ def test_save_metadata_contains_versioned_schema_fields(tmp_path: Path) -> None:
         "sasa_engine",
         "sasa_mode",
     }
-    legacy_keys = {
+    noncanonical_keys = {
         "run_label",
         "target_selection",
         "context_selection",
@@ -238,7 +238,7 @@ def test_save_metadata_contains_versioned_schema_fields(tmp_path: Path) -> None:
     }
 
     assert versioned_keys.issubset(metadata.keys())
-    assert legacy_keys.issubset(metadata.keys())
+    assert noncanonical_keys.issubset(metadata.keys())
 
 
 def test_multichain_warning_integration(caplog: pytest.LogCaptureFixture) -> None:
@@ -725,7 +725,7 @@ class TestSASAArtifactCompatibilityHash:
 
 
 class TestBuildSASAArtifactMetadata:
-    def test_contains_legacy_keys(self) -> None:
+    def test_contains_noncanonical_keys(self) -> None:
         result = _make_sasa_result()
         metadata = build_sasa_artifact_metadata(
             result,
@@ -822,7 +822,7 @@ class TestCheckSASAArtifactCompatibility:
             equilibration="10ns",
         )
 
-    def _legacy_metadata(self) -> dict[str, object]:
+    def _noncanonical_metadata(self) -> dict[str, object]:
         metadata = self._versioned_metadata()
         metadata.pop("artifact_schema", None)
         metadata.pop("artifact_schema_version", None)
@@ -846,13 +846,13 @@ class TestCheckSASAArtifactCompatibility:
         metadata = self._versioned_metadata()
         compat = check_sasa_artifact_compatibility(metadata, self._query())
         assert compat.is_compatible is True
-        assert compat.is_legacy is False
+        assert compat.is_noncanonical is False
 
-    def test_compatible_legacy(self) -> None:
-        metadata = self._legacy_metadata()
+    def test_compatible_noncanonical(self) -> None:
+        metadata = self._noncanonical_metadata()
         compat = check_sasa_artifact_compatibility(metadata, self._query())
         assert compat.is_compatible is True
-        assert compat.is_legacy is True
+        assert compat.is_noncanonical is True
 
     def test_rejects_probe_radius_mismatch(self) -> None:
         metadata = self._versioned_metadata()
@@ -979,7 +979,7 @@ class TestFindSiblingSASAArtifacts:
         }
         return metadata
 
-    def _legacy_metadata(self) -> dict[str, object]:
+    def _noncanonical_metadata(self) -> dict[str, object]:
         return {
             "run_label": "run_1",
             "target_selection": "chainid A",
@@ -1097,7 +1097,7 @@ class TestFindSiblingSASAArtifacts:
         matches = find_sibling_sasa_artifacts(replicate_dir, self._query())
         assert matches == []
 
-    def test_ordering_versioned_before_legacy(self, tmp_path: Path) -> None:
+    def test_ordering_versioned_before_noncanonical(self, tmp_path: Path) -> None:
         replicate_dir = self._make_replicate_dir(tmp_path)
         sibling_dir = tmp_path / "analysis" / "condA" / "sasa" / "run_1"
         sibling_dir.mkdir(parents=True, exist_ok=True)
@@ -1108,7 +1108,7 @@ class TestFindSiblingSASAArtifacts:
             context_selection="all",
             equilibration="10ns",
         )
-        self._write_artifact(sibling_dir, "sasa_legacy", self._legacy_metadata())
+        self._write_artifact(sibling_dir, "sasa_noncanonical", self._noncanonical_metadata())
         self._write_artifact(
             sibling_dir,
             "sasa_versioned",
@@ -1117,8 +1117,8 @@ class TestFindSiblingSASAArtifacts:
 
         matches = find_sibling_sasa_artifacts(replicate_dir, self._query())
         assert len(matches) == 2
-        assert matches[0].compatibility.is_legacy is False
-        assert matches[1].compatibility.is_legacy is True
+        assert matches[0].compatibility.is_noncanonical is False
+        assert matches[1].compatibility.is_noncanonical is True
 
     def test_ordering_hash_match_preferred(self, tmp_path: Path) -> None:
         replicate_dir = self._make_replicate_dir(tmp_path)

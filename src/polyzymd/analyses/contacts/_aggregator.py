@@ -44,7 +44,7 @@ CONTACT_PROFILE_SIDECAR = "sidecars/contact_profiles.npz"
 CONTACTS_AGGREGATION_POLICY_VERSION = "contacts-condition-aggregation-v1"
 CONTACTS_LEGACY_RECOMPUTE_GUIDANCE = (
     "Contacts aggregation now requires MDAnalysis ReplicateArtifact inputs. "
-    "Legacy ContactResult/AggregatedContactResult caches are not compatible; rerun contacts "
+    "Non-canonical ContactResult/AggregatedContactResult caches are not compatible; rerun contacts "
     "with recompute enabled or clear stale contacts caches."
 )
 _ABSOLUTE_TIMESTAMP_REFERENCES = frozenset({"trajectory_timestamp"})
@@ -96,7 +96,7 @@ def aggregate_contact_artifacts(
     Raises
     ------
     MDAAggregationError
-        Raised when legacy inputs or stale/mismatched artifacts are supplied.
+        Raised when non-canonical inputs or stale/mismatched artifacts are supplied.
     """
 
     normalized = _validate_contacts_artifacts(artifacts, ctx)
@@ -477,7 +477,7 @@ def _validate_frame_selection_compatibility(
     """Validate scientifically relevant frame-selection compatibility.
 
     Per-replicate timestamp provenance can differ when trajectories begin at
-    different absolute times. Legacy loaded-frame-relative provenance must keep
+    different absolute times. Non-canonical loaded-frame-relative provenance must keep
     matching resolved frame windows because offsets are interpreted against each
     loaded trajectory origin.
 
@@ -743,7 +743,7 @@ def _validate_loaded_frame_window(item: _LoadedContactArtifact, ctx: AggregateCo
     Raises
     ------
     MDAAggregationError
-        Raised when sidecar frame counts or legacy frame windows are inconsistent.
+        Raised when sidecar frame counts or stale frame windows are inconsistent.
     """
 
     frame_indices = np.asarray(item.data["frame_indices"])
@@ -795,7 +795,7 @@ def _validate_loaded_frame_zero_artifact_window(
     """Validate one loaded-frame-relative contacts frame window.
 
     Timestamp-relative artifacts may carry per-replicate start-frame differences,
-    so they are intentionally excluded from these legacy-window checks.
+    so they are intentionally excluded from these non-canonical-window checks.
 
     Parameters
     ----------

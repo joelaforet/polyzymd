@@ -189,7 +189,7 @@ class RgAnalysis(Analysis):
             raise ValueError(
                 "Aggregated Rg result"
                 f"{condition_text} is missing a settings fingerprint{source_text}. "
-                "Legacy Rg aggregated caches are not compatible with "
+                "Non-canonical Rg aggregated caches are not compatible with "
                 "settings-sensitive compare/plot loading. Recompute the condition before "
                 "comparing or plotting."
             )
@@ -677,7 +677,7 @@ class RgAnalysis(Analysis):
             )
         if not all(isinstance(result, ReplicateArtifact) for result in results):
             raise TypeError(
-                "Rg aggregation expects MDAnalysis ReplicateArtifact inputs. Legacy Rg "
+                "Rg aggregation expects MDAnalysis ReplicateArtifact inputs. Non-canonical Rg "
                 "replicate caches are incompatible with the MDAnalysis artifact lifecycle; "
                 "recompute the condition or clear stale caches before aggregating."
             )

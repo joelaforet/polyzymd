@@ -522,7 +522,7 @@ class TestContactsMDAArtifacts:
 
 
 class TestContactsSparseEventUtilities:
-    """Contacts-local helpers preserve legacy scientific semantics."""
+    """Contacts-local helpers preserve existing scientific semantics."""
 
     def test_build_atom_to_residue_map_distinguishes_duplicate_resids_by_chain(self):
         from polyzymd.analyses.contacts._events import build_atom_to_residue_map
@@ -1081,7 +1081,7 @@ class TestAggregate:
             ({"equilibration_start": 11}, "frame-selection equilibration_start mismatch"),
         ],
     )
-    def test_aggregate_rejects_legacy_frame_selection_window_mismatch(
+    def test_aggregate_rejects_noncanonical_frame_selection_window_mismatch(
         self,
         tmp_path,
         candidate_overrides,
@@ -1136,7 +1136,7 @@ class TestAggregate:
         with pytest.raises(MDAAggregationError, match=message):
             ContactsAnalysis().aggregate(ctx, artifacts)
 
-    def test_aggregate_rejects_single_stale_legacy_loaded_frame_zero_window(self, tmp_path):
+    def test_aggregate_rejects_single_stale_noncanonical_loaded_frame_zero_window(self, tmp_path):
         """Aggregation should validate the first artifact against the requested window."""
 
         from polyzymd.analyses.base import AggregateContext, Condition
@@ -1222,7 +1222,9 @@ class TestAggregate:
         ):
             ContactsAnalysis().aggregate(ctx, [artifact])
 
-    def test_aggregate_rejects_matching_stale_legacy_loaded_frame_zero_windows(self, tmp_path):
+    def test_aggregate_rejects_matching_stale_noncanonical_loaded_frame_zero_windows(
+        self, tmp_path
+    ):
         """Aggregation should not trust the first stale artifact as the baseline."""
 
         from polyzymd.analyses.base import AggregateContext, Condition
@@ -1343,7 +1345,7 @@ class TestAggregate:
         with pytest.raises(MDAAggregationError, match="equilibration mismatch"):
             ContactsAnalysis().aggregate(ctx, [artifact])
 
-    def test_aggregate_rejects_legacy_contact_results(self, tmp_path):
+    def test_aggregate_rejects_noncanonical_contact_results(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
 
@@ -2062,7 +2064,7 @@ class TestCompare:
         with pytest.raises(ValueError, match="must be a boolean"):
             analysis.compare(ctx)
 
-    def test_compare_rejects_legacy_aggregate_when_recompute_true(self, tmp_path):
+    def test_compare_rejects_noncanonical_aggregate_when_recompute_true(self, tmp_path):
         """Comparison-stage reads should not suppress valid aggregate JSON files."""
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
@@ -2096,23 +2098,23 @@ class TestCompare:
         with pytest.raises(ValueError, match="canonical ConditionArtifact"):
             analysis.compare(ctx)
 
-    def test_compare_ignores_root_level_legacy_aggregate(self, tmp_path):
-        """Comparison loading should not scan root-level legacy contacts aggregates."""
+    def test_compare_ignores_root_level_noncanonical_aggregate(self, tmp_path):
+        """Comparison loading should not scan root-level non-canonical contacts aggregates."""
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
 
         analysis = ContactsAnalysis()
         settings = ContactsSettings()
         condition = Condition(
-            label="LegacyRoot",
+            label="Non-canonicalRoot",
             config_path=tmp_path / "config.yaml",
             replicates=(1, 2),
             sim_config=MagicMock(),
         )
-        analysis_dir = tmp_path / "LegacyRoot" / "contacts"
+        analysis_dir = tmp_path / "Non-canonicalRoot" / "contacts"
         (analysis_dir / "aggregated").mkdir(parents=True)
-        legacy_path = analysis_dir / "contacts_aggregated_eq10ns_cut4.5_reps1-2.json"
-        legacy_path.write_text(
+        noncanonical_path = analysis_dir / "contacts_aggregated_eq10ns_cut4.5_reps1-2.json"
+        noncanonical_path.write_text(
             '{"analysis_type":"contacts_aggregated","n_replicates":2}', encoding="utf-8"
         )
         ctx = ComparisonContext(
@@ -2120,7 +2122,7 @@ class TestCompare:
             conditions=[condition],
             excluded_conditions=[],
             control_label=None,
-            analysis_dirs={"LegacyRoot": analysis_dir},
+            analysis_dirs={"Non-canonicalRoot": analysis_dir},
             results_dir=tmp_path / "results",
             equilibration="10ns",
             settings=settings,
@@ -2733,7 +2735,7 @@ class TestPlot:
         with pytest.raises(ValueError, match="invalid profile sidecar"):
             ContactsAnalysis().plot(ctx)
 
-    def test_legacy_only_json_does_not_plot(self, tmp_path, caplog):
+    def test_noncanonical_only_json_does_not_plot(self, tmp_path, caplog):
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
 
         settings = ContactsSettings()
@@ -2866,8 +2868,8 @@ class TestLifecycle:
 class TestContactsCanonicalArtifacts:
     """Contacts uses canonical artifact store paths only."""
 
-    def test_legacy_cache_wrappers_are_not_public_on_plugin(self):
-        """Legacy sidecar/cache path wrappers should not remain on the facade."""
+    def test_noncanonical_cache_wrappers_are_not_public_on_plugin(self):
+        """Non-canonical sidecar/cache path wrappers should not remain on the facade."""
         from polyzymd.analyses.contacts import ContactsAnalysis
 
         facade_names = set(ContactsAnalysis.__dict__)
@@ -2914,8 +2916,10 @@ class TestContactsCanonicalArtifacts:
         assert result is not None
         assert [summary.label for summary in result.conditions] == ["A"]
 
-    def test_legacy_sidecar_json_is_ignored_when_canonical_artifact_is_missing(self, tmp_path):
-        """Comparison should not discover legacy contacts JSON sidecars."""
+    def test_noncanonical_sidecar_json_is_ignored_when_canonical_artifact_is_missing(
+        self, tmp_path
+    ):
+        """Comparison should not discover non-canonical contacts JSON sidecars."""
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
 

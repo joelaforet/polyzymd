@@ -15,14 +15,14 @@ from numpy.typing import NDArray
 
 from polyzymd.analyses._framework.cache_identity import compute_config_hash
 from polyzymd.analyses._framework.results_base import get_polyzymd_version
-from polyzymd.analyses.hydrogen_bonds._results import (
+from polyzymd.analyses.hydrogen_bonds._models import (
     AggregatedCompositionEntry,
     CompositionEntry,
     DirectedResiduePairResult,
-    HydrogenBondAggregatedResult,
     HydrogenBondAggregatedSummary,
+    HydrogenBondConditionModel,
+    HydrogenBondReplicateModel,
     HydrogenBondReplicateSummary,
-    HydrogenBondResult,
     ResidueRef,
     UndirectedResiduePairResult,
 )
@@ -110,7 +110,9 @@ class HydrogenBondMDAAnalysis:
         self.replicate = replicate
         self.raw_timestep_ps = raw_timestep_ps
         self.plan: HydrogenBondMDAPlan | None = None
-        self.results = type("HydrogenBondResults", (), {"hbonds": np.empty((0, 6), dtype=float)})()
+        self.results = type(
+            "HydrogenBondReplicateModels", (), {"hbonds": np.empty((0, 6), dtype=float)}
+        )()
 
     def run(self, start: int, stop: int | None = None, step: int = 1, **kwargs: Any) -> Any:
         """Execute MDAnalysis hydrogen-bond detection for the frame window.
@@ -378,7 +380,7 @@ def aggregate_hydrogen_bond_artifacts(
     replicates: Sequence[int],
     output_dir: Path,
     artifacts: Sequence[ReplicateArtifact],
-    legacy_result: HydrogenBondAggregatedResult,
+    condition_model: HydrogenBondConditionModel,
 ) -> ConditionArtifact:
     """Aggregate hydrogen-bond replicate artifacts into a condition artifact.
 
@@ -392,7 +394,7 @@ def aggregate_hydrogen_bond_artifacts(
         Aggregated output directory.
     artifacts : sequence of ReplicateArtifact
         Per-replicate hydrogen-bond artifacts.
-    legacy_result : HydrogenBondAggregatedResult
+    condition_model : HydrogenBondConditionModel
         Established in-memory aggregate model used by comparison/plot adapters.
 
     Returns
@@ -404,24 +406,24 @@ def aggregate_hydrogen_bond_artifacts(
     ordered_artifacts = validate_and_order_replicate_artifacts(
         condition_label=condition_label,
         replicates=replicates,
-        settings_fingerprint=legacy_result.settings_fingerprint,
+        settings_fingerprint=condition_model.settings_fingerprint,
         artifacts=artifacts,
         analysis_dir=output_dir.parent,
     )
-    metrics, replicate_metrics = _condition_metrics(legacy_result)
+    metrics, replicate_metrics = _condition_metrics(condition_model)
     source_result_files = _source_result_files(output_dir, replicates)
     return ConditionArtifact(
         analysis_name="hydrogen_bonds",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
         payload={
-            "summaries": [summary.model_dump(mode="json") for summary in legacy_result.summaries],
+            "summaries": [summary.model_dump(mode="json") for summary in condition_model.summaries],
             "composition_entries": [
-                entry.model_dump(mode="json") for entry in legacy_result.composition_entries
+                entry.model_dump(mode="json") for entry in condition_model.composition_entries
             ],
             "metrics": metrics,
             "replicate_metrics": replicate_metrics,
-            "n_replicates": legacy_result.n_replicates,
+            "n_replicates": condition_model.n_replicates,
         },
         provenance={
             "source": "hydrogen_bonds_replicate_artifact_aggregation",
@@ -429,17 +431,17 @@ def aggregate_hydrogen_bond_artifacts(
         },
         metadata={
             "result_kind": "hydrogen_bonds_mda_condition",
-            "settings_fingerprint": legacy_result.settings_fingerprint,
-            "config_hash": legacy_result.config_hash,
-            "polyzymd_version": legacy_result.polyzymd_version,
-            "equilibration_time": legacy_result.equilibration_time,
-            "equilibration_unit": legacy_result.equilibration_unit,
-            "selection_string": legacy_result.selection_string,
-            "timestep_ps": legacy_result.timestep_ps,
-            "raw_timestep_ps": legacy_result.raw_timestep_ps,
-            "frame_stride": legacy_result.frame_stride,
+            "settings_fingerprint": condition_model.settings_fingerprint,
+            "config_hash": condition_model.config_hash,
+            "polyzymd_version": condition_model.polyzymd_version,
+            "equilibration_time": condition_model.equilibration_time,
+            "equilibration_unit": condition_model.equilibration_unit,
+            "selection_string": condition_model.selection_string,
+            "timestep_ps": condition_model.timestep_ps,
+            "raw_timestep_ps": condition_model.raw_timestep_ps,
+            "frame_stride": condition_model.frame_stride,
             "source_result_files": source_result_files,
-            "n_replicates": legacy_result.n_replicates,
+            "n_replicates": condition_model.n_replicates,
         },
         source_replicates=[
             {"replicate": int(replicate), "path": str(path)}
@@ -509,13 +511,13 @@ def validate_and_order_replicate_artifacts(
     return [by_replicate[rep] for rep in expected]
 
 
-def artifact_to_hydrogen_bond_result(
+def artifact_to_hydrogen_bond_model(
     artifact: ReplicateArtifact,
     *,
     settings_fingerprint: str | None = None,
     validate_sidecars: bool = False,
     store_root: Path | None = None,
-) -> HydrogenBondResult:
+) -> HydrogenBondReplicateModel:
     """Convert a replicate artifact to the established result model.
 
     Parameters
@@ -531,7 +533,7 @@ def artifact_to_hydrogen_bond_result(
 
     Returns
     -------
-    HydrogenBondResult
+    HydrogenBondReplicateModel
         Established in-memory replicate result model.
     """
 
@@ -545,7 +547,7 @@ def artifact_to_hydrogen_bond_result(
         )
     if validate_sidecars:
         _validate_event_sidecar(artifact, analysis_dir=store_root)
-    return HydrogenBondResult(
+    return HydrogenBondReplicateModel(
         config_hash=str(artifact.metadata.get("config_hash", "unknown")),
         polyzymd_version=str(artifact.metadata.get("polyzymd_version", get_polyzymd_version())),
         replicate=artifact.replicate,
@@ -567,7 +569,7 @@ def artifact_to_hydrogen_bond_result(
     )
 
 
-def condition_artifact_to_legacy_result(artifact: Any) -> HydrogenBondAggregatedResult:
+def condition_artifact_to_condition_model(artifact: Any) -> HydrogenBondConditionModel:
     """Convert a condition artifact to the established aggregate model.
 
     Parameters
@@ -577,11 +579,11 @@ def condition_artifact_to_legacy_result(artifact: Any) -> HydrogenBondAggregated
 
     Returns
     -------
-    HydrogenBondAggregatedResult
+    HydrogenBondConditionModel
         Established in-memory aggregate result model.
     """
 
-    if isinstance(artifact, HydrogenBondAggregatedResult):
+    if isinstance(artifact, HydrogenBondConditionModel):
         return artifact
     if not isinstance(artifact, ConditionArtifact):
         raise TypeError(
@@ -589,7 +591,7 @@ def condition_artifact_to_legacy_result(artifact: Any) -> HydrogenBondAggregated
             f"{type(artifact).__name__}"
         )
     metadata = artifact.metadata
-    return HydrogenBondAggregatedResult(
+    return HydrogenBondConditionModel(
         config_hash=str(metadata.get("config_hash", "unknown")),
         polyzymd_version=str(metadata.get("polyzymd_version", get_polyzymd_version())),
         replicate=0,
@@ -1303,9 +1305,9 @@ def _replicate_metrics(summaries: Sequence[HydrogenBondReplicateSummary]) -> dic
 
 
 def _condition_metrics(
-    result: HydrogenBondAggregatedResult,
+    result: HydrogenBondConditionModel,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, float]]]:
-    """Build condition-level metrics payload from a legacy aggregate."""
+    """Build condition-level metrics payload from a condition aggregate."""
 
     metrics: dict[str, dict[str, Any]] = {}
     replicate_metrics: dict[str, dict[str, float]] = {

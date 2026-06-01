@@ -27,7 +27,7 @@ class TestReplicateArtifactContract:
 
     @pytest.mark.parametrize("plugin_name", sorted(MDA_ARTIFACT_PLUGINS))
     def test_migrated_plugin_replicate_result_class_is_none(self, plugin_name: str) -> None:
-        """Migrated built-ins should not declare legacy replicate result classes."""
+        """Migrated built-ins should not declare non-canonical replicate result classes."""
 
         cls = get_analysis(plugin_name)
         assert cls.ReplicateResultClass is None

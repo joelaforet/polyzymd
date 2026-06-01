@@ -51,7 +51,7 @@ def _rgba(color):
 
 
 def test_semantic_order_disabled_preserves_input_order() -> None:
-    """Disabled semantic colors should preserve legacy condition order."""
+    """Disabled semantic colors should preserve existing condition order."""
     plot_settings = PlotSettings(
         semantic_colors={"enabled": False, "order": ["B", "A"]},
     )
@@ -59,7 +59,7 @@ def test_semantic_order_disabled_preserves_input_order() -> None:
     assert order_condition_labels(["A", "B", "C"], plot_settings) == ["A", "B", "C"]
 
 
-def test_semantic_colors_disabled_use_legacy_palette() -> None:
+def test_semantic_colors_disabled_use_noncanonical_palette() -> None:
     """Disabled semantic colors should return palette colors."""
     labels = ["A", "B", "C"]
     plot_settings = PlotSettings(color_palette="tab10")
@@ -283,7 +283,7 @@ def test_semantic_no_metadata_uses_default_or_palette() -> None:
 
 
 def test_load_canonical_plot_artifacts_reads_configured_artifacts_only(tmp_path) -> None:
-    """Plot artifact loading should ignore legacy JSON and extra run directories."""
+    """Plot artifact loading should ignore non-canonical JSON and extra run directories."""
     analysis_dir = tmp_path / "condition" / "rmsd"
     aggregated_dir = analysis_dir / "aggregated"
     run_1 = analysis_dir / "run_1"
@@ -307,7 +307,7 @@ def test_load_canonical_plot_artifacts_reads_configured_artifacts_only(tmp_path)
         )
     )
     (run_99 / "result.json").write_text('{"artifact_type": "replicate"}', encoding="utf-8")
-    (analysis_dir / "legacy_plot.json").write_text('{"metric": 99}', encoding="utf-8")
+    (analysis_dir / "noncanonical_plot.json").write_text('{"metric": 99}', encoding="utf-8")
 
     loaded = load_canonical_plot_artifacts(analysis_dir, [1])
 
@@ -317,8 +317,8 @@ def test_load_canonical_plot_artifacts_reads_configured_artifacts_only(tmp_path)
     assert loaded.replicate_artifacts[1].payload["metric"] == pytest.approx(1.1)
 
 
-def test_load_canonical_plot_artifacts_rejects_legacy_result_json(tmp_path) -> None:
-    """Legacy JSON at the canonical path should fail artifact validation."""
+def test_load_canonical_plot_artifacts_rejects_condition_model_json(tmp_path) -> None:
+    """Non-canonical JSON at the canonical path should fail artifact validation."""
     analysis_dir = tmp_path / "condition" / "distances"
     aggregated_dir = analysis_dir / "aggregated"
     aggregated_dir.mkdir(parents=True)

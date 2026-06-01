@@ -236,7 +236,7 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
         Parameters
         ----------
         label : str or tuple[str, str]
-            Either a treatment label for legacy lookup or an explicit
+            Either a treatment label for non-canonical lookup or an explicit
             ``(condition_a, condition_b)`` pair.
 
         Returns
@@ -249,20 +249,20 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
             for comparison in self.pairwise_comparisons:
                 if comparison.condition_a == condition_a and comparison.condition_b == condition_b:
                     return comparison
-            legacy_label = condition_b
+            noncanonical_label = condition_b
         else:
-            legacy_label = label
+            noncanonical_label = label
 
         matches = [
             comparison
             for comparison in self.pairwise_comparisons
-            if comparison.condition_b == legacy_label
+            if comparison.condition_b == noncanonical_label
         ]
         if not matches:
             return None
         if len(matches) > 1:
             raise ValueError(
-                f"Ambiguous legacy comparison lookup for label '{legacy_label}': "
+                f"Ambiguous non-canonical comparison lookup for label '{noncanonical_label}': "
                 f"found {len(matches)} matches; use tuple lookup (condition_a, condition_b)."
             )
         return matches[0]

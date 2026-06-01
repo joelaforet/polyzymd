@@ -4,7 +4,7 @@ This module defines Pydantic models for storing Rg analysis results:
 - RgRunResult: Single run (selection) within a single replicate
 - RgResult: All runs for one replicate
 - RgRunAggregatedResult: One run aggregated across replicates
-- RgAggregatedResult: All runs aggregated across replicates
+- RgConditionModel: All runs aggregated across replicates
 
 Supports multiple named Rg selections (runs) per analysis, following
 the multi-entry pattern established by the distances plugin.
@@ -392,7 +392,7 @@ class RgRunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         return "\n".join(lines)
 
 
-class RgAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
+class RgConditionModel(BaseAnalysisResult, AggregatedResultMixin):
     """Aggregated Rg results for all runs across replicates."""
 
     analysis_type: ClassVar[str] = "rg_aggregated"

@@ -41,18 +41,18 @@ from polyzymd.analyses.rmsd._mda import (
     _build_rmsd_analysis,
     _sidecar_filename,
 )
+from polyzymd.analyses.rmsd._models import (
+    RMSDConditionModel,
+    RMSDResult,
+    RMSDRunAggregatedResult,
+    RMSDRunResult,
+)
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
 from polyzymd.analyses.rmsd._plotters import (
     RMSDPlotData,
     _resolve_npz_sidecar_path,
     plot_rmsd_comparison_bars,
     plot_rmsd_timeseries,
-)
-from polyzymd.analyses.rmsd._results import (
-    RMSDAggregatedResult,
-    RMSDResult,
-    RMSDRunAggregatedResult,
-    RMSDRunResult,
 )
 from polyzymd.config.comparison import PlotSettings
 from tests._support.analysis_testkit import (
@@ -637,7 +637,7 @@ def test_settings_cache_tag_changes_with_settings() -> None:
 
 
 def test_build_mda_jobs_uses_one_job_per_run(condition: Condition, tmp_path: Path) -> None:
-    """RMSD should expose MDAnalysis-native jobs instead of legacy runners."""
+    """RMSD should expose MDAnalysis-native jobs instead of direct runners."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
     replicate_ctx = make_replicate_context(
@@ -1021,8 +1021,8 @@ def test_rmsd_result_n_runs() -> None:
 
 
 def test_rmsd_aggregated_result_creation() -> None:
-    """RMSDAggregatedResult should be constructible with run aggregates."""
-    aggregated = RMSDAggregatedResult(
+    """RMSDConditionModel should be constructible with run aggregates."""
+    aggregated = RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1042,8 +1042,8 @@ def test_rmsd_aggregated_result_creation() -> None:
 
 
 def test_rmsd_aggregated_result_summary() -> None:
-    """RMSDAggregatedResult.summary should include key metadata."""
-    aggregated = RMSDAggregatedResult(
+    """RMSDConditionModel.summary should include key metadata."""
+    aggregated = RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1309,10 +1309,10 @@ def test_aggregate_single_replicate(
     with caplog.at_level("WARNING"):
         aggregated = analysis.aggregate(ctx, [artifact])
 
-    legacy = _condition_artifact_summary(aggregated)
+    noncanonical = _condition_artifact_summary(aggregated)
     assert aggregated.replicates == [1]
-    assert legacy.n_replicates == 1
-    assert len(legacy.run_results) == 2
+    assert noncanonical.n_replicates == 1
+    assert len(noncanonical.run_results) == 2
     assert not (ctx.output_dir / "result.json").exists()
     assert "Only one replicate available for RMSD aggregation" in caplog.text
 
@@ -1504,7 +1504,7 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
     control = make_condition(label="Control")
     treated = make_condition(label="Treated")
 
-    control_agg = RMSDAggregatedResult(
+    control_agg = RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1520,7 +1520,7 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
         settings_fingerprint=settings_hash,
         source_result_files=[],
     )
-    treated_agg = RMSDAggregatedResult(
+    treated_agg = RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1570,7 +1570,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
     ]
 
     aggregated_results = {
-        "Control": RMSDAggregatedResult(
+        "Control": RMSDConditionModel(
             config_hash="hash123",
             polyzymd_version="1.2.1",
             replicate=None,
@@ -1586,7 +1586,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
             settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
-        "A": RMSDAggregatedResult(
+        "A": RMSDConditionModel(
             config_hash="hash123",
             polyzymd_version="1.2.1",
             replicate=None,
@@ -1602,7 +1602,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
             settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
-        "B": RMSDAggregatedResult(
+        "B": RMSDConditionModel(
             config_hash="hash123",
             polyzymd_version="1.2.1",
             replicate=None,
@@ -1651,7 +1651,7 @@ def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
     ]
 
     aggregated_results = {
-        "Control": RMSDAggregatedResult(
+        "Control": RMSDConditionModel(
             config_hash="hash123",
             polyzymd_version="1.2.1",
             replicate=None,
@@ -1666,7 +1666,7 @@ def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
             settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
-        "A": RMSDAggregatedResult(
+        "A": RMSDConditionModel(
             config_hash="hash123",
             polyzymd_version="1.2.1",
             replicate=None,
@@ -1681,7 +1681,7 @@ def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
             settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
-        "B": RMSDAggregatedResult(
+        "B": RMSDConditionModel(
             config_hash="hash123",
             polyzymd_version="1.2.1",
             replicate=None,
@@ -1727,7 +1727,7 @@ def test_compare_missing_configured_run_raises(tmp_path: Path) -> None:
     control = make_condition(label="Control")
     treated = make_condition(label="Treated")
 
-    control_agg = RMSDAggregatedResult(
+    control_agg = RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1743,7 +1743,7 @@ def test_compare_missing_configured_run_raises(tmp_path: Path) -> None:
         settings_fingerprint=settings_hash,
         source_result_files=[],
     )
-    treated_agg = RMSDAggregatedResult(
+    treated_agg = RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1787,7 +1787,7 @@ def test_compare_missing_condition_aggregated_result_raises(tmp_path: Path) -> N
     control = make_condition(label="Control")
     treated = make_condition(label="Treated")
 
-    control_agg = RMSDAggregatedResult(
+    control_agg = RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1831,7 +1831,7 @@ def test_compare_incomplete_run_replicate_values_raise(tmp_path: Path) -> None:
     control = make_condition(label="Control")
     treated = make_condition(label="Treated")
 
-    control_agg = RMSDAggregatedResult(
+    control_agg = RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1847,7 +1847,7 @@ def test_compare_incomplete_run_replicate_values_raise(tmp_path: Path) -> None:
         source_result_files=[],
     )
     treated_run = _make_aggregated_run("protein_backbone", "protein and name CA", [1.0, 1.05])
-    treated_agg = RMSDAggregatedResult(
+    treated_agg = RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1887,7 +1887,7 @@ def test_compare_incomplete_run_replicate_values_raise(tmp_path: Path) -> None:
     [
         pytest.param("stale", "current settings require", id="stale-fingerprint"),
         pytest.param(
-            "legacy",
+            "unstamped",
             "missing a settings fingerprint",
             id="missing-fingerprint",
         ),
@@ -1908,7 +1908,7 @@ def test_compare_rejects_preloaded_invalid_aggregated_results(
 
     selection = "protein" if result_kind == "stale" else "protein and name CA"
     settings_fingerprint = _settings_hash(stale_settings) if result_kind == "stale" else None
-    preloaded_result = RMSDAggregatedResult(
+    preloaded_result = RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1950,7 +1950,7 @@ def test_compare_rejects_stale_aggregated_result_from_disk(tmp_path: Path) -> No
     aggregated_dir = analysis_dir / "aggregated"
     aggregated_dir.mkdir(parents=True)
 
-    stale_result = RMSDAggregatedResult(
+    stale_result = RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,
@@ -1982,7 +1982,7 @@ def test_compare_rejects_stale_aggregated_result_from_disk(tmp_path: Path) -> No
         analysis.compare(ctx)
 
 
-def test_plot_rejects_legacy_aggregated_result_from_disk(tmp_path: Path) -> None:
+def test_plot_rejects_noncanonical_aggregated_result_from_disk(tmp_path: Path) -> None:
     """plot should fail loudly when aggregated RMSD cache lacks settings identity."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
@@ -1991,7 +1991,7 @@ def test_plot_rejects_legacy_aggregated_result_from_disk(tmp_path: Path) -> None
     aggregated_dir = analysis_dir / "aggregated"
     aggregated_dir.mkdir(parents=True)
 
-    RMSDAggregatedResult(
+    RMSDConditionModel(
         config_hash="hash123",
         polyzymd_version="1.2.1",
         replicate=None,

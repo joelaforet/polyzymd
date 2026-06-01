@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 
 from polyzymd.analyses._framework.cache_identity import compute_config_hash
 from polyzymd.analyses._framework.results_base import get_polyzymd_version
-from polyzymd.analyses.distances._results import DistancePairResult, DistanceResultMetadata
+from polyzymd.analyses.distances._models import DistancePairResult, DistanceResultMetadata
 from polyzymd.analyses.mda import (
     ArtifactStore,
     ConditionArtifact,
