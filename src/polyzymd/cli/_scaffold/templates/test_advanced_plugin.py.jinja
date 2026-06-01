@@ -201,8 +201,8 @@ class TestCollector:
         assert artifact.condition_label == condition.label
         assert artifact.replicate == 1
         assert artifact.payload["metrics"][METRIC_NAME] == pytest.approx(12.0)
-        assert artifact.payload["n_selected_atoms"] == 3
-        assert artifact.payload["n_frames"] == 2
+        assert artifact.payload["jobs"][0]["results"]["n_selected_atoms"] == 3
+        assert artifact.payload["jobs"][0]["results"]["n_frames"] == 2
         assert artifact.sidecars == []
 
 
