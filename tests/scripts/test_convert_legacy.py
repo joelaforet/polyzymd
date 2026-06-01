@@ -319,6 +319,63 @@ def test_generate_comparison_yaml_preserves_disambiguated_entries(
     assert config.validate_config() == []
 
 
+def test_generate_comparison_yaml_rejects_ambiguous_control_base_label(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Ambiguous base control labels should ask for an exact disambiguated label."""
+    converted = tmp_path / "converted"
+    _write_converted_config(
+        converted,
+        "10A_RESTRAINT_CALB_Resorufin-Butyrate_conf1_363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+    )
+    _write_converted_config(
+        converted,
+        "12A_RESTRAINT_CALB_Resorufin-Butyrate_conf2_363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+    )
+
+    with pytest.raises(ValueError, match="--control") as exc_info:
+        convert_legacy.generate_comparison_yaml(
+            output_dir=converted,
+            comparison_dir=tmp_path / "comparison",
+            project_name="legacy_compare",
+            control_label="No Polymer (Control)",
+        )
+
+    message = str(exc_info.value)
+    assert "No Polymer (Control) (10A, CALB" in message
+    assert "No Polymer (Control) (12A, CALB" in message
+    assert 'Pass --control "<exact label>"' in message
+
+
+def test_generate_comparison_yaml_accepts_explicit_disambiguated_control(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """An exact disambiguated control label should be accepted and written."""
+    converted = tmp_path / "converted"
+    _write_converted_config(
+        converted,
+        "10A_RESTRAINT_CALB_Resorufin-Butyrate_conf1_363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+    )
+    _write_converted_config(
+        converted,
+        "12A_RESTRAINT_CALB_Resorufin-Butyrate_conf2_363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+    )
+    control_label = (
+        "No Polymer (Control) " "(12A, CALB, Resorufin-Butyrate, conf2, 363K, no polymer)"
+    )
+
+    comparison_yaml = convert_legacy.generate_comparison_yaml(
+        output_dir=converted,
+        comparison_dir=tmp_path / "comparison",
+        project_name="legacy_compare",
+        control_label=control_label,
+    )
+
+    data = yaml.safe_load(comparison_yaml.read_text(encoding="utf-8"))
+    assert data["control"] == control_label
+    assert data["conditions"][0]["label"] == control_label
+
+
 def test_validate_output_config_validation_failure_returns_false(
     convert_legacy: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
