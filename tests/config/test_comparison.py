@@ -305,9 +305,9 @@ class TestPlotStylePresets:
 
 
 class TestSemanticColorSettings:
-    """Semantic color settings should parse without changing defaults."""
+    """Semantic color settings should parse canonical defaults."""
 
-    def test_defaults_disabled_for_backward_compatibility(self) -> None:
+    def test_defaults_disable_semantic_mapping(self) -> None:
         """Semantic colors should be opt-in by default."""
         settings = PlotSettings()
 

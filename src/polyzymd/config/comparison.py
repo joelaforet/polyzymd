@@ -293,8 +293,8 @@ class SemanticFamilyColorConfig(BaseModel):
 class SemanticColorSettings(BaseModel):
     """Semantic condition color and ordering settings for comparison plots.
 
-    Defaults keep semantic behavior disabled, preserving legacy palette order
-    and colors until users opt in with ``enabled: true``.
+    Defaults define the canonical v1.3 plot behavior: semantic color mapping is
+    disabled until users opt in with ``enabled: true``.
     """
 
     enabled: bool = False
