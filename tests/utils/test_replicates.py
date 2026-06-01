@@ -130,20 +130,8 @@ class TestValidateReplicateRange:
             validate_replicate_range("1-a")
 
 
-class TestBackwardCompatibility:
-    """Tests for import compatibility across legacy modules."""
-
-    def test_import_from_workflow_slurm(self) -> None:
-        """Import parse_replicate_range from workflow.slurm."""
-        from polyzymd.workflow.slurm import parse_replicate_range as workflow_slurm_parse
-
-        assert workflow_slurm_parse("1") == [1]
-
-    def test_import_from_workflow_init(self) -> None:
-        """Import parse_replicate_range from workflow package init."""
-        from polyzymd.workflow import parse_replicate_range as workflow_parse
-
-        assert workflow_parse("1") == [1]
+class TestCanonicalImports:
+    """Tests for canonical replicate utility imports."""
 
     def test_import_from_utils(self) -> None:
         """Import parse_replicate_range from utils package init."""

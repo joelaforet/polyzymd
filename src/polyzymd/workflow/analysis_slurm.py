@@ -125,31 +125,13 @@ class AnalysisJobManifest(BaseModel):
     comparison_yaml: str
     condition_specs: list[ConditionTaskSpec]
     settings_snapshot: dict[str, Any]
-    snapshot_hash: str = ""
-    pipeline_mode: Literal["full", "finalize_only"] = "full"
-    partial_policy: Literal["strict", "allow_partial"] = "strict"
+    snapshot_hash: str = Field(min_length=1)
+    pipeline_mode: Literal["full", "finalize_only"]
+    partial_policy: Literal["strict", "allow_partial"]
     equilibration: str
     recompute: bool = False
     resources: AnalysisSlurmResources
     created_at: str
-
-    @model_validator(mode="after")
-    def _populate_snapshot_hash(self) -> AnalysisJobManifest:
-        """Backfill snapshot hash for backward compatibility.
-
-        Returns
-        -------
-        AnalysisJobManifest
-            Manifest with a snapshot hash.
-        """
-        if not self.snapshot_hash:
-            self.snapshot_hash = compute_manifest_snapshot_hash(
-                analysis_name=self.analysis_name,
-                settings_snapshot=self.settings_snapshot,
-                condition_specs=self.condition_specs,
-                equilibration=self.equilibration,
-            )
-        return self
 
     def save(self, path: Path) -> Path:
         """Save manifest as JSON."""

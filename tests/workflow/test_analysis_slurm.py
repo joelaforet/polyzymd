@@ -135,6 +135,9 @@ def _make_manifest(tmp_path: Path) -> AnalysisJobManifest:
             )
         ],
         settings_snapshot={"threshold": 1.0},
+        snapshot_hash="test-snapshot-hash",
+        pipeline_mode="full",
+        partial_policy="strict",
         equilibration="10ns",
         recompute=False,
         resources=resources,
@@ -176,6 +179,9 @@ def _make_manifest_two_conditions(tmp_path: Path) -> AnalysisJobManifest:
             ),
         ],
         settings_snapshot={"threshold": 1.0},
+        snapshot_hash="test-snapshot-hash",
+        pipeline_mode="full",
+        partial_policy="strict",
         equilibration="10ns",
         recompute=False,
         resources=resources,
@@ -514,9 +520,9 @@ def test_submit_analysis_graph_finalize_only_uses_root_dependencies(
     assert calls == ["afterok:101:102"]
 
 
-def test_manifest_load_defaults_pipeline_mode_for_legacy_json(tmp_path: Path) -> None:
-    """Legacy manifests without pipeline_mode should default to full mode."""
-    legacy_payload = {
+def test_manifest_load_rejects_missing_pipeline_mode(tmp_path: Path) -> None:
+    """Manifests without pipeline_mode should fail validation."""
+    payload = {
         "analysis_name": "toy_slurm",
         "comparison_yaml": str(tmp_path / "comparison.yaml"),
         "condition_specs": [
@@ -535,18 +541,54 @@ def test_manifest_load_defaults_pipeline_mode_for_legacy_json(tmp_path: Path) ->
             }
         ],
         "settings_snapshot": {"threshold": 1.0},
-        "snapshot_hash": "",
+        "snapshot_hash": "test-snapshot-hash",
         "partial_policy": "strict",
         "equilibration": "10ns",
         "recompute": False,
         "resources": AnalysisSlurmResources().model_dump(mode="json"),
         "created_at": "2026-01-01T00:00:00+00:00",
     }
-    legacy_path = tmp_path / "legacy_manifest.json"
-    legacy_path.write_text(json.dumps(legacy_payload))
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload))
 
-    loaded = AnalysisJobManifest.load(legacy_path)
-    assert loaded.pipeline_mode == "full"
+    with pytest.raises(ValidationError):
+        AnalysisJobManifest.load(manifest_path)
+
+
+def test_manifest_load_rejects_missing_partial_policy(tmp_path: Path) -> None:
+    """Manifests without partial_policy should fail validation."""
+    manifest = _make_manifest(tmp_path)
+    payload = manifest.model_dump(mode="json")
+    payload.pop("partial_policy")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError):
+        AnalysisJobManifest.load(manifest_path)
+
+
+def test_manifest_load_rejects_missing_snapshot_hash(tmp_path: Path) -> None:
+    """Manifests without snapshot_hash should fail validation."""
+    manifest = _make_manifest(tmp_path)
+    payload = manifest.model_dump(mode="json")
+    payload.pop("snapshot_hash")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError):
+        AnalysisJobManifest.load(manifest_path)
+
+
+def test_manifest_load_rejects_empty_snapshot_hash(tmp_path: Path) -> None:
+    """Manifests with empty snapshot_hash should fail validation."""
+    manifest = _make_manifest(tmp_path)
+    payload = manifest.model_dump(mode="json")
+    payload["snapshot_hash"] = ""
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError):
+        AnalysisJobManifest.load(manifest_path)
 
 
 def test_submit_analysis_graph_with_arrays_builds_dependencies(
@@ -597,6 +639,9 @@ def test_submit_analysis_graph_with_arrays_builds_dependencies(
             ),
         ],
         settings_snapshot={"threshold": 1.0},
+        snapshot_hash="test-snapshot-hash",
+        pipeline_mode="full",
+        partial_policy="strict",
         equilibration="10ns",
         recompute=False,
         resources=AnalysisSlurmResources(),
