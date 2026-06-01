@@ -650,6 +650,8 @@ class TestRunInitialSegmentEquilibrationSkip:
                 duration_ns=20.0,
                 num_samples=250,
                 timestep_fs=2.0,
+                report_interval=40000,
+                checkpoint_interval_s=60.0,
             )
 
         # Should NOT have minimized or equilibrated
@@ -720,6 +722,8 @@ class TestRunInitialSegmentEquilibrationSkip:
                 duration_ns=20.0,
                 num_samples=250,
                 timestep_fs=2.0,
+                report_interval=40000,
+                checkpoint_interval_s=60.0,
             )
 
         # Should have minimized and equilibrated (full pipeline)
