@@ -81,9 +81,9 @@ plugins:
 | `mda_backend_policy` | mapping | no | `{}` | Optional MDAnalysis internal backend policy for job-backed analyses |
 | `plot_settings` | mapping | no | see below | Plot customization — **how** to visualize |
 
-**Legacy key handling:**
-- `analysis_settings:` is accepted as a backward-compatible alias for `plugins:` (emits deprecation warning).
-- Unknown top-level keys raise a `ValueError` listing the invalid keys and valid alternatives.
+Unknown top-level keys raise a `ValueError` listing the invalid keys and valid
+alternatives. Use `plugins:` for analysis plugin settings; former legacy keys
+such as `analysis_settings:` are rejected.
 
 ---
 

@@ -1265,8 +1265,7 @@ def generate_comparison_yaml(
         "defaults": {
             "equilibration_time": "10ns",
         },
-        "analysis_settings": _build_analysis_settings(enzyme_pdb_rel),
-        "comparison_settings": _build_comparison_settings(),
+        "plugins": _build_plugin_settings(enzyme_pdb_rel),
         "plot_settings": _build_plot_settings(),
     }
 
@@ -1317,8 +1316,8 @@ def generate_comparison_yaml(
     return comparison_yaml_path
 
 
-def _build_analysis_settings(enzyme_pdb_rel: str | None) -> dict:
-    """Build the analysis_settings section of comparison.yaml.
+def _build_plugin_settings(enzyme_pdb_rel: str | None) -> dict:
+    """Build the plugins section of comparison.yaml.
 
     Parameters
     ----------
@@ -1328,7 +1327,7 @@ def _build_analysis_settings(enzyme_pdb_rel: str | None) -> dict:
     Returns
     -------
     dict
-        Analysis settings configuration.
+        Plugin settings configuration.
     """
     del enzyme_pdb_rel
 
@@ -1370,27 +1369,6 @@ def _build_analysis_settings(enzyme_pdb_rel: str | None) -> dict:
     }
 
     return settings
-
-
-def _build_comparison_settings() -> dict:
-    """Build the comparison_settings section of comparison.yaml.
-
-    Every key in analysis_settings must have a corresponding entry here.
-
-    Returns
-    -------
-    dict
-        Comparison settings configuration.
-    """
-    return {
-        "rmsf": {},
-        "catalytic_triad": {},
-        "contacts": {
-            "fdr_alpha": 0.05,
-            "min_effect_size": 0.5,
-            "top_residues": 10,
-        },
-    }
 
 
 def _build_plot_settings() -> dict:

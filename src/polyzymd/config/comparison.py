@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -16,8 +15,6 @@ from polyzymd.core.archived_features import (
 )
 from polyzymd.core.branding import prepend_file_header
 from polyzymd.utils.templates import render_package_template
-
-logger = logging.getLogger(__name__)
 
 CANONICAL_PLOT_STYLES: tuple[str, ...] = ("compact", "large_elements", "low_ink")
 _PLOT_STYLE_ALLOWED_MESSAGE = "allowed values are 'compact', 'large_elements', and 'low_ink'"
@@ -818,6 +815,8 @@ class ComparisonConfig(BaseModel):
     ...     print(f"RMSF selection: {rmsf_settings.selection}")
     """
 
+    model_config = {"extra": "forbid"}
+
     name: str
     description: str | None = None
     control: str | None = None
@@ -868,20 +867,6 @@ class ComparisonConfig(BaseModel):
 
         if data is None:
             data = {}
-
-        if "plugins" not in data and "analysis_settings" in data:
-            logger.warning(
-                "comparison.yaml uses legacy 'analysis_settings:'; treating it as 'plugins:' "
-                "for backward compatibility."
-            )
-            data["plugins"] = data.pop("analysis_settings")
-
-        if "analysis_settings" in data:
-            logger.warning(
-                "comparison.yaml contains both 'plugins' and legacy 'analysis_settings'; "
-                "ignoring 'analysis_settings'."
-            )
-            data.pop("analysis_settings")
 
         allowed_keys = {
             "name",

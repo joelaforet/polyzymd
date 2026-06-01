@@ -163,8 +163,8 @@ class TestMDABackendPolicyConfig:
             "n_workers": 2,
         }
 
-    def test_legacy_analysis_settings_still_migrates(self, tmp_path: Path) -> None:
-        """Legacy analysis_settings key should warn but migrate to plugins."""
+    def test_legacy_analysis_settings_is_rejected(self, tmp_path: Path) -> None:
+        """Legacy analysis_settings key should be rejected as unknown."""
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
@@ -178,8 +178,8 @@ class TestMDABackendPolicyConfig:
             )
         )
 
-        config = ComparisonConfig.from_yaml(yaml_path)
-        assert config is not None
+        with pytest.raises(ValueError, match="analysis_settings"):
+            ComparisonConfig.from_yaml(yaml_path)
 
 
 class TestConditionReplicateValidation:
