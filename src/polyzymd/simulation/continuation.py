@@ -206,11 +206,12 @@ class ContinuationManager:
             3. **Graceful interruption with restart checkpoint** —
                ``restart_state.xml`` saved by wall-time checkpoint loop.
                Uses ``loadState()`` (portable).
-            4. **Graceful interruption (legacy, .chk only)** —
+            4. **Emergency interruption (.chk only)** —
                ``interrupted_checkpoint.chk`` exists but no state XML.
-               Falls back to ``loadCheckpoint()`` (non-portable).
-            5. **Hard kill** — periodic ``checkpoint.chk`` from
-               CheckpointReporter exists but no XML state files.
+               Falls back to ``loadCheckpoint()`` (non-portable) only after
+               XML state recovery is unavailable.
+            5. **Hard kill/OOM/node failure** — periodic ``checkpoint.chk``
+               from CheckpointReporter exists but no XML state files.
                Falls back to ``loadCheckpoint()`` (non-portable).
         """
         prev_dir = self._working_dir / f"production_{self._prev_segment}"
@@ -254,18 +255,18 @@ class ContinuationManager:
                 system_path = restart_system
 
         elif interrupted_chk.exists() and interrupted_system.exists():
-            # Case 4: Legacy graceful interruption — only .chk available
+            # Case 4: Emergency recovery when only binary .chk survived
             LOGGER.warning(
                 f"Previous segment {self._prev_segment} was interrupted — "
-                f"no portable state XML found, falling back to "
-                f"interrupted_checkpoint.chk (non-portable)"
+                f"no portable state XML found, using emergency "
+                f"interrupted_checkpoint.chk recovery (non-portable)"
             )
             system_path = interrupted_system
             checkpoint_path = interrupted_chk
             use_checkpoint = True
 
         elif checkpoint_path.exists() and system_path.exists():
-            # Case 5: Hard kill — periodic CheckpointReporter .chk file
+            # Case 5: Emergency hard-kill/OOM/node-failure .chk recovery
             LOGGER.warning(
                 f"Previous segment {self._prev_segment} appears hard-killed — "
                 f"no state XML or interrupted files, recovering from "
