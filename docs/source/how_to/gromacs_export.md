@@ -49,10 +49,14 @@ and parameterize the system:
 pixi run -e build polyzymd build -c config.yaml --format gromacs
 ```
 
-The export includes `.gro`, `.top`, component `.itp` files, and MDP defaults
-generated from the validated `config.yaml`. You may use those MDP defaults as a
-starting point or replace them and continue entirely in your own GROMACS
-workflow.
+The core handoff is the `.gro` coordinate file, `.top` topology file, and
+component `.itp` parameter files. PolyzyMD may also generate MDP defaults and a
+run script as conveniences from the validated `config.yaml`, but those files are
+not required. You may use the generated defaults as a starting point or replace
+them and continue entirely in your own GROMACS workflow.
+
+Use `polyzymd run --engine gromacs` instead when you want PolyzyMD to build and
+execute the full local GROMACS workflow.
 
 ---
 

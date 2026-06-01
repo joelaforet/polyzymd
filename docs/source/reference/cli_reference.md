@@ -211,19 +211,25 @@ The build command creates:
 
 ### Output Files (GROMACS)
 
-With `--format gromacs`, the build command creates in `{projects_dir}/replicate_{N}/gromacs/`:
+With `--format gromacs`, the build command creates a build-only handoff in
+`{projects_dir}/replicate_{N}/gromacs/`. The core handoff files are:
+
 - `{system}.gro` - GROMACS coordinate file
 - `{system}.top` - GROMACS topology file
 - `*.itp` - Molecule parameter files (one per component)
+- Position restraints (`#ifdef POSRES_PROTEIN`, etc.) appended into molecule `.itp` files
+
+PolyzyMD may also generate convenience defaults:
+
 - `em.mdp` - Energy minimization parameters
 - `eq_XX_name.mdp` - Equilibration stage parameters
 - `prod.mdp` - Production parameters
-- Position restraints (`#ifdef POSRES_PROTEIN`, etc.) appended into molecule `.itp` files
-- `run_{system}_gromacs.sh` - Shell script to run the workflow
+- `run_*_gromacs.sh` - Convenience shell script
 
-This is a build-only handoff point. You may use the generated MDP defaults and
-run script, or replace them downstream and manage the GROMACS workflow outside
-PolyzyMD.
+The `.mdp` files and run script are not required to continue outside PolyzyMD;
+you may replace them with your own GROMACS workflow. Use
+`polyzymd run --engine gromacs` when you want PolyzyMD to perform the full local
+build-and-run workflow.
 
 ---
 

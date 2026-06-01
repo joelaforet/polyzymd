@@ -215,10 +215,9 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
 
 @cli.command(
     help=(
-        "Build simulation input files (OpenMM, GROMACS, LAMMPS, AMBER) without "
-        "running. Use --format to select the output engine. "
-        "Use run --engine <gromacs|openmm> to execute locally, or submit for "
-        "OpenMM SLURM jobs."
+        "Build simulation input files without running. Use --format gromacs for "
+        "a build-only GROMACS handoff. Use run --engine <gromacs|openmm> to "
+        "build and execute locally, or submit for SLURM jobs."
     )
 )
 @click.option(
@@ -258,7 +257,8 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     default=None,
     type=click.Choice(["gromacs", "lammps", "amber"], case_sensitive=False),
     help=(
-        "Export format: gromacs, lammps (planned), amber (planned). Default: OpenMM (no export)."
+        "Build-only export format: gromacs, lammps (planned), amber (planned). "
+        "Default: OpenMM build artifacts."
     ),
 )
 def build(
@@ -276,8 +276,10 @@ def build(
     artifacts for one or more replicates. No simulation is executed.
 
     By default, this prepares OpenMM inputs in the working directory. Use
-    ``--format gromacs`` to export GROMACS files (``.gro``, ``.top``,
-    ``.itp``, ``.mdp``). AMBER and LAMMPS export are not yet supported.
+    ``--format gromacs`` to export core GROMACS handoff files (``.gro``,
+    ``.top``, ``.itp``). MDP files and a run script may also be generated as
+    convenience defaults, but they are not required to continue outside
+    PolyzyMD. AMBER and LAMMPS export are not yet supported.
 
     Use ``run --engine gromacs`` if you want PolyzyMD to build and then
     execute the full local GROMACS workflow. Use ``run --engine openmm`` for
@@ -292,7 +294,8 @@ def build(
     Export Notes:
         - Output files are placed in replicate_<n>/<format>/
         - Filenames are derived from config: {enzyme_name}_{polymer_prefix}.*
-        - MDP files include energy minimization, equilibration, and production stages
+        - Core GROMACS handoff files are .gro, .top, and component .itp files
+        - MDP files and run scripts are convenience defaults when generated
         - Topology is split into .itp files for cleaner multi-component systems
     """
     from pydantic import ValidationError as PydanticValidationError
@@ -420,19 +423,22 @@ def build(
                     colored_echo("    - *.gro (coordinates)", phase="build")
                     colored_echo("    - *.top (topology)", phase="build")
                     colored_echo("    - *.itp (molecule parameters)", phase="build")
-                    colored_echo("    - em.mdp (energy minimization)", phase="build")
+                    colored_echo("    - Optional convenience MDP files:", phase="build")
+                    colored_echo("      - em.mdp (energy minimization)", phase="build")
                     if eq_stages:
                         for i, stage in enumerate(eq_stages, 1):
                             colored_echo(
-                                f"    - eq_{i:02d}_{stage.name}.mdp (equilibration)",
+                                f"      - eq_{i:02d}_{stage.name}.mdp (equilibration)",
                                 phase="build",
                             )
-                    colored_echo("    - prod.mdp (production)", phase="build")
+                    colored_echo("      - prod.mdp (production)", phase="build")
                     colored_echo(
                         "    - Position restraints appended to molecule *.itp files",
                         phase="build",
                     )
-                    colored_echo("    - run_*_gromacs.sh (run script)", phase="build")
+                    colored_echo(
+                        "    - Optional run_*_gromacs.sh (convenience script)", phase="build"
+                    )
                 elif export_format in ("lammps", "amber"):
                     colored_echo(
                         f"    ({export_format.upper()} export is not yet supported)",
@@ -498,6 +504,7 @@ def build(
                 colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
                 colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
                 colored_echo("  - *.itp (molecule parameters)", phase="export")
+                colored_echo("Convenience defaults generated:", phase="export")
                 colored_echo(
                     f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export"
                 )
@@ -508,7 +515,10 @@ def build(
                     colored_echo("Position restraints added to molecule ITP files:", phase="export")
                     for component, define in export_result["posres_defines"].items():
                         colored_echo(f"  - {component}: #ifdef {define}", phase="export")
-                colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
+                colored_echo(
+                    f"  - {export_result['run_script'].name} (convenience run script)",
+                    phase="export",
+                )
                 colored_echo(phase="export")
                 colored_echo(
                     f"To run: cd {export_dir} && ./{export_result['run_script'].name}",

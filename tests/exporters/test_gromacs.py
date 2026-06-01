@@ -727,6 +727,20 @@ class TestFixGroMultiplePolymerTypes:
 class TestEnergyMinimizationHelpers:
     """Tests for EM health checks."""
 
+    def test_gromacs_handoff_core_files_are_gro_top_itp(self, tmp_path: Path) -> None:
+        """Build handoff contract centers on coordinates, topology, and ITP files."""
+        prefix = "system"
+        core_files = [tmp_path / f"{prefix}.gro", tmp_path / f"{prefix}.top"]
+        core_files.extend([tmp_path / f"{prefix}_MOL0.itp", tmp_path / f"{prefix}_water.itp"])
+        for path in core_files:
+            path.write_text("placeholder\n")
+
+        missing_core = [path for path in core_files if not path.exists()]
+
+        assert missing_core == []
+        assert not (tmp_path / "em.mdp").exists()
+        assert not (tmp_path / f"run_{prefix}_gromacs.sh").exists()
+
     def test_run_script_template_resource_exists(self):
         """Local GROMACS run template should be packaged as a resource."""
         template = resources.files("polyzymd.engines.gromacs").joinpath(

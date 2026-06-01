@@ -190,6 +190,25 @@ class TestBuildCommandReplicateFlags:
         assert result.exit_code != 0
         assert "No such option: --gromacs" in result.output
 
+    def test_build_help_clarifies_gromacs_handoff(self) -> None:
+        """Build help should describe GROMACS as build-only handoff."""
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["build", "--help"])
+
+        assert result.exit_code == 0
+        assert "build-only GROMACS handoff" in result.output
+
+    def test_run_help_keeps_gromacs_engine(self) -> None:
+        """Run help should retain GROMACS as a full workflow engine."""
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["run", "--help"])
+
+        assert result.exit_code == 0
+        assert "gromacs" in result.output
+        assert "openmm" in result.output
+
     @pytest.mark.parametrize("option", ["--output-dir", "-o"])
     def test_build_output_dir_alias_is_rejected(self, option: str, tmp_path: Path) -> None:
         """Build should reject removed output-dir aliases for scratch output."""
