@@ -393,12 +393,6 @@ class JobContext:
     replicate_num: int = 1
     extra_vars: Dict = field(default_factory=dict)
 
-    # Legacy alias for backwards compatibility
-    @property
-    def working_dir(self) -> str:
-        """Alias for scratch_dir for backwards compatibility."""
-        return self.scratch_dir
-
 
 class SlurmScriptGenerator:
     """Generator for SLURM batch scripts.
