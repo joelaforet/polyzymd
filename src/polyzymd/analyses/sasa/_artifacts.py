@@ -553,8 +553,6 @@ class SASAArtifactCompatibility:
     ----------
     is_compatible : bool
         True when metadata-level required fields are compatible.
-    is_legacy : bool
-        True when schema version fields are absent.
     schema_version : int | None
         Parsed schema version if present.
     selection_hash_matches : bool | None
@@ -564,7 +562,6 @@ class SASAArtifactCompatibility:
     """
 
     is_compatible: bool
-    is_legacy: bool
     schema_version: int | None
     selection_hash_matches: bool | None
     mismatched_fields: tuple[str, ...]
@@ -816,7 +813,8 @@ def check_sasa_artifact_compatibility(
             schema_version = None
             mismatched_fields.append("artifact_schema_version")
 
-    is_legacy = schema_raw is None
+    if schema_raw is None:
+        mismatched_fields.append("artifact_schema_version")
     if schema_version is not None and schema_version > SASA_ARTIFACT_SCHEMA_VERSION:
         mismatched_fields.append("artifact_schema_version")
 
@@ -883,7 +881,6 @@ def check_sasa_artifact_compatibility(
 
     return SASAArtifactCompatibility(
         is_compatible=len(mismatched_fields) == 0,
-        is_legacy=is_legacy,
         schema_version=schema_version,
         selection_hash_matches=selection_hash_matches,
         mismatched_fields=tuple(mismatched_fields),
@@ -945,7 +942,6 @@ def find_sibling_sasa_artifacts(
 
     matches.sort(
         key=lambda item: (
-            int(item.compatibility.is_legacy),
             _selection_hash_rank(item.compatibility.selection_hash_matches),
             item.npz_path.name,
         )

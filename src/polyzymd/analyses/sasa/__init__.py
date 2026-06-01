@@ -30,11 +30,9 @@ from polyzymd.analyses.sasa._mda import (
     SASAArtifactCollector,
     aggregate_sasa_artifacts,
     build_sasa_jobs,
-    condition_artifact_to_legacy_result,
     load_condition_artifact,
 )
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
-from polyzymd.analyses.sasa._results import SASAAggregatedResult
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
@@ -161,7 +159,7 @@ class SASAAnalysis(Analysis):
     min_replicates: ClassVar[int] = 1
     Settings: ClassVar[type] = SASASettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = SASAPlotSettings
-    AggregatedResultClass: ClassVar[type | None] = SASAAggregatedResult
+    AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
     execution_cost_hint: ClassVar[str] = "high"
     slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(
@@ -227,7 +225,7 @@ class SASAAnalysis(Analysis):
             )
         if not all(isinstance(result, ReplicateArtifact) for result in results):
             raise TypeError(
-                "SASA aggregation expects MDAnalysis ReplicateArtifact inputs. Legacy SASA "
+                "SASA aggregation expects MDAnalysis ReplicateArtifact inputs. Non-artifact "
                 "replicate caches are incompatible with the MDAnalysis artifact lifecycle; "
                 "recompute the condition or clear stale caches before aggregating."
             )
@@ -450,170 +448,6 @@ class SASAAnalysis(Analysis):
                 f"{issue_text}."
             )
 
-    @classmethod
-    def _coerce_and_validate_aggregated_result(
-        cls,
-        result: Any,
-        settings: SASASettings,
-        condition: Any,
-        *,
-        source: Path | None = None,
-    ) -> SASAAggregatedResult:
-        """Coerce an aggregate and validate it against the current config.
-
-        Parameters
-        ----------
-        result : Any
-            Aggregated result loaded from disk or supplied in memory.
-        settings : SASASettings
-            Current SASA settings from the comparison configuration.
-        condition : Any
-            Condition whose replicate coverage must match the aggregate.
-        source : Path | None, optional
-            Source path for diagnostics.
-
-        Returns
-        -------
-        SASAAggregatedResult
-            Validated aggregate result.
-
-        Raises
-        ------
-        ValueError
-            Raised when cache identity, replicate coverage, or run selections
-            do not match the current configuration.
-        """
-
-        if isinstance(result, dict):
-            result = SASAAggregatedResult.model_validate(result)
-        if not isinstance(result, SASAAggregatedResult):
-            raise TypeError(
-                "SASA aggregated result loader expected SASAAggregatedResult, "
-                f"got {type(result).__name__}"
-            )
-
-        cls._validate_aggregated_result_identity(
-            result,
-            settings,
-            condition,
-            source=source,
-        )
-        return result
-
-    @classmethod
-    def _validate_aggregated_result_identity(
-        cls,
-        result: SASAAggregatedResult,
-        settings: SASASettings,
-        condition: Any,
-        *,
-        source: Path | None = None,
-    ) -> None:
-        """Validate an SASA aggregate cache against active comparison inputs.
-
-        Parameters
-        ----------
-        result : SASAAggregatedResult
-            Aggregated SASA result to validate.
-        settings : SASASettings
-            Current SASA settings.
-        condition : Any
-            Current comparison condition.
-        source : Path | None, optional
-            Source path for diagnostics.
-
-        Raises
-        ------
-        ValueError
-            Raised when the aggregate was produced for different replicates,
-            settings, or run selections.
-        """
-
-        source_text = f" at {source}" if source is not None else ""
-        condition_text = f" for condition '{condition.label}'"
-        expected_replicates = sorted(condition.replicates)
-        observed_replicates = sorted(result.replicates)
-        if (
-            result.n_replicates != len(expected_replicates)
-            or observed_replicates != expected_replicates
-        ):
-            raise ValueError(
-                "Aggregated SASA result"
-                f"{condition_text} has stale replicate coverage{source_text}. Expected "
-                f"replicates {expected_replicates}, found {observed_replicates} with "
-                f"n_replicates={result.n_replicates}. Recompute the condition or clear "
-                "stale caches before comparing."
-            )
-
-        stored_fingerprint = result.settings_fingerprint
-        current_fingerprint = cls._settings_cache_token(settings)
-        if stored_fingerprint is None:
-            raise ValueError(
-                "Aggregated SASA result"
-                f"{condition_text} is missing a settings fingerprint{source_text}. Legacy "
-                "SASA aggregated caches are not compatible with settings-sensitive "
-                "comparison loading. Recompute the condition before comparing."
-            )
-        if stored_fingerprint != current_fingerprint:
-            raise ValueError(
-                "Aggregated SASA result"
-                f"{condition_text} was computed with settings fingerprint "
-                f"{stored_fingerprint}, but current settings require {current_fingerprint}"
-                f"{source_text}. Recompute the condition or clear stale caches before comparing."
-            )
-
-        expected_runs = {run.label: run for run in settings.runs}
-        observed_labels = [run_result.run_label for run_result in result.run_results]
-        missing_runs = [label for label in expected_runs if label not in observed_labels]
-        unexpected_runs = sorted(set(observed_labels) - set(expected_runs))
-        duplicate_runs = sorted(
-            {label for label in observed_labels if observed_labels.count(label) > 1}
-        )
-        if missing_runs or unexpected_runs or duplicate_runs:
-            details: list[str] = []
-            if missing_runs:
-                details.append(f"missing runs {missing_runs}")
-            if unexpected_runs:
-                details.append(f"unexpected runs {unexpected_runs}")
-            if duplicate_runs:
-                details.append(f"duplicate runs {duplicate_runs}")
-            raise ValueError(
-                "Aggregated SASA result"
-                f"{condition_text} has stale run coverage{source_text}: "
-                f"{'; '.join(details)}. Recompute the condition before comparing."
-            )
-
-        for run_result in result.run_results:
-            expected_run = expected_runs[run_result.run_label]
-            if (
-                run_result.target_selection != expected_run.target_selection
-                or run_result.context_selection != expected_run.context_selection
-            ):
-                raise ValueError(
-                    "Aggregated SASA run "
-                    f"'{run_result.run_label}'{condition_text} has stale selection context"
-                    f"{source_text}. Expected target/context "
-                    f"{expected_run.target_selection!r}/{expected_run.context_selection!r}, "
-                    f"found {run_result.target_selection!r}/{run_result.context_selection!r}. "
-                    "Recompute the condition before comparing."
-                )
-
-            run_replicates = sorted(run_result.replicates)
-            value_count = len(run_result.per_replicate_means)
-            if (
-                run_result.n_replicates != len(expected_replicates)
-                or run_replicates != expected_replicates
-                or value_count != len(expected_replicates)
-            ):
-                raise ValueError(
-                    "Aggregated SASA run "
-                    f"'{run_result.run_label}'{condition_text} has stale replicate metadata"
-                    f"{source_text}. Expected replicates {expected_replicates}, found "
-                    f"{run_replicates} with n_replicates={run_result.n_replicates} and "
-                    f"{value_count} per-replicate values. Recompute the condition before "
-                    "comparing."
-                )
-
     def _resolve_aggregated_result_path(self, aggregated_dir: Path) -> Path | None:
         """Resolve the canonical aggregated SASA result path.
 
@@ -686,7 +520,7 @@ class SASAAnalysis(Analysis):
                 return ArtifactStore(path.parent).read_condition_result(path.name)
         raise ValueError(
             f"SASA aggregate at {path} is not a canonical MDAnalysis condition artifact. "
-            "Recompute the condition or clear stale legacy SASA caches."
+            "Recompute the condition or clear stale SASA caches."
         )
 
     def compare(self, ctx: ComparisonContext) -> Any:
@@ -716,7 +550,7 @@ class SASAAnalysis(Analysis):
                 if not isinstance(agg_result, ConditionArtifact):
                     raise TypeError(
                         f"SASA comparison for condition '{condition.label}' requires canonical "
-                        "MDAnalysis condition artifacts. Legacy SASA aggregate inputs are "
+                        "MDAnalysis condition artifacts. Non-artifact aggregate inputs are "
                         "incompatible; recompute the condition or clear stale caches before "
                         "comparing."
                     )

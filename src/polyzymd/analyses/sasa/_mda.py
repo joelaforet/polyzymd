@@ -538,81 +538,6 @@ def aggregate_sasa_artifacts(
     return artifact
 
 
-def condition_artifact_to_legacy_result(artifact: ConditionArtifact) -> Any:
-    """Adapt a canonical condition artifact to the legacy aggregate model.
-
-    Parameters
-    ----------
-    artifact : ConditionArtifact
-        Canonical SASA condition artifact.
-
-    Returns
-    -------
-    SASAAggregatedResult
-        Legacy-shaped aggregate model used by existing comparison and formatters.
-    """
-
-    from polyzymd.analyses.sasa._results import SASAAggregatedResult, SASARunAggregatedResult
-
-    payload = artifact.payload
-    return SASAAggregatedResult(
-        config_hash=str(artifact.metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(artifact.metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=None,
-        equilibration_time=float(artifact.metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(artifact.metadata.get("equilibration_unit", "ns")),
-        selection_string=str(artifact.metadata.get("selection_string", "")),
-        replicates=[int(replicate) for replicate in artifact.replicates],
-        n_replicates=int(payload.get("n_replicates", len(artifact.replicates))),
-        run_results=[
-            SASARunAggregatedResult(
-                config_hash=str(artifact.metadata.get("config_hash", "unknown")),
-                polyzymd_version=str(
-                    artifact.metadata.get("polyzymd_version", get_polyzymd_version())
-                ),
-                replicate=None,
-                equilibration_time=float(artifact.metadata.get("equilibration_time", 0.0)),
-                equilibration_unit=str(artifact.metadata.get("equilibration_unit", "ns")),
-                selection_string=str(run_result.get("target_selection", "")),
-                replicates=[int(replicate) for replicate in run_result.get("replicates", [])],
-                n_replicates=int(run_result.get("n_replicates", 0)),
-                run_label=str(run_result["run_label"]),
-                target_selection=str(run_result["target_selection"]),
-                context_selection=str(run_result["context_selection"]),
-                overall_mean=_legacy_float(run_result.get("overall_mean")),
-                overall_sem=_legacy_float(run_result.get("overall_sem")),
-                overall_median=_legacy_float(run_result.get("overall_median")),
-                overall_min=_legacy_float(run_result.get("overall_min")),
-                overall_max=_legacy_float(run_result.get("overall_max")),
-                overall_final=_legacy_float(run_result.get("overall_final")),
-                per_replicate_means=_legacy_float_list(run_result["per_replicate_means"]),
-                per_replicate_stds=_legacy_float_list(run_result["per_replicate_stds"]),
-                per_replicate_medians=_legacy_float_list(run_result["per_replicate_medians"]),
-                per_replicate_mins=_legacy_float_list(run_result["per_replicate_mins"]),
-                per_replicate_maxs=_legacy_float_list(run_result["per_replicate_maxs"]),
-                per_replicate_finals=_legacy_float_list(run_result["per_replicate_finals"]),
-                n_target_atoms=int(run_result["n_target_atoms"]),
-                n_context_atoms=run_result.get("n_context_atoms"),
-                per_replicate_context_atom_counts=list(
-                    run_result.get("per_replicate_context_atom_counts", [])
-                ),
-                n_context_atoms_variable=bool(run_result.get("n_context_atoms_variable", False)),
-                n_target_residues=int(run_result["n_target_residues"]),
-                zero_atom_selection=bool(run_result.get("zero_atom_selection", False)),
-                residue_keys=list(run_result.get("residue_keys", [])),
-                residue_chainids=list(run_result.get("residue_chainids", [])),
-                residue_resids=[int(value) for value in run_result.get("residue_resids", [])],
-                residue_resnames=list(run_result.get("residue_resnames", [])),
-                per_residue_mean_sasa=list(run_result.get("per_residue_mean_sasa", [])),
-                per_residue_sem_sasa=list(run_result.get("per_residue_sem_sasa", [])),
-            )
-            for run_result in payload.get("run_results", [])
-        ],
-        settings_fingerprint=artifact.metadata.get("settings_fingerprint"),
-        source_result_files=list(artifact.metadata.get("source_result_files", [])),
-    )
-
-
 def load_condition_artifact(aggregated_dir: Path) -> ConditionArtifact | None:
     """Load a canonical SASA condition artifact if it exists."""
 
@@ -1450,19 +1375,6 @@ def _json_float_or_none(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return numeric if math.isfinite(numeric) else None
-
-
-def _legacy_float(value: Any) -> float:
-    """Return a float for legacy result models, preserving missing values as NaN."""
-
-    numeric = _json_float_or_none(value)
-    return float("nan") if numeric is None else numeric
-
-
-def _legacy_float_list(values: Sequence[Any]) -> list[float]:
-    """Return floats for legacy result models from artifact-safe values."""
-
-    return [_legacy_float(value) for value in values]
 
 
 def _mean_optional_values(values: Sequence[float | None]) -> float | None:

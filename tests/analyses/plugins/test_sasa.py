@@ -36,7 +36,6 @@ from polyzymd.analyses.sasa._formatters import format_sasa_comparison
 from polyzymd.analyses.sasa._mda import (
     SASAArtifactCollector,
     build_sasa_jobs,
-    condition_artifact_to_legacy_result,
     load_replicate_sasa_sidecar,
 )
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
@@ -786,12 +785,11 @@ def test_sasa_aggregate_per_residue_profiles(tmp_path: Path) -> None:
 
     assert isinstance(aggregated, ConditionArtifact)
     assert not (tmp_path / "aggregated" / "result.json").exists()
-    legacy = condition_artifact_to_legacy_result(aggregated)
-    run = legacy.run_results[0]
-    assert run.overall_mean == pytest.approx(13.0)
-    assert run.per_replicate_means == pytest.approx([11.0, 15.0])
-    assert run.per_residue_mean_sasa == pytest.approx([13.0])
-    assert run.residue_keys == ["A:1:ALA"]
+    run = aggregated.payload["run_results"][0]
+    assert run["overall_mean"] == pytest.approx(13.0)
+    assert run["per_replicate_means"] == pytest.approx([11.0, 15.0])
+    assert run["per_residue_mean_sasa"] == pytest.approx([13.0])
+    assert run["residue_keys"] == ["A:1:ALA"]
 
 
 def test_sasa_aggregate_rejects_missing_sidecar(tmp_path: Path) -> None:
