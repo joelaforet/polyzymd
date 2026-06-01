@@ -13,11 +13,11 @@ and DPI settings are respected automatically.
 Examples
 --------
 >>> from polyzymd.analyses.shared.plotting import (
-...     apply_axis_style, apply_legend, get_colors, save_figure,
+...     apply_axis_style, apply_legend, get_palette_colors, save_figure,
 ... )
 >>>
 >>> fig, ax = plt.subplots()
->>> colors = get_colors(3, plot_settings)
+>>> colors = get_palette_colors(3, plot_settings)
 >>> ax.bar(x, y, color=colors[0])
 >>> apply_axis_style(ax, plot_settings, title="My Plot", ylabel="Value (Å)")
 >>> apply_legend(ax, plot_settings)
@@ -301,27 +301,6 @@ def _matplotlib_colormap_colors(colormap_name: str, n: int) -> list:
 
     cmap = plt.colormaps[colormap_name]
     return [cmap(i / max(1, n - 1)) for i in range(n)]
-
-
-def get_colors(n: int, plot_settings: "PlotSettings") -> list:
-    """Get *n* existing palette colors.
-
-    This backward-compatible alias preserves the historical behavior of
-    ``get_colors()`` while semantic condition color helpers opt in separately.
-
-    Parameters
-    ----------
-    n : int
-        Number of colors needed.
-    plot_settings : PlotSettings
-        Global plot settings.
-
-    Returns
-    -------
-    list
-        List of color values from the configured palette.
-    """
-    return get_palette_colors(n, plot_settings)
 
 
 def order_condition_labels(labels: Sequence[str], plot_settings: "PlotSettings") -> list[str]:

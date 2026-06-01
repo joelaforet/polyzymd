@@ -144,7 +144,7 @@ from polyzymd.analyses.orchestrator import run_comparison
 from polyzymd.config.comparison import ComparisonConfig
 
 config = ComparisonConfig.from_yaml("comparison.yaml")
-analysis = get_analysis("triad")()
+analysis = get_analysis("catalytic_triad")()
 
 pipeline_result = run_comparison(
     analysis,

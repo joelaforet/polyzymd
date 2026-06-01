@@ -625,8 +625,8 @@ def test_load_aggregated_result_ignores_noncanonical_json(tmp_path: Path) -> Non
     assert analysis._load_aggregated_result(aggregated_dir) is None
 
 
-def test_aggregated_summary_deserializes_noncanonical_std_unique_pairs_field() -> None:
-    """Non-canonical std field should populate sem_unique_pairs_per_frame."""
+def test_aggregated_summary_rejects_noncanonical_std_unique_pairs_field() -> None:
+    """Non-canonical std field should not populate sem_unique_pairs_per_frame."""
     noncanonical_payload = {
         "name": "protein_polymer",
         "mode": "between",
@@ -641,8 +641,8 @@ def test_aggregated_summary_deserializes_noncanonical_std_unique_pairs_field() -
         "sem_fraction_with_any": 0.05,
         "per_replicate_fraction_with_any": [0.75, 0.85],
     }
-    summary = HydrogenBondAggregatedSummary.model_validate(noncanonical_payload)
-    assert summary.sem_unique_pairs_per_frame == pytest.approx(0.4)
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        HydrogenBondAggregatedSummary.model_validate(noncanonical_payload)
 
 
 def test_aggregated_summary_deserializes_new_sem_unique_pairs_field() -> None:

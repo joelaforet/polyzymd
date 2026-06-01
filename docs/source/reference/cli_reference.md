@@ -1026,7 +1026,7 @@ Arguments:
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
-  --recompute            Retained for CLI compatibility (no effect)
+  --recompute            Regenerate comparison and plot outputs
   --allow-partial        Allow finalize when some conditions are missing results
 ```
 

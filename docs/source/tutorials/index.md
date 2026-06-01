@@ -25,8 +25,8 @@ If you already know what you want to do, jump to
 [How-To Guides](../how_to/index.md) instead.
 
 <!-- IMAGE OPPORTUNITY: Add a compact pipeline figure for the end-to-end
-analysis workflow, using the existing compare/analyze stages as a visual
-backbone. -->
+analysis workflow, from completed trajectories through analysis artifacts,
+comparison results, and figures. -->
 
 ```{toctree}
 :hidden:

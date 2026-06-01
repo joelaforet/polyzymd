@@ -53,7 +53,7 @@ def validate_name(name: str, *, check_existing: bool = True) -> str | None:
         Proposed plugin name in snake_case.
     check_existing : bool, optional
         If True, also reject names that collide with already-registered
-        analysis plugins or their aliases, by default True.
+        analysis plugins, by default True.
 
     Returns
     -------
@@ -220,8 +220,8 @@ def _check_registered_name_conflict(spec: ScaffoldSpec) -> None:
     Raises
     ------
     ValueError
-        If the requested name collides with a built-in, external, or alias-only
-        analysis registration.
+        If the requested name collides with a built-in or external analysis
+        registration.
     """
     try:
         from polyzymd.analyses.discovery import list_all_names

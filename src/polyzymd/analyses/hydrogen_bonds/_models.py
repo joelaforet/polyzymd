@@ -6,7 +6,7 @@ hydrogen-bonds plugin lifecycle.
 
 from __future__ import annotations
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ResidueRef(BaseModel):
@@ -142,7 +142,7 @@ class UndirectedPairAggregate(BaseModel):
 class HydrogenBondAggregatedSummary(BaseModel):
     """Aggregated per-summary results across replicates."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     name: str
     mode: str
@@ -152,13 +152,7 @@ class HydrogenBondAggregatedSummary(BaseModel):
     sem_hbonds_per_frame: float
     per_replicate_mean_hbonds: list[float]
     mean_unique_pairs_per_frame: float = 0.0
-    sem_unique_pairs_per_frame: float = Field(
-        default=0.0,
-        validation_alias=AliasChoices(
-            "sem_unique_pairs_per_frame",
-            "std_unique_pairs_per_frame",
-        ),
-    )
+    sem_unique_pairs_per_frame: float = 0.0
     mean_fraction_with_any: float
     sem_fraction_with_any: float
     per_replicate_fraction_with_any: list[float]

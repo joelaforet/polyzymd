@@ -17,9 +17,9 @@ from polyzymd.analyses.mda import ConditionArtifact
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
-    get_colors,
     get_condition_colors,
     get_output_path,
+    get_palette_colors,
     order_condition_labels,
     save_figure,
     scatter_replicate_values,
@@ -392,7 +392,7 @@ def plot_composition_absolute(
         return None
 
     x = np.arange(len(labels), dtype=float)
-    colors = get_colors(len(keys), plot_settings)
+    colors = get_palette_colors(len(keys), plot_settings)
 
     fig, ax = plt.subplots(figsize=(max(7.0, 1.8 * len(labels)), 5.0))
     bottom = np.zeros(len(labels), dtype=float)
@@ -487,7 +487,7 @@ def plot_composition_fraction(
         return None
 
     x = np.arange(len(labels), dtype=float)
-    colors = get_colors(len(keys), plot_settings)
+    colors = get_palette_colors(len(keys), plot_settings)
 
     fig, ax = plt.subplots(figsize=(max(7.0, 1.8 * len(labels)), 5.0))
     bottom = np.zeros(len(labels), dtype=float)
