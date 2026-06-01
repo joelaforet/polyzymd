@@ -237,7 +237,7 @@ def _make_mock_distance_result(
     n_pairs: int = 2,
     pair_schemas: list[tuple[str, str, str]] | None = None,
 ):
-    """Create a mock DistanceReplicatePayload."""
+    """Create a mock distance replicate artifact."""
     mock = MagicMock()
     mock.replicate = replicate
     mock.config_hash = "abc123"
@@ -645,7 +645,7 @@ class TestRunReplicate:
 
 
 class TestAggregate:
-    """aggregate produces a DistanceConditionPayload."""
+    """aggregate produces a canonical distance condition artifact."""
 
     def _make_mock_results(self, settings, n_reps: int = 3):
         """Create mock per-replicate results for aggregation."""
