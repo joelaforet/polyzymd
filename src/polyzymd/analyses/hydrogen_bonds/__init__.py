@@ -31,7 +31,6 @@ from polyzymd.analyses.hydrogen_bonds._mda import (
     HydrogenBondArtifactCollector,
     aggregate_hydrogen_bond_artifacts,
     build_hydrogen_bond_jobs,
-    compute_composition,
     validate_and_order_replicate_artifacts,
 )
 from polyzymd.analyses.hydrogen_bonds._models import (
@@ -49,6 +48,7 @@ from polyzymd.analyses.hydrogen_bonds._models import (
 from polyzymd.analyses.mda import (
     ArtifactStore,
     ArtifactStoreError,
+    ComparisonArtifact,
     ConditionArtifact,
     ReplicateArtifact,
 )
@@ -762,7 +762,7 @@ class HydrogenBondsAnalysis(Analysis):
         del ctx
         return HydrogenBondArtifactCollector()
 
-    def compare(self, ctx: ComparisonContext) -> Any:
+    def compare(self, ctx: ComparisonContext) -> ComparisonArtifact | None:
         """Compare hydrogen-bond results across conditions.
 
         Parameters
@@ -772,80 +772,29 @@ class HydrogenBondsAnalysis(Analysis):
 
         Returns
         -------
-        Any
-            Default scalar comparison result, or ``None`` when no metrics are
+        ComparisonArtifact or None
+            Canonical comparison artifact, or ``None`` when no metrics are
             available.
         """
 
-        from polyzymd.analyses.stats import default_scalar_comparison
-
-        metrics_by_condition: dict[str, dict[str, MetricValue]] = {}
         settings: HydrogenBondSettings = ctx.settings
         for cond in ctx.conditions:
             summary = ctx.aggregated_results.get(cond.label)
-            if summary is None:
-                agg_dir_parent = ctx.analysis_dirs.get(cond.label)
-                if agg_dir_parent is None:
-                    logger.warning(
-                        "%s: no analysis directory for condition %r — skipping.",
-                        self.name,
-                        cond.label,
-                    )
-                    continue
-
-                summary = self._load_aggregated_result(
-                    agg_dir_parent / "aggregated",
-                    settings=settings,
-                    condition_label=cond.label,
-                )
-                if summary is None:
-                    logger.warning(
-                        "%s: missing aggregated result for condition %r — skipping.",
-                        self.name,
-                        cond.label,
-                    )
-                    continue
-            else:
+            if summary is not None:
                 summary = self._coerce_and_validate_aggregated_result(
                     summary,
                     settings,
                     condition_label=cond.label,
                 )
+                ctx.aggregated_results[cond.label] = summary
 
-            extracted = self.extract_metrics(summary)
-            if not isinstance(extracted, dict):
-                raise PluginContractError(
-                    f"Plugin '{self.name}' extract_metrics() must return dict[str, MetricValue] "
-                    f"for condition '{cond.label}', got {type(extracted).__name__}"
-                )
-            for metric_key, metric_value in extracted.items():
-                if not isinstance(metric_value, MetricValue):
-                    raise PluginContractError(
-                        f"Plugin '{self.name}' extract_metrics() returned invalid value for "
-                        f"key '{metric_key}' in condition '{cond.label}': expected MetricValue, "
-                        f"got {type(metric_value).__name__}"
-                    )
-            if not extracted:
-                raise PluginContractError(
-                    f"Plugin '{self.name}' extract_metrics() returned empty dict for "
-                    f"condition '{cond.label}' — implement extract_metrics() or override compare()"
-                )
-            metrics_by_condition[cond.label] = extracted
-
-        if not metrics_by_condition:
-            logger.warning("%s: no conditions have metrics — skipping comparison.", self.name)
-            return None
-
-        return default_scalar_comparison(
-            analysis_name=self.name,
-            project_name=ctx.name,
-            metrics_by_condition=metrics_by_condition,
-            control_label=ctx.effective_control,
-            equilibration=ctx.equilibration,
-            fdr_alpha=ctx.fdr_alpha,
-            ttest_method=ctx.ttest_method,
-            posthoc_method=ctx.posthoc_method,
-        )
+        result = super().compare(ctx)
+        if result is not None and not isinstance(result, ComparisonArtifact):
+            raise PluginContractError(
+                f"Plugin '{self.name}' expected canonical ComparisonArtifact from comparison, "
+                f"got {type(result).__name__}"
+            )
+        return result
 
     def _trajectory_loader_factory(self) -> type[Any]:
         """Return the hydrogen-bond loader class for the MDA job lifecycle.
@@ -1093,30 +1042,6 @@ class HydrogenBondsAnalysis(Analysis):
             condition_model=agg_result,
         )
 
-    def _compute_composition(
-        self,
-        composition_settings: HydrogenBondCompositionSettings,
-        hbond_array: np.ndarray,
-        universe: Any,
-        start_frame: int,
-        n_frames: int,
-        allow_overlapping: bool = False,
-    ) -> list[CompositionEntry]:
-        """Compute hydrogen-bond composition across disjoint partitions.
-
-        This compatibility wrapper preserves the historical helper method while
-        delegating the implementation to the runner module.
-        """
-
-        return compute_composition(
-            composition_settings=composition_settings,
-            hbond_array=hbond_array,
-            universe=universe,
-            start_frame=start_frame,
-            n_frames=n_frames,
-            allow_overlapping=allow_overlapping,
-        )
-
     def _aggregate_composition(
         self,
         results: Sequence[dict[str, Any]],
@@ -1138,11 +1063,12 @@ class HydrogenBondsAnalysis(Analysis):
         composition_map: dict[tuple[str, str], dict[str, list[float]]] = {}
 
         for replicate_idx, result in enumerate(results):
-            entries = (
-                result["composition_entries"]
-                if isinstance(result, dict)
-                else result.composition_entries
-            )
+            if not isinstance(result, dict):
+                raise TypeError(
+                    "Hydrogen-bond composition aggregation requires canonical payload mappings, "
+                    f"got {type(result).__name__}"
+                )
+            entries = result["composition_entries"]
             for entry in entries:
                 pair_key = (entry.donor_partition, entry.acceptor_partition)
                 if pair_key not in composition_map:
@@ -1188,15 +1114,24 @@ class HydrogenBondsAnalysis(Analysis):
         dict[str, MetricValue]
             One metric per configured summary with mean H-bonds per frame.
         """
-        if isinstance(summary, ConditionArtifact):
-            summaries = summary.payload.get("summaries", [])
-        elif isinstance(summary, dict) and summary.get("artifact_type") == "condition":
-            summaries = ConditionArtifact.model_validate(summary).payload.get("summaries", [])
-        elif isinstance(summary, BaseModel):
-            summaries = summary.model_dump(mode="json").get("summaries", [])
-        else:
-            logger.warning("Unexpected result type for extract_metrics: %s", type(summary))
-            return {}
+        if isinstance(summary, dict):
+            if summary.get("artifact_type") != "condition":
+                raise PluginContractError(
+                    "Hydrogen-bond metric extraction requires a canonical condition artifact dict"
+                )
+            summary = ConditionArtifact.model_validate(summary)
+
+        if not isinstance(summary, ConditionArtifact):
+            raise PluginContractError(
+                "Hydrogen-bond metric extraction requires a canonical ConditionArtifact, got "
+                f"{type(summary).__name__}"
+            )
+        if summary.analysis_name != self.name:
+            raise PluginContractError(
+                f"Hydrogen-bond metric extraction expected analysis '{self.name}', got "
+                f"{summary.analysis_name!r}"
+            )
+        summaries = summary.payload.get("summaries", [])
 
         metrics: dict[str, MetricValue] = {}
         for item in summaries:
@@ -1238,45 +1173,48 @@ class HydrogenBondsAnalysis(Analysis):
         str
             Formatted output string.
         """
-        from polyzymd.analyses.base import ComparisonResult
-        from polyzymd.analyses.stats import format_scalar_comparison
+        from polyzymd.analyses.stats import format_scalar_comparison_artifact_payload
 
-        if isinstance(result, ComparisonResult):
-            metric_keys = (
-                list(result.rankings_by_metric.keys()) if result.rankings_by_metric else []
+        if not isinstance(result, ComparisonArtifact):
+            raise TypeError(
+                "Hydrogen-bond formatting requires canonical ComparisonArtifact input, got "
+                f"{type(result).__name__}"
             )
-            if not metric_keys and result.pairwise_comparisons:
-                metric_keys = [result.pairwise_comparisons[0].metric]
 
-            if len(metric_keys) == 1:
-                return format_scalar_comparison(
-                    result,
-                    title="Hydrogen Bond Analysis",
+        if output_format == "json":
+            return result.model_dump_json(indent=2)
+
+        metric_keys = list((result.payload.get("rankings_by_metric") or {}).keys())
+        if not metric_keys and result.payload.get("pairwise_comparisons"):
+            metric_keys = [str(result.payload["pairwise_comparisons"][0].get("metric"))]
+        if not metric_keys:
+            return format_scalar_comparison_artifact_payload(
+                result.payload,
+                title="Hydrogen Bond Analysis",
+                metric_label="Mean H-bonds/frame",
+                metric_unit="",
+                output_format=output_format,
+                higher_is_better=None,
+            )
+
+        chunks: list[str] = []
+        for metric_key in metric_keys:
+            summary_name = metric_key.replace("mean_hbonds_", "", 1)
+            title = (
+                "Hydrogen Bond Analysis" if len(metric_keys) == 1 else f"H-bonds: {summary_name}"
+            )
+            chunks.append(
+                format_scalar_comparison_artifact_payload(
+                    result.payload,
+                    title=title,
                     metric_label="Mean H-bonds/frame",
                     metric_unit="",
-                    metric_key=metric_keys[0],
+                    metric_key=metric_key,
                     output_format=output_format,
                     higher_is_better=None,
                 )
-
-            if len(metric_keys) > 1:
-                chunks: list[str] = []
-                for metric_key in metric_keys:
-                    summary_name = metric_key.replace("mean_hbonds_", "", 1)
-                    chunks.append(
-                        format_scalar_comparison(
-                            result,
-                            title=f"H-bonds: {summary_name}",
-                            metric_label="Mean H-bonds/frame",
-                            metric_unit="",
-                            metric_key=metric_key,
-                            output_format=output_format,
-                            higher_is_better=None,
-                        )
-                    )
-                return "\n\n".join(chunks)
-
-        return super().format(result, output_format)
+            )
+        return "\n\n".join(chunks)
 
     def plot(self, ctx: PlotContext) -> list[Path]:
         """Generate default hydrogen-bond comparison figures.
@@ -1338,20 +1276,12 @@ class HydrogenBondsAnalysis(Analysis):
             if loaded_result is None:
                 continue
 
-            if isinstance(loaded_result, ConditionArtifact):
-                loaded[label] = loaded_result
-            elif isinstance(loaded_result, BaseModel):
-                payload = loaded_result.model_dump(mode="json")
-                loaded[label] = ConditionArtifact(
-                    analysis_name=self.name,
-                    condition_label=label,
-                    replicates=[int(rep) for rep in payload.get("replicates", [])],
-                    payload=payload,
-                    metadata={
-                        "settings_fingerprint": payload.get("settings_fingerprint"),
-                        "timestep_ps": payload.get("timestep_ps"),
-                    },
+            if not isinstance(loaded_result, ConditionArtifact):
+                raise PluginContractError(
+                    "Hydrogen-bond plotting requires canonical ConditionArtifact input, got "
+                    f"{type(loaded_result).__name__}"
                 )
+            loaded[label] = loaded_result
 
         labels_with_data = [label for label in labels if label in loaded]
         if not labels_with_data:

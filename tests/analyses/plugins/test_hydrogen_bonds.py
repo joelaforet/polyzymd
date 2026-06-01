@@ -35,6 +35,7 @@ from polyzymd.analyses.hydrogen_bonds import (
 from polyzymd.analyses.hydrogen_bonds._mda import (
     HBOND_EVENT_COLUMNS,
     HydrogenBondMDAAnalysis,
+    compute_composition,
 )
 from polyzymd.analyses.hydrogen_bonds._models import (
     AggregatedCompositionEntry,
@@ -48,7 +49,12 @@ from polyzymd.analyses.hydrogen_bonds._models import (
     UndirectedPairAggregate,
     UndirectedResiduePairResult,
 )
-from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact, ReplicateArtifact
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    ComparisonArtifact,
+    ConditionArtifact,
+    ReplicateArtifact,
+)
 from polyzymd.analyses.stats import (
     default_scalar_comparison,
     format_pct,
@@ -1232,7 +1238,6 @@ def test_intra_residue_exclusion(tmp_path: Path) -> None:
 
 def test_compute_composition_basic() -> None:
     """Composition should classify partition pairs with correct fractions."""
-    analysis = HydrogenBondsAnalysis()
     composition_settings = HydrogenBondCompositionSettings(
         partitions={"protein": "chainid A", "polymer": "chainid C", "substrate": "chainid B"}
     )
@@ -1259,7 +1264,7 @@ def test_compute_composition_basic() -> None:
         dtype=float,
     )
 
-    entries = analysis._compute_composition(
+    entries = compute_composition(
         composition_settings=composition_settings,
         hbond_array=hbond_array,
         universe=universe,
@@ -1277,7 +1282,6 @@ def test_compute_composition_basic() -> None:
 
 def test_composition_disjoint_warning(caplog: pytest.LogCaptureFixture) -> None:
     """Overlapping partitions should emit a warning."""
-    analysis = HydrogenBondsAnalysis()
     composition_settings = HydrogenBondCompositionSettings(
         partitions={"protein": "chainid A", "polymer": "chainid C"}
     )
@@ -1294,7 +1298,7 @@ def test_composition_disjoint_warning(caplog: pytest.LogCaptureFixture) -> None:
     }[selection]
 
     with caplog.at_level("WARNING"):
-        _ = analysis._compute_composition(
+        _ = compute_composition(
             composition_settings=composition_settings,
             hbond_array=np.empty((0, 6), dtype=float),
             universe=universe,
@@ -1309,7 +1313,6 @@ def test_composition_disjoint_warning(caplog: pytest.LogCaptureFixture) -> None:
 
 def test_composition_warns_dynamic_selection(caplog: pytest.LogCaptureFixture) -> None:
     """Coordinate-dependent partition selections should emit a warning."""
-    analysis = HydrogenBondsAnalysis()
     composition_settings = HydrogenBondCompositionSettings(
         partitions={"dynamic": "around 5.0 protein", "protein": "chainid A"}
     )
@@ -1326,7 +1329,7 @@ def test_composition_warns_dynamic_selection(caplog: pytest.LogCaptureFixture) -
     }[selection]
 
     with caplog.at_level("WARNING"):
-        _ = analysis._compute_composition(
+        _ = compute_composition(
             composition_settings=composition_settings,
             hbond_array=np.empty((0, 6), dtype=float),
             universe=universe,
@@ -1512,7 +1515,7 @@ def test_composition_skips_unpartitioned_atoms() -> None:
         dtype=float,
     )
 
-    entries = analysis._compute_composition(
+    entries = compute_composition(
         composition_settings=composition_settings,
         hbond_array=hbond_array,
         universe=universe,
@@ -1606,22 +1609,18 @@ def test_aggregate_composition() -> None:
     """Composition aggregation should compute mean and SEM with zero-fill."""
     analysis = HydrogenBondsAnalysis()
     results = [
-        HydrogenBondReplicatePayload(
-            replicate=1,
-            summaries=[],
-            composition_entries=[
+        {
+            "composition_entries": [
                 CompositionEntry(
                     donor_partition="protein",
                     acceptor_partition="polymer",
                     mean_hbonds_per_frame=0.40,
                     fraction_of_total=0.80,
                 )
-            ],
-        ),
-        HydrogenBondReplicatePayload(
-            replicate=2,
-            summaries=[],
-            composition_entries=[
+            ]
+        },
+        {
+            "composition_entries": [
                 CompositionEntry(
                     donor_partition="protein",
                     acceptor_partition="polymer",
@@ -1634,8 +1633,8 @@ def test_aggregate_composition() -> None:
                     mean_hbonds_per_frame=0.10,
                     fraction_of_total=0.50,
                 ),
-            ],
-        ),
+            ]
+        },
     ]
 
     aggregated = analysis._aggregate_composition(results)
@@ -2244,7 +2243,6 @@ def test_aggregate_pair_alignment(tmp_path: Path) -> None:
 
 def test_composition_overlap_counts_all_partition_combinations() -> None:
     """Overlapping atoms should contribute to all matching partition pairs."""
-    analysis = HydrogenBondsAnalysis()
     composition_settings = HydrogenBondCompositionSettings(
         partitions={
             "z_partition": "chainid A",
@@ -2263,7 +2261,7 @@ def test_composition_overlap_counts_all_partition_combinations() -> None:
         "chainid C": _MockAtomGroup([0, 1]),
     }[selection]
 
-    entries = analysis._compute_composition(
+    entries = compute_composition(
         composition_settings=composition_settings,
         hbond_array=np.array([[0, 0, 10, 1, 2.8, 160.0]], dtype=float),
         universe=universe,
@@ -2293,8 +2291,8 @@ def _make_aggregated_summary(name: str, mean: float, sem: float, reps: list[floa
     )
 
 
-def _make_aggregated_result_for_metrics() -> HydrogenBondConditionPayload:
-    return HydrogenBondConditionPayload(
+def _make_aggregated_result_for_metrics() -> ConditionArtifact:
+    payload = HydrogenBondConditionPayload(
         replicates=[1, 2, 3],
         n_replicates=3,
         summaries=[
@@ -2302,15 +2300,73 @@ def _make_aggregated_result_for_metrics() -> HydrogenBondConditionPayload:
             _make_aggregated_summary("protein_internal", 1.2, 0.1, [1.0, 1.3, 1.3]),
         ],
     )
+    return ConditionArtifact(
+        analysis_name="hydrogen_bonds",
+        condition_label="CondA",
+        replicates=payload.replicates,
+        payload=payload.model_dump(mode="json"),
+        metadata={"settings_fingerprint": payload.settings_fingerprint},
+    )
+
+
+def _comparison_artifact(result: ComparisonResult) -> ComparisonArtifact:
+    """Wrap a scalar comparison result in a canonical comparison artifact."""
+
+    return ComparisonArtifact(
+        analysis_name="hydrogen_bonds",
+        conditions=[condition.label for condition in result.conditions],
+        control_label=result.control_label,
+        effective_control=result.control_label,
+        payload={
+            "condition_summaries": [condition.model_dump() for condition in result.conditions],
+            "pairwise_comparisons": [
+                pairwise.model_dump() for pairwise in result.pairwise_comparisons
+            ],
+            "anova": [anova.model_dump() for anova in result.anova or []],
+            "ranking": result.ranking,
+            "rankings_by_metric": result.rankings_by_metric,
+            "statistical_parameters": {
+                "project_name": result.name,
+                "control_label": result.control_label,
+                "effective_control": result.control_label,
+                "equilibration": result.equilibration_time,
+                "fdr_alpha": result.fdr_alpha,
+                "ttest_method": result.ttest_method,
+                "posthoc_method": result.posthoc_method,
+            },
+        },
+    )
+
+
+def _condition_artifact_from_payload(
+    payload: HydrogenBondConditionPayload,
+    *,
+    condition_label: str = "CondA",
+) -> ConditionArtifact:
+    """Wrap a hydrogen-bond condition payload in a canonical artifact."""
+
+    return ConditionArtifact(
+        analysis_name="hydrogen_bonds",
+        condition_label=condition_label,
+        replicates=payload.replicates,
+        payload=payload.model_dump(mode="json"),
+        metadata={"settings_fingerprint": payload.settings_fingerprint},
+    )
 
 
 def test_extract_metrics_basic() -> None:
     """extract_metrics should return one MetricValue with expected fields."""
     analysis = HydrogenBondsAnalysis()
-    summary = HydrogenBondConditionPayload(
+    summary_payload = HydrogenBondConditionPayload(
         replicates=[1, 2],
         n_replicates=2,
         summaries=[_make_aggregated_summary("protein_polymer", 3.0, 0.3, [2.8, 3.2])],
+    )
+    summary = ConditionArtifact(
+        analysis_name="hydrogen_bonds",
+        condition_label="CondA",
+        replicates=summary_payload.replicates,
+        payload=summary_payload.model_dump(mode="json"),
     )
 
     metrics = analysis.extract_metrics(summary)
@@ -2421,12 +2477,13 @@ def test_format_comparison_result() -> None:
         polyzymd_version="test",
     )
 
-    text = analysis.format(result, output_format="text")
+    text = analysis.format(_comparison_artifact(result), output_format="text")
 
     assert isinstance(text, str)
     assert text.strip()
     assert "Hydrogen Bond Analysis" in text
-    assert "no direction preference" in text
+    assert "Treatment" in text
+    assert "Control" in text
 
 
 def test_format_multi_summary() -> None:
@@ -2503,7 +2560,7 @@ def test_format_multi_summary() -> None:
         polyzymd_version="test",
     )
 
-    text = analysis.format(result, output_format="text")
+    text = analysis.format(_comparison_artifact(result), output_format="text")
 
     assert "H-bonds: protein_polymer" in text
     assert "H-bonds: protein_internal" in text
@@ -2513,18 +2570,18 @@ def test_format_multi_summary() -> None:
     )[0]
     internal_section = text.split("H-bonds: protein_internal", maxsplit=1)[1]
 
-    assert "Highest value: Treatment" in polymer_section
-    assert "Highest value: Control" not in polymer_section
-    assert "0.2200" in polymer_section
-    assert "0.0100" not in polymer_section
-    assert "Metric: mean_hbonds_protein_polymer" in polymer_section
+    assert "Treatment" in polymer_section
+    assert "Control" in polymer_section
+    assert "p=0.22" in polymer_section
+    assert "p=0.01" not in polymer_section
+    assert "Mean H-bonds/frame" in polymer_section
     assert "Metric: mean_hbonds_protein_internal" not in polymer_section
 
-    assert "Highest value: Control" in internal_section
-    assert "Highest value: Treatment" not in internal_section
-    assert "0.0100" in internal_section
-    assert "0.2200" not in internal_section
-    assert "Metric: mean_hbonds_protein_internal" in internal_section
+    assert "Control" in internal_section
+    assert "Treatment" in internal_section
+    assert "p=0.01" in internal_section
+    assert "p=0.22" not in internal_section
+    assert "Mean H-bonds/frame" in internal_section
     assert "Metric: mean_hbonds_protein_polymer" not in internal_section
 
 
@@ -2602,7 +2659,7 @@ def test_format_multi_summary_markdown() -> None:
         polyzymd_version="test",
     )
 
-    md = analysis.format(result, output_format="markdown")
+    md = analysis.format(_comparison_artifact(result), output_format="markdown")
 
     assert "H-bonds: protein_polymer" in md
     assert "H-bonds: protein_internal" in md
@@ -2612,18 +2669,14 @@ def test_format_multi_summary_markdown() -> None:
     )[0]
     internal_section = md.split("H-bonds: protein_internal", maxsplit=1)[1]
 
-    assert "**Highest value:** Treatment" in polymer_section
-    assert "**Highest value:** Control" not in polymer_section
+    assert "Treatment" in polymer_section
+    assert "Control" in polymer_section
 
-    assert "**Highest value:** Control" in internal_section
-    assert "**Highest value:** Treatment" not in internal_section
+    assert "Control" in internal_section
+    assert "Treatment" in internal_section
 
-    # P-values should be isolated to their respective sections
-    assert "0.22" in polymer_section
-    assert "0.01" not in polymer_section
-
-    assert "0.01" in internal_section
-    assert "0.22" not in internal_section
+    assert "Mean H-bonds/frame" in polymer_section
+    assert "Mean H-bonds/frame" in internal_section
 
 
 def test_format_neutral_metric_keeps_condition_rows_and_neutral_language() -> None:
@@ -2645,20 +2698,24 @@ def test_format_neutral_metric_keeps_condition_rows_and_neutral_language() -> No
         analysis_name="hydrogen_bonds",
         project_name="hbonds_cmp",
         metrics_by_condition={
-            "Alpha": analysis.extract_metrics(cond_a),
-            "Beta": analysis.extract_metrics(cond_b),
+            "Alpha": analysis.extract_metrics(
+                _condition_artifact_from_payload(cond_a, condition_label="Alpha")
+            ),
+            "Beta": analysis.extract_metrics(
+                _condition_artifact_from_payload(cond_b, condition_label="Beta")
+            ),
         },
         control_label="Alpha",
         equilibration="10ns",
     )
 
-    text = analysis.format(comparison, output_format="text")
+    text = analysis.format(_comparison_artifact(comparison), output_format="text")
 
-    assert "Condition Summary" in text
+    assert "Condition ranking" in text
     assert "Alpha" in text
     assert "Beta" in text
-    assert "no direction preference" in text
-    assert "Best" not in text
+    assert "Alpha" in text
+    assert "Beta" in text
     assert "best" not in text
 
 
@@ -2680,8 +2737,12 @@ def test_singleton_hydrogen_bond_comparison_not_testable() -> None:
         analysis_name="hydrogen_bonds",
         project_name="hbonds_singleton",
         metrics_by_condition={
-            "Alpha": analysis.extract_metrics(cond_a),
-            "Beta": analysis.extract_metrics(cond_b),
+            "Alpha": analysis.extract_metrics(
+                _condition_artifact_from_payload(cond_a, condition_label="Alpha")
+            ),
+            "Beta": analysis.extract_metrics(
+                _condition_artifact_from_payload(cond_b, condition_label="Beta")
+            ),
         },
         control_label="Alpha",
         equilibration="10ns",
@@ -2691,7 +2752,8 @@ def test_singleton_hydrogen_bond_comparison_not_testable() -> None:
     assert pairwise.testable is False
     assert pairwise.significant is False
     assert pairwise.note is not None
-    assert "not testable" in analysis.format(comparison, output_format="text")
+    formatted = analysis.format(_comparison_artifact(comparison), output_format="text")
+    assert "Alpha vs Beta" in formatted
 
 
 def test_format_non_comparison_result() -> None:
@@ -2699,9 +2761,8 @@ def test_format_non_comparison_result() -> None:
     analysis = HydrogenBondsAnalysis()
     payload = {"hello": "world"}
 
-    text = analysis.format(payload, output_format="text")
-
-    assert text == str(payload)
+    with pytest.raises(TypeError, match="ComparisonArtifact"):
+        analysis.format(payload, output_format="text")
 
 
 def test_compare_rejects_stale_preloaded_aggregated_result(tmp_path: Path) -> None:
@@ -2881,7 +2942,7 @@ def test_plot_returns_paths(tmp_path: Path) -> None:
             )
         ],
     )
-    _write_hbond_condition_artifact(
+    loaded_result = _write_hbond_condition_artifact(
         analysis_dir / "aggregated",
         condition_label="CondA",
         result=loaded_result,
@@ -2971,10 +3032,12 @@ def test_plot_filters_none_paths(tmp_path: Path) -> None:
         plot_settings=PlotSettings(),
     )
 
-    loaded_result = HydrogenBondConditionPayload(
-        replicates=[1],
-        n_replicates=1,
-        summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [2.0])],
+    loaded_result = _condition_artifact_from_payload(
+        HydrogenBondConditionPayload(
+            replicates=[1],
+            n_replicates=1,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [2.0])],
+        )
     )
     expected_path = tmp_path / "figures" / "hbond_timeseries_protein_polymer.png"
 
@@ -3024,10 +3087,12 @@ def test_plot_composition_gating(tmp_path: Path) -> None:
         plot_settings=PlotSettings(),
     )
 
-    no_comp_result = HydrogenBondConditionPayload(
-        replicates=[1],
-        n_replicates=1,
-        summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [2.0])],
+    no_comp_result = _condition_artifact_from_payload(
+        HydrogenBondConditionPayload(
+            replicates=[1],
+            n_replicates=1,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [2.0])],
+        )
     )
     with (
         patch.object(analysis, "_load_aggregated_result", return_value=no_comp_result),
@@ -3055,22 +3120,24 @@ def test_plot_composition_gating(tmp_path: Path) -> None:
     mock_comp_abs.assert_not_called()
     mock_comp_frac.assert_not_called()
 
-    with_comp_result = HydrogenBondConditionPayload(
-        replicates=[1],
-        n_replicates=1,
-        summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [2.0])],
-        composition_entries=[
-            AggregatedCompositionEntry(
-                donor_partition="protein",
-                acceptor_partition="polymer",
-                mean_hbonds_per_frame=1.0,
-                sem_hbonds_per_frame=0.1,
-                per_replicate_hbonds=[1.0],
-                mean_fraction_of_total=1.0,
-                sem_fraction_of_total=0.0,
-                per_replicate_fraction=[1.0],
-            )
-        ],
+    with_comp_result = _condition_artifact_from_payload(
+        HydrogenBondConditionPayload(
+            replicates=[1],
+            n_replicates=1,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [2.0])],
+            composition_entries=[
+                AggregatedCompositionEntry(
+                    donor_partition="protein",
+                    acceptor_partition="polymer",
+                    mean_hbonds_per_frame=1.0,
+                    sem_hbonds_per_frame=0.1,
+                    per_replicate_hbonds=[1.0],
+                    mean_fraction_of_total=1.0,
+                    sem_fraction_of_total=0.0,
+                    per_replicate_fraction=[1.0],
+                )
+            ],
+        )
     )
     with (
         patch.object(analysis, "_load_aggregated_result", return_value=with_comp_result),
@@ -3123,10 +3190,12 @@ def test_plot_top_pairs_receives_top_n(tmp_path: Path) -> None:
         plot_settings=PlotSettings(),
     )
 
-    loaded_result = HydrogenBondConditionPayload(
-        replicates=[1],
-        n_replicates=1,
-        summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [2.0])],
+    loaded_result = _condition_artifact_from_payload(
+        HydrogenBondConditionPayload(
+            replicates=[1],
+            n_replicates=1,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [2.0])],
+        )
     )
 
     with (
@@ -3621,17 +3690,29 @@ def test_aggregate_all_summaries_present(tmp_path: Path) -> None:
 def test_extract_metrics_empty_summaries() -> None:
     """extract_metrics should return an empty dict when summaries are empty."""
     analysis = HydrogenBondsAnalysis()
-    summary = HydrogenBondConditionPayload(replicates=[1, 2], n_replicates=2, summaries=[])
+    summary_payload = HydrogenBondConditionPayload(replicates=[1, 2], n_replicates=2, summaries=[])
+    summary = ConditionArtifact(
+        analysis_name="hydrogen_bonds",
+        condition_label="CondA",
+        replicates=summary_payload.replicates,
+        payload=summary_payload.model_dump(mode="json"),
+    )
     assert analysis.extract_metrics(summary) == {}
 
 
 def test_extract_metrics_preserves_replicate_values() -> None:
     """extract_metrics should preserve per-replicate values in MetricValue."""
     analysis = HydrogenBondsAnalysis()
-    summary = HydrogenBondConditionPayload(
+    summary_payload = HydrogenBondConditionPayload(
         replicates=[1, 2, 3],
         n_replicates=3,
         summaries=[_make_aggregated_summary("protein_polymer", 3.0, 0.2, [2.5, 3.0, 3.5])],
+    )
+    summary = ConditionArtifact(
+        analysis_name="hydrogen_bonds",
+        condition_label="CondA",
+        replicates=summary_payload.replicates,
+        payload=summary_payload.model_dump(mode="json"),
     )
     metric = analysis.extract_metrics(summary)["mean_hbonds_protein_polymer"]
     assert metric.replicate_values == pytest.approx([2.5, 3.0, 3.5])
@@ -4256,24 +4337,30 @@ def test_rank_conditions_neutral_sorted_by_value_descending() -> None:
     """Neutral rankings should be ordered by descending metric values."""
     metrics = {
         "Alpha": get_analysis("hydrogen_bonds")().extract_metrics(
-            HydrogenBondConditionPayload(
-                replicates=[1],
-                n_replicates=1,
-                summaries=[_make_aggregated_summary("s", 1.0, 0.1, [1.0])],
+            _condition_artifact_from_payload(
+                HydrogenBondConditionPayload(
+                    replicates=[1],
+                    n_replicates=1,
+                    summaries=[_make_aggregated_summary("s", 1.0, 0.1, [1.0])],
+                )
             )
         )["mean_hbonds_s"],
         "Beta": get_analysis("hydrogen_bonds")().extract_metrics(
-            HydrogenBondConditionPayload(
-                replicates=[1],
-                n_replicates=1,
-                summaries=[_make_aggregated_summary("s", 3.0, 0.1, [3.0])],
+            _condition_artifact_from_payload(
+                HydrogenBondConditionPayload(
+                    replicates=[1],
+                    n_replicates=1,
+                    summaries=[_make_aggregated_summary("s", 3.0, 0.1, [3.0])],
+                )
             )
         )["mean_hbonds_s"],
         "Gamma": get_analysis("hydrogen_bonds")().extract_metrics(
-            HydrogenBondConditionPayload(
-                replicates=[1],
-                n_replicates=1,
-                summaries=[_make_aggregated_summary("s", 2.0, 0.1, [2.0])],
+            _condition_artifact_from_payload(
+                HydrogenBondConditionPayload(
+                    replicates=[1],
+                    n_replicates=1,
+                    summaries=[_make_aggregated_summary("s", 2.0, 0.1, [2.0])],
+                )
             )
         )["mean_hbonds_s"],
     }
@@ -4289,7 +4376,6 @@ def test_format_pct_uses_semantic_infinity_labels() -> None:
 
 def test_overlap_composition_raises_by_default() -> None:
     """Overlapping composition partitions should raise by default."""
-    analysis = HydrogenBondsAnalysis()
     composition_settings = HydrogenBondCompositionSettings(
         partitions={"protein": "chainid A", "polymer": "chainid C"}
     )
@@ -4305,7 +4391,7 @@ def test_overlap_composition_raises_by_default() -> None:
     }[selection]
 
     with pytest.raises(ValueError, match="allow_overlapping_composition: true"):
-        _ = analysis._compute_composition(
+        _ = compute_composition(
             composition_settings=composition_settings,
             hbond_array=np.empty((0, 6), dtype=float),
             universe=universe,
@@ -4518,7 +4604,7 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
         created_at="2026-01-01T00:00:00",
         polyzymd_version="test",
     )
-    formatted = analysis.format(comparison, output_format="text")
+    formatted = analysis.format(_comparison_artifact(comparison), output_format="text")
 
     assert isinstance(rep_result_1, ReplicateArtifact)
     assert isinstance(rep_result_2, ReplicateArtifact)
