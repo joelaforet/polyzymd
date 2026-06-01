@@ -14,7 +14,6 @@ from numpy.typing import NDArray
 
 from polyzymd.analyses._framework.cache_identity import compute_config_hash
 from polyzymd.analyses._framework.results_base import get_polyzymd_version
-from polyzymd.analyses.distances._models import DistancePairResult, DistanceResultMetadata
 from polyzymd.analyses.mda import (
     ArtifactStore,
     ConditionArtifact,
@@ -726,30 +725,46 @@ def _validate_pair_payloads(
 def _pair_payload_to_json(payload: DistancePairPayload) -> dict[str, Any]:
     """Return JSON summary for one pair without raw distance arrays."""
 
-    result = DistancePairResult.from_runner_payload(
-        DistanceResultMetadata(
-            config_hash="unknown",
-            polyzymd_version=get_polyzymd_version(),
-            replicate=None,
-            equilibration_time=0.0,
-            equilibration_unit="ns",
-        ),
-        payload,
-        store_distributions=False,
-    ).model_dump(mode="json")
-    for key in (
-        "config_hash",
-        "polyzymd_version",
-        "replicate",
-        "equilibration_time",
-        "equilibration_unit",
-        "selection_string",
-        "analysis_type",
-        "created_at",
-        "distances",
-    ):
-        result.pop(key, None)
-    return result
+    return {
+        "pair_label": payload.pair_label,
+        "selection1": payload.selection1,
+        "selection2": payload.selection2,
+        "mean_distance": payload.mean_distance,
+        "std_distance": payload.std_distance,
+        "median_distance": payload.median_distance,
+        "min_distance": payload.min_distance,
+        "max_distance": payload.max_distance,
+        "sem_distance": payload.sem_distance,
+        "correlation_time": payload.correlation_time,
+        "correlation_time_unit": payload.correlation_time_unit,
+        "n_independent_frames": payload.n_independent_frames,
+        "statistical_inefficiency": payload.statistical_inefficiency,
+        "autocorrelation_warning": payload.autocorrelation_warning,
+        "threshold": payload.threshold,
+        "fraction_below_threshold": payload.fraction_below_threshold,
+        "histogram_edges": _json_list(payload.histogram_edges),
+        "histogram_counts": _json_list(payload.histogram_counts),
+        "kde_x": _json_list(payload.kde_x),
+        "kde_y": _json_list(payload.kde_y),
+        "kde_peak": payload.kde_peak,
+        "kde_bandwidth": payload.kde_bandwidth,
+        "n_frames_total": payload.n_frames_total,
+        "n_frames_used": payload.n_frames_used,
+    }
+
+
+def _json_list(value: Any) -> list[Any] | None:
+    """Convert array-like values to JSON-compatible lists."""
+
+    if value is None:
+        return None
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
 
 
 def _replicate_metrics(pair_payloads: Sequence[Mapping[str, Any]]) -> dict[str, float]:

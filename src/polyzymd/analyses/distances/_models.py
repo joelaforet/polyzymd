@@ -15,8 +15,6 @@ from typing import Any, ClassVar, Protocol, Sequence
 
 from pydantic import BaseModel, Field
 
-from polyzymd.analyses._framework.results_base import BaseAnalysisResult
-
 
 @dataclass(frozen=True)
 class DistanceResultMetadata:
@@ -187,7 +185,7 @@ def _stringify_paths(paths: Sequence[str | Path]) -> list[str]:
     return [str(path) for path in paths]
 
 
-class DistancePairResult(BaseAnalysisResult):
+class DistancePairResult(DistanceArtifactPayloadBase):
     """Distance analysis result for a single atom pair in one replicate.
 
     Stores the full distribution of distances as well as summary statistics.
@@ -293,6 +291,11 @@ class DistancePairResult(BaseAnalysisResult):
     # Trajectory info
     n_frames_total: int = Field(..., description="Total frames in trajectory")
     n_frames_used: int = Field(..., description="Frames used after equilibration")
+
+    def _format_equilibration(self) -> str:
+        """Format equilibration time for display."""
+
+        return f"{self.equilibration_time}{self.equilibration_unit}"
 
     @classmethod
     def from_runner_payload(

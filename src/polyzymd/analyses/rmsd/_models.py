@@ -16,8 +16,6 @@ from typing import ClassVar
 
 from pydantic import BaseModel, Field
 
-from polyzymd.analyses._framework.results_base import BaseAnalysisResult
-
 
 class RMSDArtifactPayloadBase(BaseModel):
     """Common artifact payload metadata for RMSD payload fragments."""
@@ -30,7 +28,7 @@ class RMSDArtifactPayloadBase(BaseModel):
     selection_string: str
 
 
-class RMSDRunResult(BaseAnalysisResult):
+class RMSDRunResult(RMSDArtifactPayloadBase):
     """RMSD result for a single named run in one replicate.
 
     Stores per-frame RMSD timeseries (as NPZ sidecar path) and summary
@@ -104,6 +102,9 @@ class RMSDRunResult(BaseAnalysisResult):
         default=None, description="Standard error of the mean (autocorrelation-corrected)"
     )
     correlation_time_unit: str | None = Field(default=None, description="Unit of correlation time")
+    n_independent_frames: int | None = Field(
+        default=None, description="Number of independent frames used"
+    )
     statistical_inefficiency: float | None = Field(
         default=None, description="Factor by which variance is inflated due to correlation"
     )
@@ -149,6 +150,11 @@ class RMSDRunResult(BaseAnalysisResult):
         default=None,
         description="Frame stride applied when sampling this RMSD run",
     )
+
+    def _format_equilibration(self) -> str:
+        """Format equilibration time for display."""
+
+        return f"{self.equilibration_time}{self.equilibration_unit}"
 
     def summary(self) -> str:
         """Return human-readable summary."""

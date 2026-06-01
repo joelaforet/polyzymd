@@ -472,6 +472,25 @@ class TestDistanceReplicatePayloadFactories:
         assert result.distances is None
         assert result.histogram_counts == [1, 2]
 
+    def test_pair_payload_json_does_not_use_result_factory(self):
+        """Canonical pair JSON should not depend on legacy result factories."""
+        from polyzymd.analyses.distances._mda import _pair_payload_to_json
+        from polyzymd.analyses.distances._models import DistancePairResult
+
+        payload = self._make_payload()
+        with patch.object(
+            DistancePairResult,
+            "from_runner_payload",
+            side_effect=AssertionError("legacy factory called"),
+        ):
+            result = _pair_payload_to_json(payload)
+
+        assert result["pair_label"] == "pair0"
+        assert result["selection1"] == "sel_a"
+        assert result["histogram_counts"] == [1, 2]
+        assert "distances" not in result
+        assert "config_hash" not in result
+
     def test_factory_results_have_flat_keys(self):
         from polyzymd.analyses.distances._models import DistancePairResult
 

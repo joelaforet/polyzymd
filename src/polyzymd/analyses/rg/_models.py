@@ -16,8 +16,6 @@ from typing import ClassVar
 
 from pydantic import BaseModel, Field
 
-from polyzymd.analyses._framework.results_base import BaseAnalysisResult
-
 
 class RgArtifactPayloadBase(BaseModel):
     """Common artifact payload metadata for Rg payload fragments."""
@@ -40,7 +38,7 @@ class RgSkippedRunResult(BaseModel):
     reason_code: str = Field(default="empty_selection", description="Machine-readable skip reason")
 
 
-class RgRunResult(BaseAnalysisResult):
+class RgRunResult(RgArtifactPayloadBase):
     """Rg result for a single named run in one replicate.
 
     Stores per-frame Rg timeseries (as NPZ sidecar path) and summary
@@ -123,6 +121,9 @@ class RgRunResult(BaseAnalysisResult):
         default=None, description="Standard error of the mean (autocorrelation-corrected)"
     )
     correlation_time_unit: str | None = Field(default=None, description="Unit of correlation time")
+    n_independent_frames: int | None = Field(
+        default=None, description="Number of independent frames used"
+    )
     statistical_inefficiency: float | None = Field(
         default=None, description="Factor by which variance is inflated due to correlation"
     )
@@ -201,6 +202,11 @@ class RgRunResult(BaseAnalysisResult):
         default=None,
         description="Frame stride applied when sampling this Rg run",
     )
+
+    def _format_equilibration(self) -> str:
+        """Format equilibration time for display."""
+
+        return f"{self.equilibration_time}{self.equilibration_unit}"
 
     def summary(self) -> str:
         """Return human-readable summary."""
