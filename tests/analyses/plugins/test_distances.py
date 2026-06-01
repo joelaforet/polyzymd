@@ -273,69 +273,6 @@ def _make_mock_distance_result(
     return mock
 
 
-def _make_distance_cache_result(
-    *,
-    config_hash: str,
-    pairs: list[tuple[str, str]],
-    thresholds: list[float | None],
-):
-    """Create a concrete ``DistanceReplicatePayload`` for cache-identity tests."""
-    from polyzymd.analyses.distances._models import DistancePairResult, DistanceReplicatePayload
-
-    pair_results = []
-    for idx, ((selection1, selection2), threshold) in enumerate(
-        zip(pairs, thresholds, strict=True)
-    ):
-        pair_results.append(
-            DistancePairResult(
-                config_hash=config_hash,
-                polyzymd_version="1.0.0",
-                replicate=1,
-                equilibration_time=0.0,
-                equilibration_unit="ns",
-                selection_string=f"{selection1} : {selection2}",
-                pair_label=f"pair{idx}",
-                selection1=selection1,
-                selection2=selection2,
-                distances=[3.0, 3.1, 3.2],
-                mean_distance=3.1,
-                std_distance=0.1,
-                median_distance=3.1,
-                min_distance=3.0,
-                max_distance=3.2,
-                sem_distance=0.05,
-                correlation_time=None,
-                correlation_time_unit=None,
-                n_independent_frames=None,
-                statistical_inefficiency=None,
-                autocorrelation_warning=None,
-                threshold=threshold,
-                fraction_below_threshold=1.0,
-                histogram_edges=[3.0, 3.1, 3.2],
-                histogram_counts=[1, 2],
-                kde_x=None,
-                kde_y=None,
-                kde_peak=None,
-                kde_bandwidth=None,
-                n_frames_total=3,
-                n_frames_used=3,
-            )
-        )
-
-    return DistanceReplicatePayload(
-        config_hash=config_hash,
-        polyzymd_version="1.0.0",
-        replicate=1,
-        equilibration_time=0.0,
-        equilibration_unit="ns",
-        selection_string="; ".join(f"({a} : {b})" for a, b in pairs),
-        pair_results=pair_results,
-        n_frames_total=3,
-        n_frames_used=3,
-        trajectory_files=["/fake/traj.dcd"],
-    )
-
-
 def _make_distance_artifacts(tmp_path, condition_label, settings, n_reps: int = 3):
     """Create canonical distance replicate artifacts with NPZ sidecars."""
     import numpy as np
@@ -1505,12 +1442,11 @@ class TestCompare:
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
-            _make_pair_label,
         )
 
         selection_a = "resid 10 and name CA"
         selection_b = "resid 20 and name CA"
-        auto_label = _make_pair_label(selection_a, selection_b)
+        auto_label = "Residue 10 CA - residue 20 CA"
         analysis = DistancesAnalysis()
         settings = DistancesSettings(
             pairs=[
@@ -1729,115 +1665,6 @@ class TestSettingsCacheTag:
         tag_b = DistancesAnalysis._make_settings_cache_tag(settings_b)
 
         assert tag_a != tag_b
-
-
-class TestDistanceCalculatorCacheIdentity:
-    """DistanceCalculator should enforce strict cache identity."""
-
-    def test_default_cache_filename_changes_when_only_later_pair_changes(self):
-        from polyzymd.analyses.distances import DistanceCalculator
-
-        config = MagicMock()
-        with (
-            patch("polyzymd.analyses.shared.loader._require_mdanalysis"),
-            patch("polyzymd.analyses.distances.TrajectoryLoader"),
-        ):
-            calc_a = DistanceCalculator(
-                config,
-                pairs=[("resid 1 and name CA", "resid 2 and name CA"), ("resid 3", "resid 4")],
-            )
-            calc_b = DistanceCalculator(
-                config,
-                pairs=[("resid 1 and name CA", "resid 2 and name CA"), ("resid 30", "resid 40")],
-            )
-
-        assert calc_a._settings_tag != "unstamped"
-        assert calc_a._make_result_filename() != calc_b._make_result_filename()
-
-    def test_cached_result_rejected_when_config_hash_validation_fails(self, tmp_path):
-        from polyzymd.analyses.distances import DistanceCalculator
-
-        config = MagicMock()
-        pairs = [("resid 1 and name CA", "resid 2 and name CA")]
-        thresholds = [3.5]
-
-        with (
-            patch("polyzymd.analyses.shared.loader._require_mdanalysis"),
-            patch("polyzymd.analyses.distances.TrajectoryLoader"),
-        ):
-            calc = DistanceCalculator(
-                config,
-                pairs=pairs,
-                thresholds=thresholds,
-            )
-
-        result_file = tmp_path / calc._make_result_filename()
-        cached_result = _make_distance_cache_result(
-            config_hash="stale-config-hash",
-            pairs=pairs,
-            thresholds=thresholds,
-        )
-        cached_result.save(result_file)
-        calc._write_cache_metadata(result_file)
-
-        with patch(
-            "polyzymd.analyses._framework.cache_identity.validate_config_hash",
-            return_value=False,
-        ) as mock_validate:
-            reused = calc._load_cached_result(result_file)
-
-        assert reused is None
-        mock_validate.assert_called_once_with("stale-config-hash", config)
-
-    def test_stale_noncanonical_named_cache_is_rejected_when_settings_change(self, tmp_path):
-        from polyzymd.analyses.distances import DistanceCalculator
-
-        config = MagicMock()
-        original_pairs = [
-            ("resid 1 and name CA", "resid 2 and name CA"),
-            ("resid 3 and name CA", "resid 4 and name CA"),
-        ]
-        changed_pairs = [
-            ("resid 1 and name CA", "resid 2 and name CA"),
-            ("resid 30 and name CA", "resid 40 and name CA"),
-        ]
-        thresholds = [3.5, 4.0]
-
-        with (
-            patch("polyzymd.analyses.shared.loader._require_mdanalysis"),
-            patch("polyzymd.analyses.distances.TrajectoryLoader"),
-        ):
-            calc_old = DistanceCalculator(
-                config,
-                pairs=original_pairs,
-                thresholds=thresholds,
-                settings_tag="unstamped",
-            )
-            calc_new = DistanceCalculator(
-                config,
-                pairs=changed_pairs,
-                thresholds=thresholds,
-                settings_tag="unstamped",
-            )
-
-        result_file = tmp_path / calc_old._make_result_filename()
-        assert result_file.name == calc_new._make_result_filename()
-
-        cached_result = _make_distance_cache_result(
-            config_hash=calc_old._config_hash,
-            pairs=original_pairs,
-            thresholds=thresholds,
-        )
-        cached_result.save(result_file)
-        calc_old._write_cache_metadata(result_file)
-
-        with patch(
-            "polyzymd.analyses._framework.cache_identity.validate_config_hash",
-            return_value=True,
-        ):
-            reused = calc_new._load_cached_result(result_file)
-
-        assert reused is None
 
 
 # ---------------------------------------------------------------------------

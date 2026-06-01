@@ -15,20 +15,12 @@ averaging unrelated distances (e.g. H-bond distance + lid-opening distance)
 is not semantically meaningful.  Therefore ``compare()`` is overridden
 entirely and ``extract_metrics()`` is not used.
 
-Compatibility API
------------------
-The :class:`DistanceCalculator` class remains available for callers that rely
-on the current public API. Import it as::
-
-    from polyzymd.analyses.distances import DistanceCalculator
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -37,7 +29,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from polyzymd.analyses._framework.cache_identity import compute_config_hash, settings_fingerprint
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -51,7 +43,6 @@ from polyzymd.analyses.distances._mda import (
     aggregate_distance_artifacts,
     build_distance_jobs,
 )
-from polyzymd.analyses.distances._models import DistanceReplicatePayload
 from polyzymd.analyses.distances._plot_settings import DistancesPlotSettings
 from polyzymd.analyses.distances._plotters import (
     _plot_distance_kde,
@@ -65,13 +56,11 @@ from polyzymd.analyses.mda import (
     MDAReplicateJobContext,
     ReplicateArtifact,
 )
-from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
 
 if TYPE_CHECKING:
     from polyzymd.analyses.distances._comparison_results import (
         DistanceComparisonResult,
     )
-    from polyzymd.config.schema import SimulationConfig
 
 logger = logging.getLogger("polyzymd.analyses.distances")
 
@@ -141,214 +130,6 @@ class _DistancesTrajectoryWindow:
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
-
-
-def _selection_to_label(selection: str) -> str:
-    """Convert MDAnalysis selection to filename-safe label.
-
-    Handles special syntax like midpoint() and com().
-
-    Examples
-    --------
-    >>> _selection_to_label("resid 77 and name OG")
-    "resid77_OG"
-    >>> _selection_to_label("protein and resid 133 and name NE2")
-    "resid133_NE2"
-    >>> _selection_to_label("midpoint(resid 133 and name OD1 OD2)")
-    "resid133_mid"
-    """
-    from polyzymd.analyses.shared.selections import parse_selection_string
-
-    parsed = parse_selection_string(selection)
-    inner_selection = parsed.selection
-
-    # Remove common keywords
-    label = inner_selection.lower()
-    label = re.sub(r"\b(and|or|not|protein)\b", "", label)
-    # Extract resid and name
-    resid_match = re.search(r"resid\s*(\d+)", label)
-    name_match = re.search(r"name\s+(\w+)", label)
-
-    parts = []
-    if resid_match:
-        parts.append(f"resid{resid_match.group(1)}")
-
-    # Use mode-specific suffix for special syntax
-    if parsed.mode.value == "midpoint":
-        parts.append("mid")
-    elif parsed.mode.value == "com":
-        parts.append("com")
-    elif name_match:
-        parts.append(name_match.group(1).upper())
-
-    if parts:
-        return "_".join(parts)
-
-    # Fallback: sanitize the whole string
-    label = re.sub(r"[^a-z0-9]+", "_", label)
-    return label.strip("_")
-
-
-def _make_pair_label(sel1: str, sel2: str) -> str:
-    """Create human-readable label for a distance pair."""
-    l1 = _selection_to_label(sel1)
-    l2 = _selection_to_label(sel2)
-    return f"{l1}-{l2}"
-
-
-def _make_distance_result_filename(
-    *,
-    pairs: Sequence[tuple[str, str]],
-    equilibration_time: float,
-    equilibration_unit: str,
-    use_pbc: bool,
-    alignment: Any,
-    settings_tag: str | None,
-) -> str:
-    """Build the non-canonical distances replicate filename.
-
-    Parameters
-    ----------
-    pairs : Sequence[tuple[str, str]]
-        Distance pairs included in the run.
-    equilibration_time : float
-        Equilibration offset value.
-    equilibration_unit : str
-        Equilibration offset unit.
-    use_pbc : bool
-        Whether minimum-image distances are enabled.
-    alignment : Any
-        Alignment configuration object.
-    settings_tag : str | None
-        Settings fingerprint suffix. ``None`` preserves the non-canonical tag.
-
-    Returns
-    -------
-    str
-        Cache-compatible result filename.
-    """
-
-    eq_str = f"eq{equilibration_time:g}{equilibration_unit}"
-
-    if pairs:
-        pair_label = _make_pair_label(*pairs[0])
-        if len(pairs) > 1:
-            pair_label += f"_and{len(pairs) - 1}more"
-    else:
-        pair_label = "nopairs"
-
-    settings_parts = ["pbc" if use_pbc else "nopbc"]
-    if getattr(alignment, "enabled", False):
-        settings_parts.append(f"align-{alignment.reference_mode}")
-    else:
-        settings_parts.append("noalign")
-
-    settings_suffix = "_".join(settings_parts)
-    tag = settings_tag or "unstamped"
-    return f"distances_{pair_label}_{eq_str}_{settings_suffix}_s{tag}.json"
-
-
-def _make_distance_calculator_settings_payload(
-    *,
-    pairs: Sequence[tuple[str, str]],
-    thresholds: Sequence[float | None],
-    use_pbc: bool,
-    alignment: Any,
-    equilibration_time: float,
-    equilibration_unit: str,
-) -> dict[str, Any]:
-    """Build a canonical cache-identity payload for ``DistanceCalculator``.
-
-    Parameters
-    ----------
-    pairs : Sequence[tuple[str, str]]
-        Ordered distance-pair selections.
-    thresholds : Sequence[float | None]
-        Per-pair thresholds aligned with ``pairs``.
-    use_pbc : bool
-        Whether minimum-image distances are enabled.
-    alignment : Any
-        Alignment configuration object.
-    equilibration_time : float
-        Equilibration offset value.
-    equilibration_unit : str
-        Equilibration offset unit.
-
-    Returns
-    -------
-    dict[str, Any]
-        JSON-serializable payload covering the effective cache identity.
-    """
-
-    if hasattr(alignment, "to_dict"):
-        alignment_payload = alignment.to_dict()
-    elif isinstance(alignment, BaseModel):
-        alignment_payload = alignment.model_dump(mode="json")
-    else:
-        alignment_payload = {
-            "enabled": getattr(alignment, "enabled", False),
-            "reference_mode": getattr(alignment, "reference_mode", None),
-            "reference_frame": getattr(alignment, "reference_frame", None),
-            "selection": getattr(alignment, "selection", None),
-            "centroid_selection": getattr(alignment, "centroid_selection", None),
-            "reference_file": str(getattr(alignment, "reference_file", None)),
-        }
-
-    pair_payloads = [
-        {
-            "selection_a": selection_a,
-            "selection_b": selection_b,
-            "threshold": threshold,
-        }
-        for (selection_a, selection_b), threshold in zip(pairs, thresholds, strict=True)
-    ]
-
-    return {
-        "pairs": pair_payloads,
-        "use_pbc": use_pbc,
-        "alignment": alignment_payload,
-        "equilibration": {
-            "time": equilibration_time,
-            "unit": equilibration_unit,
-        },
-    }
-
-
-def _make_distance_calculator_settings_fingerprint(settings_payload: dict[str, Any]) -> str:
-    """Build a short deterministic fingerprint for calculator cache identity.
-
-    Parameters
-    ----------
-    settings_payload : dict[str, Any]
-        Canonical cache-identity payload from
-        :func:`_make_distance_calculator_settings_payload`.
-
-    Returns
-    -------
-    str
-        First 8 hexadecimal characters of the SHA-256 digest.
-    """
-
-    canonical = json.dumps(settings_payload, sort_keys=True, default=str)
-    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    return digest[:8]
-
-
-def _distance_calculator_metadata_path(result_path: Path) -> Path:
-    """Return the cache-metadata sidecar path for a result file.
-
-    Parameters
-    ----------
-    result_path : Path
-        Result JSON path.
-
-    Returns
-    -------
-    Path
-        Sidecar metadata path that stores strict cache identity.
-    """
-
-    return result_path.with_suffix(f"{result_path.suffix}.meta.json")
 
 
 # ---------------------------------------------------------------------------
@@ -499,162 +280,6 @@ class DistancesSettings(BaseModel):
             reference_mode=self.alignment_mode,
             reference_frame=self.alignment_frame,
             selection=self.alignment_selection,
-        )
-
-
-# ---------------------------------------------------------------------------
-# DistanceCalculator — public API for cross-plugin use
-# ---------------------------------------------------------------------------
-
-
-class DistanceCalculator:
-    """Calculator for distance analysis with proper statistics.
-
-    This class handles the distance analysis workflow:
-
-    - Load trajectories from config
-    - Apply the equilibration offset
-    - Optionally align the trajectory to remove rotational drift
-    - Compute PBC-aware distances for specified atom pairs
-    - Calculate distributions and statistics
-
-    This compatibility façade preserves the current public API while delegating
-    trajectory-native work to the same MDAnalysis-compatible pair-distance
-    kernel used by the plugin path.
-
-    Parameters
-    ----------
-    config : SimulationConfig
-        PolyzyMD simulation configuration.
-    pairs : sequence of tuple[str, str]
-        List of ``(selection1, selection2)`` pairs to analyze.
-    equilibration : str, optional
-        Equilibration time to skip. Default is ``"0ns"``.
-    thresholds : sequence of float or float, optional
-        Distance thresholds for contact analysis (Angstroms).
-    use_pbc : bool, optional
-        If True (default), use periodic boundary conditions.
-    alignment : AlignmentConfig, optional
-        Trajectory alignment configuration.
-    """
-
-    def __init__(
-        self,
-        config: "SimulationConfig",
-        pairs: Sequence[tuple[str, str]],
-        equilibration: str = "0ns",
-        thresholds: Sequence[float | None] | float | None = None,
-        use_pbc: bool = True,
-        alignment: Any | None = None,
-        settings_tag: str | None = None,
-    ) -> None:
-        from polyzymd.analyses.shared.alignment import AlignmentConfig
-        from polyzymd.analyses.shared.loader import _require_mdanalysis
-
-        _require_mdanalysis("distance analysis")
-
-        self.config = config
-        self.pairs = list(pairs)
-
-        # Normalize thresholds to a list matching pairs length
-        if thresholds is None:
-            self.thresholds: list[float | None] = [None] * len(self.pairs)
-        elif isinstance(thresholds, (int, float)):
-            self.thresholds = [float(thresholds)] * len(self.pairs)
-        else:
-            thresholds_list = list(thresholds)
-            if len(thresholds_list) != len(self.pairs):
-                raise ValueError(
-                    f"thresholds length ({len(thresholds_list)}) must match "
-                    f"pairs length ({len(self.pairs)})"
-                )
-            self.thresholds = thresholds_list
-
-        # PBC and alignment settings
-        self._use_pbc = use_pbc
-        self._alignment = alignment if alignment is not None else AlignmentConfig()
-
-        # Parse equilibration time
-        eq_value, eq_unit = parse_time_string(equilibration)
-        self.equilibration_time = eq_value
-        self.equilibration_unit = eq_unit
-
-        self._cache_settings_payload = _make_distance_calculator_settings_payload(
-            pairs=self.pairs,
-            thresholds=self.thresholds,
-            use_pbc=self._use_pbc,
-            alignment=self._alignment,
-            equilibration_time=self.equilibration_time,
-            equilibration_unit=self.equilibration_unit,
-        )
-        self._settings_fingerprint = _make_distance_calculator_settings_fingerprint(
-            self._cache_settings_payload
-        )
-
-        # Initialize loader
-        self._loader = TrajectoryLoader(config)
-        self._config_hash = compute_config_hash(config)
-        self._settings_tag = settings_tag or self._settings_fingerprint
-
-    def _write_cache_metadata(self, result_file: Path) -> None:
-        """Persist strict cache-identity metadata next to a legacy cache file.
-
-        Parameters
-        ----------
-        result_file : Path
-            Result JSON path used by cache-identity regression tests.
-        """
-
-        metadata_path = _distance_calculator_metadata_path(result_file)
-        metadata = {
-            "settings_fingerprint": self._settings_fingerprint,
-            "settings_payload": self._cache_settings_payload,
-        }
-        metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-
-    def _load_cached_result(self, result_file: Path) -> DistanceReplicatePayload | None:
-        """Return a legacy cache only when strict identity metadata matches.
-
-        Parameters
-        ----------
-        result_file : Path
-            Legacy distance cache path.
-
-        Returns
-        -------
-        DistanceReplicatePayload or None
-            Cached payload when compatible, otherwise ``None``.
-        """
-
-        from polyzymd.analyses._framework.cache_identity import validate_config_hash
-
-        result = DistanceReplicatePayload.load(result_file)
-        if not validate_config_hash(result.config_hash, self.config):
-            return None
-        metadata_path = _distance_calculator_metadata_path(result_file)
-        if not metadata_path.exists():
-            return None
-        try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-        if metadata.get("settings_fingerprint") != self._settings_fingerprint:
-            return None
-        return result
-
-    def _make_result_filename(self) -> str:
-        """Generate filename for result JSON.
-
-        Includes analysis settings that affect results to ensure cache
-        invalidation when settings change.
-        """
-        return _make_distance_result_filename(
-            pairs=self.pairs,
-            equilibration_time=self.equilibration_time,
-            equilibration_unit=self.equilibration_unit,
-            use_pbc=self._use_pbc,
-            alignment=self._alignment,
-            settings_tag=self._settings_tag,
         )
 
 

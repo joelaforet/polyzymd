@@ -1,8 +1,7 @@
 """Distance plotting helpers.
 
 Private module — extracted from the main plugin to keep ``__init__.py``
-focused on the ``Analysis`` lifecycle (compute / aggregate / compare) and the
-cross-plugin ``DistanceCalculator`` API.
+focused on the ``Analysis`` lifecycle (compute / aggregate / compare).
 
 All functions are called exclusively from ``DistanceAnalysis.plot()``.
 """
