@@ -48,7 +48,7 @@ def filter_conditions(
                     f"  Excluding '{cond.label}': no polymer atoms found with selection "
                     f"'{analysis._effective_polymer_selection(resolved)}'"
                 )
-        except (AttributeError, ValueError, KeyError, OSError) as e:
+        except (PolymerTopologyUnavailableError, AttributeError, KeyError, OSError) as e:
             logger.warning(f"  Error checking condition '{cond.label}': {e} — including anyway")
             valid.append(cond)
 

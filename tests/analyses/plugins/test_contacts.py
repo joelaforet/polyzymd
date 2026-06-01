@@ -1644,6 +1644,52 @@ class TestFilterConditions:
         result = analysis.filter_conditions([cond])
         assert len(result) == 1  # Included because of error (fail-open)
 
+    def test_missing_config_engine_raises_value_error(self, tmp_path):
+        """Missing engine configuration should not be swallowed by fail-open filtering."""
+        from polyzymd.analyses.base import Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis
+
+        analysis = ContactsAnalysis()
+        run_dir = tmp_path / "run_1"
+        run_dir.mkdir()
+
+        mock_sim_config = MagicMock()
+        del mock_sim_config.engine
+        mock_sim_config.output.projects_directory = tmp_path / "projects"
+        mock_sim_config.get_working_directory.return_value = run_dir
+        cond = Condition(
+            label="MissingEngine",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1,),
+            sim_config=mock_sim_config,
+        )
+
+        with pytest.raises(ValueError, match="non-empty string engine"):
+            analysis.filter_conditions([cond])
+
+    def test_invalid_config_engine_raises_value_error(self, tmp_path):
+        """Unknown engine configuration should not be swallowed by fail-open filtering."""
+        from polyzymd.analyses.base import Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis
+
+        analysis = ContactsAnalysis()
+        run_dir = tmp_path / "run_1"
+        run_dir.mkdir()
+
+        mock_sim_config = MagicMock()
+        mock_sim_config.engine = "namd"
+        mock_sim_config.output.projects_directory = tmp_path / "projects"
+        mock_sim_config.get_working_directory.return_value = run_dir
+        cond = Condition(
+            label="InvalidEngine",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1,),
+            sim_config=mock_sim_config,
+        )
+
+        with pytest.raises(ValueError, match="Unknown engine"):
+            analysis.filter_conditions([cond])
+
     def test_missing_topology_includes_condition(self, tmp_path):
         """Conditions are fail-open when no replicate topology can be inspected."""
         from polyzymd.analyses.base import Condition
