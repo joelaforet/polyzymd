@@ -400,7 +400,7 @@ def default_scalar_comparison(
 ) -> ComparisonResult:
     """Run the framework scalar comparison statistics pipeline.
 
-    This utility converts condition-level scalar metrics into the legacy
+    This utility converts condition-level scalar metrics into the framework
     ``ComparisonResult`` statistical model used internally by the framework and
     by tests of the statistical helpers. Built-in MDAnalysis plugins should
     expose canonical comparison artifacts; the artifact comparison layer calls

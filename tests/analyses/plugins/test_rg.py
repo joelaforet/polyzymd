@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime
 from types import ModuleType, SimpleNamespace
@@ -31,11 +32,6 @@ from polyzymd.analyses.rg._mda import (
     RG_FRAGMENT_POLICY_WARNING,
     RG_PBC_POLICY_WARNING,
     compute_rg_run,
-)
-from polyzymd.analyses.rg._models import (
-    RgConditionPayload,
-    RgReplicatePayload,
-    RgRunAggregatePayload,
 )
 from polyzymd.analyses.rg._plotters import (
     _load_condition_aggregated,
@@ -690,7 +686,7 @@ def test_fragment_mode_lifecycle_records_structured_topology_provenance(
 
 
 def test_aggregate_rejects_noncanonical_inputs(tmp_path) -> None:
-    """Rg aggregation should reject non-canonical RgReplicatePayload inputs with recompute guidance."""
+    """Rg aggregation should reject non-canonical inputs with recompute guidance."""
 
     analysis = RgAnalysis()
     settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
@@ -701,17 +697,7 @@ def test_aggregate_rejects_noncanonical_inputs(tmp_path) -> None:
         settings=settings,
         equilibration="0ns",
     )
-    noncanonical = RgReplicatePayload(
-        config_hash="hash",
-        polyzymd_version="test",
-        replicate=1,
-        equilibration_time=0.0,
-        equilibration_unit="ns",
-        selection_string="protein",
-        run_results=[],
-        n_frames_total=1,
-        n_frames_used=1,
-    )
+    noncanonical = {"analysis_type": "rg_replicate", "replicate": 1, "run_results": []}
 
     with pytest.raises(TypeError, match="Non-canonical Rg replicate caches are incompatible"):
         analysis.aggregate(ctx, [noncanonical])
@@ -935,38 +921,20 @@ def test_plot_rejects_non_artifact_aggregated_result_from_disk(tmp_path) -> None
     analysis_dir = tmp_path / "analysis" / "control" / "rg"
     aggregated_dir = analysis_dir / "aggregated"
     aggregated_dir.mkdir(parents=True)
-    noncanonical_run = RgRunAggregatePayload(
-        config_hash="hash",
-        polyzymd_version="test",
-        replicate=None,
-        equilibration_time=0.0,
-        equilibration_unit="ns",
-        selection_string="protein",
-        replicates=[1, 2],
-        n_replicates=2,
-        run_label="protein_rg",
-        selection="protein",
-        overall_mean=1.0,
-        overall_sem=0.0,
-        overall_median=1.0,
-        per_replicate_means=[1.0, 1.0],
-        per_replicate_stds=[0.0, 0.0],
-        per_replicate_medians=[1.0, 1.0],
-    )
-    noncanonical_payload = RgConditionPayload(
-        config_hash="hash",
-        polyzymd_version="test",
-        replicate=None,
-        equilibration_time=0.0,
-        equilibration_unit="ns",
-        selection_string="protein",
-        replicates=[1, 2],
-        n_replicates=2,
-        run_results=[noncanonical_run],
-    )
-    (aggregated_dir / "result.json").write_text(
-        noncanonical_payload.model_dump_json(), encoding="utf-8"
-    )
+    noncanonical_payload = {
+        "analysis_type": "rg_aggregated",
+        "replicates": [1, 2],
+        "n_replicates": 2,
+        "run_results": [
+            {
+                "run_label": "protein_rg",
+                "selection": "protein",
+                "overall_mean": 1.0,
+                "per_replicate_means": [1.0, 1.0],
+            }
+        ],
+    }
+    (aggregated_dir / "result.json").write_text(json.dumps(noncanonical_payload), encoding="utf-8")
     results_dir = tmp_path / "comparison"
     results_dir.mkdir()
     _make_comparison_result().save(results_dir / "result.json")

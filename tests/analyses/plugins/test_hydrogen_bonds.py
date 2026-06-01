@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 from pathlib import Path
@@ -605,14 +606,19 @@ def test_load_aggregated_result_ignores_noncanonical_json(tmp_path: Path) -> Non
     analysis = HydrogenBondsAnalysis()
     aggregated_dir = tmp_path / "aggregated"
     aggregated_dir.mkdir()
-    noncanonical_payload = HydrogenBondConditionPayload(
-        settings_fingerprint=_settings_hash(HydrogenBondSettings()),
-        replicates=[1, 2],
-        n_replicates=2,
-        summaries=[_make_aggregated_summary("protein_polymer", 3.0, 0.2, [2.8, 3.2])],
-    )
+    noncanonical_payload = {
+        "analysis_type": "hbonds_aggregated",
+        "settings_fingerprint": _settings_hash(HydrogenBondSettings()),
+        "replicates": [1, 2],
+        "n_replicates": 2,
+        "summaries": [
+            _make_aggregated_summary("protein_polymer", 3.0, 0.2, [2.8, 3.2]).model_dump(
+                mode="json"
+            )
+        ],
+    }
     (aggregated_dir / "noncanonical_summary.json").write_text(
-        noncanonical_payload.model_dump_json(), encoding="utf-8"
+        json.dumps(noncanonical_payload), encoding="utf-8"
     )
 
     assert analysis._load_aggregated_result(aggregated_dir) is None
@@ -1034,9 +1040,9 @@ def test_load_replicate_result_ignores_noncanonical_custom_cache(tmp_path: Path)
     """Non-canonical custom hbonds_eq caches should not be active after MDA migration."""
     run_dir = tmp_path / "run_1"
     run_dir.mkdir()
-    noncanonical_payload = HydrogenBondReplicatePayload(replicate=1, summaries=[])
+    noncanonical_payload = {"analysis_type": "hbonds_replicate", "replicate": 1, "summaries": []}
     (run_dir / "hbonds_eq0ns_deadbeef.json").write_text(
-        noncanonical_payload.model_dump_json(), encoding="utf-8"
+        json.dumps(noncanonical_payload), encoding="utf-8"
     )
     analysis = HydrogenBondsAnalysis()
 
@@ -2869,25 +2875,23 @@ def test_plot_rejects_noncanonical_replicate_cache_from_disk(tmp_path: Path) -> 
         ),
     )
 
-    noncanonical_payload = HydrogenBondReplicatePayload(
-        config_hash="cfg123",
-        replicate=1,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="chainid A",
-        summaries=[
-            HydrogenBondReplicateSummary(
-                name="protein_polymer",
-                mode="between",
-                group_names=["protein", "polymer"],
-                n_frames_used=3,
-                mean_hbonds_per_frame=2.0,
-                fraction_frames_with_any_hbond=0.5,
-                counts_per_frame=[1, 2, 3],
-            )
+    noncanonical_payload = {
+        "analysis_type": "hbonds_replicate",
+        "config_hash": "cfg123",
+        "replicate": 1,
+        "summaries": [
+            {
+                "name": "protein_polymer",
+                "mode": "between",
+                "group_names": ["protein", "polymer"],
+                "n_frames_used": 3,
+                "mean_hbonds_per_frame": 2.0,
+                "fraction_frames_with_any_hbond": 0.5,
+                "counts_per_frame": [1, 2, 3],
+            }
         ],
-    )
-    (run_dir / "result.json").write_text(noncanonical_payload.model_dump_json(), encoding="utf-8")
+    }
+    (run_dir / "result.json").write_text(json.dumps(noncanonical_payload), encoding="utf-8")
 
     ctx = PlotContext(
         conditions=[condition],
@@ -4735,17 +4739,10 @@ class TestLoadReplicateResult:
         run_dir = tmp_path / "run_1"
         run_dir.mkdir()
 
-        rep_result = HydrogenBondReplicatePayload(
-            config_hash="abc123",
-            replicate=1,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="chainid A",
-            summaries=[],
-            composition_entries=[],
-        )
         cache_path = run_dir / "hbonds_eq10ns_deadbeef.json"
-        cache_path.write_text(rep_result.model_dump_json())
+        cache_path.write_text(
+            json.dumps({"analysis_type": "hbonds_replicate", "replicate": 1, "summaries": []})
+        )
 
         analysis = HydrogenBondsAnalysis()
         loaded = analysis._load_replicate_result(run_dir)
@@ -4773,16 +4770,9 @@ class TestLoadReplicateResult:
         run_dir = tmp_path / "run_1"
         run_dir.mkdir()
 
-        rep_result = HydrogenBondReplicatePayload(
-            config_hash="abc123",
-            replicate=1,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="chainid A",
-            summaries=[],
-            composition_entries=[],
+        json_content = json.dumps(
+            {"analysis_type": "hbonds_replicate", "replicate": 1, "summaries": []}
         )
-        json_content = rep_result.model_dump_json()
 
         (run_dir / "hbonds_eq10ns_aaaa1111.json").write_text(json_content)
         (run_dir / "hbonds_eq10ns_bbbb2222.json").write_text(json_content)
@@ -4797,27 +4787,15 @@ class TestLoadReplicateResult:
         run_dir = tmp_path / "run_1"
         run_dir.mkdir()
 
-        eq10_result = HydrogenBondReplicatePayload(
-            config_hash="eq10_hash",
-            replicate=1,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="chainid A",
-            summaries=[],
-            composition_entries=[],
+        eq10_result = json.dumps(
+            {"analysis_type": "hbonds_replicate", "config_hash": "eq10_hash", "replicate": 1}
         )
-        eq20_result = HydrogenBondReplicatePayload(
-            config_hash="eq20_hash",
-            replicate=1,
-            equilibration_time=20.0,
-            equilibration_unit="ns",
-            selection_string="chainid A",
-            summaries=[],
-            composition_entries=[],
+        eq20_result = json.dumps(
+            {"analysis_type": "hbonds_replicate", "config_hash": "eq20_hash", "replicate": 1}
         )
 
-        (run_dir / "hbonds_eq10ns_aaaa1111.json").write_text(eq10_result.model_dump_json())
-        (run_dir / "hbonds_eq20ns_bbbb2222.json").write_text(eq20_result.model_dump_json())
+        (run_dir / "hbonds_eq10ns_aaaa1111.json").write_text(eq10_result)
+        (run_dir / "hbonds_eq20ns_bbbb2222.json").write_text(eq20_result)
 
         analysis = HydrogenBondsAnalysis()
         loaded = analysis._load_replicate_result(run_dir)
@@ -4829,17 +4807,10 @@ class TestLoadReplicateResult:
         run_dir = tmp_path / "run_1"
         run_dir.mkdir()
 
-        rep_result = HydrogenBondReplicatePayload(
-            config_hash="abc123",
-            replicate=1,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="chainid A",
-            summaries=[],
-            composition_entries=[],
-        )
         cache_path = run_dir / "hbonds_eq10ns_deadbeef.json"
-        cache_path.write_text(rep_result.model_dump_json())
+        cache_path.write_text(
+            json.dumps({"analysis_type": "hbonds_replicate", "replicate": 1, "summaries": []})
+        )
 
         analysis = HydrogenBondsAnalysis()
         with patch.object(Path, "glob", autospec=True, side_effect=OSError("Permission denied")):
