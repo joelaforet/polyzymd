@@ -77,10 +77,10 @@ class BaseAnalysisResult(BaseModel, ABC):
        and ``selection_string`` have sensible defaults for analyzers that
        operate without full config context (e.g., low-level ``ContactAnalyzer``).
 
-    6. **Backward compatibility** — if migrating from a non-canonical format, keep
-       remapping local to the active result class with a
-       ``model_validator(mode="before")`` and cover it with focused
-       regression tests.
+    6. **Canonical artifacts** — built-in trajectory-native plugins persist
+       ``ReplicateArtifact`` and ``ConditionArtifact`` envelopes. Domain
+       Pydantic models should describe payload entries or custom comparison
+       outputs, not alternate aggregate cache files.
 
     Attributes
     ----------

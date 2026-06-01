@@ -35,7 +35,7 @@ Delete items that do not apply, or mark them `N/A` with a short reason.
   module or one package with a public `__init__.py`.
 - [ ] The public plugin class subclasses `Analysis` and defines `name` and
   `Settings`.
-- [ ] Advanced helper files such as `_mda.py`, `_plotters.py`, `_results.py`, and
+- [ ] Advanced helper files such as `_mda.py`, `_plotters.py`, `_models.py`, and
   `_formatters.py` exist only when they have clear responsibilities.
 - [ ] The plugin name is stable, lowercase, and matches CLI/config usage.
 

@@ -45,7 +45,7 @@ shape.
   NPZ arrays, CSV tables, and other bulky outputs beside artifacts without
   bloating JSON.
 - [Convert a plugin into an advanced package](advanced_package.md) — split a
-  single-file plugin into `_mda.py`, `_plotters.py`, `_results.py`, or
+  single-file plugin into `_mda.py`, `_plotters.py`, `_models.py`, or
   `_formatters.py` helpers when reviewability improves.
 
 ## Verify

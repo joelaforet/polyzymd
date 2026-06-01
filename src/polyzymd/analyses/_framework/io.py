@@ -12,6 +12,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("polyzymd.analyses")
 
+_STRICT_CANONICAL_AGGREGATE_ANALYSES = frozenset(
+    {
+        "catalytic_triad",
+        "contacts",
+        "distances",
+        "hydrogen_bonds",
+        "rg",
+        "rmsd",
+        "rmsf",
+        "sasa",
+        "secondary_structure",
+    }
+)
+
 
 def load_aggregated_result(analysis: Any, aggregated_dir: Path) -> Any:
     """Load the aggregated result from disk.
@@ -55,6 +69,11 @@ def deserialize_result(analysis: Any, path: Path) -> Any:
         artifact = _try_load_mda_condition_artifact(analysis, path.parent, path, text)
         if artifact is not None:
             return artifact
+    if getattr(analysis, "name", None) in _STRICT_CANONICAL_AGGREGATE_ANALYSES:
+        raise ValueError(
+            f"{analysis.name}: aggregate result at {path} is not a canonical MDA "
+            "ConditionArtifact. Remove stale legacy JSON caches and recompute this analysis."
+        )
     result_cls = type(analysis).AggregatedResultClass
     if result_cls is not None:
         if hasattr(result_cls, "load"):

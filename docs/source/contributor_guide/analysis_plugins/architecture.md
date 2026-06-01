@@ -119,7 +119,7 @@ about maintainability, not status.
 | Choose this shape | When it fits | Typical structure |
 | --- | --- | --- |
 | **Simple plugin module** | The analysis has one clear metric, limited plotting, and straightforward settings. | One module with the `Analysis` subclass, settings, job construction, collection, metrics, and perhaps a small plot method. |
-| **Advanced plugin package** | The analysis has multiple jobs, richer results, several plot types, substantial sidecar handling, or custom comparison output. | A package with a public `__init__.py` for the `Analysis` subclass and private helper modules such as `_mda.py`, `_plotters.py`, `_results.py`, or `_formatters.py`. |
+| **Advanced plugin package** | The analysis has multiple jobs, richer artifact payloads, several plot types, substantial sidecar handling, or custom comparison output. | A package with a public `__init__.py` for the `Analysis` subclass and private helper modules such as `_mda.py`, `_plotters.py`, `_models.py`, or `_formatters.py`. |
 
 The same lifecycle applies in both cases. A package layout only moves complexity
 into smaller files; it does not change the public import boundary for

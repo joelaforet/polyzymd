@@ -42,7 +42,7 @@ shapes. Their private helper modules are useful examples of organization:
 
 - `_mda.py` for trajectory-native job and collector helpers;
 - `_plotters.py` for artifact-only plotting helpers;
-- `_results.py` for structured result models;
+- `_models.py` for domain schemas that validate artifact payload entries;
 - `_formatters.py` for substantial CLI formatting; and
 - plugin-specific modules such as `_comparison.py` or `_filters.py` only when a
   plugin has a genuine need.
@@ -70,20 +70,20 @@ src/polyzymd/analyses/solvent_shell/
 ├── __init__.py
 ├── _mda.py
 ├── _plotters.py
-├── _results.py
+├── _models.py
 └── _formatters.py
 ```
 
 Create only the files that have a current job. If your plugin has no custom
-formatting yet, skip `_formatters.py`. If artifacts and default comparison are
-enough, skip `_results.py`.
+formatting yet, skip `_formatters.py`. If plain artifact payload dictionaries
+are enough, skip `_models.py`.
 
 | File | Responsibility | Keep out |
 | --- | --- | --- |
 | `__init__.py` | Public plugin class, settings model, class variables, lifecycle wiring, and small orchestration methods. | Long MDAnalysis loops, large plot functions, bulky formatters. |
 | `_mda.py` | MDAnalysis job functions, `AnalysisBase`-compatible workers, collectors, sidecar writing, and helpers that translate runtime results into `ReplicateArtifact` objects. | Public plugin registration, CLI formatting, plot rendering. |
 | `_plotters.py` | Artifact-only plot helpers that load `ConditionArtifact`, `ComparisonArtifact`, and registered sidecars, then write figures. | Trajectory loading, MDAnalysis job execution, recomputation. |
-| `_results.py` | Pydantic models or typed result helpers when the plugin returns structured outputs beyond plain artifact payloads. | Raw MDAnalysis `Results` objects or large frame-by-frame arrays that belong in sidecars. |
+| `_models.py` | Pydantic domain schemas for validating nested artifact payload entries or custom comparison outputs. | Alternate aggregate cache loaders, raw MDAnalysis `Results` objects, or large frame-by-frame arrays that belong in sidecars. |
 | `_formatters.py` | Substantial text/table formatting used by `format()`. | Scientific computation, artifact writes, plotting side effects. |
 
 ## Keep `__init__.py` as the public facade
@@ -275,21 +275,21 @@ def plot_solvent_shell_summary(ctx: PlotContext) -> list[Path]:
 Keep all heavy plotting dependencies inside the plotting function. This preserves
 fast imports for users who only need configuration, discovery, or API docs.
 
-## Add `_results.py` only for structured outputs
+## Add `_models.py` only for domain schemas
 
-Use `_results.py` when the plugin has a custom Pydantic output model or typed
+Use `_models.py` when the plugin has a custom Pydantic output model or typed
 helpers that make aggregation and comparison clearer. Do not add a result model
 only to wrap one scalar already stored under `payload["metrics"]`.
 
-Good uses for `_results.py` include:
+Good uses for `_models.py` include:
 
 - custom comparison outputs with several tables or ranked entries;
 - aggregate summaries that need schema validation beyond artifact payloads;
 - small typed models that point to sidecars by reference; and
-- compatibility loaders for an established plugin-specific result format.
+- typed custom comparison models when the default comparison artifact is not enough.
 
 Large arrays, per-frame matrices, and event streams should remain in registered
-sidecars, with `_results.py` storing only validated summaries or sidecar
+sidecars, with `_models.py` storing only validated summaries or sidecar
 references.
 
 ## Add `_formatters.py` only for substantial formatting
@@ -323,7 +323,7 @@ that aggregation or comparison already produced.
    `polyzymd.analyses.shared` utilities.
 4. **Move plot helpers next.** Put plot data loading and rendering in
    `_plotters.py`. Verify plots read artifacts and sidecars only.
-5. **Move structured models only if needed.** Add `_results.py` when the plugin
+5. **Move structured models only if needed.** Add `_models.py` when the plugin
    has a custom result contract. Otherwise, keep relying on canonical artifacts.
 6. **Move formatting only if needed.** Add `_formatters.py` when CLI rendering is
    substantial enough to deserve its own file.
@@ -353,7 +353,7 @@ Before you consider the package split complete, check that:
 - Aggregation and comparison consume artifacts or validated structured outputs,
   not raw runtime containers.
 - `plot()` delegates to helpers that load cached artifacts and sidecars only.
-- `_results.py` and `_formatters.py` exist only if they have clear current
+- `_models.py` and `_formatters.py` exist only if they have clear current
   responsibilities.
 - Focused plugin tests pass after the file move.
 
