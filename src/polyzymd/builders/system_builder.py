@@ -29,16 +29,9 @@ LOGGER = logging.getLogger(__name__)
 class SystemBuilder:
     """Orchestrator for building complete simulation systems.
 
-    This class coordinates the 5-stage build pipeline:
-    1. Enzyme loading and partitioning
-    2. Substrate loading and charging
-    3. Polymer generation and packing
-    4. Solvation with water, ions, and co-solvents
-    5. Interchange creation with optimized combining
-
-    The Interchange.combine() optimization is used when polymers are present,
-    which significantly speeds up parameterization for systems with many
-    unique molecules.
+    This class coordinates enzyme loading, substrate charging, polymer
+    generation, solvation, and Interchange creation through the canonical
+    single-call OpenFF pathway.
 
     Example:
         >>> builder = SystemBuilder.from_config(config)
@@ -376,11 +369,7 @@ class SystemBuilder:
 
         return self._solvated_topology
 
-    def create_interchange(
-        self,
-        use_optimized_combining: bool = True,
-        use_batched_combining: bool = False,
-    ) -> Interchange:
+    def create_interchange(self) -> Interchange:
         """Create the OpenFF Interchange for simulation.
 
         By default, passes the entire solvated topology to a single
@@ -392,15 +381,6 @@ class SystemBuilder:
         Pre-computed charges are supplied via ``charge_from_molecules``
         for water, polymers, substrate, and co-solvents so that no
         AM1BCC calculations are triggered at runtime.
-
-        The legacy batched approach (multiple ``create_interchange()``
-        calls joined by ``Interchange.combine()``) is available via
-        ``use_batched_combining=True`` for A/B benchmarking.
-
-        Args:
-            use_optimized_combining: Unused, kept for backward compat.
-            use_batched_combining: If True, use the legacy batched +
-                serial-combine code path instead of a single call.
 
         Returns:
             OpenFF Interchange object.
@@ -426,12 +406,8 @@ class SystemBuilder:
             water_model = self._solvent_builder._composition.water_model
         water_mol = get_solvent_molecule(water_model)
 
-        if use_batched_combining:
-            LOGGER.info("Using BATCHED approach (multiple create + serial combine)")
-            self._interchange = self._create_interchange_batched(ff, water_mol)
-        else:
-            LOGGER.info("Using SINGLE-CALL approach (one create_interchange, no combine)")
-            self._interchange = self._create_interchange_single_call(ff, water_mol)
+        LOGGER.info("Using single-call Interchange creation")
+        self._interchange = self._create_interchange_single_call(ff, water_mol)
 
         LOGGER.info("Interchange created successfully")
 
@@ -596,169 +572,12 @@ class SystemBuilder:
 
         return interchange
 
-    def _create_interchange_batched(self, ff: ForceField, water_mol: Molecule) -> Interchange:
-        """Create Interchange using batched molecule processing with preserved order.
-
-        This implementation batches molecules by type for efficiency while preserving
-        the exact molecule order from self._solvated_topology. This is critical for
-        DCD trajectory compatibility - the atom order in the Interchange must match
-        the atom order in solvated_system.pdb.
-
-        Batching strategy:
-        1. Build an ``id(molecule) -> SMILES`` cache in ONE pass (avoids calling
-           ``to_smiles()`` three separate times per molecule).
-        2. Parameterize each unique molecule type ONCE (cache parameters).
-        3. Create individual Interchanges in original topology order, grouping
-           consecutive same-type molecules into single batches.
-        4. Combine Interchanges using an **adjacent-pair tree reduction** instead
-           of a serial left-fold.  This keeps the atom order identical to the
-           original topology while reducing the asymptotic cost of
-           ``Interchange.combine()`` from O(N²) to O(N log N).
-
-        Note:
-            When combining Interchanges from molecules parameterized by different
-            force fields (e.g., ff14SB for proteins + OpenFF 2.0 for small molecules),
-            you may see "Key collision with different parameters" warnings. This is
-            expected behavior - the same SMIRKS pattern (e.g., [#6X4:1]-[#1:2] for
-            C-H bonds) can have different parameters in different force fields.
-            OpenFF handles this by appending "_DUPLICATE" to the key, allowing both
-            parameter sets to coexist. See OpenFF's "Sharp Edges" documentation:
-            https://docs.openforcefield.org/projects/interchange/en/stable/using/edges.html
-
-        Args:
-            ff: OpenFF ForceField.
-            water_mol: Water molecule with pre-computed charges.
-
-        Returns:
-            Combined Interchange object.
-        """
-        LOGGER.info("Using batched Interchange creation (preserving molecule order)")
-
-        # Build helper mappings
-        smiles_to_name = self._build_molecule_name_mapping()
-        smiles_to_template = self._build_charge_template_mapping(water_mol)
-
-        # ── Step 0: Cache to_smiles() for every molecule in ONE pass ──
-        # molecule.to_smiles() is expensive; previous code called it 3×.
-        t0 = time.perf_counter()
-        mol_id_to_smiles: Dict[int, str] = {}
-        smiles_counts: Dict[str, int] = {}
-        first_mol_for_smiles: Dict[str, Molecule] = {}
-
-        for molecule in self._solvated_topology.molecules:
-            mid = id(molecule)
-            mol_smiles = molecule.to_smiles()
-            mol_id_to_smiles[mid] = mol_smiles
-            smiles_counts[mol_smiles] = smiles_counts.get(mol_smiles, 0) + 1
-            if mol_smiles not in first_mol_for_smiles:
-                first_mol_for_smiles[mol_smiles] = molecule
-
-        LOGGER.info(
-            f"SMILES cache built in {time.perf_counter() - t0:.1f}s "
-            f"({len(mol_id_to_smiles)} molecules, {len(smiles_counts)} unique types)"
-        )
-
-        # ── Step 1: Prepare per-type metadata (no parameterisation yet) ──
-        smiles_info: Dict[str, dict] = {}
-        for mol_smiles, count in smiles_counts.items():
-            display_name = smiles_to_name.get(mol_smiles, mol_smiles[:50] + "...")
-            LOGGER.info(f"  {display_name}: {count} instance(s)")
-
-            charge_from = []
-            if mol_smiles in smiles_to_template:
-                charge_from = [smiles_to_template[mol_smiles]]
-
-            smiles_info[mol_smiles] = {
-                "template": first_mol_for_smiles[mol_smiles],
-                "charge_from": charge_from,
-                "display_name": display_name,
-            }
-
-        # ── Step 2: Create Interchanges in ORIGINAL TOPOLOGY ORDER ──
-        # Group consecutive molecules of the same type into single batches.
-        t1 = time.perf_counter()
-        all_interchanges: List[Interchange] = []
-        interchange_names: List[str] = []
-
-        current_smiles: str | None = None
-        current_batch: List[Molecule] = []
-
-        def flush_batch():
-            """Create interchange for current batch and add to list."""
-            nonlocal current_batch, current_smiles
-            if not current_batch:
-                return
-
-            info = smiles_info[current_smiles]
-            display_name = info["display_name"]
-            charge_from = info["charge_from"]
-
-            LOGGER.debug(f"Creating Interchange for {len(current_batch)} {display_name}")
-
-            inc = ff.create_interchange(
-                topology=current_batch,
-                charge_from_molecules=charge_from,
-            )
-            all_interchanges.append(inc)
-            interchange_names.append(f"{len(current_batch)}x {display_name}")
-
-            current_batch = []
-
-        for molecule in self._solvated_topology.molecules:
-            mol_smiles = mol_id_to_smiles[id(molecule)]
-
-            if mol_smiles != current_smiles:
-                flush_batch()
-                current_smiles = mol_smiles
-
-            current_batch.append(molecule)
-
-        flush_batch()
-
-        t2 = time.perf_counter()
-        LOGGER.info(f"Created {len(all_interchanges)} Interchange batch(es) in {t2 - t1:.1f}s")
-        if len(interchange_names) <= 10:
-            LOGGER.info(f"  Batches: {', '.join(interchange_names)}")
-        else:
-            LOGGER.info(f"  First 5: {', '.join(interchange_names[:5])}")
-            LOGGER.info(f"  Last 5: {', '.join(interchange_names[-5:])}")
-
-        if not all_interchanges:
-            raise RuntimeError("No molecules found in solvated topology")
-
-        # ── Step 3: Serial combine (preserving order) ──
-        # OpenFF Interchange.combine() creates _DUPLICATE parameter keys when
-        # SMIRKS patterns resolve to different force constants in different
-        # molecular contexts.  Combining two objects that *both* contain
-        # _DUPLICATE keys raises UnsupportedCombinationError, which rules out
-        # tree-based (pairwise) reduction.  We therefore keep the serial
-        # left-fold: combined = ((A + B) + C) + D.
-        #
-        # The O(N²) cost is mitigated by having very few batches (one per
-        # contiguous same-SMILES run), typically 5-10 for a solvated system.
-        combined = all_interchanges[0]
-        for idx, inc in enumerate(all_interchanges[1:], 1):
-            t_step = time.perf_counter()
-            combined = combined.combine(inc)
-            elapsed = time.perf_counter() - t_step
-            LOGGER.info(
-                f"  Combined batch {idx}/{len(all_interchanges) - 1} "
-                f"({interchange_names[idx]}) in {elapsed:.1f}s"
-            )
-
-        t3 = time.perf_counter()
-        LOGGER.info(f"Interchange combination complete ({t3 - t2:.1f}s total)")
-
-        # Reset box vectors
-        combined.box = self._solvated_topology.box_vectors
-
-        return combined
-
     def _renumber_chains(self, topology: Topology) -> None:
-        """Re-number chain IDs in the topology.
+        """Normalize chain IDs before canonical PDB identifier assignment.
 
-        Note: This is the legacy method. For PDB-compliant output, use
-        _assign_pdb_identifiers() which is called by save_topology().
+        This lightweight normalization keeps intermediate OpenFF metadata
+        deterministic before ``_assign_pdb_identifiers()`` applies the
+        canonical PolyzyMD chain convention during topology export.
 
         Args:
             topology: Topology to modify.
@@ -1078,8 +897,7 @@ class SystemBuilder:
             self.save_topology(pdb_path)
 
         # 6. Create Interchange
-        use_optimized = config.polymers is not None and config.polymers.enabled
-        self.create_interchange(use_optimized_combining=use_optimized)
+        self.create_interchange()
 
         return self._interchange
 
