@@ -350,12 +350,18 @@ def discover_files(sim_dir: Path, metadata: SimMetadata) -> None:
 
     if segment_dirs:
         # Daisy-chain: production_N/production_N_trajectory.dcd
+        missing_trajectories = []
         for seg_dir in segment_dirs:
             traj = seg_dir / f"{seg_dir.name}_trajectory.dcd"
             if traj.exists():
                 trajectories.append(traj)
             else:
-                logger.warning(f"  Missing trajectory: {traj}")
+                missing_trajectories.append(traj)
+        if missing_trajectories:
+            missing = "\n".join(f"  - {path}" for path in missing_trajectories)
+            raise FileNotFoundError(
+                "Missing expected daisy-chain segment trajectory file(s):\n" f"{missing}"
+            )
     else:
         # Single production: production/production_trajectory.dcd
         traj = sim_dir / "production" / "production_trajectory.dcd"
@@ -980,7 +986,8 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
             if traj_path.exists():
                 logger.info(f"  OK: Trajectory accessible: {prod_dir.name}/{traj_name}")
             else:
-                logger.warning(f"  WARN: Trajectory not found at expected path: {traj_path}")
+                logger.error(f"  FAIL: Trajectory not found at expected path: {traj_path}")
+                success = False
 
     # Try loading config with PolyzyMD (optional — may not be installed)
     try:
