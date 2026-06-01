@@ -1749,7 +1749,7 @@ def convert_simulation(
     # Step 2: Discover files
     try:
         discover_files(sim_dir, metadata)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         logger.error(f"  SKIP: {e}")
         return False
 

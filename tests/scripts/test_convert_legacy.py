@@ -757,6 +757,66 @@ def test_convert_simulation_returns_false_when_daisy_chain_segment_missing(
     assert success is False
 
 
+def test_convert_simulation_returns_false_for_empty_trajectory_daisy_chain_segment(
+    convert_legacy: ModuleType,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    """Conversion should skip empty daisy-chain trajectories before output writes."""
+    caplog.set_level("ERROR", logger=convert_legacy.logger.name)
+    sim_dir = tmp_path / (
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1"
+    )
+    prod0 = sim_dir / "production_0"
+    prod1 = sim_dir / "production_1"
+    prod0.mkdir(parents=True)
+    prod1.mkdir()
+    (prod0 / "production_0_topology.pdb").write_text("ATOM\n", encoding="utf-8")
+    (prod0 / "production_0_trajectory.dcd").write_bytes(b"DCD")
+    (prod1 / "production_1_trajectory.dcd").write_bytes(b"")
+    converted = tmp_path / "converted"
+
+    success = convert_legacy.convert_simulation(
+        sim_dir=sim_dir,
+        output_dir=converted,
+        reference_pdb=tmp_path / "reference.pdb",
+    )
+
+    assert success is False
+    assert not (converted / sim_dir.name).exists()
+    assert "SKIP" in caplog.text
+    assert "Empty daisy-chain trajectory" in caplog.text
+    assert "production_1/production_1_trajectory.dcd" in caplog.text
+
+
+def test_convert_simulation_returns_false_for_empty_trajectory_single_production(
+    convert_legacy: ModuleType,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    """Conversion should skip empty single-production trajectories before output writes."""
+    caplog.set_level("ERROR", logger=convert_legacy.logger.name)
+    sim_dir = tmp_path / (
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1"
+    )
+    prod = sim_dir / "production"
+    prod.mkdir(parents=True)
+    (prod / "production_topology.pdb").write_text("ATOM\n", encoding="utf-8")
+    (prod / "production_trajectory.dcd").write_bytes(b"")
+    converted = tmp_path / "converted"
+
+    success = convert_legacy.convert_simulation(
+        sim_dir=sim_dir,
+        output_dir=converted,
+        reference_pdb=tmp_path / "reference.pdb",
+    )
+
+    assert success is False
+    assert not (converted / sim_dir.name).exists()
+    assert "SKIP" in caplog.text
+    assert "Empty production trajectory" in caplog.text
+
+
 def test_conversion_guidance_uses_canonical_compare_commands(
     convert_legacy: ModuleType, caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
