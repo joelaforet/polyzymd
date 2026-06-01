@@ -1363,20 +1363,6 @@ def _source_result_files(output_dir: Path, replicates: Sequence[int]) -> list[tu
     ]
 
 
-def _legacy_source_result_files(value: Any) -> list[str]:
-    """Return source result file paths from current or historical metadata shapes."""
-
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        return []
-    paths: list[str] = []
-    for entry in value:
-        if isinstance(entry, Sequence) and not isinstance(entry, (str, bytes)) and len(entry) >= 2:
-            paths.append(str(entry[1]))
-        else:
-            paths.append(str(entry))
-    return paths
-
-
 def _combined_warnings(artifacts: Sequence[ReplicateArtifact]) -> list[str]:
     """Combine warnings from replicate artifacts in first-seen order."""
 
