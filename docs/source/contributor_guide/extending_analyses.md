@@ -49,11 +49,6 @@ The plugin is discovered automatically. Single-file plugins named
 `src/polyzymd/analyses/<name>/` both participate in discovery. No registry
 edits, decorators, or bootstrap imports are needed.
 
-The scaffold implementation still accepts the historical `style="measurement"`
-token for programmatic compatibility. That token only means the default
-single-file MDAnalysis-native scaffold; it does not refer to the removed
-scalar-measurement API and is not exposed as a `--style` CLI choice.
-
 Use an advanced package when your plugin needs a direct `AnalysisBase` helper,
 sidecars, multiple metrics, custom aggregation, or custom plotting:
 

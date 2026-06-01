@@ -693,12 +693,9 @@ builds an `MDAAnalysisJob.from_function()` job, returns a `ReplicateArtifact`
 with explicit `payload["metrics"]`, and relies on the default artifact
 aggregation path.
 
-Programmatic callers may still pass `style="measurement"` to
-`generate_scaffold()` as a historical compatibility token for this default
-single-file MDAnalysis-native scaffold. It is not a CLI style; omit `--style` to
-use the default scaffold.
+Omit `--style` to use the default single-file scaffold.
 
-`--advanced` and `--style dict` create a package at
+`--advanced` and `--style dict` create an advanced package scaffold at
 `src/polyzymd/analyses/<NAME>/` with lifecycle wiring in `__init__.py`, a
 lazy-imported `AnalysisBase` helper in `_mda.py`, and dict metrics stored in
 canonical artifacts.

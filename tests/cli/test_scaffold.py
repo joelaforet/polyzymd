@@ -289,10 +289,10 @@ class TestGenerateScaffold:
         assert "ScalarMeasurementAnalysis" not in text
         assert "SolventShellReplicateRunner" not in text
 
-    def test_measurement_style_token_uses_simple_mda_scaffold(self, tmp_path: Path):
+    def test_simple_style_uses_simple_mda_scaffold(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
-        created = generate_scaffold("solvent_shell", tmp_path, style="measurement")
+        created = generate_scaffold("solvent_shell", tmp_path, style="simple")
         plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
         analyses_root = tmp_path / "src" / "polyzymd" / "analyses"
         text = plugin_path.read_text(encoding="utf-8")
@@ -335,9 +335,17 @@ class TestStyleValidation:
     """Style parameter validation."""
 
     def test_valid_styles_constant(self):
-        assert "measurement" in VALID_STYLES
+        assert "simple" in VALID_STYLES
+        assert "measurement" not in VALID_STYLES
         assert "dict" in VALID_STYLES
         assert "pydantic" not in VALID_STYLES
+
+    def test_measurement_style_raises(self, tmp_path: Path):
+        _prepare_project(tmp_path)
+        legacy_style = "measure" + "ment"
+
+        with pytest.raises(ValueError, match="Invalid style"):
+            generate_scaffold("solvent_shell", tmp_path, style=legacy_style)
 
     def test_pydantic_style_raises(self, tmp_path: Path):
         _prepare_project(tmp_path)
@@ -397,7 +405,7 @@ class TestTemplateResources:
         simple_spec = ScaffoldSpec(
             name="strict_sample",
             class_name="StrictSample",
-            style="measurement",
+            style="simple",
         )
         advanced_spec = ScaffoldSpec(
             name="strict_sample",
@@ -421,7 +429,7 @@ class TestGeneratedCodeQuality:
     @pytest.mark.parametrize(
         ("name", "style", "expected_count"),
         [
-            ("solvent_shell", "measurement", 2),
+            ("solvent_shell", "simple", 2),
             ("scaffold_advanced_dict_e2e", "dict", 3),
         ],
     )
@@ -702,6 +710,15 @@ class TestNewAnalysisCLI:
         assert result.exit_code != 0
         assert "Invalid value" in result.output
 
+    def test_style_measurement_rejected(self, runner: CliRunner, cli):
+        legacy_style = "measure" + "ment"
+        result = runner.invoke(
+            cli,
+            ["solvent_shell", "--style", legacy_style, "--project-root", str(self.root)],
+        )
+        assert result.exit_code != 0
+        assert "Invalid value" in result.output
+
     def test_style_dict_explicit(self, runner: CliRunner, cli):
         result = runner.invoke(
             cli,
@@ -793,7 +810,7 @@ class TestNewAnalysisCLI:
     @pytest.mark.parametrize(
         ("plugin_name", "style_args", "stale_path_parts"),
         [
-            ("scaffold_force_measurement", [], ("scaffold_force_measurement.py",)),
+            ("scaffold_force_simple", [], ("scaffold_force_simple.py",)),
             (
                 "scaffold_force_advanced",
                 ["--style", "dict"],
@@ -906,7 +923,7 @@ class TestNewAnalysisCLI:
         assert "src/polyzymd/analyses/<NAME>/__init__.py" in result.output
         assert "only dict canonical" in result.output
         assert "artifacts are supported" in result.output
-        assert "--style measurement" not in result.output
+        assert f"--style {'measure' + 'ment'}" not in result.output
         assert "_runner.py" not in result.output
         assert "Advanced package scaffolds" in result.output
 

@@ -214,12 +214,12 @@ def _extract_job_metrics(result_payload: dict[str, Any]) -> dict[str, float]:
 
 
 def _metric_summary(summary: Any, metric_name: str) -> dict[str, Any]:
-    """Return one metric summary from an aggregated condition artifact.
+    """Return one metric summary from a condition artifact.
 
     Parameters
     ----------
     summary : Any
-        Condition artifact or dictionary payload.
+        Aggregated condition artifact from default MDA aggregation.
     metric_name : str
         Metric name to extract.
 
@@ -229,9 +229,10 @@ def _metric_summary(summary: Any, metric_name: str) -> dict[str, Any]:
         Summary statistics emitted by default MDA aggregation.
     """
 
-    payload = (
-        summary.payload if isinstance(summary, ConditionArtifact) else summary.get("payload", {})
-    )
+    if not isinstance(summary, ConditionArtifact):
+        message = "Expected a ConditionArtifact from default MDA aggregation."
+        raise PluginContractError(message)
+    payload = summary.payload
     metrics = payload.get("metrics", {})
     if metric_name not in metrics:
         aggregate_name = "{{ spec.name }} aggregate"

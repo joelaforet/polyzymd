@@ -3131,6 +3131,7 @@ def new_analysis(
     \b
       pixi run -e build pytest tests/analyses/plugins/test_<NAME>.py -v
     """
+    from polyzymd.cli._scaffold.models import DEFAULT_STYLE
     from polyzymd.cli.scaffold import generate_scaffold, validate_class_name, validate_name
 
     # Force needs scaffold-level ownership checks before registered-name rejection
@@ -3160,7 +3161,7 @@ def new_analysis(
         root = Path(project_root)
 
     try:
-        effective_style = style or "measurement"
+        effective_style = style or DEFAULT_STYLE
         created = generate_scaffold(
             name,
             root,

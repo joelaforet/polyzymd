@@ -20,7 +20,7 @@ import keyword
 import re
 from pathlib import Path
 
-from polyzymd.cli._scaffold.models import ADVANCED_STYLES, VALID_STYLES, ScaffoldSpec
+from polyzymd.cli._scaffold.models import ADVANCED_STYLES, DEFAULT_STYLE, VALID_STYLES, ScaffoldSpec
 from polyzymd.cli._scaffold.renderer import render_scaffold
 
 # ---------------------------------------------------------------------------
@@ -134,9 +134,9 @@ def _build_spec(
     class_name : str or None
         Optional PascalCase class prefix.
     style : str
-        Scaffold style name. ``"measurement"`` is a compatibility token for
-        the default single-file MDAnalysis-native scaffold; ``"dict"`` requests
-        an advanced package scaffold using canonical artifact payloads.
+        Scaffold style name. ``"simple"`` requests the default single-file
+        MDAnalysis-native scaffold; ``"dict"`` requests an advanced package
+        scaffold using canonical artifact payloads.
     advanced : bool, optional
         If True, request an advanced package scaffold.
 
@@ -150,8 +150,7 @@ def _build_spec(
     ValueError
         If any input is invalid.
     """
-    # Preserve the programmatic compatibility token while keeping advanced explicit
-    effective_style = "dict" if advanced and style == "measurement" else style
+    effective_style = "dict" if advanced and style == DEFAULT_STYLE else style
     if effective_style not in VALID_STYLES:
         raise ValueError(f"Invalid style '{style}'. Choose from: {', '.join(VALID_STYLES)}")
 
@@ -375,7 +374,7 @@ def generate_scaffold(
     project_root: Path,
     *,
     class_name: str | None = None,
-    style: str = "measurement",
+    style: str = DEFAULT_STYLE,
     advanced: bool = False,
     force: bool = False,
     dry_run: bool = False,
@@ -392,9 +391,8 @@ def generate_scaffold(
         PascalCase class prefix. Auto-derived from *name* when omitted, by
         default None.
     style : str, optional
-        ``"measurement"`` for the historical compatibility alias of the default
-        single-file MDAnalysis-native plugin, or ``"dict"`` for advanced
-        canonical artifacts, by default ``"measurement"``.
+        ``"simple"`` for the default single-file MDAnalysis-native plugin, or
+        ``"dict"`` for advanced canonical artifacts, by default ``"simple"``.
     advanced : bool, optional
         Request an advanced package scaffold, by default False.
     force : bool, optional

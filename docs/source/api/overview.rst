@@ -104,7 +104,6 @@ Analysis
 - :py:class:`~polyzymd.analyses.mda.artifacts.ComparisonArtifact` - Canonical comparison output for cross-condition results
 - :py:class:`~polyzymd.analyses.mda.store.ArtifactStore` - Canonical artifact persistence and loading helper
 - :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor for default comparisons
-- :py:class:`~polyzymd.analyses.distances.DistanceCalculator` - Inter-group distances
 - :py:class:`~polyzymd.analyses.contacts.ParallelContactAnalyzer` - Polymer-protein contacts
 
 Comparison
