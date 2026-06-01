@@ -959,6 +959,8 @@ class OutputConfig(BaseModel):
           naming_template: "{enzyme}_{substrate}_{temperature}K_run{replicate}"
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     # Directory configuration
     projects_directory: Path = Field(
         Path("."),
@@ -988,14 +990,7 @@ class OutputConfig(BaseModel):
     save_state_data: bool = Field(True, description="Save state data CSV")
     trajectory_format: str = Field("dcd", description="Trajectory file format")
 
-    # Legacy compatibility
-    base_directory: Path | None = Field(
-        None,
-        description="Deprecated: Use scratch_directory instead",
-        exclude=True,
-    )
-
-    @field_validator("projects_directory", "scratch_directory", "base_directory", mode="before")
+    @field_validator("projects_directory", "scratch_directory", mode="before")
     @classmethod
     def expand_env_vars_in_paths(cls, v: str | Path | None) -> Path | None:
         """Expand environment variables and ~ in path fields.
@@ -1005,13 +1000,6 @@ class OutputConfig(BaseModel):
         if v is None:
             return None
         return expand_path(Path(v))
-
-    @model_validator(mode="after")
-    def handle_legacy_base_directory(self) -> "OutputConfig":
-        """Handle legacy base_directory field for backwards compatibility."""
-        if self.base_directory is not None and self.scratch_directory is None:
-            self.scratch_directory = self.base_directory
-        return self
 
     @property
     def effective_scratch_directory(self) -> Path:

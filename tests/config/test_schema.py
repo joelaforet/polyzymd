@@ -319,11 +319,39 @@ class TestStatepointCoSolventExport:
         assert "cosolvent_urea_molarity" in sp
 
 
+class TestOutputConfig:
+    """Tests for output path configuration."""
+
+    def test_defaults_use_projects_as_effective_scratch(self):
+        """Default output settings should write scratch data under projects."""
+        from polyzymd.config.schema import OutputConfig
+
+        config = OutputConfig()
+
+        assert config.projects_directory == Path(".")
+        assert config.scratch_directory is None
+        assert config.effective_scratch_directory == Path(".")
+
+    def test_base_directory_field_is_rejected(self):
+        """OutputConfig should reject the removed base_directory field."""
+        from polyzymd.config.schema import OutputConfig
+
+        with pytest.raises(ValidationError, match="base_directory"):
+            OutputConfig(base_directory="/tmp/old-output")
+
+    def test_output_base_directory_yaml_data_is_rejected(self, minimal_config_data):
+        """SimulationConfig data should reject stale output.base_directory."""
+        minimal_config_data["output"] = {"base_directory": "/tmp/old-output"}
+
+        with pytest.raises(ValidationError, match="base_directory"):
+            SimulationConfig(**minimal_config_data)
+
+
 class TestEngineConfig:
     """Tests for engine configuration fields."""
 
     def test_default_engine_is_openmm(self, minimal_config_data):
-        """Default engine should be openmm for backward compatibility."""
+        """Default engine should be openmm."""
         config = SimulationConfig(**minimal_config_data)
         assert config.engine == "openmm"
 
