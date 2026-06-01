@@ -77,7 +77,7 @@ class PolymerBuilder:
 
     This class supports two generation modes:
 
-    1. Cached mode (legacy): Load pre-built SDF files from disk
+    1. Cached mode: Load pre-built SDF files from disk
        - Requires sdf_directory with pre-built polymer files
        - Filenames: {type_prefix}_seq={sequence}_{length}-mer_charged.sdf
 

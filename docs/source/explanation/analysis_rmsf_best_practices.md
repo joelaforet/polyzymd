@@ -149,8 +149,8 @@ multiple successful replicates. If only a subset of planned replicates is
 available, interpret the result as provisional and document which replicates
 contributed.
 
-Current RMSF outputs use the analysis artifact lifecycle rather than legacy
-top-level filenames. The stable entry points are:
+Current RMSF outputs use the analysis artifact lifecycle. The stable entry
+points are:
 
 - per-replicate result:
   `analysis/<sanitized_condition_label>/rmsf/run_<N>/result.json`
@@ -280,7 +280,7 @@ labeled accordingly.
 Contributors should keep RMSF documentation and downstream tooling aligned with
 the artifact lifecycle. Programmatic consumers should start from canonical
 artifact paths and follow payload or sidecar references rather than relying on
-legacy filenames or stale top-level fields.
+obsolete filenames or stale top-level fields.
 
 For default comparison results, condition summaries may be available under a
 comparison artifact payload such as

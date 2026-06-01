@@ -82,8 +82,8 @@ plugins:
 | `plot_settings` | mapping | no | see below | Plot customization — **how** to visualize |
 
 Unknown top-level keys raise a `ValueError` listing the invalid keys and valid
-alternatives. Use `plugins:` for analysis plugin settings; former legacy keys
-such as `analysis_settings:` are rejected.
+alternatives. Use `plugins:` for analysis plugin settings; unsupported keys such
+as `analysis_settings:` are rejected.
 
 ---
 
@@ -111,8 +111,7 @@ Each entry describes one simulation condition to include in the comparison.
 `equilibration_time` is interpreted as an absolute MDAnalysis trajectory
 timestamp when the loaded trajectory exposes finite frame times. This handles
 continuation runs where the first loaded segment may begin after 0 ps. If frame
-timestamps are unavailable, PolyzyMD falls back to the legacy behavior and treats
-the first loaded frame as time zero.
+timestamps are unavailable, PolyzyMD treats the first loaded frame as time zero.
 
 ## `mda_backend_policy`
 

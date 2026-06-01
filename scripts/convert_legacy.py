@@ -1303,14 +1303,16 @@ def generate_comparison_yaml(
 
     logger.info(
         f"\n  Next steps:"
-        f"\n    1. Review and edit comparison.yaml if needed"
+        f"\n    1. Review and edit {comparison_yaml_path} if needed"
         f"\n    2. Ensure enzyme PDB is at {comparison_dir}/structures/enzyme.pdb"
-        f"\n    3. Run analyses:"
-        f"\n       polyzymd compare run rmsf -c {comparison_yaml_path}"
-        f"\n       polyzymd compare run catalytic_triad -c {comparison_yaml_path}"
-        f"\n       polyzymd compare run contacts -c {comparison_yaml_path}"
-        f"\n    4. Generate all plots:"
-        f"\n       polyzymd compare plot-all -c {comparison_yaml_path}"
+        f"\n    3. Validate the comparison configuration:"
+        f"\n       polyzymd compare validate -f {comparison_yaml_path}"
+        f"\n    4. Run analyses:"
+        f"\n       polyzymd compare run rmsf -f {comparison_yaml_path}"
+        f"\n       polyzymd compare run catalytic_triad -f {comparison_yaml_path}"
+        f"\n       polyzymd compare run contacts -f {comparison_yaml_path}"
+        f"\n    5. Generate all plots:"
+        f"\n       polyzymd compare plot-all -f {comparison_yaml_path}"
     )
 
     return comparison_yaml_path
@@ -1725,17 +1727,14 @@ def main():
         elif do_conversion:
             logger.info(
                 f"\n  Next steps:"
-                f"\n    1. cd {output_dir}/<simulation_folder>"
-                f"\n    2. polyzymd analyze init"
-                f"\n    3. Edit analysis.yaml to enable desired analyses"
-                f"\n    4. polyzymd analyze run"
-                f"\n"
-                f"\n  For cross-condition comparison:"
-                f"\n    1. Re-run with --generate-comparison <dir> to auto-generate"
-                f"\n    2. Or manually: polyzymd compare init -n my_comparison"
-                f"\n    3. Edit comparison.yaml to point to each condition's config.yaml"
-                f"\n    4. polyzymd compare run <analysis_type>"
-                f"\n    5. polyzymd compare plot-all"
+                f"\n    1. Re-run with --generate-comparison <dir> to create comparison.yaml"
+                f"\n    2. Review comparison.yaml and point each condition to its config.yaml"
+                f"\n    3. Validate the comparison configuration:"
+                f"\n       polyzymd compare validate -f comparison.yaml"
+                f"\n    4. Run analyses by canonical plugin name:"
+                f"\n       polyzymd compare run <analysis_type> -f comparison.yaml"
+                f"\n    5. Generate figures:"
+                f"\n       polyzymd compare plot-all -f comparison.yaml"
             )
 
     # Exit code: success if no conversion was done, or all conversions passed

@@ -305,7 +305,7 @@ class PolymerConfig(BaseModel):
     """Configuration for polymer components.
 
     Supports two generation modes:
-    - "cached": Load pre-built polymer SDF files from sdf_directory (legacy)
+    - "cached": Load pre-built polymer SDF files from sdf_directory
     - "dynamic": Generate polymers on-the-fly using Polymerist from SMILES
 
     For dynamic mode, you must provide:

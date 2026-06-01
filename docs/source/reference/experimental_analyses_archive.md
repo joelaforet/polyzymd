@@ -41,22 +41,9 @@ clear any experimental cache directories for those plugins, and rerun the active
 replacement analysis from trajectories so the result metadata, cache identity,
 and comparison statistics all come from the current code.
 
-## Inspecting archived code
+## Current workflow
 
-To inspect the archived implementation, fetch tags and switch to the archive
-tag in a detached worktree state. If the tag is already present locally, the
-`git fetch` command is optional.
-
-```bash
-git fetch origin --tags
-git switch --detach archive_experimental_analysis
-```
-
-If the historical branch is available locally or on your remote, you can also
-inspect the last active development branch:
-
-```bash
-git switch feature/mda-analysis-migration
-```
-
-Return to your working branch before continuing v1.3 development.
+The active v1.3 workflow is `comparison.yaml` plus canonical plugin names. Run
+`polyzymd compare validate`, then `polyzymd compare run <analysis>`, and use
+`polyzymd compare plot-all` for figures. Requests for removed plugin names are
+handled as ordinary unknown analysis names.
