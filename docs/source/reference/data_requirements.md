@@ -124,25 +124,11 @@ The `TrajectoryLoader` class resolves trajectory paths from a simulation
 `projects_directory` as fallback) combined with the `naming_template` to
 locate each replicate's working directory.
 
-### Topology search order
+### Topology and trajectory layout
 
-Within each replicate's working directory, `TrajectoryLoader` searches for a
-topology file in this order:
-
-| Priority | Path | When It Exists |
-|---|---|---|
-| 1 | `solvated_system.pdb` | Always present after `polyzymd build` |
-| 2 | `production_0/production_0_topology.pdb` | Daisy-chain structure |
-| 3 | `production/production_topology.pdb` | Legacy (pre-daisy-chain) |
-| 4 | Glob fallback: `production_*/*_topology.pdb`, then `*.pdb` | Last resort |
-
-### Trajectory search order
-
-| Priority | Pattern | Description |
-|---|---|---|
-| 1 | `production_N/production_N_trajectory.dcd` | Daisy-chain segments (current) |
-| 2 | `production/production_trajectory.dcd` | Legacy single file (deprecated) |
-| 3 | Glob fallback: `**/production*trajectory.dcd` | Any production DCD |
+Current OpenMM runs write `solvated_system.pdb` in the replicate working
+directory and production trajectories as indexed daisy-chain segments:
+`production_N/production_N_trajectory.dcd`.
 
 When multiple daisy-chain segments exist (e.g., `production_0/`,
 `production_1/`, `production_2/`), they are automatically stitched together in

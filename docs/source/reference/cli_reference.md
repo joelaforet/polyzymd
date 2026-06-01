@@ -221,6 +221,10 @@ With `--format gromacs`, the build command creates in `{projects_dir}/replicate_
 - Position restraints (`#ifdef POSRES_PROTEIN`, etc.) appended into molecule `.itp` files
 - `run_{system}_gromacs.sh` - Shell script to run the workflow
 
+This is a build-only handoff point. You may use the generated MDP defaults and
+run script, or replace them downstream and manage the GROMACS workflow outside
+PolyzyMD.
+
 ---
 
 ## polyzymd run

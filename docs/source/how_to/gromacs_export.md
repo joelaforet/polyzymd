@@ -40,6 +40,20 @@ pixi run -e build polyzymd submit \
 This generates self-resubmitting SLURM scripts that run EM, equilibration,
 and production with checkpoint-based restart.
 
+## Build-only GROMACS export
+
+Use `polyzymd build --format gromacs` when you only want PolyzyMD to construct
+and parameterize the system:
+
+```bash
+pixi run -e build polyzymd build -c config.yaml --format gromacs
+```
+
+The export includes `.gro`, `.top`, component `.itp` files, and MDP defaults
+generated from the validated `config.yaml`. You may use those MDP defaults as a
+starting point or replace them and continue entirely in your own GROMACS
+workflow.
+
 ---
 
 ## Quick Start: GPU
