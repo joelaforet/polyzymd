@@ -60,14 +60,23 @@ class TestOpenMMTopologySearch:
         assert layout.topology_path is not None
         assert layout.topology_path.name == "production_topology.pdb"
 
-    def test_glob_fallback_finds_any_pdb(self, tmp_path: Path) -> None:
-        """Any PDB in root is found as last resort."""
+    def test_rejects_arbitrary_root_pdb(self, tmp_path: Path) -> None:
+        """Arbitrary root PDBs are not treated as OpenMM topology."""
         (tmp_path / "custom_topology.pdb").write_text("ATOM")
 
         engine = _make_engine()
         layout = engine.resolve_trajectory_layout(tmp_path, replicate=1)
-        assert layout.topology_path is not None
-        assert layout.topology_path.name == "custom_topology.pdb"
+        assert layout.topology_path is None
+
+    def test_rejects_non_exact_topology_name(self, tmp_path: Path) -> None:
+        """Non-canonical topology names are rejected even in production dirs."""
+        prod = tmp_path / "production_0"
+        prod.mkdir()
+        (prod / "custom_topology.pdb").write_text("ATOM")
+
+        engine = _make_engine()
+        layout = engine.resolve_trajectory_layout(tmp_path, replicate=1)
+        assert layout.topology_path is None
 
     def test_no_files_returns_none(self, tmp_path: Path) -> None:
         """Empty directory returns None topology."""
@@ -103,15 +112,15 @@ class TestOpenMMTrajectorySearch:
         assert len(layout.trajectory_paths) == 1
         assert layout.trajectory_paths[0].name == "production_trajectory.dcd"
 
-    def test_glob_fallback(self, tmp_path: Path) -> None:
-        """Deep glob finds production DCDs when structured paths do not exist."""
+    def test_rejects_arbitrary_recursive_production_trajectory(self, tmp_path: Path) -> None:
+        """Recursive production trajectory globs are intentionally not used."""
         subdir = tmp_path / "subdir"
         subdir.mkdir()
         (subdir / "production_custom_trajectory.dcd").write_bytes(b"DCD")
 
         engine = _make_engine()
         layout = engine.resolve_trajectory_layout(tmp_path, replicate=1)
-        assert len(layout.trajectory_paths) == 1
+        assert layout.trajectory_paths == []
 
     def test_no_trajectories_returns_empty(self, tmp_path: Path) -> None:
         """Empty directory returns empty trajectory list."""

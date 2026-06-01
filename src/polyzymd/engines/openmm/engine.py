@@ -209,19 +209,13 @@ class OpenMMEngine(SimulationEngine):
         if candidate.exists():
             return candidate
 
-        # Read-only support for expensive pre-PolyzyMD/JRL 2025 LipA simulations
+        # Keep exact read-only support for expensive JRL 2025 LipA pre-PolyzyMD data
         candidate = working_dir / "production" / "production_topology.pdb"
         if candidate.exists():
             return candidate
 
-        for pattern in [
-            "production_*/*_topology.pdb",
-            "production/*_topology.pdb",
-            "*.pdb",
-        ]:
-            hits = sorted(working_dir.glob(pattern))
-            if hits:
-                return hits[0]
+        # Arbitrary topology discovery is intentionally disallowed to avoid
+        # analyzing unrelated PDBs in mixed scratch or archival directories
         return None
 
     @staticmethod
@@ -250,13 +244,11 @@ class OpenMMEngine(SimulationEngine):
         if segments:
             return [segments[index] for index in sorted(segments.keys())]
 
-        # Read-only support for expensive pre-PolyzyMD/JRL 2025 LipA simulations
+        # Keep exact read-only support for expensive JRL 2025 LipA pre-PolyzyMD data
         single_production = working_dir / "production" / "production_trajectory.dcd"
         if single_production.exists() and single_production.stat().st_size > 0:
             return [single_production]
 
-        return sorted(
-            path
-            for path in working_dir.glob("**/production*trajectory.dcd")
-            if path.stat().st_size > 0
-        )
+        # Broad recursive globs are intentionally disallowed so old datasets
+        # must match approved legacy names instead of accidental local files
+        return []
