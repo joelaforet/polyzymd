@@ -4,7 +4,7 @@ Analyses active-site geometry from MD trajectories by computing per-pair
 distances and a simultaneous contact fraction (all pairs below threshold in the
 same frame). Trajectory-native pair distances run through the shared MDAnalysis
 pair-distance primitive, while the plugin owns the triad-specific composite
-reducer and artifact adapters.
+reducer and canonical artifacts.
 """
 
 from __future__ import annotations
@@ -39,7 +39,6 @@ from polyzymd.analyses.catalytic_triad._plotters import (
     plot_triad_kde_panel_from_data,
     plot_triad_threshold_bars_from_data,
 )
-from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
 from polyzymd.analyses.mda import (
     ArtifactStore,
     ComparisonArtifact,
@@ -135,9 +134,7 @@ class CatalyticTriadAnalysis(Analysis):
     all pairs are below the threshold at the same time.
 
     The ``compare()`` method is NOT overridden. Canonical condition artifacts
-    are compared through the MDAnalysis artifact lifecycle, while legacy
-    in-memory summaries still expose ``simultaneous_contact_fraction`` as a
-    percent-scaled scalar metric for the default comparison fallback.
+    are compared through the MDAnalysis artifact lifecycle.
 
     Plots
     -----
@@ -148,7 +145,7 @@ class CatalyticTriadAnalysis(Analysis):
     name: ClassVar[str] = "catalytic_triad"
     Settings: ClassVar[type] = CatalyticTriadSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = TriadPlotSettings
-    AggregatedResultClass: ClassVar[type] = TriadAggregatedResult
+    AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ("triad",)
     dependencies: ClassVar[tuple[str, ...]] = ()
@@ -163,7 +160,7 @@ class CatalyticTriadAnalysis(Analysis):
         return settings_fingerprint(settings)
 
     def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
-        """Return the legacy catalytic-triad aggregate settings fingerprint.
+        """Return the catalytic-triad aggregate settings fingerprint.
 
         Parameters
         ----------
@@ -173,7 +170,7 @@ class CatalyticTriadAnalysis(Analysis):
         Returns
         -------
         str or None
-            Existing settings-only fingerprint used by saved aggregate results.
+            Settings-only fingerprint used by saved aggregate artifacts.
         """
 
         if settings is None:
@@ -206,7 +203,7 @@ class CatalyticTriadAnalysis(Analysis):
                 return ArtifactStore(path.parent).read_condition_result(path.name)
         raise ValueError(
             f"Catalytic-triad aggregate at {path} is not a canonical MDAnalysis condition "
-            "artifact. Recompute the condition or clear stale legacy triad caches."
+            "artifact. Recompute the condition or clear stale triad caches."
         )
 
     def aggregate(
@@ -230,7 +227,7 @@ class CatalyticTriadAnalysis(Analysis):
         Returns
         -------
         ConditionArtifact
-            Aggregated condition artifact with legacy-compatible summaries.
+            Aggregated condition artifact with canonical summaries.
         """
         if not results:
             raise ValueError(
@@ -239,7 +236,7 @@ class CatalyticTriadAnalysis(Analysis):
             )
         if not all(isinstance(result, ReplicateArtifact) for result in results):
             raise TypeError(
-                "Catalytic-triad aggregation expects MDAnalysis ReplicateArtifact inputs. Legacy "
+                "Catalytic-triad aggregation expects MDAnalysis ReplicateArtifact inputs. "
                 "triad replicate caches are incompatible with the MDAnalysis artifact lifecycle; "
                 "recompute the condition or clear stale caches before aggregating."
             )
@@ -296,21 +293,24 @@ class CatalyticTriadAnalysis(Analysis):
         Parameters
         ----------
         summary : Any
-            Aggregated catalytic-triad summary with simultaneous contact fields.
+            Aggregated catalytic-triad artifact or payload with simultaneous contact fields.
 
         Returns
         -------
         dict[str, MetricValue]
             Mapping for the primary simultaneous contact metric.
         """
-
+        payload = summary.payload if hasattr(summary, "payload") else summary
+        if not isinstance(payload, dict):
+            payload = summary
         return {
             SIMULTANEOUS_CONTACT_METRIC: MetricValue(
                 name=SIMULTANEOUS_CONTACT_METRIC,
-                mean=float(summary.overall_simultaneous_contact) * 100.0,
-                sem=float(summary.sem_simultaneous_contact) * 100.0,
+                mean=float(_payload_get(payload, "overall_simultaneous_contact")) * 100.0,
+                sem=float(_payload_get(payload, "sem_simultaneous_contact")) * 100.0,
                 replicate_values=[
-                    float(value) * 100.0 for value in summary.per_replicate_simultaneous
+                    float(value) * 100.0
+                    for value in _payload_get(payload, "per_replicate_simultaneous")
                 ],
                 higher_is_better=bool(SIMULTANEOUS_CONTACT_METADATA["higher_is_better"]),
                 direction_labels=tuple(SIMULTANEOUS_CONTACT_METADATA["direction_labels"]),
@@ -396,3 +396,11 @@ def _comparison_artifact_to_result(artifact: ComparisonArtifact) -> ComparisonRe
         created_at=str(artifact.metadata.get("created_at", "")),
         polyzymd_version=str(artifact.metadata.get("polyzymd_version", "")),
     )
+
+
+def _payload_get(payload: Any, key: str) -> Any:
+    """Return *key* from a canonical payload or object-like test double."""
+
+    if isinstance(payload, dict):
+        return payload[key]
+    return getattr(payload, key)

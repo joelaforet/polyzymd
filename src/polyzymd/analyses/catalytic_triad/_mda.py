@@ -1,4 +1,4 @@
-"""MDAnalysis-native catalytic-triad jobs and artifact adapters."""
+"""MDAnalysis-native catalytic-triad jobs and canonical artifacts."""
 
 from __future__ import annotations
 
@@ -12,18 +12,12 @@ from numpy.typing import NDArray
 
 from polyzymd.analyses._framework.cache_identity import compute_config_hash
 from polyzymd.analyses._framework.results_base import get_polyzymd_version
-from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult, TriadResult
 from polyzymd.analyses.distances._mda import (
     DistanceReplicatePayload,
     _pair_payload_to_json,
     mdanalysis_version,
     payload_from_pair_distance_analysis,
     resolve_distance_pairs,
-)
-from polyzymd.analyses.distances._results import (
-    DistancePairAggregatedResult,
-    DistancePairResult,
-    DistanceResultMetadata,
 )
 from polyzymd.analyses.mda import (
     ArtifactStore,
@@ -37,7 +31,6 @@ from polyzymd.analyses.mda import (
     build_pair_distance_analysis,
     pair_distance_version,
 )
-from polyzymd.analyses.mda.pair_distance import aggregate_distance_pair_stats
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
 from polyzymd.analyses.shared.loader import parse_time_string
 
@@ -260,7 +253,7 @@ def aggregate_triad_artifacts(
     Returns
     -------
     ConditionArtifact
-        Canonical condition artifact with legacy-compatible summaries.
+        Canonical condition artifact with canonical summaries.
     """
 
     ordered_artifacts = _validate_and_order_artifacts(
@@ -271,32 +264,38 @@ def aggregate_triad_artifacts(
         artifacts=artifacts,
         analysis_dir=output_dir.parent,
     )
-    legacy_result = _aggregate_legacy_result(
-        condition_label=condition_label,
+    from polyzymd.analyses.shared.statistics import compute_sem
+
+    eq_value, eq_unit = parse_time_string(equilibration)
+    per_replicate_simultaneous = [
+        float(artifact.payload["simultaneous_contact_fraction"]) for artifact in ordered_artifacts
+    ]
+    sim_stats = compute_sem(per_replicate_simultaneous)
+    pair_results = _aggregate_pair_payloads(ordered_artifacts, replicates)
+    metrics, replicate_metrics = _condition_metrics(
         replicates=replicates,
-        settings=settings,
-        equilibration=equilibration,
-        artifacts=ordered_artifacts,
-        settings_fingerprint=settings_fingerprint,
+        per_replicate_simultaneous=per_replicate_simultaneous,
+        mean=sim_stats.mean,
+        sem=sim_stats.sem,
     )
-    metrics, replicate_metrics = _condition_metrics(legacy_result)
+    first_metadata = ordered_artifacts[0].metadata
     artifact = ConditionArtifact(
         analysis_name="catalytic_triad",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
         payload={
-            "triad_name": legacy_result.triad_name,
-            "triad_description": legacy_result.triad_description,
-            "pairs": [pair.model_dump(mode="json") for pair in legacy_result.pair_results],
-            "pair_results": [pair.model_dump(mode="json") for pair in legacy_result.pair_results],
-            "threshold": legacy_result.threshold,
-            "overall_simultaneous_contact": legacy_result.overall_simultaneous_contact,
-            "sem_simultaneous_contact": legacy_result.sem_simultaneous_contact,
-            "per_replicate_simultaneous": legacy_result.per_replicate_simultaneous,
+            "triad_name": settings.name,
+            "triad_description": settings.description,
+            "pairs": pair_results,
+            "pair_results": pair_results,
+            "threshold": float(settings.threshold),
+            "overall_simultaneous_contact": float(sim_stats.mean),
+            "sem_simultaneous_contact": float(sim_stats.sem),
+            "per_replicate_simultaneous": per_replicate_simultaneous,
             "metrics": metrics,
             "replicate_metrics": replicate_metrics,
             "metric_metadata": {SIMULTANEOUS_CONTACT_METRIC: SIMULTANEOUS_CONTACT_METADATA},
-            "n_replicates": legacy_result.n_replicates,
+            "n_replicates": len(ordered_artifacts),
         },
         provenance={
             "source": "triad_replicate_artifact_aggregation",
@@ -310,18 +309,18 @@ def aggregate_triad_artifacts(
         metadata={
             "result_kind": "catalytic_triad_mda_condition",
             "settings_fingerprint": settings_fingerprint,
-            "config_hash": legacy_result.config_hash,
-            "polyzymd_version": legacy_result.polyzymd_version,
+            "config_hash": first_metadata.get("config_hash", "unknown"),
+            "polyzymd_version": get_polyzymd_version(),
             "mdanalysis_version": mdanalysis_version(),
             "pair_distance_version": pair_distance_version(),
-            "equilibration_time": legacy_result.equilibration_time,
-            "equilibration_unit": legacy_result.equilibration_unit,
-            "selection_string": legacy_result.selection_string,
+            "equilibration_time": eq_value,
+            "equilibration_unit": eq_unit,
+            "selection_string": _combined_selection(settings.get_pair_selections()),
             "source_result_files": [
                 str(output_dir.parent / f"run_{replicate}" / "result.json")
                 for replicate in replicates
             ],
-            "n_replicates": legacy_result.n_replicates,
+            "n_replicates": len(ordered_artifacts),
         },
         source_replicates=[
             {
@@ -333,135 +332,6 @@ def aggregate_triad_artifacts(
         warnings=_combined_warnings(ordered_artifacts),
     )
     return artifact
-
-
-def artifact_to_triad_result(artifact: ReplicateArtifact) -> TriadResult:
-    """Convert a replicate artifact to the established triad result model."""
-
-    if artifact.analysis_name != "catalytic_triad":
-        raise ValueError(f"Expected catalytic_triad artifact, got {artifact.analysis_name!r}")
-    metadata = artifact.metadata
-    payload = artifact.payload
-    return TriadResult(
-        config_hash=str(metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=artifact.replicate,
-        equilibration_time=float(metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(metadata.get("equilibration_unit", "ns")),
-        selection_string=str(metadata.get("selection_string", "")),
-        triad_name=str(payload.get("triad_name", "catalytic_triad")),
-        triad_description=payload.get("triad_description"),
-        pair_results=[DistancePairResult.model_validate(pair) for pair in payload.get("pairs", [])],
-        threshold=float(payload.get("threshold", 3.5)),
-        simultaneous_contact_fraction=float(payload.get("simultaneous_contact_fraction", 0.0)),
-        n_frames_simultaneous=int(payload.get("n_frames_simultaneous", 0) or 0),
-        simultaneous_contact_timeseries=None,
-        sim_contact_sem=payload.get("sim_contact_sem"),
-        sim_contact_correlation_time=payload.get("sim_contact_correlation_time"),
-        sim_contact_correlation_time_unit=payload.get("sim_contact_correlation_time_unit"),
-        sim_contact_n_independent=payload.get("sim_contact_n_independent"),
-        sim_contact_warning=payload.get("sim_contact_warning"),
-        n_frames_total=int(payload.get("n_frames_total", 0) or 0),
-        n_frames_used=int(payload.get("n_frames_used", 0) or 0),
-        settings_fingerprint=metadata.get("settings_fingerprint"),
-    )
-
-
-def condition_artifact_to_legacy_result(artifact: Any) -> TriadAggregatedResult:
-    """Convert a condition artifact to the established aggregate model."""
-
-    if isinstance(artifact, TriadAggregatedResult):
-        return artifact
-    if not isinstance(artifact, ConditionArtifact):
-        raise TypeError(
-            "Catalytic-triad aggregate adapters require canonical ConditionArtifact inputs. "
-            f"Got {type(artifact).__name__}; recompute the condition or clear stale caches."
-        )
-    metadata = artifact.metadata
-    payload = artifact.payload
-    return TriadAggregatedResult(
-        config_hash=str(metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=None,
-        equilibration_time=float(metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(metadata.get("equilibration_unit", "ns")),
-        selection_string=str(metadata.get("selection_string", "")),
-        replicates=[int(rep) for rep in artifact.replicates],
-        n_replicates=len(artifact.replicates),
-        triad_name=str(payload.get("triad_name", "catalytic_triad")),
-        triad_description=payload.get("triad_description"),
-        pair_results=[
-            DistancePairAggregatedResult.model_validate(pair) for pair in payload.get("pairs", [])
-        ],
-        threshold=float(payload.get("threshold", 3.5)),
-        overall_simultaneous_contact=float(payload.get("overall_simultaneous_contact", 0.0)),
-        sem_simultaneous_contact=float(payload.get("sem_simultaneous_contact", 0.0)),
-        per_replicate_simultaneous=[
-            float(value) for value in payload.get("per_replicate_simultaneous", [])
-        ],
-        source_result_files=[str(path) for path in metadata.get("source_result_files", [])],
-        settings_fingerprint=metadata.get("settings_fingerprint"),
-    )
-
-
-def _aggregate_legacy_result(
-    *,
-    condition_label: str,
-    replicates: Sequence[int],
-    settings: CatalyticTriadSettings,
-    equilibration: str,
-    artifacts: Sequence[ReplicateArtifact],
-    settings_fingerprint: str,
-) -> TriadAggregatedResult:
-    """Build the established aggregate model from replicate artifacts."""
-
-    from polyzymd.analyses.shared.statistics import compute_sem
-
-    del condition_label
-    eq_value, eq_unit = parse_time_string(equilibration)
-    legacy_results = [artifact_to_triad_result(artifact) for artifact in artifacts]
-    first = legacy_results[0]
-    metadata = DistanceResultMetadata(
-        config_hash=first.config_hash,
-        polyzymd_version=get_polyzymd_version(),
-        replicate=None,
-        equilibration_time=eq_value,
-        equilibration_unit=eq_unit,
-    )
-    aggregated_pairs: list[DistancePairAggregatedResult] = []
-    for pair_idx, pair in enumerate(first.pair_results):
-        stats = aggregate_distance_pair_stats(legacy_results, pair_idx)
-        aggregated_pairs.append(
-            DistancePairAggregatedResult.from_aggregated_stats(
-                metadata,
-                pair,
-                stats,
-                replicates=replicates,
-                threshold=settings.threshold,
-                pair_label=pair.pair_label,
-            )
-        )
-    per_replicate_simultaneous = [result.simultaneous_contact_fraction for result in legacy_results]
-    sim_stats = compute_sem(per_replicate_simultaneous)
-    return TriadAggregatedResult(
-        config_hash=first.config_hash,
-        polyzymd_version=metadata.polyzymd_version,
-        replicate=None,
-        equilibration_time=eq_value,
-        equilibration_unit=eq_unit,
-        selection_string=_combined_selection(settings.get_pair_selections()),
-        replicates=[int(rep) for rep in replicates],
-        n_replicates=len(replicates),
-        triad_name=settings.name,
-        triad_description=settings.description,
-        pair_results=aggregated_pairs,
-        threshold=settings.threshold,
-        overall_simultaneous_contact=sim_stats.mean,
-        sem_simultaneous_contact=sim_stats.sem,
-        per_replicate_simultaneous=per_replicate_simultaneous,
-        source_result_files=[],
-        settings_fingerprint=settings_fingerprint,
-    )
 
 
 def _validate_and_order_artifacts(
@@ -542,23 +412,72 @@ def _validate_pair_payloads(artifact: ReplicateArtifact, settings: CatalyticTria
 
 
 def _condition_metrics(
-    legacy_result: TriadAggregatedResult,
+    *,
+    replicates: Sequence[int],
+    per_replicate_simultaneous: Sequence[float],
+    mean: float,
+    sem: float,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, float]]]:
-    """Build percent-scaled condition metrics from a triad aggregate."""
+    """Build percent-scaled condition metrics from canonical aggregate values."""
 
-    values = [float(value) * 100.0 for value in legacy_result.per_replicate_simultaneous]
+    values = [float(value) * 100.0 for value in per_replicate_simultaneous]
     metric = _metric_summary(
         SIMULTANEOUS_CONTACT_METRIC,
         values,
-        legacy_result.overall_simultaneous_contact * 100.0,
-        legacy_result.sem_simultaneous_contact * 100.0,
+        mean * 100.0,
+        sem * 100.0,
     )
     metric.update(SIMULTANEOUS_CONTACT_METADATA)
     replicate_metrics = {
         str(replicate): {SIMULTANEOUS_CONTACT_METRIC: value}
-        for replicate, value in zip(legacy_result.replicates, values, strict=True)
+        for replicate, value in zip(replicates, values, strict=True)
     }
     return {SIMULTANEOUS_CONTACT_METRIC: metric}, replicate_metrics
+
+
+def _aggregate_pair_payloads(
+    artifacts: Sequence[ReplicateArtifact],
+    replicates: Sequence[int],
+) -> list[dict[str, Any]]:
+    """Aggregate canonical pair payload dictionaries across replicates."""
+
+    from polyzymd.analyses.shared.statistics import compute_sem
+
+    first_pairs = artifacts[0].payload.get("pairs", [])
+    aggregated: list[dict[str, Any]] = []
+    for pair_idx, source_pair in enumerate(first_pairs):
+        pair_payloads = [artifact.payload.get("pairs", [])[pair_idx] for artifact in artifacts]
+        mean_values = [float(pair["mean_distance"]) for pair in pair_payloads]
+        std_values = [float(pair["std_distance"]) for pair in pair_payloads]
+        median_values = [float(pair["median_distance"]) for pair in pair_payloads]
+        mean_stats = compute_sem(mean_values)
+        median_stats = compute_sem(median_values)
+        fractions = [pair.get("fraction_below_threshold") for pair in pair_payloads]
+        finite_fractions = [float(value) for value in fractions if value is not None]
+        fraction_stats = compute_sem(finite_fractions) if finite_fractions else None
+        result = {
+            "replicates": [int(rep) for rep in replicates],
+            "n_replicates": len(replicates),
+            "pair_label": source_pair.get("pair_label"),
+            "selection1": source_pair.get("selection1"),
+            "selection2": source_pair.get("selection2"),
+            "overall_mean": float(mean_stats.mean),
+            "overall_sem": float(mean_stats.sem),
+            "overall_median": float(median_stats.mean),
+            "per_replicate_means": mean_values,
+            "per_replicate_stds": std_values,
+            "per_replicate_medians": median_values,
+            "threshold": source_pair.get("threshold"),
+            "overall_fraction_below": (
+                float(fraction_stats.mean) if fraction_stats is not None else None
+            ),
+            "sem_fraction_below": (
+                float(fraction_stats.sem) if fraction_stats is not None else None
+            ),
+            "per_replicate_fractions_below": finite_fractions or None,
+        }
+        aggregated.append(result)
+    return aggregated
 
 
 def _metric_summary(name: str, values: Sequence[float], mean: float, sem: float) -> dict[str, Any]:

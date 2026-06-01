@@ -27,10 +27,7 @@ from polyzymd.analyses.catalytic_triad import (
 from polyzymd.analyses.catalytic_triad._mda import (
     SIMULTANEOUS_CONTACT_METRIC,
     TriadArtifactCollector,
-    artifact_to_triad_result,
-    condition_artifact_to_legacy_result,
 )
-from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
 from polyzymd.analyses.distances._mda import DistancePairPayload, DistanceReplicatePayload
 from polyzymd.analyses.mda import (
     ArtifactStore,
@@ -174,12 +171,12 @@ class TestTriadDiscoveryAndSettings:
     def test_class_vars_use_mda_replicate_artifacts(
         self, triad_analysis: CatalyticTriadAnalysis
     ) -> None:
-        """The migrated plugin should expose MDA jobs and no legacy replicate model."""
+        """The plugin should expose MDA jobs and canonical aggregate artifacts."""
 
         assert triad_analysis.name == "catalytic_triad"
         assert triad_analysis.aliases == ("triad",)
         assert triad_analysis.ReplicateResultClass is None
-        assert triad_analysis.AggregatedResultClass is TriadAggregatedResult
+        assert triad_analysis.AggregatedResultClass is None
         assert "run_replicate" not in type(triad_analysis).__dict__
 
     def test_extract_metrics_metadata_preserves_primary_metric(
@@ -245,27 +242,6 @@ class TestTriadMDACollector:
             assert npz_data["thresholds"].tolist() == [3.5, 3.5]
             assert npz_data["pair_labels"].tolist() == ["Asp133-His156", "His156-Ser77"]
 
-    def test_artifact_to_legacy_result_preserves_pair_labels(
-        self, tmp_path: Path, condition: Condition, default_settings: CatalyticTriadSettings
-    ) -> None:
-        """Artifact adapter should preserve established in-memory result fields."""
-
-        artifact = _replicate_artifact(
-            tmp_path,
-            condition,
-            default_settings,
-            np.asarray([[3.0, 3.2], [3.1, 3.3]], dtype=np.float64),
-            replicate=1,
-        )
-
-        result = artifact_to_triad_result(artifact)
-
-        assert result.replicate == 1
-        assert result.triad_name == "LipA_triad"
-        assert result.get_pair_labels() == ["Asp133-His156", "His156-Ser77"]
-        assert result.simultaneous_contact_fraction == 1.0
-        assert result.settings_fingerprint == settings_fingerprint(default_settings)
-
 
 class TestTriadAggregationAndComparison:
     """Tests for artifact aggregation and scalar comparison compatibility."""
@@ -313,7 +289,7 @@ class TestTriadAggregationAndComparison:
         tmp_path: Path,
         default_settings: CatalyticTriadSettings,
     ) -> None:
-        """Legacy replicate results should be rejected with recompute guidance."""
+        """Non-artifact replicate results should be rejected with recompute guidance."""
 
         ctx = AggregateContext(
             condition=condition,
@@ -326,7 +302,7 @@ class TestTriadAggregationAndComparison:
         with pytest.raises(TypeError, match="recompute the condition"):
             triad_analysis.aggregate(ctx, [object()])
 
-    def test_aggregate_returns_condition_artifact_and_adapter(
+    def test_aggregate_returns_condition_artifact_payload(
         self,
         triad_analysis: CatalyticTriadAnalysis,
         condition: Condition,
@@ -366,7 +342,6 @@ class TestTriadAggregationAndComparison:
         )
 
         artifact = triad_analysis.aggregate(ctx, artifacts)
-        legacy = condition_artifact_to_legacy_result(artifact)
 
         assert artifact.artifact_type == "condition"
         assert not (tmp_path / "aggregated" / "result.json").exists()
@@ -377,9 +352,12 @@ class TestTriadAggregationAndComparison:
             "higher_is_better": True,
             "direction_labels": ("worsening", "unchanged", "improving"),
         }
-        assert legacy.overall_simultaneous_contact == pytest.approx(0.75)
-        assert legacy.per_replicate_simultaneous == [0.5, 1.0]
-        assert legacy.get_pair_labels() == ["Asp133-His156", "His156-Ser77"]
+        assert artifact.payload["overall_simultaneous_contact"] == pytest.approx(0.75)
+        assert artifact.payload["per_replicate_simultaneous"] == [0.5, 1.0]
+        assert [pair["pair_label"] for pair in artifact.payload["pair_results"]] == [
+            "Asp133-His156",
+            "His156-Ser77",
+        ]
 
     def test_compare_condition_artifacts_preserves_triad_metadata(
         self,

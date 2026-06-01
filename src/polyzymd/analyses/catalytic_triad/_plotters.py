@@ -27,8 +27,6 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-    from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult, TriadResult
-
 # Matplotlib/seaborn are lazy-imported inside functions to avoid
 # import-time overhead. Sentinels defined here for availability checks.
 HAS_SEABORN: bool
@@ -88,9 +86,9 @@ def _triad_pair_identity(
         Pair label plus selection settings when available.
     """
 
-    pair_label = getattr(pair_result, "pair_label", None)
-    selection1 = getattr(pair_result, "selection1", None)
-    selection2 = getattr(pair_result, "selection2", None)
+    pair_label = _result_get(pair_result, "pair_label")
+    selection1 = _result_get(pair_result, "selection1")
+    selection2 = _result_get(pair_result, "selection2")
     return (
         pair_label if isinstance(pair_label, str) else fallback_label,
         selection1 if isinstance(selection1, str) else None,
@@ -112,7 +110,13 @@ def _triad_pair_labels(result: Any) -> list[str]:
         Pair labels in the result's own order.
     """
 
-    labels = result.get_pair_labels()
+    if isinstance(result, dict):
+        labels = [
+            pair.get("pair_label", f"Pair {idx + 1}")
+            for idx, pair in enumerate(result["pair_results"])
+        ]
+    else:
+        labels = result.get_pair_labels()
     return [str(label) for label in labels]
 
 
@@ -160,7 +164,7 @@ def _control_label_from_data(data: dict[str, Any]) -> str | None:
 
 
 def plot_triad_kde_panel(
-    results: Sequence["TriadResult"],
+    results: Sequence[Any],
     labels: Sequence[str],
     threshold: float | None = None,
     colors: Sequence | None = None,
@@ -179,9 +183,9 @@ def plot_triad_kde_panel(
 
     Parameters
     ----------
-    results : sequence of TriadResult
-        Per-replicate triad results, one per condition. Each result should
-        contain pair_results with the distances array populated.
+    results : sequence
+        Per-replicate triad result-like objects, one per condition. Each result
+        should contain pair_results with the distances array populated.
     labels : sequence of str
         Condition labels (e.g., ["No Polymer", "50% SBMA", "100% SBMA"])
     threshold : float, optional
@@ -208,12 +212,9 @@ def plot_triad_kde_panel(
     matplotlib.figure.Figure
         The generated figure
 
-    Examples
-    --------
-    >>> from polyzymd.analyses.catalytic_triad._results import TriadResult
-    >>> results = [TriadResult.load("cond1/triad.json"), TriadResult.load("cond2/triad.json")]
-    >>> fig = plot_triad_kde_panel(results, labels=["Control", "Treatment"])
-    >>> fig.savefig("triad_kde.png")
+    Notes
+    -----
+    Prefer canonical artifacts and sidecars for built-in plugin plotting.
     """
     _require_matplotlib()
     _require_seaborn()
@@ -449,7 +450,7 @@ def plot_triad_kde_panel_pooled(
 
 
 def plot_triad_threshold_bars(
-    results: Sequence["TriadAggregatedResult"],
+    results: Sequence[Any],
     labels: Sequence[str],
     colors: Sequence | None = None,
     color_palette: str = "tab10",
@@ -468,8 +469,8 @@ def plot_triad_threshold_bars(
 
     Parameters
     ----------
-    results : sequence of TriadAggregatedResult
-        Aggregated triad results, one per condition
+    results : sequence
+        Canonical aggregate payloads or result-like objects, one per condition
     labels : sequence of str
         Condition labels
     colors : sequence, optional
@@ -514,7 +515,9 @@ def plot_triad_threshold_bars(
     # Use the first result to define plotted pair columns
     pair_labels = _triad_pair_labels(results[0])
     n_pairs = len(pair_labels)
-    pair_index_by_identity = _map_triad_pair_indices(results[0].pair_results, pair_labels)
+    pair_index_by_identity = _map_triad_pair_indices(
+        _result_get(results[0], "pair_results"), pair_labels
+    )
 
     # Build metric labels
     metric_labels = list(pair_labels)
@@ -541,11 +544,11 @@ def plot_triad_threshold_bars(
         cond_replicates: list[list[float]] = [[] for _ in range(n_metrics)]
         result_pair_labels = _triad_pair_labels(result)
         # Per-pair fractions
-        for pair_idx, pr in enumerate(result.pair_results):
+        for pair_idx, pr in enumerate(_result_get(result, "pair_results")):
             fallback_label = (
                 result_pair_labels[pair_idx]
                 if pair_idx < len(result_pair_labels)
-                else str(getattr(pr, "pair_label", f"Pair {pair_idx + 1}"))
+                else str(_result_get(pr, "pair_label", f"Pair {pair_idx + 1}"))
             )
             pair_key = _triad_pair_identity(pr, fallback_label)
             metric_idx = pair_index_by_identity.get(pair_key)
@@ -556,18 +559,21 @@ def plot_triad_threshold_bars(
                     "Skipping triad pair not present in reference columns: %s", pair_key[0]
                 )
                 continue
-            if pr.overall_fraction_below is not None:
-                data[cond_idx, metric_idx] = pr.overall_fraction_below * 100
-                errors[cond_idx, metric_idx] = (pr.sem_fraction_below or 0) * 100
+            overall_fraction = _result_get(pr, "overall_fraction_below")
+            if overall_fraction is not None:
+                data[cond_idx, metric_idx] = overall_fraction * 100
+                errors[cond_idx, metric_idx] = (_result_get(pr, "sem_fraction_below") or 0) * 100
             cond_replicates[metric_idx] = [
-                value * 100 for value in pr.per_replicate_fractions_below or []
+                value * 100 for value in _result_get(pr, "per_replicate_fractions_below", []) or []
             ]
 
         # Simultaneous contact
         if show_simultaneous:
-            data[cond_idx, -1] = result.overall_simultaneous_contact * 100
-            errors[cond_idx, -1] = result.sem_simultaneous_contact * 100
-            cond_replicates[-1] = [value * 100 for value in result.per_replicate_simultaneous]
+            data[cond_idx, -1] = _result_get(result, "overall_simultaneous_contact") * 100
+            errors[cond_idx, -1] = _result_get(result, "sem_simultaneous_contact") * 100
+            cond_replicates[-1] = [
+                value * 100 for value in _result_get(result, "per_replicate_simultaneous")
+            ]
 
         replicate_values.append(cond_replicates)
 
@@ -618,7 +624,7 @@ def plot_triad_threshold_bars(
 
     # Title
     if title is None:
-        threshold = results[0].threshold
+        threshold = _result_get(results[0], "threshold")
         title = f"Triad Contact Fractions (Threshold: {threshold:.1f} Å)"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
@@ -634,7 +640,7 @@ def plot_triad_threshold_bars(
 
 
 def plot_triad_2d_kde(
-    result: "TriadResult",
+    result: Any,
     pair_x_idx: int = 0,
     pair_y_idx: int = 1,
     threshold: float | None = None,
@@ -650,8 +656,8 @@ def plot_triad_2d_kde(
 
     Parameters
     ----------
-    result : TriadResult
-        Single replicate triad result with distance arrays
+    result : Any
+        Single replicate result-like object with distance arrays
     pair_x_idx : int, optional
         Index of pair to plot on x-axis (default 0)
     pair_y_idx : int, optional
@@ -727,7 +733,7 @@ def plot_triad_2d_kde(
 
 
 def plot_triad_2d_kde_comparison(
-    results: Sequence["TriadResult"],
+    results: Sequence[Any],
     labels: Sequence[str],
     pair_x_idx: int = 0,
     pair_y_idx: int = 1,
@@ -745,8 +751,8 @@ def plot_triad_2d_kde_comparison(
 
     Parameters
     ----------
-    results : sequence of TriadResult
-        One per condition
+    results : sequence
+        Result-like objects, one per condition
     labels : sequence of str
         Condition labels
     pair_x_idx : int, optional
@@ -1094,12 +1100,9 @@ def _load_aggregated_results(
     Returns
     -------
     dict
-        Mapping of label -> TriadAggregatedResult.
+        Mapping of label to canonical triad payload.
     """
-    from polyzymd.analyses.catalytic_triad._mda import (
-        condition_artifact_to_legacy_result,
-        load_condition_artifact,
-    )
+    from polyzymd.analyses.catalytic_triad._mda import load_condition_artifact
 
     results: dict[str, Any] = {}
 
@@ -1119,8 +1122,16 @@ def _load_aggregated_results(
             if artifact is None:
                 logger.debug("No canonical aggregated triad artifact in %s", aggregated_dir)
                 continue
-            results[label] = condition_artifact_to_legacy_result(artifact)
+            results[label] = artifact.payload
         except (OSError, KeyError, ValueError) as e:
             logger.warning("Failed to load canonical triad aggregate %s: %s", aggregated_dir, e)
 
     return results
+
+
+def _result_get(result: Any, key: str, default: Any = None) -> Any:
+    """Return *key* from canonical dictionaries or object-like plot inputs."""
+
+    if isinstance(result, dict):
+        return result.get(key, default)
+    return getattr(result, key, default)
