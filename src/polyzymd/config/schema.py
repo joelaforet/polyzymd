@@ -654,6 +654,7 @@ class SimulationPhaseConfig(BaseModel):
         ensemble: Thermodynamic ensemble (NVT, NPT)
         duration: Simulation duration in nanoseconds
         samples: Number of trajectory frames to save
+        report_interval: Explicit reporter interval in MD steps
         time_step: Integration time step in femtoseconds
         thermostat: Thermostat type
         thermostat_timescale: Thermostat coupling timescale in ps
@@ -666,6 +667,7 @@ class SimulationPhaseConfig(BaseModel):
     ensemble: Ensemble = Field(..., description="Thermodynamic ensemble")
     duration: float = Field(..., gt=0.0, description="Duration (ns)")
     samples: int = Field(..., ge=1, description="Trajectory frames to save")
+    report_interval: int = Field(..., ge=1, description="Reporter interval in MD steps")
     time_step: float = Field(2.0, gt=0.0, description="Time step (fs)")
     thermostat: ThermostatType = Field(
         ThermostatType.LANGEVIN_MIDDLE, description="Thermostat type"
@@ -674,14 +676,14 @@ class SimulationPhaseConfig(BaseModel):
     barostat: BarostatType | None = Field(None, description="Barostat type")
     barostat_frequency: int = Field(25, ge=1, description="Barostat update frequency")
     checkpoint_interval: float = Field(
-        60.0,
-        ge=0.0,
+        ...,
+        gt=0.0,
         description=(
             "Wall-time interval in seconds between restart checkpoints. "
             "Controls how frequently simulation state is saved for automatic "
             "restart on SLURM preemption or hard kill. Independent of "
-            "trajectory/reporter output frequency. Default 60s ensures at "
-            "most 1 minute of lost work on unexpected termination."
+            "trajectory/reporter output frequency. Must be positive so "
+            "unexpected termination recovery remains enabled."
         ),
     )
 

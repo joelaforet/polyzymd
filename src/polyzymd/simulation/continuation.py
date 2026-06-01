@@ -685,8 +685,9 @@ class ContinuationManager:
         duration_ns: float,
         num_samples: int = 250,
         timestep_fs: float = 2.0,
-        report_interval: int | None = None,
-        checkpoint_interval_s: float = 60.0,
+        *,
+        report_interval: int,
+        checkpoint_interval_s: float,
     ) -> Dict[str, Any]:
         """Run the continuation segment.
 
@@ -700,19 +701,15 @@ class ContinuationManager:
         duration_ns : float
             Duration of this segment in nanoseconds.
         num_samples : int
-            Number of trajectory frames to save. Ignored when
-            ``report_interval`` is provided.
+            Number of trajectory frames to save.
         timestep_fs : float
             Time step in femtoseconds.
-        report_interval : int or None
-            Fixed reporter interval in steps. When provided, this
-            overrides the per-segment ``total_steps // num_samples``
-            calculation to keep frame spacing uniform across segments.
+        report_interval : int
+            Explicit reporter interval in steps.
         checkpoint_interval_s : float
             Wall-time interval in seconds between portable restart
-            checkpoints.  Also controls how frequently the loop checks
-            for SLURM preemption signals.  Set to 0 to disable
-            wall-time checkpoints (reverts to legacy behaviour).
+            checkpoints. Also controls how frequently the loop checks
+            for SLURM preemption signals.
 
         Returns
         -------
@@ -772,12 +769,11 @@ class ContinuationManager:
         # Calculate total steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
 
-        # Determine report interval: prefer the fixed global value if given,
-        # otherwise fall back to per-segment calculation (legacy callers).
-        if report_interval is not None:
-            seg_report_interval = report_interval
-        else:
-            seg_report_interval = max(1, total_steps // num_samples)
+        if report_interval <= 0:
+            raise ValueError("report_interval must be a positive integer")
+        if checkpoint_interval_s <= 0:
+            raise ValueError("checkpoint_interval_s must be positive")
+        seg_report_interval = report_interval
 
         # Setup reporters
         self._setup_reporters(seg_report_interval, output_dir)
@@ -838,9 +834,7 @@ class ContinuationManager:
 
                 # Adaptive sub-chunk calibration (once, after first interval)
                 if (
-                    not _adapted
-                    and checkpoint_interval_s > 0
-                    and (_now - _loop_start) >= checkpoint_interval_s
+                    not _adapted and (_now - _loop_start) >= checkpoint_interval_s
                 ):
                     elapsed = _now - _loop_start
                     steps_per_sec = steps_done / elapsed if elapsed > 0 else 1.0
@@ -883,8 +877,7 @@ class ContinuationManager:
 
                 # Wall-time restart checkpoint
                 if (
-                    checkpoint_interval_s > 0
-                    and (_now - _last_checkpoint_write) >= checkpoint_interval_s
+                    (_now - _last_checkpoint_write) >= checkpoint_interval_s
                     and steps_done < total_steps  # skip if we're about to finish
                 ):
                     save_restart_checkpoint(

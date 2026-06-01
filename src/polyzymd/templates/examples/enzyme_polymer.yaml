@@ -143,6 +143,8 @@ simulation_phases:
     ensemble: "NPT"
     duration: 100.0  # 100 ns total
     samples: 2500
+    report_interval: 20000
+    checkpoint_interval: 60.0
     time_step: 2.0
     thermostat: "LangevinMiddle"
     thermostat_timescale: 1.0

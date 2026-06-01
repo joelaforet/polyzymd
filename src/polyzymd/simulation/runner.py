@@ -1005,29 +1005,26 @@ class SimulationRunner:
         barostat_frequency: int = 25,
         output_prefix: str = "production",
         segment_index: int = 0,
-        report_interval: int | None = None,
-        checkpoint_interval_s: float = 60.0,
+        *,
+        report_interval: int,
+        checkpoint_interval_s: float,
     ) -> Dict[str, Any]:
         """Run NPT production simulation.
 
         Args:
             temperature: Temperature in Kelvin.
             duration_ns: Duration in nanoseconds.
-            num_samples: Number of trajectory frames to save. Ignored when
-                ``report_interval`` is provided.
+            num_samples: Number of trajectory frames to save.
             timestep_fs: Time step in femtoseconds.
             friction: Friction coefficient in 1/ps.
             pressure: Pressure in atmospheres.
             barostat_frequency: Barostat update frequency.
             output_prefix: Prefix for output files.
             segment_index: Segment index for multi-segment production.
-            report_interval: Fixed reporter interval in steps. When provided,
-                this overrides the per-segment ``total_steps // num_samples``
-                calculation to keep frame spacing uniform across segments.
+            report_interval: Explicit reporter interval in steps.
             checkpoint_interval_s: Wall-time interval in seconds between
-                portable restart checkpoints.  Also controls how frequently
-                the loop checks for SLURM preemption signals.  Set to 0 to
-                disable wall-time checkpoints (reverts to legacy behaviour).
+                portable restart checkpoints. Also controls how frequently
+                the loop checks for SLURM preemption signals.
 
         Returns:
             Dictionary with phase results.
@@ -1052,10 +1049,10 @@ class SimulationRunner:
         # Calculate steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
 
-        # Determine report interval: prefer the fixed global value if given,
-        # otherwise fall back to per-segment calculation (legacy callers).
-        if report_interval is None:
-            report_interval = max(1, total_steps // num_samples)
+        if report_interval <= 0:
+            raise ValueError("report_interval must be a positive integer")
+        if checkpoint_interval_s <= 0:
+            raise ValueError("checkpoint_interval_s must be positive")
 
         # Create integrator and simulation
         integrator = self._create_integrator(
@@ -1259,9 +1256,7 @@ class SimulationRunner:
 
                 # Adaptive sub-chunk calibration (once, after first interval)
                 if (
-                    not _adapted
-                    and checkpoint_interval_s > 0
-                    and (_now - _loop_start) >= checkpoint_interval_s
+                    not _adapted and (_now - _loop_start) >= checkpoint_interval_s
                 ):
                     elapsed = _now - _loop_start
                     steps_per_sec = steps_done / elapsed if elapsed > 0 else 1.0
@@ -1309,8 +1304,7 @@ class SimulationRunner:
 
                 # Wall-time restart checkpoint
                 if (
-                    checkpoint_interval_s > 0
-                    and (_now - _last_checkpoint_write) >= checkpoint_interval_s
+                    (_now - _last_checkpoint_write) >= checkpoint_interval_s
                     and steps_done < total_steps  # skip if we're about to finish
                 ):
                     save_restart_checkpoint(

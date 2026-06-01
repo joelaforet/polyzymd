@@ -28,6 +28,8 @@ def minimal_config_data():
                 "ensemble": "NPT",
                 "duration": 1.0,
                 "samples": 10,
+                "report_interval": 50000,
+                "checkpoint_interval": 60.0,
             },
         },
     }
@@ -219,6 +221,8 @@ class TestSimulationPhasesConfig:
             ensemble="NPT",
             duration=1.0,
             samples=10,
+            report_interval=50000,
+            checkpoint_interval=60.0,
             time_step=2.0,
         )
 
@@ -234,6 +238,8 @@ class TestSimulationPhasesConfig:
             ensemble="NPT",
             duration=1.0,
             samples=10,
+            report_interval=50000,
+            checkpoint_interval=60.0,
             time_step=2.0,
         )
 
@@ -257,7 +263,13 @@ class TestSimulationPhasesConfig:
                         temperature=300.0,
                     )
                 ],
-                production={"ensemble": "NPT", "duration": 1.0, "samples": 10},
+                production={
+                    "ensemble": "NPT",
+                    "duration": 1.0,
+                    "samples": 10,
+                    "report_interval": 50000,
+                    "checkpoint_interval": 60.0,
+                },
                 segments=[],
             )
 

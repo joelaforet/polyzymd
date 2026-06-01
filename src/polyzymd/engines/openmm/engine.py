@@ -65,7 +65,7 @@ class OpenMMEngine(SimulationEngine):
             duration_ns=prod.duration,
             num_samples=prod.samples,
             timestep_fs=prod.time_step,
-            report_interval=None,
+            report_interval=prod.report_interval,
             checkpoint_interval_s=prod.checkpoint_interval,
         )
 
@@ -161,23 +161,7 @@ class OpenMMEngine(SimulationEngine):
     def resolve_trajectory_layout(self, working_dir: Path, replicate: int) -> TrajectoryLayout:
         """Resolve OpenMM trajectory and topology paths.
 
-        Replicates the search order used by TrajectoryLoader so that the
-        engine can serve as the authoritative file resolver.
-
-        Topology search order:
-
-        1. ``solvated_system.pdb`` in working_dir root
-        2. ``production_0/production_0_topology.pdb``
-        3. ``production/production_topology.pdb`` (legacy)
-        4. Glob ``production_*/*_topology.pdb``
-        5. Glob ``production/*_topology.pdb``
-        6. Glob ``*.pdb`` in root
-
-        Trajectory search order:
-
-        1. ``production_N/production_N_trajectory.dcd`` (ordered by N)
-        2. ``production/production_trajectory.dcd`` (legacy)
-        3. Glob ``**/production*trajectory.dcd``
+        Uses the canonical OpenMM output layout rooted at ``working_dir``.
 
         Parameters
         ----------
@@ -215,24 +199,21 @@ class OpenMMEngine(SimulationEngine):
         Returns
         -------
         Path or None
-            Path to topology file, or None if not found.
+            Path to ``solvated_system.pdb``, or None if not found.
         """
-        # Primary topology path used by simulation workflow
         candidate = working_dir / "solvated_system.pdb"
         if candidate.exists():
             return candidate
 
-        # Daisy-chain output from the first production segment
         candidate = working_dir / "production_0" / "production_0_topology.pdb"
         if candidate.exists():
             return candidate
 
-        # Legacy single production directory layout
+        # Read-only support for expensive pre-PolyzyMD/JRL 2025 LipA simulations
         candidate = working_dir / "production" / "production_topology.pdb"
         if candidate.exists():
             return candidate
 
-        # Fallback glob patterns retained for backward compatibility
         for pattern in [
             "production_*/*_topology.pdb",
             "production/*_topology.pdb",
@@ -241,7 +222,6 @@ class OpenMMEngine(SimulationEngine):
             hits = sorted(working_dir.glob(pattern))
             if hits:
                 return hits[0]
-
         return None
 
     @staticmethod
@@ -258,7 +238,6 @@ class OpenMMEngine(SimulationEngine):
         list[Path]
             Ordered list of trajectory files.
         """
-        # Daisy-chain segmented trajectories ordered by production index
         prod_re = re.compile(r"production_(\d+)[/\\]production_\d+_trajectory\.dcd$")
         segments: dict[int, Path] = {}
         for file_path in working_dir.glob("production_*/production_*_trajectory.dcd"):
@@ -271,12 +250,11 @@ class OpenMMEngine(SimulationEngine):
         if segments:
             return [segments[index] for index in sorted(segments.keys())]
 
-        # Legacy single-file production trajectory path
-        legacy = working_dir / "production" / "production_trajectory.dcd"
-        if legacy.exists() and legacy.stat().st_size > 0:
-            return [legacy]
+        # Read-only support for expensive pre-PolyzyMD/JRL 2025 LipA simulations
+        single_production = working_dir / "production" / "production_trajectory.dcd"
+        if single_production.exists() and single_production.stat().st_size > 0:
+            return [single_production]
 
-        # Last-resort recursive pattern for historical layouts
         return sorted(
             path
             for path in working_dir.glob("**/production*trajectory.dcd")

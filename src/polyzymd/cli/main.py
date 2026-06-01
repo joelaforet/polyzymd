@@ -1711,7 +1711,7 @@ def run_segment(
     seg_idx = seg_info["segment_index"]
     steps_to_run = seg_info["steps_to_run"]
     samples_to_write = seg_info["samples_to_write"]
-    report_interval = seg_info["report_interval"]
+    report_interval = prod.report_interval
     duration_ns = (steps_to_run * timestep_fs) / 1e6
 
     colored_echo(
@@ -1776,8 +1776,8 @@ def _run_initial_segment(
     duration_ns: float,
     num_samples: int,
     timestep_fs: float,
-    report_interval: int | None = None,
-    checkpoint_interval_s: float = 60.0,
+    report_interval: int,
+    checkpoint_interval_s: float,
 ) -> None:
     """Build system, equilibrate, and run the first production segment.
 
@@ -1797,13 +1797,17 @@ def _run_initial_segment(
         Number of trajectory frames to save.
     timestep_fs : float
         Integration timestep in femtoseconds.
-    report_interval : int or None
-        Fixed reporter interval in steps. Overrides per-segment
-        interval calculation when provided.
+    report_interval : int
+        Explicit reporter interval in steps.
     checkpoint_interval_s : float
         Wall-time interval in seconds between restart checkpoints.
     """
     from polyzymd.simulation.runner import SimulationRunner
+
+    if report_interval <= 0:
+        raise ValueError("report_interval must be a positive integer")
+    if checkpoint_interval_s <= 0:
+        raise ValueError("checkpoint_interval_s must be positive")
 
     temperature = sim_config.thermodynamics.temperature
     pressure = sim_config.thermodynamics.pressure
@@ -1967,8 +1971,8 @@ def _run_continuation_segment(
     duration_ns: float,
     num_samples: int,
     timestep_fs: float,
-    report_interval: int | None = None,
-    checkpoint_interval_s: float = 60.0,
+    report_interval: int,
+    checkpoint_interval_s: float,
 ) -> None:
     """Continue from the last completed segment.
 
@@ -1984,13 +1988,17 @@ def _run_continuation_segment(
         Number of trajectory frames to save.
     timestep_fs : float
         Integration timestep in femtoseconds.
-    report_interval : int or None
-        Fixed reporter interval in steps. Overrides per-segment
-        interval calculation when provided.
+    report_interval : int
+        Explicit reporter interval in steps.
     checkpoint_interval_s : float
         Wall-time interval in seconds between restart checkpoints.
     """
     from polyzymd.simulation.continuation import ContinuationManager
+
+    if report_interval <= 0:
+        raise ValueError("report_interval must be a positive integer")
+    if checkpoint_interval_s <= 0:
+        raise ValueError("checkpoint_interval_s must be positive")
 
     colored_echo(f"Loading state from segment {segment_index - 1}...", phase="simulation")
     manager = ContinuationManager(
