@@ -2,7 +2,7 @@
 """Convert pre-PolyzyMD legacy simulation directories for PolyzyMD analysis.
 
 This script takes legacy simulation directories (pre-PolyzyMD format) and generates
-the files needed for PolyzyMD's analysis/compare pipeline:
+the files needed for PolyzyMD's current ``compare`` workflow:
 
 1. ``solvated_system.pdb`` — topology with corrected chain assignments
    (A=protein, B=substrate, C=polymer, D=solvent/ions)
