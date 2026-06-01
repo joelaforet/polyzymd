@@ -231,10 +231,7 @@ class RMSFAnalysis(Analysis):
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format RMSF comparison output for CLI display."""
 
-        from polyzymd.analyses.stats import (
-            format_scalar_comparison,
-            format_scalar_comparison_artifact_payload,
-        )
+        from polyzymd.analyses.stats import format_scalar_comparison_artifact_payload
 
         if isinstance(result, ComparisonArtifact):
             if output_format == "json":
@@ -249,16 +246,6 @@ class RMSFAnalysis(Analysis):
                 higher_is_better=False,
             )
 
-        if hasattr(result, "pairwise_comparisons"):
-            return format_scalar_comparison(
-                result,
-                title="RMSF Comparison",
-                metric_label="Mean RMSF",
-                metric_unit="A",
-                metric_key=MEAN_RMSF_METRIC,
-                output_format=output_format,
-                higher_is_better=False,
-            )
         return super().format(result, output_format)
 
     def plot(self, ctx: PlotContext) -> list[Path]:

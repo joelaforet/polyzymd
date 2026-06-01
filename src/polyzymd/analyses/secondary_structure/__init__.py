@@ -212,26 +212,13 @@ class SecondaryStructureAnalysis(Analysis):
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format secondary-structure comparison output for CLI display."""
 
-        from polyzymd.analyses.stats import (
-            format_scalar_comparison,
-            format_scalar_comparison_artifact_payload,
-        )
+        from polyzymd.analyses.stats import format_scalar_comparison_artifact_payload
 
         if isinstance(result, ComparisonArtifact):
             if output_format == "json":
                 return result.model_dump_json(indent=2)
             return format_scalar_comparison_artifact_payload(
                 result.payload,
-                title="Secondary Structure Comparison",
-                metric_label="Helix Fraction",
-                metric_unit="",
-                metric_key=HELIX_FRACTION_METRIC,
-                output_format=output_format,
-                higher_is_better=True,
-            )
-        if hasattr(result, "pairwise_comparisons"):
-            return format_scalar_comparison(
-                result,
                 title="Secondary Structure Comparison",
                 metric_label="Helix Fraction",
                 metric_unit="",

@@ -263,10 +263,7 @@ class CatalyticTriadAnalysis(Analysis):
         str
             Formatted output.
         """
-        from polyzymd.analyses.stats import (
-            format_scalar_comparison,
-            format_scalar_comparison_artifact_payload,
-        )
+        from polyzymd.analyses.stats import format_scalar_comparison_artifact_payload
 
         if isinstance(result, ComparisonArtifact):
             if output_format == "json":
@@ -281,16 +278,6 @@ class CatalyticTriadAnalysis(Analysis):
                 higher_is_better=True,
             )
 
-        if hasattr(result, "pairwise_comparisons"):
-            return format_scalar_comparison(
-                result,
-                title="Catalytic Triad Comparison",
-                metric_label="Simultaneous Contact",
-                metric_unit="%",
-                metric_key="simultaneous_contact_fraction",
-                output_format=output_format,
-                higher_is_better=True,
-            )
         return super().format(result, output_format)
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
