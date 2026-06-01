@@ -2,9 +2,9 @@
 
 This module defines Pydantic models for storing RMSD analysis results:
 - RMSDRunResult: Single run (selection) within a single replicate
-- RMSDResult: All runs for one replicate
-- RMSDRunAggregatedResult: One run aggregated across replicates
-- RMSDConditionModel: All runs aggregated across replicates
+- RMSDReplicatePayload: All runs for one replicate
+- RMSDRunAggregatePayload: One run aggregated across replicates
+- RMSDConditionPayload: All runs aggregated across replicates
 
 Supports multiple named RMSD selections (runs) per analysis, following
 the multi-entry pattern established by the distances plugin.
@@ -175,7 +175,7 @@ class RMSDRunResult(BaseAnalysisResult):
         return "\n".join(lines)
 
 
-class RMSDResult(BaseAnalysisResult):
+class RMSDReplicatePayload(BaseAnalysisResult):
     """RMSD results for all runs in one replicate.
 
     Container for analyzing multiple RMSD selections simultaneously.
@@ -221,7 +221,7 @@ class RMSDResult(BaseAnalysisResult):
         return len(self.run_results)
 
 
-class RMSDRunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
+class RMSDRunAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
     """Aggregated RMSD results for one run across replicates.
 
     Attributes
@@ -293,7 +293,7 @@ class RMSDRunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         return "\n".join(lines)
 
 
-class RMSDConditionModel(BaseAnalysisResult, AggregatedResultMixin):
+class RMSDConditionPayload(BaseAnalysisResult, AggregatedResultMixin):
     """Aggregated RMSD results for all runs across replicates."""
 
     analysis_type: ClassVar[str] = "rmsd_aggregated"
@@ -303,7 +303,7 @@ class RMSDConditionModel(BaseAnalysisResult, AggregatedResultMixin):
     n_replicates: int = Field(..., description="Number of replicates")
 
     # Collection of aggregated run results
-    run_results: list[RMSDRunAggregatedResult] = Field(
+    run_results: list[RMSDRunAggregatePayload] = Field(
         ..., description="Aggregated results for each run"
     )
 

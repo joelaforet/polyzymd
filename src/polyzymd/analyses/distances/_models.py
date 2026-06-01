@@ -1,8 +1,8 @@
 """Distance analysis result models.
 
 This module defines Pydantic models for storing distance analysis results:
-- DistanceResult: Single replicate distance distributions
-- DistanceConditionModel: Multi-replicate aggregated results
+- DistanceReplicatePayload: Single replicate distance distributions
+- DistanceConditionPayload: Multi-replicate aggregated results
 
 Supports both single pair and multiple pair analyses.
 """
@@ -395,7 +395,7 @@ class DistancePairResult(BaseAnalysisResult):
         return "\n".join(lines)
 
 
-class DistanceResult(BaseAnalysisResult):
+class DistanceReplicatePayload(BaseAnalysisResult):
     """Distance analysis results for multiple pairs in one replicate.
 
     Container for analyzing multiple distance pairs simultaneously.
@@ -430,7 +430,7 @@ class DistanceResult(BaseAnalysisResult):
         trajectory_files: Sequence[str | Path] = (),
         settings_fingerprint: str | None = None,
         selection_string: str | None = None,
-    ) -> DistanceResult:
+    ) -> DistanceReplicatePayload:
         """Construct a replicate distance result from pair results.
 
         Parameters
@@ -453,7 +453,7 @@ class DistanceResult(BaseAnalysisResult):
 
         Returns
         -------
-        DistanceResult
+        DistanceReplicatePayload
             Flat replicate result preserving the current serialized schema.
         """
 
@@ -491,7 +491,7 @@ class DistanceResult(BaseAnalysisResult):
         return len(self.pair_results)
 
 
-class DistancePairAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
+class DistancePairAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
     """Aggregated distance results for one pair across replicates.
 
     Attributes
@@ -563,7 +563,7 @@ class DistancePairAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         threshold: float | None,
         pair_label: str | None = None,
         selection_string: str | None = None,
-    ) -> DistancePairAggregatedResult:
+    ) -> DistancePairAggregatePayload:
         """Construct an aggregated pair result from shared statistics.
 
         Parameters
@@ -585,7 +585,7 @@ class DistancePairAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
 
         Returns
         -------
-        DistancePairAggregatedResult
+        DistancePairAggregatePayload
             Flat aggregated pair result preserving the current schema.
         """
 
@@ -649,7 +649,7 @@ class DistancePairAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         return "\n".join(lines)
 
 
-class DistanceConditionModel(BaseAnalysisResult, AggregatedResultMixin):
+class DistanceConditionPayload(BaseAnalysisResult, AggregatedResultMixin):
     """Aggregated distance results for multiple pairs across replicates."""
 
     analysis_type: ClassVar[str] = "distances_aggregated"
@@ -659,7 +659,7 @@ class DistanceConditionModel(BaseAnalysisResult, AggregatedResultMixin):
     n_replicates: int = Field(..., description="Number of replicates")
 
     # Collection of aggregated pair results
-    pair_results: list[DistancePairAggregatedResult] = Field(
+    pair_results: list[DistancePairAggregatePayload] = Field(
         ..., description="Aggregated results for each pair"
     )
 
@@ -676,20 +676,20 @@ class DistanceConditionModel(BaseAnalysisResult, AggregatedResultMixin):
     def from_pair_results(
         cls,
         metadata: DistanceResultMetadata,
-        pair_results: Sequence[DistancePairAggregatedResult],
+        pair_results: Sequence[DistancePairAggregatePayload],
         *,
         replicates: Sequence[int],
         source_result_files: Sequence[str | Path] = (),
         settings_fingerprint: str | None = None,
         selection_string: str | None = None,
-    ) -> DistanceConditionModel:
+    ) -> DistanceConditionPayload:
         """Construct an aggregated distance result from pair results.
 
         Parameters
         ----------
         metadata : DistanceResultMetadata
             Common result metadata to flatten into the serialized result.
-        pair_results : sequence of DistancePairAggregatedResult
+        pair_results : sequence of DistancePairAggregatePayload
             Aggregated per-pair results.
         replicates : sequence of int
             Replicate numbers included in the aggregation.
@@ -703,7 +703,7 @@ class DistanceConditionModel(BaseAnalysisResult, AggregatedResultMixin):
 
         Returns
         -------
-        DistanceConditionModel
+        DistanceConditionPayload
             Flat aggregated result preserving the current serialized schema.
         """
 

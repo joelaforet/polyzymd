@@ -237,7 +237,7 @@ def _make_mock_distance_result(
     n_pairs: int = 2,
     pair_schemas: list[tuple[str, str, str]] | None = None,
 ):
-    """Create a mock DistanceResult."""
+    """Create a mock DistanceReplicatePayload."""
     mock = MagicMock()
     mock.replicate = replicate
     mock.config_hash = "abc123"
@@ -279,8 +279,8 @@ def _make_distance_cache_result(
     pairs: list[tuple[str, str]],
     thresholds: list[float | None],
 ):
-    """Create a concrete ``DistanceResult`` for cache-identity tests."""
-    from polyzymd.analyses.distances._models import DistancePairResult, DistanceResult
+    """Create a concrete ``DistanceReplicatePayload`` for cache-identity tests."""
+    from polyzymd.analyses.distances._models import DistancePairResult, DistanceReplicatePayload
 
     pair_results = []
     for idx, ((selection1, selection2), threshold) in enumerate(
@@ -322,7 +322,7 @@ def _make_distance_cache_result(
             )
         )
 
-    return DistanceResult(
+    return DistanceReplicatePayload(
         config_hash=config_hash,
         polyzymd_version="1.0.0",
         replicate=1,
@@ -427,7 +427,7 @@ def _make_distance_artifacts(tmp_path, condition_label, settings, n_reps: int = 
     return artifacts
 
 
-class TestDistanceResultFactories:
+class TestDistanceReplicatePayloadFactories:
     """Factory helpers preserve the flat distance result schema."""
 
     @staticmethod
@@ -551,14 +551,14 @@ class TestDistanceResultFactories:
         assert dumped["pair_label"] == "pair0"
 
     def test_result_factory_stringifies_paths(self):
-        from polyzymd.analyses.distances._models import DistancePairResult, DistanceResult
+        from polyzymd.analyses.distances._models import DistancePairResult, DistanceReplicatePayload
 
         pair_result = DistancePairResult.from_runner_payload(
             self._make_metadata(replicate=None),
             self._make_payload(),
         )
 
-        result = DistanceResult.from_pair_results(
+        result = DistanceReplicatePayload.from_pair_results(
             self._make_metadata(replicate=1),
             [pair_result],
             n_frames_total=100,
@@ -572,8 +572,8 @@ class TestDistanceResultFactories:
         from types import SimpleNamespace
 
         from polyzymd.analyses.distances._models import (
-            DistanceConditionModel,
-            DistancePairAggregatedResult,
+            DistanceConditionPayload,
+            DistancePairAggregatePayload,
         )
 
         source_pair = SimpleNamespace(pair_label="pair0", selection1="sel_a", selection2="sel_b")
@@ -589,14 +589,14 @@ class TestDistanceResultFactories:
             per_rep_kde_peaks=[2.9, 3.1],
         )
 
-        pair_result = DistancePairAggregatedResult.from_aggregated_stats(
+        pair_result = DistancePairAggregatePayload.from_aggregated_stats(
             self._make_metadata(replicate=None),
             source_pair,
             stats,
             replicates=(1, 2),
             threshold=3.5,
         )
-        result = DistanceConditionModel.from_pair_results(
+        result = DistanceConditionPayload.from_pair_results(
             self._make_metadata(replicate=None),
             [pair_result],
             replicates=(1, 2),
@@ -611,7 +611,7 @@ class TestDistanceResultFactories:
         assert "stats" not in dumped
 
     def test_direct_constructors_still_supported(self):
-        from polyzymd.analyses.distances._models import DistancePairResult, DistanceResult
+        from polyzymd.analyses.distances._models import DistancePairResult, DistanceReplicatePayload
 
         pair_result = DistancePairResult(
             config_hash="hash123",
@@ -632,7 +632,7 @@ class TestDistanceResultFactories:
             n_frames_total=100,
             n_frames_used=90,
         )
-        result = DistanceResult(
+        result = DistanceReplicatePayload(
             config_hash="hash123",
             polyzymd_version="1.3.0-test",
             replicate=1,
@@ -887,7 +887,7 @@ class TestRunReplicate:
 
 
 class TestAggregate:
-    """aggregate produces a DistanceConditionModel."""
+    """aggregate produces a DistanceConditionPayload."""
 
     def _make_mock_results(self, settings, n_reps: int = 3):
         """Create mock per-replicate results for aggregation."""

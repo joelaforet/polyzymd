@@ -2,9 +2,9 @@
 
 This module defines Pydantic models for storing Rg analysis results:
 - RgRunResult: Single run (selection) within a single replicate
-- RgResult: All runs for one replicate
-- RgRunAggregatedResult: One run aggregated across replicates
-- RgConditionModel: All runs aggregated across replicates
+- RgReplicatePayload: All runs for one replicate
+- RgRunAggregatePayload: One run aggregated across replicates
+- RgConditionPayload: All runs aggregated across replicates
 
 Supports multiple named Rg selections (runs) per analysis, following
 the multi-entry pattern established by the distances plugin.
@@ -224,7 +224,7 @@ class RgRunResult(BaseAnalysisResult):
         return "\n".join(lines)
 
 
-class RgResult(BaseAnalysisResult):
+class RgReplicatePayload(BaseAnalysisResult):
     """Rg results for all runs in one replicate.
 
     Container for analyzing multiple Rg selections simultaneously.
@@ -275,7 +275,7 @@ class RgResult(BaseAnalysisResult):
         return len(self.run_results)
 
 
-class RgRunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
+class RgRunAggregatePayload(BaseAnalysisResult, AggregatedResultMixin):
     """Aggregated Rg results for one run across replicates.
 
     Attributes
@@ -392,7 +392,7 @@ class RgRunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         return "\n".join(lines)
 
 
-class RgConditionModel(BaseAnalysisResult, AggregatedResultMixin):
+class RgConditionPayload(BaseAnalysisResult, AggregatedResultMixin):
     """Aggregated Rg results for all runs across replicates."""
 
     analysis_type: ClassVar[str] = "rg_aggregated"
@@ -402,7 +402,7 @@ class RgConditionModel(BaseAnalysisResult, AggregatedResultMixin):
     n_replicates: int = Field(..., description="Number of replicates")
 
     # Collection of aggregated run results
-    run_results: list[RgRunAggregatedResult] = Field(
+    run_results: list[RgRunAggregatePayload] = Field(
         ..., description="Aggregated results for each run"
     )
     skipped_runs: list[RgSkippedRunResult] = Field(

@@ -33,9 +33,9 @@ from polyzymd.analyses.rg._mda import (
     compute_rg_run,
 )
 from polyzymd.analyses.rg._models import (
-    RgConditionModel,
-    RgResult,
-    RgRunAggregatedResult,
+    RgConditionPayload,
+    RgReplicatePayload,
+    RgRunAggregatePayload,
 )
 from polyzymd.analyses.rg._plotters import (
     _load_condition_aggregated,
@@ -690,7 +690,7 @@ def test_fragment_mode_lifecycle_records_structured_topology_provenance(
 
 
 def test_aggregate_rejects_noncanonical_inputs(tmp_path) -> None:
-    """Rg aggregation should reject non-canonical RgResult inputs with recompute guidance."""
+    """Rg aggregation should reject non-canonical RgReplicatePayload inputs with recompute guidance."""
 
     analysis = RgAnalysis()
     settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
@@ -701,7 +701,7 @@ def test_aggregate_rejects_noncanonical_inputs(tmp_path) -> None:
         settings=settings,
         equilibration="0ns",
     )
-    noncanonical = RgResult(
+    noncanonical = RgReplicatePayload(
         config_hash="hash",
         polyzymd_version="test",
         replicate=1,
@@ -935,7 +935,7 @@ def test_plot_rejects_non_artifact_aggregated_result_from_disk(tmp_path) -> None
     analysis_dir = tmp_path / "analysis" / "control" / "rg"
     aggregated_dir = analysis_dir / "aggregated"
     aggregated_dir.mkdir(parents=True)
-    noncanonical_run = RgRunAggregatedResult(
+    noncanonical_run = RgRunAggregatePayload(
         config_hash="hash",
         polyzymd_version="test",
         replicate=None,
@@ -953,7 +953,7 @@ def test_plot_rejects_non_artifact_aggregated_result_from_disk(tmp_path) -> None
         per_replicate_stds=[0.0, 0.0],
         per_replicate_medians=[1.0, 1.0],
     )
-    RgConditionModel(
+    RgConditionPayload(
         config_hash="hash",
         polyzymd_version="test",
         replicate=None,
@@ -977,7 +977,7 @@ def test_plot_rejects_non_artifact_aggregated_result_from_disk(tmp_path) -> None
         equilibration="0ns",
     )
 
-    with pytest.raises(TypeError, match="canonical ConditionArtifact"):
+    with pytest.raises(ValueError, match="canonical MDA ConditionArtifact"):
         analysis.plot(plot_ctx)
 
 

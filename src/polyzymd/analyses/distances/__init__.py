@@ -50,13 +50,8 @@ from polyzymd.analyses.distances._mda import (
     DistanceArtifactCollector,
     aggregate_distance_artifacts,
     build_distance_jobs,
-    compute_distance_payloads,
 )
-from polyzymd.analyses.distances._models import (
-    DistancePairResult,
-    DistanceResult,
-    DistanceResultMetadata,
-)
+from polyzymd.analyses.distances._models import DistanceReplicatePayload
 from polyzymd.analyses.distances._plot_settings import DistancesPlotSettings
 from polyzymd.analyses.distances._plotters import (
     _plot_distance_kde,
@@ -602,12 +597,12 @@ class DistanceCalculator:
         self._settings_tag = settings_tag or self._settings_fingerprint
 
     def _write_cache_metadata(self, result_file: Path) -> None:
-        """Persist strict cache-identity metadata next to a result file.
+        """Persist strict cache-identity metadata next to a legacy cache file.
 
         Parameters
         ----------
         result_file : Path
-            Result JSON path.
+            Result JSON path used by cache-identity regression tests.
         """
 
         metadata_path = _distance_calculator_metadata_path(result_file)
@@ -617,324 +612,34 @@ class DistanceCalculator:
         }
         metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
-    def _load_cached_settings_fingerprint(self, result_file: Path) -> str | None:
-        """Load the cached settings fingerprint for a result file.
+    def _load_cached_result(self, result_file: Path) -> DistanceReplicatePayload | None:
+        """Return a legacy cache only when strict identity metadata matches.
 
         Parameters
         ----------
         result_file : Path
-            Result JSON path.
+            Legacy distance cache path.
 
         Returns
         -------
-        str | None
-            Stored settings fingerprint, or ``None`` when strict cache
-            identity metadata is unavailable.
-        """
-
-        from polyzymd.analyses._framework.cache_identity import (
-            extract_settings_fingerprint_from_path,
-        )
-
-        metadata_path = _distance_calculator_metadata_path(result_file)
-        if metadata_path.exists():
-            try:
-                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                logger.warning(
-                    "Could not read distance cache metadata %s: %s",
-                    metadata_path,
-                    exc,
-                )
-                return None
-
-            stored = metadata.get("settings_fingerprint")
-            if isinstance(stored, str) and stored:
-                return stored
-
-        return extract_settings_fingerprint_from_path(result_file)
-
-    def _cached_result_matches_settings(self, result: "DistanceResult", result_file: Path) -> bool:
-        """Validate that a cached result matches current calculator settings.
-
-        Parameters
-        ----------
-        result : DistanceResult
-            Cached result loaded from disk.
-        result_file : Path
-            Result JSON path.
-
-        Returns
-        -------
-        bool
-            ``True`` when the cached result is safe to reuse.
-        """
-
-        stored_fingerprint = self._load_cached_settings_fingerprint(result_file)
-        if stored_fingerprint is None:
-            logger.info(
-                "Skipping distances cache without strict settings identity: %s",
-                result_file,
-            )
-            return False
-
-        if stored_fingerprint != self._settings_fingerprint:
-            logger.info(
-                "Skipping distances cache with mismatched settings fingerprint %s "
-                "(expected %s): %s",
-                stored_fingerprint,
-                self._settings_fingerprint,
-                result_file,
-            )
-            return False
-
-        if result.equilibration_time != self.equilibration_time:
-            logger.info(
-                "Skipping distances cache with mismatched equilibration time: %s",
-                result_file,
-            )
-            return False
-
-        if result.equilibration_unit != self.equilibration_unit:
-            logger.info(
-                "Skipping distances cache with mismatched equilibration unit: %s",
-                result_file,
-            )
-            return False
-
-        if len(result.pair_results) != len(self.pairs):
-            logger.info(
-                "Skipping distances cache with mismatched pair count: %s",
-                result_file,
-            )
-            return False
-
-        for idx, (pair_result, pair, threshold) in enumerate(
-            zip(result.pair_results, self.pairs, self.thresholds, strict=True),
-            start=1,
-        ):
-            selection_a, selection_b = pair
-            if pair_result.selection1 != selection_a or pair_result.selection2 != selection_b:
-                logger.info(
-                    "Skipping distances cache with mismatched pair %d selections: %s",
-                    idx,
-                    result_file,
-                )
-                return False
-            if pair_result.threshold != threshold:
-                logger.info(
-                    "Skipping distances cache with mismatched pair %d threshold: %s",
-                    idx,
-                    result_file,
-                )
-                return False
-
-        return True
-
-    def _load_cached_result(self, result_file: Path) -> "DistanceResult" | None:
-        """Load a cached result when both config and settings identity match.
-
-        Parameters
-        ----------
-        result_file : Path
-            Result JSON path.
-
-        Returns
-        -------
-        DistanceResult | None
-            Cached result on a strict cache hit, otherwise ``None``.
+        DistanceReplicatePayload or None
+            Cached payload when compatible, otherwise ``None``.
         """
 
         from polyzymd.analyses._framework.cache_identity import validate_config_hash
 
-        logger.info("Loading cached result from %s", result_file)
-        result = DistanceResult.load(result_file)
+        result = DistanceReplicatePayload.load(result_file)
         if not validate_config_hash(result.config_hash, self.config):
             return None
-        if not self._cached_result_matches_settings(result, result_file):
+        metadata_path = _distance_calculator_metadata_path(result_file)
+        if not metadata_path.exists():
             return None
-        return result
-
-    def compute(
-        self,
-        replicate: int,
-        save: bool = True,
-        output_dir: Path | None = None,
-        recompute: bool = False,
-        store_distributions: bool = True,
-    ) -> "DistanceResult":
-        """Compute distances for a single replicate.
-
-        Parameters
-        ----------
-        replicate : int
-            Replicate number (1-indexed).
-        save : bool, optional
-            If True (default), save result to JSON.
-        output_dir : Path, optional
-            Directory to save results.
-        recompute : bool, optional
-            If True, recompute even if cached.
-        store_distributions : bool, optional
-            If True (default), store full distance arrays.
-
-        Returns
-        -------
-        DistanceResult
-            Distance analysis results.
-        """
-        from polyzymd.analyses._framework.results_base import get_polyzymd_version
-        from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
-
-        if output_dir is None:
-            output_dir = (
-                self.config.output.projects_directory
-                / "analysis"
-                / "distances"
-                / f"run_{replicate}"
-            )
-
-        result_file = output_dir / self._make_result_filename()
-
-        # Check cache
-        if not recompute and result_file.exists():
-            result = self._load_cached_result(result_file)
-            if result is not None:
-                result = self._update_threshold_if_needed(result)
-                return result
-
-        logger.info(f"Computing distances for replicate {replicate}")
-
-        u = self._loader.load_universe(replicate)
-        traj_info = self._loader.get_trajectory_info(replicate)
-        window = resolve_replicate_trajectory_window(
-            loader=self._loader,
-            replicate=replicate,
-            equilibration=f"{self.equilibration_time:g}{self.equilibration_unit}",
-            n_frames_total=len(u.trajectory),
-        )
-        if window.warning_message:
-            logger.warning(window.warning_message)
-
-        logger.info(
-            "Trajectory: %d frames, using %d after equilibration",
-            window.n_frames_total,
-            window.n_frames_selected,
-        )
-
-        payload = compute_distance_payloads(
-            universe=u,
-            pairs=self.pairs,
-            thresholds=self.thresholds,
-            start=window.start,
-            stop=window.stop,
-            step=window.step,
-            timestep_ps=window.timestep_ps,
-            use_pbc=self._use_pbc,
-            alignment=self._alignment,
-            pair_label_func=_make_pair_label,
-        )
-
-        metadata = DistanceResultMetadata(
-            config_hash=self._config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=replicate,
-            equilibration_time=self.equilibration_time,
-            equilibration_unit=self.equilibration_unit,
-        )
-        pair_metadata = metadata.with_replicate(None)
-        pair_results = []
-        for pair_payload in payload.pair_payloads:
-            pr = DistancePairResult.from_runner_payload(
-                pair_metadata,
-                pair_payload,
-                store_distributions=store_distributions,
-            )
-            pair_results.append(pr)
-
-            if pr.sem_distance is not None:
-                logger.info(
-                    f"  {pr.pair_label}: {pr.mean_distance:.2f} "
-                    f"± {pr.sem_distance:.2f} Å "
-                    f"(SEM, n_ind={pr.n_independent_frames})"
-                )
-            else:
-                logger.info(f"  {pr.pair_label}: {pr.mean_distance:.2f} ± {pr.std_distance:.2f} Å")
-
-        # Create result
-        selection_strs = [f"({s1} : {s2})" for s1, s2 in self.pairs]
-        combined_selection = "; ".join(selection_strs)
-
-        result = DistanceResult.from_pair_results(
-            metadata,
-            pair_results,
-            n_frames_total=payload.n_frames_total,
-            n_frames_used=payload.n_frames_used,
-            trajectory_files=traj_info.trajectory_files,
-            selection_string=combined_selection,
-        )
-
-        if save:
-            result.save(result_file)
-            self._write_cache_metadata(result_file)
-            logger.info(f"Saved result to {result_file}")
-
-        return result
-
-    def _update_threshold_if_needed(self, result: "DistanceResult") -> "DistanceResult":
-        """Update contact fractions if thresholds changed since caching.
-
-        If the cached result used different thresholds than currently
-        requested and the distances array is available, recompute
-        ``fraction_below_threshold`` from the stored distances.
-
-        Parameters
-        ----------
-        result : DistanceResult
-            Cached result to potentially update.
-
-        Returns
-        -------
-        DistanceResult
-            Updated result (or original if no changes needed).
-        """
-        if all(t is None for t in self.thresholds):
-            return result
-
-        updated_pairs = []
-        any_updated = False
-
-        for idx, pr in enumerate(result.pair_results):
-            expected_threshold = self.thresholds[idx] if idx < len(self.thresholds) else None
-            cached_threshold = pr.threshold
-            needs_update = cached_threshold != expected_threshold
-
-            if needs_update and expected_threshold is not None:
-                if pr.distances is not None and len(pr.distances) > 0:
-                    distances_arr = np.array(pr.distances)
-                    new_fraction = float(np.mean(distances_arr < expected_threshold))
-                    logger.info(
-                        f"Recomputing contact fraction for {pr.pair_label} "
-                        f"(threshold: {cached_threshold} -> {expected_threshold})"
-                    )
-                    pr = pr.model_copy(
-                        update={
-                            "threshold": expected_threshold,
-                            "fraction_below_threshold": new_fraction,
-                        }
-                    )
-                    any_updated = True
-                else:
-                    logger.warning(
-                        f"Cannot update threshold for {pr.pair_label}: "
-                        f"distances not stored. Use --recompute to recalculate."
-                    )
-
-            updated_pairs.append(pr)
-
-        if any_updated:
-            return result.model_copy(update={"pair_results": updated_pairs})
-
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if metadata.get("settings_fingerprint") != self._settings_fingerprint:
+            return None
         return result
 
     def _make_result_filename(self) -> str:
