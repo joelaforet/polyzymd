@@ -68,11 +68,11 @@ def _plot_rmsf_profile(
         if cond_data is None:
             continue
 
-        aggregated_result = cond_data.get("aggregated_result")
-        if aggregated_result is None:
+        condition_payload = _condition_payload(cond_data)
+        if condition_payload is None:
             continue
 
-        profile_data = _rmsf_profile_from_aggregated(aggregated_result)
+        profile_data = _rmsf_profile_from_payload(condition_payload)
         if profile_data:
             profiles[label] = profile_data
 
@@ -174,31 +174,14 @@ def _plot_rmsf_comparison_from_aggregated(
         if cond_data is None:
             continue
 
-        agg_data = cond_data.get("aggregated_result")
-        if agg_data is None:
+        condition_payload = _condition_payload(cond_data)
+        if condition_payload is None:
             continue
 
         try:
-            # Support multiple key naming conventions without dropping zeros
-            mean_val = _get_first_available_field(
-                agg_data,
-                "overall_mean_rmsf",
-                "overall_mean",
-                "mean_rmsf",
-            )
-            sem_val = _get_first_available_field(
-                agg_data,
-                "overall_sem_rmsf",
-                "overall_sem",
-                "sem_rmsf",
-                default=0,
-            )
-            rep_vals = _get_first_available_field(
-                agg_data,
-                "per_replicate_mean_rmsf",
-                "replicate_values",
-                default=[],
-            )
+            mean_val = condition_payload["overall_mean_rmsf"]
+            sem_val = condition_payload.get("overall_sem_rmsf", 0.0)
+            rep_vals = condition_payload.get("per_replicate_mean_rmsf", [])
 
             if mean_val is not None:
                 plot_labels.append(label)
@@ -284,40 +267,6 @@ def _draw_sem_errorbars(
     )
 
 
-def _get_first_available_field(item: Any, *names: str, default: Any = None) -> Any:
-    """Return the first present field without treating zero as missing.
-
-    Parameters
-    ----------
-    item : Any
-        Mapping or object to inspect.
-    *names : str
-        Field names in priority order.
-    default : Any, optional
-        Value returned when none of the fields are present, by default ``None``.
-
-    Returns
-    -------
-    Any
-        First non-``None`` field value, preserving falsey finite values such as
-        ``0.0`` and empty lists when they are explicitly present.
-    """
-    extras = getattr(item, "model_extra", None)
-    for name in names:
-        if isinstance(item, dict) and name in item:
-            value = item[name]
-        elif extras is not None and name in extras:
-            value = extras[name]
-        elif hasattr(item, name):
-            value = getattr(item, name)
-        else:
-            continue
-
-        if value is not None:
-            return value
-    return default
-
-
 def _control_label_from_data(data: dict[str, Any]) -> str | None:
     """Return the framework-provided control label when available."""
 
@@ -348,17 +297,10 @@ def _reference_secondary_structure_from_data(
         cond_data = data.get(label)
         if not isinstance(cond_data, dict):
             continue
-        artifact = cond_data.get("condition_artifact")
-        artifact_payload = getattr(artifact, "payload", None)
-        if isinstance(artifact_payload, dict):
-            annotation = artifact_payload.get("reference_secondary_structure")
-            if isinstance(annotation, dict):
-                return annotation
-        aggregated_result = cond_data.get("aggregated_result")
-        annotation = _get_first_available_field(
-            aggregated_result,
-            "reference_secondary_structure",
-        )
+        condition_payload = _condition_payload(cond_data)
+        if condition_payload is None:
+            continue
+        annotation = condition_payload.get("reference_secondary_structure")
         if isinstance(annotation, dict):
             return annotation
     return None
@@ -412,8 +354,21 @@ def _draw_reference_secondary_structure_strip(
         spine.set_visible(False)
 
 
-def _rmsf_profile_from_aggregated(data: Any) -> dict | None:
-    """Return per-residue RMSF data from a validated aggregate.
+def _condition_payload(cond_data: dict[str, Any]) -> dict[str, Any] | None:
+    """Return canonical condition payload from plot data."""
+
+    payload = cond_data.get("condition_payload")
+    if isinstance(payload, dict):
+        return payload
+    artifact = cond_data.get("condition_artifact")
+    artifact_payload = getattr(artifact, "payload", None)
+    if isinstance(artifact_payload, dict):
+        return artifact_payload
+    return None
+
+
+def _rmsf_profile_from_payload(data: dict[str, Any]) -> dict | None:
+    """Return per-residue RMSF data from a canonical condition payload.
 
     Returns
     -------
@@ -421,47 +376,18 @@ def _rmsf_profile_from_aggregated(data: Any) -> dict | None:
         {"residues": [...], "rmsf": [...], "sem": [...]}
     """
     try:
-        # Check for per-residue data (support multiple key naming conventions)
-        per_res = _get_first_available_field(data, "mean_rmsf_per_residue")
-        if per_res is not None:
-            return {
-                "residues": _get_first_available_field(
-                    data,
-                    "residue_ids",
-                    default=list(range(1, len(per_res) + 1)),
-                ),
-                "rmsf": per_res,
-                "sem": _get_first_available_field(data, "sem_rmsf_per_residue", default=[]),
-                "n_replicates": _get_first_available_field(data, "n_replicates", default=0),
-            }
-        per_res = _get_first_available_field(data, "per_residue_rmsf")
-        if per_res is not None:
-            return {
-                "residues": _get_first_available_field(
-                    data,
-                    "residue_ids",
-                    default=list(range(1, len(per_res) + 1)),
-                ),
-                "rmsf": per_res,
-                "sem": _get_first_available_field(data, "per_residue_sem", default=[]),
-                "n_replicates": _get_first_available_field(data, "n_replicates", default=0),
-            }
-
-        residue_rmsf = _get_first_available_field(data, "residue_rmsf")
-        if residue_rmsf is not None:
-            return {
-                "residues": _get_first_available_field(
-                    data,
-                    "residue_ids",
-                    default=list(range(len(residue_rmsf))),
-                ),
-                "rmsf": residue_rmsf,
-                "sem": _get_first_available_field(data, "residue_sem", default=[]),
-                "n_replicates": _get_first_available_field(data, "n_replicates", default=0),
-            }
-
-        return None
+        profile = data.get("profile", {})
+        per_res = data.get("mean_rmsf_per_residue") or profile.get("mean_rmsf_per_residue")
+        if per_res is None:
+            return None
+        residue_ids = data.get("residue_ids") or profile.get("residue_ids")
+        return {
+            "residues": residue_ids or list(range(1, len(per_res) + 1)),
+            "rmsf": per_res,
+            "sem": data.get("sem_rmsf_per_residue") or profile.get("sem_rmsf_per_residue", []),
+            "n_replicates": data.get("n_replicates", 0),
+        }
 
     except (KeyError, TypeError, ValueError) as e:
-        logger.debug(f"Failed to extract RMSF profile from aggregated result: {e}")
+        logger.debug(f"Failed to extract RMSF profile from condition payload: {e}")
         return None

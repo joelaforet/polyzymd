@@ -1,10 +1,9 @@
-"""MDAnalysis-native RMSF profile jobs and artifact adapters."""
+"""MDAnalysis-native RMSF profile jobs and canonical artifacts."""
 
 from __future__ import annotations
 
 import hashlib
 import logging
-import math
 from collections.abc import Mapping, Sequence
 from operator import index as operator_index
 from pathlib import Path
@@ -26,7 +25,6 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
-from polyzymd.analyses.rmsf._results import RMSFAggregatedResult, RMSFResult
 from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
 from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
 from polyzymd.analyses.shared.loader import parse_time_string
@@ -279,51 +277,66 @@ def aggregate_rmsf_artifacts(
         artifacts=artifacts,
         analysis_dir=output_dir.parent,
     )
-    legacy_result = _aggregate_legacy_result(
-        replicates=replicates,
-        settings=settings,
-        equilibration=equilibration,
-        artifacts=ordered_artifacts,
-        settings_fingerprint=settings_fingerprint,
-    )
-    values = [float(value) for value in legacy_result.per_replicate_mean_rmsf]
+    first_artifact = ordered_artifacts[0]
+    first_profile = _require_mapping(first_artifact.payload.get("profile"), "profile")
+    profiles = []
+    for artifact in ordered_artifacts:
+        profile = _require_mapping(artifact.payload.get("profile"), "profile")
+        values = np.asarray(profile.get("rmsf_values"), dtype=np.float64)
+        if values.ndim != 1 or values.size == 0 or not np.all(np.isfinite(values)):
+            raise ValueError(f"RMSF replicate {artifact.replicate} has invalid RMSF profile values")
+        profiles.append(values)
+
+    matrix = np.vstack(profiles)
+    mean_rmsf_per_residue = np.mean(matrix, axis=0)
+    sem_rmsf_per_residue = np.zeros(matrix.shape[1], dtype=np.float64)
+    if matrix.shape[0] > 1:
+        sem_rmsf_per_residue = np.std(matrix, axis=0, ddof=1) / np.sqrt(matrix.shape[0])
+
+    per_replicate_means = [float(np.mean(profile)) for profile in profiles]
+    overall_stats = compute_sem(per_replicate_means)
+    eq_value, eq_unit = parse_time_string(equilibration)
+    residue_ids = [int(value) for value in first_profile.get("residue_ids", [])]
+    residue_names = [str(value) for value in first_profile.get("residue_names", [])]
+    mean_values = mean_rmsf_per_residue.tolist()
+    sem_values = sem_rmsf_per_residue.tolist()
     metric = _metric_summary(
         MEAN_RMSF_METRIC,
-        values,
-        legacy_result.overall_mean_rmsf,
-        legacy_result.overall_sem_rmsf,
+        per_replicate_means,
+        overall_stats.mean,
+        overall_stats.sem,
     )
     metric.update(RMSF_METRIC_METADATA)
     replicate_metrics = {
         str(replicate): {MEAN_RMSF_METRIC: value}
-        for replicate, value in zip(legacy_result.replicates, values, strict=True)
+        for replicate, value in zip(replicates, per_replicate_means, strict=True)
     }
     reference_ss, reference_ss_warnings = reference_secondary_structure_payload(
         settings=settings,
-        residue_ids=legacy_result.residue_ids,
+        residue_ids=residue_ids,
     )
     payload = {
         "profile": {
-            "residue_ids": legacy_result.residue_ids,
-            "residue_names": legacy_result.residue_names,
-            "residue_indices": ordered_artifacts[0].payload["profile"]["residue_indices"],
-            "identity_keys": ordered_artifacts[0].payload["profile"]["identity_keys"],
-            "mean_rmsf_per_residue": legacy_result.mean_rmsf_per_residue,
-            "sem_rmsf_per_residue": legacy_result.sem_rmsf_per_residue,
+            "residue_ids": residue_ids,
+            "residue_names": residue_names,
+            "residue_indices": [int(value) for value in first_profile.get("residue_indices", [])],
+            "identity_keys": [str(value) for value in first_profile.get("identity_keys", [])],
+            "mean_rmsf_per_residue": mean_values,
+            "sem_rmsf_per_residue": sem_values,
         },
-        "residue_ids": legacy_result.residue_ids,
-        "residue_names": legacy_result.residue_names,
-        "mean_rmsf_per_residue": legacy_result.mean_rmsf_per_residue,
-        "sem_rmsf_per_residue": legacy_result.sem_rmsf_per_residue,
-        "per_replicate_mean_rmsf": values,
-        "overall_mean_rmsf": legacy_result.overall_mean_rmsf,
-        "overall_sem_rmsf": legacy_result.overall_sem_rmsf,
-        "overall_min_rmsf": legacy_result.overall_min_rmsf,
-        "overall_max_rmsf": legacy_result.overall_max_rmsf,
+        "residue_ids": residue_ids,
+        "residue_names": residue_names,
+        "mean_rmsf_per_residue": mean_values,
+        "sem_rmsf_per_residue": sem_values,
+        "per_replicate_mean_rmsf": per_replicate_means,
+        "overall_mean_rmsf": overall_stats.mean,
+        "overall_sem_rmsf": overall_stats.sem,
+        "overall_min_rmsf": float(np.min(mean_rmsf_per_residue)),
+        "overall_max_rmsf": float(np.max(mean_rmsf_per_residue)),
         "metrics": {MEAN_RMSF_METRIC: metric},
         "replicate_metrics": replicate_metrics,
         "metric_metadata": {MEAN_RMSF_METRIC: RMSF_METRIC_METADATA},
-        "n_replicates": legacy_result.n_replicates,
+        "n_replicates": len(replicates),
     }
     if reference_ss is not None:
         payload["reference_secondary_structure"] = reference_ss
@@ -341,18 +354,20 @@ def aggregate_rmsf_artifacts(
         metadata={
             "result_kind": "rmsf_mda_condition",
             "settings_fingerprint": settings_fingerprint,
-            "config_hash": legacy_result.config_hash,
-            "polyzymd_version": legacy_result.polyzymd_version,
+            "config_hash": str(first_artifact.metadata.get("config_hash", "unknown")),
+            "polyzymd_version": str(
+                first_artifact.metadata.get("polyzymd_version", get_polyzymd_version())
+            ),
             "mdanalysis_version": mdanalysis_version(),
             "rmsf_profile_version": RMSF_PROFILE_VERSION,
-            "equilibration_time": legacy_result.equilibration_time,
-            "equilibration_unit": legacy_result.equilibration_unit,
-            "selection_string": legacy_result.selection_string,
+            "equilibration_time": eq_value,
+            "equilibration_unit": eq_unit,
+            "selection_string": settings.selection,
             "source_result_files": [
                 str(output_dir.parent / f"run_{replicate}" / "result.json")
                 for replicate in replicates
             ],
-            "n_replicates": legacy_result.n_replicates,
+            "n_replicates": len(replicates),
             "statistical_policy": RMSF_METRIC_METADATA["statistical_policy"],
         },
         source_replicates=[
@@ -860,83 +875,6 @@ def _simplify_secondary_structure_state(state: str) -> str:
     return "C"
 
 
-def artifact_to_rmsf_result(artifact: ReplicateArtifact) -> RMSFResult:
-    """Convert a replicate artifact to the established RMSF result model."""
-
-    if artifact.analysis_name != "rmsf":
-        raise ValueError(f"Expected rmsf artifact, got {artifact.analysis_name!r}")
-    metadata = artifact.metadata
-    payload = artifact.payload
-    profile = _require_mapping(payload.get("profile"), "profile")
-    reference = _require_mapping(payload.get("reference"), "reference")
-    alignment = _require_mapping(payload.get("alignment"), "alignment")
-    autocorrelation = _require_mapping(payload.get("autocorrelation"), "autocorrelation")
-    frame_metadata = _require_mapping(payload.get("frame_metadata"), "frame_metadata")
-    return RMSFResult(
-        config_hash=str(metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=artifact.replicate,
-        equilibration_time=float(metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(metadata.get("equilibration_unit", "ns")),
-        selection_string=str(metadata.get("selection_string", "")),
-        correlation_time=autocorrelation.get("correlation_time"),
-        correlation_time_unit=autocorrelation.get("correlation_time_unit"),
-        n_independent_frames=autocorrelation.get("n_independent_frames"),
-        residue_ids=[int(value) for value in profile.get("residue_ids", [])],
-        residue_names=[str(value) for value in profile.get("residue_names", [])],
-        rmsf_values=[float(value) for value in profile.get("rmsf_values", [])],
-        mean_rmsf=float(payload.get("mean_rmsf", 0.0)),
-        std_rmsf=float(payload.get("std_rmsf", 0.0)),
-        min_rmsf=float(payload.get("min_rmsf", 0.0)),
-        max_rmsf=float(payload.get("max_rmsf", 0.0)),
-        reference_mode=reference.get("reference_mode"),
-        reference_frame=reference.get("reference_frame"),
-        alignment_selection=alignment.get("alignment_selection"),
-        reference_file=reference.get("reference_file"),
-        n_frames_total=int(frame_metadata.get("n_frames_total", 0) or 0),
-        n_frames_used=int(frame_metadata.get("n_frames_used", 0) or 0),
-        settings_fingerprint=metadata.get("settings_fingerprint"),
-        trajectory_files=[],
-    )
-
-
-def condition_artifact_to_legacy_result(artifact: Any) -> RMSFAggregatedResult:
-    """Convert a condition artifact to the established aggregate model."""
-
-    if isinstance(artifact, RMSFAggregatedResult):
-        return artifact
-    if not isinstance(artifact, ConditionArtifact):
-        raise TypeError(
-            "RMSF aggregate adapters require canonical ConditionArtifact inputs. "
-            f"Got {type(artifact).__name__}; recompute the condition or clear stale caches."
-        )
-    metadata = artifact.metadata
-    payload = artifact.payload
-    return RMSFAggregatedResult(
-        config_hash=str(metadata.get("config_hash", "unknown")),
-        polyzymd_version=str(metadata.get("polyzymd_version", get_polyzymd_version())),
-        replicate=None,
-        equilibration_time=float(metadata.get("equilibration_time", 0.0)),
-        equilibration_unit=str(metadata.get("equilibration_unit", "ns")),
-        selection_string=str(metadata.get("selection_string", "")),
-        replicates=[int(rep) for rep in artifact.replicates],
-        n_replicates=len(artifact.replicates),
-        residue_ids=[int(value) for value in payload.get("residue_ids", [])],
-        residue_names=[str(value) for value in payload.get("residue_names", [])],
-        mean_rmsf_per_residue=[float(value) for value in payload.get("mean_rmsf_per_residue", [])],
-        sem_rmsf_per_residue=[float(value) for value in payload.get("sem_rmsf_per_residue", [])],
-        per_replicate_mean_rmsf=[
-            float(value) for value in payload.get("per_replicate_mean_rmsf", [])
-        ],
-        overall_mean_rmsf=float(payload.get("overall_mean_rmsf", 0.0)),
-        overall_sem_rmsf=float(payload.get("overall_sem_rmsf", 0.0)),
-        overall_min_rmsf=float(payload.get("overall_min_rmsf", 0.0)),
-        overall_max_rmsf=float(payload.get("overall_max_rmsf", 0.0)),
-        source_result_files=[str(path) for path in metadata.get("source_result_files", [])],
-        settings_fingerprint=metadata.get("settings_fingerprint"),
-    )
-
-
 def load_condition_artifact(aggregated_dir: Path) -> ConditionArtifact | None:
     """Load the canonical RMSF condition artifact if present."""
 
@@ -954,52 +892,6 @@ def mdanalysis_version() -> str | None:
     except ImportError:
         return None
     return str(getattr(mda, "__version__", "unknown"))
-
-
-def _aggregate_legacy_result(
-    *,
-    replicates: Sequence[int],
-    settings: RMSFSettings,
-    equilibration: str,
-    artifacts: Sequence[ReplicateArtifact],
-    settings_fingerprint: str,
-) -> RMSFAggregatedResult:
-    """Build the established aggregate model from replicate artifacts."""
-
-    legacy_results = [artifact_to_rmsf_result(artifact) for artifact in artifacts]
-    first = legacy_results[0]
-    eq_value, eq_unit = parse_time_string(equilibration)
-    per_replicate_rmsf = [
-        np.asarray(result.rmsf_values, dtype=np.float64) for result in legacy_results
-    ]
-    matrix = np.vstack(per_replicate_rmsf)
-    means = np.mean(matrix, axis=0)
-    sems = np.zeros(matrix.shape[1], dtype=np.float64)
-    if matrix.shape[0] > 1:
-        sems = np.std(matrix, axis=0, ddof=1) / math.sqrt(matrix.shape[0])
-    per_replicate_means = [float(result.mean_rmsf) for result in legacy_results]
-    overall_stats = compute_sem(per_replicate_means)
-    return RMSFAggregatedResult(
-        config_hash=first.config_hash,
-        polyzymd_version=get_polyzymd_version(),
-        replicate=None,
-        equilibration_time=eq_value,
-        equilibration_unit=eq_unit,
-        selection_string=settings.selection,
-        replicates=[int(rep) for rep in replicates],
-        n_replicates=len(replicates),
-        residue_ids=first.residue_ids,
-        residue_names=first.residue_names,
-        mean_rmsf_per_residue=means.tolist(),
-        sem_rmsf_per_residue=sems.tolist(),
-        per_replicate_mean_rmsf=per_replicate_means,
-        overall_mean_rmsf=overall_stats.mean,
-        overall_sem_rmsf=overall_stats.sem,
-        overall_min_rmsf=float(np.min(means)),
-        overall_max_rmsf=float(np.max(means)),
-        settings_fingerprint=settings_fingerprint,
-        source_result_files=[],
-    )
 
 
 def _validate_and_order_artifacts(

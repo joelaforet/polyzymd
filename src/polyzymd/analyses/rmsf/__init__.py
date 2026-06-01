@@ -30,12 +30,10 @@ from polyzymd.analyses.rmsf._mda import (
     RMSFArtifactCollector,
     aggregate_rmsf_artifacts,
     build_rmsf_jobs,
-    condition_artifact_to_legacy_result,
     external_reference_file_identity,
 )
 from polyzymd.analyses.rmsf._plot_settings import RMSFPlotSettings
 from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison, _plot_rmsf_profile
-from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
 
 if TYPE_CHECKING:
     from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext
@@ -90,7 +88,7 @@ class RMSFAnalysis(Analysis):
     name: ClassVar[str] = "rmsf"
     Settings: ClassVar[type] = RMSFSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RMSFPlotSettings
-    AggregatedResultClass: ClassVar[type] = RMSFAggregatedResult
+    AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
@@ -174,8 +172,8 @@ class RMSFAnalysis(Analysis):
             )
         if not all(isinstance(result, ReplicateArtifact) for result in results):
             raise TypeError(
-                "RMSF aggregation expects MDAnalysis ReplicateArtifact inputs. Legacy RMSF "
-                "replicate caches are incompatible with the MDAnalysis artifact lifecycle; "
+                "RMSF aggregation expects MDAnalysis ReplicateArtifact inputs. Incompatible "
+                "replicate inputs were found for the MDAnalysis artifact lifecycle; "
                 "recompute the condition or clear stale caches before aggregating."
             )
         return aggregate_rmsf_artifacts(
@@ -189,12 +187,12 @@ class RMSFAnalysis(Analysis):
         )
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-        """Extract mean RMSF from a legacy aggregate adapter.
+        """Extract mean RMSF from a canonical condition artifact.
 
         Parameters
         ----------
         summary : Any
-            Aggregated RMSF result or condition artifact.
+            Canonical RMSF condition artifact.
 
         Returns
         -------
@@ -202,27 +200,31 @@ class RMSFAnalysis(Analysis):
             Mean RMSF metric for the scalar comparison path.
         """
 
-        if isinstance(summary, ConditionArtifact):
-            summary = condition_artifact_to_legacy_result(summary)
+        if not isinstance(summary, ConditionArtifact):
+            raise TypeError(
+                "RMSF metric extraction requires a canonical ConditionArtifact input. "
+                "Recompute the condition or clear stale caches before comparing."
+            )
+        payload = summary.payload
         return {
             MEAN_RMSF_METRIC: MetricValue(
                 name=MEAN_RMSF_METRIC,
-                mean=summary.overall_mean_rmsf,
-                sem=summary.overall_sem_rmsf,
-                replicate_values=summary.per_replicate_mean_rmsf,
+                mean=float(payload["overall_mean_rmsf"]),
+                sem=float(payload["overall_sem_rmsf"]),
+                replicate_values=[float(value) for value in payload["per_replicate_mean_rmsf"]],
                 higher_is_better=False,
                 direction_labels=("stabilizing", "unchanged", "destabilizing"),
             )
         }
 
     def compare(self, ctx: ComparisonContext) -> Any:
-        """Compare RMSF condition artifacts with legacy-cache rejection."""
+        """Compare RMSF condition artifacts."""
 
         for label, summary in ctx.aggregated_results.items():
             if summary is not None and not isinstance(summary, ConditionArtifact):
                 raise TypeError(
                     f"RMSF comparison for condition '{label}' requires canonical MDAnalysis "
-                    "condition artifacts. Legacy RMSF aggregate inputs are incompatible; "
+                    "ConditionArtifact inputs. Incompatible aggregate inputs were found; "
                     "recompute the condition or clear stale caches before comparing."
                 )
         return super().compare(ctx)
@@ -276,8 +278,8 @@ class RMSFAnalysis(Analysis):
                 expected_replicates=condition.replicates,
                 allow_replicate_subset=True,
             )
-            cond_data["aggregated_result"] = condition_artifact_to_legacy_result(artifact)
             cond_data["condition_artifact"] = artifact
+            cond_data["condition_payload"] = artifact.payload
 
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
         plots: list[Path] = []
@@ -300,7 +302,7 @@ class RMSFAnalysis(Analysis):
                 return ArtifactStore(path.parent).read_condition_result(path.name)
         raise ValueError(
             f"RMSF aggregate at {path} is not a canonical MDAnalysis condition artifact. "
-            "Recompute the condition or clear stale legacy RMSF caches."
+            "Recompute the condition or clear stale caches."
         )
 
 

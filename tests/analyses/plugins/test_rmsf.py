@@ -8,8 +8,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import matplotlib
 import numpy as np
 import pytest
+
+matplotlib.use("Agg", force=True)
 
 from polyzymd.analyses.base import AggregateContext, ComparisonContext, Condition, PlotContext
 from polyzymd.analyses.discovery import clear_cache, get_analysis, list_analyses
@@ -29,7 +32,6 @@ from polyzymd.analyses.rmsf._mda import (
     MEAN_RMSF_METRIC,
     RMSFArtifactCollector,
     aggregate_rmsf_artifacts,
-    condition_artifact_to_legacy_result,
     external_reference_file_identity,
     prepare_rmsf_profile_input,
 )
@@ -265,10 +267,10 @@ class TestRMSFDiscoveryAndSettings:
         assert get_analysis("rmsf") is RMSFAnalysis
 
     def test_class_uses_mda_artifacts(self) -> None:
-        """RMSF should no longer expose a legacy replicate result class."""
+        """RMSF should use canonical MDA artifacts directly."""
 
         assert RMSFAnalysis.ReplicateResultClass is None
-        assert RMSFAnalysis.AggregatedResultClass is not None
+        assert RMSFAnalysis.AggregatedResultClass is None
         assert "run_replicate" not in RMSFAnalysis.__dict__
 
     def test_settings_defaults_and_validation(self) -> None:
@@ -830,10 +832,10 @@ class TestRMSFArtifacts:
                 settings_fingerprint=current_fingerprint,
             )
 
-    def test_analysis_aggregate_rejects_legacy_inputs(
+    def test_analysis_aggregate_requires_replicate_artifacts(
         self, condition: Condition, tmp_path: Path
     ) -> None:
-        """Legacy replicate payloads should fail with recompute guidance."""
+        """Non-artifact replicate payloads should fail with recompute guidance."""
 
         ctx = AggregateContext(
             condition=condition,
@@ -842,7 +844,7 @@ class TestRMSFArtifacts:
             equilibration="0ns",
             settings=RMSFSettings(),
         )
-        with pytest.raises(TypeError, match="Legacy RMSF replicate caches"):
+        with pytest.raises(TypeError, match="ReplicateArtifact inputs"):
             RMSFAnalysis().aggregate(ctx, [MagicMock(), MagicMock()])
 
 
@@ -895,8 +897,25 @@ class TestRMSFCompareFormatPlot:
         policy = result.payload["metric_metadata"][MEAN_RMSF_METRIC]["statistical_policy"]
         assert policy["metric_classification"] == "variance_based"
 
-    def test_compare_rejects_legacy_aggregate(self, condition: Condition, tmp_path: Path) -> None:
-        """In-memory legacy aggregates should fail loudly."""
+    def test_extract_metrics_reads_condition_artifact(
+        self, condition: Condition, tmp_path: Path
+    ) -> None:
+        """Metric extraction should consume canonical condition payload fields."""
+
+        artifact = self._condition_artifact(condition, tmp_path / "control")
+
+        metrics = RMSFAnalysis().extract_metrics(artifact)
+
+        metric = metrics[MEAN_RMSF_METRIC]
+        assert metric.mean == pytest.approx(2.0)
+        assert metric.sem == pytest.approx(0.5)
+        assert metric.replicate_values == pytest.approx([1.5, 2.5])
+        assert metric.higher_is_better is False
+
+    def test_compare_rejects_non_artifact_aggregate(
+        self, condition: Condition, tmp_path: Path
+    ) -> None:
+        """In-memory non-artifact aggregates should fail loudly."""
 
         ctx = ComparisonContext(
             name="rmsf_compare",
@@ -909,7 +928,7 @@ class TestRMSFCompareFormatPlot:
             settings=RMSFSettings(),
             aggregated_results={condition.label: MagicMock()},
         )
-        with pytest.raises(TypeError, match="Legacy RMSF aggregate inputs"):
+        with pytest.raises(TypeError, match="ConditionArtifact inputs"):
             RMSFAnalysis().compare(ctx)
 
     def test_format_accepts_comparison_artifact(self, condition: Condition, tmp_path: Path) -> None:
@@ -940,7 +959,7 @@ class TestRMSFCompareFormatPlot:
         """plot() should load canonical artifacts and pass profile data to plotters."""
 
         artifact = self._condition_artifact(condition, tmp_path / "analysis" / "rmsf")
-        assert condition_artifact_to_legacy_result(artifact).overall_mean_rmsf == pytest.approx(2.0)
+        assert artifact.payload["overall_mean_rmsf"] == pytest.approx(2.0)
 
         from polyzymd.config.comparison import PlotSettings
 
@@ -986,20 +1005,16 @@ class TestRMSFCompareFormatPlot:
         data = {
             "__meta__": {"settings": {"reference_file": str(ref_path)}},
             "Control": {
-                "aggregated_result": {
+                "condition_payload": {
                     "residue_ids": [1, 2, 3],
                     "mean_rmsf_per_residue": [1.0, 1.5, 2.0],
                     "sem_rmsf_per_residue": [0.1, 0.1, 0.1],
                     "n_replicates": 2,
+                    "reference_secondary_structure": {
+                        "residue_ids": [1, 2, 3],
+                        "states": ["H", "E", "C"],
+                    },
                 },
-                "condition_artifact": SimpleNamespace(
-                    payload={
-                        "reference_secondary_structure": {
-                            "residue_ids": [1, 2, 3],
-                            "states": ["H", "E", "C"],
-                        }
-                    }
-                ),
             },
         }
 
@@ -1029,20 +1044,16 @@ class TestRMSFCompareFormatPlot:
 
         data = {
             "Control": {
-                "aggregated_result": {
+                "condition_payload": {
                     "residue_ids": [1, 2, 3],
                     "mean_rmsf_per_residue": [1.0, 1.5, 2.0],
                     "sem_rmsf_per_residue": [0.1, 0.1, 0.1],
                     "n_replicates": 2,
+                    "reference_secondary_structure": {
+                        "residue_ids": [1, 2, 3],
+                        "states": ["H", "E", "C"],
+                    },
                 },
-                "condition_artifact": SimpleNamespace(
-                    payload={
-                        "reference_secondary_structure": {
-                            "residue_ids": [1, 2, 3],
-                            "states": ["H", "E", "C"],
-                        }
-                    }
-                ),
             }
         }
         captured = []
@@ -1076,7 +1087,7 @@ class TestRMSFCompareFormatPlot:
 
         data = {
             "Control": {
-                "aggregated_result": {
+                "condition_payload": {
                     "residue_ids": [1, 2, 3],
                     "mean_rmsf_per_residue": [1.0, 1.5, 2.0],
                     "sem_rmsf_per_residue": [0.1, 0.1, 0.1],
@@ -1122,7 +1133,7 @@ class TestRMSFCompareFormatPlot:
         data = {
             "__meta__": {"control_label": "Control"},
             "Treated": {
-                "aggregated_result": {
+                "condition_payload": {
                     "overall_mean_rmsf": 2.0,
                     "overall_sem_rmsf": 0.1,
                     "per_replicate_mean_rmsf": [1.9, 2.1],
@@ -1133,7 +1144,7 @@ class TestRMSFCompareFormatPlot:
                 }
             },
             "Control": {
-                "aggregated_result": {
+                "condition_payload": {
                     "overall_mean_rmsf": 1.0,
                     "overall_sem_rmsf": 0.1,
                     "per_replicate_mean_rmsf": [0.9, 1.1],
@@ -1178,8 +1189,8 @@ class TestRMSFCompareFormatPlot:
         for fig in captured:
             plt.close(fig)
 
-    def test_deserialize_rejects_legacy_json(self, tmp_path: Path) -> None:
-        """Legacy aggregate files should not be loaded as RMSF MDA artifacts."""
+    def test_deserialize_rejects_non_artifact_json(self, tmp_path: Path) -> None:
+        """Non-artifact aggregate files should not be loaded as RMSF MDA artifacts."""
 
         path = tmp_path / "result.json"
         path.write_text('{"analysis_type": "rmsf_aggregated"}', encoding="utf-8")
