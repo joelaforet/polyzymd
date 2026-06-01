@@ -6,6 +6,7 @@
 # ============================================================================
 
 name: "LipA_ResorufinButyrate_DMSO10"
+engine: "openmm"
 description: "LipA enzyme with Resorufin-Butyrate in 10% DMSO co-solvent"
 
 # ============================================================================

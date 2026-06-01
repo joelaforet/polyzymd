@@ -13,6 +13,7 @@ def minimal_config_data():
     """Provide minimal valid SimulationConfig input data."""
     return {
         "name": "test_simulation",
+        "engine": "openmm",
         "enzyme": {"name": "TestEnzyme", "pdb_path": "test.pdb"},
         "thermodynamics": {"temperature": 300.0},
         "simulation_phases": {
@@ -362,8 +363,8 @@ class TestOutputConfig:
 class TestEngineConfig:
     """Tests for engine configuration fields."""
 
-    def test_default_engine_is_openmm(self, minimal_config_data):
-        """Default engine should be openmm."""
+    def test_explicit_openmm_engine_parses(self, minimal_config_data):
+        """Explicit OpenMM engine should be accepted."""
         config = SimulationConfig(**minimal_config_data)
         assert config.engine == "openmm"
 
@@ -464,11 +465,11 @@ class TestEngineConfig:
         assert config.gromacs.env_exports["GMX_GPU_DD_COMMS"] == "true"
         assert config.gromacs.setup_commands[0] == "source /opt/gromacs/bin/GMXRC"
 
-    def test_old_config_without_engine_field(self, minimal_config_data):
-        """Old configs without engine field should default to openmm."""
+    def test_missing_engine_field_is_rejected(self, minimal_config_data):
+        """Configs without engine field should fail validation."""
         minimal_config_data.pop("engine", None)
-        config = SimulationConfig(**minimal_config_data)
-        assert config.engine == "openmm"
+        with pytest.raises(ValidationError):
+            SimulationConfig(**minimal_config_data)
 
 
 class TestGromacsEngineConfigWarnings:

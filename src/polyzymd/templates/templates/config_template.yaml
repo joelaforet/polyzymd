@@ -12,6 +12,7 @@
 #
 # REQUIRED SECTIONS:
 #   - name (simulation identifier)
+#   - engine (openmm or gromacs)
 #   - enzyme (protein structure)
 #   - solvent (solvation settings)
 #   - thermodynamics (temperature, pressure)
@@ -28,6 +29,10 @@
 
 # Simulation identifier - used in output directory names
 name: {{ project_name | yaml_quote }}
+
+# Required simulation engine: "openmm" or "gromacs"
+engine: "openmm"
+
 description: "Description of your simulation system"
 
 # ============================================================================

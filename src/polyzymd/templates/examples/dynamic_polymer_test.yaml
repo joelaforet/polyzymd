@@ -10,6 +10,7 @@
 # ============================================================================
 
 name: "dynamic_polymer_test"
+engine: "openmm"
 description: "Minimal test of dynamic polymer generation with OpenMM"
 
 # ============================================================================

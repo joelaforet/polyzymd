@@ -1318,7 +1318,7 @@ class SimulationConfig(BaseModel):
     force_field: ForceFieldConfig = Field(
         default_factory=ForceFieldConfig, description="Force field settings"
     )
-    engine: Literal["openmm", "gromacs"] = Field("openmm", description="Simulation engine to use")
+    engine: Literal["openmm", "gromacs"] = Field(..., description="Simulation engine to use")
     openmm: OpenMMEngineConfig = Field(
         default_factory=OpenMMEngineConfig, description="OpenMM engine settings"
     )

@@ -6,6 +6,7 @@
 # ============================================================================
 
 name: "LipA_ResorufinButyrate_control"
+engine: "openmm"
 description: "LipA enzyme with docked Resorufin-Butyrate substrate - no polymers"
 
 # ============================================================================
