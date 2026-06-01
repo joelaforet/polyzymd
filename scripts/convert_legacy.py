@@ -286,6 +286,68 @@ def _parse_polymer_string(polymer_str: str, chain_count: int) -> PolymerInfo:
 # =============================================================================
 
 
+def _production_segment_index(path: Path) -> int | None:
+    """Return the numeric daisy-chain segment index for a production path.
+
+    Parameters
+    ----------
+    path : Path
+        Production directory path to inspect.
+
+    Returns
+    -------
+    int | None
+        Numeric segment index, or ``None`` when the directory name is not a
+        daisy-chain segment name.
+    """
+    match = re.fullmatch(r"production_(\d+)", path.name)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _expected_daisy_chain_paths(
+    sim_dir: Path, max_index: int
+) -> tuple[list[Path], Path, list[Path]]:
+    """Return required contiguous daisy-chain paths through ``max_index``.
+
+    Parameters
+    ----------
+    sim_dir : Path
+        Legacy simulation directory containing production segment directories.
+    max_index : int
+        Highest discovered or expected daisy-chain segment index.
+
+    Returns
+    -------
+    tuple[list[Path], Path, list[Path]]
+        Expected segment directories, required first-segment topology, and one
+        required trajectory path per segment.
+    """
+    segment_dirs = [sim_dir / f"production_{index}" for index in range(max_index + 1)]
+    topology_path = segment_dirs[0] / "production_0_topology.pdb"
+    trajectory_paths = [
+        segment_dir / f"{segment_dir.name}_trajectory.dcd" for segment_dir in segment_dirs
+    ]
+    return segment_dirs, topology_path, trajectory_paths
+
+
+def _format_missing_paths(paths: list[Path]) -> str:
+    """Format missing paths for user-facing error messages.
+
+    Parameters
+    ----------
+    paths : list[Path]
+        Missing paths to include in the message.
+
+    Returns
+    -------
+    str
+        Newline-delimited bullet list of missing paths.
+    """
+    return "\n".join(f"  - {path}" for path in paths)
+
+
 def discover_files(sim_dir: Path, metadata: SimMetadata) -> None:
     """Discover topology, trajectory, and production directories in a legacy sim folder.
 
@@ -300,14 +362,38 @@ def discover_files(sim_dir: Path, metadata: SimMetadata) -> None:
     """
     # --- Discover production directories ---
     # Check for daisy-chain segments: production_0/, production_1/, ...
-    segment_dirs = sorted(
-        [d for d in sim_dir.iterdir() if d.is_dir() and re.match(r"production_\d+$", d.name)],
-        key=lambda d: int(d.name.split("_")[1]),
-    )
+    segment_map = {
+        index: d
+        for d in sim_dir.iterdir()
+        if d.is_dir() and (index := _production_segment_index(d)) is not None
+    }
+    segment_dirs = [segment_map[index] for index in sorted(segment_map)]
 
     if segment_dirs:
-        metadata.production_dirs = segment_dirs
-        metadata.n_segments = len(segment_dirs)
+        max_index = max(segment_map)
+        expected_dirs, required_topology, trajectories = _expected_daisy_chain_paths(
+            sim_dir, max_index
+        )
+        missing_paths = []
+        missing_paths.extend(path for path in expected_dirs if not path.is_dir())
+        if not required_topology.exists():
+            missing_paths.append(required_topology)
+        missing_paths.extend(path for path in trajectories if not path.exists())
+
+        if missing_paths:
+            missing = _format_missing_paths(missing_paths)
+            raise FileNotFoundError(
+                "Missing required contiguous daisy-chain production path(s):\n" f"{missing}"
+            )
+
+        metadata.production_dirs = expected_dirs
+        metadata.n_segments = len(expected_dirs)
+        metadata.topology_path = required_topology
+        metadata.trajectory_paths = trajectories
+
+        logger.info(f"  Topology: segment_0_topology -> {required_topology.name}")
+        logger.info(f"  Trajectories: {len(trajectories)} segment(s) found")
+        return
     else:
         # Single production directory
         prod_dir = sim_dir / "production"
@@ -971,23 +1057,40 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
         logger.info("  OK: config.yaml exists")
 
     # Check trajectory discovery via symlinks
-    for prod_dir in metadata.production_dirs:
-        link = output_sim_dir / prod_dir.name
-        if not link.exists():
-            logger.error(f"  FAIL: Production symlink missing: {link}")
-            success = False
-        else:
-            # Check that trajectory files are accessible
-            if metadata.n_segments > 1:
-                traj_name = f"{prod_dir.name}_trajectory.dcd"
-            else:
-                traj_name = "production_trajectory.dcd"
-            traj_path = link / traj_name
+    segment_indices = [
+        index
+        for prod_dir in metadata.production_dirs
+        if (index := _production_segment_index(prod_dir)) is not None
+    ]
+    if metadata.n_segments > 1 or segment_indices:
+        max_index = max([metadata.n_segments - 1, *segment_indices])
+        expected_dirs, _required_topology, trajectory_paths = _expected_daisy_chain_paths(
+            output_sim_dir, max_index
+        )
+        for segment_dir, traj_path in zip(expected_dirs, trajectory_paths, strict=True):
+            if not segment_dir.exists():
+                logger.error(f"  FAIL: Production symlink missing: {segment_dir}")
+                success = False
             if traj_path.exists():
-                logger.info(f"  OK: Trajectory accessible: {prod_dir.name}/{traj_name}")
+                logger.info(f"  OK: Trajectory accessible: {segment_dir.name}/{traj_path.name}")
             else:
                 logger.error(f"  FAIL: Trajectory not found at expected path: {traj_path}")
                 success = False
+    else:
+        for prod_dir in metadata.production_dirs:
+            link = output_sim_dir / prod_dir.name
+            if not link.exists():
+                logger.error(f"  FAIL: Production symlink missing: {link}")
+                success = False
+            else:
+                traj_path = link / "production_trajectory.dcd"
+                if traj_path.exists():
+                    logger.info(
+                        f"  OK: Trajectory accessible: {prod_dir.name}/production_trajectory.dcd"
+                    )
+                else:
+                    logger.error(f"  FAIL: Trajectory not found at expected path: {traj_path}")
+                    success = False
 
     # Try loading config with PolyzyMD (optional — may not be installed)
     try:

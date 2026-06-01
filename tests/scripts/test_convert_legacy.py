@@ -110,6 +110,90 @@ def test_discover_files_rejects_incomplete_daisy_chain_segment(
     assert metadata.trajectory_paths == []
 
 
+def test_discover_files_rejects_non_contiguous_daisy_chain_segments(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Discovery should reject daisy-chain segment gaps before assigning metadata."""
+    sim_dir = tmp_path / "legacy"
+    prod0 = sim_dir / "production_0"
+    prod2 = sim_dir / "production_2"
+    prod0.mkdir(parents=True)
+    prod2.mkdir()
+    (prod0 / "production_0_topology.pdb").write_text("ATOM\n", encoding="utf-8")
+    (prod0 / "production_0_trajectory.dcd").write_bytes(b"DCD")
+    (prod2 / "production_2_trajectory.dcd").write_bytes(b"DCD")
+
+    metadata = convert_legacy.SimMetadata(
+        folder_name="legacy",
+        restraint_distance="10A",
+        enzyme_name="LipA",
+        substrate_name="Resorufin-Butyrate",
+        temperature_K=363.0,
+        replicate=1,
+    )
+
+    with pytest.raises(FileNotFoundError) as exc_info:
+        convert_legacy.discover_files(sim_dir, metadata)
+
+    assert "production_1/production_1_trajectory.dcd" in str(exc_info.value)
+    assert metadata.production_dirs == []
+    assert metadata.trajectory_paths == []
+
+
+def test_discover_files_rejects_daisy_chain_missing_production_zero(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Discovery should require daisy chains to start at production_0."""
+    sim_dir = tmp_path / "legacy"
+    prod1 = sim_dir / "production_1"
+    prod2 = sim_dir / "production_2"
+    prod1.mkdir(parents=True)
+    prod2.mkdir()
+    (prod1 / "production_1_trajectory.dcd").write_bytes(b"DCD")
+    (prod2 / "production_2_trajectory.dcd").write_bytes(b"DCD")
+
+    metadata = convert_legacy.SimMetadata(
+        folder_name="legacy",
+        restraint_distance="10A",
+        enzyme_name="LipA",
+        substrate_name="Resorufin-Butyrate",
+        temperature_K=363.0,
+        replicate=1,
+    )
+
+    with pytest.raises(FileNotFoundError) as exc_info:
+        convert_legacy.discover_files(sim_dir, metadata)
+
+    message = str(exc_info.value)
+    assert "production_0/production_0_topology.pdb" in message
+    assert "production_0/production_0_trajectory.dcd" in message
+
+
+def test_discover_files_rejects_missing_first_segment_topology(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Discovery should require the exact production_0 topology path."""
+    sim_dir = tmp_path / "legacy"
+    prod0 = sim_dir / "production_0"
+    prod1 = sim_dir / "production_1"
+    prod0.mkdir(parents=True)
+    prod1.mkdir()
+    (prod0 / "production_0_trajectory.dcd").write_bytes(b"DCD")
+    (prod1 / "production_1_trajectory.dcd").write_bytes(b"DCD")
+
+    metadata = convert_legacy.SimMetadata(
+        folder_name="legacy",
+        restraint_distance="10A",
+        enzyme_name="LipA",
+        substrate_name="Resorufin-Butyrate",
+        temperature_K=363.0,
+        replicate=1,
+    )
+
+    with pytest.raises(FileNotFoundError, match="production_0_topology.pdb"):
+        convert_legacy.discover_files(sim_dir, metadata)
+
+
 def test_discover_files_rejects_arbitrary_names(convert_legacy: ModuleType, tmp_path: Path) -> None:
     """Discovery rejects non-exact topology and trajectory names."""
     sim_dir = tmp_path / "legacy"
@@ -127,7 +211,7 @@ def test_discover_files_rejects_arbitrary_names(convert_legacy: ModuleType, tmp_
         replicate=1,
     )
 
-    with pytest.raises(FileNotFoundError, match="No topology PDB found"):
+    with pytest.raises(FileNotFoundError, match="production_0_topology.pdb"):
         convert_legacy.discover_files(sim_dir, metadata)
 
 
@@ -417,7 +501,10 @@ def test_validate_output_config_validation_failure_returns_false(
 
 
 def test_validate_output_missing_expected_segment_trajectory_returns_false(
-    convert_legacy: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    convert_legacy: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
 ) -> None:
     """Validation should fail when a daisy-chain segment trajectory is missing."""
 
@@ -449,16 +536,18 @@ def test_validate_output_missing_expected_segment_trajectory_returns_false(
     fake_mda = type("FakeMDAnalysis", (), {"Universe": FakeUniverse})()
     monkeypatch.setitem(sys.modules, "MDAnalysis", fake_mda)
     monkeypatch.setattr("polyzymd.config.schema.SimulationConfig", FakeSimulationConfig)
+    caplog.set_level("ERROR", logger=convert_legacy.logger.name)
 
     output_sim_dir = tmp_path / "converted"
     output_sim_dir.mkdir()
     (output_sim_dir / "solvated_system.pdb").write_text("ATOM\n", encoding="utf-8")
     (output_sim_dir / "config.yaml").write_text("name: legacy\n", encoding="utf-8")
     prod0 = output_sim_dir / "production_0"
-    prod1 = output_sim_dir / "production_1"
+    prod2 = output_sim_dir / "production_2"
     prod0.mkdir()
-    prod1.mkdir()
+    prod2.mkdir()
     (prod0 / "production_0_trajectory.dcd").write_bytes(b"DCD")
+    (prod2 / "production_2_trajectory.dcd").write_bytes(b"DCD")
 
     metadata = convert_legacy.SimMetadata(
         folder_name="legacy",
@@ -467,11 +556,12 @@ def test_validate_output_missing_expected_segment_trajectory_returns_false(
         substrate_name="Resorufin-Butyrate",
         temperature_K=363.0,
         replicate=1,
-        n_segments=2,
-        production_dirs=[Path("production_0"), Path("production_1")],
+        n_segments=3,
+        production_dirs=[Path("production_0"), Path("production_2")],
     )
 
     assert convert_legacy.validate_output(output_sim_dir, metadata) is False
+    assert "production_1/production_1_trajectory.dcd" in caplog.text
 
 
 def test_convert_simulation_returns_false_when_validation_fails(
@@ -501,6 +591,31 @@ def test_convert_simulation_returns_false_when_validation_fails(
     )
 
     assert success is False
+
+
+def test_convert_simulation_returns_false_for_gapped_daisy_chain_before_output(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Conversion should reject non-contiguous daisy chains before output writes."""
+    sim_dir = tmp_path / (
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1"
+    )
+    prod0 = sim_dir / "production_0"
+    prod2 = sim_dir / "production_2"
+    prod0.mkdir(parents=True)
+    prod2.mkdir()
+    (prod0 / "production_0_topology.pdb").write_text("ATOM\n", encoding="utf-8")
+    (prod0 / "production_0_trajectory.dcd").write_bytes(b"DCD")
+    (prod2 / "production_2_trajectory.dcd").write_bytes(b"DCD")
+
+    success = convert_legacy.convert_simulation(
+        sim_dir=sim_dir,
+        output_dir=tmp_path / "converted",
+        reference_pdb=tmp_path / "reference.pdb",
+    )
+
+    assert success is False
+    assert not (tmp_path / "converted" / sim_dir.name).exists()
 
 
 def test_convert_simulation_returns_false_when_daisy_chain_segment_missing(
