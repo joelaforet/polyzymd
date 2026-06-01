@@ -14,7 +14,8 @@ sure PolyzyMD can build the system.
 ## Prerequisites
 
 - PolyzyMD installed with `pixi` as described in {doc}`installation`
-- a simulation-ready enzyme PDB file
+- a simulation-ready enzyme PDB file; if you are starting from a raw PDB entry,
+  prepare and validate it first with {doc}`../tutorials/prepare_pdb_for_openff`
 - the repository available locally so `pixi run -e ...` can find `pixi.toml`
 
 By the end, you will have a working project directory and a validated
@@ -69,6 +70,11 @@ Your PDB should already be ready for simulation:
 - missing atoms or residues fixed
 - intended protonation state chosen
 - alternate conformers removed
+- all protein residues assigned to chain ID `A`
+
+If your input came directly from the Protein Data Bank, do not assume it is ready
+for PolyzyMD. Use {doc}`../tutorials/prepare_pdb_for_openff` for a worked 4CHA
+example that separates biological-system selection from mechanical cleanup.
 
 If you are also using a substrate, place its SDF file in `structures/` now, but
 this tutorial keeps the first run to an enzyme-only example.

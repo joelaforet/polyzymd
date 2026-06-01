@@ -7,6 +7,8 @@ want a worked example with a clear beginning, middle, and end.
 
 - [Run Your First Analysis](first_analysis.md)
   Go from finished trajectories to RMSF results in five steps.
+- [Prepare a PDB for OpenFF and PolyzyMD](prepare_pdb_for_openff.md)
+  Inspect and clean a raw 4CHA crystal structure before simulation setup.
 - [Analyze a Multi-Condition Study](analysis_complete_workflow.md)
   Follow the full path from finished trajectories to comparison figures.
 - [Measure Surface Accessibility with SASA](sasa_analysis.md)
@@ -33,6 +35,7 @@ comparison results, and figures. -->
 :maxdepth: 1
 
 Run Your First Analysis <first_analysis>
+Prepare a PDB for OpenFF and PolyzyMD <prepare_pdb_for_openff>
 Analyze a Multi-Condition Study <analysis_complete_workflow>
 Measure Surface Accessibility with SASA <sasa_analysis>
 ```

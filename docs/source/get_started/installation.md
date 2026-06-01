@@ -102,7 +102,7 @@ In the `build` environment, these commands should work directly:
 | `polyzymd init` | Yes | Project scaffolding |
 | `polyzymd build` | Yes | System building |
 | `polyzymd validate` | Yes | Config validation |
-| `polyzymd clean-pdb` | Yes | PDB cleanup |
+| `polyzymd clean-pdb` | Yes | Convenience PDB cleanup, not biological-system selection |
 | `polyzymd info` | Yes | Version/dependency summary |
 | `polyzymd submit` | No | Requires a CUDA environment |
 | `polyzymd run-segment` | No | Requires a CUDA environment |
