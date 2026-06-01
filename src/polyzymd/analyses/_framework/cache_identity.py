@@ -216,7 +216,6 @@ def validate_settings_fingerprint(
     *,
     warn: bool = True,
     source: str | Path | None = None,
-    allow_missing: bool = False,
 ) -> bool:
     """Validate cached settings fingerprint against current analysis settings.
 
@@ -230,9 +229,6 @@ def validate_settings_fingerprint(
         Emit warnings on mismatch or missing fingerprint, by default True.
     source : str or Path or None, optional
         Optional cache source path for diagnostics.
-    allow_missing : bool, optional
-        Treat missing fingerprints as compatible, by default False. Callers can
-        opt in only when intentionally reading trusted legacy caches.
 
     Returns
     -------
@@ -243,26 +239,23 @@ def validate_settings_fingerprint(
     Notes
     -----
     Cache files without settings fingerprints cannot prove they were generated
-    from the current analysis settings. They are rejected by default so stale
-    compatibility caches do not silently influence new comparisons.
+    from the current analysis settings. They are always rejected so stale caches
+    do not silently influence new comparisons.
     """
     current_fingerprint = settings_fingerprint(current_settings)
     source_text = f" ({source})" if source is not None else ""
 
     if stored_fingerprint is None:
         if warn:
-            action = (
-                "loading legacy cache by explicit opt-in" if allow_missing else "rejecting cache"
-            )
             warnings.warn(
                 "Cached analysis result is missing settings fingerprint"
-                f"{source_text}; {action}. This cache cannot prove it matches the current "
+                f"{source_text}; rejecting cache. This cache cannot prove it matches the current "
                 "analysis settings. Use --recompute or clear the analysis cache to refresh "
                 "derived files.",
                 UserWarning,
                 stacklevel=2,
             )
-        return allow_missing
+        return False
 
     if stored_fingerprint != current_fingerprint:
         if warn:

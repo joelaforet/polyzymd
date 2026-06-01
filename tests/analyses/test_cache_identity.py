@@ -179,10 +179,9 @@ class TestSettingsFingerprintValidation:
             valid = validate_settings_fingerprint(None, settings)
         assert valid is False
 
-    def test_validate_settings_fingerprint_can_allow_missing_by_opt_in(self):
-        """Legacy callers can explicitly allow missing fingerprints."""
+    def test_validate_settings_fingerprint_always_rejects_missing(self):
+        """Missing fingerprints should be rejected without an opt-in path."""
         settings = SimpleSettings(cutoff=4.5)
-        allow_missing = True
-        with pytest.warns(UserWarning, match="explicit opt-in"):
-            valid = validate_settings_fingerprint(None, settings, allow_missing=allow_missing)
-        assert valid is True
+        with pytest.warns(UserWarning, match="rejecting cache"):
+            valid = validate_settings_fingerprint(None, settings)
+        assert valid is False
