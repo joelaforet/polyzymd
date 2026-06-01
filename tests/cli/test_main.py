@@ -190,6 +190,18 @@ class TestBuildCommandReplicateFlags:
         assert result.exit_code != 0
         assert "No such option: --gromacs" in result.output
 
+    @pytest.mark.parametrize("option", ["--output-dir", "-o"])
+    def test_build_output_dir_alias_is_rejected(self, option: str, tmp_path: Path) -> None:
+        """Build should reject removed output-dir aliases for scratch output."""
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["build", "-c", str(config_path), option, str(tmp_path)])
+
+        assert result.exit_code != 0
+        assert f"No such option: {option}" in result.output
+
 
 class TestRunCommandReplicateFlags:
     """Test that the run command accepts replicate flags."""

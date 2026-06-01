@@ -236,13 +236,6 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     help="Replicate range (e.g., '1', '1-3', '1,3,5'). Default: 1",
 )
 @click.option(
-    "-o",
-    "--output-dir",
-    default=None,
-    type=click.Path(),
-    help="Output directory (default: from config). Alias for --scratch-dir.",
-)
-@click.option(
     "--scratch-dir",
     default=None,
     type=click.Path(),
@@ -271,7 +264,6 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
 def build(
     config: str,
     replicates: str | None,
-    output_dir: str | None,
     scratch_dir: str | None,
     projects_dir: str | None,
     dry_run: bool,
@@ -317,9 +309,8 @@ def build(
         colored_echo(f"Configuration validated: {sim_config.name}", phase="build")
 
         # Override directories if provided via CLI
-        effective_scratch = scratch_dir or output_dir  # output_dir is alias for scratch_dir
-        if effective_scratch:
-            sim_config.output.scratch_directory = Path(effective_scratch)
+        if scratch_dir:
+            sim_config.output.scratch_directory = Path(scratch_dir)
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
 
