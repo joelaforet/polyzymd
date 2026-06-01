@@ -19,12 +19,8 @@ from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
-    ANOVAResult,
     BasePlotSettings,
-    ComparisonResult,
-    ConditionSummary,
     MetricValue,
-    PairwiseResult,
     PlotContext,
 )
 from polyzymd.analyses.catalytic_triad._mda import (
@@ -267,17 +263,27 @@ class CatalyticTriadAnalysis(Analysis):
         str
             Formatted output.
         """
-        from polyzymd.analyses.stats import format_scalar_comparison
+        from polyzymd.analyses.stats import (
+            format_scalar_comparison,
+            format_scalar_comparison_artifact_payload,
+        )
 
-        comparison_result = result
         if isinstance(result, ComparisonArtifact):
             if output_format == "json":
                 return result.model_dump_json(indent=2)
-            comparison_result = _comparison_artifact_to_result(result)
+            return format_scalar_comparison_artifact_payload(
+                result.payload,
+                title="Catalytic Triad Comparison",
+                metric_label="Simultaneous Contact",
+                metric_unit="%",
+                metric_key="simultaneous_contact_fraction",
+                output_format=output_format,
+                higher_is_better=True,
+            )
 
-        if isinstance(comparison_result, ComparisonResult):
+        if hasattr(result, "pairwise_comparisons"):
             return format_scalar_comparison(
-                comparison_result,
+                result,
                 title="Catalytic Triad Comparison",
                 metric_label="Simultaneous Contact",
                 metric_unit="%",
@@ -353,49 +359,6 @@ class CatalyticTriadAnalysis(Analysis):
         plots.extend(result)
 
         return plots
-
-
-def _comparison_artifact_to_result(artifact: ComparisonArtifact) -> ComparisonResult:
-    """Adapt a canonical comparison artifact for scalar CLI formatting.
-
-    Parameters
-    ----------
-    artifact : ComparisonArtifact
-        MDAnalysis comparison artifact generated from condition artifacts.
-
-    Returns
-    -------
-    ComparisonResult
-        Non-canonical scalar comparison model consumed by the shared formatter.
-    """
-
-    payload = artifact.payload
-    statistical_parameters = payload.get("statistical_parameters", {})
-    if not isinstance(statistical_parameters, dict):
-        statistical_parameters = {}
-    anova_payload = payload.get("anova") or []
-    return ComparisonResult(
-        analysis_type=artifact.analysis_name,
-        name=str(artifact.metadata.get("project_name", artifact.analysis_name)),
-        control_label=artifact.effective_control or artifact.control_label,
-        fdr_alpha=statistical_parameters.get("fdr_alpha"),
-        ttest_method=str(statistical_parameters.get("ttest_method", "student")),
-        posthoc_method=str(statistical_parameters.get("posthoc_method", "ttest_bh")),
-        conditions=[
-            ConditionSummary.model_validate(summary)
-            for summary in payload.get("condition_summaries", [])
-        ],
-        pairwise_comparisons=[
-            PairwiseResult.model_validate(pairwise)
-            for pairwise in payload.get("pairwise_comparisons", [])
-        ],
-        anova=[ANOVAResult.model_validate(entry) for entry in anova_payload] or None,
-        ranking=list(payload.get("ranking", [])),
-        rankings_by_metric=payload.get("rankings_by_metric"),
-        equilibration_time=str(statistical_parameters.get("equilibration", "0ns")),
-        created_at=str(artifact.metadata.get("created_at", "")),
-        polyzymd_version=str(artifact.metadata.get("polyzymd_version", "")),
-    )
 
 
 def _payload_get(payload: Any, key: str) -> Any:

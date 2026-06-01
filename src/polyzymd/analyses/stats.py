@@ -22,6 +22,7 @@ polyzymd.analyses.shared.inferential_statistics : Lower-level statistical
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 from datetime import datetime
@@ -672,6 +673,150 @@ def format_scalar_comparison(
         _get_cond,
         higher_is_better,
     )
+
+
+def format_scalar_comparison_artifact_payload(
+    payload: dict[str, Any],
+    *,
+    title: str = "Comparison",
+    metric_label: str = "Value",
+    metric_unit: str = "",
+    metric_key: str | None = None,
+    output_format: str = "text",
+    higher_is_better: bool | None = True,
+) -> str:
+    """Format a canonical comparison artifact payload for CLI display.
+
+    Parameters
+    ----------
+    payload : dict[str, Any]
+        Canonical comparison artifact payload produced by the default scalar
+        comparison pipeline.
+    title : str, optional
+        Display title, by default ``"Comparison"``.
+    metric_label : str, optional
+        Human-readable metric label, by default ``"Value"``.
+    metric_unit : str, optional
+        Unit suffix for metric values, by default ``""``.
+    metric_key : str | None, optional
+        Metric key to format. If omitted, the first ranking or pairwise metric
+        in the payload is used.
+    output_format : str, optional
+        ``"text"``, ``"markdown"``, or ``"json"``, by default ``"text"``.
+    higher_is_better : bool | None, optional
+        Ranking direction used for interpretation text, by default ``True``.
+
+    Returns
+    -------
+    str
+        Formatted comparison output.
+    """
+
+    if output_format == "json":
+        return json.dumps(payload, indent=2)
+
+    metric_key = _select_payload_metric_key(payload, metric_key)
+    unit_str = f" {metric_unit}" if metric_unit else ""
+    conditions = payload.get("condition_summaries", [])
+    condition_by_label = {str(item.get("label", "")): item for item in conditions}
+    ranking = _payload_ranking(payload, metric_key)
+    pairwise = [
+        item
+        for item in payload.get("pairwise_comparisons", [])
+        if not metric_key or item.get("metric") == metric_key
+    ]
+    statistical_parameters = payload.get("statistical_parameters", {})
+    comparison_name = str(statistical_parameters.get("project_name", payload.get("name", "")))
+    equilibration = str(statistical_parameters.get("equilibration", "0ns"))
+    control_label = payload.get("effective_control") or payload.get("control_label")
+
+    if output_format == "markdown":
+        lines = [f"# {title}: {comparison_name}", ""]
+        lines.append(f"**Equilibration:** {equilibration}")
+        if control_label:
+            lines.append(f"**Control:** {control_label}")
+        lines.extend(["", f"## Condition ranking ({metric_label})", ""])
+        lines.append(f"| Rank | Condition | {metric_label} | SEM |")
+        lines.append("|---:|---|---:|---:|")
+        for item in ranking:
+            label = str(item.get("label", ""))
+            condition = condition_by_label.get(label, {})
+            lines.append(
+                f"| {item.get('rank', '')} | {label} | "
+                f"{_payload_metric(condition, metric_key, 'mean'):.4f}{unit_str} | "
+                f"{_payload_metric(condition, metric_key, 'sem'):.4f}{unit_str} |"
+            )
+        return "\n".join(lines)
+
+    lines = ["", f"{title}: {comparison_name}", "=" * 60, f"Equilibration: {equilibration}"]
+    if control_label:
+        lines.append(f"Control: {control_label}")
+    lines.extend(["", f"Condition ranking ({metric_label}):"])
+    direction = _payload_direction_label(higher_is_better)
+    if direction:
+        lines.append(direction)
+    for item in ranking:
+        label = str(item.get("label", ""))
+        condition = condition_by_label.get(label, {})
+        lines.append(
+            f"  {item.get('rank', '')}. {label}: "
+            f"{_payload_metric(condition, metric_key, 'mean'):.4f}{unit_str} ± "
+            f"{_payload_metric(condition, metric_key, 'sem'):.4f}{unit_str}"
+        )
+    if pairwise:
+        lines.extend(["", "Pairwise comparisons:"])
+        for item in pairwise:
+            lines.append(
+                f"  {item.get('condition_a')} vs {item.get('condition_b')}: "
+                f"Δ={float(item.get('effect_size', item.get('mean_difference', 0.0))):.4f}, "
+                f"p={float(item.get('p_value', 1.0)):.4g}"
+            )
+    return "\n".join(lines)
+
+
+def _select_payload_metric_key(payload: dict[str, Any], metric_key: str | None) -> str:
+    """Return the metric key to format from a comparison payload."""
+
+    if metric_key is not None:
+        return metric_key
+    rankings_by_metric = payload.get("rankings_by_metric") or {}
+    if rankings_by_metric:
+        return str(next(iter(rankings_by_metric)))
+    pairwise = payload.get("pairwise_comparisons", [])
+    if pairwise:
+        return str(pairwise[0].get("metric", "value"))
+    return "value"
+
+
+def _payload_ranking(payload: dict[str, Any], metric_key: str) -> list[dict[str, Any]]:
+    """Return the selected ranking list from a comparison payload."""
+
+    rankings_by_metric = payload.get("rankings_by_metric") or {}
+    ranking = rankings_by_metric.get(metric_key, payload.get("ranking", []))
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(ranking, start=1):
+        if isinstance(item, dict):
+            normalized.append(item)
+        elif isinstance(item, str):
+            normalized.append({"rank": index, "label": item})
+    return normalized
+
+
+def _payload_metric(condition: dict[str, Any], metric_key: str, suffix: str) -> float:
+    """Return a scalar metric from a payload condition summary."""
+
+    value = condition.get(f"{metric_key}_{suffix}", condition.get(suffix, 0.0))
+    return float(value if value is not None else 0.0)
+
+
+def _payload_direction_label(higher_is_better: bool | None) -> str:
+    """Return a ranking direction label for payload formatting."""
+
+    if higher_is_better is True:
+        return "Higher values rank first."
+    if higher_is_better is False:
+        return "Lower values rank first."
+    return ""
 
 
 def _format_scalar_text(

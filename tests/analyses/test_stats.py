@@ -408,7 +408,9 @@ def test_format_scalar_comparison_backward_compatible_without_adjusted_pvalues()
     }
     condition_model = ComparisonResult.model_validate_json(json.dumps(noncanonical_payload))
 
-    text_output = format_scalar_comparison(condition_model, output_format="text", metric_key="metric")
+    text_output = format_scalar_comparison(
+        condition_model, output_format="text", metric_key="metric"
+    )
     markdown_output = format_scalar_comparison(
         condition_model,
         output_format="markdown",

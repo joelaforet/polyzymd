@@ -266,7 +266,9 @@ class TestAnalysisABC:
 
         with pytest.raises(TypeError, match=r"inherits removed hook run_replicate\(\)"):
 
-            class ConcreteNoncanonicalRunReplicate(_MDAContractMixin, AbstractNoncanonicalRunReplicate):
+            class ConcreteNoncanonicalRunReplicate(
+                _MDAContractMixin, AbstractNoncanonicalRunReplicate
+            ):
                 name: ClassVar[str] = "concrete_inherited_run_replicate_removed"
                 Settings: ClassVar[type] = ToySettings
 

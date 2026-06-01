@@ -15,7 +15,6 @@ from polyzymd.analyses.base import (
     Analysis,
     BasePlotSettings,
     ComparisonContext,
-    ComparisonResult,
     MetricValue,
     PlotContext,
 )
@@ -232,17 +231,27 @@ class RMSFAnalysis(Analysis):
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format RMSF comparison output for CLI display."""
 
-        from polyzymd.analyses.stats import format_scalar_comparison
+        from polyzymd.analyses.stats import (
+            format_scalar_comparison,
+            format_scalar_comparison_artifact_payload,
+        )
 
-        comparison_result = result
         if isinstance(result, ComparisonArtifact):
             if output_format == "json":
                 return result.model_dump_json(indent=2)
-            comparison_result = _comparison_artifact_to_result(result)
+            return format_scalar_comparison_artifact_payload(
+                result.payload,
+                title="RMSF Comparison",
+                metric_label="Mean RMSF",
+                metric_unit="A",
+                metric_key=MEAN_RMSF_METRIC,
+                output_format=output_format,
+                higher_is_better=False,
+            )
 
-        if isinstance(comparison_result, ComparisonResult):
+        if hasattr(result, "pairwise_comparisons"):
             return format_scalar_comparison(
-                comparison_result,
+                result,
                 title="RMSF Comparison",
                 metric_label="Mean RMSF",
                 metric_unit="A",
@@ -304,26 +313,3 @@ class RMSFAnalysis(Analysis):
             f"RMSF aggregate at {path} is not a canonical MDAnalysis condition artifact. "
             "Recompute the condition or clear stale caches."
         )
-
-
-def _comparison_artifact_to_result(artifact: ComparisonArtifact) -> ComparisonResult:
-    """Convert a comparison artifact to the generic scalar comparison model."""
-
-    payload = artifact.payload
-    statistical_parameters = payload.get("statistical_parameters", {})
-    return ComparisonResult(
-        analysis_type=artifact.analysis_name,
-        name=str(statistical_parameters.get("project_name", artifact.analysis_name)),
-        control_label=artifact.effective_control,
-        fdr_alpha=statistical_parameters.get("fdr_alpha"),
-        ttest_method=statistical_parameters.get("ttest_method"),
-        posthoc_method=statistical_parameters.get("posthoc_method"),
-        conditions=payload.get("condition_summaries", []),
-        pairwise_comparisons=payload.get("pairwise_comparisons", []),
-        anova=payload.get("anova") or None,
-        ranking=payload.get("ranking", []),
-        rankings_by_metric=payload.get("rankings_by_metric"),
-        equilibration_time=statistical_parameters.get("equilibration", "0ns"),
-        created_at=str(artifact.metadata.get("created_at", "")),
-        polyzymd_version=str(artifact.metadata.get("polyzymd_version", "")),
-    )
