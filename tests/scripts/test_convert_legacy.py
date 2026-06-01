@@ -167,6 +167,131 @@ def test_generate_comparison_yaml_uses_canonical_plot_key(
     assert config.validate_config() == []
 
 
+def _write_converted_config(root: Path, folder_name: str) -> Path:
+    """Create a synthetic converted simulation directory with config.yaml.
+
+    Parameters
+    ----------
+    root : Path
+        Converted-output root directory.
+    folder_name : str
+        Legacy-format simulation folder name.
+
+    Returns
+    -------
+    Path
+        Path to the generated config file.
+    """
+    sim_dir = root / folder_name
+    sim_dir.mkdir(parents=True)
+    config_path = sim_dir / "config.yaml"
+    config_path.write_text("name: legacy\nengine: openmm\n", encoding="utf-8")
+    return config_path
+
+
+def test_group_conditions_separates_duplicate_control_labels(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Control-like conditions with different restraint or conformation stay distinct."""
+    converted = tmp_path / "converted"
+    config_a = _write_converted_config(
+        converted,
+        "10A_RESTRAINT_CALB_Resorufin-Butyrate_conf1_363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+    )
+    config_b = _write_converted_config(
+        converted,
+        "12A_RESTRAINT_CALB_Resorufin-Butyrate_conf2_363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+    )
+    config_b_rep2 = _write_converted_config(
+        converted,
+        "12A_RESTRAINT_CALB_Resorufin-Butyrate_conf2_363.0K_0.5ns-NVT_1000.0ns-NPT_run2",
+    )
+
+    conditions = convert_legacy.group_conditions(converted)
+
+    assert len(conditions) == 2
+    assert all(label.startswith("No Polymer (Control) (") for label in conditions)
+    assert any("10A" in label and "conf1" in label for label in conditions)
+    assert any("12A" in label and "conf2" in label for label in conditions)
+    assert sorted(cond["config"] for cond in conditions.values()) == sorted([config_a, config_b])
+    assert sorted(cond["replicates"] for cond in conditions.values()) == [[1], [1, 2]]
+    assert config_b_rep2 not in [cond["config"] for cond in conditions.values()]
+
+
+def test_group_conditions_separates_duplicate_polymer_chain_counts(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Polymer conditions with identical friendly labels but chain counts stay distinct."""
+    converted = tmp_path / "converted"
+    config_38 = _write_converted_config(
+        converted,
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_SBMA-EGMA-50%_38x_"
+        "363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+    )
+    config_77 = _write_converted_config(
+        converted,
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_SBMA-EGMA-50%_77x_"
+        "363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+    )
+    _write_converted_config(
+        converted,
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_SBMA-EGMA-50%_77x_"
+        "363.0K_0.5ns-NVT_1000.0ns-NPT_run2",
+    )
+
+    conditions = convert_legacy.group_conditions(converted)
+
+    assert len(conditions) == 2
+    assert all(label.startswith("SBMA-EGMA 50% (") for label in conditions)
+    assert any("38 chains" in label for label in conditions)
+    assert any("77 chains" in label for label in conditions)
+    assert sorted(cond["config"] for cond in conditions.values()) == sorted([config_38, config_77])
+    assert sorted(cond["replicates"] for cond in conditions.values()) == [[1], [1, 2]]
+
+
+def test_generate_comparison_yaml_preserves_disambiguated_entries(
+    convert_legacy: ModuleType, tmp_path: Path
+) -> None:
+    """Comparison YAML should include all disambiguated duplicate-label conditions."""
+    converted = tmp_path / "converted"
+    control_config = _write_converted_config(
+        converted,
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+    )
+    polymer_38 = _write_converted_config(
+        converted,
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_SBMA-EGMA-50%_38x_"
+        "363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+    )
+    polymer_77 = _write_converted_config(
+        converted,
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_SBMA-EGMA-50%_77x_"
+        "363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
+    )
+
+    comparison_yaml = convert_legacy.generate_comparison_yaml(
+        output_dir=converted,
+        comparison_dir=tmp_path / "comparison",
+        project_name="legacy_compare",
+        control_label="No Polymer (Control)",
+    )
+
+    data = yaml.safe_load(comparison_yaml.read_text(encoding="utf-8"))
+    entries = {entry["label"]: entry for entry in data["conditions"]}
+    assert list(entries)[0] == "No Polymer (Control)"
+    assert len(entries) == 3
+    assert entries["No Polymer (Control)"]["replicates"] == [1]
+    assert any(label.startswith("SBMA-EGMA 50% (") for label in entries)
+    assert any("38 chains" in label for label in entries)
+    assert any("77 chains" in label for label in entries)
+    config_values = {entry["config"] for entry in entries.values()}
+    assert f"../{control_config.relative_to(tmp_path)}" in config_values
+    assert f"../{polymer_38.relative_to(tmp_path)}" in config_values
+    assert f"../{polymer_77.relative_to(tmp_path)}" in config_values
+    config = ComparisonConfig.from_yaml(comparison_yaml)
+    assert config.validate_config() == []
+
+
 def test_validate_output_config_validation_failure_returns_false(
     convert_legacy: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -1006,11 +1006,14 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
 # =============================================================================
 
 
-def _condition_key(metadata: SimMetadata) -> tuple[str, str, float, str | None, float | None]:
+def _condition_key(
+    metadata: SimMetadata,
+) -> tuple[str, str, str, int | None, float, str | None, float | None, int | None]:
     """Return a hashable key that groups replicates into a single condition.
 
     The key captures everything about the simulation *except* replicate number:
-    (enzyme, substrate, temperature, polymer_type_prefix, polymer_percent_b).
+    restraint, enzyme, substrate, conformation, temperature, polymer type,
+    polymer percentage, and polymer chain count.
 
     Parameters
     ----------
@@ -1024,12 +1027,16 @@ def _condition_key(metadata: SimMetadata) -> tuple[str, str, float, str | None, 
     """
     poly_prefix = metadata.polymer.type_prefix if metadata.polymer else None
     poly_pct = metadata.polymer.percent_b if metadata.polymer else None
+    poly_chain_count = metadata.polymer.chain_count if metadata.polymer else None
     return (
+        metadata.restraint_distance,
         metadata.enzyme_name,
         metadata.substrate_name,
+        metadata.conformation,
         metadata.temperature_K,
         poly_prefix,
         poly_pct,
+        poly_chain_count,
     )
 
 
@@ -1057,6 +1064,59 @@ def _condition_label(metadata: SimMetadata) -> str:
 
     pct = int(poly.percent_b) if poly.percent_b == int(poly.percent_b) else poly.percent_b
     return f"{poly.type_prefix} {pct}%"
+
+
+def _format_float_token(value: float) -> str:
+    """Format a float for stable condition-label descriptors.
+
+    Parameters
+    ----------
+    value : float
+        Numeric value to format.
+
+    Returns
+    -------
+    str
+        Compact deterministic string representation.
+    """
+    return f"{value:g}"
+
+
+def _condition_descriptor(metadata: SimMetadata) -> str:
+    """Return a stable descriptor that disambiguates duplicate base labels.
+
+    Parameters
+    ----------
+    metadata : SimMetadata
+        Parsed simulation metadata for a condition.
+
+    Returns
+    -------
+    str
+        Descriptor built from condition-defining fields.
+    """
+    parts = [
+        metadata.restraint_distance,
+        metadata.enzyme_name,
+        metadata.substrate_name,
+    ]
+    if metadata.conformation is not None:
+        parts.append(f"conf{metadata.conformation}")
+    parts.append(f"{_format_float_token(metadata.temperature_K)}K")
+
+    if metadata.polymer is None:
+        parts.append("no polymer")
+    else:
+        poly = metadata.polymer
+        parts.extend(
+            [
+                poly.type_prefix,
+                f"{_format_float_token(poly.percent_b)}%",
+                f"{poly.chain_count} chains",
+            ]
+        )
+
+    return ", ".join(parts)
 
 
 def group_conditions(
@@ -1130,15 +1190,25 @@ def group_conditions(
             f"Scanned {len(sim_dirs)} directories, skipped {skipped}."
         )
 
-    # Finalize: sort replicates, pick run1 (or lowest) as canonical config
+    # Finalize: sort replicates, disambiguate duplicate labels, pick run1 (or lowest)
     result = {}
-    for key, cond in conditions.items():
+    label_counts: dict[str, int] = {}
+    for cond in conditions.values():
+        label_counts[cond["label"]] = label_counts.get(cond["label"], 0) + 1
+
+    for key, cond in sorted(
+        conditions.items(), key=lambda item: (_condition_label(item[1]["metadata"]), item[0])
+    ):
         cond["replicates"].sort()
         # Use the lowest replicate's config as the canonical one
         lowest_rep = cond["replicates"][0]
         cond["config"] = cond["config_paths"][lowest_rep]
         del cond["config_paths"]
-        result[cond["label"]] = cond
+        label = cond["label"]
+        if label_counts[label] > 1:
+            label = f"{label} ({_condition_descriptor(cond['metadata'])})"
+            cond["label"] = label
+        result[label] = cond
 
     if skipped > 0:
         logger.info(f"  Skipped {skipped} directories (parse error or temperature filter)")
