@@ -169,22 +169,16 @@ class ContinuationManager:
         FileNotFoundError
             If no suitable PDB file is found.
         """
-        patterns = [
-            "*solvated*.pdb",
-            "*_solvated.pdb",
-            "solvated_*.pdb",
-            "production_0/*_topology.pdb",
-        ]
+        allowed_paths = (
+            self._working_dir / "solvated_system.pdb",
+            self._working_dir / "production_0" / "production_0_topology.pdb",
+            self._working_dir / "production" / "production_topology.pdb",
+        )
+        for pdb_path in allowed_paths:
+            if pdb_path.exists():
+                return pdb_path
 
-        for pattern in patterns:
-            pdb_files = list(self._working_dir.glob(pattern))
-            if pdb_files:
-                return pdb_files[0]
-
-        # Fallback to any PDB
-        pdb_files = list(self._working_dir.glob("**/*.pdb"))
-        if pdb_files:
-            return pdb_files[0]
+        # Arbitrary recursive PDB discovery is disallowed to avoid selecting decoys or inputs
 
         raise FileNotFoundError(f"Could not find solvated PDB file in {self._working_dir}")
 

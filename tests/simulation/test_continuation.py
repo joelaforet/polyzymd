@@ -142,6 +142,48 @@ def _write_hard_killed_segment(
 # ---------------------------------------------------------------------------
 
 
+class TestFindSolvatedPdb:
+    """ContinuationManager._find_solvated_pdb accepts only approved topology paths."""
+
+    def _make_manager(self, working_dir):
+        """Create a minimal ContinuationManager-like object for testing."""
+        try:
+            from polyzymd.simulation.continuation import ContinuationManager
+
+            mgr = ContinuationManager.__new__(ContinuationManager)
+            mgr._working_dir = Path(working_dir)
+            return mgr
+        except ImportError:
+            pytest.skip("polyzymd.simulation.continuation not importable")
+
+    @pytest.mark.parametrize(
+        "relative_path",
+        [
+            Path("solvated_system.pdb"),
+            Path("production_0") / "production_0_topology.pdb",
+            Path("production") / "production_topology.pdb",
+        ],
+    )
+    def test_finds_exact_approved_paths(self, tmp_path, relative_path):
+        """Approved exact topology paths should be accepted."""
+        pdb_path = tmp_path / relative_path
+        pdb_path.parent.mkdir(parents=True, exist_ok=True)
+        pdb_path.write_text("ATOM ...")
+        mgr = self._make_manager(tmp_path)
+
+        assert mgr._find_solvated_pdb() == pdb_path
+
+    def test_rejects_arbitrary_recursive_pdb(self, tmp_path):
+        """Arbitrary recursive PDB files should not be accepted."""
+        nested_dir = tmp_path / "nested"
+        nested_dir.mkdir()
+        (nested_dir / "decoy.pdb").write_text("ATOM ...")
+        mgr = self._make_manager(tmp_path)
+
+        with pytest.raises(FileNotFoundError, match="Could not find solvated PDB file"):
+            mgr._find_solvated_pdb()
+
+
 class TestGetPreviousPaths:
     """ContinuationManager._get_previous_paths selects the right recovery path."""
 

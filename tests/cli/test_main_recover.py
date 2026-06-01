@@ -39,16 +39,16 @@ class TestFindTopologyPdb:
     """_find_topology_pdb locates a suitable PDB file."""
 
     def test_finds_solvated_pdb(self, tmp_path):
-        (tmp_path / "system_solvated.pdb").write_text("ATOM ...")
+        (tmp_path / "solvated_system.pdb").write_text("ATOM ...")
         result = _find_topology_pdb(tmp_path)
-        assert result.name == "system_solvated.pdb"
+        assert result.name == "solvated_system.pdb"
 
-    def test_finds_equilibration_topology(self, tmp_path):
+    def test_rejects_arbitrary_equilibration_topology(self, tmp_path):
         eq_dir = tmp_path / "equilibration_0_heating"
         eq_dir.mkdir()
         (eq_dir / "equilibration_0_heating_topology.pdb").write_text("ATOM ...")
-        result = _find_topology_pdb(tmp_path)
-        assert "topology.pdb" in result.name
+        with pytest.raises(FileNotFoundError, match="Could not find topology PDB"):
+            _find_topology_pdb(tmp_path)
 
     def test_finds_production_0_topology(self, tmp_path):
         prod_dir = tmp_path / "production_0"
@@ -56,6 +56,20 @@ class TestFindTopologyPdb:
         (prod_dir / "production_0_topology.pdb").write_text("ATOM ...")
         result = _find_topology_pdb(tmp_path)
         assert result.name == "production_0_topology.pdb"
+
+    def test_finds_approved_old_production_topology(self, tmp_path):
+        prod_dir = tmp_path / "production"
+        prod_dir.mkdir()
+        (prod_dir / "production_topology.pdb").write_text("ATOM ...")
+        result = _find_topology_pdb(tmp_path)
+        assert result == prod_dir / "production_topology.pdb"
+
+    def test_rejects_arbitrary_recursive_pdb(self, tmp_path):
+        nested_dir = tmp_path / "nested"
+        nested_dir.mkdir()
+        (nested_dir / "decoy.pdb").write_text("ATOM ...")
+        with pytest.raises(FileNotFoundError, match="Could not find topology PDB"):
+            _find_topology_pdb(tmp_path)
 
     def test_raises_if_no_pdb(self, tmp_path):
         with pytest.raises(FileNotFoundError, match="Could not find topology PDB"):
