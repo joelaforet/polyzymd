@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from polyzymd.analyses import get_analysis, list_analyses
 from polyzymd.analyses.base import (
@@ -3762,8 +3762,14 @@ def test_plot_top_pairs_uses_sem_occupancy_for_xerr(tmp_path: Path) -> None:
     cond_b_sem = 0.217
     # Sentinels intentionally differ from SEMs recomputed from replicate values
     results = {
-        "CondA": _make_aggregated_result_with_pair(0.35, cond_a_sem, [0.31, 0.39]),
-        "CondB": _make_aggregated_result_with_pair(0.55, cond_b_sem, [0.49, 0.61]),
+        "CondA": _condition_artifact_from_payload(
+            _make_aggregated_result_with_pair(0.35, cond_a_sem, [0.31, 0.39]),
+            condition_label="CondA",
+        ),
+        "CondB": _condition_artifact_from_payload(
+            _make_aggregated_result_with_pair(0.55, cond_b_sem, [0.49, 0.61]),
+            condition_label="CondB",
+        ),
     }
     captured_kwargs: list[dict[str, Any]] = []
     original_barh = matplotlib.axes.Axes.barh
@@ -3796,8 +3802,14 @@ def test_plot_top_pairs_suppresses_singleton_errorbars(tmp_path: Path) -> None:
     from polyzymd.analyses.hydrogen_bonds._plotters import plot_top_pairs
 
     results = {
-        "CondA": _make_aggregated_result_with_pair(0.35, 0.04, [0.35]),
-        "CondB": _make_aggregated_result_with_pair(0.55, 0.06, [0.55]),
+        "CondA": _condition_artifact_from_payload(
+            _make_aggregated_result_with_pair(0.35, 0.04, [0.35]),
+            condition_label="CondA",
+        ),
+        "CondB": _condition_artifact_from_payload(
+            _make_aggregated_result_with_pair(0.55, 0.06, [0.55]),
+            condition_label="CondB",
+        ),
     }
     captured_kwargs: list[dict[str, Any]] = []
     original_barh = matplotlib.axes.Axes.barh
@@ -3829,16 +3841,47 @@ def test_plot_summary_comparison_smoke(tmp_path: Path) -> None:
     output_dir = tmp_path / "plots"
     output_dir.mkdir(parents=True)
     results = {
-        "CondA": HydrogenBondConditionPayload(
-            replicates=[1],
-            n_replicates=1,
-            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0])],
+        "CondA": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1],
+                n_replicates=1,
+                summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0])],
+            ),
+            condition_label="CondA",
         )
     }
 
     path = plot_summary_comparison(results, ["CondA"], output_dir, PlotSettings())
     assert path is not None
     assert path.exists()
+
+
+def test_plotters_reject_nonartifact_payloads(tmp_path: Path) -> None:
+    """Direct plotter helpers should require canonical condition artifacts."""
+    pytest.importorskip("matplotlib")
+    from polyzymd.analyses.hydrogen_bonds._plotters import plot_summary_comparison
+
+    class PlotPayloadModel(BaseModel):
+        """Non-artifact Pydantic payload for rejection checks."""
+
+    output_dir = tmp_path / "plots"
+    output_dir.mkdir(parents=True)
+
+    with pytest.raises(TypeError, match="Expected ConditionArtifact"):
+        plot_summary_comparison(
+            {"CondA": {"summaries": []}},
+            ["CondA"],
+            output_dir,
+            PlotSettings(),
+        )
+
+    with pytest.raises(TypeError, match="Expected ConditionArtifact"):
+        plot_summary_comparison(
+            {"CondA": PlotPayloadModel()},
+            ["CondA"],
+            output_dir,
+            PlotSettings(),
+        )
 
 
 def test_plot_summary_comparison_facets_multiple_summaries(tmp_path: Path) -> None:
@@ -3851,21 +3894,27 @@ def test_plot_summary_comparison_facets_multiple_summaries(tmp_path: Path) -> No
     output_dir = tmp_path / "plots"
     output_dir.mkdir(parents=True)
     results = {
-        "CondA": HydrogenBondConditionPayload(
-            replicates=[1],
-            n_replicates=1,
-            summaries=[
-                _make_aggregated_summary("s1", 2.0, 0.1, [2.0]),
-                _make_aggregated_summary("s2", 10.0, 0.2, [10.0]),
-            ],
+        "CondA": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1],
+                n_replicates=1,
+                summaries=[
+                    _make_aggregated_summary("s1", 2.0, 0.1, [2.0]),
+                    _make_aggregated_summary("s2", 10.0, 0.2, [10.0]),
+                ],
+            ),
+            condition_label="CondA",
         ),
-        "CondB": HydrogenBondConditionPayload(
-            replicates=[1],
-            n_replicates=1,
-            summaries=[
-                _make_aggregated_summary("s1", 3.0, 0.1, [3.0]),
-                _make_aggregated_summary("s2", 12.0, 0.2, [12.0]),
-            ],
+        "CondB": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1],
+                n_replicates=1,
+                summaries=[
+                    _make_aggregated_summary("s1", 3.0, 0.1, [3.0]),
+                    _make_aggregated_summary("s2", 12.0, 0.2, [12.0]),
+                ],
+            ),
+            condition_label="CondB",
         ),
     }
 
@@ -3892,22 +3941,25 @@ def test_plot_composition_absolute_smoke(tmp_path: Path) -> None:
     output_dir = tmp_path / "plots"
     output_dir.mkdir(parents=True)
     results = {
-        "CondA": HydrogenBondConditionPayload(
-            replicates=[1],
-            n_replicates=1,
-            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0])],
-            composition_entries=[
-                AggregatedCompositionEntry(
-                    donor_partition="protein",
-                    acceptor_partition="polymer",
-                    mean_hbonds_per_frame=1.0,
-                    sem_hbonds_per_frame=0.0,
-                    per_replicate_hbonds=[1.0],
-                    mean_fraction_of_total=1.0,
-                    sem_fraction_of_total=0.0,
-                    per_replicate_fraction=[1.0],
-                )
-            ],
+        "CondA": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1],
+                n_replicates=1,
+                summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0])],
+                composition_entries=[
+                    AggregatedCompositionEntry(
+                        donor_partition="protein",
+                        acceptor_partition="polymer",
+                        mean_hbonds_per_frame=1.0,
+                        sem_hbonds_per_frame=0.0,
+                        per_replicate_hbonds=[1.0],
+                        mean_fraction_of_total=1.0,
+                        sem_fraction_of_total=0.0,
+                        per_replicate_fraction=[1.0],
+                    )
+                ],
+            ),
+            condition_label="CondA",
         )
     }
 
@@ -3924,32 +3976,35 @@ def test_plot_composition_absolute_uses_replicate_specific_bases(tmp_path: Path)
     output_dir = tmp_path / "plots"
     output_dir.mkdir(parents=True)
     results = {
-        "CondA": HydrogenBondConditionPayload(
-            replicates=[1, 2],
-            n_replicates=2,
-            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [1.0, 3.0])],
-            composition_entries=[
-                AggregatedCompositionEntry(
-                    donor_partition="groupA",
-                    acceptor_partition="groupA",
-                    mean_hbonds_per_frame=2.0,
-                    sem_hbonds_per_frame=1.0,
-                    per_replicate_hbonds=[1.0, 3.0],
-                    mean_fraction_of_total=0.4,
-                    sem_fraction_of_total=0.0,
-                    per_replicate_fraction=[0.2, 0.6],
-                ),
-                AggregatedCompositionEntry(
-                    donor_partition="groupA",
-                    acceptor_partition="groupB",
-                    mean_hbonds_per_frame=3.0,
-                    sem_hbonds_per_frame=1.0,
-                    per_replicate_hbonds=[4.0, 2.0],
-                    mean_fraction_of_total=0.6,
-                    sem_fraction_of_total=0.0,
-                    per_replicate_fraction=[0.8, 0.4],
-                ),
-            ],
+        "CondA": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1, 2],
+                n_replicates=2,
+                summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [1.0, 3.0])],
+                composition_entries=[
+                    AggregatedCompositionEntry(
+                        donor_partition="groupA",
+                        acceptor_partition="groupA",
+                        mean_hbonds_per_frame=2.0,
+                        sem_hbonds_per_frame=1.0,
+                        per_replicate_hbonds=[1.0, 3.0],
+                        mean_fraction_of_total=0.4,
+                        sem_fraction_of_total=0.0,
+                        per_replicate_fraction=[0.2, 0.6],
+                    ),
+                    AggregatedCompositionEntry(
+                        donor_partition="groupA",
+                        acceptor_partition="groupB",
+                        mean_hbonds_per_frame=3.0,
+                        sem_hbonds_per_frame=1.0,
+                        per_replicate_hbonds=[4.0, 2.0],
+                        mean_fraction_of_total=0.6,
+                        sem_fraction_of_total=0.0,
+                        per_replicate_fraction=[0.8, 0.4],
+                    ),
+                ],
+            ),
+            condition_label="CondA",
         )
     }
 
@@ -3978,32 +4033,35 @@ def test_plot_composition_fraction_overlap_exceeds_one(tmp_path: Path) -> None:
     output_dir.mkdir(parents=True)
     # Two partitions with fractions summing to 1.4, simulating overlap
     results = {
-        "CondA": HydrogenBondConditionPayload(
-            replicates=[1],
-            n_replicates=1,
-            summaries=[_make_aggregated_summary("s", 5.0, 0.1, [5.0])],
-            composition_entries=[
-                AggregatedCompositionEntry(
-                    donor_partition="groupA",
-                    acceptor_partition="groupA",
-                    mean_hbonds_per_frame=3.5,
-                    sem_hbonds_per_frame=0.0,
-                    per_replicate_hbonds=[3.5],
-                    mean_fraction_of_total=0.7,
-                    sem_fraction_of_total=0.0,
-                    per_replicate_fraction=[0.7],
-                ),
-                AggregatedCompositionEntry(
-                    donor_partition="groupA",
-                    acceptor_partition="groupB",
-                    mean_hbonds_per_frame=3.5,
-                    sem_hbonds_per_frame=0.0,
-                    per_replicate_hbonds=[3.5],
-                    mean_fraction_of_total=0.7,
-                    sem_fraction_of_total=0.0,
-                    per_replicate_fraction=[0.7],
-                ),
-            ],
+        "CondA": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1],
+                n_replicates=1,
+                summaries=[_make_aggregated_summary("s", 5.0, 0.1, [5.0])],
+                composition_entries=[
+                    AggregatedCompositionEntry(
+                        donor_partition="groupA",
+                        acceptor_partition="groupA",
+                        mean_hbonds_per_frame=3.5,
+                        sem_hbonds_per_frame=0.0,
+                        per_replicate_hbonds=[3.5],
+                        mean_fraction_of_total=0.7,
+                        sem_fraction_of_total=0.0,
+                        per_replicate_fraction=[0.7],
+                    ),
+                    AggregatedCompositionEntry(
+                        donor_partition="groupA",
+                        acceptor_partition="groupB",
+                        mean_hbonds_per_frame=3.5,
+                        sem_hbonds_per_frame=0.0,
+                        per_replicate_hbonds=[3.5],
+                        mean_fraction_of_total=0.7,
+                        sem_fraction_of_total=0.0,
+                        per_replicate_fraction=[0.7],
+                    ),
+                ],
+            ),
+            condition_label="CondA",
         )
     }
     captured_upper_limits: list[float] = []
@@ -4035,32 +4093,35 @@ def test_plot_composition_fraction_uses_replicate_specific_bases(tmp_path: Path)
     output_dir = tmp_path / "plots"
     output_dir.mkdir(parents=True)
     results = {
-        "CondA": HydrogenBondConditionPayload(
-            replicates=[1, 2],
-            n_replicates=2,
-            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0, 2.0])],
-            composition_entries=[
-                AggregatedCompositionEntry(
-                    donor_partition="groupA",
-                    acceptor_partition="groupA",
-                    mean_hbonds_per_frame=2.0,
-                    sem_hbonds_per_frame=0.0,
-                    per_replicate_hbonds=[2.0, 2.0],
-                    mean_fraction_of_total=0.5,
-                    sem_fraction_of_total=0.1,
-                    per_replicate_fraction=[0.4, 0.6],
-                ),
-                AggregatedCompositionEntry(
-                    donor_partition="groupA",
-                    acceptor_partition="groupB",
-                    mean_hbonds_per_frame=2.0,
-                    sem_hbonds_per_frame=0.0,
-                    per_replicate_hbonds=[2.0, 2.0],
-                    mean_fraction_of_total=0.5,
-                    sem_fraction_of_total=0.1,
-                    per_replicate_fraction=[0.7, 0.3],
-                ),
-            ],
+        "CondA": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1, 2],
+                n_replicates=2,
+                summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0, 2.0])],
+                composition_entries=[
+                    AggregatedCompositionEntry(
+                        donor_partition="groupA",
+                        acceptor_partition="groupA",
+                        mean_hbonds_per_frame=2.0,
+                        sem_hbonds_per_frame=0.0,
+                        per_replicate_hbonds=[2.0, 2.0],
+                        mean_fraction_of_total=0.5,
+                        sem_fraction_of_total=0.1,
+                        per_replicate_fraction=[0.4, 0.6],
+                    ),
+                    AggregatedCompositionEntry(
+                        donor_partition="groupA",
+                        acceptor_partition="groupB",
+                        mean_hbonds_per_frame=2.0,
+                        sem_hbonds_per_frame=0.0,
+                        per_replicate_hbonds=[2.0, 2.0],
+                        mean_fraction_of_total=0.5,
+                        sem_fraction_of_total=0.1,
+                        per_replicate_fraction=[0.7, 0.3],
+                    ),
+                ],
+            ),
+            condition_label="CondA",
         )
     }
 
@@ -4090,32 +4151,35 @@ def test_plot_composition_fraction_ylim_covers_skewed_replicate_endpoints(
     output_dir = tmp_path / "plots"
     output_dir.mkdir(parents=True)
     results = {
-        "CondA": HydrogenBondConditionPayload(
-            replicates=[1, 2],
-            n_replicates=2,
-            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0, 2.0])],
-            composition_entries=[
-                AggregatedCompositionEntry(
-                    donor_partition="groupA",
-                    acceptor_partition="groupA",
-                    mean_hbonds_per_frame=2.0,
-                    sem_hbonds_per_frame=0.0,
-                    per_replicate_hbonds=[2.0, 2.0],
-                    mean_fraction_of_total=0.5,
-                    sem_fraction_of_total=0.0,
-                    per_replicate_fraction=[0.9, 0.1],
-                ),
-                AggregatedCompositionEntry(
-                    donor_partition="groupA",
-                    acceptor_partition="groupB",
-                    mean_hbonds_per_frame=2.0,
-                    sem_hbonds_per_frame=0.0,
-                    per_replicate_hbonds=[2.0, 2.0],
-                    mean_fraction_of_total=0.5,
-                    sem_fraction_of_total=0.0,
-                    per_replicate_fraction=[0.9, 0.1],
-                ),
-            ],
+        "CondA": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1, 2],
+                n_replicates=2,
+                summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0, 2.0])],
+                composition_entries=[
+                    AggregatedCompositionEntry(
+                        donor_partition="groupA",
+                        acceptor_partition="groupA",
+                        mean_hbonds_per_frame=2.0,
+                        sem_hbonds_per_frame=0.0,
+                        per_replicate_hbonds=[2.0, 2.0],
+                        mean_fraction_of_total=0.5,
+                        sem_fraction_of_total=0.0,
+                        per_replicate_fraction=[0.9, 0.1],
+                    ),
+                    AggregatedCompositionEntry(
+                        donor_partition="groupA",
+                        acceptor_partition="groupB",
+                        mean_hbonds_per_frame=2.0,
+                        sem_hbonds_per_frame=0.0,
+                        per_replicate_hbonds=[2.0, 2.0],
+                        mean_fraction_of_total=0.5,
+                        sem_fraction_of_total=0.0,
+                        per_replicate_fraction=[0.9, 0.1],
+                    ),
+                ],
+            ),
+            condition_label="CondA",
         )
     }
     captured_upper_limits: list[float] = []
@@ -4156,32 +4220,35 @@ def test_plot_composition_fraction_ylim_ignores_hidden_replicate_endpoints(
     output_dir = tmp_path / "plots"
     output_dir.mkdir(parents=True)
     results = {
-        "CondA": HydrogenBondConditionPayload(
-            replicates=[1, 2],
-            n_replicates=2,
-            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0, 2.0])],
-            composition_entries=[
-                AggregatedCompositionEntry(
-                    donor_partition="groupA",
-                    acceptor_partition="groupA",
-                    mean_hbonds_per_frame=2.0,
-                    sem_hbonds_per_frame=0.0,
-                    per_replicate_hbonds=[2.0, 2.0],
-                    mean_fraction_of_total=0.5,
-                    sem_fraction_of_total=0.0,
-                    per_replicate_fraction=[0.9, 0.1],
-                ),
-                AggregatedCompositionEntry(
-                    donor_partition="groupA",
-                    acceptor_partition="groupB",
-                    mean_hbonds_per_frame=2.0,
-                    sem_hbonds_per_frame=0.0,
-                    per_replicate_hbonds=[2.0, 2.0],
-                    mean_fraction_of_total=0.5,
-                    sem_fraction_of_total=0.0,
-                    per_replicate_fraction=[0.9, 0.1],
-                ),
-            ],
+        "CondA": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1, 2],
+                n_replicates=2,
+                summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0, 2.0])],
+                composition_entries=[
+                    AggregatedCompositionEntry(
+                        donor_partition="groupA",
+                        acceptor_partition="groupA",
+                        mean_hbonds_per_frame=2.0,
+                        sem_hbonds_per_frame=0.0,
+                        per_replicate_hbonds=[2.0, 2.0],
+                        mean_fraction_of_total=0.5,
+                        sem_fraction_of_total=0.0,
+                        per_replicate_fraction=[0.9, 0.1],
+                    ),
+                    AggregatedCompositionEntry(
+                        donor_partition="groupA",
+                        acceptor_partition="groupB",
+                        mean_hbonds_per_frame=2.0,
+                        sem_hbonds_per_frame=0.0,
+                        per_replicate_hbonds=[2.0, 2.0],
+                        mean_fraction_of_total=0.5,
+                        sem_fraction_of_total=0.0,
+                        per_replicate_fraction=[0.9, 0.1],
+                    ),
+                ],
+            ),
+            condition_label="CondA",
         )
     }
     captured_upper_limits: list[float] = []
@@ -4218,10 +4285,13 @@ def test_plot_timeseries_smoke(tmp_path: Path) -> None:
     output_dir = tmp_path / "plots"
     output_dir.mkdir(parents=True)
     results = {
-        "CondA": HydrogenBondConditionPayload(
-            replicates=[1],
-            n_replicates=1,
-            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0])],
+        "CondA": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1],
+                n_replicates=1,
+                summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0])],
+            ),
+            condition_label="CondA",
         )
     }
     replicate_data = {"CondA": {"protein_polymer": [[1, 2, 3, 2]]}}
@@ -4251,39 +4321,45 @@ def test_condition_plots_use_semantic_colors_but_composition_remains_categorical
     output_dir = tmp_path / "plots"
     output_dir.mkdir(parents=True)
     results = {
-        "Treatment": HydrogenBondConditionPayload(
-            replicates=[1],
-            n_replicates=1,
-            summaries=[_make_aggregated_summary("protein_polymer", 4.0, 0.1, [4.0])],
-            composition_entries=[
-                AggregatedCompositionEntry(
-                    donor_partition="protein",
-                    acceptor_partition="polymer",
-                    mean_hbonds_per_frame=2.0,
-                    sem_hbonds_per_frame=0.0,
-                    per_replicate_hbonds=[2.0],
-                    mean_fraction_of_total=1.0,
-                    sem_fraction_of_total=0.0,
-                    per_replicate_fraction=[1.0],
-                )
-            ],
+        "Treatment": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1],
+                n_replicates=1,
+                summaries=[_make_aggregated_summary("protein_polymer", 4.0, 0.1, [4.0])],
+                composition_entries=[
+                    AggregatedCompositionEntry(
+                        donor_partition="protein",
+                        acceptor_partition="polymer",
+                        mean_hbonds_per_frame=2.0,
+                        sem_hbonds_per_frame=0.0,
+                        per_replicate_hbonds=[2.0],
+                        mean_fraction_of_total=1.0,
+                        sem_fraction_of_total=0.0,
+                        per_replicate_fraction=[1.0],
+                    )
+                ],
+            ),
+            condition_label="Treatment",
         ),
-        "Control": HydrogenBondConditionPayload(
-            replicates=[1],
-            n_replicates=1,
-            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0])],
-            composition_entries=[
-                AggregatedCompositionEntry(
-                    donor_partition="protein",
-                    acceptor_partition="polymer",
-                    mean_hbonds_per_frame=1.0,
-                    sem_hbonds_per_frame=0.0,
-                    per_replicate_hbonds=[1.0],
-                    mean_fraction_of_total=1.0,
-                    sem_fraction_of_total=0.0,
-                    per_replicate_fraction=[1.0],
-                )
-            ],
+        "Control": _condition_artifact_from_payload(
+            HydrogenBondConditionPayload(
+                replicates=[1],
+                n_replicates=1,
+                summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0])],
+                composition_entries=[
+                    AggregatedCompositionEntry(
+                        donor_partition="protein",
+                        acceptor_partition="polymer",
+                        mean_hbonds_per_frame=1.0,
+                        sem_hbonds_per_frame=0.0,
+                        per_replicate_hbonds=[1.0],
+                        mean_fraction_of_total=1.0,
+                        sem_fraction_of_total=0.0,
+                        per_replicate_fraction=[1.0],
+                    )
+                ],
+            ),
+            condition_label="Control",
         ),
     }
     plot_settings = PlotSettings(
