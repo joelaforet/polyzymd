@@ -588,7 +588,9 @@ class TestRunReplicate:
         metrics = result.payload["pairs"][0]
         assert metrics["pair_label"] == "Configured Label"
         assert metrics["mean_distance"] == pytest.approx(float(np.mean(raw_distances)))
-        assert metrics["fraction_below_threshold"] == pytest.approx(float(np.mean(raw_distances < 3.2)))
+        assert metrics["fraction_below_threshold"] == pytest.approx(
+            float(np.mean(raw_distances < 3.2))
+        )
         assert metrics["correlation_time"] == pytest.approx(90.0)
         assert "distances" not in metrics
         assert "distance_matrix" not in json.dumps(result.payload)
