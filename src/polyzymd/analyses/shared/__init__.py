@@ -28,20 +28,11 @@ diagnostics
     Selection diagnostics, equilibration validation.
 window
     Centralized trajectory window resolution for MDAnalysis job lifecycles.
-config_hash
-    Temporary compatibility facade for framework cache identity helpers.
-sasa
-    Temporary compatibility facade for SASA plugin artifact helpers.
 plotting
     Shared plotting helpers (axis styling, figure saving, grouped bars, etc.).
 """
 
 from __future__ import annotations
-
-from polyzymd.analyses._framework.cache_identity import (
-    compute_config_hash,
-    validate_config_hash,
-)
 
 # Re-export the most commonly used symbols for convenience.
 # Plugins can do:  from polyzymd.analyses.shared import TrajectoryLoader, AlignmentConfig
@@ -137,9 +128,6 @@ __all__ = [
     "statistical_inefficiency_multiple",
     "n_effective",
     "check_statistical_reliability",
-    # Config hash
-    "compute_config_hash",
-    "validate_config_hash",
     # Convergence
     "ConvergenceResult",
     "find_convergence_time",
