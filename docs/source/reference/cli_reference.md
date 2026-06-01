@@ -185,8 +185,6 @@ polyzymd build -c <path> --format gromacs    # Export for GROMACS
 | `--dry-run` | - | No | false | Validate only, don't build |
 | `--format` | - | No | OpenMM | Export format (`gromacs`, `lammps` (planned), or `amber` (planned)) |
 
-> **Note:** `--replicate` and `--gromacs` are retained as hidden deprecated aliases.
-
 ### Example
 
 ```bash
@@ -252,8 +250,6 @@ polyzymd run -c <path> --engine openmm --dry-run
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--gmx-path` | - | No | unset | Path to GROMACS executable (gromacs engine only) |
 | `--dry-run` | - | No | false | Validate and preview actions only (writes nothing) |
-
-> **Note:** `--replicate` is retained as a hidden deprecated alias.
 
 ### Example
 

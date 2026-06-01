@@ -819,7 +819,7 @@ class TestHardKillNoSystemXmlRaises:
 
 
 class TestBuildDryRunGromacs:
-    """build --dry-run --gromacs must show an actual directory, not {projects_dir}."""
+    """build --dry-run --format gromacs shows the resolved export directory."""
 
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_gromacs_dry_run_shows_actual_path(self, mock_from_yaml, tmp_path):
@@ -841,7 +841,8 @@ class TestBuildDryRunGromacs:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["build", "-c", str(config_file), "--dry-run", "--gromacs", "-r", "1"]
+            cli,
+            ["build", "-c", str(config_file), "--dry-run", "--format", "gromacs", "-r", "1"],
         )
         assert result.exit_code == 0, result.output
         message = "Output path must be interpolated, not literal {projects_dir}"

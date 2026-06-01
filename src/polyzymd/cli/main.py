@@ -99,19 +99,13 @@ suppress_openff_logs()
 
 def _resolve_replicates_option(
     replicates: str | None,
-    replicate: int | None,
-    command_name: str,
 ) -> list[int]:
-    """Resolve --replicates / --replicate into a list of replicate numbers.
+    """Resolve ``--replicates`` into a list of replicate numbers.
 
     Parameters
     ----------
     replicates : str or None
         Value from ``--replicates`` (range syntax, e.g. ``"1-3"``)
-    replicate : int or None
-        Value from deprecated ``--replicate`` (single integer)
-    command_name : str
-        Name of the CLI command (for error messages)
 
     Returns
     -------
@@ -120,28 +114,10 @@ def _resolve_replicates_option(
 
     Raises
     ------
-    click.UsageError
-        If both ``--replicates`` and ``--replicate`` are given
+    click.BadParameter
+        If the replicate range is invalid.
     """
     from polyzymd.utils.replicates import parse_replicate_range
-
-    if replicates is not None and replicate is not None:
-        raise click.UsageError(
-            f"Cannot use both --replicates and --replicate in '{command_name}'. "
-            "Use --replicates (e.g., --replicates 1-3)."
-        )
-
-    if replicate is not None:
-        if replicate <= 0:
-            raise click.BadParameter(
-                f"Replicate must be a positive integer, got {replicate}.",
-                param_hint="'--replicate'",
-            )
-        click.echo(
-            f"Warning: --replicate is deprecated in '{command_name}', use --replicates instead.",
-            err=True,
-        )
-        return [replicate]
 
     if replicates is not None:
         try:
@@ -260,13 +236,6 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     help="Replicate range (e.g., '1', '1-3', '1,3,5'). Default: 1",
 )
 @click.option(
-    "--replicate",
-    default=None,
-    type=int,
-    hidden=True,
-    help="[Deprecated] Use --replicates instead.",
-)
-@click.option(
     "-o",
     "--output-dir",
     default=None,
@@ -299,22 +268,14 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
         "Export format: gromacs, lammps (planned), amber (planned). Default: OpenMM (no export)."
     ),
 )
-@click.option(
-    "--gromacs",
-    is_flag=True,
-    hidden=True,
-    help="[Deprecated] Use --format gromacs instead.",
-)
 def build(
     config: str,
     replicates: str | None,
-    replicate: int | None,
     output_dir: str | None,
     scratch_dir: str | None,
     projects_dir: str | None,
     dry_run: bool,
     export_format: str | None,
-    gromacs: bool,
 ) -> None:
     """Build simulation input files from configuration.
 
@@ -347,19 +308,7 @@ def build(
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
 
-    # Resolve export format: --format takes priority, --gromacs is deprecated alias
-    if gromacs and export_format is not None:
-        raise click.UsageError(
-            "Cannot use both --gromacs and --format. Use --format gromacs instead."
-        )
-    if gromacs:
-        click.echo(
-            "Warning: --gromacs is deprecated, use --format gromacs instead.",
-            err=True,
-        )
-        export_format = "gromacs"
-
-    replicate_list = _resolve_replicates_option(replicates, replicate, "build")
+    replicate_list = _resolve_replicates_option(replicates)
 
     colored_echo(f"Loading configuration from: {config}", phase="build")
 
@@ -789,13 +738,6 @@ def _print_run_dry_run_report(
     help="Replicate range (e.g., '1', '1-3', '1,3,5'). Default: 1",
 )
 @click.option(
-    "--replicate",
-    default=None,
-    type=int,
-    hidden=True,
-    help="[Deprecated] Use --replicates instead.",
-)
-@click.option(
     "--scratch-dir",
     default=None,
     type=click.Path(),
@@ -826,7 +768,6 @@ def _print_run_dry_run_report(
 def run(
     config: str,
     replicates: str | None,
-    replicate: int | None,
     scratch_dir: str | None,
     projects_dir: str | None,
     gmx_path: str | None,
@@ -855,7 +796,7 @@ def run(
     if engine == "openmm" and gmx_path is not None:
         raise click.UsageError("--gmx-path can only be used with --engine gromacs")
 
-    replicate_list = _resolve_replicates_option(replicates, replicate, "run")
+    replicate_list = _resolve_replicates_option(replicates)
 
     colored_echo(f"Loading configuration from: {config}", phase="simulation")
 
@@ -1386,7 +1327,7 @@ def submit(
     if dry_run:
         from polyzymd.config.schema import SimulationConfig
 
-        replicate_list = _resolve_replicates_option(replicates, None, "submit")
+        replicate_list = _resolve_replicates_option(replicates)
         sim_config = SimulationConfig.from_yaml(config)
         engine_name = _resolve_engine_name(sim_config, override=engine)
         if scratch_dir:
@@ -1462,7 +1403,7 @@ def submit(
             )
 
         engine_impl = create_engine(sim_config, override="gromacs", defer_binary=True)
-        replicate_list = _resolve_replicates_option(replicates, None, "submit")
+        replicate_list = _resolve_replicates_option(replicates)
         config_path_abs = Path(config).resolve()
 
         colored_echo("Using GROMACS submission backend", phase="workflow")

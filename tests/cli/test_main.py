@@ -1,7 +1,7 @@
 """Tests for CLI replicate flag handling and run/submit UX.
 
-Tests the _resolve_replicates_option() helper and the updated
---replicates / --replicate flags on `build` and `run`.
+Tests the _resolve_replicates_option() helper and the --replicates flags on
+`build` and `run`.
 """
 
 from __future__ import annotations
@@ -70,57 +70,33 @@ class TestResolveReplicatesOption:
 
     def test_replicates_single(self) -> None:
         """--replicates '1' resolves to [1]."""
-        assert _resolve_replicates_option("1", None, "test") == [1]
+        assert _resolve_replicates_option("1") == [1]
 
     def test_replicates_range(self) -> None:
         """--replicates '1-3' resolves to [1, 2, 3]."""
-        assert _resolve_replicates_option("1-3", None, "test") == [1, 2, 3]
+        assert _resolve_replicates_option("1-3") == [1, 2, 3]
 
     def test_replicates_comma(self) -> None:
         """--replicates '1,3,5' resolves to [1, 3, 5]."""
-        assert _resolve_replicates_option("1,3,5", None, "test") == [1, 3, 5]
+        assert _resolve_replicates_option("1,3,5") == [1, 3, 5]
 
     def test_replicates_range_with_step(self) -> None:
         """--replicates '1-10:2' resolves to [1, 3, 5, 7, 9]."""
-        assert _resolve_replicates_option("1-10:2", None, "test") == [1, 3, 5, 7, 9]
-
-    def test_deprecated_replicate_single(self) -> None:
-        """--replicate 1 resolves to [1] with stderr warning."""
-        from click.testing import CliRunner
-
-        runner = CliRunner()
-        with runner.isolation() as (_stdin, _stdout, stderr):
-            result = _resolve_replicates_option(None, 1, "test")
-            assert result == [1]
-            assert "--replicate is deprecated" in stderr.getvalue().decode("utf-8")
-
-    def test_deprecated_replicate_preserves_value(self) -> None:
-        """--replicate 5 resolves to [5]."""
-        assert _resolve_replicates_option(None, 5, "test") == [5]
-
-    def test_both_flags_raises(self) -> None:
-        """Using both --replicates and --replicate raises UsageError."""
-        with pytest.raises(click.UsageError, match="Cannot use both"):
-            _resolve_replicates_option("1-3", 1, "test")
+        assert _resolve_replicates_option("1-10:2") == [1, 3, 5, 7, 9]
 
     def test_neither_flag_defaults_to_one(self) -> None:
         """Omitting both flags defaults to [1]."""
-        assert _resolve_replicates_option(None, None, "test") == [1]
-
-    def test_error_message_includes_command_name(self) -> None:
-        """Error message mentions the command name."""
-        with pytest.raises(click.UsageError, match="build"):
-            _resolve_replicates_option("1-3", 1, "build")
+        assert _resolve_replicates_option(None) == [1]
 
     def test_invalid_range_raises(self) -> None:
         """Invalid range string is converted to Click BadParameter."""
         with pytest.raises(click.BadParameter):
-            _resolve_replicates_option("abc", None, "test")
+            _resolve_replicates_option("abc")
 
     def test_empty_range_raises(self) -> None:
         """Empty string is converted to Click BadParameter."""
         with pytest.raises(click.BadParameter):
-            _resolve_replicates_option("", None, "test")
+            _resolve_replicates_option("")
 
 
 class TestResolveEngineName:
@@ -199,9 +175,9 @@ class TestBuildCommandReplicateFlags:
         # (but --replicates will appear, so we check there's no standalone --replicate)
         lines = result.output.split("\n")
         for line in lines:
-            # If a line contains --replicate but NOT --replicates, that's the deprecated flag showing
+            # Detect removed singular option without matching the plural option
             if "--replicate" in line and "--replicates" not in line:
-                pytest.fail(f"Deprecated --replicate visible in help: {line}")
+                pytest.fail(f"Removed singular --replicate visible in help: {line}")
 
 
 class TestRunCommandReplicateFlags:
@@ -230,7 +206,7 @@ class TestRunCommandReplicateFlags:
         lines = result.output.split("\n")
         for line in lines:
             if "--replicate" in line and "--replicates" not in line:
-                pytest.fail(f"Deprecated --replicate visible in help: {line}")
+                pytest.fail(f"Removed singular --replicate visible in help: {line}")
 
     def test_run_help_shows_engine_flag(self) -> None:
         """'polyzymd run --help' should include required --engine option."""
@@ -403,24 +379,6 @@ class TestDryRunOutput:
         assert "--dry-run" in result.output
 
 
-class TestDeprecatedReplicateValidation:
-    """Unit tests for deprecated --replicate validation."""
-
-    def test_replicate_zero_raises(self) -> None:
-        """Replicate zero should raise BadParameter."""
-        with pytest.raises(click.BadParameter):
-            _resolve_replicates_option(None, 0, "build")
-
-    def test_replicate_negative_raises(self) -> None:
-        """Negative replicate should raise BadParameter."""
-        with pytest.raises(click.BadParameter):
-            _resolve_replicates_option(None, -1, "build")
-
-    def test_replicate_positive_still_works(self) -> None:
-        """Positive replicate should still resolve correctly."""
-        assert _resolve_replicates_option(None, 3, "build") == [3]
-
-
 class TestBuildDryRunEndToEnd:
     """End-to-end CliRunner tests for build dry-run behavior."""
 
@@ -438,12 +396,12 @@ class TestBuildDryRunEndToEnd:
         assert "DRY RUN" in result.output
 
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
-    def test_build_dry_run_with_deprecated_replicate_warns(
+    def test_build_dry_run_rejects_singular_replicate(
         self,
         mock_from_yaml,
         tmp_path: Path,
     ) -> None:
-        """Deprecated --replicate should still work and emit warning."""
+        """Build should reject the removed singular --replicate option."""
         mock_from_yaml.return_value = _make_dry_run_config()
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
@@ -454,12 +412,11 @@ class TestBuildDryRunEndToEnd:
             ["build", "-c", str(config_path), "--replicate", "1", "--dry-run"],
         )
 
-        assert result.exit_code == 0
-        stderr = getattr(result, "stderr", "")
-        assert "deprecated" in f"{result.output}\n{stderr}".lower()
+        assert result.exit_code != 0
+        assert "No such option: --replicate" in result.output
 
     def test_build_with_replicate_zero_fails(self, tmp_path: Path) -> None:
-        """Replicate zero should fail with positive-integer guidance."""
+        """Removed singular --replicate should fail as an unknown option."""
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
         runner = CliRunner()
@@ -467,9 +424,7 @@ class TestBuildDryRunEndToEnd:
         result = runner.invoke(cli, ["build", "-c", str(config_path), "--replicate", "0"])
 
         assert result.exit_code != 0
-        stderr = getattr(result, "stderr", "")
-        message = f"{result.output}\n{stderr}".lower()
-        assert "positive" in message or "must be" in message
+        assert "No such option: --replicate" in result.output
 
 
 class TestCliExceptionHandlingNarrowing:
