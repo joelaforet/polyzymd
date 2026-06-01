@@ -223,6 +223,9 @@ src/polyzymd/exporters/gmx_test_correct_outputs/
 # Mock/test artifacts accidentally created at repository root
 MagicMock/
 
+# Generated knowledge graph output
+graphify-out/
+
 # Legacy backup files
 *.bak
 
