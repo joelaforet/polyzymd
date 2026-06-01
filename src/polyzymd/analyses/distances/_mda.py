@@ -140,50 +140,6 @@ def build_distance_jobs(
     ]
 
 
-def compute_distance_payloads(
-    *,
-    universe: Any,
-    pairs: Sequence[tuple[str, str]],
-    thresholds: Sequence[float | None],
-    start: int,
-    stop: int,
-    step: int,
-    timestep_ps: float,
-    use_pbc: bool,
-    alignment: Any,
-    pair_label_func: Callable[[str, str], str],
-) -> DistanceReplicatePayload:
-    """Compute distance payloads through the shared pair-distance primitive.
-
-    This compatibility helper keeps direct callers and the catalytic-triad
-    runner on the same MDAnalysis ``AnalysisBase`` implementation used by the
-    migrated distances plugin.
-    """
-
-    from polyzymd.analyses.shared.alignment import align_trajectory
-
-    if getattr(alignment, "enabled", False):
-        align_trajectory(universe, alignment, start_frame=start, stop_frame=stop, step_frame=step)
-    resolved_pairs = resolve_distance_pairs(
-        universe=universe,
-        pairs=pairs,
-        thresholds=thresholds,
-        pair_label_func=pair_label_func,
-    )
-    analysis = build_pair_distance_analysis(
-        universe=universe,
-        pairs=resolved_pairs,
-        use_pbc=use_pbc,
-    ).run(start=start, stop=stop, step=step)
-    return payload_from_pair_distance_analysis(
-        analysis=analysis,
-        resolved_pairs=resolved_pairs,
-        timestep_ps=timestep_ps,
-        step=step,
-        n_frames_total=len(universe.trajectory),
-    )
-
-
 def resolve_distance_pairs(
     *,
     universe: Any,

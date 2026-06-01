@@ -6,6 +6,7 @@ plot delegation, AggregatedResultClass, artifact deserialization, and lifecycle.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -489,81 +490,8 @@ class TestRunReplicate:
 
         assert jobs is expected_jobs
 
-    def test_compute_distance_payloads_uses_effective_timestep_for_autocorrelation(
-        self, monkeypatch
-    ):
-        """Distance autocorrelation should use raw timestep multiplied by frame stride."""
-        from types import SimpleNamespace
-
-        import numpy as np
-
-        from polyzymd.analyses.distances import _mda as runner_module
-        from polyzymd.analyses.distances._mda import compute_distance_payloads
-
-        captured: dict[str, float] = {}
-
-        class _FakeDistanceAnalysis:
-            def __init__(self, **kwargs):
-                self.results = SimpleNamespace(
-                    distance_matrix=[], frames=[], times_ps=[], warnings=[]
-                )
-
-            def run(self, *, start: int, stop: int, step: int):
-                del start, stop, step
-                self.results.distance_matrix = np.asarray(
-                    [np.linspace(1.0, 2.0, 20, dtype=np.float64)]
-                )
-                self.results.frames = np.arange(0, 60, 3, dtype=np.int64)
-                return self
-
-        monkeypatch.setattr(
-            runner_module, "build_pair_distance_analysis", lambda **kwargs: _FakeDistanceAnalysis()
-        )
-        monkeypatch.setattr(
-            runner_module,
-            "resolve_distance_pairs",
-            lambda **kwargs: [
-                SimpleNamespace(
-                    label="P1",
-                    selection_a="sel_a",
-                    selection_b="sel_b",
-                    threshold=None,
-                )
-            ],
-        )
-
-        def _fake_estimate_correlation_time(_series, **kwargs):
-            captured["timestep"] = kwargs["timestep"]
-            return SimpleNamespace(
-                tau=1.0,
-                tau_unit="ps",
-                n_independent=20,
-                statistical_inefficiency=1.0,
-                warning=None,
-            )
-
-        monkeypatch.setattr(
-            "polyzymd.analyses.shared.autocorrelation.estimate_correlation_time",
-            _fake_estimate_correlation_time,
-        )
-        universe = MagicMock(trajectory=list(range(30)))
-
-        compute_distance_payloads(
-            universe=universe,
-            pairs=[("sel_a", "sel_b")],
-            thresholds=[None],
-            start=0,
-            stop=30,
-            step=3,
-            timestep_ps=10.0,
-            use_pbc=False,
-            alignment=SimpleNamespace(enabled=False),
-            pair_label_func=lambda _selection_a, _selection_b: "P1",
-        )
-
-        assert captured["timestep"] == pytest.approx(30.0)
-
-    def test_collector_writes_summary_json_and_npz_sidecar(self, tmp_path):
+    def test_collector_writes_summary_json_and_npz_sidecar(self, tmp_path, monkeypatch):
+        """Distance collector should summarize JSON and retain raw distances in a sidecar."""
         import numpy as np
 
         from polyzymd.analyses.base import Condition, ReplicateContext
@@ -572,9 +500,30 @@ class TestRunReplicate:
             DistancesSettings,
         )
         from polyzymd.analyses.distances._mda import DistanceArtifactCollector
-        from polyzymd.analyses.mda import ArtifactStore, FrameSelection, MDACollectorContext
+        from polyzymd.analyses.mda import (
+            ArtifactStore,
+            FrameSelection,
+            MDACollectorContext,
+            ReplicateArtifact,
+        )
         from polyzymd.analyses.mda.job import MDABackendPolicy, MDAJobResult, MDAUniversePolicy
 
+        captured: dict[str, float] = {}
+
+        def _fake_estimate_correlation_time(_series, **kwargs):
+            captured["timestep"] = kwargs["timestep"]
+            return SimpleNamespace(
+                tau=90.0,
+                tau_unit="ps",
+                n_independent=10,
+                statistical_inefficiency=2.0,
+                warning=None,
+            )
+
+        monkeypatch.setattr(
+            "polyzymd.analyses.shared.autocorrelation.estimate_correlation_time",
+            _fake_estimate_correlation_time,
+        )
         settings = DistancesSettings(
             pairs=[
                 DistancePairSettings(
@@ -601,23 +550,31 @@ class TestRunReplicate:
             settings=settings,
         )
         analysis_obj = MagicMock()
-        analysis_obj.results.distance_matrix = np.asarray([[3.0, 3.2, 3.4]], dtype=np.float64)
-        analysis_obj.results.frames = np.asarray([0, 1, 2], dtype=np.int64)
-        analysis_obj.results.times_ps = np.asarray([0.0, 10.0, 20.0], dtype=np.float64)
+        raw_distances = np.linspace(2.8, 3.8, 20, dtype=np.float64)
+        analysis_obj.results.distance_matrix = np.asarray([raw_distances], dtype=np.float64)
+        analysis_obj.results.frames = np.arange(0, 60, 3, dtype=np.int64)
+        analysis_obj.results.times_ps = np.arange(0, 600, 30, dtype=np.float64)
         analysis_obj.results.warnings = []
+        frame_selection = FrameSelection(
+            start=0,
+            stop=60,
+            step=3,
+            n_frames_total=60,
+            timestep_ps=10.0,
+        )
         job = MDAJobResult(
             name="pair_distances",
             analysis=analysis_obj,
             results=analysis_obj.results,
-            run_kwargs={"start": 0, "stop": 3, "step": 1},
-            frame_selection=FrameSelection(start=0, stop=3, step=1, n_frames_total=3),
+            run_kwargs={"start": 0, "stop": 60, "step": 3},
+            frame_selection=frame_selection,
             backend_policy=MDABackendPolicy(),
             universe_policy=MDAUniversePolicy(),
         )
         collector_ctx = MDACollectorContext(
             analysis_name="distances",
             replicate_context=ctx,
-            frame_selection=FrameSelection(start=0, stop=3, step=1, n_frames_total=3),
+            frame_selection=frame_selection,
             universe_policy=MDAUniversePolicy(condition_label="test", replicate=1),
             artifact_store=ArtifactStore(tmp_path / "run_1"),
             settings_fingerprint="abc123",
@@ -626,15 +583,21 @@ class TestRunReplicate:
         result = DistanceArtifactCollector()(collector_ctx, [job])
 
         assert result.replicate == 1
-        assert result.payload["n_frames_used"] == 3
-        assert result.payload["pairs"][0]["pair_label"] == "Configured Label"
-        assert result.payload["pairs"][0]["mean_distance"] == pytest.approx(3.2)
-        assert result.payload["pairs"][0]["fraction_below_threshold"] == pytest.approx(1.0 / 3.0)
-        assert "distances" not in result.payload["pairs"][0]
+        assert isinstance(result, ReplicateArtifact)
+        assert result.payload["n_frames_used"] == 20
+        metrics = result.payload["pairs"][0]
+        assert metrics["pair_label"] == "Configured Label"
+        assert metrics["mean_distance"] == pytest.approx(float(np.mean(raw_distances)))
+        assert metrics["fraction_below_threshold"] == pytest.approx(float(np.mean(raw_distances < 3.2)))
+        assert metrics["correlation_time"] == pytest.approx(90.0)
+        assert "distances" not in metrics
+        assert "distance_matrix" not in json.dumps(result.payload)
+        assert captured["timestep"] == pytest.approx(30.0)
         assert result.sidecars[0].metadata["kind"] == "distance_matrix"
         sidecar_path = ArtifactStore(tmp_path / "run_1").validate_sidecar(result.sidecars[0])
         with np.load(sidecar_path) as npz_data:
-            assert npz_data["distance_matrix"].shape == (1, 3)
+            assert npz_data["distance_matrix"].shape == (1, 20)
+            np.testing.assert_allclose(npz_data["distance_matrix"][0], raw_distances)
             assert npz_data["pair_labels"].tolist() == ["Configured Label"]
             assert npz_data["thresholds"].tolist() == pytest.approx([3.2])
 
