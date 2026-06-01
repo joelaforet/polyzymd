@@ -130,7 +130,9 @@ def _resolve_replicates_option(
 
 
 def _resolve_engine_name(sim_config: object, override: str | None = None) -> str:
-    """Resolve the simulation engine from CLI override or config.
+    """Resolve the required simulation engine from CLI override or config.
+
+    The engine must be configured unless a CLI override is provided.
 
     Parameters
     ----------
@@ -146,7 +148,10 @@ def _resolve_engine_name(sim_config: object, override: str | None = None) -> str
     """
     if override:
         return override.lower()
-    return getattr(sim_config, "engine", "openmm") or "openmm"
+    engine = getattr(sim_config, "engine", None)
+    if not engine:
+        raise click.UsageError("Configure 'engine' in the simulation config or pass --engine.")
+    return str(engine).lower()
 
 
 def _generate_system_prefix(sim_config: object) -> str:

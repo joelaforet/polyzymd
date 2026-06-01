@@ -37,6 +37,7 @@ def _make_dry_run_config() -> SimpleNamespace:
     return SimpleNamespace(
         name="test_sim",
         description="test description",
+        engine="openmm",
         enzyme=SimpleNamespace(name="TestEnzyme", pdb_path=Path("structures/enzyme.pdb")),
         substrate=None,
         polymers=None,
@@ -111,6 +112,15 @@ class TestResolveEngineName:
         config = SimpleNamespace(engine="openmm")
         assert _resolve_engine_name(config, override="gromacs") == "gromacs"
 
+    def test_override_works_without_config_engine(self) -> None:
+        """CLI --engine override should work when config has no engine."""
+        from types import SimpleNamespace
+
+        from polyzymd.cli.main import _resolve_engine_name
+
+        config = SimpleNamespace()
+        assert _resolve_engine_name(config, override="gromacs") == "gromacs"
+
     def test_reads_config_engine(self) -> None:
         """Should read engine from config when no override."""
         from types import SimpleNamespace
@@ -120,23 +130,35 @@ class TestResolveEngineName:
         config = SimpleNamespace(engine="gromacs")
         assert _resolve_engine_name(config) == "gromacs"
 
-    def test_defaults_to_openmm(self) -> None:
-        """Should default to openmm when config has no engine field."""
+    def test_missing_engine_raises_usage_error(self) -> None:
+        """Missing config engine should raise a usage error."""
         from types import SimpleNamespace
 
         from polyzymd.cli.main import _resolve_engine_name
 
         config = SimpleNamespace()
-        assert _resolve_engine_name(config) == "openmm"
+        with pytest.raises(click.UsageError, match="Configure 'engine'"):
+            _resolve_engine_name(config)
 
-    def test_none_engine_defaults_to_openmm(self) -> None:
-        """Should default to openmm when config.engine is None."""
+    def test_none_engine_raises_usage_error(self) -> None:
+        """None config engine should raise a usage error."""
         from types import SimpleNamespace
 
         from polyzymd.cli.main import _resolve_engine_name
 
         config = SimpleNamespace(engine=None)
-        assert _resolve_engine_name(config) == "openmm"
+        with pytest.raises(click.UsageError, match="Configure 'engine'"):
+            _resolve_engine_name(config)
+
+    def test_empty_engine_raises_usage_error(self) -> None:
+        """Empty config engine should raise a usage error."""
+        from types import SimpleNamespace
+
+        from polyzymd.cli.main import _resolve_engine_name
+
+        config = SimpleNamespace(engine="")
+        with pytest.raises(click.UsageError, match="Configure 'engine'"):
+            _resolve_engine_name(config)
 
     def test_case_insensitive(self) -> None:
         """Override should be case-insensitive."""
