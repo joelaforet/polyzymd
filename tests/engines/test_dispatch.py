@@ -25,16 +25,42 @@ def test_get_engine_class_unknown() -> None:
         get_engine_class("amber")
 
 
-def test_create_engine_defaults_to_openmm() -> None:
-    """Engine factory should default to OpenMM when not configured."""
+def test_create_engine_rejects_missing_engine() -> None:
+    """Engine factory should reject configs without an engine field."""
     config = SimpleNamespace()
-    engine = create_engine(config)
-    assert isinstance(engine, OpenMMEngine)
+
+    with pytest.raises(ValueError, match="non-empty string engine"):
+        create_engine(config)
+
+
+@pytest.mark.parametrize("engine_value", [None, "", "   ", 123])
+def test_create_engine_rejects_invalid_config_engine(engine_value: object) -> None:
+    """Engine factory should reject null, empty, and non-string engine values."""
+    config = SimpleNamespace(engine=engine_value)
+
+    with pytest.raises(ValueError, match="non-empty string engine"):
+        create_engine(config)
+
+
+@pytest.mark.parametrize("override", ["", "   ", 123])
+def test_create_engine_rejects_invalid_override(override: object) -> None:
+    """Engine factory should reject empty and non-string overrides."""
+    config = SimpleNamespace(engine="openmm")
+
+    with pytest.raises(ValueError, match="Engine override"):
+        create_engine(config, override=override)  # type: ignore[arg-type]
 
 
 def test_create_engine_override() -> None:
     """Engine factory should honor explicit override."""
     config = SimpleNamespace(engine="openmm")
+    engine = create_engine(config, override="openmm")
+    assert isinstance(engine, OpenMMEngine)
+
+
+def test_create_engine_override_succeeds_without_config_engine() -> None:
+    """Explicit override should work even when config.engine is missing."""
+    config = SimpleNamespace()
     engine = create_engine(config, override="openmm")
     assert isinstance(engine, OpenMMEngine)
 
