@@ -226,14 +226,9 @@ def _path_has_scaffold_signature(path: Path) -> bool:
         return False
 
     text = path.read_text(encoding="utf-8")
-    # Keep legacy signature text so --force can still identify old scaffold output
     signatures = (
-        "Replace this placeholder with domain-specific measurement logic",
-        "Replace this placeholder with domain-specific MDAnalysis logic",
         "Generated MDAnalysis-native analysis plugin",
         "Generated advanced MDAnalysis-native analysis package",
-        "Uses plain dicts for result containers",
-        "Uses typed Pydantic result models for validation",
     )
     return any(signature in text for signature in signatures)
 

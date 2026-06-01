@@ -270,6 +270,29 @@ class TestGenerateScaffold:
         assert len(created) == 2
         assert "stale local edit" not in plugin_path.read_text(encoding="utf-8")
 
+    @pytest.mark.parametrize(
+        "legacy_marker",
+        [
+            "Replace this placeholder with domain-specific " + "measurement logic",
+            "Replace this placeholder with domain-specific " + "MDAnalysis logic",
+            "Uses plain " + "dicts for result containers",
+            "Uses typed Pydantic " + "result models for validation",
+        ],
+    )
+    def test_force_rejects_legacy_scaffold_signatures(
+        self,
+        tmp_path: Path,
+        legacy_marker: str,
+    ):
+        _prepare_project(tmp_path)
+        plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
+        plugin_path.write_text(f"# {legacy_marker}\n", encoding="utf-8")
+
+        with pytest.raises(FileExistsError, match="already exists"):
+            generate_scaffold("solvent_shell", tmp_path, force=True)
+
+        assert plugin_path.read_text(encoding="utf-8") == f"# {legacy_marker}\n"
+
     def test_dry_run_creates_no_files(self, tmp_path: Path):
         _prepare_project(tmp_path)
 
