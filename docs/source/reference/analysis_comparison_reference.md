@@ -87,7 +87,7 @@ Stable analysis plugins:
 - `catalytic_triad`
 - `secondary_structure`
 - `sasa`
-- `hydrogen_bonds` (aliases: `hbonds`, `hbond`)
+- `hydrogen_bonds`
 
 ## Plugin Summary Table
 
@@ -124,7 +124,7 @@ reported as not testable rather than significant.
 | `polyzymd compare init -n NAME` | Create a comparison workspace |
 | `polyzymd compare validate` | Check `comparison.yaml` before running |
 | `polyzymd compare run TYPE` | Run one analysis plugin |
-| `polyzymd compare run --list` | List available comparison types and aliases |
+| `polyzymd compare run --list` | List available comparison types |
 | `polyzymd compare run-all` | Run every enabled plugin in one pass |
 | `polyzymd compare plot-all` | Generate configured figures |
 | `polyzymd compare plot-all --list-available` | List available plots and experimental labels |
@@ -143,9 +143,9 @@ polyzymd compare run rg
 polyzymd compare run rmsf
 polyzymd compare run contacts
 polyzymd compare run distances
-polyzymd compare run triad
+polyzymd compare run catalytic_triad
 polyzymd compare run sasa
-polyzymd compare run hydrogen_bonds  # aliases: hbonds, hbond
+polyzymd compare run hydrogen_bonds
 polyzymd compare run-all
 polyzymd compare plot-all
 ```

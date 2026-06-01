@@ -47,9 +47,8 @@ fraction alone.
 
 ## Configuration shape and plugin name
 
-The canonical plugin name is `catalytic_triad`. The shorter `triad` name is
-accepted as an alias in CLI contexts, but new documentation and configuration
-should prefer `catalytic_triad`.
+The plugin name is `catalytic_triad`. Use this canonical name in CLI commands
+and `comparison.yaml` configuration.
 
 Current `comparison.yaml` files define triad settings under `plugins:`:
 

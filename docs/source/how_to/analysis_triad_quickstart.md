@@ -24,7 +24,7 @@ Alternatively, prefix each command with `pixi run -e build`.
 
 ```bash
 # Run catalytic triad comparison (all conditions in comparison.yaml)
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 
 # Equivalent full plugin name
 polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
@@ -33,7 +33,7 @@ polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 polyzymd compare run-all -f comparison.yaml --eq-time 100ns
 
 # Force recompute and machine-readable output
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns --recompute --format json
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns --recompute --format json
 ```
 
 ## Prerequisites
@@ -104,8 +104,8 @@ plugins:
 Then run:
 
 ```bash
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns --recompute
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns --recompute
 ```
 ````
 
@@ -113,7 +113,7 @@ polyzymd compare run triad -f comparison.yaml --eq-time 100ns --recompute
 Run the configured comparison:
 
 ```bash
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 ```
 
 Expected output pattern:
@@ -194,7 +194,7 @@ Supported selection forms:
 Use one `comparison.yaml` with all conditions, then run one command:
 
 ```bash
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 ```
 
 The comparison includes:

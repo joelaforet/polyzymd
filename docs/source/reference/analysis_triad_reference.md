@@ -203,7 +203,7 @@ and output resolution for triad plots.
 Use either plugin name:
 
 ```bash
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 ```
 

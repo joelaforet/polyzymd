@@ -29,8 +29,8 @@ helper modules for plotting, result models, or MDAnalysis job construction.
 | Function | Purpose |
 |----------|---------|
 | `list_analyses()` | Return discovered plugin classes keyed by canonical name. |
-| `list_all_names()` | Return canonical names and aliases. |
-| `get_analysis(name)` | Resolve a plugin class by canonical name or alias. |
+| `list_all_names()` | Return canonical plugin names. |
+| `get_analysis(name)` | Resolve a plugin class by canonical name. |
 | `clear_cache()` | Clear the discovery cache, primarily for tests and dynamic plugin development. |
 
 ```{eval-rst}

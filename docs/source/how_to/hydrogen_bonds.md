@@ -563,19 +563,14 @@ plot_settings:
   style: "compact"
 ```
 
-## Aliases
+## CLI name
 
-The plugin responds to these CLI names:
+Run the plugin with its canonical CLI name:
 
-- `hydrogen_bonds` (canonical)
-- `hbonds`
-- `hbond`
+- `hydrogen_bonds`
 
 ```bash
-# These are equivalent:
 polyzymd compare run hydrogen_bonds
-polyzymd compare run hbonds
-polyzymd compare run hbond
 ```
 
 ## See Also

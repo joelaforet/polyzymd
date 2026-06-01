@@ -181,7 +181,6 @@ polyzymd build -c <path> --format gromacs    # Export for GROMACS
 | `--replicates` | `-r` | No | "1" | Replicate range (for example "1", "1-3", "1,3,5") |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
-| `--output-dir` | `-o` | No | from config | Alias for --scratch-dir |
 | `--dry-run` | - | No | false | Validate only, don't build |
 | `--format` | - | No | OpenMM | Export format (`gromacs`, `lammps` (planned), or `amber` (planned)) |
 

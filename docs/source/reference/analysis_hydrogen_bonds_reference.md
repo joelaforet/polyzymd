@@ -4,8 +4,7 @@ For task-oriented setup examples, see {doc}`../how_to/hydrogen_bonds`.
 
 ## Settings
 
-Top-level plugin key: `plugins.hydrogen_bonds`. Aliases accepted by the CLI are
-`hbonds` and `hbond`.
+Top-level plugin key and CLI name: `hydrogen_bonds`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
