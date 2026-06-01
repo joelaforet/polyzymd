@@ -344,7 +344,8 @@ class TrajectoryLoader:
 
     File discovery is delegated to the simulation engine resolved from the
     config's ``engine`` field.  The engine is created lazily on the first
-    call that needs it, so construction remains cheap.
+    call that needs it, so construction remains cheap. Engine resolution errors
+    propagate unless an explicit ``engine_override`` is supplied.
 
     Parameters
     ----------
@@ -400,8 +401,8 @@ class TrajectoryLoader:
     def _get_engine(self) -> "SimulationEngine":
         """Lazily create and cache the simulation engine.
 
-        Falls back to OpenMM when the config's ``engine`` field is
-        unrecognised (e.g. a mock object in tests).
+        Engine resolution errors from ``create_engine()`` propagate to callers
+        unless an explicit ``engine_override`` supplies a valid backend.
 
         Returns
         -------
@@ -411,19 +412,7 @@ class TrajectoryLoader:
         if self._engine is None:
             from polyzymd.engines import create_engine
 
-            try:
-                self._engine = create_engine(self.config, override=self._engine_override)
-            except (ValueError, TypeError):
-                # Unrecognised engine name (e.g. MagicMock in tests) —
-                # fall back to OpenMM which works with any directory layout.
-                LOGGER.debug(
-                    "Could not resolve engine from config (%s); "
-                    "falling back to OpenMM layout resolver.",
-                    getattr(self.config, "engine", "<no engine attr>"),
-                )
-                from polyzymd.engines.openmm import OpenMMEngine
-
-                self._engine = OpenMMEngine.from_config(self.config)
+            self._engine = create_engine(self.config, override=self._engine_override)
         return self._engine
 
     def _resolve_layout(

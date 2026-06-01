@@ -9,7 +9,7 @@ Tests cover:
 - find_topology() backward compatibility for direct callers
 - _infer_replicate() edge cases
 - Error paths (missing topology, missing trajectories, missing working dir)
-- Fallback when engine name is unrecognisable
+- Engine resolution error propagation
 """
 
 from __future__ import annotations
@@ -459,6 +459,19 @@ class TestEngineOverride:
         assert info.topology_file.name == "solvated_system.pdb"
         assert len(info.trajectory_files) == 2
 
+    def test_override_openmm_succeeds_when_config_engine_missing(self, tmp_path):
+        """OpenMM override should bypass a missing config.engine value."""
+        run_dir = tmp_path / "run_1"
+        _create_openmm_daisy_chain(run_dir, n_segments=1)
+        config = SimpleNamespace(
+            get_working_directory=lambda rep: tmp_path / f"run_{rep}",
+            output=SimpleNamespace(effective_scratch_directory=tmp_path),
+        )
+        loader = TrajectoryLoader(config, engine_override="openmm")
+
+        info = loader.get_trajectory_info(replicate=1)
+        assert info.topology_file == run_dir / "solvated_system.pdb"
+
 
 # ---------------------------------------------------------------------------
 # find_topology backward compatibility
@@ -584,14 +597,14 @@ class TestErrorPaths:
 
 
 # ---------------------------------------------------------------------------
-# Mock config fallback
+# Engine resolution errors
 # ---------------------------------------------------------------------------
 
 
-class TestMockConfigFallback:
-    """Unrecognised engine names fall back to OpenMM resolver."""
+class TestEngineResolutionErrors:
+    """Invalid engine settings propagate instead of falling back."""
 
-    def test_mock_engine_falls_back_to_openmm(self, tmp_path):
+    def test_unknown_engine_error_propagates(self, tmp_path):
         run_dir = tmp_path / "run_1"
         _create_openmm_daisy_chain(run_dir, n_segments=1)
 
@@ -601,21 +614,39 @@ class TestMockConfigFallback:
         config.output.effective_scratch_directory = tmp_path
 
         loader = TrajectoryLoader(config)
-        topo = loader.find_topology(run_dir)
-        assert topo == run_dir / "solvated_system.pdb"
 
-    def test_fully_mocked_config_works(self, tmp_path):
-        """Purely mocked config (no engine attr value) still works."""
+        with pytest.raises(ValueError, match="Unknown engine"):
+            loader.find_topology(run_dir)
+
+    def test_missing_engine_error_propagates(self, tmp_path):
+        """Configs without an engine value should be rejected by the loader."""
         run_dir = tmp_path / "run_1"
         _create_openmm_daisy_chain(run_dir, n_segments=1)
 
+        config = SimpleNamespace(
+            get_working_directory=lambda rep: tmp_path / f"run_{rep}",
+            output=SimpleNamespace(effective_scratch_directory=tmp_path),
+        )
+
+        loader = TrajectoryLoader(config)
+
+        with pytest.raises(ValueError, match="non-empty string engine"):
+            loader.find_topology(run_dir)
+
+    @pytest.mark.parametrize("engine_value", [None, "", "   ", 123])
+    def test_invalid_engine_values_propagate(self, tmp_path, engine_value: object):
+        """Null, empty, and non-string config.engine values should be rejected."""
+        run_dir = tmp_path / "run_1"
+        _create_openmm_daisy_chain(run_dir, n_segments=1)
         config = MagicMock()
+        config.engine = engine_value
         config.get_working_directory.side_effect = lambda rep: tmp_path / f"run_{rep}"
         config.output.effective_scratch_directory = tmp_path
 
         loader = TrajectoryLoader(config)
-        topo = loader.find_topology(run_dir)
-        assert topo == run_dir / "solvated_system.pdb"
+
+        with pytest.raises(ValueError, match="non-empty string engine"):
+            loader.find_topology(run_dir)
 
 
 # ---------------------------------------------------------------------------
