@@ -145,7 +145,6 @@ class Analysis(ABC):
     AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
     execution_cost_hint: ClassVar[str] = "medium"
-    aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
     has_compute_stage: ClassVar[bool] = True

@@ -316,7 +316,6 @@ class DistancesAnalysis(Analysis):
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = DistancesPlotSettings
     AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
-    aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 1
 

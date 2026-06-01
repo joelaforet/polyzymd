@@ -355,10 +355,6 @@ def _topological_sort(analyses: list[Analysis]) -> list[Analysis]:
         If there is a circular dependency.
     """
     name_to_analysis = {a.name: a for a in analyses}
-    # Include aliases in lookup
-    for a in analyses:
-        for alias in a.aliases:
-            name_to_analysis[alias] = a
 
     visited: set[str] = set()
     temp_marks: set[str] = set()
@@ -376,7 +372,6 @@ def _topological_sort(analyses: list[Analysis]) -> list[Analysis]:
                 visit(dep_name)
             temp_marks.discard(name)
             visited.add(name)
-            # Avoid duplicates (alias vs canonical)
             if analysis not in order:
                 order.append(analysis)
         else:
@@ -398,7 +393,7 @@ def order_analyses_for_execution(
     Parameters
     ----------
     analysis_names : Sequence[str]
-        Analysis names or aliases to order.
+        Canonical analysis names to order.
     satisfied : set[str] | None, optional
         Dependency names that are already satisfied outside this run list,
         such as excluded analyses with completed results on disk.
@@ -663,8 +658,6 @@ def _validate_dependencies(analyses: list[Analysis], satisfied: set[str] | None 
     known = list_all_names()
     resolved_satisfied = satisfied or set()
     scheduled = {a.name for a in analyses}
-    for a_aliases in (a.aliases for a in analyses):
-        scheduled.update(a_aliases)
 
     for a in analyses:
         for dep in a.dependencies:

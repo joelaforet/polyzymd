@@ -220,10 +220,11 @@ def test_discovered() -> None:
     assert "hydrogen_bonds" in analyses
 
 
-def test_aliases() -> None:
-    """Alias names should resolve to the plugin class."""
-    assert get_analysis("hbonds") is HydrogenBondsAnalysis
-    assert get_analysis("hbond") is HydrogenBondsAnalysis
+@pytest.mark.parametrize("alias", ["hbonds", "hbond"])
+def test_aliases_are_rejected(alias: str) -> None:
+    """Alias names should not resolve to the plugin class."""
+    with pytest.raises(KeyError, match="Unknown analysis"):
+        get_analysis(alias)
 
 
 def test_class_variables() -> None:
@@ -2469,6 +2470,7 @@ def test_format_comparison_result() -> None:
                 metric="mean_hbonds_protein_polymer",
                 t_statistic=1.0,
                 p_value=0.2,
+                p_value_adjusted=None,
                 cohens_d=0.4,
                 effect_size_interpretation="small",
                 direction="more H-bonds",
@@ -2523,6 +2525,7 @@ def test_format_multi_summary() -> None:
                 metric="mean_hbonds_protein_polymer",
                 t_statistic=1.0,
                 p_value=0.22,
+                p_value_adjusted=None,
                 cohens_d=0.4,
                 effect_size_interpretation="small",
                 direction="more H-bonds",
@@ -2535,6 +2538,7 @@ def test_format_multi_summary() -> None:
                 metric="mean_hbonds_protein_internal",
                 t_statistic=1.2,
                 p_value=0.01,
+                p_value_adjusted=0.02,
                 cohens_d=0.5,
                 effect_size_interpretation="small",
                 direction="more H-bonds",
@@ -2622,6 +2626,7 @@ def test_format_multi_summary_markdown() -> None:
                 metric="mean_hbonds_protein_polymer",
                 t_statistic=1.0,
                 p_value=0.22,
+                p_value_adjusted=None,
                 cohens_d=0.4,
                 effect_size_interpretation="small",
                 direction="more H-bonds",
@@ -2634,6 +2639,7 @@ def test_format_multi_summary_markdown() -> None:
                 metric="mean_hbonds_protein_internal",
                 t_statistic=1.2,
                 p_value=0.01,
+                p_value_adjusted=0.02,
                 cohens_d=0.5,
                 effect_size_interpretation="small",
                 direction="more H-bonds",

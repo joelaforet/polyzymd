@@ -20,6 +20,7 @@ from polyzymd.analyses.base import (
     ReplicateContext,
     SlurmResourceHint,
 )
+from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.mda import (
     ArtifactStore,
     ComparisonArtifact,
@@ -73,7 +74,8 @@ def test_plugin_attributes(settings: SecondaryStructureSettings) -> None:
     assert SecondaryStructureAnalysis.name == "secondary_structure"
     assert SecondaryStructureAnalysis.AggregatedResultClass is None
     assert SecondaryStructureAnalysis.ReplicateResultClass is None
-    assert SecondaryStructureAnalysis.aliases == ("ss",)
+    with pytest.raises(KeyError, match="Unknown analysis"):
+        get_analysis("ss")
     assert SecondaryStructureAnalysis.slurm_resource_hint == SlurmResourceHint(mem="16G")
     assert "run_replicate" not in SecondaryStructureAnalysis.__dict__
 

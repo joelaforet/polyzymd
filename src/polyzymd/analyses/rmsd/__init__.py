@@ -191,7 +191,6 @@ class RMSDAnalysis(Analysis):
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RMSDPlotSettings
     AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
-    aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
 
     @staticmethod

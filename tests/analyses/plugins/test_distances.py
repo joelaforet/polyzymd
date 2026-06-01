@@ -61,11 +61,6 @@ class TestClassAttributes:
 
         assert DistancesAnalysis.Settings is DistancesSettings
 
-    def test_aliases(self):
-        from polyzymd.analyses.distances import DistancesAnalysis
-
-        assert DistancesAnalysis.aliases == ()
-
     def test_dependencies(self):
         from polyzymd.analyses.distances import DistancesAnalysis
 

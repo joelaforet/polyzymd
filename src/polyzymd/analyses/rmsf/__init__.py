@@ -89,7 +89,6 @@ class RMSFAnalysis(Analysis):
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RMSFPlotSettings
     AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
-    aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 1
 

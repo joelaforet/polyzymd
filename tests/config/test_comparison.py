@@ -452,6 +452,29 @@ class TestArchivedAnalysisDiagnostics:
         assert "feature/mda-analysis-migration" in message
 
 
+class TestPluginSettingsCanonicalNames:
+    """Plugin settings should use canonical analysis names only."""
+
+    @pytest.mark.parametrize("alias", ["triad", "ss", "hbonds", "hbond"])
+    def test_plugin_alias_keys_are_rejected(self, alias: str, tmp_path: Path) -> None:
+        """Known removed aliases should be reported as unknown plugins."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "alias-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {alias: {}},
+                }
+            )
+        )
+
+        with pytest.raises(ValueError, match=f"Unknown analysis plugin '{alias}'"):
+            ComparisonConfig.from_yaml(yaml_path)
+
+
 class TestPluginSettingsPathResolution:
     """Plugin path-like settings should resolve relative to comparison.yaml."""
 

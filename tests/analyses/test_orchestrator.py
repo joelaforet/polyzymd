@@ -809,7 +809,6 @@ class TestOrchestrator:
 
         class _A(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "a"
-            aliases: ClassVar[tuple[str, ...]] = ("alias_a",)
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ()
 
@@ -832,14 +831,14 @@ class TestOrchestrator:
 
         monkeypatch.setattr(
             "polyzymd.analyses.discovery.get_analysis",
-            lambda name: _A if name in {"a", "alias_a"} else _B,
+            lambda name: _A if name == "a" else _B,
         )
         monkeypatch.setattr(
             "polyzymd.analyses.discovery.list_all_names",
-            lambda: ["a", "alias_a", "b"],
+            lambda: ["a", "b"],
         )
 
-        ordered = order_analyses_for_execution(["b", "alias_a"])
+        ordered = order_analyses_for_execution(["b", "a"])
         assert ordered == ["a", "b"]
 
     def test_order_analyses_allows_satisfied_external_dependencies(self, monkeypatch) -> None:

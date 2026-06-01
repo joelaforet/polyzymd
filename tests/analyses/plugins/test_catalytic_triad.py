@@ -166,7 +166,8 @@ class TestTriadDiscoveryAndSettings:
 
         clear_cache()
         assert list_analyses()["catalytic_triad"] is CatalyticTriadAnalysis
-        assert get_analysis("triad") is CatalyticTriadAnalysis
+        with pytest.raises(KeyError, match="Unknown analysis"):
+            get_analysis("triad")
 
     def test_class_vars_use_mda_replicate_artifacts(
         self, triad_analysis: CatalyticTriadAnalysis
@@ -174,7 +175,6 @@ class TestTriadDiscoveryAndSettings:
         """The plugin should expose MDA jobs and canonical aggregate artifacts."""
 
         assert triad_analysis.name == "catalytic_triad"
-        assert triad_analysis.aliases == ("triad",)
         assert triad_analysis.ReplicateResultClass is None
         assert triad_analysis.AggregatedResultClass is None
         assert "run_replicate" not in type(triad_analysis).__dict__

@@ -256,7 +256,6 @@ class ContactsAnalysis(Analysis):
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = ContactsPlotSettings
     AggregatedResultClass: ClassVar[type] = ConditionArtifact
     ReplicateResultClass: ClassVar[type | None] = None
-    aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 1
 

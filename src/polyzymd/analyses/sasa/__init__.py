@@ -165,7 +165,6 @@ class SASAAnalysis(Analysis):
     slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(
         mem="8G", time="02:00:00"
     )
-    aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     # SASA is a mean-based observable (all frames contribute, SEM corrected via N_eff)
 

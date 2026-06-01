@@ -78,7 +78,6 @@ class ToyAnalysis(_MDAContractMixin, Analysis):
     name: ClassVar[str] = "toy"
     Settings: ClassVar[type] = ToySettings
     AggregatedResultClass: ClassVar[type] = ToyAggregatedResult
-    aliases: ClassVar[tuple[str, ...]] = ("toy_alias",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
 
@@ -358,7 +357,6 @@ class TestAnalysisABC:
     def test_concrete_subclass_valid(self, toy_analysis):
         """ToyAnalysis should instantiate without error."""
         assert toy_analysis.name == "toy"
-        assert toy_analysis.aliases == ("toy_alias",)
         assert toy_analysis.min_replicates == 2
 
     def test_repr(self, toy_analysis):

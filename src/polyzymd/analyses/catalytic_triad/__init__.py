@@ -143,7 +143,6 @@ class CatalyticTriadAnalysis(Analysis):
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = TriadPlotSettings
     AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
-    aliases: ClassVar[tuple[str, ...]] = ("triad",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 1
 

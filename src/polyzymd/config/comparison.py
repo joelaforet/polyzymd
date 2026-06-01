@@ -151,9 +151,6 @@ class PluginSettingsContainer(BaseModel):
                     f"Available plugins: {available}"
                 ) from None
 
-            # Always store under the canonical name so that
-            # _resolve_settings() (which queries by analysis.name) finds it,
-            # even when the YAML key is an alias like "triad".
             canonical_name = analysis_cls.name
 
             settings_class = analysis_cls.Settings
@@ -177,23 +174,6 @@ class PluginSettingsContainer(BaseModel):
     def get_enabled_plugins(self) -> list[str]:
         """Get the configured plugin names."""
         return [key for key, value in self.model_dump().items() if value is not None]
-
-    def to_analysis_yaml_dict(self, replicates: list[int], eq_time: str) -> dict[str, Any]:
-        """Convert unified plugin settings to analysis.yaml-compatible data."""
-        result: dict[str, Any] = {
-            "replicates": replicates,
-            "defaults": {"equilibration_time": eq_time},
-        }
-        for analysis_type in self.get_enabled_plugins():
-            settings = self.get(analysis_type)
-            if settings is not None:
-                if hasattr(settings, "to_analysis_yaml_dict"):
-                    result[analysis_type] = settings.to_analysis_yaml_dict()
-                elif hasattr(settings, "model_dump"):
-                    result[analysis_type] = settings.model_dump(exclude_none=True)
-                else:
-                    result[analysis_type] = settings
-        return result
 
 
 # ============================================================================
@@ -1008,35 +988,6 @@ class ComparisonConfig(BaseModel):
                 errors.append(f"Config not found for '{cond.label}': {cond.config}")
 
         return errors
-
-    def generate_analysis_yaml(self, condition: ConditionConfig) -> str:
-        """Generate analysis.yaml content for a specific condition.
-
-        Parameters
-        ----------
-        condition : ConditionConfig
-            The condition to generate analysis.yaml for.
-
-        Returns
-        -------
-        str
-            YAML content for the analysis.yaml file.
-        """
-        data = self.plugins.to_analysis_yaml_dict(
-            replicates=condition.replicates,
-            eq_time=self.defaults.equilibration_time,
-        )
-        return yaml.dump(data, default_flow_style=False, sort_keys=False)
-
-    def generate_analysis_yaml_for_all(self) -> dict[str, str]:
-        """Generate analysis.yaml content for all conditions.
-
-        Returns
-        -------
-        dict[str, str]
-            Dictionary mapping condition labels to analysis.yaml content.
-        """
-        return {cond.label: self.generate_analysis_yaml(cond) for cond in self.conditions}
 
 
 def generate_comparison_template(name: str, eq_time: str = "10ns") -> str:

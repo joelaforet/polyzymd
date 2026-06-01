@@ -557,7 +557,7 @@ def run_comparison(
 ):
     """Run a comparison using the analysis plugin system.
 
-    Runs any discovered analysis plugin by name or alias. Use --list to see
+    Runs any discovered analysis plugin by canonical name. Use --list to see
     all available comparison types.
 
     This command runs analysis interactively in the current process. For
@@ -567,7 +567,7 @@ def run_comparison(
     \b
     Examples:
         polyzymd compare run rmsf
-        polyzymd compare run triad --eq-time 10ns
+        polyzymd compare run catalytic_triad --eq-time 10ns
         polyzymd compare run contacts --format markdown
         polyzymd compare run --list
     """
@@ -580,9 +580,7 @@ def run_comparison(
         analyses = list_analyses()
         click.echo("Available comparison types:")
         for name, cls in analyses.items():
-            aliases = ", ".join(cls.aliases) if cls.aliases else ""
-            suffix = f" (aliases: {aliases})" if aliases else ""
-            click.echo(f"  - {name}{suffix}: {cls.__name__}")
+            click.echo(f"  - {name}: {cls.__name__}")
         return
 
     # Require comparison_type if not listing

@@ -61,11 +61,6 @@ class TestClassAttributes:
 
         assert ContactsAnalysis.Settings is ContactsSettings
 
-    def test_aliases(self):
-        from polyzymd.analyses.contacts import ContactsAnalysis
-
-        assert ContactsAnalysis.aliases == ()
-
     def test_dependencies(self):
         from polyzymd.analyses.contacts import ContactsAnalysis
 

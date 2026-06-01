@@ -69,7 +69,6 @@ class SecondaryStructureAnalysis(Analysis):
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = SSPlotSettings
     AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
-    aliases: ClassVar[tuple[str, ...]] = ("ss",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 1
     slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(mem="16G")

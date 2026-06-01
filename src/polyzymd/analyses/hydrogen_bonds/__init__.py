@@ -526,7 +526,6 @@ class HydrogenBondsAnalysis(Analysis):
     Settings: ClassVar[type] = HydrogenBondSettings
     AggregatedResultClass: ClassVar[type | None] = None
     execution_cost_hint: ClassVar[str] = "high"
-    aliases: ClassVar[tuple[str, ...]] = ("hbonds", "hbond")
     min_replicates: ClassVar[int] = 1
     has_compute_stage: ClassVar[bool] = True
     has_aggregate_stage: ClassVar[bool] = True

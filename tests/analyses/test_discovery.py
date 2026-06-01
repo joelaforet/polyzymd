@@ -223,10 +223,9 @@ class TestDiscovery:
             patch("pkgutil.iter_modules", return_value=walked),
             patch("importlib.import_module", side_effect=_import_side_effect),
         ):
-            registry, aliases = _discover_plugins()
+            registry = _discover_plugins()
 
         assert "fake_good" in registry
-        assert aliases == {}
 
 
 class TestDiscoveryRobustness:
@@ -265,10 +264,9 @@ class TestDiscoveryRobustness:
             _plugin_source("TempPackageRealAnalysis", "temp_package_real")
         )
 
-        registry, aliases = _discover_from_temp_analysis_path(monkeypatch, tmp_path)
+        registry = _discover_from_temp_analysis_path(monkeypatch, tmp_path)
 
         assert set(registry) == {"temp_single_real", "temp_package_real"}
-        assert aliases == {}
         assert registry["temp_single_real"].__name__ == "TempSingleRealAnalysis"
         assert registry["temp_package_real"].__name__ == "TempPackageRealAnalysis"
 
@@ -291,10 +289,9 @@ class TestDiscoveryRobustness:
         )
         (package_dir / "_private_runner.py").write_text("raise RuntimeError('nested imported')\n")
 
-        registry, aliases = _discover_from_temp_analysis_path(monkeypatch, tmp_path)
+        registry = _discover_from_temp_analysis_path(monkeypatch, tmp_path)
 
         assert set(registry) == {"temp_nested_package"}
-        assert aliases == {}
 
     def test_realistic_single_file_and_package_name_collision(self, monkeypatch, tmp_path):
         """Duplicate plugin names across modules and packages should fail."""
@@ -311,8 +308,8 @@ class TestDiscoveryRobustness:
         with pytest.raises(RuntimeError, match="Analysis name collision"):
             _discover_from_temp_analysis_path(monkeypatch, tmp_path)
 
-    def test_realistic_alias_collision(self, monkeypatch, tmp_path):
-        """Duplicate aliases across top-level plugins should fail."""
+    def test_realistic_alias_collision_is_ignored(self, monkeypatch, tmp_path):
+        """Duplicate aliases should not register or affect discovery."""
 
         (tmp_path / "temp_alias_left.py").write_text(
             _plugin_source("TempAliasLeftAnalysis", "temp_alias_left", aliases=("temp_alias",))
@@ -321,11 +318,13 @@ class TestDiscoveryRobustness:
             _plugin_source("TempAliasRightAnalysis", "temp_alias_right", aliases=("temp_alias",))
         )
 
-        with pytest.raises(RuntimeError, match="Analysis alias collision"):
-            _discover_from_temp_analysis_path(monkeypatch, tmp_path)
+        registry = _discover_from_temp_analysis_path(monkeypatch, tmp_path)
 
-    def test_realistic_alias_name_collision(self, monkeypatch, tmp_path):
-        """Aliases should not collide with top-level plugin names."""
+        assert set(registry) == {"temp_alias_left", "temp_alias_right"}
+        assert "temp_alias" not in registry
+
+    def test_realistic_alias_name_collision_is_ignored(self, monkeypatch, tmp_path):
+        """Aliases should not register even when they match plugin names."""
 
         (tmp_path / "temp_alias_name_left.py").write_text(
             _plugin_source("TempAliasNameLeftAnalysis", "temp_existing_name")
@@ -338,8 +337,9 @@ class TestDiscoveryRobustness:
             )
         )
 
-        with pytest.raises(RuntimeError, match="conflicts with existing analysis name"):
-            _discover_from_temp_analysis_path(monkeypatch, tmp_path)
+        registry = _discover_from_temp_analysis_path(monkeypatch, tmp_path)
+
+        assert set(registry) == {"temp_existing_name", "temp_alias_name_right"}
 
     def test_discovery_imports_top_level_single_file_plugins(self):
         """Single-file plugins should be imported as contributor plugins."""
@@ -365,10 +365,9 @@ class TestDiscoveryRobustness:
             patch("pkgutil.iter_modules", return_value=[(None, module_name, False)]),
             patch("importlib.import_module", return_value=single_file_mod) as mock_import,
         ):
-            registry, aliases = _discover_plugins()
+            registry = _discover_plugins()
 
         assert registry == {"single_file_plugin": SingleFilePlugin}
-        assert aliases == {}
         mock_import.assert_called_once_with(module_name)
 
     def test_discovery_skips_shared_descendants_end_to_end(self):
@@ -404,13 +403,12 @@ class TestDiscoveryRobustness:
             patch("pkgutil.iter_modules", return_value=walked),
             patch("importlib.import_module", side_effect=_import_side_effect) as mock_import,
         ):
-            registry, aliases = _discover_plugins()
+            registry = _discover_plugins()
 
         imported_modules = [call.args[0] for call in mock_import.call_args_list]
         assert "polyzymd.analyses.shared.loader" not in imported_modules
         assert "polyzymd.analyses.fake_plugin" in imported_modules
         assert "fake_plugin" in registry
-        assert aliases == {}
 
     def test_getattr_attribute_error_logged(self, caplog):
         """Discovery should log and continue on AttributeError during getattr."""
@@ -483,10 +481,9 @@ class TestDiscoveryRobustness:
             patch("importlib.import_module", side_effect=_import_side_effect),
             caplog.at_level("INFO", logger="polyzymd.analyses"),
         ):
-            registry, aliases = _discover_plugins()
+            registry = _discover_plugins()
 
         assert registry == {}
-        assert aliases == {}
         assert any(
             "Skipping analysis module polyzymd.analyses.fake_optional_dep" in record.message
             and "openmm" in record.message

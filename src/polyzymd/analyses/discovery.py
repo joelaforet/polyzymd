@@ -126,23 +126,22 @@ def _is_top_level_module(modname: str, package_prefix: str) -> bool:
     return "." not in relative_name
 
 
-def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
+def _discover_plugins() -> dict[str, type["Analysis"]]:
     """Import all analysis modules and collect concrete Analysis subclasses.
 
     Returns
     -------
-    tuple[dict[str, type[Analysis]], dict[str, str]]
-        ``(name_registry, alias_to_name)`` mappings.
+    dict[str, type[Analysis]]
+        Mapping from canonical analysis name to Analysis subclass.
 
     Raises
     ------
     RuntimeError
-        If two plugins register the same ``name`` or alias.
+        If two plugins register the same ``name``.
     """
     import polyzymd.analyses as analyses_pkg
 
     registry: dict[str, type[Analysis]] = {}
-    alias_registry: dict[str, str] = {}  # alias -> canonical name
 
     # Import only direct plugin packages and simple single-file plugin modules
     package_path = analyses_pkg.__path__
@@ -201,11 +200,6 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
                 )
                 continue
             name = name.strip()
-            if name in alias_registry:
-                raise RuntimeError(
-                    f"Analysis name {name!r} (from {obj.__module__}.{obj.__qualname__}) "
-                    f"conflicts with existing alias for {alias_registry[name]!r}."
-                )
             if name in registry:
                 existing = registry[name]
                 if existing is obj:
@@ -218,33 +212,12 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
             registry[name] = obj
             logger.debug(f"Discovered analysis plugin: {name} ({obj.__qualname__})")
 
-            # Register aliases
-            for alias in getattr(obj, "aliases", ()):
-                if not alias or not alias.strip():
-                    logger.warning(
-                        "Analysis %r has empty alias — skipping.",
-                        name,
-                    )
-                    continue
-                alias = alias.strip()
-                if alias in alias_registry:
-                    raise RuntimeError(
-                        f"Analysis alias collision: {alias!r} is claimed by both "
-                        f"{alias_registry[alias]!r} and {name!r}."
-                    )
-                if alias in registry:
-                    raise RuntimeError(
-                        f"Analysis alias {alias!r} (from {name!r}) conflicts with "
-                        f"existing analysis name {alias!r}."
-                    )
-                alias_registry[alias] = name
-
-    return registry, alias_registry
+    return registry
 
 
 @lru_cache(maxsize=1)
-def _cached_registry() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
-    """Return (name_registry, alias_to_name) with caching.
+def _cached_registry() -> dict[str, type["Analysis"]]:
+    """Return canonical analysis registry with caching.
 
     The cache is invalidated only by :func:`clear_cache`.
     """
@@ -262,12 +235,12 @@ def clear_cache() -> None:
 
 
 def get_analysis(name: str) -> type["Analysis"]:
-    """Look up an Analysis class by name or alias.
+    """Look up an Analysis class by canonical name.
 
     Parameters
     ----------
     name : str
-        Analysis name (e.g. ``"rmsf"``) or alias (e.g. ``"triad"``).
+        Canonical analysis name, for example ``"rmsf"``.
 
     Returns
     -------
@@ -279,12 +252,9 @@ def get_analysis(name: str) -> type["Analysis"]:
     KeyError
         If no analysis matches *name*.
     """
-    registry, aliases = _cached_registry()
+    registry = _cached_registry()
     if name in registry:
         return registry[name]
-    canonical = aliases.get(name)
-    if canonical is not None:
-        return registry[canonical]
     from polyzymd.core.archived_features import (
         format_archived_analysis_message,
         get_archived_analysis_plugin,
@@ -293,7 +263,7 @@ def get_analysis(name: str) -> type["Analysis"]:
     if get_archived_analysis_plugin(name) is not None:
         raise KeyError(format_archived_analysis_message(name, context="analysis lookup"))
 
-    available = sorted(set(registry.keys()) | set(aliases.keys()))
+    available = sorted(registry.keys())
     raise KeyError(f"Unknown analysis {name!r}.  Available: {', '.join(available)}")
 
 
@@ -305,17 +275,17 @@ def list_analyses() -> dict[str, type["Analysis"]]:
     dict[str, type[Analysis]]
         Mapping ``canonical_name -> Analysis subclass``, sorted by name.
     """
-    registry, _ = _cached_registry()
+    registry = _cached_registry()
     return dict(sorted(registry.items()))
 
 
 def list_all_names() -> list[str]:
-    """Return all names and aliases, sorted.
+    """Return all canonical analysis names, sorted.
 
     Returns
     -------
     list[str]
-        All canonical names and aliases.
+        All canonical names.
     """
-    registry, aliases = _cached_registry()
-    return sorted(set(registry.keys()) | set(aliases.keys()))
+    registry = _cached_registry()
+    return sorted(registry.keys())
