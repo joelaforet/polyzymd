@@ -12,6 +12,7 @@
 #
 # REQUIRED SECTIONS:
 #   - name (simulation identifier)
+#   - engine (openmm or gromacs)
 #   - enzyme (protein structure)
 #   - solvent (solvation settings)
 #   - thermodynamics (temperature, pressure)
@@ -27,7 +28,11 @@
 # ============================================================================
 
 # Simulation identifier - used in output directory names
-name: "my_simulation"
+name: {{ project_name | yaml_quote }}
+
+# Required simulation engine: "openmm" or "gromacs"
+engine: "openmm"
+
 description: "Description of your simulation system"
 
 # ============================================================================
@@ -334,6 +339,8 @@ description: "Description of your simulation system"
 #     ensemble: "NPT"
 #     duration: 100.0
 #     samples: 2500
+#     report_interval: 20000
+#     checkpoint_interval: 60.0
 #     time_step: 2.0
 #     thermostat: "LangevinMiddle"
 #     thermostat_timescale: 1.0

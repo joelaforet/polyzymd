@@ -1,15 +1,14 @@
-"""Shared infrastructure for analysis plugins.
+"""Reusable shared utilities for analysis plugins.
 
-This package provides a curated set of commonly used shared utilities.
-For advanced or less common helpers, import directly from the relevant
-shared submodules.
+This package provides contributor-facing utilities that are broadly reusable
+across analysis plugins. Framework internals, CLI helpers, and plugin-private
+artifact helpers live with their owning packages.
 
-In particular, selectors, custom selections, and result I/O helpers are not
-re-exported from this package root and should be imported from:
+In particular, selectors and custom selections are not re-exported from this
+package root and should be imported from:
 
 - ``polyzymd.analyses.shared.selectors``
 - ``polyzymd.analyses.shared.selections``
-- ``polyzymd.analyses.shared.result_io``
 
 Sub-modules
 -----------
@@ -21,24 +20,14 @@ centroid
     K-Means centroid frame finding, reference mode dispatch.
 statistics
     SEM, per-residue/region aggregation, weighted mean.
-aggregation
-    Replicate collection, distance pair aggregation.
 autocorrelation
     ACF, correlation time, statistical inefficiency.
-pbc
-    Minimum image distance, PBC-aware distance matrix.
 selections
     Extended selection syntax (midpoint, COM), position retrieval.
 diagnostics
     Selection diagnostics, equilibration validation.
-config_hash
-    Config hashing for cache validation.
-constants
-    Shared default values (cutoffs, thresholds).
-defaults
-    AnalysisDefaults model (equilibration_time).
-logging_utils
-    Colored terminal logging.
+window
+    Centralized trajectory window resolution for MDAnalysis job lifecycles.
 plotting
     Shared plotting helpers (axis styling, figure saving, grouped bars, etc.).
 """
@@ -66,20 +55,10 @@ from polyzymd.analyses.shared.autocorrelation import (
     statistical_inefficiency,
     statistical_inefficiency_multiple,
 )
-from polyzymd.analyses.shared.config_hash import (
-    compute_config_hash,
-    validate_config_hash,
-)
-from polyzymd.analyses.shared.constants import (
-    DEFAULT_CONTACT_CUTOFF,
-    DEFAULT_DISTANCE_THRESHOLD,
-    DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
-)
 from polyzymd.analyses.shared.convergence import (
     ConvergenceResult,
     find_convergence_time,
 )
-from polyzymd.analyses.shared.defaults import AnalysisDefaults
 from polyzymd.analyses.shared.loader import (
     TrajectoryInfo,
     TrajectoryLoader,
@@ -87,19 +66,17 @@ from polyzymd.analyses.shared.loader import (
     parse_time_string,
     time_to_frame,
 )
-from polyzymd.analyses.shared.pbc import (
-    minimum_image_distance,
-    pairwise_distances_pbc,
-)
 from polyzymd.analyses.shared.plotting import (
     annotate_cells,
     apply_axis_style,
     apply_legend,
-    find_json,
-    get_colors,
+    get_condition_color_map,
+    get_condition_colors,
     get_output_path,
+    get_palette_colors,
     get_theme,
     grouped_bars,
+    order_condition_labels,
     save_figure,
     symmetric_clim,
 )
@@ -111,6 +88,11 @@ from polyzymd.analyses.shared.statistics import (
     compute_sem,
     weighted_mean_with_sem,
 )
+from polyzymd.analyses.shared.window import (
+    TrajectoryWindow,
+    resolve_replicate_trajectory_window,
+    resolve_trajectory_window,
+)
 
 __all__ = [
     # Loader
@@ -119,6 +101,9 @@ __all__ = [
     "parse_time_string",
     "convert_time",
     "time_to_frame",
+    "TrajectoryWindow",
+    "resolve_trajectory_window",
+    "resolve_replicate_trajectory_window",
     # Alignment
     "AlignmentConfig",
     "ReferenceMode",
@@ -142,18 +127,6 @@ __all__ = [
     "statistical_inefficiency_multiple",
     "n_effective",
     "check_statistical_reliability",
-    # PBC
-    "minimum_image_distance",
-    "pairwise_distances_pbc",
-    # Constants
-    "DEFAULT_CONTACT_CUTOFF",
-    "DEFAULT_DISTANCE_THRESHOLD",
-    "DEFAULT_SURFACE_EXPOSURE_THRESHOLD",
-    # Defaults
-    "AnalysisDefaults",
-    # Config hash
-    "compute_config_hash",
-    "validate_config_hash",
     # Convergence
     "ConvergenceResult",
     "find_convergence_time",
@@ -161,11 +134,13 @@ __all__ = [
     "get_theme",
     "apply_axis_style",
     "apply_legend",
-    "get_colors",
+    "get_palette_colors",
+    "order_condition_labels",
+    "get_condition_colors",
+    "get_condition_color_map",
     "get_output_path",
     "save_figure",
     "grouped_bars",
-    "find_json",
     "annotate_cells",
     "symmetric_clim",
     # Plot settings (lazily re-exported from config.comparison)

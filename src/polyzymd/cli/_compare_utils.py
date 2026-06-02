@@ -19,8 +19,8 @@ def common_compare_options(func):
 
     Adds: -f/--file, --eq-time, --format, -o/--output, -q/--quiet, --debug
 
-    Note: --recompute is NOT included because exposure uses two separate
-    recompute flags (--recompute-sasa, --recompute-exposure).
+    Note: --recompute is not included here because subcommands decide whether
+    a recompute flag is meaningful for their workflow.
     """
 
     @click.option(

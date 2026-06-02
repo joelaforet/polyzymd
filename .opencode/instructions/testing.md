@@ -32,14 +32,10 @@ tests/
 │   │   ├── test_result_io.py
 │   │   └── test_sasa.py
 │   ├── plugins/                 # One file per analysis plugin
-│   │   ├── test_binding_free_energy.py
 │   │   ├── test_catalytic_triad.py
 │   │   ├── test_contacts.py
 │   │   ├── test_distances.py
-│   │   ├── test_exposure.py
 │   │   ├── test_hydrogen_bonds.py
-│   │   ├── test_polymer_affinity.py
-│   │   ├── test_polymer_bridging.py
 │   │   ├── test_rg.py
 │   │   ├── test_rmsd.py
 │   │   ├── test_rmsf.py
@@ -109,29 +105,30 @@ When adding a new analysis plugin in `analyses/`, write tests that cover:
 1. **Discovery**: Plugin is found by `list_analyses()` and `get_analysis()`
 2. **Class variables**: `name` and `Settings` are set correctly
 3. **Settings validation**: Pydantic model validates/rejects correctly
-4. **compute_replicate()**: Returns expected structure (mock TrajectoryLoader / MDAnalysis)
-5. **aggregate()**: Combines replicate results correctly (no mocks needed)
-6. **extract_metrics()**: Returns correct `MetricValue` instances (if using default compare)
-7. **_deserialize_result()**: Loads JSON back correctly (if using default compare)
-8. **compare()**: Produces a valid `ComparisonResult`
-9. **format()**: Generates readable CLI output
+4. **MDAnalysis job stage**: `build_mda_jobs()` constructs `MDAAnalysisJob`
+   objects using `FrameSelection` and fake `AnalysisBase`-compatible work.
+5. **Collector artifacts**: `build_mda_collector()` maps completed jobs to a
+   valid `ReplicateArtifact` without serializing raw MDAnalysis `Results`.
+6. **Artifact aggregation**: `aggregate()` or the default artifact aggregator
+   combines replicate artifacts into a `ConditionArtifact` without loading
+   trajectories.
+7. **Comparison metrics**: `extract_metrics()` or custom `compare()` consumes
+   condition artifacts and uses replicate-level statistics.
+8. **Artifact-only plots**: `plot()` reads cached artifacts/sidecars only.
+9. **format()**: Generates readable CLI output from comparison artifacts/results.
 
 Example test structure for a plugin:
 
 ```python
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import numpy as np
-import pytest
+from unittest.mock import MagicMock
 
 from polyzymd.analyses import get_analysis, list_analyses
 from polyzymd.analyses.base import (
     AggregateContext,
     Condition,
+    MDAReplicateJobContext,
     MetricValue,
-    ReplicateContext,
 )
 
 
@@ -154,51 +151,42 @@ class TestMyPluginDiscovery:
         assert settings.selection == "protein and name CA"
 
 
-class TestMyPluginCompute:
-    """Test compute_replicate with mocked trajectories."""
+class TestMyPluginMDAJobs:
+    """Test the MDAnalysis job stage with small fakes."""
 
-    @patch("polyzymd.analyses.my_analysis.TrajectoryLoader")
-    def test_computes_metric(self, MockLoader, tmp_path):
+    class FakeTrajectory:
+        def __len__(self) -> int:
+            return 50
+
+    class FakeUniverse:
+        trajectory = FakeTrajectory()
+
+    def test_builds_mda_jobs(self, tmp_path):
         cls = get_analysis("my_analysis")
         analysis = cls()
-        settings = cls.Settings()
-
-        # Mock TrajectoryLoader and Universe
-        mock_loader = MagicMock()
-        MockLoader.return_value = mock_loader
-        mock_universe = MagicMock()
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=100)
-        mock_universe.select_atoms.return_value = mock_atoms
-        mock_trajectory = MagicMock()
-        mock_trajectory.__len__ = MagicMock(return_value=50)
-        mock_trajectory.__getitem__ = MagicMock(return_value=range(50))
-        mock_universe.trajectory = mock_trajectory
-        mock_loader.load_universe.return_value = mock_universe
-        mock_loader.get_timestep.return_value = 10.0
-
         condition = Condition(
             label="Test",
             config_path=Path("/fake/config.yaml"),
             replicates=(1,),
-            sim_config=MagicMock(),
+            sim_config=object(),
         )
-        ctx = ReplicateContext(
+        ctx = MDAReplicateJobContext(
             condition=condition,
             replicate=1,
             sim_config=condition.sim_config,
             output_dir=tmp_path / "run_1",
             equilibration="0ns",
             recompute=True,
-            settings=settings,
+            settings=cls.Settings(),
         )
 
-        result = analysis.compute_replicate(ctx, replicate=1)
-        assert isinstance(result, dict)
+        jobs = analysis.build_mda_jobs(ctx)
+        assert jobs
+        assert all(job.name for job in jobs)
 
 
-class TestMyPluginAggregate:
-    """Test aggregation — no mocks needed."""
+class TestMyPluginArtifacts:
+    """Test artifact aggregation — no trajectory mocks needed."""
 
     def test_aggregate(self, tmp_path):
         cls = get_analysis("my_analysis")

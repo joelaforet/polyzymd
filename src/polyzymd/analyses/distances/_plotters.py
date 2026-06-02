@@ -1,8 +1,7 @@
 """Distance plotting helpers.
 
 Private module — extracted from the main plugin to keep ``__init__.py``
-focused on the ``Analysis`` lifecycle (compute / aggregate / compare) and the
-cross-plugin ``DistanceCalculator`` API.
+focused on the ``Analysis`` lifecycle (compute / aggregate / compare).
 
 All functions are called exclusively from ``DistanceAnalysis.plot()``.
 """
@@ -10,23 +9,61 @@ All functions are called exclusively from ``DistanceAnalysis.plot()``.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
 
+from polyzymd.analyses.mda import ArtifactStoreError
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
-    get_colors,
+    get_condition_colors,
     get_output_path,
     get_theme,
     grouped_bars,
+    load_canonical_plot_artifacts,
+    order_condition_labels,
     save_figure,
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DistancePlotData:
+    """Loaded distance artifact data prepared before rendering."""
+
+    pooled_distances: dict[str, dict[str, dict[str, Any]]]
+    aggregated_results: dict[str, dict[str, Any]]
+    pair_settings: list[Any] | None = None
+    control_label: str | None = None
+
+
+def build_distance_plot_data(data: dict[str, Any], labels: Sequence[str]) -> DistancePlotData:
+    """Load all canonical distance plot inputs before rendering.
+
+    Parameters
+    ----------
+    data : dict of str to Any
+        Plot data dictionary produced by the analysis framework.
+    labels : sequence of str
+        Condition labels in display order.
+
+    Returns
+    -------
+    DistancePlotData
+        Sidecar-derived distance arrays and condition artifact payloads.
+    """
+
+    return DistancePlotData(
+        pooled_distances=_collect_distance_data(data, labels),
+        aggregated_results=_load_distance_aggregated_results(data, labels),
+        pair_settings=_get_distance_pair_settings(data),
+        control_label=_get_control_label(data),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 
 def _plot_distance_kde(
-    data: dict[str, Any],
+    data: DistancePlotData,
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -67,9 +104,11 @@ def _plot_distance_kde(
     except ImportError:
         has_seaborn = False
 
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    control_label = data.control_label
     t = get_theme(plot_settings)
 
-    pair_data = _collect_distance_data(data, labels)
+    pair_data = data.pooled_distances
     if not pair_data:
         logger.warning("No distance data found for KDE plots")
         return []
@@ -79,12 +118,17 @@ def _plot_distance_kde(
     for pair_label, condition_distances in pair_data.items():
         fig, ax = plt.subplots(figsize=plot_settings.distances.figsize)
 
-        n_conditions = len(condition_distances)
-        colors = get_colors(n_conditions, plot_settings)
+        condition_labels = [label for label in ordered_labels if label in condition_distances]
+        colors = get_condition_colors(
+            condition_labels,
+            plot_settings,
+            control_label=control_label,
+        )
 
         threshold = None
 
-        for idx, (cond_label, dist_data) in enumerate(condition_distances.items()):
+        for idx, cond_label in enumerate(condition_labels):
+            dist_data = condition_distances[cond_label]
             distances = dist_data.get("distances")
             if distances is None:
                 continue
@@ -144,7 +188,7 @@ def _plot_distance_kde(
 
 
 def _plot_distance_threshold_bars(
-    data: dict[str, Any],
+    data: DistancePlotData,
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -169,9 +213,11 @@ def _plot_distance_threshold_bars(
     """
     import matplotlib.pyplot as plt
 
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    control_label = data.control_label
     t = get_theme(plot_settings)
 
-    aggregated = _load_distance_aggregated_results(data, labels)
+    aggregated = data.aggregated_results
     if not aggregated:
         logger.warning("No aggregated distance data found for threshold bars")
         return []
@@ -185,9 +231,10 @@ def _plot_distance_threshold_bars(
 
     fractions_list: list[list[float]] = []
     errors_list: list[list[float]] = []
+    replicate_values: list[list[list[float]]] = []
     valid_labels: list[str] = []
 
-    for label in labels:
+    for label in ordered_labels:
         if label not in aggregated:
             continue
         valid_labels.append(label)
@@ -197,6 +244,7 @@ def _plot_distance_threshold_bars(
 
         row_frac = []
         row_err = []
+        row_reps: list[list[float]] = []
         for pair_result in pair_results[:n_pairs]:
             frac = pair_result.get("overall_fraction_below") or pair_result.get(
                 "fraction_below_threshold", 0
@@ -204,15 +252,23 @@ def _plot_distance_threshold_bars(
             sem = pair_result.get("sem_fraction_below", 0)
             row_frac.append(frac * 100)
             row_err.append(sem * 100)
+            per_replicate = pair_result.get("per_replicate_fractions_below") or []
+            row_reps.append([value * 100 for value in per_replicate])
         # Pad if fewer pair results than expected
         while len(row_frac) < n_pairs:
             row_frac.append(0.0)
             row_err.append(0.0)
+            row_reps.append([])
         fractions_list.append(row_frac)
         errors_list.append(row_err)
+        replicate_values.append(row_reps)
 
     n_conditions = len(valid_labels)
-    colors = get_colors(n_conditions, plot_settings)
+    colors = get_condition_colors(
+        valid_labels,
+        plot_settings,
+        control_label=control_label,
+    )
 
     fig, ax = plt.subplots(figsize=plot_settings.distances.figsize)
 
@@ -222,7 +278,15 @@ def _plot_distance_threshold_bars(
         for cond_idx, label in enumerate(valid_labels)
     ]
 
-    grouped_bars(ax, x, series, colors, plot_settings, reference_line=None)
+    grouped_bars(
+        ax,
+        x,
+        series,
+        colors,
+        plot_settings,
+        reference_line=None,
+        replicate_values=replicate_values if replicate_values else None,
+    )
 
     ax.set_xticks(x)
     ax.set_xticklabels(pair_labels, fontsize=t.tick_fontsize)
@@ -242,7 +306,7 @@ def _plot_distance_threshold_bars(
 
 
 def _plot_distance_state_bars(
-    data: dict[str, Any],
+    data: DistancePlotData,
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
@@ -265,12 +329,13 @@ def _plot_distance_state_bars(
     list[Path]
         Paths to generated state-bar figures, one per distance pair.
     """
-    aggregated = _load_distance_aggregated_results(data, labels)
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    aggregated = data.aggregated_results
     if not aggregated:
         logger.warning("No aggregated distance data found for state bars")
         return []
 
-    pair_settings = _get_distance_pair_settings(data)
+    pair_settings = data.pair_settings
 
     first_label = next(iter(aggregated.keys()))
     pair_results_ref = aggregated[first_label].get("pair_results", [])
@@ -283,7 +348,7 @@ def _plot_distance_state_bars(
         fig_path = _plot_distance_state_single_pair(
             pair_idx=pair_idx,
             aggregated=aggregated,
-            labels=labels,
+            labels=ordered_labels,
             pair_settings=pair_settings,
             output_dir=output_dir,
             plot_settings=plot_settings,
@@ -355,51 +420,23 @@ def _load_pooled_distances(analysis_dir: Path, replicates: list[int]) -> dict[st
     dict[str, dict[str, Any]]
         Mapping ``{pair_label: {"distances": ndarray, "threshold": float | None}}``.
     """
-    import json
-
     pooled: dict[str, list[NDArray[np.float64]]] = {}
     thresholds: dict[str, float] = {}
 
-    for rep in replicates:
-        rep_dir = analysis_dir / f"run_{rep}"
-        json_files: list[Path] = []
+    try:
+        artifacts = load_canonical_plot_artifacts(analysis_dir, replicates)
+    except (ArtifactStoreError, ValueError) as exc:
+        logger.warning(
+            "Failed to load canonical distance plot artifacts in %s: %s", analysis_dir, exc
+        )
+        return {}
 
-        canonical_file = rep_dir / "result.json"
-        if canonical_file.exists():
-            json_files.append(canonical_file)
-
-        for candidate in sorted(rep_dir.glob("distances_*.json")):
-            if candidate == canonical_file:
-                continue
-            json_files.append(candidate)
-
-        if not json_files:
-            continue
-
-        for result_file in json_files:
-            try:
-                with result_file.open(encoding="utf-8") as f:
-                    result_data = json.load(f)
-
-                pair_results = result_data.get("pair_results", [])
-                if not pair_results and "distances" in result_data:
-                    pair_results = [result_data]
-
-                for pair_result in pair_results:
-                    pair_label = pair_result.get("pair_label", "Distance")
-                    distances = pair_result.get("distances")
-                    threshold = pair_result.get("threshold")
-
-                    if distances is not None:
-                        if pair_label not in pooled:
-                            pooled[pair_label] = []
-                        pooled[pair_label].append(np.asarray(distances, dtype=np.float64))
-
-                        if threshold is not None and pair_label not in thresholds:
-                            thresholds[pair_label] = float(threshold)
-
-            except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-                logger.debug(f"Failed to load {result_file}: {exc}")
+    for rep, artifact in artifacts.replicate_artifacts.items():
+        rep_dir = artifacts.run_dirs[rep]
+        try:
+            _collect_artifact_distances(rep_dir, artifact, pooled, thresholds)
+        except (OSError, KeyError, ValueError) as exc:
+            logger.debug("Failed to load distance artifact %s: %s", rep_dir / "result.json", exc)
 
     result: dict[str, dict[str, Any]] = {}
     for pair_label, arrays in pooled.items():
@@ -429,8 +466,6 @@ def _load_distance_aggregated_results(
     dict[str, dict[str, Any]]
         Mapping ``{condition_label: aggregated_result_dict}``.
     """
-    import json
-
     results: dict[str, dict[str, Any]] = {}
 
     for label in labels:
@@ -442,29 +477,57 @@ def _load_distance_aggregated_results(
         if not aggregated_dir:
             continue
 
-        aggregated_path = Path(aggregated_dir)
-
-        result_file = aggregated_path / "result.json"
-        if not result_file.exists():
-            legacy_file = aggregated_path / "distance_aggregated.json"
-            if legacy_file.exists():
-                result_file = legacy_file
-                logger.warning(f"Using legacy distances aggregate cache: {legacy_file}")
-            else:
-                prefixed_files = sorted(aggregated_path.glob("distances_*.json"))
-                if prefixed_files:
-                    result_file = prefixed_files[0]
-                    logger.warning(f"Using fallback distances aggregate cache: {result_file}")
-                else:
-                    continue
-
         try:
-            with result_file.open(encoding="utf-8") as f:
-                results[label] = json.load(f)
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.warning(f"Failed to load {result_file}: {exc}")
+            artifacts = load_canonical_plot_artifacts(Path(aggregated_dir).parent, [])
+        except (ArtifactStoreError, ValueError) as exc:
+            logger.warning("Failed to load canonical distance aggregate for %s: %s", label, exc)
+            continue
+        artifact = artifacts.condition_artifact
+        if artifact is None:
+            continue
+        results[label] = {
+            **artifact.payload,
+            "sidecars": [sidecar.model_dump(mode="json") for sidecar in artifact.sidecars],
+            "metadata": artifact.metadata,
+        }
 
     return results
+
+
+def _collect_artifact_distances(
+    rep_dir: Path,
+    artifact: Any,
+    pooled: dict[str, list[NDArray[np.float64]]],
+    thresholds: dict[str, float],
+) -> None:
+    """Collect raw distance arrays from a canonical replicate artifact sidecar."""
+    from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
+
+    sidecar = next(
+        (
+            ref
+            for ref in artifact.sidecars
+            if getattr(ref, "metadata", {}).get("kind") == "distance_matrix"
+        ),
+        None,
+    )
+    if sidecar is None:
+        return
+    payload_pairs = artifact.payload.get("pairs", [])
+    try:
+        npz_context = ArtifactStore(rep_dir).load_npz_sidecar(sidecar)
+    except ArtifactStoreError as exc:
+        raise ValueError(f"invalid distance sidecar for {rep_dir / 'result.json'}: {exc}") from exc
+    with npz_context as npz_data:
+        matrix = np.asarray(npz_data["distance_matrix"], dtype=np.float64)
+        for pair_index, pair_result in enumerate(payload_pairs):
+            if pair_index >= matrix.shape[0]:
+                continue
+            pair_label = pair_result.get("pair_label", f"Pair {pair_index}")
+            threshold = pair_result.get("threshold")
+            pooled.setdefault(pair_label, []).append(matrix[pair_index])
+            if threshold is not None and pair_label not in thresholds:
+                thresholds[pair_label] = float(threshold)
 
 
 def _plot_distance_state_single_pair(
@@ -678,3 +741,11 @@ def _get_distance_pair_settings(data: dict[str, Any]) -> list[Any] | None:
         return getattr(dist_settings, "pairs", None)
 
     return None
+
+
+def _get_control_label(data: dict[str, Any]) -> str | None:
+    """Return the framework-provided control label when available."""
+
+    meta = data.get("__meta__", {})
+    control_label = meta.get("control_label")
+    return control_label if isinstance(control_label, str) else None

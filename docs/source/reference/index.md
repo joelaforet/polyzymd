@@ -67,7 +67,11 @@ RMSF Plugin Reference <analysis_rmsf_reference>
 Catalytic Triad Plugin Reference <analysis_triad_reference>
 Distances Plugin Reference <analysis_distances_reference>
 Contacts Plugin Reference <analysis_contacts_reference>
+Secondary Structure Plugin Reference <analysis_secondary_structure_reference>
+SASA Plugin Reference <analysis_sasa_reference>
+Hydrogen Bonds Plugin Reference <analysis_hydrogen_bonds_reference>
 Post-Hoc Testing Reference <posthoc_testing>
+Experimental Analyses Archive <experimental_analyses_archive>
 ```
 
 ## API Reference
@@ -75,7 +79,10 @@ Post-Hoc Testing Reference <posthoc_testing>
 Full Python API documentation.
 
 ```{toctree}
-:maxdepth: 1
+:maxdepth: 2
 
 API Reference <../api/index>
+Package and workflow APIs <../api/package_api>
+Analysis APIs <../api/analysis_api>
+MDAnalysis extension-layer APIs <../api/mda_api>
 ```

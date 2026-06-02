@@ -10,8 +10,11 @@ import logging
 
 from polyzymd.analyses.rmsd._comparison_results import RMSDComparisonResult, RMSDRunSummary
 from polyzymd.analyses.shared.multi_run_formatting import (
+    SINGLE_REPLICATE_SEM_NOTE,
     format_anova_line,
     format_pairwise_line,
+    format_sem_value,
+    is_sem_estimable,
     make_ranked_markdown_header,
     make_ranked_rows,
     make_ranked_table_header,
@@ -94,8 +97,19 @@ def _format_rmsd_table(result: RMSDComparisonResult) -> str:
         for condition_label, mean_rmsd, sem_rmsd, rank in ranked_rows:
             condition = result.get_condition(condition_label)
             run_summary = condition.get_run(run_label)
-            lines.append(f"{condition.label:<18} {mean_rmsd:<15.2f} {sem_rmsd:<8.2f} {rank:<4}")
+            n_replicates = condition.n_replicates or len(run_summary.per_replicate_means)
+            sem_str = format_sem_value(sem_rmsd, n_replicates, precision=2)
+            lines.append(f"{condition.label:<18} {mean_rmsd:<15.2f} {sem_str:<8} {rank:<4}")
             lines.append(_format_convergence_line(run_summary))
+
+        if any(
+            not is_sem_estimable(
+                result.get_condition(label).n_replicates
+                or len(result.get_condition(label).get_run(run_label).per_replicate_means)
+            )
+            for label in ranking
+        ):
+            lines.append(SINGLE_REPLICATE_SEM_NOTE)
 
         lines.append("")
         lines.extend(_format_pairwise_line(run_label, result))
@@ -152,8 +166,20 @@ def _format_rmsd_markdown(result: RMSDComparisonResult) -> str:
         for condition_label, mean_rmsd, sem_rmsd, rank in ranked_rows:
             condition = result.get_condition(condition_label)
             run_summary = condition.get_run(run_label)
-            lines.append(f"| {condition.label} | {mean_rmsd:.2f} | {sem_rmsd:.2f} | {rank} |")
+            n_replicates = condition.n_replicates or len(run_summary.per_replicate_means)
+            sem_str = format_sem_value(sem_rmsd, n_replicates, precision=2)
+            lines.append(f"| {condition.label} | {mean_rmsd:.2f} | {sem_str} | {rank} |")
             lines.append(f"  - {_format_convergence_line(run_summary)}")
+
+        if any(
+            not is_sem_estimable(
+                result.get_condition(label).n_replicates
+                or len(result.get_condition(label).get_run(run_label).per_replicate_means)
+            )
+            for label in ranking
+        ):
+            lines.append("")
+            lines.append(f"*{SINGLE_REPLICATE_SEM_NOTE}.*")
 
         comparisons = result.get_comparisons_for_run(run_label)
         if comparisons:

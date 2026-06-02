@@ -34,97 +34,133 @@ raise a validation error.
 
 ## Output Files
 
-Results are saved in your project's analysis directory:
+Results are saved as canonical v1.3 artifacts. JSON files are stable artifact
+envelopes, while per-frame RMSD arrays are stored in NPZ sidecars.
 
 ```text
-<projects_directory>/
-└── analysis/
+<comparison_workspace>/
+├── analysis/
+│   └── <condition>/
+│       └── rmsd/
+│           ├── run_1/
+│           │   ├── result.json
+│           │   └── sidecars/
+│           │       ├── rmsd_Protein_Backbone_timeseries.npz
+│           │       └── rmsd_Active_Site_timeseries.npz
+│           ├── run_2/
+│           │   └── ...
+│           ├── run_3/
+│           │   └── ...
+│           └── aggregated/
+│               ├── result.json
+│               └── sidecars/
+│                   └── rmsd_Protein_Backbone_timeseries.npz
+└── comparison/
     └── rmsd/
-        ├── run_1/
-        │   ├── rmsd_eq10ns.json
-        │   ├── rmsd_Protein Backbone_timeseries.npz
-        │   └── rmsd_Active Site_timeseries.npz
-        ├── run_2/
-        │   ├── rmsd_eq10ns.json
-        │   ├── rmsd_Protein Backbone_timeseries.npz
-        │   └── rmsd_Active Site_timeseries.npz
-        ├── run_3/
-        │   └── ...
-        └── aggregated/
-            └── rmsd_reps1-3_eq10ns.json
+        └── result.json
 ```
 
-Each replicate directory contains:
-- **JSON result** — summary statistics for all configured runs
-- **NPZ sidecar(s)** — raw per-frame RMSD timeseries (one per run)
+The canonical paths are:
 
-### JSON Result Structure
+| Level | Artifact | Path |
+|-------|----------|------|
+| Per replicate | `ReplicateArtifact` | `analysis/<condition>/rmsd/run_<replicate>/result.json` |
+| Per condition | `ConditionArtifact` | `analysis/<condition>/rmsd/aggregated/result.json` |
+| Cross condition | Comparison result | `comparison/rmsd/result.json` |
+| Large arrays | NPZ sidecars | `analysis/<condition>/rmsd/**/sidecars/*.npz` |
 
-Per-replicate result (`RMSDResult`):
+Each replicate artifact contains JSON-compatible summaries for all configured
+runs. Raw per-frame RMSD timeseries are sidecars referenced from `payload` and
+listed in `sidecars` with recorded size and hash metadata.
+
+### Artifact envelope fields
+
+| Field | Description |
+|-------|-------------|
+| `payload` | RMSD run summaries, scalar metrics, convergence diagnostics, and sidecar paths |
+| `metadata` | Settings such as selections, reference modes, equilibration labels, and units |
+| `provenance` | Input topology/trajectory identity and workflow details |
+| `sidecars` | Validated references to `sidecars/*.npz` arrays for timeseries and aggregate profiles |
+
+Use `ArtifactStore` for programmatic access:
+
+```python
+from pathlib import Path
+
+from polyzymd.analyses.mda import ArtifactStore
+
+replicate = ArtifactStore(Path("analysis/PEGylated/rmsd/run_1")).read_replicate_result()
+condition = ArtifactStore(Path("analysis/PEGylated/rmsd/aggregated")).read_condition_result()
+print(replicate.payload["runs"][0]["mean_rmsd"])
+print(condition.payload["runs"][0]["metrics"]["mean_rmsd"])
+```
+
+### JSON result structure
+
+Per-replicate result (`ReplicateArtifact`), representative structure:
 
 ```python
 {
-    "config_hash": "abc123...",
+    "schema_version": "1",
+    "artifact_type": "replicate",
+    "analysis_name": "rmsd",
+    "condition_label": "PEGylated",
     "replicate": 1,
-    "equilibration_time": 10.0,
-    "equilibration_unit": "ns",
-    "selection_string": "protein and name CA; ...",
-    "n_frames_total": 10000,
-    "n_frames_used": 9000,
-    "trajectory_files": ["..."],
-    "run_results": [
+    "payload": {
+        "runs": [
+            {
+                "run_label": "Protein Backbone",
+                "selection": "protein and name CA",
+                "alignment_selection": "protein and name CA",
+                "reference_mode": "centroid",
+                "mean_rmsd": 1.823,
+                "std_rmsd": 0.312,
+                "median_rmsd": 1.791,
+                "sem_rmsd": 0.078,
+                "converged": true,
+                "convergence_time_ns": 12.5,
+                "timeseries_sidecar": "sidecars/rmsd_Protein_Backbone_timeseries.npz"
+            }
+        ]
+    },
+    "metadata": {"equilibration": "10ns", "time_unit": "ns"},
+    "provenance": {"trajectory_files": ["..."], "n_frames_used": 9000},
+    "sidecars": [
         {
-            "run_label": "Protein Backbone",
-            "selection": "protein and name CA",
-            "alignment_selection": "protein and name CA",
-            "reference_mode": "centroid",
-            "mean_rmsd": 1.823,
-            "std_rmsd": 0.312,
-            "median_rmsd": 1.791,
-            "min_rmsd": 0.987,
-            "max_rmsd": 3.104,
-            "final_rmsd": 1.956,
-            "sem_rmsd": 0.078,
-            "correlation_time": 4521.3,
-            "correlation_time_unit": "ps",
-            "n_independent_frames": 16,
-            "statistical_inefficiency": 562.7,
-            "n_frames_total": 10000,
-            "n_frames_used": 9000,
-            "npz_path": ".../rmsd_Protein Backbone_timeseries.npz",
-            "time_unit": "ns",
-            "timestep_ps": 10.0,
-            "converged": true,
-            "convergence_assessable": true,
-            "convergence_time_ns": 12.5,
-            "convergence_message": "Converged at 12.500 ns"
+            "path": "sidecars/rmsd_Protein_Backbone_timeseries.npz",
+            "metadata": {"kind": "timeseries", "run_label": "Protein Backbone"}
         }
     ]
 }
 ```
 
-Aggregated result (`RMSDAggregatedResult`):
+Aggregated result (`ConditionArtifact`), representative structure:
 
 ```python
 {
+    "schema_version": "1",
+    "artifact_type": "condition",
+    "analysis_name": "rmsd",
+    "condition_label": "PEGylated",
     "replicates": [1, 2, 3],
-    "n_replicates": 3,
-    "run_results": [
-        {
-            "run_label": "Protein Backbone",
-            "selection": "protein and name CA",
-            "overall_mean": 1.856,
-            "overall_sem": 0.034,
-            "overall_median": 1.823,
-            "per_replicate_means": [1.823, 1.891, 1.854],
-            "per_replicate_stds": [0.312, 0.298, 0.324],
-            "per_replicate_medians": [1.791, 1.862, 1.816],
-            "n_converged_replicates": 3,
-            "convergence_fraction": 1.0,
-            "mean_convergence_time_ns": 13.2,
-            "median_convergence_time_ns": 12.5
-        }
-    ]
+    "payload": {
+        "runs": [
+            {
+                "run_label": "Protein Backbone",
+                "selection": "protein and name CA",
+                "metrics": {
+                    "mean_rmsd": {"values": [1.823, 1.891, 1.854], "mean": 1.856, "sem": 0.034}
+                },
+                "convergence": {
+                    "n_converged_replicates": 3,
+                    "convergence_fraction": 1.0,
+                    "mean_convergence_time_ns": 13.2
+                }
+            }
+        ]
+    },
+    "metadata": {"equilibration": "10ns"},
+    "provenance": {"source_replicates": [1, 2, 3]}
 }
 ```
 

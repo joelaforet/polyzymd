@@ -9,11 +9,13 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+import yaml
 from click.testing import CliRunner
 from pydantic import BaseModel
 
+from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.cli.compare import compare
-from polyzymd.config.comparison import PlotSettings
+from polyzymd.config.comparison import ComparisonConfig, PlotSettings
 from polyzymd.workflow.analysis_slurm import (
     ConditionTaskSpec,
     ReplicateTaskSpec,
@@ -24,6 +26,82 @@ from polyzymd.workflow.analysis_slurm import (
 
 class _Settings(BaseModel):
     threshold: float = 1.0
+
+
+BRANDING_LINE = "PolyzyMD: Created by Joseph R. Laforet Jr."
+
+
+def _assert_no_jinja_markers(content: str) -> None:
+    """Assert rendered content contains no unresolved Jinja syntax."""
+    assert "{{" not in content
+    assert "{%" not in content
+    assert "%}" not in content
+
+
+def _write_minimal_comparison_config(path: Path) -> None:
+    """Write a minimal valid comparison config for CLI diagnostics tests."""
+    path.write_text(
+        yaml.dump(
+            {
+                "name": "cli-diagnostics-test",
+                "conditions": [
+                    {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                ],
+                "plugins": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _assert_unknown_analysis_diagnostic(output: str, analysis_name: str) -> None:
+    """Assert unknown-analysis diagnostics use the standard available-types path."""
+    assert analysis_name in output
+    assert "Unknown" in output
+    assert "feature/mda-analysis-migration" not in output
+
+
+def test_compare_init_renders_comparison_scaffold(tmp_path: Path) -> None:
+    """compare init should render a valid comparison project scaffold."""
+    runner = CliRunner()
+
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(compare, ["init", "-n", "study", "--eq-time", "20ns"])
+
+        assert result.exit_code == 0
+        project_dir = Path("study")
+        assert project_dir.is_dir()
+        assert (project_dir / "comparison").is_dir()
+        assert (project_dir / "figures").is_dir()
+        assert (project_dir / "structures").is_dir()
+        assert (project_dir / "structures" / "README.md").is_file()
+
+        config_path = project_dir / "comparison.yaml"
+        content = config_path.read_text(encoding="utf-8")
+        data = yaml.safe_load(content)
+        assert data["name"] == "study"
+        assert data["defaults"]["equilibration_time"] == "20ns"
+        assert content.count(BRANDING_LINE) == 1
+        _assert_no_jinja_markers(content)
+
+        config = ComparisonConfig.from_yaml(config_path)
+        assert config.name == "study"
+
+        readme_content = (project_dir / "structures" / "README.md").read_text(encoding="utf-8")
+        assert readme_content.count(BRANDING_LINE) == 1
+        _assert_no_jinja_markers(readme_content)
+
+
+def test_compare_init_existing_directory_still_errors(tmp_path: Path) -> None:
+    """compare init should preserve existing-directory error behavior."""
+    runner = CliRunner()
+
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("study").mkdir()
+        result = runner.invoke(compare, ["init", "-n", "study"])
+
+        assert result.exit_code != 0
+        assert "Directory already exists" in result.output
 
 
 def test_submit_dry_run_prints_summary(monkeypatch, tmp_path: Path) -> None:
@@ -421,21 +499,284 @@ def test_finalize_command_loads_aggregated_and_runs(monkeypatch, tmp_path: Path)
         },
     )
     monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
+    captured: dict[str, Any] = {}
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator._resolve_settings",
         lambda plugin, config: SimpleNamespace(),
     )
+
+    def _capture_finalize(**kwargs):
+        captured.update(kwargs)
+        return {"comparison_path": tmp_path / "comparison" / "toy" / "result.json"}
+
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.finalize_comparison_from_disk",
-        lambda **kwargs: {"comparison_path": tmp_path / "comparison" / "toy" / "result.json"},
+        _capture_finalize,
     )
 
     result = runner.invoke(
         compare,
-        ["finalize", "toy", "-f", str(tmp_path / "comparison.yaml")],
+        ["finalize", "toy", "-f", str(tmp_path / "comparison.yaml"), "--recompute"],
     )
     assert result.exit_code == 0
     assert "Saved result:" in result.output
+    assert captured["recompute"] is True
+
+
+def test_run_reports_plugin_contract_error(monkeypatch, tmp_path: Path) -> None:
+    """compare run should label plugin contract errors as plugin bugs."""
+    runner = CliRunner()
+
+    class _Analysis:
+        name = "toy"
+
+        def format(self, result, output_format="text"):
+            return "formatted"
+
+    config = SimpleNamespace(
+        name="contract_project",
+        conditions=[SimpleNamespace(label="A")],
+        defaults=SimpleNamespace(equilibration_time="10ns"),
+    )
+
+    monkeypatch.setattr("polyzymd.cli.compare.load_comparison_config", lambda path: config)
+    monkeypatch.setattr("polyzymd.cli.compare.validate_and_report", lambda config: None)
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis",
+        lambda name: _Analysis,
+    )
+
+    def _raise_contract(*args, **kwargs):
+        raise PluginContractError("toy.compute_stage() returned None")
+
+    monkeypatch.setattr("polyzymd.analyses.orchestrator.run_comparison", _raise_contract)
+
+    result = runner.invoke(compare, ["run", "toy", "-f", str(tmp_path / "comparison.yaml")])
+
+    assert result.exit_code != 0
+    assert "Plugin contract error in analysis 'toy'" in result.output
+    assert "likely a PolyzyMD/plugin bug, not missing trajectory data" in result.output
+
+
+def test_run_all_plot_phase_receives_eq_time_override(monkeypatch, tmp_path: Path) -> None:
+    """compare run-all --plot should pass --eq-time to plot-only execution."""
+
+    runner = CliRunner()
+    config = SimpleNamespace(
+        name="eq_override_project",
+        conditions=[SimpleNamespace(label="A")],
+        defaults=SimpleNamespace(equilibration_time="10ns"),
+        plugins=SimpleNamespace(get_enabled_plugins=lambda: ["toy"]),
+    )
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr("polyzymd.cli.compare.load_comparison_config", lambda path: config)
+    monkeypatch.setattr("polyzymd.cli.compare.validate_and_report", lambda config: None)
+
+    def _run_all_comparisons(*args, **kwargs):
+        captured["comparison_equilibration"] = kwargs.get("equilibration")
+        return {"toy": {"comparison": {"ok": True}, "comparison_path": tmp_path / "result.json"}}
+
+    def _run_all_plots(*args, **kwargs):
+        captured["plot_equilibration"] = kwargs.get("equilibration")
+        return [tmp_path / "plot.png"], []
+
+    monkeypatch.setattr("polyzymd.analyses.orchestrator.run_all_comparisons", _run_all_comparisons)
+    monkeypatch.setattr("polyzymd.analyses.orchestrator.run_all_plots", _run_all_plots)
+
+    result = runner.invoke(
+        compare,
+        ["run-all", "-f", str(tmp_path / "comparison.yaml"), "--eq-time", "2ns", "--plot"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["comparison_equilibration"] == "2ns"
+    assert captured["plot_equilibration"] == "2ns"
+
+
+@pytest.mark.parametrize(
+    "analysis_name",
+    [
+        "exposure",
+        "binding_free_energy",
+        "bfe",
+        "polymer_affinity",
+        "pa",
+        "polymer_bridging",
+        "bridging",
+    ],
+)
+def test_run_unknown_analysis_reports_standard_diagnostic(
+    analysis_name: str,
+    tmp_path: Path,
+) -> None:
+    """compare run should report the standard unknown-name diagnostic."""
+    runner = CliRunner()
+
+    result = runner.invoke(compare, ["run", analysis_name, "-f", str(tmp_path / "missing.yaml")])
+
+    assert result.exit_code != 0
+    _assert_unknown_analysis_diagnostic(result.output, analysis_name)
+
+
+def test_plot_all_unknown_analysis_reports_standard_diagnostic(tmp_path: Path) -> None:
+    """compare plot-all -a should report the standard unknown-name diagnostic."""
+    runner = CliRunner()
+    config_path = tmp_path / "comparison.yaml"
+    _write_minimal_comparison_config(config_path)
+
+    result = runner.invoke(compare, ["plot-all", "-f", str(config_path), "-a", "polymer_bridging"])
+
+    assert result.exit_code != 0
+    _assert_unknown_analysis_diagnostic(result.output, "polymer_bridging")
+
+
+def test_submit_unknown_analysis_reports_standard_diagnostic_before_sbatch(
+    tmp_path: Path,
+) -> None:
+    """compare submit should not mask unknown analyses with SLURM prechecks."""
+    runner = CliRunner()
+    config_path = tmp_path / "comparison.yaml"
+    _write_minimal_comparison_config(config_path)
+
+    result = runner.invoke(
+        compare,
+        ["submit", "polymer_bridging", "-f", str(config_path)],
+    )
+
+    assert result.exit_code != 0
+    _assert_unknown_analysis_diagnostic(result.output, "polymer_bridging")
+    assert "sbatch" not in result.output
+
+
+def test_status_unknown_analysis_reports_standard_diagnostic(tmp_path: Path) -> None:
+    """compare status should report the standard unknown-name diagnostic."""
+    runner = CliRunner()
+    config_path = tmp_path / "comparison.yaml"
+    _write_minimal_comparison_config(config_path)
+
+    result = runner.invoke(compare, ["status", "polymer_bridging", "-f", str(config_path)])
+
+    assert result.exit_code != 0
+    _assert_unknown_analysis_diagnostic(result.output, "polymer_bridging")
+
+
+def test_finalize_unknown_analysis_reports_standard_diagnostic(tmp_path: Path) -> None:
+    """compare finalize should report the standard unknown-name diagnostic."""
+    runner = CliRunner()
+    config_path = tmp_path / "comparison.yaml"
+    _write_minimal_comparison_config(config_path)
+
+    result = runner.invoke(compare, ["finalize", "polymer_bridging", "-f", str(config_path)])
+
+    assert result.exit_code != 0
+    _assert_unknown_analysis_diagnostic(result.output, "polymer_bridging")
+
+
+def test_submit_all_unknown_plugin_config_reports_standard_diagnostic_before_sbatch(
+    tmp_path: Path,
+) -> None:
+    """compare submit-all config handling should surface unknown plugin diagnostics."""
+    runner = CliRunner()
+    config_path = tmp_path / "comparison.yaml"
+    config_path.write_text(
+        yaml.dump(
+            {
+                "name": "unknown-cli-test",
+                "conditions": [
+                    {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                ],
+                "plugins": {"polymer_bridging": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(compare, ["submit-all", "-f", str(config_path)])
+
+    assert result.exit_code != 0
+    _assert_unknown_analysis_diagnostic(result.output, "polymer_bridging")
+    assert "sbatch" not in result.output
+
+
+def test_finalize_compare_only_plugin_skips_aggregated_precheck(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Public finalize should not require aggregates for compare-only plugins."""
+    runner = CliRunner()
+
+    class _CompareOnlyAnalysis:
+        name = "compare_only"
+        has_compute_stage = False
+        has_aggregate_stage = False
+
+        def _load_aggregated_result(self, path):
+            del path
+            raise AssertionError("Compare-only finalize should not load aggregated results")
+
+        def figures_output_dir(self, base):
+            return Path(base) / "compare_only"
+
+    condition_a = SimpleNamespace(label="A")
+    condition_b = SimpleNamespace(label="B")
+    config = SimpleNamespace(
+        source_path=tmp_path / "comparison.yaml",
+        control=None,
+        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
+        defaults=SimpleNamespace(equilibration_time="10ns"),
+        model_copy=lambda deep=True: SimpleNamespace(
+            source_path=tmp_path / "comparison.yaml",
+            control=None,
+            plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
+            defaults=SimpleNamespace(equilibration_time="10ns"),
+        ),
+    )
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
+        lambda path: config,
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis",
+        lambda name: lambda: _CompareOnlyAnalysis(),
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator.prepare_comparison_run",
+        lambda plugin, config, equilibration: {
+            "all_conditions": [condition_a, condition_b],
+            "valid_conditions": [condition_a, condition_b],
+            "excluded_conditions": [],
+            "condition_by_label": {"A": condition_a, "B": condition_b},
+            "settings": SimpleNamespace(),
+            "equilibration": "10ns",
+            "analysis_root": tmp_path / "analysis",
+        },
+    )
+    monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
+    captured: dict[str, Any] = {}
+
+    def _capture_finalize(**kwargs):
+        captured.update(kwargs)
+        return {"comparison_path": tmp_path / "comparison" / "compare_only" / "result.json"}
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator.finalize_comparison_from_disk",
+        _capture_finalize,
+    )
+
+    result = runner.invoke(
+        compare,
+        ["finalize", "compare_only", "-f", str(tmp_path / "comparison.yaml")],
+    )
+
+    assert result.exit_code == 0
+    assert captured["aggregated_results"] == {}
+    assert captured["analysis_dirs"] == {
+        "A": tmp_path / "analysis" / "A" / "compare_only",
+        "B": tmp_path / "analysis" / "B" / "compare_only",
+    }
+    assert "missing aggregated results" not in result.output
 
 
 def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
@@ -457,7 +798,7 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
         analysis_name="toy",
         comparison_yaml=str(tmp_path / "comparison.yaml"),
         equilibration="10ns",
-        recompute=False,
+        recompute=True,
         settings_snapshot={"threshold": 1.0},
         condition_specs=[
             SimpleNamespace(
@@ -469,6 +810,7 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
     )
     condition = SimpleNamespace(label="A", replicates=(1,))
     called = {"rep": 0, "agg": 0, "fin": 0}
+    captured_recompute: dict[str, bool] = {}
 
     monkeypatch.setattr(
         "polyzymd.workflow.analysis_slurm.AnalysisJobManifest.load", lambda path: manifest
@@ -498,15 +840,31 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.run_replicate_once",
-        lambda *args, **kwargs: called.__setitem__("rep", called["rep"] + 1) or {"ok": True},
+        lambda *args, **kwargs: (
+            called.__setitem__("rep", called["rep"] + 1)
+            or captured_recompute.__setitem__("rep", args[-1])
+            or {"ok": True}
+        ),
     )
+
+    def _capture_aggregate(*args, **kwargs):
+        called["agg"] += 1
+        captured_recompute["agg"] = kwargs["recompute"]
+        return {"ok": True}
+
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.aggregate_condition_from_disk",
-        lambda *args, **kwargs: called.__setitem__("agg", called["agg"] + 1) or {"ok": True},
+        _capture_aggregate,
     )
+
+    def _capture_finalize(**kwargs):
+        called["fin"] += 1
+        captured_recompute["fin"] = kwargs["recompute"]
+        return {}
+
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.finalize_comparison_from_disk",
-        lambda **kwargs: called.__setitem__("fin", called["fin"] + 1) or {},
+        _capture_finalize,
     )
 
     rep_res = runner.invoke(
@@ -540,6 +898,7 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
     assert agg_res.exit_code == 0
     assert fin_res.exit_code == 0
     assert called == {"rep": 1, "agg": 1, "fin": 1}
+    assert captured_recompute == {"rep": True, "agg": True, "fin": True}
 
 
 def test_finalize_with_missing_conditions(monkeypatch, tmp_path: Path) -> None:
@@ -622,7 +981,7 @@ def test_worker_finalize_finalize_only_skips_aggregated_loading(
     runner = CliRunner()
 
     class _CompareOnlyAnalysis:
-        name = "exposure"
+        name = "compare_only"
         Settings = _Settings
         has_compute_stage = False
         has_aggregate_stage = False
@@ -634,7 +993,7 @@ def test_worker_finalize_finalize_only_skips_aggregated_loading(
             )
 
         def figures_output_dir(self, base):
-            return Path(base) / "exposure"
+            return Path(base) / "compare_only"
 
     condition = SimpleNamespace(label="Cond A")
     cond_spec = ConditionTaskSpec(
@@ -644,7 +1003,7 @@ def test_worker_finalize_finalize_only_skips_aggregated_loading(
         replicate_specs=[],
     )
     manifest = SimpleNamespace(
-        analysis_name="exposure",
+        analysis_name="compare_only",
         comparison_yaml=str(tmp_path / "comparison.yaml"),
         settings_snapshot={"threshold": 1.0},
         condition_specs=[cond_spec],
@@ -682,7 +1041,7 @@ def test_worker_finalize_finalize_only_skips_aggregated_loading(
 
     def _capture_finalize(**kwargs):
         captured.update(kwargs)
-        return {"comparison_path": tmp_path / "comparison" / "exposure" / "result.json"}
+        return {"comparison_path": tmp_path / "comparison" / "compare_only" / "result.json"}
 
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.finalize_comparison_from_disk",
@@ -697,8 +1056,9 @@ def test_worker_finalize_finalize_only_skips_aggregated_loading(
     assert result.exit_code == 0
     assert captured["aggregated_results"] == {}
     assert captured["analysis_dirs"] == {
-        "Cond A": tmp_path / "analysis" / "Cond A" / "exposure",
+        "Cond A": tmp_path / "analysis" / "Cond A" / "compare_only",
     }
+    assert captured["recompute"] is False
 
 
 def test_manifest_config_drift_detection(monkeypatch, tmp_path: Path) -> None:
@@ -846,6 +1206,16 @@ def test_submit_without_sbatch(monkeypatch, tmp_path: Path) -> None:
     """CLI submit should fail cleanly when sbatch is unavailable."""
     runner = CliRunner()
 
+    class _FakeAnalysis:
+        name = "toy"
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
+        lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis", lambda name: lambda: _FakeAnalysis()
+    )
     monkeypatch.setattr("shutil.which", lambda name: None if name == "sbatch" else "/usr/bin/other")
     result = runner.invoke(
         compare,
@@ -1001,7 +1371,7 @@ def test_submit_all_dry_run_orders_and_submits_enabled_analyses(
 
     class _Plugins:
         def get_enabled_plugins(self):
-            return ["exposure", "contacts"]
+            return ["dependent_fake", "contacts"]
 
     config = SimpleNamespace(source_path=tmp_path / "comparison.yaml", plugins=_Plugins())
 
@@ -1012,12 +1382,12 @@ def test_submit_all_dry_run_orders_and_submits_enabled_analyses(
         def __call__(self):
             return SimpleNamespace(name="contacts")
 
-    class _Exposure:
-        name = "exposure"
+    class _DependentFake:
+        name = "dependent_fake"
         dependencies = ("contacts",)
 
         def __call__(self):
-            return SimpleNamespace(name="exposure")
+            return SimpleNamespace(name="dependent_fake")
 
     class _Cond:
         def __init__(self, reps):
@@ -1040,11 +1410,11 @@ def test_submit_all_dry_run_orders_and_submits_enabled_analyses(
     )
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.order_analyses_for_execution",
-        lambda names, satisfied=None: ["contacts", "exposure"],
+        lambda names, satisfied=None: ["contacts", "dependent_fake"],
     )
     monkeypatch.setattr(
         "polyzymd.analyses.discovery.get_analysis",
-        lambda name: _Contacts() if name == "contacts" else _Exposure(),
+        lambda name: _Contacts() if name == "contacts" else _DependentFake(),
     )
     monkeypatch.setattr("polyzymd.workflow.analysis_slurm.build_manifest", _build_manifest)
     monkeypatch.setattr(
@@ -1066,10 +1436,10 @@ def test_submit_all_dry_run_orders_and_submits_enabled_analyses(
     )
 
     assert result.exit_code == 0
-    assert build_calls == ["contacts", "exposure"]
+    assert build_calls == ["contacts", "dependent_fake"]
     assert "Submitted analyses summary:" in result.output
     assert "Dry run only: no jobs were submitted" in result.output
-    assert result.output.index("contacts") < result.output.index("exposure")
+    assert result.output.index("contacts") < result.output.index("dependent_fake")
 
 
 def test_submit_all_exclude_filters_requested_plugins(monkeypatch, tmp_path: Path) -> None:
@@ -1078,7 +1448,7 @@ def test_submit_all_exclude_filters_requested_plugins(monkeypatch, tmp_path: Pat
 
     class _Plugins:
         def get_enabled_plugins(self):
-            return ["contacts", "exposure", "rmsf"]
+            return ["contacts", "dependent_fake", "rmsf"]
 
     config = SimpleNamespace(source_path=tmp_path / "comparison.yaml", plugins=_Plugins())
 
@@ -1137,14 +1507,14 @@ def test_submit_all_exclude_filters_requested_plugins(monkeypatch, tmp_path: Pat
             "-f",
             str(tmp_path / "comparison.yaml"),
             "--exclude",
-            "exposure",
+            "dependent_fake",
             "--dry-run",
         ],
     )
 
     assert result.exit_code == 0
     assert captured["names"] == ["contacts", "rmsf"]
-    assert "exposure" not in result.output
+    assert "dependent_fake" not in result.output
 
 
 def test_submit_all_excluded_dependency_with_result_is_satisfied(
@@ -1155,7 +1525,7 @@ def test_submit_all_excluded_dependency_with_result_is_satisfied(
 
     class _Plugins:
         def get_enabled_plugins(self):
-            return ["contacts", "exposure"]
+            return ["contacts", "dependent_fake"]
 
     config = SimpleNamespace(source_path=tmp_path / "comparison.yaml", plugins=_Plugins())
 
@@ -1168,7 +1538,7 @@ def test_submit_all_excluded_dependency_with_result_is_satisfied(
     def _order(analysis_names, satisfied=None):
         captured["names"] = list(analysis_names)
         captured["satisfied"] = set() if satisfied is None else set(satisfied)
-        return ["exposure"]
+        return ["dependent_fake"]
 
     class _AnalysisClass:
         def __init__(self, name):
@@ -1224,7 +1594,7 @@ def test_submit_all_excluded_dependency_with_result_is_satisfied(
     )
 
     assert result.exit_code == 0
-    assert captured["names"] == ["exposure"]
+    assert captured["names"] == ["dependent_fake"]
     assert captured["satisfied"] == {"contacts"}
 
 
@@ -1281,7 +1651,7 @@ def test_submit_all_passes_cross_plugin_root_dependencies(monkeypatch, tmp_path:
 
     class _Plugins:
         def get_enabled_plugins(self):
-            return ["contacts", "exposure"]
+            return ["contacts", "dependent_fake"]
 
     config = SimpleNamespace(source_path=tmp_path / "comparison.yaml", plugins=_Plugins())
 
@@ -1292,12 +1662,12 @@ def test_submit_all_passes_cross_plugin_root_dependencies(monkeypatch, tmp_path:
         def __call__(self):
             return SimpleNamespace(name="contacts")
 
-    class _Exposure:
-        name = "exposure"
+    class _DependentFake:
+        name = "dependent_fake"
         dependencies = ("contacts",)
 
         def __call__(self):
-            return SimpleNamespace(name="exposure")
+            return SimpleNamespace(name="dependent_fake")
 
     class _Cond:
         def __init__(self):
@@ -1331,11 +1701,11 @@ def test_submit_all_passes_cross_plugin_root_dependencies(monkeypatch, tmp_path:
     )
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.order_analyses_for_execution",
-        lambda names, satisfied=None: ["contacts", "exposure"],
+        lambda names, satisfied=None: ["contacts", "dependent_fake"],
     )
     monkeypatch.setattr(
         "polyzymd.analyses.discovery.get_analysis",
-        lambda name: _Contacts() if name == "contacts" else _Exposure(),
+        lambda name: _Contacts() if name == "contacts" else _DependentFake(),
     )
     monkeypatch.setattr("polyzymd.workflow.analysis_slurm.build_manifest", _build_manifest)
     monkeypatch.setattr("polyzymd.workflow.analysis_slurm.submit_analysis_graph", _submit_graph)

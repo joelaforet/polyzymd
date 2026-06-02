@@ -1,25 +1,22 @@
-"""Tests for the catalytic triad analysis plugin.
-
-Tests the CatalyticTriadAnalysis class: discovery, aliases, settings,
-compute_replicate, aggregate, extract_metrics, AggregatedResultClass,
-_settings_to_config, _make_aggregated_filename, plot delegation, and the
-full lifecycle via the orchestrator.
-
-Heavy dependencies (MDAnalysis, trajectories) are mocked.
-"""
+"""Tests for the MDAnalysis-native catalytic-triad plugin."""
 
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
+    ComparisonContext,
     Condition,
     MetricValue,
     PlotContext,
+    PluginContractError,
     ReplicateContext,
 )
 from polyzymd.analyses.catalytic_triad import (
@@ -27,21 +24,34 @@ from polyzymd.analyses.catalytic_triad import (
     CatalyticTriadSettings,
     TriadPairSettings,
 )
-
-# ============================================================================
-# Fixtures
-# ============================================================================
+from polyzymd.analyses.catalytic_triad._mda import (
+    SIMULTANEOUS_CONTACT_METRIC,
+    TriadArtifactCollector,
+)
+from polyzymd.analyses.distances._mda import DistancePairPayload, DistanceReplicatePayload
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    ComparisonArtifact,
+    FrameSelection,
+    MDACollectorContext,
+    MDAJobResult,
+    MDAUniversePolicy,
+    ReplicateArtifact,
+)
+from polyzymd.analyses.mda.job import MDABackendPolicy
 
 
 @pytest.fixture
-def triad_analysis():
-    """Return a fresh CatalyticTriadAnalysis instance."""
+def triad_analysis() -> CatalyticTriadAnalysis:
+    """Return a fresh catalytic-triad analysis."""
+
     return CatalyticTriadAnalysis()
 
 
 @pytest.fixture
-def default_settings():
-    """Return default CatalyticTriadSettings with two pairs."""
+def default_settings() -> CatalyticTriadSettings:
+    """Return default catalytic-triad settings with two pairs."""
+
     return CatalyticTriadSettings(
         name="LipA_triad",
         pairs=[
@@ -62,8 +72,9 @@ def default_settings():
 
 
 @pytest.fixture
-def condition():
-    """Return a mock Condition."""
+def condition() -> Condition:
+    """Return a representative comparison condition."""
+
     return Condition(
         label="No Polymer",
         config_path=Path("/fake/config.yaml"),
@@ -72,270 +83,178 @@ def condition():
     )
 
 
-def _make_mock_pair_result(pair_idx: int, replicate: int) -> MagicMock:
-    """Create a mock DistancePairResult for one pair in one replicate."""
-    pr = MagicMock()
-    pr.pair_label = f"Pair_{pair_idx}"
-    pr.selection1 = f"resid {100 + pair_idx} and name OD1"
-    pr.selection2 = f"resid {200 + pair_idx} and name ND1"
-    pr.mean_distance = 3.0 + 0.1 * pair_idx
-    pr.std_distance = 0.5
-    pr.sem_distance = 0.1
-    pr.median_distance = 3.0 + 0.1 * pair_idx
-    pr.min_distance = 2.0
-    pr.max_distance = 5.0
-    pr.replicate = replicate
-    pr.threshold = 3.5
-    pr.fraction_below_threshold = 0.7 - 0.05 * pair_idx
-    pr.kde_peak = 2.8 + 0.1 * pair_idx
-    pr.distances = [3.0, 3.2, 2.8, 3.5, 2.9]  # Needed for aggregation stats
-    return pr
+def _collector_context(
+    tmp_path: Path,
+    condition: Condition,
+    settings: CatalyticTriadSettings,
+    *,
+    replicate: int = 1,
+) -> MDACollectorContext:
+    """Build an MDA collector context for synthetic triad jobs."""
+
+    from polyzymd.analyses.base import ReplicateContext
+
+    output_dir = tmp_path / f"run_{replicate}"
+    return MDACollectorContext(
+        analysis_name="catalytic_triad",
+        replicate_context=ReplicateContext(
+            condition=condition,
+            replicate=replicate,
+            sim_config=condition.sim_config,
+            output_dir=output_dir,
+            equilibration="10ns",
+            recompute=True,
+            settings=settings,
+        ),
+        frame_selection=FrameSelection(
+            start=0,
+            stop=4,
+            step=1,
+            n_frames_total=4,
+            timestep_ps=10.0,
+        ),
+        universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=replicate),
+        artifact_store=ArtifactStore(output_dir),
+        settings_fingerprint=settings_fingerprint(settings),
+    )
 
 
-def _make_mock_triad_result(replicate: int, sim_contact: float = 0.65) -> MagicMock:
-    """Create a mock TriadResult with realistic fields."""
-    result = MagicMock()
-    result.replicate = replicate
-    result.triad_name = "LipA_triad"
-    result.triad_description = "Ser-His-Asp catalytic triad"
-    result.pair_results = [
-        _make_mock_pair_result(0, replicate),
-        _make_mock_pair_result(1, replicate),
-    ]
-    result.threshold = 3.5
-    result.simultaneous_contact_fraction = sim_contact
-    result.n_frames_simultaneous = int(sim_contact * 1000)
-    result.n_frames_total = 1200
-    result.n_frames_used = 1000
-    result.config_hash = "hash123"
-    result.equilibration_time = 10.0
-    result.equilibration_unit = "ns"
-    result.selection_string = "(resid 133 : resid 156); (resid 156 : resid 77)"
-    return result
+def _completed_pair_distance_job(distance_matrix: np.ndarray) -> MDAJobResult:
+    """Return a completed job with pair-distance analysis results."""
+
+    results = SimpleNamespace(
+        distance_matrix=np.asarray(distance_matrix, dtype=np.float64),
+        frames=np.arange(distance_matrix.shape[1], dtype=np.int64),
+        times_ps=np.arange(distance_matrix.shape[1], dtype=np.float64) * 10.0,
+        warnings=[],
+    )
+    analysis = SimpleNamespace(results=results, frames=results.frames, times=results.times_ps)
+    return MDAJobResult(
+        name="triad_pair_distances",
+        analysis=analysis,
+        results=results,
+        run_kwargs={},
+        frame_selection=FrameSelection(start=0, stop=distance_matrix.shape[1], step=1),
+        backend_policy=MDABackendPolicy(),
+        universe_policy=MDAUniversePolicy(condition_label="No Polymer", replicate=1),
+    )
 
 
-# ============================================================================
-# Test: Discovery
-# ============================================================================
+def _replicate_artifact(
+    tmp_path: Path,
+    condition: Condition,
+    settings: CatalyticTriadSettings,
+    distance_matrix: np.ndarray,
+    *,
+    replicate: int,
+) -> ReplicateArtifact:
+    """Collect and persist one synthetic triad replicate artifact."""
+
+    ctx = _collector_context(tmp_path, condition, settings, replicate=replicate)
+    artifact = TriadArtifactCollector()(ctx, [_completed_pair_distance_job(distance_matrix)])
+    ArtifactStore(ctx.output_dir).write_replicate_result(artifact)
+    return artifact
 
 
-class TestTriadDiscovery:
-    """Test that CatalyticTriadAnalysis is auto-discovered by the plugin system."""
+class TestTriadDiscoveryAndSettings:
+    """Tests for discovery, class variables, and settings."""
 
-    def test_discovery_finds_catalytic_triad(self):
-        from polyzymd.analyses.discovery import clear_cache, list_analyses
+    def test_discovery_finds_catalytic_triad(self) -> None:
+        """Catalytic triad should be auto-discovered by plugin discovery."""
+
+        from polyzymd.analyses.discovery import clear_cache, get_analysis, list_analyses
 
         clear_cache()
-        analyses = list_analyses()
-        assert "catalytic_triad" in analyses
-        assert analyses["catalytic_triad"] is CatalyticTriadAnalysis
+        assert list_analyses()["catalytic_triad"] is CatalyticTriadAnalysis
+        with pytest.raises(KeyError, match="Unknown analysis"):
+            get_analysis("triad")
 
-    def test_get_analysis_by_name(self):
-        from polyzymd.analyses.discovery import clear_cache, get_analysis
+    def test_class_vars_use_mda_replicate_artifacts(
+        self, triad_analysis: CatalyticTriadAnalysis
+    ) -> None:
+        """The plugin should expose MDA jobs and canonical aggregate artifacts."""
 
-        clear_cache()
-        cls = get_analysis("catalytic_triad")
-        assert cls is CatalyticTriadAnalysis
-
-    def test_get_analysis_by_alias(self):
-        from polyzymd.analyses.discovery import clear_cache, get_analysis
-
-        clear_cache()
-        cls = get_analysis("triad")
-        assert cls is CatalyticTriadAnalysis
-
-    def test_list_all_names_includes_alias(self):
-        from polyzymd.analyses.discovery import clear_cache, list_all_names
-
-        clear_cache()
-        all_names = list_all_names()
-        assert "catalytic_triad" in all_names
-        assert "triad" in all_names
-
-
-# ============================================================================
-# Test: Class variables
-# ============================================================================
-
-
-class TestTriadClassVars:
-    """Test class variables and settings."""
-
-    def test_name(self, triad_analysis):
         assert triad_analysis.name == "catalytic_triad"
+        assert triad_analysis.ReplicateResultClass is None
+        assert triad_analysis.AggregatedResultClass is None
+        assert "run_replicate" not in type(triad_analysis).__dict__
 
-    def test_aliases(self, triad_analysis):
-        assert triad_analysis.aliases == ("triad",)
+    def test_extract_metrics_metadata_preserves_primary_metric(
+        self, triad_analysis: CatalyticTriadAnalysis
+    ) -> None:
+        """Metric extraction should preserve the primary comparison metadata."""
 
-    def test_dependencies_empty(self, triad_analysis):
-        assert triad_analysis.dependencies == ()
-
-    def test_min_replicates(self, triad_analysis):
-        assert triad_analysis.min_replicates == 2
-
-    def test_repr(self, triad_analysis):
-        assert repr(triad_analysis) == "<CatalyticTriadAnalysis(name='catalytic_triad')>"
-
-    def test_settings_type(self, triad_analysis):
-        assert triad_analysis.Settings is CatalyticTriadSettings
-
-
-# ============================================================================
-# Test: Settings validation
-# ============================================================================
-
-
-class TestCatalyticTriadSettings:
-    """Test CatalyticTriadSettings validation and defaults."""
-
-    def test_valid_settings(self, default_settings):
-        assert default_settings.name == "LipA_triad"
-        assert len(default_settings.pairs) == 2
-        assert default_settings.threshold == 3.5
-        assert default_settings.description == "Ser-His-Asp catalytic triad"
-
-    def test_default_threshold(self):
-        s = CatalyticTriadSettings(
-            pairs=[
-                TriadPairSettings(label="pair1", selection_a="resid 1", selection_b="resid 2"),
-            ],
+        summary = MagicMock(
+            overall_simultaneous_contact=0.72,
+            sem_simultaneous_contact=0.04,
+            per_replicate_simultaneous=[0.70, 0.72, 0.74],
         )
-        assert s.threshold == 3.5
+        metric = triad_analysis.extract_metrics(summary)[SIMULTANEOUS_CONTACT_METRIC]
 
-    def test_default_name(self):
-        s = CatalyticTriadSettings(
-            pairs=[
-                TriadPairSettings(label="pair1", selection_a="resid 1", selection_b="resid 2"),
-            ],
-        )
-        assert s.name == "catalytic_triad"
+        assert metric.name == SIMULTANEOUS_CONTACT_METRIC
+        assert metric.higher_is_better is True
+        assert metric.direction_labels == ("worsening", "unchanged", "improving")
 
-    def test_empty_pairs_raises(self):
+    def test_settings_validation(self, default_settings: CatalyticTriadSettings) -> None:
+        """Settings should validate required pairs and expose labels."""
+
+        assert default_settings.n_pairs == 2
+        assert default_settings.get_pair_labels() == ["Asp133-His156", "His156-Ser77"]
         with pytest.raises(ValueError, match="At least one distance pair"):
             CatalyticTriadSettings(pairs=[])
 
-    def test_n_pairs(self, default_settings):
-        assert default_settings.n_pairs == 2
 
-    def test_get_pair_selections(self, default_settings):
-        sels = default_settings.get_pair_selections()
-        assert len(sels) == 2
-        assert sels[0] == ("resid 133 and name OD1", "resid 156 and name ND1")
+class TestTriadMDACollector:
+    """Tests for triad pair-distance artifact collection."""
 
-    def test_get_pair_labels(self, default_settings):
-        labels = default_settings.get_pair_labels()
-        assert labels == ["Asp133-His156", "His156-Ser77"]
+    def test_collector_uses_strict_threshold_and_writes_sidecar(
+        self, tmp_path: Path, condition: Condition, default_settings: CatalyticTriadSettings
+    ) -> None:
+        """Simultaneous contact should require every pair to be strictly below threshold."""
 
-    def test_custom_threshold(self):
-        s = CatalyticTriadSettings(
-            name="test",
-            threshold=4.0,
-            pairs=[
-                TriadPairSettings(label="pair1", selection_a="resid 1", selection_b="resid 2"),
+        matrix = np.asarray(
+            [
+                [3.0, 3.5, 3.49, 3.2],
+                [3.1, 3.0, 3.6, 3.4],
             ],
+            dtype=np.float64,
         )
-        assert s.threshold == 4.0
+        ctx = _collector_context(tmp_path, condition, default_settings)
 
-    def test_no_description(self):
-        s = CatalyticTriadSettings(
-            pairs=[
-                TriadPairSettings(label="pair1", selection_a="resid 1", selection_b="resid 2"),
-            ],
-        )
-        assert s.description is None
+        with patch(
+            "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+            return_value="1.3.0",
+        ):
+            artifact = TriadArtifactCollector()(ctx, [_completed_pair_distance_job(matrix)])
 
+        assert artifact.analysis_name == "catalytic_triad"
+        assert artifact.payload["simultaneous_contact_fraction"] == pytest.approx(0.5)
+        assert artifact.payload["n_frames_simultaneous"] == 2
+        assert artifact.payload["metrics"][SIMULTANEOUS_CONTACT_METRIC] == pytest.approx(50.0)
+        assert len(artifact.sidecars) == 1
 
-# ============================================================================
-# Test: compute_replicate
-# ============================================================================
-
-
-def _make_mock_distance_result(n_pairs: int = 2, n_frames: int = 1000):
-    """Create a mock DistanceResult with *real* DistancePairResult objects.
-
-    Uses genuine ``DistancePairResult`` instances so that ``model_copy()``
-    works correctly and ``TriadResult`` Pydantic validation passes.
-    """
-    import numpy as np
-
-    from polyzymd.analyses.distances._results import DistancePairResult
-
-    mock_result = MagicMock()
-    mock_result.n_frames_total = n_frames + 200
-    mock_result.n_frames_used = n_frames
-
-    pair_results = []
-    for i in range(n_pairs):
-        rng = np.random.default_rng(42 + i)
-        dists = rng.normal(3.2, 0.8, n_frames).tolist()
-
-        pr = DistancePairResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=None,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string=f"resid {100 + i} and name OD1 : resid {200 + i} and name ND1",
-            pair_label=f"orig_pair_{i}",
-            selection1=f"resid {100 + i} and name OD1",
-            selection2=f"resid {200 + i} and name ND1",
-            distances=dists,
-            mean_distance=float(np.mean(dists)),
-            std_distance=float(np.std(dists)),
-            median_distance=float(np.median(dists)),
-            min_distance=float(np.min(dists)),
-            max_distance=float(np.max(dists)),
-            sem_distance=0.1,
-            threshold=3.5,
-            fraction_below_threshold=float(np.mean(np.array(dists) < 3.5)),
-            kde_peak=2.8 + 0.1 * i,
-            n_frames_total=n_frames + 200,
-            n_frames_used=n_frames,
-        )
-        pair_results.append(pr)
-
-    mock_result.pair_results = pair_results
-    return mock_result
+        sidecar_path = ArtifactStore(ctx.output_dir).validate_sidecar(artifact.sidecars[0])
+        with np.load(sidecar_path) as npz_data:
+            np.testing.assert_allclose(npz_data["distance_matrix"], matrix)
+            np.testing.assert_array_equal(
+                npz_data["simultaneous_contact"], np.asarray([True, False, False, True])
+            )
+            assert npz_data["thresholds"].tolist() == [3.5, 3.5]
+            assert npz_data["pair_labels"].tolist() == ["Asp133-His156", "His156-Ser77"]
 
 
-class TestComputeReplicate:
-    """Test CatalyticTriadAnalysis.compute_replicate with inlined computation."""
+class TestTriadAggregationAndComparison:
+    """Tests for artifact aggregation and scalar comparison compatibility."""
 
-    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
-    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
-    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
-    @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analyses.distances.DistanceCalculator")
-    def test_computes_triad_inline(
+    def test_mda_not_configured_fails_without_scalar_fallback(
         self,
-        MockDistCalc,
-        MockLoader,
-        mock_hash,
-        mock_validate_hash,
-        mock_version,
-        triad_analysis,
-        condition,
-        tmp_path,
-        default_settings,
-    ):
-        """compute_replicate should use DistanceCalculator and compute simultaneous contact."""
-
-        # Mock TrajectoryLoader
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-        mock_u = MagicMock()
-        # Make select_atoms return non-empty for validation
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=1)
-        mock_u.select_atoms.return_value = mock_atoms
-        mock_loader_inst.load_universe.return_value = mock_u
-        mock_loader_inst.get_timestep.return_value = 10.0
-
-        # Mock DistanceCalculator
-        mock_dist_result = _make_mock_distance_result(n_pairs=2, n_frames=1000)
-        mock_dist_inst = MagicMock()
-        mock_dist_inst.compute.return_value = mock_dist_result
-        MockDistCalc.return_value = mock_dist_inst
+        triad_analysis: CatalyticTriadAnalysis,
+        condition: Condition,
+        tmp_path: Path,
+        default_settings: CatalyticTriadSettings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A missing MDA job path should fail closed before scalar fallback."""
 
         ctx = ReplicateContext(
             condition=condition,
@@ -343,350 +262,381 @@ class TestComputeReplicate:
             sim_config=condition.sim_config,
             output_dir=tmp_path / "run_1",
             equilibration="10ns",
-            recompute=True,  # skip cache check
+            recompute=True,
             settings=default_settings,
         )
+        monkeypatch.setattr(
+            "polyzymd.analyses.mda.lifecycle.run_mda_replicate_jobs",
+            lambda *_args: None,
+        )
 
-        result = triad_analysis.compute_replicate(ctx, 1)
+        with pytest.raises(PluginContractError, match=r"build_mda_jobs\(\) returned None"):
+            triad_analysis._run_compute_stage(ctx, replicate=1)
 
-        # Verify DistanceCalculator was created with correct args
-        MockDistCalc.assert_called_once()
-        call_kwargs = MockDistCalc.call_args
-        assert call_kwargs.kwargs["config"] is condition.sim_config
-        assert len(call_kwargs.kwargs["pairs"]) == 2
-
-        # Verify result has expected triad fields
-        assert result.replicate == 1
-        assert result.triad_name == "LipA_triad"
-        assert result.threshold == 3.5
-        assert len(result.pair_results) == 2
-        # Pair labels should be updated from settings
-        assert result.pair_results[0].pair_label == "Asp133-His156"
-        assert result.pair_results[1].pair_label == "His156-Ser77"
-        # Simultaneous contact fraction should be computed
-        assert 0.0 <= result.simultaneous_contact_fraction <= 1.0
-        assert result.n_frames_used == 1000
-
-    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
-    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
-    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
-    @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analyses.distances.DistanceCalculator")
-    def test_passes_recompute_flag(
+    def test_direct_scalar_runner_path_is_removed(
         self,
-        MockDistCalc,
-        MockLoader,
-        mock_hash,
-        mock_validate_hash,
-        mock_version,
-        triad_analysis,
-        condition,
-        tmp_path,
-        default_settings,
-    ):
-        """recompute flag should be passed to DistanceCalculator.compute()."""
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-        mock_u = MagicMock()
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=1)
-        mock_u.select_atoms.return_value = mock_atoms
-        mock_loader_inst.load_universe.return_value = mock_u
-        mock_loader_inst.get_timestep.return_value = 10.0
+        triad_analysis: CatalyticTriadAnalysis,
+    ) -> None:
+        """The old runner hook should not exist on catalytic triad."""
 
-        mock_dist_result = _make_mock_distance_result(n_pairs=2, n_frames=500)
-        mock_dist_inst = MagicMock()
-        mock_dist_inst.compute.return_value = mock_dist_result
-        MockDistCalc.return_value = mock_dist_inst
+        assert "build_runner" not in type(triad_analysis).__dict__
+        assert not hasattr(triad_analysis, "_run_replicate_via_runner")
 
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=2,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_2",
-            equilibration="5ns",
-            recompute=True,
-            settings=default_settings,
-        )
-
-        triad_analysis.compute_replicate(ctx, 2)
-
-        mock_dist_inst.compute.assert_called_once_with(
-            replicate=2,
-            save=False,
-            recompute=True,
-            store_distributions=True,
-        )
-
-    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
-    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
-    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
-    @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analyses.distances.DistanceCalculator")
-    def test_caches_result_file(
+    def test_aggregate_requires_replicate_artifacts(
         self,
-        MockDistCalc,
-        MockLoader,
-        mock_hash,
-        mock_validate_hash,
-        mock_version,
-        triad_analysis,
-        condition,
-        tmp_path,
-        default_settings,
-    ):
-        """Result should be saved to the output directory."""
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-        mock_u = MagicMock()
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=1)
-        mock_u.select_atoms.return_value = mock_atoms
-        mock_loader_inst.load_universe.return_value = mock_u
-        mock_loader_inst.get_timestep.return_value = 10.0
-
-        mock_dist_result = _make_mock_distance_result(n_pairs=2, n_frames=100)
-        mock_dist_inst = MagicMock()
-        mock_dist_inst.compute.return_value = mock_dist_result
-        MockDistCalc.return_value = mock_dist_inst
-
-        output_dir = tmp_path / "run_1"
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=output_dir,
-            equilibration="10ns",
-            recompute=True,
-            settings=default_settings,
-        )
-
-        triad_analysis.compute_replicate(ctx, 1)
-
-        # Check that result JSON was written
-        json_files = list(output_dir.glob("*.json"))
-        assert len(json_files) == 1
-        assert "triad_LipA_triad_eq10ns.json" in json_files[0].name
-
-
-# ============================================================================
-# Test: aggregate
-# ============================================================================
-
-
-class TestAggregate:
-    """Test CatalyticTriadAnalysis.aggregate."""
-
-    def test_aggregates_results(self, triad_analysis, condition, tmp_path, default_settings):
-        """Test aggregate produces a TriadAggregatedResult with correct stats."""
-        results = [_make_mock_triad_result(i, sim_contact=0.6 + 0.05 * i) for i in range(1, 4)]
-        agg_dir = tmp_path / "aggregated"
+        triad_analysis: CatalyticTriadAnalysis,
+        condition: Condition,
+        tmp_path: Path,
+        default_settings: CatalyticTriadSettings,
+    ) -> None:
+        """Non-artifact replicate results should be rejected with recompute guidance."""
 
         ctx = AggregateContext(
             condition=condition,
-            replicates=(1, 2, 3),
-            output_dir=agg_dir,
-            equilibration="10ns",
-            settings=default_settings,
-        )
-
-        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
-            result = triad_analysis.aggregate(ctx, results)
-
-        assert result.n_replicates == 3
-        assert result.replicates == [1, 2, 3]
-        assert result.triad_name == "LipA_triad"
-        assert len(result.pair_results) == 2
-        assert len(result.per_replicate_simultaneous) == 3
-        # Mean of 0.65, 0.70, 0.75
-        assert result.overall_simultaneous_contact == pytest.approx(0.7, abs=0.01)
-        assert result.sem_simultaneous_contact > 0
-
-    def test_aggregate_saves_result_file(
-        self, triad_analysis, condition, tmp_path, default_settings
-    ):
-        """Verify aggregated result is saved to the output directory."""
-        results = [_make_mock_triad_result(i, sim_contact=0.65) for i in range(1, 3)]
-        agg_dir = tmp_path / "aggregated"
-
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1, 2),
-            output_dir=agg_dir,
-            equilibration="10ns",
-            settings=default_settings,
-        )
-
-        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
-            triad_analysis.aggregate(ctx, results)
-
-        json_files = list(agg_dir.glob("*.json"))
-        assert len(json_files) == 1
-        assert "triad_LipA_triad_reps1-2_eq10ns.json" in json_files[0].name
-
-    def test_aggregate_preserves_per_replicate_contact(
-        self, triad_analysis, condition, tmp_path, default_settings
-    ):
-        """Verify per_replicate_simultaneous has the correct values."""
-        results = [_make_mock_triad_result(i, sim_contact=0.5 + 0.1 * i) for i in range(1, 4)]
-
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1, 2, 3),
+            replicates=(1,),
             output_dir=tmp_path / "aggregated",
             equilibration="10ns",
             settings=default_settings,
         )
 
-        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
-            result = triad_analysis.aggregate(ctx, results)
+        with pytest.raises(TypeError, match="recompute the condition"):
+            triad_analysis.aggregate(ctx, [object()])
 
-        assert result.per_replicate_simultaneous == pytest.approx([0.6, 0.7, 0.8])
+    def test_aggregate_returns_condition_artifact_payload(
+        self,
+        triad_analysis: CatalyticTriadAnalysis,
+        condition: Condition,
+        tmp_path: Path,
+        default_settings: CatalyticTriadSettings,
+    ) -> None:
+        """Aggregation should return artifacts and leave persistence to the framework."""
 
+        artifacts = [
+            _replicate_artifact(
+                tmp_path,
+                condition,
+                default_settings,
+                np.asarray([[3.0, 3.8, 3.1, 3.2], [3.1, 3.0, 3.7, 3.2]]),
+                replicate=1,
+            ),
+            _replicate_artifact(
+                tmp_path,
+                condition,
+                default_settings,
+                np.asarray([[3.0, 3.2, 3.1, 3.2], [3.1, 3.0, 3.2, 3.2]]),
+                replicate=2,
+            ),
+        ]
+        two_replicate_condition = Condition(
+            label=condition.label,
+            config_path=condition.config_path,
+            replicates=(1, 2),
+            sim_config=condition.sim_config,
+        )
+        ctx = AggregateContext(
+            condition=two_replicate_condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="10ns",
+            settings=default_settings,
+        )
 
-# ============================================================================
-# Test: extract_metrics
-# ============================================================================
+        artifact = triad_analysis.aggregate(ctx, artifacts)
 
-
-class TestExtractMetrics:
-    """Test CatalyticTriadAnalysis.extract_metrics for default comparison pipeline."""
-
-    def test_returns_simultaneous_contact_metric(self, triad_analysis):
-        summary = MagicMock()
-        summary.overall_simultaneous_contact = 0.72
-        summary.sem_simultaneous_contact = 0.04
-        summary.per_replicate_simultaneous = [0.70, 0.72, 0.74]
-
-        metrics = triad_analysis.extract_metrics(summary)
-
-        assert "simultaneous_contact_fraction" in metrics
-        m = metrics["simultaneous_contact_fraction"]
-        assert isinstance(m, MetricValue)
-        assert m.name == "simultaneous_contact_fraction"
-        assert m.mean == 72.0
-        assert m.sem == 4.0
-        assert m.replicate_values == [70.0, 72.0, 74.0]
-        assert m.higher_is_better is True
-        assert m.direction_labels == ("worsening", "unchanged", "improving")
-
-    def test_returns_single_metric(self, triad_analysis):
-        summary = MagicMock()
-        summary.overall_simultaneous_contact = 0.5
-        summary.sem_simultaneous_contact = 0.1
-        summary.per_replicate_simultaneous = [0.4, 0.6]
-
-        metrics = triad_analysis.extract_metrics(summary)
-        assert len(metrics) == 1
-
-
-# ============================================================================
-# Test: AggregatedResultClass and _deserialize_result
-# ============================================================================
-
-
-class TestDeserializeResult:
-    """Test CatalyticTriadAnalysis.AggregatedResultClass and _deserialize_result."""
-
-    def test_aggregated_result_class_set(self, triad_analysis):
-        """AggregatedResultClass should be TriadAggregatedResult."""
-        from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
-
-        assert triad_analysis.AggregatedResultClass is TriadAggregatedResult
-
-    def test_loads_aggregated_result(self, triad_analysis, tmp_path):
-        mock_loaded = MagicMock()
-        with patch.object(
-            triad_analysis.AggregatedResultClass, "load", return_value=mock_loaded
-        ) as mock_load:
-            result = triad_analysis._deserialize_result(tmp_path / "test.json")
-
-            mock_load.assert_called_once_with(tmp_path / "test.json")
-            assert result is mock_loaded
-
-
-# ============================================================================
-# Test: filter_conditions (default behavior — keeps all)
-# ============================================================================
-
-
-class TestFilterConditions:
-    """Catalytic triad applies to all conditions — filter should keep all."""
-
-    def test_keeps_all_conditions(self, triad_analysis):
-        conditions = [
-            Condition(
-                label=f"Cond {i}",
-                config_path=Path(f"/fake/config_{i}.yaml"),
-                replicates=(1, 2),
-                sim_config=MagicMock(),
-            )
-            for i in range(4)
+        assert artifact.artifact_type == "condition"
+        assert not (tmp_path / "aggregated" / "result.json").exists()
+        assert artifact.payload["metrics"][SIMULTANEOUS_CONTACT_METRIC]["values"] == [50.0, 100.0]
+        assert artifact.payload["metric_metadata"][SIMULTANEOUS_CONTACT_METRIC] == {
+            "label": "Simultaneous Contact",
+            "unit": "%",
+            "higher_is_better": True,
+            "direction_labels": ("worsening", "unchanged", "improving"),
+        }
+        assert artifact.payload["overall_simultaneous_contact"] == pytest.approx(0.75)
+        assert artifact.payload["per_replicate_simultaneous"] == [0.5, 1.0]
+        assert [pair["pair_label"] for pair in artifact.payload["pair_results"]] == [
+            "Asp133-His156",
+            "His156-Ser77",
         ]
 
-        filtered = triad_analysis.filter_conditions(conditions)
-        assert len(filtered) == 4
+    def test_compare_condition_artifacts_preserves_triad_metadata(
+        self,
+        triad_analysis: CatalyticTriadAnalysis,
+        condition: Condition,
+        tmp_path: Path,
+        default_settings: CatalyticTriadSettings,
+    ) -> None:
+        """Real condition artifacts should compare through the MDA artifact engine."""
+
+        control = Condition(
+            label="No Polymer",
+            config_path=Path("/fake/control.yaml"),
+            replicates=(1, 2),
+            sim_config=condition.sim_config,
+        )
+        peg = Condition(
+            label="PEG",
+            config_path=Path("/fake/peg.yaml"),
+            replicates=(1, 2),
+            sim_config=condition.sim_config,
+        )
+        control_base = tmp_path / "control" / "catalytic_triad"
+        peg_base = tmp_path / "peg" / "catalytic_triad"
+        control_artifact = triad_analysis.aggregate(
+            AggregateContext(
+                condition=control,
+                replicates=(1, 2),
+                output_dir=control_base / "aggregated",
+                equilibration="10ns",
+                settings=default_settings,
+            ),
+            [
+                _replicate_artifact(
+                    control_base,
+                    control,
+                    default_settings,
+                    np.asarray([[3.0, 3.8, 3.1, 3.2], [3.1, 3.0, 3.7, 3.2]]),
+                    replicate=1,
+                ),
+                _replicate_artifact(
+                    control_base,
+                    control,
+                    default_settings,
+                    np.asarray([[3.0, 3.2, 3.1, 3.8], [3.1, 3.0, 3.2, 3.2]]),
+                    replicate=2,
+                ),
+            ],
+        )
+        peg_artifact = triad_analysis.aggregate(
+            AggregateContext(
+                condition=peg,
+                replicates=(1, 2),
+                output_dir=peg_base / "aggregated",
+                equilibration="10ns",
+                settings=default_settings,
+            ),
+            [
+                _replicate_artifact(
+                    peg_base,
+                    peg,
+                    default_settings,
+                    np.asarray([[3.0, 3.2, 3.1, 3.8], [3.1, 3.0, 3.2, 3.2]]),
+                    replicate=1,
+                ),
+                _replicate_artifact(
+                    peg_base,
+                    peg,
+                    default_settings,
+                    np.asarray([[3.0, 3.2, 3.1, 3.2], [3.1, 3.0, 3.2, 3.2]]),
+                    replicate=2,
+                ),
+            ],
+        )
+        ctx = ComparisonContext(
+            name="triad-project",
+            conditions=[control, peg],
+            excluded_conditions=[],
+            control_label="No Polymer",
+            analysis_dirs={"No Polymer": control_base, "PEG": peg_base},
+            results_dir=tmp_path / "results",
+            equilibration="10ns",
+            settings=default_settings,
+            fdr_alpha=0.05,
+            ttest_method="welch",
+            posthoc_method="ttest_bh",
+            aggregated_results={"No Polymer": control_artifact, "PEG": peg_artifact},
+        )
+
+        comparison = triad_analysis.compare(ctx)
+
+        assert isinstance(comparison, ComparisonArtifact)
+        assert comparison.payload["ranking"] == ["PEG", "No Polymer"]
+        metadata = comparison.payload["metric_metadata"][SIMULTANEOUS_CONTACT_METRIC]
+        assert metadata["label"] == "Simultaneous Contact"
+        assert metadata["unit"] == "%"
+        assert metadata["higher_is_better"] is True
+        assert metadata["direction_labels"] == ["worsening", "unchanged", "improving"]
+        assert comparison.payload["pairwise_comparisons"][0]["direction"] == "improving"
+
+    def test_format_accepts_comparison_artifact(
+        self,
+        triad_analysis: CatalyticTriadAnalysis,
+    ) -> None:
+        """ComparisonArtifact output should use triad-specific scalar formatting."""
+
+        comparison = ComparisonArtifact(
+            analysis_name="catalytic_triad",
+            conditions=["No Polymer", "PEG"],
+            control_label="No Polymer",
+            effective_control="No Polymer",
+            payload={
+                "condition_summaries": [
+                    {
+                        "label": "No Polymer",
+                        "n_replicates": 2,
+                        "simultaneous_contact_fraction_mean": 62.5,
+                        "simultaneous_contact_fraction_sem": 12.5,
+                        "simultaneous_contact_fraction_replicate_values": [50.0, 75.0],
+                    },
+                    {
+                        "label": "PEG",
+                        "n_replicates": 2,
+                        "simultaneous_contact_fraction_mean": 87.5,
+                        "simultaneous_contact_fraction_sem": 12.5,
+                        "simultaneous_contact_fraction_replicate_values": [75.0, 100.0],
+                    },
+                ],
+                "pairwise_comparisons": [
+                    {
+                        "condition_a": "No Polymer",
+                        "condition_b": "PEG",
+                        "metric": SIMULTANEOUS_CONTACT_METRIC,
+                        "t_statistic": 1.0,
+                        "p_value": 0.5,
+                        "p_value_adjusted": 0.5,
+                        "posthoc_method": "ttest_bh",
+                        "cohens_d": 1.0,
+                        "effect_size_interpretation": "large",
+                        "direction": "improving",
+                        "significant": False,
+                        "percent_change": 40.0,
+                        "testable": True,
+                    }
+                ],
+                "anova": [],
+                "ranking": ["PEG", "No Polymer"],
+                "rankings_by_metric": {SIMULTANEOUS_CONTACT_METRIC: ["PEG", "No Polymer"]},
+                "metric_metadata": {
+                    SIMULTANEOUS_CONTACT_METRIC: {
+                        "label": "Simultaneous Contact",
+                        "unit": "%",
+                        "higher_is_better": True,
+                        "direction_labels": ["worsening", "unchanged", "improving"],
+                    }
+                },
+                "statistical_parameters": {
+                    "fdr_alpha": 0.05,
+                    "ttest_method": "welch",
+                    "posthoc_method": "ttest_bh",
+                    "control_label": "No Polymer",
+                    "effective_control": "No Polymer",
+                    "equilibration": "10ns",
+                },
+            },
+        )
+
+        formatted = triad_analysis.format(comparison, "text")
+        json_formatted = triad_analysis.format(comparison, "json")
+
+        assert "Catalytic Triad Comparison" in formatted
+        assert "Simultaneous Contact" in formatted
+        assert "PEG" in formatted
+        assert "artifact_type" not in formatted
+        assert '"artifact_type": "comparison"' in json_formatted
+        assert '"metric_metadata"' in json_formatted
+
+    def test_extract_metrics_preserves_percent_scaling(
+        self, triad_analysis: CatalyticTriadAnalysis
+    ) -> None:
+        """Non-canonical metric extraction should still report percentages."""
+
+        summary = MagicMock(
+            overall_simultaneous_contact=0.72,
+            sem_simultaneous_contact=0.04,
+            per_replicate_simultaneous=[0.70, 0.72, 0.74],
+        )
+
+        metrics = triad_analysis.extract_metrics(summary)
+
+        metric = metrics[SIMULTANEOUS_CONTACT_METRIC]
+        assert isinstance(metric, MetricValue)
+        assert metric.mean == 72.0
+        assert metric.sem == 4.0
+        assert metric.replicate_values == [70.0, 72.0, 74.0]
+
+    def test_deserialize_rejects_noncanonical_json(
+        self, triad_analysis: CatalyticTriadAnalysis, tmp_path: Path
+    ) -> None:
+        """Non-canonical triad JSON should not be loaded as a canonical aggregate."""
+
+        noncanonical_path = tmp_path / "triad_noncanonical.json"
+        noncanonical_path.write_text(
+            '{"analysis_type": "catalytic_triad_aggregated"}', encoding="utf-8"
+        )
+
+        with pytest.raises(ValueError, match="canonical MDAnalysis condition artifact"):
+            triad_analysis._deserialize_result(noncanonical_path)
 
 
-# ============================================================================
-# Test: _make_aggregated_filename
-# ============================================================================
+class TestTriadPlot:
+    """Tests for plotting helpers and artifact-only loading."""
 
+    def test_threshold_bars_overlay_pair_and_simultaneous_replicates(self) -> None:
+        """Threshold bars should pass per-replicate percentages to shared scatter."""
 
-class TestMakeAggregatedFilename:
-    """Test backward-compatible filename generation."""
+        import matplotlib.pyplot as plt
 
-    def test_contiguous_replicates(self):
-        result = MagicMock()
-        result.equilibration_time = 10.0
-        result.equilibration_unit = "ns"
-        result.triad_name = "LipA_triad"
-
-        filename = CatalyticTriadAnalysis._make_aggregated_filename((1, 2, 3, 4, 5), result)
-        assert filename == "triad_LipA_triad_reps1-5_eq10ns.json"
-
-    def test_non_contiguous_replicates(self):
-        result = MagicMock()
-        result.equilibration_time = 100.0
-        result.equilibration_unit = "ns"
-        result.triad_name = "LipA_triad"
-
-        filename = CatalyticTriadAnalysis._make_aggregated_filename((1, 3, 5), result)
-        assert filename == "triad_LipA_triad_reps1_3_5_eq100ns.json"
-
-    def test_single_pair(self):
-        result = MagicMock()
-        result.equilibration_time = 0.0
-        result.equilibration_unit = "ns"
-        result.triad_name = "LipA_triad"
-
-        filename = CatalyticTriadAnalysis._make_aggregated_filename((1, 2), result)
-        assert filename == "triad_LipA_triad_reps1-2_eq0ns.json"
-
-    def test_name_sanitization(self):
-        result = MagicMock()
-        result.equilibration_time = 10.0
-        result.equilibration_unit = "ns"
-        result.triad_name = "Ser His/Asp triad"
-
-        filename = CatalyticTriadAnalysis._make_aggregated_filename((1, 2, 3), result)
-        assert filename == "triad_Ser_His-Asp_triad_reps1-3_eq10ns.json"
-
-
-# ============================================================================
-# Test: plot
-# ============================================================================
-
-
-class TestPlot:
-    """Test CatalyticTriadAnalysis.plot delegates to inlined plotting helpers."""
-
-    def test_plot_returns_empty_on_no_conditions(self, triad_analysis, tmp_path, default_settings):
+        from polyzymd.analyses.catalytic_triad._plotters import plot_triad_threshold_bars
         from polyzymd.config.comparison import PlotSettings
 
+        pair_a = MagicMock(
+            pair_label="Asp-His",
+            selection1="resid 1",
+            selection2="resid 2",
+            overall_fraction_below=0.5,
+            sem_fraction_below=0.05,
+            per_replicate_fractions_below=[0.4, 0.6],
+        )
+        pair_b = MagicMock(
+            pair_label="His-Ser",
+            selection1="resid 2",
+            selection2="resid 3",
+            overall_fraction_below=0.25,
+            sem_fraction_below=0.02,
+            per_replicate_fractions_below=[0.2, 0.3],
+        )
+        result = MagicMock(
+            pair_results=[pair_a, pair_b],
+            overall_simultaneous_contact=0.1,
+            sem_simultaneous_contact=0.01,
+            per_replicate_simultaneous=[0.08, 0.12],
+            threshold=3.5,
+        )
+        result.get_pair_labels.return_value = ["Asp-His", "His-Ser"]
+
+        with patch(
+            "polyzymd.analyses.catalytic_triad._plotters.scatter_replicate_values"
+        ) as mock_scatter:
+            fig = plot_triad_threshold_bars(
+                [result], ["Control"], colors=["blue"], plot_settings=PlotSettings()
+            )
+
+        mock_scatter.assert_called_once()
+        assert mock_scatter.call_args.args[2] == [[40.0, 60.0], [20.0, 30.0], [8.0, 12.0]]
+        plt.close(fig)
+
+    @patch("polyzymd.analyses.catalytic_triad.plot_triad_threshold_bars_from_data")
+    @patch("polyzymd.analyses.catalytic_triad.plot_triad_kde_panel_from_data")
+    def test_plot_delegates_to_artifact_helpers(
+        self,
+        mock_kde_fn: MagicMock,
+        mock_bars_fn: MagicMock,
+        triad_analysis: CatalyticTriadAnalysis,
+        condition: Condition,
+        tmp_path: Path,
+        default_settings: CatalyticTriadSettings,
+    ) -> None:
+        """The public plot hook should delegate to artifact-backed helpers."""
+
+        from polyzymd.config.comparison import PlotSettings
+
+        mock_kde_fn.return_value = [tmp_path / "figures" / "triad_kde_panel.png"]
+        mock_bars_fn.return_value = [tmp_path / "figures" / "triad_threshold_bars.png"]
+        analysis_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
+        analysis_dir.mkdir(parents=True)
         ctx = PlotContext(
-            conditions=[],
-            analysis_dirs={},
+            conditions=[condition],
+            analysis_dirs={"No Polymer": analysis_dir},
             results_dir=tmp_path / "comparison",
             output_dir=tmp_path / "figures",
             settings=default_settings,
@@ -694,245 +644,146 @@ class TestPlot:
         )
 
         plots = triad_analysis.plot(ctx)
-        assert plots == []
-
-    @patch("polyzymd.analyses.catalytic_triad.plot_triad_threshold_bars_from_data")
-    @patch("polyzymd.analyses.catalytic_triad.plot_triad_kde_panel_from_data")
-    def test_plot_delegates_to_helpers(
-        self,
-        mock_kde_fn,
-        mock_bars_fn,
-        triad_analysis,
-        condition,
-        tmp_path,
-        default_settings,
-    ):
-        from polyzymd.config.comparison import PlotSettings
-
-        # Setup mock return values
-        mock_kde_fn.return_value = [tmp_path / "figures" / "triad_kde_panel.png"]
-        mock_bars_fn.return_value = [tmp_path / "figures" / "triad_threshold_bars.png"]
-
-        analysis_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
-        analysis_dir.mkdir(parents=True)
-
-        ctx = PlotContext(
-            conditions=[condition],
-            analysis_dirs={"No Polymer": analysis_dir},
-            results_dir=tmp_path / "comparison",
-            output_dir=tmp_path / "figures",
-            settings=default_settings,
-            plot_settings=PlotSettings(),
-        )
-
-        with patch("polyzymd.config.comparison.PlotSettings") as MockPlotSettings:
-            MockPlotSettings.return_value = MagicMock()
-            plots = triad_analysis.plot(ctx)
 
         assert len(plots) == 2
         mock_kde_fn.assert_called_once()
         mock_bars_fn.assert_called_once()
 
-        # Verify PlotSettings is passed to both functions
-        kde_args = mock_kde_fn.call_args[0]
-        bars_args = mock_bars_fn.call_args[0]
-        assert len(kde_args) == 4  # data, labels, output_dir, plot_settings
-        assert len(bars_args) == 4
+    def test_from_data_helpers_apply_semantic_order_and_colors(self, tmp_path: Path) -> None:
+        """Artifact-backed triad helpers should pass semantic labels and colors to renderers."""
 
-    @patch(
-        "polyzymd.analyses.catalytic_triad.plot_triad_threshold_bars_from_data",
-        side_effect=Exception("plot error"),
-    )
-    @patch(
-        "polyzymd.analyses.catalytic_triad.plot_triad_kde_panel_from_data",
-        side_effect=Exception("plot error"),
-    )
-    def test_plot_propagates_exceptions(
-        self,
-        mock_kde_fn,
-        mock_bars_fn,
-        triad_analysis,
-        condition,
-        tmp_path,
-        default_settings,
-    ):
-        """Plotter failures should propagate to orchestrator."""
+        from polyzymd.analyses.catalytic_triad import _plotters
         from polyzymd.config.comparison import PlotSettings
 
-        analysis_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
-        analysis_dir.mkdir(parents=True)
-
-        ctx = PlotContext(
-            conditions=[condition],
-            analysis_dirs={"No Polymer": analysis_dir},
-            results_dir=tmp_path / "comparison",
-            output_dir=tmp_path / "figures",
-            settings=default_settings,
-            plot_settings=PlotSettings(),
+        plot_settings = PlotSettings(
+            semantic_colors={
+                "enabled": True,
+                "order": ["Control", "Treatment"],
+                "conditions": {
+                    "Control": {"role": "control"},
+                    "Treatment": {"color": "#ff7f0e"},
+                },
+                "control_color": "#111111",
+            }
         )
+        data = {"__meta__": {"control_label": "Control"}}
+        labels = ["Treatment", "Control"]
+        pooled = {
+            "Control": {"Asp-His": [2.8, 3.0]},
+            "Treatment": {"Asp-His": [3.5, 3.8]},
+        }
+        result = MagicMock()
 
-        with patch("polyzymd.config.comparison.PlotSettings") as MockPlotSettings:
-            MockPlotSettings.return_value = MagicMock()
-            with pytest.raises(Exception, match="plot error"):
-                triad_analysis.plot(ctx)
+        with (
+            patch.object(
+                _plotters, "_pool_distances", return_value=(pooled, ["Asp-His"], 3.5)
+            ) as pool,
+            patch.object(
+                _plotters,
+                "plot_triad_kde_panel_pooled",
+                return_value=MagicMock(),
+            ) as kde,
+            patch.object(
+                _plotters,
+                "_load_aggregated_results",
+                return_value={"Control": result, "Treatment": result},
+            ) as load,
+            patch.object(_plotters, "plot_triad_threshold_bars", return_value=MagicMock()) as bars,
+            patch(
+                "polyzymd.analyses.shared.plotting.save_figure",
+                side_effect=lambda fig, path, settings: path,
+            ),
+        ):
+            kde_paths = _plotters.plot_triad_kde_panel_from_data(
+                data,
+                labels,
+                tmp_path,
+                plot_settings,
+            )
+            bar_paths = _plotters.plot_triad_threshold_bars_from_data(
+                data,
+                labels,
+                tmp_path,
+                plot_settings,
+            )
 
-    def test_plot_passes_data_and_labels(self, triad_analysis, tmp_path, default_settings):
-        """Verify the data dict passed to helpers has the expected shape."""
-        from polyzymd.config.comparison import PlotSettings
-
-        cond1 = Condition(
-            label="No Polymer",
-            config_path=Path("/fake/config1.yaml"),
-            replicates=(1, 2, 3),
-            sim_config=MagicMock(),
-        )
-        cond2 = Condition(
-            label="100% SBMA",
-            config_path=Path("/fake/config2.yaml"),
-            replicates=(1, 2, 3),
-            sim_config=MagicMock(),
-        )
-
-        for label in ("no_polymer", "sbma"):
-            (tmp_path / "analysis" / label / "catalytic_triad").mkdir(parents=True)
-
-        captured_data = {}
-        captured_labels = []
-
-        def capture_kde(data, labels, output_dir, plot_settings):
-            captured_data.update(data)
-            captured_labels.extend(labels)
-            return []
-
-        with patch(
-            "polyzymd.analyses.catalytic_triad.plot_triad_kde_panel_from_data",
-            side_effect=capture_kde,
-        ) as mock_kde_fn:
-            with patch(
-                "polyzymd.analyses.catalytic_triad.plot_triad_threshold_bars_from_data"
-            ) as mock_bars_fn:
-                mock_bars_fn.return_value = []
-
-                ctx = PlotContext(
-                    conditions=[cond1, cond2],
-                    analysis_dirs={
-                        "No Polymer": tmp_path / "analysis" / "no_polymer" / "catalytic_triad",
-                        "100% SBMA": tmp_path / "analysis" / "sbma" / "catalytic_triad",
-                    },
-                    results_dir=tmp_path / "comparison",
-                    output_dir=tmp_path / "figures",
-                    settings=default_settings,
-                    plot_settings=PlotSettings(),
-                )
-
-                triad_analysis.plot(ctx)
-
-        assert "No Polymer" in captured_data
-        assert "100% SBMA" in captured_data
-        assert captured_labels == ["No Polymer", "100% SBMA"]
-        # Each condition entry should have analysis_dir, aggregated_dir, replicates
-        for label in ("No Polymer", "100% SBMA"):
-            entry = captured_data[label]
-            assert "analysis_dir" in entry
-            assert "aggregated_dir" in entry
-            assert "replicates" in entry
-
-
-# ============================================================================
-# Test: Full lifecycle via orchestrator (mocked compute)
-# ============================================================================
+        assert kde_paths == [tmp_path / "triad_kde_panel.png"]
+        assert bar_paths == [tmp_path / "triad_threshold_bars.png"]
+        assert pool.call_args.args[1] == ["Control", "Treatment"]
+        assert load.call_args.args[1] == ["Control", "Treatment"]
+        assert kde.call_args.kwargs["colors"] == ["#111111", "#ff7f0e"]
+        assert bars.call_args.kwargs["labels"] == ["Control", "Treatment"]
+        assert bars.call_args.kwargs["colors"] == ["#111111", "#ff7f0e"]
+        assert bars.call_args.kwargs["control_label"] == "Control"
 
 
 class TestTriadLifecycle:
-    """Test the full compute -> aggregate -> compare lifecycle."""
+    """Tests for the MDA lifecycle hooks."""
 
-    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
-    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
-    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
-    @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analyses.distances.DistanceCalculator")
-    def test_run_analysis_lifecycle(
+    def test_build_mda_collector_returns_triad_collector(
         self,
-        MockDistCalc,
-        MockLoader,
-        mock_hash,
-        mock_validate_hash,
-        mock_version,
-        triad_analysis,
-        condition,
-        tmp_path,
-        default_settings,
-    ):
-        """Test compute_replicate -> aggregate via run_analysis()."""
-        from polyzymd.analyses.orchestrator import run_analysis
+        triad_analysis: CatalyticTriadAnalysis,
+        condition: Condition,
+        tmp_path: Path,
+        default_settings: CatalyticTriadSettings,
+    ) -> None:
+        """The migrated plugin should expose a triad artifact collector."""
 
-        # Mock TrajectoryLoader (shared by all replicates)
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-        mock_u = MagicMock()
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=1)
-        mock_u.select_atoms.return_value = mock_atoms
-        mock_loader_inst.load_universe.return_value = mock_u
-        mock_loader_inst.get_timestep.return_value = 10.0
+        ctx = _collector_context(tmp_path, condition, default_settings)
+        assert isinstance(triad_analysis.build_mda_collector(ctx), TriadArtifactCollector)
 
-        def make_dist_result_for_replicate(*args, **kwargs):
-            return _make_mock_distance_result(n_pairs=2, n_frames=100)
+    def test_build_mda_jobs_delegates_to_triad_job_builder(
+        self, triad_analysis: CatalyticTriadAnalysis
+    ) -> None:
+        """The public hook should delegate to the triad job builder."""
 
-        mock_dist_inst = MagicMock()
-        mock_dist_inst.compute.side_effect = make_dist_result_for_replicate
-        MockDistCalc.return_value = mock_dist_inst
+        mda_ctx = MagicMock()
+        mda_ctx.settings = MagicMock()
+        sentinel_jobs = [object()]
+        with patch(
+            "polyzymd.analyses.catalytic_triad.build_triad_jobs", return_value=sentinel_jobs
+        ):
+            assert triad_analysis.build_mda_jobs(mda_ctx) is sentinel_jobs
 
-        output_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
-        result = run_analysis(
-            triad_analysis,
-            condition,
-            settings=default_settings,
-            equilibration="10ns",
-            output_dir=output_dir,
+
+class TestTriadDirectPayloadCompatibility:
+    """Tests for reusable payload structures used by triad adapters."""
+
+    def test_distance_payload_imports_from_mda_module(self) -> None:
+        """Distance payload classes should no longer require the deleted runner wrapper."""
+
+        payload = DistanceReplicatePayload(
+            n_frames_total=2,
+            n_frames_used=2,
+            pair_payloads=[
+                DistancePairPayload(
+                    pair_label="pair",
+                    selection1="a",
+                    selection2="b",
+                    distances=np.asarray([1.0, 2.0]),
+                    mean_distance=1.5,
+                    std_distance=0.5,
+                    median_distance=1.5,
+                    min_distance=1.0,
+                    max_distance=2.0,
+                    sem_distance=None,
+                    correlation_time=None,
+                    correlation_time_unit=None,
+                    n_independent_frames=None,
+                    statistical_inefficiency=None,
+                    autocorrelation_warning=None,
+                    threshold=3.5,
+                    fraction_below_threshold=1.0,
+                    histogram_edges=np.asarray([1.0, 2.0]),
+                    histogram_counts=np.asarray([2]),
+                    kde_x=None,
+                    kde_y=None,
+                    kde_peak=None,
+                    kde_bandwidth=None,
+                    n_frames_total=2,
+                    n_frames_used=2,
+                )
+            ],
         )
 
-        # Verify orchestrator called compute for each replicate
-        assert mock_dist_inst.compute.call_count == 3
-
-        # Verify aggregate produced a valid result
-        assert result.n_replicates == 3
-        assert result.replicates == [1, 2, 3]
-        assert result.triad_name == "LipA_triad"
-        assert len(result.pair_results) == 2
-        assert len(result.per_replicate_simultaneous) == 3
-        # All replicates used the same random seed → same fraction, so all should be equal
-        for val in result.per_replicate_simultaneous:
-            assert 0.0 <= val <= 1.0
-        assert result.overall_simultaneous_contact == pytest.approx(
-            sum(result.per_replicate_simultaneous) / 3, abs=0.01
-        )
-
-    def test_extract_metrics_feeds_default_compare(self, triad_analysis):
-        """Verify extract_metrics output is compatible with default_scalar_comparison."""
-        from polyzymd.analyses.stats import default_scalar_comparison
-
-        metrics_by_condition = {}
-        for label, mean, sem, vals in [
-            ("No Polymer", 0.55, 0.04, [0.50, 0.55, 0.60]),
-            ("100% SBMA", 0.75, 0.03, [0.72, 0.75, 0.78]),
-        ]:
-            summary = MagicMock()
-            summary.overall_simultaneous_contact = mean
-            summary.sem_simultaneous_contact = sem
-            summary.per_replicate_simultaneous = vals
-            metrics_by_condition[label] = triad_analysis.extract_metrics(summary)
-
-        result = default_scalar_comparison(
-            analysis_name="catalytic_triad",
-            project_name="test_project",
-            metrics_by_condition=metrics_by_condition,
-            control_label="No Polymer",
-            equilibration="10ns",
-        )
-
-        assert result.analysis_type == "catalytic_triad"
-        assert len(result.conditions) == 2
-        assert len(result.pairwise_comparisons) >= 1
-        # Higher triad score = better, so 100% SBMA should rank first
-        assert result.ranking[0] == "100% SBMA"
+        assert payload.n_frames_used == 2

@@ -10,8 +10,11 @@ import logging
 
 from polyzymd.analyses.rg._comparison_results import RgComparisonResult
 from polyzymd.analyses.shared.multi_run_formatting import (
+    SINGLE_REPLICATE_SEM_NOTE,
     format_anova_line,
     format_pairwise_line,
+    format_sem_value,
+    is_sem_estimable,
     make_ranked_markdown_header,
     make_ranked_rows,
     make_ranked_table_header,
@@ -116,7 +119,9 @@ def _format_rg_table(result: RgComparisonResult) -> str:
         for condition_label, mean_rg, sem_rg, rank in ranked_rows:
             condition = result.get_condition(condition_label)
             run_summary = condition.get_run(run_label)
-            lines.append(f"{condition.label:<18} {mean_rg:<15.2f} {sem_rg:<8.2f} {rank:<4}")
+            n_replicates = condition.n_replicates or len(run_summary.per_replicate_means)
+            sem_str = format_sem_value(sem_rg, n_replicates, precision=2)
+            lines.append(f"{condition.label:<18} {mean_rg:<15.2f} {sem_str:<8} {rank:<4}")
             mode_line = _format_mode(run_summary)
             if mode_line is not None:
                 lines.append(f"  {mode_line}")
@@ -124,6 +129,15 @@ def _format_rg_table(result: RgComparisonResult) -> str:
                     lines.append(
                         f"  Mean fragments/frame: {run_summary.mean_fragments_per_frame:.1f}"
                     )
+
+        if any(
+            not is_sem_estimable(
+                result.get_condition(label).n_replicates
+                or len(result.get_condition(label).get_run(run_label).per_replicate_means)
+            )
+            for label in ranking
+        ):
+            lines.append(SINGLE_REPLICATE_SEM_NOTE)
 
         lines.append("")
         lines.extend(_format_pairwise_line(run_label, result))
@@ -180,7 +194,19 @@ def _format_rg_markdown(result: RgComparisonResult) -> str:
         for condition_label, mean_rg, sem_rg, rank in ranked_rows:
             condition = result.get_condition(condition_label)
             run_summary = condition.get_run(run_label)
-            lines.append(f"| {condition.label} | {mean_rg:.2f} | {sem_rg:.2f} | {rank} |")
+            n_replicates = condition.n_replicates or len(run_summary.per_replicate_means)
+            sem_str = format_sem_value(sem_rg, n_replicates, precision=2)
+            lines.append(f"| {condition.label} | {mean_rg:.2f} | {sem_str} | {rank} |")
+
+        if any(
+            not is_sem_estimable(
+                result.get_condition(label).n_replicates
+                or len(result.get_condition(label).get_run(run_label).per_replicate_means)
+            )
+            for label in ranking
+        ):
+            lines.append("")
+            lines.append(f"*{SINGLE_REPLICATE_SEM_NOTE}.*")
 
         fragment_mode_summaries = []
         for condition_label in ranking:

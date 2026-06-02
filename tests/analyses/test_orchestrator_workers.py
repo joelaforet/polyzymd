@@ -10,7 +10,7 @@ import pytest
 from pydantic import BaseModel
 
 from polyzymd.analyses.base import Analysis, Condition, MetricValue
-from polyzymd.analyses.exceptions import ReplicateError
+from polyzymd.analyses.exceptions import PluginContractError, ReplicateError
 from polyzymd.analyses.orchestrator import (
     aggregate_condition_from_disk,
     finalize_comparison_from_disk,
@@ -24,12 +24,22 @@ class _WorkerSettings(BaseModel):
     scale: float = 1.0
 
 
-class _WorkerAnalysis(Analysis):
+class _MDAContractMixin:
+    """Provide the required MDA lifecycle seam for direct compute fakes."""
+
+    def build_mda_jobs(self, ctx):
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+
+class _WorkerAnalysis(_MDAContractMixin, Analysis):
     name: ClassVar[str] = "worker_toy"
     Settings: ClassVar[type] = _WorkerSettings
     min_replicates: ClassVar[int] = 1
 
-    def compute_replicate(self, ctx: Any, replicate: int) -> dict[str, Any]:
+    def _run_compute_stage(self, ctx: Any, replicate: int) -> dict[str, Any]:
         return {"value": float(replicate) * float(ctx.settings.scale), "replicate": replicate}
 
     def aggregate(self, ctx, results) -> dict[str, Any]:
@@ -60,8 +70,45 @@ class _WorkerAnalysis(Analysis):
         return [out]
 
 
+def _worker_aggregate_payload(
+    analysis: Analysis,
+    settings: BaseModel,
+    value: float,
+    *,
+    replicate: int = 1,
+) -> dict[str, Any]:
+    """Build a validation-ready worker aggregate payload.
+
+    Parameters
+    ----------
+    analysis : Analysis
+        Analysis instance used to compute the expected settings identity.
+    settings : BaseModel
+        Active worker settings.
+    value : float
+        Scalar value represented by the synthetic aggregate.
+    replicate : int, optional
+        Replicate ID represented by the aggregate, by default 1.
+
+    Returns
+    -------
+    dict[str, Any]
+        Aggregate payload with settings and replicate identity metadata.
+    """
+
+    return {
+        "mean_value": value,
+        "sem_value": 0.0,
+        "replicate_values": [value],
+        "n_replicates": 1,
+        "replicates": [replicate],
+        "settings_fingerprint": analysis.aggregate_settings_fingerprint(settings),
+    }
+
+
 class _FailingWorkerAnalysis(_WorkerAnalysis):
-    def compute_replicate(self, ctx: Any, replicate: int) -> dict[str, Any]:
+    def _run_compute_stage(self, ctx: Any, replicate: int) -> dict[str, Any]:
+        del ctx, replicate
         raise RuntimeError("test error")
 
 
@@ -91,7 +138,7 @@ def test_run_analysis_raises_structured_replicate_error_on_worker_exception(tmp_
     condition = Condition("Cond", tmp_path / "cfg.yaml", (1,), cast(Any, SimpleNamespace()))
     settings = _WorkerSettings(scale=1.0)
 
-    with pytest.raises(ReplicateError, match="compute_replicate failed"):
+    with pytest.raises(ReplicateError, match="compute stage failed"):
         run_analysis(
             analysis=analysis,
             condition=condition,
@@ -175,9 +222,10 @@ def test_finalize_comparison_from_disk_runs_compare_and_plot(
         "A": tmp_path / "analysis" / "A" / "worker_toy",
         "B": tmp_path / "analysis" / "B" / "worker_toy",
     }
+    settings = _WorkerSettings()
     aggregated = {
-        "A": {"mean_value": 1.0, "sem_value": 0.0, "replicate_values": [1.0], "n_replicates": 1},
-        "B": {"mean_value": 2.0, "sem_value": 0.0, "replicate_values": [2.0], "n_replicates": 1},
+        "A": _worker_aggregate_payload(analysis, settings, 1.0),
+        "B": _worker_aggregate_payload(analysis, settings, 2.0),
     }
     out = finalize_comparison_from_disk(
         analysis=analysis,
@@ -186,7 +234,7 @@ def test_finalize_comparison_from_disk_runs_compare_and_plot(
         aggregated_results=aggregated,
         results_dir=tmp_path / "comparison" / "worker_toy",
         figures_dir=tmp_path / "figures" / "worker_toy",
-        settings=_WorkerSettings(),
+        settings=settings,
         effective_control="A",
     )
     assert out["comparison_path"].exists()
@@ -228,9 +276,10 @@ def test_finalize_partial_recomputes_control_when_original_missing(
         "B": tmp_path / "analysis" / "B" / "worker_toy",
         "C": tmp_path / "analysis" / "C" / "worker_toy",
     }
+    settings = _WorkerSettings()
     aggregated = {
-        "B": {"mean_value": 2.0, "sem_value": 0.0, "replicate_values": [2.0], "n_replicates": 1},
-        "C": {"mean_value": 3.0, "sem_value": 0.0, "replicate_values": [3.0], "n_replicates": 1},
+        "B": _worker_aggregate_payload(analysis, settings, 2.0),
+        "C": _worker_aggregate_payload(analysis, settings, 3.0),
     }
 
     caplog.set_level("WARNING")
@@ -241,7 +290,7 @@ def test_finalize_partial_recomputes_control_when_original_missing(
         aggregated_results=aggregated,
         results_dir=tmp_path / "comparison" / "worker_toy",
         figures_dir=tmp_path / "figures" / "worker_toy",
-        settings=_WorkerSettings(),
+        settings=settings,
         effective_control="A",
         allow_partial=True,
     )
@@ -277,22 +326,16 @@ def test_finalize_partial_with_one_condition_succeeds(
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.Condition.from_condition_config", _fake_from_cond
     )
+    settings = _WorkerSettings()
 
     out = finalize_comparison_from_disk(
         analysis=analysis,
         config=cast(Any, config),
         analysis_dirs={"B": tmp_path / "analysis" / "B" / "worker_toy"},
-        aggregated_results={
-            "B": {
-                "mean_value": 2.0,
-                "sem_value": 0.0,
-                "replicate_values": [2.0],
-                "n_replicates": 1,
-            }
-        },
+        aggregated_results={"B": _worker_aggregate_payload(analysis, settings, 2.0)},
         results_dir=tmp_path / "comparison" / "worker_toy",
         figures_dir=tmp_path / "figures" / "worker_toy",
-        settings=_WorkerSettings(),
+        settings=settings,
         effective_control="A",
         allow_partial=True,
     )
@@ -378,23 +421,17 @@ def test_finalize_filtered_control_proceeds_without_allow_partial(
         "equilibration": "10ns",
         "analysis_root": tmp_path / "analysis",
     }
+    settings = _WorkerSettings()
 
     caplog.set_level("WARNING")
     out = finalize_comparison_from_disk(
         analysis=analysis,
         config=cast(Any, config),
         analysis_dirs={"B": tmp_path / "analysis" / "B" / "worker_toy"},
-        aggregated_results={
-            "B": {
-                "mean_value": 2.0,
-                "sem_value": 0.0,
-                "replicate_values": [2.0],
-                "n_replicates": 1,
-            }
-        },
+        aggregated_results={"B": _worker_aggregate_payload(analysis, settings, 2.0)},
         results_dir=tmp_path / "comparison" / "worker_toy",
         figures_dir=tmp_path / "figures" / "worker_toy",
-        settings=_WorkerSettings(),
+        settings=settings,
         effective_control="A",
         prepared_state=prepared_state,
         allow_partial=False,
@@ -479,9 +516,11 @@ class _TypedAggregatedResult(BaseModel):
     mean_value: float
     replicate_values: list[float]
     n_replicates: int
+    replicates: list[int] | None = None
+    settings_fingerprint: str | None = None
 
 
-class _TypedWorkerAnalysis(Analysis):
+class _TypedWorkerAnalysis(_MDAContractMixin, Analysis):
     """Analysis plugin that uses Pydantic models for replicate results."""
 
     name: ClassVar[str] = "typed_worker_toy"
@@ -490,7 +529,7 @@ class _TypedWorkerAnalysis(Analysis):
     AggregatedResultClass: ClassVar[type | None] = _TypedAggregatedResult
     min_replicates: ClassVar[int] = 1
 
-    def compute_replicate(self, ctx: Any, replicate: int) -> _TypedReplicateResult:
+    def _run_compute_stage(self, ctx: Any, replicate: int) -> _TypedReplicateResult:
         return _TypedReplicateResult(
             value=float(replicate) * float(ctx.settings.scale),
             replicate=replicate,

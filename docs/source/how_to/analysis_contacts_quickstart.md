@@ -71,8 +71,8 @@ defaults:
 
 plugins:
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A"
     cutoff: 4.5
     grouping: "aa_class"
     compute_residence_times: true
@@ -117,13 +117,19 @@ Then run:
 polyzymd compare run contacts -f comparison.yaml
 ```
 
+Set `compute_residence_times: false` when you only need contact fractions or
+downstream contacts-derived analyses. This skips aggregate residence-time
+summaries and residence-time plots, but still stores per-replicate contact
+events. Changing the setting changes the canonical contacts artifact identity,
+so recompute contacts after toggling it.
+
 ### Analyze one polymer type only
 
 ```yaml
 plugins:
   contacts:
-    polymer_selection: "chainID C and resname SBM"
-    protein_selection: "protein"
+    polymer_selection: "chainid C and resname SBM"
+    protein_selection: "chainid A"
 ```
 
 For EGMA-only analysis, switch to `resname EGM`.
@@ -133,14 +139,14 @@ For EGMA-only analysis, switch to `resname EGM`.
 ```yaml
 plugins:
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein and (resname TRP PHE TYR)"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A and (resname TRP PHE TYR)"
 ```
 
 For an active-site slice, use a residue range selection such as:
 
 ```yaml
-protein_selection: "protein and (resid 75-80 or resid 130-140)"
+protein_selection: "chainid A and (resid 75-80 or resid 130-140)"
 ```
 
 ### Run with reproducible cache behavior
@@ -160,8 +166,8 @@ If you want one place to set the most common contacts options:
 ```yaml
 plugins:
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A"
     cutoff: 4.5
     polymer_types: ["SBM", "EGM"]
     grouping: "aa_class"
@@ -196,8 +202,9 @@ After running, these partitions are used in partition-level contacts plots.
 polyzymd compare plot-all -f comparison.yaml
 ```
 
-You will get contact-fraction and residence-time profiles plus grouped bar
-plots for AA classes and (if configured) user partitions.
+You will get contact-fraction profiles and grouped bar plots for AA classes and
+(if configured) user partitions. Residence-time profiles are generated only
+when `compute_residence_times` is enabled and residence-time data exists.
 
 For the full list of plot outputs and plot settings, see
 {doc}`../reference/analysis_contacts_reference`.
@@ -274,8 +281,8 @@ print(
 )
 ```
 
-For worked Python recipes (interaction matrices, group-level summaries, custom
-queries), use {doc}`analysis_contacts_cookbook`.
+For complete contacts configuration, output, plotting, and troubleshooting
+details, use {doc}`../reference/analysis_contacts_reference`.
 
 ## Compare conditions
 
@@ -308,7 +315,6 @@ see {doc}`../reference/analysis_contacts_reference`.
 ## Next steps
 
 - {doc}`analysis_compare_conditions`
-- {doc}`analysis_contacts_cookbook`
 - {doc}`analysis_rmsf_quickstart`
 - {doc}`analysis_triad_quickstart`
 - {doc}`../reference/analysis_contacts_reference`

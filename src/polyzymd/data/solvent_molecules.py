@@ -41,10 +41,10 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
-from openff.toolkit import Molecule
-from openff.units import unit as offunit
+if TYPE_CHECKING:
+    from openff.toolkit import Molecule
 
 LOGGER = logging.getLogger(__name__)
 
@@ -202,6 +202,9 @@ def _create_tip3p_water() -> Molecule:
     Returns:
         OpenFF Molecule for TIP3P water.
     """
+    from openff.toolkit import Molecule
+    from openff.units import unit as offunit
+
     water = Molecule.from_smiles("O")
     water.name = "water_TIP3P"
 
@@ -228,6 +231,9 @@ def _create_spce_water() -> Molecule:
     Returns:
         OpenFF Molecule for SPC/E water.
     """
+    from openff.toolkit import Molecule
+    from openff.units import unit as offunit
+
     water = Molecule.from_smiles("O")
     water.name = "water_SPCE"
 
@@ -258,6 +264,8 @@ def _generate_charged_molecule(smiles: str, residue_name: str) -> Molecule:
     Returns:
         OpenFF Molecule with AM1BCC partial charges.
     """
+    from openff.toolkit import Molecule
+
     # Create molecule from SMILES
     mol = Molecule.from_smiles(smiles)
 
@@ -292,6 +300,8 @@ def _load_molecule_from_sdf(path: Path) -> Molecule:
     Returns:
         OpenFF Molecule with charges and metadata restored.
     """
+    from openff.toolkit import Molecule
+
     mol = Molecule.from_file(str(path), file_format="sdf")
 
     # Restore metadata from SDF properties

@@ -26,8 +26,8 @@ plugins:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `name` | `str` | *required* | Triad identifier saved in output files |
-| `description` | `str` | `""` | Human-readable triad description |
+| `name` | `str` | `"catalytic_triad"` | Triad identifier saved in output files |
+| `description` | `str \| null` | `null` | Optional human-readable triad description |
 | `threshold` | `float` | `3.5` | Contact cutoff in angstroms for each pair |
 | `pairs` | `list[TriadPair]` | *required* | Pair definitions used to compute distances and contacts |
 
@@ -55,7 +55,9 @@ so bare `resid X` selections can match non-protein atoms. Prefer
 
 ## Output Files
 
-Triad outputs are written under each condition plus a comparison result:
+Triad outputs are written as canonical v1.3 artifacts under each condition plus
+a comparison result. JSON files use framework-owned artifact envelopes instead
+of exposing plugin-private result model classes as public schemas.
 
 ```text
 comparison_workspace/
@@ -63,73 +65,110 @@ comparison_workspace/
 │   └── <condition>/
 │       └── catalytic_triad/
 │           ├── run_1/
-│           │   └── triad_LipA_catalytic_triad_eq100ns.json
+│           │   ├── result.json
+│           │   └── sidecars/
+│           │       └── triad_distances.npz
 │           ├── run_2/
-│           │   └── triad_LipA_catalytic_triad_eq100ns.json
+│           │   └── ...
 │           ├── run_3/
-│           │   └── triad_LipA_catalytic_triad_eq100ns.json
+│           │   └── ...
 │           └── aggregated/
-│               └── triad_LipA_catalytic_triad_reps1-3_eq100ns.json
+│               ├── result.json
+│               └── sidecars/
+│                   └── triad_distance_profiles.npz
 └── comparison/
     └── catalytic_triad/
         └── result.json
 ```
 
-### Per-replicate JSON structure
+The canonical paths are:
+
+| Level | Artifact | Path |
+|-------|----------|------|
+| Per replicate | `ReplicateArtifact` | `analysis/<condition>/catalytic_triad/run_<replicate>/result.json` |
+| Per condition | `ConditionArtifact` | `analysis/<condition>/catalytic_triad/aggregated/result.json` |
+| Cross condition | Comparison result | `comparison/catalytic_triad/result.json` |
+| Large arrays | NPZ sidecars | `analysis/<condition>/catalytic_triad/**/sidecars/*.npz` |
+
+### Artifact envelope fields
+
+| Field | Description |
+|-------|-------------|
+| `payload` | Triad contact metrics, pair summaries, and relative sidecar paths |
+| `metadata` | Triad settings, cutoff threshold, equilibration labels, and units |
+| `provenance` | Input topology/trajectory identity and workflow details |
+| `sidecars` | Validated references to `sidecars/*.npz` arrays with hashes and sizes |
+
+Use the public artifact API to load saved triad artifacts:
+
+```python
+from pathlib import Path
+
+from polyzymd.analyses.mda import ArtifactStore
+
+replicate = ArtifactStore(Path("analysis/PEGylated/catalytic_triad/run_1"))
+condition = ArtifactStore(Path("analysis/PEGylated/catalytic_triad/aggregated"))
+print(replicate.read_replicate_result().payload["metrics"])
+print(condition.read_condition_result().payload["metrics"])
+```
+
+### Per-replicate JSON structure (`ReplicateArtifact`)
+
+Representative structure:
 
 ```python
 {
-    "analysis_type": "catalytic_triad",
-    "triad_name": "LipA_catalytic_triad",
-    "triad_description": "Ser-His-Asp catalytic triad...",
-    "threshold": 3.5,
-    "simultaneous_contact_fraction": 0.741,
-    "n_frames_simultaneous": 1482,
-    "sim_contact_sem": 0.082,
-    "sim_contact_correlation_time": 8542.5,
-    "sim_contact_n_independent": 12,
-    "pair_results": [
-        {
-            "pair_label": "Asp133-His156",
-            "mean_distance": 2.91,
-            "std_distance": 0.45,
-            "fraction_below_threshold": 0.932
-        },
-        {
-            "pair_label": "His156-Ser77",
-            "mean_distance": 4.07,
-            "std_distance": 1.10,
-            "fraction_below_threshold": 0.551
-        }
-    ],
-    "n_frames_used": 2000,
-    "n_frames_total": 3000
+    "schema_version": "1",
+    "artifact_type": "replicate",
+    "analysis_name": "catalytic_triad",
+    "condition_label": "PEGylated",
+    "replicate": 1,
+    "payload": {
+        "metrics": {"simultaneous_contact_fraction": 0.741},
+        "pair_results": [
+            {"pair_label": "Asp133-His156", "mean_distance": 2.91, "fraction_below_threshold": 0.932},
+            {"pair_label": "His156-Ser77", "mean_distance": 4.07, "fraction_below_threshold": 0.551}
+        ],
+        "distance_sidecar": "sidecars/triad_distances.npz",
+        "summary": {"n_frames_used": 2000, "n_frames_total": 3000}
+    },
+    "metadata": {"triad_name": "LipA_catalytic_triad", "threshold": 3.5, "equilibration": "100ns"},
+    "provenance": {"trajectory_files": ["..."]},
+    "sidecars": [
+        {"path": "sidecars/triad_distances.npz", "metadata": {"kind": "distance_timeseries"}}
+    ]
 }
 ```
 
-### Aggregated JSON structure
+### Aggregated JSON structure (`ConditionArtifact`)
+
+Representative structure:
 
 ```python
 {
-    "analysis_type": "catalytic_triad_aggregated",
-    "n_replicates": 3,
+    "schema_version": "1",
+    "artifact_type": "condition",
+    "analysis_name": "catalytic_triad",
+    "condition_label": "PEGylated",
     "replicates": [1, 2, 3],
-    "overall_simultaneous_contact": 0.499,
-    "sem_simultaneous_contact": 0.273,
-    "per_replicate_simultaneous": [0.741, 0.512, 0.245],
-    "pair_results": [
-        {
-            "pair_label": "Asp133-His156",
-            "overall_mean": 3.09,
-            "overall_sem": 0.21,
-            "per_replicate_means": [2.91, 3.05, 3.31]
+    "payload": {
+        "metrics": {
+            "simultaneous_contact_fraction": {
+                "values": [0.741, 0.512, 0.245],
+                "mean": 0.499,
+                "sem": 0.273
+            }
         },
-        {
-            "pair_label": "His156-Ser77",
-            "overall_mean": 4.03,
-            "overall_sem": 1.07,
-            "per_replicate_means": [3.12, 4.00, 4.97]
-        }
+        "pair_results": [
+            {"pair_label": "Asp133-His156", "overall_mean": 3.09, "overall_sem": 0.21},
+            {"pair_label": "His156-Ser77", "overall_mean": 4.03, "overall_sem": 1.07}
+        ],
+        "distance_profile_sidecar": "sidecars/triad_distance_profiles.npz"
+    },
+    "metadata": {"triad_name": "LipA_catalytic_triad", "threshold": 3.5, "equilibration": "100ns"},
+    "provenance": {"source_replicates": [1, 2, 3]},
+    "sidecars": [
+        {"path": "sidecars/triad_distance_profiles.npz", "metadata": {"kind": "distance_profiles"}}
     ]
 }
 ```
@@ -140,12 +179,12 @@ Catalytic triad plots are generated by `polyzymd compare plot-all`.
 
 | Plot output | Description |
 |-------------|-------------|
-| `simultaneous_contact_comparison.png` | Condition-level comparison of simultaneous contact (%) |
-| `triad_pair_distances_<condition>.png` | Per-pair mean distances and uncertainty for one condition |
-| `triad_pair_contacts_<condition>.png` | Per-pair fraction below threshold for one condition |
-| `triad_pair_kde_<condition>.png` | KDE of pair distance distributions for one condition |
-| `triad_2d_kde_<condition>.png` | 2D KDE for two pair distances to inspect coupled geometry |
-| `triad_summary_<condition>.png` | Combined summary panel for one condition |
+| `triad_kde_panel.png` | Multi-row KDE of per-pair distance distributions across conditions |
+| `triad_threshold_bars.png` | Grouped bar chart of the fraction below threshold for each pair |
+
+Optional historical plotting helpers in the code can generate 2D KDE figures,
+but the current plugin `plot()` lifecycle emits the KDE panel and threshold bar
+figures listed above.
 
 Use top-level `plot_settings` in `comparison.yaml` to tune sizes, styles,
 and output resolution for triad plots.
@@ -164,7 +203,7 @@ and output resolution for triad plots.
 Use either plugin name:
 
 ```bash
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 ```
 

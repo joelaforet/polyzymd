@@ -30,9 +30,7 @@ Use this site by *need*:
    Stable analysis workflows for the `v1.3.0` release are RMSD, Rg, RMSF,
    contacts, distances, catalytic triad, secondary structure, SASA, and
    hydrogen bonds. RMSD analysis now includes automated convergence detection
-   diagnostics. Binding preference, exposure dynamics, binding free energy,
-   polymer affinity, and polymer bridging remain available, but are documented
-   as experimental.
+   diagnostics.
 
 Choose Your Path
 ----------------
@@ -55,9 +53,9 @@ Common Workflows
 ----------------
 
 - Install locally and validate the CLI:
-  :doc:`Install PolyzyMD with pixi <tutorials/installation>`
+  :doc:`Install PolyzyMD with pixi <get_started/installation>`
 - Build and submit a first simulation:
-  :doc:`Run Your First PolyzyMD Simulation <tutorials/quickstart>`
+  :doc:`Run Your First PolyzyMD Simulation <get_started/quickstart>`
 - Run a comparison study across multiple conditions:
   :doc:`Compare Simulation Conditions <how_to/analysis_compare_conditions>`
 - Generate comparison figures as a smoke test:

@@ -99,19 +99,13 @@ suppress_openff_logs()
 
 def _resolve_replicates_option(
     replicates: str | None,
-    replicate: int | None,
-    command_name: str,
 ) -> list[int]:
-    """Resolve --replicates / --replicate into a list of replicate numbers.
+    """Resolve ``--replicates`` into a list of replicate numbers.
 
     Parameters
     ----------
     replicates : str or None
         Value from ``--replicates`` (range syntax, e.g. ``"1-3"``)
-    replicate : int or None
-        Value from deprecated ``--replicate`` (single integer)
-    command_name : str
-        Name of the CLI command (for error messages)
 
     Returns
     -------
@@ -120,28 +114,10 @@ def _resolve_replicates_option(
 
     Raises
     ------
-    click.UsageError
-        If both ``--replicates`` and ``--replicate`` are given
+    click.BadParameter
+        If the replicate range is invalid.
     """
     from polyzymd.utils.replicates import parse_replicate_range
-
-    if replicates is not None and replicate is not None:
-        raise click.UsageError(
-            f"Cannot use both --replicates and --replicate in '{command_name}'. "
-            "Use --replicates (e.g., --replicates 1-3)."
-        )
-
-    if replicate is not None:
-        if replicate <= 0:
-            raise click.BadParameter(
-                f"Replicate must be a positive integer, got {replicate}.",
-                param_hint="'--replicate'",
-            )
-        click.echo(
-            f"Warning: --replicate is deprecated in '{command_name}', use --replicates instead.",
-            err=True,
-        )
-        return [replicate]
 
     if replicates is not None:
         try:
@@ -154,7 +130,9 @@ def _resolve_replicates_option(
 
 
 def _resolve_engine_name(sim_config: object, override: str | None = None) -> str:
-    """Resolve the simulation engine from CLI override or config.
+    """Resolve the required simulation engine from CLI override or config.
+
+    The engine must be configured unless a CLI override is provided.
 
     Parameters
     ----------
@@ -170,7 +148,10 @@ def _resolve_engine_name(sim_config: object, override: str | None = None) -> str
     """
     if override:
         return override.lower()
-    return getattr(sim_config, "engine", "openmm") or "openmm"
+    engine = getattr(sim_config, "engine", None)
+    if not engine:
+        raise click.UsageError("Configure 'engine' in the simulation config or pass --engine.")
+    return str(engine).lower()
 
 
 def _generate_system_prefix(sim_config: object) -> str:
@@ -239,10 +220,9 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
 
 @cli.command(
     help=(
-        "Build simulation input files (OpenMM, GROMACS, LAMMPS, AMBER) without "
-        "running. Use --format to select the output engine. "
-        "Use run --engine <gromacs|openmm> to execute locally, or submit for "
-        "OpenMM SLURM jobs."
+        "Build simulation input files without running. Use --format gromacs for "
+        "a build-only GROMACS handoff. Use run --engine <gromacs|openmm> to "
+        "build and execute locally, or submit for SLURM jobs."
     )
 )
 @click.option(
@@ -258,20 +238,6 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     default=None,
     type=str,
     help="Replicate range (e.g., '1', '1-3', '1,3,5'). Default: 1",
-)
-@click.option(
-    "--replicate",
-    default=None,
-    type=int,
-    hidden=True,
-    help="[Deprecated] Use --replicates instead.",
-)
-@click.option(
-    "-o",
-    "--output-dir",
-    default=None,
-    type=click.Path(),
-    help="Output directory (default: from config). Alias for --scratch-dir.",
 )
 @click.option(
     "--scratch-dir",
@@ -296,25 +262,17 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     default=None,
     type=click.Choice(["gromacs", "lammps", "amber"], case_sensitive=False),
     help=(
-        "Export format: gromacs, lammps (planned), amber (planned). Default: OpenMM (no export)."
+        "Build-only export format: gromacs, lammps (planned), amber (planned). "
+        "Default: OpenMM build artifacts."
     ),
-)
-@click.option(
-    "--gromacs",
-    is_flag=True,
-    hidden=True,
-    help="[Deprecated] Use --format gromacs instead.",
 )
 def build(
     config: str,
     replicates: str | None,
-    replicate: int | None,
-    output_dir: str | None,
     scratch_dir: str | None,
     projects_dir: str | None,
     dry_run: bool,
     export_format: str | None,
-    gromacs: bool,
 ) -> None:
     """Build simulation input files from configuration.
 
@@ -323,8 +281,10 @@ def build(
     artifacts for one or more replicates. No simulation is executed.
 
     By default, this prepares OpenMM inputs in the working directory. Use
-    ``--format gromacs`` to export GROMACS files (``.gro``, ``.top``,
-    ``.itp``, ``.mdp``). AMBER and LAMMPS export are not yet supported.
+    ``--format gromacs`` to export core GROMACS handoff files (``.gro``,
+    ``.top``, ``.itp``). MDP files and a run script may also be generated as
+    convenience defaults, but they are not required to continue outside
+    PolyzyMD. AMBER and LAMMPS export are not yet supported.
 
     Use ``run --engine gromacs`` if you want PolyzyMD to build and then
     execute the full local GROMACS workflow. Use ``run --engine openmm`` for
@@ -339,7 +299,8 @@ def build(
     Export Notes:
         - Output files are placed in replicate_<n>/<format>/
         - Filenames are derived from config: {enzyme_name}_{polymer_prefix}.*
-        - MDP files include energy minimization, equilibration, and production stages
+        - Core GROMACS handoff files are .gro, .top, and component .itp files
+        - MDP files and run scripts are convenience defaults when generated
         - Topology is split into .itp files for cleaner multi-component systems
     """
     from pydantic import ValidationError as PydanticValidationError
@@ -347,19 +308,7 @@ def build(
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
 
-    # Resolve export format: --format takes priority, --gromacs is deprecated alias
-    if gromacs and export_format is not None:
-        raise click.UsageError(
-            "Cannot use both --gromacs and --format. Use --format gromacs instead."
-        )
-    if gromacs:
-        click.echo(
-            "Warning: --gromacs is deprecated, use --format gromacs instead.",
-            err=True,
-        )
-        export_format = "gromacs"
-
-    replicate_list = _resolve_replicates_option(replicates, replicate, "build")
+    replicate_list = _resolve_replicates_option(replicates)
 
     colored_echo(f"Loading configuration from: {config}", phase="build")
 
@@ -368,9 +317,8 @@ def build(
         colored_echo(f"Configuration validated: {sim_config.name}", phase="build")
 
         # Override directories if provided via CLI
-        effective_scratch = scratch_dir or output_dir  # output_dir is alias for scratch_dir
-        if effective_scratch:
-            sim_config.output.scratch_directory = Path(effective_scratch)
+        if scratch_dir:
+            sim_config.output.scratch_directory = Path(scratch_dir)
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
 
@@ -480,19 +428,22 @@ def build(
                     colored_echo("    - *.gro (coordinates)", phase="build")
                     colored_echo("    - *.top (topology)", phase="build")
                     colored_echo("    - *.itp (molecule parameters)", phase="build")
-                    colored_echo("    - em.mdp (energy minimization)", phase="build")
+                    colored_echo("    - Optional convenience MDP files:", phase="build")
+                    colored_echo("      - em.mdp (energy minimization)", phase="build")
                     if eq_stages:
                         for i, stage in enumerate(eq_stages, 1):
                             colored_echo(
-                                f"    - eq_{i:02d}_{stage.name}.mdp (equilibration)",
+                                f"      - eq_{i:02d}_{stage.name}.mdp (equilibration)",
                                 phase="build",
                             )
-                    colored_echo("    - prod.mdp (production)", phase="build")
+                    colored_echo("      - prod.mdp (production)", phase="build")
                     colored_echo(
                         "    - Position restraints appended to molecule *.itp files",
                         phase="build",
                     )
-                    colored_echo("    - run_*_gromacs.sh (run script)", phase="build")
+                    colored_echo(
+                        "    - Optional run_*_gromacs.sh (convenience script)", phase="build"
+                    )
                 elif export_format in ("lammps", "amber"):
                     colored_echo(
                         f"    ({export_format.upper()} export is not yet supported)",
@@ -558,6 +509,7 @@ def build(
                 colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
                 colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
                 colored_echo("  - *.itp (molecule parameters)", phase="export")
+                colored_echo("Convenience defaults generated:", phase="export")
                 colored_echo(
                     f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export"
                 )
@@ -568,7 +520,10 @@ def build(
                     colored_echo("Position restraints added to molecule ITP files:", phase="export")
                     for component, define in export_result["posres_defines"].items():
                         colored_echo(f"  - {component}: #ifdef {define}", phase="export")
-                colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
+                colored_echo(
+                    f"  - {export_result['run_script'].name} (convenience run script)",
+                    phase="export",
+                )
                 colored_echo(phase="export")
                 colored_echo(
                     f"To run: cd {export_dir} && ./{export_result['run_script'].name}",
@@ -789,13 +744,6 @@ def _print_run_dry_run_report(
     help="Replicate range (e.g., '1', '1-3', '1,3,5'). Default: 1",
 )
 @click.option(
-    "--replicate",
-    default=None,
-    type=int,
-    hidden=True,
-    help="[Deprecated] Use --replicates instead.",
-)
-@click.option(
     "--scratch-dir",
     default=None,
     type=click.Path(),
@@ -826,7 +774,6 @@ def _print_run_dry_run_report(
 def run(
     config: str,
     replicates: str | None,
-    replicate: int | None,
     scratch_dir: str | None,
     projects_dir: str | None,
     gmx_path: str | None,
@@ -855,7 +802,7 @@ def run(
     if engine == "openmm" and gmx_path is not None:
         raise click.UsageError("--gmx-path can only be used with --engine gromacs")
 
-    replicate_list = _resolve_replicates_option(replicates, replicate, "run")
+    replicate_list = _resolve_replicates_option(replicates)
 
     colored_echo(f"Loading configuration from: {config}", phase="simulation")
 
@@ -1386,7 +1333,7 @@ def submit(
     if dry_run:
         from polyzymd.config.schema import SimulationConfig
 
-        replicate_list = _resolve_replicates_option(replicates, None, "submit")
+        replicate_list = _resolve_replicates_option(replicates)
         sim_config = SimulationConfig.from_yaml(config)
         engine_name = _resolve_engine_name(sim_config, override=engine)
         if scratch_dir:
@@ -1462,7 +1409,7 @@ def submit(
             )
 
         engine_impl = create_engine(sim_config, override="gromacs", defer_binary=True)
-        replicate_list = _resolve_replicates_option(replicates, None, "submit")
+        replicate_list = _resolve_replicates_option(replicates)
         config_path_abs = Path(config).resolve()
 
         colored_echo("Using GROMACS submission backend", phase="workflow")
@@ -1779,7 +1726,7 @@ def run_segment(
     seg_idx = seg_info["segment_index"]
     steps_to_run = seg_info["steps_to_run"]
     samples_to_write = seg_info["samples_to_write"]
-    report_interval = seg_info["report_interval"]
+    report_interval = prod.report_interval
     duration_ns = (steps_to_run * timestep_fs) / 1e6
 
     colored_echo(
@@ -1844,8 +1791,8 @@ def _run_initial_segment(
     duration_ns: float,
     num_samples: int,
     timestep_fs: float,
-    report_interval: int | None = None,
-    checkpoint_interval_s: float = 60.0,
+    report_interval: int,
+    checkpoint_interval_s: float,
 ) -> None:
     """Build system, equilibrate, and run the first production segment.
 
@@ -1865,13 +1812,17 @@ def _run_initial_segment(
         Number of trajectory frames to save.
     timestep_fs : float
         Integration timestep in femtoseconds.
-    report_interval : int or None
-        Fixed reporter interval in steps. Overrides per-segment
-        interval calculation when provided.
+    report_interval : int
+        Explicit reporter interval in steps.
     checkpoint_interval_s : float
         Wall-time interval in seconds between restart checkpoints.
     """
     from polyzymd.simulation.runner import SimulationRunner
+
+    if report_interval <= 0:
+        raise ValueError("report_interval must be a positive integer")
+    if checkpoint_interval_s <= 0:
+        raise ValueError("checkpoint_interval_s must be positive")
 
     temperature = sim_config.thermodynamics.temperature
     pressure = sim_config.thermodynamics.pressure
@@ -2035,8 +1986,8 @@ def _run_continuation_segment(
     duration_ns: float,
     num_samples: int,
     timestep_fs: float,
-    report_interval: int | None = None,
-    checkpoint_interval_s: float = 60.0,
+    report_interval: int,
+    checkpoint_interval_s: float,
 ) -> None:
     """Continue from the last completed segment.
 
@@ -2052,13 +2003,17 @@ def _run_continuation_segment(
         Number of trajectory frames to save.
     timestep_fs : float
         Integration timestep in femtoseconds.
-    report_interval : int or None
-        Fixed reporter interval in steps. Overrides per-segment
-        interval calculation when provided.
+    report_interval : int
+        Explicit reporter interval in steps.
     checkpoint_interval_s : float
         Wall-time interval in seconds between restart checkpoints.
     """
     from polyzymd.simulation.continuation import ContinuationManager
+
+    if report_interval <= 0:
+        raise ValueError("report_interval must be a positive integer")
+    if checkpoint_interval_s <= 0:
+        raise ValueError("checkpoint_interval_s must be positive")
 
     colored_echo(f"Loading state from segment {segment_index - 1}...", phase="simulation")
     manager = ContinuationManager(
@@ -2206,6 +2161,8 @@ def status(config: str) -> None:
     from polyzymd.engines import create_engine
     from polyzymd.simulation.progress import SimulationStatus, save_progress
 
+    logging.getLogger("polyzymd.simulation.progress").setLevel(logging.ERROR)
+
     try:
         sim_config = SimulationConfig.from_yaml(config)
     except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
@@ -2269,13 +2226,23 @@ def status(config: str) -> None:
             progress = engine_inst.load_or_scan_progress(engine_dir, rep_num)
             save_progress(engine_dir, progress)
 
-            frac = progress.fraction_complete()
-            # Compute ns from total steps (not time_completed_ns which
-            # only counts COMPLETED segments, ignoring INTERRUPTED/RUNNING).
-            completed_ns = (progress.total_steps_completed * progress.timestep_fs) / 1e6
             status_val = progress.status
             status_str = status_val.value
             status_display = status_val.value
+            steps_for_display = progress.total_steps_completed
+            if status_val == SimulationStatus.FAILED:
+                steps_for_display = max(
+                    (seg.steps_completed for seg in progress.segments), default=0
+                )
+
+            frac = (
+                min(1.0, steps_for_display / progress.total_steps_requested)
+                if progress.total_steps_requested
+                else 0.0
+            )
+            # Compute ns from displayed steps so interrupted/running/failed
+            # rows show the latest known progress, not just completed segments.
+            completed_ns = (steps_for_display * progress.timestep_fs) / 1e6
 
         bar = render_progress_bar(frac, status_str)
         pct = frac * 100
@@ -2416,7 +2383,8 @@ def init(name: str) -> None:
         └── slurm_logs/
     """
     import shutil
-    from importlib import resources
+
+    from polyzymd.utils.templates import render_package_template
 
     project_dir = Path(name)
 
@@ -2438,73 +2406,29 @@ def init(name: str) -> None:
         (project_dir / "job_scripts").mkdir()
         (project_dir / "slurm_logs").mkdir()
 
-        # Copy template configuration
-        template_path = resources.files("polyzymd.templates.templates").joinpath(
-            "config_template.yaml"
+        # Render template configuration
+        config_content = render_package_template(
+            "polyzymd.templates",
+            "config_template.yaml",
+            {"project_name": name},
         )
         config_dest = project_dir / "config.yaml"
-        with resources.as_file(template_path) as template_file:
-            shutil.copy(template_file, config_dest)
-
-        config_dest.write_text(prepend_file_header(config_dest.read_text(), comment_prefix="#"))
+        config_dest.write_text(prepend_file_header(config_content, comment_prefix="#"))
 
         # Create placeholder files
         protein_placeholder = project_dir / "structures" / "place_protein_here.placeholder.txt"
-        protein_placeholder.write_text(
-            prepend_file_header(
-                """\
-# ============================================================================
-# PLACEHOLDER: Place your protein PDB file here
-# ============================================================================
-#
-# This directory should contain your input structure files.
-#
-# PROTEIN PDB FILE (required):
-#   - Standard amino acid residue names (no nonstandard residues)
-#   - Properly protonated at your simulation pH
-#   - No missing heavy atoms in regions of interest
-#   - Rename to match your config.yaml enzyme.pdb_path setting
-#
-# PREPARATION:
-#   Use `polyzymd clean-pdb -i your_protein.pdb` or another PDB
-#   preparation tool to replace nonstandard residues and add
-#   missing hydrogens before building your system.
-#
-# Delete this placeholder file after adding your protein structure.
-# ============================================================================
-""",
-                comment_prefix="#",
-            )
+        protein_content = render_package_template(
+            "polyzymd.templates",
+            "protein_placeholder.txt.jinja",
         )
+        protein_placeholder.write_text(prepend_file_header(protein_content, comment_prefix="#"))
 
         ligand_placeholder = project_dir / "structures" / "place_ligand_here.placeholder.txt"
-        ligand_placeholder.write_text(
-            prepend_file_header(
-                """\
-# ============================================================================
-# PLACEHOLDER: Place your ligand SDF file here (if using substrate)
-# ============================================================================
-#
-# If your simulation includes a docked substrate or small molecule,
-# place the SDF file in this directory.
-#
-# LIGAND SDF FILE (optional):
-#   - 3D coordinates (from docking, crystal structure, or conformer generation)
-#   - Correct protonation state for simulation pH
-#   - Single conformer recommended (or specify conformer_index in config)
-#   - Rename to match your config.yaml substrate.sdf_path setting
-#
-# SUPPORTED FORMATS:
-#   - SDF (recommended)
-#   - MOL2
-#
-# If you're not using a substrate, you can delete this placeholder
-# and comment out the 'substrate' section in config.yaml.
-# ============================================================================
-""",
-                comment_prefix="#",
-            )
+        ligand_content = render_package_template(
+            "polyzymd.templates",
+            "ligand_placeholder.txt.jinja",
         )
+        ligand_placeholder.write_text(prepend_file_header(ligand_content, comment_prefix="#"))
 
         # Success message
         colored_echo()
@@ -3021,20 +2945,16 @@ def _find_topology_pdb(working_dir: Path) -> Path:
     FileNotFoundError
         If no suitable PDB is found.
     """
-    patterns = [
-        "*solvated*.pdb",
-        "*_solvated.pdb",
-        "solvated_*.pdb",
-        "production_0/*_topology.pdb",
-    ]
-    for pattern in patterns:
-        pdb_files = list(working_dir.glob(pattern))
-        if pdb_files:
-            return pdb_files[0]
+    allowed_paths = (
+        working_dir / "solvated_system.pdb",
+        working_dir / "production_0" / "production_0_topology.pdb",
+        working_dir / "production" / "production_topology.pdb",
+    )
+    for pdb_path in allowed_paths:
+        if pdb_path.exists():
+            return pdb_path
 
-    pdb_files = list(working_dir.glob("**/*.pdb"))
-    if pdb_files:
-        return pdb_files[0]
+    # Arbitrary recursive PDB discovery is disallowed to avoid selecting decoys or inputs
 
     raise FileNotFoundError(f"Could not find topology PDB in {working_dir}")
 
@@ -3103,9 +3023,15 @@ def info() -> None:
 )
 @click.option(
     "--style",
-    type=click.Choice(["dict", "pydantic"], case_sensitive=False),
-    default="dict",
-    help="Template style: 'dict' (default) for plain dicts, 'pydantic' for typed result models.",
+    type=click.Choice(["dict"], case_sensitive=False),
+    default=None,
+    help="Advanced package style; only dict canonical artifacts are supported.",
+)
+@click.option(
+    "--advanced",
+    is_flag=True,
+    default=False,
+    help="Request the advanced MDAnalysis-native package scaffold.",
 )
 @click.option(
     "--project-root",
@@ -3128,36 +3054,39 @@ def info() -> None:
 def new_analysis(
     name: str,
     class_name: str | None,
-    style: str,
+    style: str | None,
+    advanced: bool,
     project_root: str | None,
     force: bool,
     dry_run: bool,
 ) -> None:
-    """Scaffold a new analysis plugin.
+    """Scaffold an analysis plugin.
 
     NAME is the snake_case plugin name (e.g. 'solvent_shell').
 
-    Creates:
+    Default creates:
 
     \b
-      src/polyzymd/analyses/<NAME>/__init__.py    — plugin class
-      tests/analyses/plugins/test_<NAME>.py       — smoke tests
+      src/polyzymd/analyses/<NAME>.py             — simple MDAnalysis-native plugin
+      tests/analyses/plugins/test_<NAME>.py       — contributor-focused tests
 
-    Styles:
+    Advanced package scaffolds create:
 
     \b
-      dict      Plain dicts for results (default, simplest)
-      pydantic  Typed Pydantic result models (better for complex analyses)
+      src/polyzymd/analyses/<NAME>/__init__.py     — plugin lifecycle wiring
+      src/polyzymd/analyses/<NAME>/_mda.py         — lazy AnalysisBase helper
+      tests/analyses/plugins/test_<NAME>.py        — generated plugin tests
 
     Run the generated tests with:
 
     \b
       pixi run -e build pytest tests/analyses/plugins/test_<NAME>.py -v
     """
+    from polyzymd.cli._scaffold.models import DEFAULT_STYLE
     from polyzymd.cli.scaffold import generate_scaffold, validate_class_name, validate_name
 
-    # Validate name
-    error = validate_name(name)
+    # Force needs scaffold-level ownership checks before registered-name rejection
+    error = validate_name(name, check_existing=not force)
     if error:
         raise click.BadParameter(error, param_hint="'NAME'")
 
@@ -3183,15 +3112,17 @@ def new_analysis(
         root = Path(project_root)
 
     try:
+        effective_style = style or DEFAULT_STYLE
         created = generate_scaffold(
             name,
             root,
             class_name=class_name,
-            style=style,
+            style=effective_style,
+            advanced=advanced,
             force=force,
             dry_run=dry_run,
         )
-    except FileExistsError as exc:
+    except (FileExistsError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     verb = "Would create" if dry_run else "Created"

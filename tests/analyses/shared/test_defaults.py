@@ -1,11 +1,11 @@
-"""Tests for shared analysis defaults validation."""
+"""Tests for comparison analysis defaults validation."""
 
 from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
 
-from polyzymd.analyses.shared.defaults import AnalysisDefaults
+from polyzymd.config.comparison import AnalysisDefaults
 
 
 @pytest.mark.parametrize("invalid", [-0.1, 0.0, 1.5])

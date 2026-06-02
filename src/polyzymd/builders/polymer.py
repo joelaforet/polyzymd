@@ -20,9 +20,9 @@ from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
-from openff.toolkit import Molecule
-
 if TYPE_CHECKING:
+    from openff.toolkit import Molecule
+
     from polyzymd.config.schema import MonomerSpec, PolymerConfig, ReactionConfig
 
 LOGGER = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ class PolymerBuilder:
 
     This class supports two generation modes:
 
-    1. Cached mode (legacy): Load pre-built SDF files from disk
+    1. Cached mode: Load pre-built SDF files from disk
        - Requires sdf_directory with pre-built polymer files
        - Filenames: {type_prefix}_seq={sequence}_{length}-mer_charged.sdf
 

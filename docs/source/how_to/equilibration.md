@@ -180,7 +180,7 @@ Keep `protein_heavy` restraints for longer or reduce them more gradually.
 
 ## Related pages
 
-- first-run tutorial: {doc}`../tutorials/quickstart`
+- first-run tutorial: {doc}`../get_started/quickstart`
 - distance restraints: {doc}`restraints`
 - config schema: {doc}`../reference/configuration`
 

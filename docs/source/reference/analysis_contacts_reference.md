@@ -11,26 +11,25 @@ Contacts plugin settings live under `plugins.contacts` in `comparison.yaml`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `polymer_selection` | `str` | `"chainID C"` | MDAnalysis selection for polymer atoms |
-| `protein_selection` | `str` | `"protein"` | MDAnalysis selection for protein atoms |
+| `polymer_selection` | `str` | `"chainid C"` | MDAnalysis selection for polymer atoms |
+| `protein_selection` | `str` | `"chainid A"` | MDAnalysis selection for protein atoms |
 | `cutoff` | `float` | `4.5` | Contact distance cutoff in Angstroms |
 | `polymer_types` | `list[str] \| None` | `null` | Optional polymer residue-name filter |
 | `grouping` | `str` | `"aa_class"` | Protein grouping mode: `aa_class`, `secondary_structure`, or `none` |
-| `compute_residence_times` | `bool` | `true` | Compute residence-time statistics |
+| `compute_residence_times` | `bool` | `true` | Compute aggregate residence-time summaries and plots |
 
-### Binding preference and partition fields
+Set `compute_residence_times: false` to skip aggregate residence-time summaries
+and residence-time plotters. Per-replicate contact events remain stored because
+they are the compressed representation used for contact fractions and
+contacts-derived analyses. The setting is validated through the canonical
+contacts detection fingerprint recorded in replicate and condition artifacts.
+
+### Partition fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `compute_binding_preference` | `bool` | `false` | Enable binding-preference enrichment pipeline |
-| `surface_exposure_threshold` | `float` | `0.2` | Relative SASA threshold for surface exposure |
-| `enzyme_pdb_for_sasa` | `str \| None` | `null` | Optional enzyme PDB path for SASA computation |
-| `include_default_aa_groups` | `bool` | `true` | Include default AA-class groups |
 | `protein_groups` | `dict[str, list[int]] \| None` | `null` | Custom residue groups, e.g. `{active_site: [77, 133]}` |
-| `protein_partitions` | `dict[str, list[str]] \| None` | `null` | Named partitions of `protein_groups` |
-| `polymer_type_selections` | `dict[str, str] \| None` | `null` | Custom polymer type mappings by selection |
-| `polymer_chain` | `str` | `"C"` | Polymer chain ID used for auto-detection |
-| `enrichment_normalization` | `str` | `"residue"` | Deprecated backward-compatibility field (ignored) |
+| `protein_partitions` | `dict[str, list[str]] \| None` | `null` | Named partitions of `protein_groups` for contact-fraction and residence-time plots |
 
 ### Comparison output fields
 
@@ -59,93 +58,76 @@ Contacts results are written under each condition's analysis directory.
         └── contacts/
             ├── run_1/
             │   ├── result.json
-            │   └── contacts_eq10ns_cut4.5_s<fingerprint>_rep1.json
+            │   └── sidecars/
+            │       └── contact_events.npz
             ├── run_2/
             │   └── ...
             ├── run_3/
             │   └── ...
             ├── aggregated/
-            │   └── result.json
-            └── contacts_aggregated_eq10ns_cut4.5_s<fingerprint>_reps1-3.json
+            │   ├── result.json
+            │   └── sidecars/
+            │       └── contact_profiles.npz
 ```
 
-Depending on cache history and plugin version, legacy file names may also
-exist (for example `contacts_rep1.json`).
+Legacy standalone JSON filenames from pre-artifact contacts runs are no longer
+loaded by the v1.3 contacts workflow. Recompute contacts to produce canonical
+artifact-store outputs.
 
-### Per-replicate JSON structure (`ContactResult`)
+### Per-replicate JSON structure (`ReplicateArtifact`)
 
 Representative structure:
 
 ```python
 {
-    "analysis_type": "contacts",
-    "residue_contacts": [
-        {
-            "protein_resid": 77,
-            "protein_resname": "SER",
-            "protein_group": "polar",
-            "segment_contacts": [
-                {
-                    "polymer_resname": "SBM",
-                    "polymer_resid": 403,
-                    "polymer_chain_idx": 0,
-                    "events": [{"start_frame": 120, "duration": 9}]
-                }
-            ],
-            "statistical_inefficiency": 2.41,
-            "n_effective": 3733.6
-        }
-    ],
-    "n_frames": 9000,
-    "timestep_ps": 10.0,
-    "criteria_label": "any_atom_4.5A",
-    "criteria_cutoff": 4.5,
-    "start_frame": 1000,
-    "schema_version": 2,
+    "analysis_name": "contacts",
+    "replicate": 1,
+    "payload": {
+        "metrics": {"coverage": 0.74, "mean_contact_fraction": 0.18},
+        "event_sidecar": "sidecars/contact_events.npz",
+        "n_contact_events": 1240,
+        "n_frames_used": 9000
+    },
+    "sidecars": [{"path": "sidecars/contact_events.npz", "metadata": {"kind": "contact_events"}}],
     "metadata": {
-        "target_selector": "protein",
-        "query_selector": "chainID C",
-        "algorithm": "capped_distance"
+        "contacts_detection_fingerprint": "...",
+        "equilibration": "10ns"
     }
 }
 ```
 
-### Aggregated JSON structure (`AggregatedContactResult`)
+### Aggregated JSON structure (`ConditionArtifact`)
 
 Representative structure:
 
 ```python
 {
-    "analysis_type": "contacts_aggregated",
-    "n_replicates": 3,
-    "total_frames_per_replicate": [9000, 9000, 9000],
-    "timestep_ps": 10.0,
-    "criteria_label": "any_atom_4.5A",
-    "criteria_cutoff": 4.5,
-    "coverage_mean": 0.740,
-    "coverage_sem": 0.011,
-    "mean_contact_fraction": 0.180,
-    "mean_contact_fraction_sem": 0.004,
-    "group_stats": {
-        "aromatic": [0.242, 0.013],
-        "polar": [0.168, 0.009]
-    },
-    "residence_time_by_polymer_type": {
-        "SBM": [9.60, 0.53],
-        "EGM": [8.14, 0.56]
-    },
-    "residue_stats": [
-        {
-            "protein_resid": 77,
-            "protein_group": "polar",
-            "contact_fraction_mean": 0.211,
-            "contact_fraction_sem": 0.016,
-            "contact_fraction_per_replicate": [0.201, 0.232, 0.200],
-            "by_polymer_type": {"SBM": [0.173, 0.012]},
-            "residence_time_by_polymer_type": {"SBM": [7.2, 0.8]}
+    "analysis_name": "contacts",
+    "condition_label": "PEGylated",
+    "replicates": [1, 2, 3],
+    "payload": {
+        "metrics": {
+            "coverage": {"values": [0.73, 0.75, 0.74], "mean": 0.74, "sem": 0.01},
+            "mean_contact_fraction": {"values": [0.17, 0.19, 0.18], "mean": 0.18, "sem": 0.01}
+        },
+        "residue_stats": [
+            {
+                "protein_resid": 77,
+                "protein_group": "polar",
+                "contact_fraction_mean": 0.211,
+                "contact_fraction_per_replicate": [0.201, 0.232, 0.200]
+            }
+        ],
+        "profile_sidecar": "sidecars/contact_profiles.npz",
+        "residence_time_by_polymer_type": {
+            "SBM": {"mean_ns": 9.60, "sem_ns": 0.53}
         }
-    ],
-    "metadata": {"aggregation_method": "mean_sem"}
+    },
+    "metadata": {
+        "contacts_detection_fingerprint": "...",
+        "compute_residence_times": true,
+        "equilibration": "10ns"
+    }
 }
 ```
 
@@ -166,21 +148,11 @@ Contacts plots are generated through the comparison plotting workflow
 | `cf_by_partition_<partition>_bars` | Contact-fraction grouped bars by user-defined partition | `generate_cf_by_partition_bars` |
 | `rt_by_aa_class_bars` | Residence-time grouped bars by amino-acid class | `generate_rt_by_aa_class_bars` |
 | `rt_by_partition_<partition>_bars` | Residence-time grouped bars by user-defined partition | `generate_rt_by_partition_bars` |
-| `system_coverage_bars` | Coverage-enrichment bars by AA class | `generate_system_coverage_bars` |
-| `system_coverage_heatmap` | Coverage-enrichment heatmap | `generate_system_coverage_heatmap` |
-| `user_partition_<partition>_bars` | Coverage-enrichment bars for user partition elements | `generate_user_partition_bars` |
-| `binding_preference_bars` | Binding-preference enrichment bars | `generate_enrichment_bars` |
-| `binding_preference_heatmap` | Binding-preference enrichment heatmap | `generate_enrichment_heatmap` |
 
 ### Contacts plot settings
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `generate_enrichment_heatmap` | `true` | Enable binding-preference heatmap |
-| `generate_enrichment_bars` | `true` | Enable binding-preference bars |
-| `generate_system_coverage_heatmap` | `true` | Enable system-coverage heatmap |
-| `generate_system_coverage_bars` | `true` | Enable system-coverage bars |
-| `generate_user_partition_bars` | `true` | Enable user partition bar plots |
 | `generate_contact_fraction_profile` | `true` | Enable per-residue contact-fraction profiles |
 | `generate_residence_time_profile` | `true` | Enable per-residue residence-time profiles |
 | `generate_cf_by_aa_class_bars` | `true` | Enable contact-fraction AA-class bars |
@@ -191,8 +163,8 @@ Contacts plots are generated through the comparison plotting workflow
 | `contact_fraction_profile_threshold` | `null` | Optional threshold line on contact-fraction profile |
 
 Figure-size and error-display fields are also available per plot type (for
-example `figsize_contact_fraction_profile`,
-`show_contact_fraction_profile_error`, `figsize_enrichment_bars`).
+example `figsize_contact_fraction_profile` and
+`show_contact_fraction_profile_error`).
 
 For global plotting keys (`style`, `dpi`, output format), see
 {doc}`analysis_comparison_reference` and {doc}`comparison_yaml`.
@@ -224,7 +196,7 @@ polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
 **Fix:**
 
 - Verify chain and residue naming in your topology
-- Start with `polymer_selection: "chainID C"` and narrow incrementally
+- Start with `polymer_selection: "chainid C"` and narrow incrementally
 - Run with `--debug` to inspect selection behavior
 
 ### "Selection matched no atoms" (protein or polymer)

@@ -25,7 +25,7 @@ Before starting, make sure you have:
   in PolyzyMD's standard directory layout)
 - One `config.yaml` per condition
 - A topology such as `solvated_system.pdb` already produced during the build
-- PolyzyMD installed in a pixi environment (see {doc}`installation`)
+- PolyzyMD installed in a pixi environment (see {doc}`../get_started/installation`)
 
 If you have not run a single-condition analysis yet, complete
 {doc}`first_analysis` first.
@@ -35,6 +35,16 @@ This tutorial uses the stable `v1.3.0` comparison stack: RMSD, Rg, RMSF,
 contacts, distances, catalytic triad, secondary structure, SASA, and hydrogen
 bonds. Experimental workflows are linked at the end, but they are not part of
 the main tutorial path.
+```
+
+```{important}
+**Resource requirements:** Workspace setup and validation commands are
+lightweight. Commands that load trajectories, such as `polyzymd compare run`,
+`run-all`, and plotting over large cached results, can require substantial RAM,
+CPU/GPU time, and scratch I/O. On shared HPC systems, run them inside an
+allocated job or interactive compute session, not on a login node. If a command
+is killed or runs out of memory, request more resources or use
+`polyzymd compare submit`.
 ```
 
 ## The Study We Will Analyze
@@ -117,8 +127,8 @@ plugins:
         selection_b: "protein and resid 77 and name OG"
 
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A"
     cutoff: 4.5
     compute_residence_times: true
 ```
@@ -140,8 +150,11 @@ For the tutorial, use the batch runner:
 pixi run -e build polyzymd compare run-all
 ```
 
-This runs every enabled comparison and writes canonical cache files into
-`comparison/<analysis>/result.json`.
+This runs each enabled analysis through its replicate, aggregate, and
+cross-condition comparison stages. Successful runs write canonical
+per-replicate `ReplicateArtifact` files under `analysis/`, per-condition
+`ConditionArtifact` files under `analysis/`, and cross-condition comparison
+outputs under `comparison/<analysis>/result.json`.
 
 ```{tip}
 **On an HPC cluster?** For large studies, submit each analysis as a SLURM
@@ -180,24 +193,51 @@ At this point you should have:
 ```text
 polymer_stabilization_study/
 ├── comparison.yaml
+├── analysis/
+│   ├── No Polymer/
+│   │   ├── rmsf/
+│   │   │   ├── run_1/
+│   │   │   │   └── result.json        # ReplicateArtifact
+│   │   │   ├── run_2/
+│   │   │   │   └── result.json        # ReplicateArtifact
+│   │   │   ├── run_3/
+│   │   │   │   └── result.json        # ReplicateArtifact
+│   │   │   └── aggregated/
+│   │   │       └── result.json        # ConditionArtifact
+│   │   └── contacts/
+│   │       └── ...
+│   ├── 100% SBMA/
+│   │   └── rmsf/
+│   │       ├── run_1/
+│   │       │   └── result.json        # ReplicateArtifact
+│   │       └── aggregated/
+│   │           └── result.json        # ConditionArtifact
+│   └── 100% EGMA/
+│       └── ...
 ├── comparison/
 │   ├── rmsf/
-│   │   └── result.json
+│   │   └── result.json                # cross-condition comparison output
 │   ├── contacts/
-│   │   └── result.json
+│   │   └── result.json                # cross-condition comparison output
 │   ├── distances/
-│   │   └── result.json
+│   │   └── result.json                # cross-condition comparison output
 │   └── catalytic_triad/
-│       └── result.json
+│       └── result.json                # cross-condition comparison output
 └── figures/
-    ├── rmsf_comparison.png
-    ├── rmsf_profile.png
-    ├── triad_kde_panel.png
+    ├── rmsf/
+    │   ├── rmsf_comparison.png
+    │   └── rmsf_profile.png
+    ├── catalytic_triad/
+    │   ├── triad_kde_panel.png
+    │   └── triad_threshold_bars.png
     └── ...
 ```
 
-That is the tutorial success state: the canonical comparison caches exist, the
-figures exist, and `polyzymd compare plot-all` completes without error.
+That is the tutorial success state: canonical `ReplicateArtifact` and
+`ConditionArtifact` files exist under `analysis/`, each
+`comparison/<analysis>/result.json` contains the cross-condition comparison
+artifact or plugin-specific summary output, the figures exist, and
+`polyzymd compare plot-all` completes without error.
 
 ## What to Do Next
 
@@ -210,6 +250,6 @@ figures exist, and `polyzymd compare plot-all` completes without error.
   - [Run Contacts Analysis](../how_to/analysis_contacts_quickstart.md)
   - [Run Distance Analysis](../how_to/analysis_distances_quickstart.md)
   - [Run Catalytic Triad Analysis](../how_to/analysis_triad_quickstart.md)
-
-Experimental workflows remain available, but they are intentionally outside the
-main tutorial path for this release.
+- For removed experimental analyses, see
+  [Experimental analyses](../reference/experimental_analyses_archive.md); they
+  are not active v1.3 workflows.

@@ -15,117 +15,121 @@ averaging unrelated distances (e.g. H-bond distance + lid-opening distance)
 is not semantically meaningful.  Therefore ``compare()`` is overridden
 entirely and ``extract_metrics()`` is not used.
 
-Cross-plugin API
-----------------
-The :class:`DistanceCalculator` class is also used by the catalytic triad
-plugin (``analyses/catalytic_triad/``) for computing inter-residue
-distances of the catalytic triad.  Import it as::
-
-    from polyzymd.analyses.distances import DistanceCalculator
 """
 
 from __future__ import annotations
 
+import json
 import logging
-import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 import numpy as np
-from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
     BasePlotSettings,
     ComparisonContext,
     PlotContext,
-    ReplicateContext,
+    PluginContractError,
+)
+from polyzymd.analyses.distances._mda import (
+    DistanceArtifactCollector,
+    aggregate_distance_artifacts,
+    build_distance_jobs,
 )
 from polyzymd.analyses.distances._plot_settings import DistancesPlotSettings
 from polyzymd.analyses.distances._plotters import (
     _plot_distance_kde,
     _plot_distance_state_bars,
     _plot_distance_threshold_bars,
+    build_distance_plot_data,
 )
-from polyzymd.analyses.distances._results import DistanceAggregatedResult, DistanceResult
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
+from polyzymd.analyses.mda import (
+    ConditionArtifact,
+    MDACollectorContext,
+    MDAReplicateJobContext,
+    ReplicateArtifact,
+)
 
 if TYPE_CHECKING:
-    from MDAnalysis.core.universe import Universe
-
     from polyzymd.analyses.distances._comparison_results import (
         DistanceComparisonResult,
     )
-    from polyzymd.analyses.distances._results import (
-        DistancePairResult,
-    )
-    from polyzymd.config.schema import SimulationConfig
 
 logger = logging.getLogger("polyzymd.analyses.distances")
+
+NOT_TESTABLE_SINGLETON_NOTE = (
+    "Inferential statistics require at least two replicates per condition."
+)
 
 # Default threshold from the existing settings module
 DEFAULT_DISTANCE_THRESHOLD = 3.5
 
 
+@dataclass(frozen=True)
+class _DistancesTrajectoryWindow:
+    """Distances trajectory window that carries loader-derived file metadata."""
+
+    start: int
+    stop: int
+    step: int
+    equilibration_start: int
+    n_frames_total: int
+    n_frames_selected: int
+    timestep_ps: float
+    equilibration_ps: float
+    warning_message: str | None = None
+    trajectory_files: tuple[Path, ...] = ()
+
+    @classmethod
+    def from_window(
+        cls,
+        window: Any,
+        trajectory_files: Sequence[Path],
+    ) -> _DistancesTrajectoryWindow:
+        """Build a distances window wrapper from the shared trajectory window.
+
+        Parameters
+        ----------
+        window : Any
+            Shared trajectory window returned by the centralized resolver.
+        trajectory_files : Sequence[Path]
+            Trajectory files resolved by the existing loader instance.
+
+        Returns
+        -------
+        _DistancesTrajectoryWindow
+            Distances window wrapper that preserves run arguments and file metadata.
+        """
+
+        return cls(
+            start=int(window.start),
+            stop=int(window.stop),
+            step=int(window.step),
+            equilibration_start=int(window.equilibration_start),
+            n_frames_total=int(window.n_frames_total),
+            n_frames_selected=int(window.n_frames_selected),
+            timestep_ps=float(window.timestep_ps),
+            equilibration_ps=float(window.equilibration_ps),
+            warning_message=getattr(window, "warning_message", None),
+            trajectory_files=tuple(trajectory_files),
+        )
+
+    def run_kwargs(self) -> dict[str, int]:
+        """Return keyword arguments for the runner ``run()`` call."""
+
+        return {"start": self.start, "stop": self.stop, "step": self.step}
+
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
-
-
-def _selection_to_label(selection: str) -> str:
-    """Convert MDAnalysis selection to filename-safe label.
-
-    Handles special syntax like midpoint() and com().
-
-    Examples
-    --------
-    >>> _selection_to_label("resid 77 and name OG")
-    "resid77_OG"
-    >>> _selection_to_label("protein and resid 133 and name NE2")
-    "resid133_NE2"
-    >>> _selection_to_label("midpoint(resid 133 and name OD1 OD2)")
-    "resid133_mid"
-    """
-    from polyzymd.analyses.shared.selections import parse_selection_string
-
-    parsed = parse_selection_string(selection)
-    inner_selection = parsed.selection
-
-    # Remove common keywords
-    label = inner_selection.lower()
-    label = re.sub(r"\b(and|or|not|protein)\b", "", label)
-    # Extract resid and name
-    resid_match = re.search(r"resid\s*(\d+)", label)
-    name_match = re.search(r"name\s+(\w+)", label)
-
-    parts = []
-    if resid_match:
-        parts.append(f"resid{resid_match.group(1)}")
-
-    # Use mode-specific suffix for special syntax
-    if parsed.mode.value == "midpoint":
-        parts.append("mid")
-    elif parsed.mode.value == "com":
-        parts.append("com")
-    elif name_match:
-        parts.append(name_match.group(1).upper())
-
-    if parts:
-        return "_".join(parts)
-
-    # Fallback: sanitize the whole string
-    label = re.sub(r"[^a-z0-9]+", "_", label)
-    return label.strip("_")
-
-
-def _make_pair_label(sel1: str, sel2: str) -> str:
-    """Create human-readable label for a distance pair."""
-    l1 = _selection_to_label(sel1)
-    l2 = _selection_to_label(sel2)
-    return f"{l1}-{l2}"
 
 
 # ---------------------------------------------------------------------------
@@ -280,530 +284,6 @@ class DistancesSettings(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# DistanceCalculator — public API for cross-plugin use
-# ---------------------------------------------------------------------------
-
-
-class DistanceCalculator:
-    """Calculator for distance analysis with proper statistics.
-
-    This class handles the distance analysis workflow:
-    1. Load trajectories from config
-    2. Apply equilibration offset
-    3. Optionally align trajectory to remove rotational drift
-    4. Compute PBC-aware distances for specified atom pairs
-    5. Calculate distributions and statistics
-
-    This is the authoritative implementation, used both by the distances
-    plugin's ``compute_replicate()`` and by the catalytic triad plugin.
-
-    Parameters
-    ----------
-    config : SimulationConfig
-        PolyzyMD simulation configuration.
-    pairs : sequence of tuple[str, str]
-        List of ``(selection1, selection2)`` pairs to analyze.
-    equilibration : str, optional
-        Equilibration time to skip. Default is ``"0ns"``.
-    thresholds : sequence of float or float, optional
-        Distance thresholds for contact analysis (Angstroms).
-    use_pbc : bool, optional
-        If True (default), use periodic boundary conditions.
-    alignment : AlignmentConfig, optional
-        Trajectory alignment configuration.
-    """
-
-    def __init__(
-        self,
-        config: "SimulationConfig",
-        pairs: Sequence[tuple[str, str]],
-        equilibration: str = "0ns",
-        thresholds: Sequence[float | None] | float | None = None,
-        use_pbc: bool = True,
-        alignment: Any | None = None,
-        settings_tag: str | None = None,
-    ) -> None:
-        from polyzymd.analyses.shared.alignment import AlignmentConfig
-        from polyzymd.analyses.shared.config_hash import compute_config_hash
-        from polyzymd.analyses.shared.loader import (
-            TrajectoryLoader,
-            _require_mdanalysis,
-            parse_time_string,
-        )
-
-        _require_mdanalysis("distance analysis")
-
-        self.config = config
-        self.pairs = list(pairs)
-
-        # Normalize thresholds to a list matching pairs length
-        if thresholds is None:
-            self.thresholds: list[float | None] = [None] * len(self.pairs)
-        elif isinstance(thresholds, (int, float)):
-            self.thresholds = [float(thresholds)] * len(self.pairs)
-        else:
-            thresholds_list = list(thresholds)
-            if len(thresholds_list) != len(self.pairs):
-                raise ValueError(
-                    f"thresholds length ({len(thresholds_list)}) must match "
-                    f"pairs length ({len(self.pairs)})"
-                )
-            self.thresholds = thresholds_list
-
-        # PBC and alignment settings
-        self._use_pbc = use_pbc
-        self._alignment = alignment if alignment is not None else AlignmentConfig()
-
-        # Parse equilibration time
-        eq_value, eq_unit = parse_time_string(equilibration)
-        self.equilibration_time = eq_value
-        self.equilibration_unit = eq_unit
-
-        # Initialize loader
-        self._loader = TrajectoryLoader(config)
-        self._config_hash = compute_config_hash(config)
-        self._settings_tag = settings_tag
-
-    def compute(
-        self,
-        replicate: int,
-        save: bool = True,
-        output_dir: Path | None = None,
-        recompute: bool = False,
-        store_distributions: bool = True,
-    ) -> "DistanceResult":
-        """Compute distances for a single replicate.
-
-        Parameters
-        ----------
-        replicate : int
-            Replicate number (1-indexed).
-        save : bool, optional
-            If True (default), save result to JSON.
-        output_dir : Path, optional
-            Directory to save results.
-        recompute : bool, optional
-            If True, recompute even if cached.
-        store_distributions : bool, optional
-            If True (default), store full distance arrays.
-
-        Returns
-        -------
-        DistanceResult
-            Distance analysis results.
-        """
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.distances._results import DistanceResult
-        from polyzymd.analyses.shared.config_hash import validate_config_hash
-        from polyzymd.analyses.shared.diagnostics import validate_equilibration_time
-        from polyzymd.analyses.shared.loader import convert_time, time_to_frame
-
-        if output_dir is None:
-            output_dir = (
-                self.config.output.projects_directory
-                / "analysis"
-                / "distances"
-                / f"run_{replicate}"
-            )
-
-        result_file = output_dir / self._make_result_filename()
-
-        # Check cache
-        if not recompute and result_file.exists():
-            logger.info(f"Loading cached result from {result_file}")
-            result = DistanceResult.load(result_file)
-            validate_config_hash(result.config_hash, self.config)
-            result = self._update_threshold_if_needed(result)
-            return result
-
-        logger.info(f"Computing distances for replicate {replicate}")
-
-        # Load universe
-        u = self._loader.load_universe(replicate)
-        traj_info = self._loader.get_trajectory_info(replicate)
-
-        # Get timestep and determine start frame
-        timestep = self._loader.get_timestep(replicate, unit="ps")
-        eq_time_ps = convert_time(self.equilibration_time, self.equilibration_unit, "ps")
-        start_frame = time_to_frame(eq_time_ps, "ps", timestep, "ps")
-
-        n_frames_total = len(u.trajectory)
-        n_frames_used = n_frames_total - start_frame
-
-        # Validate equilibration time against trajectory length
-        eq_time_ns = convert_time(self.equilibration_time, self.equilibration_unit, "ns")
-        traj_time_ns = (n_frames_total * timestep) / 1000.0
-        is_valid, eq_message = validate_equilibration_time(eq_time_ns, traj_time_ns)
-        if not is_valid:
-            raise ValueError(eq_message)
-        if eq_message:
-            logger.warning(eq_message)
-
-        logger.info(
-            f"Trajectory: {n_frames_total} frames, using {n_frames_used} after equilibration"
-        )
-
-        # Apply trajectory alignment if configured
-        from polyzymd.analyses.shared.alignment import align_trajectory
-
-        ref_frame = None
-        if self._alignment.enabled:
-            ref_frame = align_trajectory(
-                u,
-                self._alignment,
-                start_frame=start_frame,
-                stop_frame=n_frames_total,
-            )
-
-        # Log PBC status
-        if self._use_pbc:
-            logger.info("Using PBC-aware distance calculation (minimum image convention)")
-        else:
-            logger.debug("PBC disabled; using simple Euclidean distances")
-
-        # Compute distances for each pair
-        pair_results = []
-        for idx, (sel1, sel2) in enumerate(self.pairs):
-            pr = self._compute_pair(
-                u,
-                sel1,
-                sel2,
-                start_frame,
-                timestep=timestep,
-                store_distribution=store_distributions,
-                threshold=self.thresholds[idx],
-            )
-            pair_results.append(pr)
-
-            if pr.sem_distance is not None:
-                logger.info(
-                    f"  {pr.pair_label}: {pr.mean_distance:.2f} "
-                    f"± {pr.sem_distance:.2f} Å "
-                    f"(SEM, n_ind={pr.n_independent_frames})"
-                )
-            else:
-                logger.info(f"  {pr.pair_label}: {pr.mean_distance:.2f} ± {pr.std_distance:.2f} Å")
-
-        # Create result
-        selection_strs = [f"({s1} : {s2})" for s1, s2 in self.pairs]
-        combined_selection = "; ".join(selection_strs)
-
-        result = DistanceResult(
-            config_hash=self._config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=replicate,
-            equilibration_time=self.equilibration_time,
-            equilibration_unit=self.equilibration_unit,
-            selection_string=combined_selection,
-            pair_results=pair_results,
-            n_frames_total=n_frames_total,
-            n_frames_used=n_frames_used,
-            trajectory_files=[str(f) for f in traj_info.trajectory_files],
-        )
-
-        if save:
-            result.save(result_file)
-            logger.info(f"Saved result to {result_file}")
-
-        return result
-
-    def _update_threshold_if_needed(self, result: "DistanceResult") -> "DistanceResult":
-        """Update contact fractions if thresholds changed since caching.
-
-        If the cached result used different thresholds than currently
-        requested and the distances array is available, recompute
-        ``fraction_below_threshold`` from the stored distances.
-
-        Parameters
-        ----------
-        result : DistanceResult
-            Cached result to potentially update.
-
-        Returns
-        -------
-        DistanceResult
-            Updated result (or original if no changes needed).
-        """
-        if all(t is None for t in self.thresholds):
-            return result
-
-        updated_pairs = []
-        any_updated = False
-
-        for idx, pr in enumerate(result.pair_results):
-            expected_threshold = self.thresholds[idx] if idx < len(self.thresholds) else None
-            cached_threshold = pr.threshold
-            needs_update = cached_threshold != expected_threshold
-
-            if needs_update and expected_threshold is not None:
-                if pr.distances is not None and len(pr.distances) > 0:
-                    distances_arr = np.array(pr.distances)
-                    new_fraction = float(np.mean(distances_arr < expected_threshold))
-                    logger.info(
-                        f"Recomputing contact fraction for {pr.pair_label} "
-                        f"(threshold: {cached_threshold} -> {expected_threshold})"
-                    )
-                    pr = pr.model_copy(
-                        update={
-                            "threshold": expected_threshold,
-                            "fraction_below_threshold": new_fraction,
-                        }
-                    )
-                    any_updated = True
-                else:
-                    logger.warning(
-                        f"Cannot update threshold for {pr.pair_label}: "
-                        f"distances not stored. Use --recompute to recalculate."
-                    )
-
-            updated_pairs.append(pr)
-
-        if any_updated:
-            return result.model_copy(update={"pair_results": updated_pairs})
-
-        return result
-
-    def _compute_pair(
-        self,
-        u: "Universe",
-        sel1: str,
-        sel2: str,
-        start_frame: int,
-        timestep: float = 1.0,
-        store_distribution: bool = True,
-        threshold: float | None = None,
-    ) -> "DistancePairResult":
-        """Compute distances for a single pair with KDE and autocorrelation.
-
-        Parameters
-        ----------
-        u : Universe
-            MDAnalysis Universe.
-        sel1 : str
-            First selection (supports midpoint() and com() syntax).
-        sel2 : str
-            Second selection (supports midpoint() and com() syntax).
-        start_frame : int
-            First frame to use (after equilibration).
-        timestep : float
-            Time between frames in ps.
-        store_distribution : bool
-            Whether to store full distance array.
-        threshold : float, optional
-            Distance threshold for contact analysis (Angstroms).
-
-        Returns
-        -------
-        DistancePairResult
-            Distance analysis results with KDE and autocorrelation statistics.
-        """
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.distances._results import DistancePairResult
-        from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
-        from polyzymd.analyses.shared.diagnostics import (
-            get_selection_diagnostics,
-            warn_if_multi_chain_selection,
-        )
-        from polyzymd.analyses.shared.pbc import minimum_image_distance
-        from polyzymd.analyses.shared.selections import (
-            get_position,
-            parse_selection_string,
-        )
-
-        # Parse selections (handle midpoint/com syntax)
-        parsed1 = parse_selection_string(sel1)
-        parsed2 = parse_selection_string(sel2)
-
-        atoms1 = u.select_atoms(parsed1.selection)
-        atoms2 = u.select_atoms(parsed2.selection)
-
-        if len(atoms1) == 0:
-            diag = get_selection_diagnostics(u, sel1)
-            raise ValueError(f"Selection '{sel1}' matched no atoms.\n\n{diag}")
-        if len(atoms2) == 0:
-            diag = get_selection_diagnostics(u, sel2)
-            raise ValueError(f"Selection '{sel2}' matched no atoms.\n\n{diag}")
-
-        # Warn if selections span multiple chains (common user error)
-        pair_label = _make_pair_label(sel1, sel2)
-        warn_if_multi_chain_selection(atoms1, sel1, f"for distance pair '{pair_label}'")
-        warn_if_multi_chain_selection(atoms2, sel2, f"for distance pair '{pair_label}'")
-
-        # Compute distances over trajectory
-        distances: list[float] = []
-        n_frames_total = len(u.trajectory)
-
-        for i, ts in enumerate(u.trajectory):
-            if i < start_frame:
-                continue
-
-            pos1 = get_position(atoms1, parsed1.mode)
-            pos2 = get_position(atoms2, parsed2.mode)
-
-            if self._use_pbc:
-                box = ts.dimensions
-                dist = minimum_image_distance(pos1, pos2, box)
-            else:
-                dist = float(np.linalg.norm(pos2 - pos1))
-            distances.append(dist)
-
-        distances_arr = np.array(distances, dtype=np.float64)
-        n_frames_used = len(distances_arr)
-
-        # Compute basic statistics
-        mean_dist = float(np.mean(distances_arr))
-        std_dist = float(np.std(distances_arr))
-        median_dist = float(np.median(distances_arr))
-        min_dist = float(np.min(distances_arr))
-        max_dist = float(np.max(distances_arr))
-
-        # Threshold analysis
-        fraction_below = None
-        if threshold is not None:
-            fraction_below = float(np.mean(distances_arr < threshold))
-
-        # Compute histogram
-        hist_counts, hist_edges = np.histogram(distances_arr, bins=50)
-
-        # ========================================
-        # KDE analysis for mode estimation
-        # ========================================
-        kde_x = None
-        kde_y = None
-        kde_peak = None
-        kde_bandwidth = None
-
-        try:
-            from scipy.stats import gaussian_kde
-
-            has_scipy = True
-        except ImportError:
-            has_scipy = False
-
-        if has_scipy and len(distances_arr) > 10:
-            try:
-                kde = gaussian_kde(distances_arr)
-                std_val = float(np.std(distances_arr))
-                kde_bandwidth = float(kde.factor) * std_val
-
-                x_min = max(0, min_dist - 0.5)
-                x_max = max_dist + 0.5
-                kde_x_arr = np.linspace(x_min, x_max, 200)
-                kde_y_arr = kde(kde_x_arr)
-
-                kde_x = kde_x_arr.tolist()
-                kde_y = kde_y_arr.tolist()
-
-                peak_idx = int(np.argmax(kde_y_arr))
-                kde_peak = float(kde_x_arr[peak_idx])
-
-                logger.debug(f"KDE peak (mode): {kde_peak:.2f} Å")
-            except (ValueError, np.linalg.LinAlgError, RuntimeError) as e:
-                logger.warning(f"KDE computation failed: {e}")
-
-        # ========================================
-        # Autocorrelation analysis
-        # ========================================
-        sem_distance = None
-        correlation_time = None
-        correlation_time_unit = None
-        n_independent_frames = None
-        statistical_inefficiency = None
-        autocorrelation_warning = None
-
-        if len(distances_arr) >= 20:
-            try:
-                tau_result = estimate_correlation_time(
-                    distances_arr,
-                    timestep=timestep,
-                    timestep_unit="ps",
-                    method="integration",
-                    n_frames=n_frames_used,
-                )
-
-                correlation_time = tau_result.tau
-                correlation_time_unit = tau_result.tau_unit
-                n_independent_frames = tau_result.n_independent
-                statistical_inefficiency = tau_result.statistical_inefficiency
-                autocorrelation_warning = tau_result.warning
-
-                if n_independent_frames > 0:
-                    sem_distance = float(std_dist / np.sqrt(n_independent_frames))
-
-                logger.debug(
-                    f"Autocorrelation: τ={correlation_time:.1f} "
-                    f"{correlation_time_unit}, n_ind={n_independent_frames}, "
-                    f"SEM={sem_distance:.3f} Å"
-                )
-            except (ValueError, np.linalg.LinAlgError, RuntimeError) as e:
-                logger.warning(f"Autocorrelation analysis failed: {e}")
-                sem_distance = float(std_dist / np.sqrt(n_frames_used))
-
-        return DistancePairResult(
-            config_hash=self._config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=None,
-            equilibration_time=self.equilibration_time,
-            equilibration_unit=self.equilibration_unit,
-            selection_string=f"{sel1} : {sel2}",
-            pair_label=_make_pair_label(sel1, sel2),
-            selection1=sel1,
-            selection2=sel2,
-            distances=distances if store_distribution else None,
-            mean_distance=mean_dist,
-            std_distance=std_dist,
-            median_distance=median_dist,
-            min_distance=min_dist,
-            max_distance=max_dist,
-            sem_distance=sem_distance,
-            correlation_time=correlation_time,
-            correlation_time_unit=correlation_time_unit,
-            n_independent_frames=n_independent_frames,
-            statistical_inefficiency=statistical_inefficiency,
-            autocorrelation_warning=autocorrelation_warning,
-            threshold=threshold,
-            fraction_below_threshold=fraction_below,
-            histogram_edges=hist_edges.tolist(),
-            histogram_counts=hist_counts.tolist(),
-            kde_x=kde_x,
-            kde_y=kde_y,
-            kde_peak=kde_peak,
-            kde_bandwidth=kde_bandwidth,
-            n_frames_total=n_frames_total,
-            n_frames_used=n_frames_used,
-        )
-
-    def _make_result_filename(self) -> str:
-        """Generate filename for result JSON.
-
-        Includes analysis settings that affect results to ensure cache
-        invalidation when settings change.
-        """
-        eq_str = f"eq{self.equilibration_time:g}{self.equilibration_unit}"
-
-        if self.pairs:
-            pair_label = _make_pair_label(*self.pairs[0])
-            if len(self.pairs) > 1:
-                pair_label += f"_and{len(self.pairs) - 1}more"
-        else:
-            pair_label = "nopairs"
-
-        settings_parts = []
-        pbc_str = "pbc" if self._use_pbc else "nopbc"
-        settings_parts.append(pbc_str)
-
-        if self._alignment.enabled:
-            align_str = f"align-{self._alignment.reference_mode}"
-        else:
-            align_str = "noalign"
-        settings_parts.append(align_str)
-
-        settings_suffix = "_".join(settings_parts)
-        tag = self._settings_tag or "legacy"
-        return f"distances_{pair_label}_{eq_str}_{settings_suffix}_s{tag}.json"
-
-
-# ---------------------------------------------------------------------------
 # Plugin
 # ---------------------------------------------------------------------------
 
@@ -812,7 +292,7 @@ class DistancesAnalysis(Analysis):
     """Distances analysis: inter-atomic distances from MD trajectories.
 
     This plugin performs full distance computation inline (no delegation
-    to legacy calculator classes), aggregates across replicates, and
+    to non-canonical calculator classes), aggregates across replicates, and
     performs per-pair cross-condition comparison with dual metrics (mean
     distance and fraction below threshold).
 
@@ -834,11 +314,10 @@ class DistancesAnalysis(Analysis):
     name: ClassVar[str] = "distances"
     Settings: ClassVar[type] = DistancesSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = DistancesPlotSettings
-    AggregatedResultClass: ClassVar[type] = DistanceAggregatedResult
-    ReplicateResultClass: ClassVar[type | None] = DistanceResult
-    aliases: ClassVar[tuple[str, ...]] = ()
+    AggregatedResultClass: ClassVar[type | None] = None
+    ReplicateResultClass: ClassVar[type | None] = None
     dependencies: ClassVar[tuple[str, ...]] = ()
-    min_replicates: ClassVar[int] = 2
+    min_replicates: ClassVar[int] = 1
 
     # === Required methods ===
 
@@ -858,157 +337,148 @@ class DistancesAnalysis(Analysis):
         """
         return settings_fingerprint(settings)
 
-    def compute_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-    ) -> Any:
-        """Compute distances for a single replicate.
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[Any] | None:
+        """Build the MDAnalysis-native pair-distance job for one replicate."""
 
-        Constructs a :class:`DistanceCalculator` from the framework context
-        and delegates to its ``compute()`` method.
+        return build_distance_jobs(ctx, ctx.settings)
 
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided context.
-        replicate : int
-            1-indexed replicate number.
+    def build_mda_collector(self, ctx: MDACollectorContext) -> Any:
+        """Build the distances artifact collector."""
 
-        Returns
-        -------
-        DistanceResult
-            Per-replicate distance result.
-        """
-        settings = ctx.settings
-        settings_tag = self._make_settings_cache_tag(settings)
+        del ctx
+        return DistanceArtifactCollector()
 
-        pairs = settings.get_pair_selections()
-        thresholds = settings.get_pair_thresholds()
-        alignment = settings.get_alignment_config()
+    def _deserialize_result(self, path: Path) -> Any:
+        """Load a canonical distances condition artifact."""
 
-        calc = DistanceCalculator(
-            config=ctx.sim_config,
-            pairs=pairs,
-            equilibration=ctx.equilibration,
-            thresholds=thresholds,
-            use_pbc=getattr(settings, "use_pbc", True),
-            alignment=alignment,
-            settings_tag=settings_tag,
+        if path.exists():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise PluginContractError(
+                    f"Distances aggregate at {path} is not a valid canonical artifact. "
+                    "Recompute the condition or clear stale caches before comparing."
+                ) from exc
+            if isinstance(loaded, dict) and loaded.get("artifact_type") == "condition":
+                from polyzymd.analyses.mda import ArtifactStore
+
+                return ArtifactStore(path.parent).read_condition_result(path.name)
+        raise PluginContractError(
+            f"Distances aggregate at {path} is not a canonical MDAnalysis condition artifact. "
+            "Recompute the condition or clear stale non-canonical distances caches."
         )
-
-        result = calc.compute(
-            replicate=replicate,
-            save=True,
-            output_dir=ctx.output_dir,
-            recompute=ctx.recompute,
-        )
-
-        return result
 
     def aggregate(
         self,
         ctx: AggregateContext,
         results: Sequence[Any],
     ) -> Any:
-        """Aggregate distance results across replicates for one condition.
-
-        Computes per-pair aggregated distance statistics from the
-        already-computed per-replicate results. Does NOT re-run the
-        calculator.
+        """Aggregate distance replicate artifacts across one condition.
 
         Parameters
         ----------
         ctx : AggregateContext
             Framework-provided context.
-        results : Sequence[DistanceResult]
-            Per-replicate distance results.
+        results : sequence of ReplicateArtifact
+            Per-replicate MDAnalysis distance artifacts.
 
         Returns
         -------
-        DistanceAggregatedResult
-            Aggregated result with per-pair statistics and SEM.
+        ConditionArtifact
+            Aggregated condition artifact with canonical pair summaries.
         """
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.distances._results import (
-            DistanceAggregatedResult,
-            DistancePairAggregatedResult,
-        )
-        from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
 
-        settings = ctx.settings
-        first = results[0]
-
-        n_pairs = len(first.pair_results)
-        aggregated_pairs: list[DistancePairAggregatedResult] = []
-
-        for pair_idx in range(n_pairs):
-            stats = aggregate_distance_pair_stats(list(results), pair_idx)
-
-            pr = first.pair_results[pair_idx]
-            thresholds = settings.get_pair_thresholds()
-            threshold = thresholds[pair_idx] if pair_idx < len(thresholds) else None
-
-            agg_pair = DistancePairAggregatedResult(
-                config_hash=first.config_hash,
-                polyzymd_version=get_polyzymd_version(),
-                replicate=None,
-                equilibration_time=first.equilibration_time,
-                equilibration_unit=first.equilibration_unit,
-                selection_string=f"{pr.selection1} : {pr.selection2}",
-                replicates=list(ctx.replicates),
-                n_replicates=len(ctx.replicates),
-                pair_label=pr.pair_label,
-                selection1=pr.selection1,
-                selection2=pr.selection2,
-                overall_mean=stats.mean_stats.mean,
-                overall_sem=stats.mean_stats.sem,
-                overall_median=stats.median_stats.mean,
-                per_replicate_means=stats.per_rep_means,
-                per_replicate_stds=stats.per_rep_stds,
-                per_replicate_medians=stats.per_rep_medians,
-                threshold=threshold,
-                overall_fraction_below=(
-                    stats.fraction_stats.mean if stats.fraction_stats else None
-                ),
-                sem_fraction_below=(stats.fraction_stats.sem if stats.fraction_stats else None),
-                per_replicate_fractions_below=(
-                    stats.per_rep_fractions if stats.per_rep_fractions else None
-                ),
-                overall_kde_peak=(stats.kde_peak_stats.mean if stats.kde_peak_stats else None),
-                sem_kde_peak=(stats.kde_peak_stats.sem if stats.kde_peak_stats else None),
-                per_replicate_kde_peaks=(
-                    stats.per_rep_kde_peaks if stats.per_rep_kde_peaks else None
-                ),
+        if not results:
+            raise ValueError(
+                f"Distances aggregation for condition '{ctx.condition.label}' requires at least "
+                "one replicate artifact. No replicate inputs were provided."
             )
-            aggregated_pairs.append(agg_pair)
-
-        # Create aggregated result
-        selection_strs = [f"({pr.selection1} : {pr.selection2})" for pr in first.pair_results]
-        combined_selection = "; ".join(selection_strs)
-
-        agg_result = DistanceAggregatedResult(
-            config_hash=first.config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=None,
-            equilibration_time=first.equilibration_time,
-            equilibration_unit=first.equilibration_unit,
-            selection_string=combined_selection,
-            replicates=list(ctx.replicates),
-            n_replicates=len(ctx.replicates),
-            pair_results=aggregated_pairs,
-            source_result_files=[],  # Not tracked in plugin mode
+        if not all(isinstance(result, ReplicateArtifact) for result in results):
+            raise TypeError(
+                "Distances aggregation expects MDAnalysis ReplicateArtifact inputs. Non-canonical "
+                "distances replicate caches are incompatible with the MDAnalysis artifact "
+                "lifecycle; recompute the condition or clear stale caches before aggregating."
+            )
+        return aggregate_distance_artifacts(
+            condition_label=ctx.condition.label,
+            replicates=ctx.replicates,
+            settings=ctx.settings,
+            equilibration=ctx.equilibration,
+            output_dir=ctx.output_dir,
+            artifacts=results,
+            settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
         )
 
-        target_path = ctx.result_path
-        if target_path is None:
-            settings_tag = self._make_settings_cache_tag(ctx.settings)
-            filename = self._make_aggregated_filename(ctx.replicates, first, settings_tag)
-            target_path = ctx.output_dir / filename
-        self.save_result(agg_result, target_path)
-        logger.info(f"Saved aggregated distances to {target_path}")
+    @staticmethod
+    def _validate_replicate_pair_schema(
+        ctx: AggregateContext,
+        results: Sequence[Any],
+        settings: DistancesSettings,
+    ) -> None:
+        """Require all replicate pair results to match the configured schema.
 
-        return agg_result
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[Any]
+            Per-replicate distance results.
+        settings : DistancesSettings
+            Current distances settings that define the canonical pair schema.
+
+        Raises
+        ------
+        ValueError
+            Raised when any replicate result has a mismatched pair count, pair
+            ordering, selections, labels, or effective threshold.
+        """
+
+        expected_thresholds = settings.get_pair_thresholds()
+        schema_issues: list[str] = []
+
+        for result in results:
+            replicate = getattr(result, "replicate", None)
+            pair_results = list(getattr(result, "pair_results", []))
+
+            if len(pair_results) != len(settings.pairs):
+                schema_issues.append(
+                    f"replicate {replicate}: pair count {len(pair_results)} != {len(settings.pairs)}"
+                )
+                continue
+
+            for pair_idx, (pair_result, pair_setting, threshold) in enumerate(
+                zip(pair_results, settings.pairs, expected_thresholds, strict=True),
+                start=1,
+            ):
+                mismatch_parts: list[str] = []
+                expected_pair_label = pair_setting.label
+                if pair_result.pair_label != expected_pair_label:
+                    mismatch_parts.append(
+                        f"label {pair_result.pair_label!r} != {expected_pair_label!r}"
+                    )
+                if pair_result.selection1 != pair_setting.selection_a:
+                    mismatch_parts.append(
+                        f"selection1 {pair_result.selection1!r} != {pair_setting.selection_a!r}"
+                    )
+                if pair_result.selection2 != pair_setting.selection_b:
+                    mismatch_parts.append(
+                        f"selection2 {pair_result.selection2!r} != {pair_setting.selection_b!r}"
+                    )
+                if pair_result.threshold != threshold:
+                    mismatch_parts.append(f"threshold {pair_result.threshold!r} != {threshold!r}")
+
+                if mismatch_parts:
+                    schema_issues.append(
+                        f"replicate {replicate} pair {pair_idx}: {', '.join(mismatch_parts)}"
+                    )
+
+        if schema_issues:
+            issue_text = "; ".join(schema_issues)
+            raise ValueError(
+                f"Distances aggregation for condition '{ctx.condition.label}' requires every "
+                f"replicate result to match the configured pair schema. Problems detected: "
+                f"{issue_text}."
+            )
 
     # === compare() — fully overridden ===
 
@@ -1059,34 +529,60 @@ class DistancesAnalysis(Analysis):
         for cond in ctx.conditions:
             # Prefer in-memory results from orchestrator, fall back to disk
             agg_result = ctx.aggregated_results.get(cond.label)
+            agg_source: Path | str = f"comparison context for {cond.label}"
             if agg_result is None:
                 agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
+                agg_source = self.aggregate_result_path(agg_dir)
                 agg_result = self._load_aggregated_result(agg_dir)
 
             if agg_result is None:
                 logger.warning(f"No aggregated result found for '{cond.label}' — skipping.")
                 continue
 
-            # Map auto-generated pair labels to user-defined labels from settings
-            selection_to_label: dict[tuple[str, str], str] = {
-                (p.selection_a, p.selection_b): p.label for p in settings.pairs
-            }
+            if not isinstance(agg_result, ConditionArtifact):
+                raise TypeError(
+                    f"Distances comparison for condition '{cond.label}' requires canonical "
+                    "MDAnalysis condition artifacts. Non-artifact aggregate inputs are "
+                    "incompatible; recompute the condition or clear stale caches before comparing."
+                )
+            agg_result = self.validate_aggregated_result(
+                agg_result,
+                condition=cond,
+                settings=ctx.settings,
+                equilibration=ctx.equilibration,
+                source=agg_source,
+                expected_replicates=cond.replicates,
+                allow_replicate_subset=True,
+            )
 
+            pair_results = list(agg_result.payload.get("pair_results", []))
             pair_summaries = []
-            for pr in agg_result.pair_results:
-                user_label = selection_to_label.get((pr.selection1, pr.selection2), pr.pair_label)
+            for pair_index, pr in enumerate(pair_results):
+                expected_label = pair_labels[pair_index] if pair_index < len(pair_labels) else None
+                pair_label = str(pr.get("pair_label", f"Pair {pair_index}"))
+                user_label = pair_label if pair_label == expected_label else expected_label
+                if user_label is None:
+                    user_label = pair_label
                 pair_summaries.append(
                     DistancePairSummary(
                         label=user_label,
-                        selection_a=pr.selection1,
-                        selection_b=pr.selection2,
-                        threshold=pr.threshold,
-                        mean_distance=pr.overall_mean,
-                        sem_distance=pr.overall_sem,
-                        fraction_below_threshold=pr.overall_fraction_below,
-                        sem_fraction_below=pr.sem_fraction_below,
-                        per_replicate_means=pr.per_replicate_means,
-                        per_replicate_fractions=pr.per_replicate_fractions_below,
+                        selection_a=str(pr.get("selection1", "")),
+                        selection_b=str(pr.get("selection2", "")),
+                        threshold=pr.get("threshold"),
+                        mean_distance=float(pr.get("overall_mean", pr.get("mean_distance", 0.0))),
+                        sem_distance=float(
+                            pr.get("overall_sem", pr.get("sem_distance", 0.0)) or 0.0
+                        ),
+                        fraction_below_threshold=pr.get("overall_fraction_below"),
+                        sem_fraction_below=pr.get("sem_fraction_below"),
+                        per_replicate_means=[
+                            float(value) for value in pr.get("per_replicate_means", [])
+                        ],
+                        per_replicate_fractions=(
+                            [float(value) for value in pr.get("per_replicate_fractions_below", [])]
+                            if pr.get("per_replicate_fractions_below") is not None
+                            else None
+                        ),
                     )
                 )
 
@@ -1094,7 +590,9 @@ class DistancesAnalysis(Analysis):
                 DistanceConditionSummary(
                     label=cond.label,
                     config_path=str(cond.config_path),
-                    n_replicates=agg_result.n_replicates,
+                    n_replicates=int(
+                        agg_result.payload.get("n_replicates", len(agg_result.replicates))
+                    ),
                     pair_summaries=pair_summaries,
                 )
             )
@@ -1180,25 +678,34 @@ class DistancesAnalysis(Analysis):
                         fraction_groups.append(pair_data.per_replicate_fractions)
 
                 anova_dist = one_way_anova(*distance_groups)
+                distance_testable = all(len(group) >= 2 for group in distance_groups)
 
                 fraction_f = None
                 fraction_p = None
                 fraction_sig = None
+                fraction_testable = None
+                fraction_note = None
                 if len(fraction_groups) == len(summaries):
                     anova_frac = one_way_anova(*fraction_groups)
+                    fraction_testable = all(len(group) >= 2 for group in fraction_groups)
                     fraction_f = anova_frac.f_statistic
                     fraction_p = anova_frac.p_value
-                    fraction_sig = anova_frac.significant
+                    fraction_sig = anova_frac.significant if fraction_testable else False
+                    fraction_note = None if fraction_testable else NOT_TESTABLE_SINGLETON_NOTE
 
                 anova_by_pair.append(
                     DistancePairANOVA(
                         pair_label=pair_label,
                         distance_f_statistic=anova_dist.f_statistic,
                         distance_p_value=anova_dist.p_value,
-                        distance_significant=anova_dist.significant,
+                        distance_significant=anova_dist.significant if distance_testable else False,
+                        distance_testable=distance_testable,
+                        distance_note=(None if distance_testable else NOT_TESTABLE_SINGLETON_NOTE),
                         fraction_f_statistic=fraction_f,
                         fraction_p_value=fraction_p,
                         fraction_significant=fraction_sig,
+                        fraction_testable=fraction_testable,
+                        fraction_note=fraction_note,
                     )
                 )
 
@@ -1257,21 +764,22 @@ class DistancesAnalysis(Analysis):
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
         plot_settings = ctx.plot_settings
+        plot_data = build_distance_plot_data(data, labels)
 
         try:
-            result = _plot_distance_kde(data, labels, ctx.output_dir, plot_settings)
+            result = _plot_distance_kde(plot_data, labels, ctx.output_dir, plot_settings)
             plots.extend(result)
         except (ValueError, RuntimeError, OSError) as exc:
             logger.warning(f"Distance KDE plot failed: {exc}")
 
         try:
-            result = _plot_distance_threshold_bars(data, labels, ctx.output_dir, plot_settings)
+            result = _plot_distance_threshold_bars(plot_data, labels, ctx.output_dir, plot_settings)
             plots.extend(result)
         except (ValueError, RuntimeError, OSError) as exc:
             logger.warning(f"Distance threshold bars plot failed: {exc}")
 
         try:
-            result = _plot_distance_state_bars(data, labels, ctx.output_dir, plot_settings)
+            result = _plot_distance_state_bars(plot_data, labels, ctx.output_dir, plot_settings)
             plots.extend(result)
         except (ValueError, RuntimeError, OSError) as exc:
             logger.warning(f"Distance state bars plot failed: {exc}")
@@ -1279,7 +787,7 @@ class DistancesAnalysis(Analysis):
         return plots
 
     def format(self, result: Any, output_format: str = "text") -> str:
-        """Format distance comparison results without legacy dispatch."""
+        """Format distance comparison results without compatibility dispatch."""
         from polyzymd.analyses.distances._formatters import format_distances_result
 
         return format_distances_result(result, format=self._normalize_output_format(output_format))
@@ -1329,6 +837,7 @@ class DistancesAnalysis(Analysis):
         # Distance metric comparison
         values_a = pair_a.per_replicate_means
         values_b = pair_b.per_replicate_means
+        distance_testable = len(values_a) >= 2 and len(values_b) >= 2
 
         ttest_dist = independent_ttest(values_a, values_b)
         effect_dist = cohens_d(values_a, values_b)
@@ -1349,10 +858,13 @@ class DistancesAnalysis(Analysis):
         fraction_dir = None
         fraction_sig = None
         fraction_pct = None
+        fraction_testable = None
+        fraction_note = None
 
         if pair_a.per_replicate_fractions and pair_b.per_replicate_fractions:
             frac_a = pair_a.per_replicate_fractions
             frac_b = pair_b.per_replicate_fractions
+            fraction_testable = len(frac_a) >= 2 and len(frac_b) >= 2
 
             ttest_frac = independent_ttest(frac_a, frac_b)
             effect_frac = cohens_d(frac_a, frac_b)
@@ -1365,7 +877,8 @@ class DistancesAnalysis(Analysis):
             fraction_p = ttest_frac.p_value
             fraction_d = effect_frac.cohens_d
             fraction_interp = effect_frac.interpretation
-            fraction_sig = ttest_frac.significant
+            fraction_sig = ttest_frac.significant if fraction_testable else False
+            fraction_note = None if fraction_testable else NOT_TESTABLE_SINGLETON_NOTE
 
             # Direction: positive change = more contact = improving
             fraction_dir = interpret_direction(
@@ -1385,8 +898,10 @@ class DistancesAnalysis(Analysis):
             distance_cohens_d=effect_dist.cohens_d,
             distance_effect_interpretation=effect_dist.interpretation,
             distance_direction=direction_dist,
-            distance_significant=ttest_dist.significant,
+            distance_significant=ttest_dist.significant if distance_testable else False,
             distance_percent_change=pct_dist,
+            distance_testable=distance_testable,
+            distance_note=None if distance_testable else NOT_TESTABLE_SINGLETON_NOTE,
             fraction_t_statistic=fraction_t,
             fraction_p_value=fraction_p,
             fraction_cohens_d=fraction_d,
@@ -1394,15 +909,6 @@ class DistancesAnalysis(Analysis):
             fraction_direction=fraction_dir,
             fraction_significant=fraction_sig,
             fraction_percent_change=fraction_pct,
+            fraction_testable=fraction_testable,
+            fraction_note=fraction_note,
         )
-
-    @staticmethod
-    def _make_aggregated_filename(
-        replicates: tuple[int, ...] | Sequence[int],
-        first_result: Any,
-        settings_tag: str,
-    ) -> str:
-        """Generate an aggregated distances filename."""
-        eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
-        rep_str = Analysis._format_replicate_range(replicates)
-        return f"distances_{rep_str}_{eq_str}_s{settings_tag}.json"

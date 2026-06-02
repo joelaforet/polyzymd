@@ -18,6 +18,7 @@ import click
 import yaml
 from pydantic import ValidationError
 
+from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.cli._compare_utils import (
     common_compare_options,
     load_comparison_config,
@@ -53,6 +54,54 @@ def _resolve_hpc_dir(config: ComparisonConfig, analysis_name: str) -> Path:
     if source is None:
         return Path("comparison") / analysis_name / "_hpc"
     return source.parent / "comparison" / analysis_name / "_hpc"
+
+
+def _contract_error_analysis_name(exc: PluginContractError, fallback: str) -> str:
+    """Infer the analysis name from a plugin contract error message.
+
+    Parameters
+    ----------
+    exc : PluginContractError
+        Contract exception raised by the analysis framework.
+    fallback : str
+        Analysis name to use when the message cannot be parsed.
+
+    Returns
+    -------
+    str
+        Best-effort analysis name for user-facing diagnostics.
+    """
+    message = str(exc)
+    if "." in message:
+        candidate = message.split(".", 1)[0].strip()
+        if candidate:
+            return candidate
+    return fallback
+
+
+def _plugin_contract_click_exception(
+    analysis_name: str,
+    exc: PluginContractError,
+) -> click.ClickException:
+    """Build a user-facing ClickException for plugin contract failures.
+
+    Parameters
+    ----------
+    analysis_name : str
+        Name of the analysis plugin that violated the framework contract.
+    exc : PluginContractError
+        Original contract exception.
+
+    Returns
+    -------
+    click.ClickException
+        Click exception with an actionable diagnostic.
+    """
+    return click.ClickException(
+        f"Plugin contract error in analysis '{analysis_name}': {exc}\n"
+        "This is likely a PolyzyMD/plugin bug, not missing trajectory data. "
+        "Please report it with the command and configuration used."
+    )
 
 
 def _resolve_submit_resources_with_hints(
@@ -293,22 +342,8 @@ def init(name: str, eq_time: str, output_dir: Path | None):
 
 Place shared structure files here for use in comparison analyses.
 
-## For Binding Preference Analysis
-
-Copy your enzyme PDB file here for SASA (solvent-accessible surface area)
-calculation used in binding preference analysis:
-
-    cp /path/to/your/enzyme.pdb structures/
-
-Then reference it in comparison.yaml:
-
-    plugins:
-      contacts:
-        compute_binding_preference: true
-        enzyme_pdb_for_sasa: "structures/enzyme.pdb"
-
-The enzyme PDB should be the reference structure (e.g., from PDB or your
-prepared simulation input), NOT a trajectory frame.
+Keep condition-specific input structures with their simulation projects and
+place only comparison-wide references in this directory.
 """
         (project_dir / "structures" / "README.md").write_text(
             prepend_file_header(structures_readme, comment_prefix="#")
@@ -326,15 +361,11 @@ prepared simulation input), NOT a trajectory frame.
         click.echo("     - Add your simulation conditions (paths to config.yaml files)")
         click.echo("     - Define catalytic_triad for active site analysis")
         click.echo()
-        click.echo("  2. For binding preference analysis, copy your enzyme PDB:")
-        click.echo(f"     cp /path/to/enzyme.pdb {_display_path(project_dir)}/structures/")
-        click.echo()
-        click.echo(f"  3. cd {_display_path(project_dir)}")
-        click.echo("  4. Run comparisons:")
+        click.echo(f"  2. cd {_display_path(project_dir)}")
+        click.echo("  3. Run comparisons:")
         click.echo("     polyzymd compare run rmsf      # Compare flexibility")
-        click.echo("     polyzymd compare run triad     # Compare triad geometry")
+        click.echo("     polyzymd compare run catalytic_triad  # Compare triad geometry")
         click.echo("     polyzymd compare run contacts  # Compare polymer-protein contacts")
-        click.echo("     polyzymd compare run exposure  # Compare chaperone-like activity")
         click.echo()
         click.echo("  On an HPC cluster, submit as SLURM jobs instead:")
         click.echo("     polyzymd compare submit sasa --partition <part> --mem 8G")
@@ -504,7 +535,7 @@ def run_comparison(
 ):
     """Run a comparison using the analysis plugin system.
 
-    Runs any discovered analysis plugin by name or alias. Use --list to see
+    Runs any discovered analysis plugin by canonical name. Use --list to see
     all available comparison types.
 
     This command runs analysis interactively in the current process. For
@@ -514,22 +545,20 @@ def run_comparison(
     \b
     Examples:
         polyzymd compare run rmsf
-        polyzymd compare run triad --eq-time 10ns
+        polyzymd compare run catalytic_triad --eq-time 10ns
         polyzymd compare run contacts --format markdown
         polyzymd compare run --list
     """
     from polyzymd.analyses.discovery import get_analysis, list_all_names, list_analyses
     from polyzymd.analyses.orchestrator import run_comparison as _run_pipeline
-    from polyzymd.analyses.shared.logging_utils import setup_logging
+    from polyzymd.cli.logging_utils import setup_logging
 
     # Handle --list flag
     if list_types:
         analyses = list_analyses()
         click.echo("Available comparison types:")
         for name, cls in analyses.items():
-            aliases = ", ".join(cls.aliases) if cls.aliases else ""
-            suffix = f" (aliases: {aliases})" if aliases else ""
-            click.echo(f"  - {name}{suffix}: {cls.__name__}")
+            click.echo(f"  - {name}: {cls.__name__}")
         return
 
     # Require comparison_type if not listing
@@ -570,6 +599,8 @@ def run_comparison(
             analysis, config, recompute=recompute, equilibration=equilibration
         )
         result = pipeline_result["comparison"]
+    except PluginContractError as e:
+        raise _plugin_contract_click_exception(analysis_cls.name, e) from e
     except (FileNotFoundError, ValueError, OSError) as e:
         raise click.ClickException(f"Error during comparison: {e}") from e
     except Exception as e:
@@ -855,7 +886,7 @@ def run_all(
         polyzymd compare run-all --recompute --plot
     """
     from polyzymd.analyses.orchestrator import run_all_comparisons
-    from polyzymd.analyses.shared.logging_utils import setup_logging
+    from polyzymd.cli.logging_utils import setup_logging
 
     _echo_branding()
 
@@ -879,12 +910,16 @@ def run_all(
     click.echo()
 
     # --- Run all analyses in dependency order --------------------------------
-    all_results = run_all_comparisons(
-        config,
-        analysis_names=None,  # run all enabled
-        recompute=recompute,
-        equilibration=equilibration,
-    )
+    try:
+        all_results = run_all_comparisons(
+            config,
+            analysis_names=None,  # run all enabled
+            recompute=recompute,
+            equilibration=equilibration,
+        )
+    except PluginContractError as e:
+        analysis_name = _contract_error_analysis_name(e, "run-all")
+        raise _plugin_contract_click_exception(analysis_name, e) from e
 
     # Categorize results for summary
     succeeded: list[str] = []
@@ -925,7 +960,11 @@ def run_all(
         click.echo()
         click.echo("Generating plots ...")
 
-        generated, plot_failures = run_all_plots(config, succeeded)
+        generated, plot_failures = run_all_plots(
+            config,
+            succeeded,
+            equilibration=equilibration,
+        )
         click.echo(f"Generated {len(generated)} plots.")
         if plot_failures:
             click.echo(f"Plot failures ({len(plot_failures)}):", err=True)
@@ -1012,13 +1051,6 @@ def submit_analysis_hpc(
 
     _echo_qos_tip_if_needed(partition, qos)
 
-    if not dry_run and shutil.which("sbatch") is None:
-        raise click.ClickException(
-            "SLURM is not available: 'sbatch' not found on PATH. The HPC submission "
-            "commands require a SLURM cluster. Run analysis locally with "
-            "'polyzymd compare run' instead."
-        )
-
     try:
         config = ComparisonConfig.from_yaml(config_file)
     except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
@@ -1034,6 +1066,13 @@ def submit_analysis_hpc(
             f"Unknown analysis type '{analysis}'. Available: {', '.join(sorted(available))}"
         )
     plugin = analysis_cls()
+
+    if not dry_run and shutil.which("sbatch") is None:
+        raise click.ClickException(
+            "SLURM is not available: 'sbatch' not found on PATH. The HPC submission "
+            "commands require a SLURM cluster. Run analysis locally with "
+            "'polyzymd compare run' instead."
+        )
 
     dependencies = tuple(getattr(analysis_cls, "dependencies", ()))
     if dependencies:
@@ -1217,17 +1256,17 @@ def submit_all_analyses_hpc(
 
     _echo_qos_tip_if_needed(partition, qos)
 
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
+        raise click.ClickException(f"Error loading config: {e}") from e
+
     if not dry_run and shutil.which("sbatch") is None:
         raise click.ClickException(
             "SLURM is not available: 'sbatch' not found on PATH. The HPC submission "
             "commands require a SLURM cluster. Run analysis locally with "
             "'polyzymd compare run' instead."
         )
-
-    try:
-        config = ComparisonConfig.from_yaml(config_file)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
-        raise click.ClickException(f"Error loading config: {e}") from e
 
     enabled = list(config.plugins.get_enabled_plugins())
     excluded_set = set(excluded_analyses)
@@ -1433,7 +1472,7 @@ def analysis_hpc_status(analysis: str, config_file: Path, reconcile: bool, as_js
     default="comparison.yaml",
     help="Path to comparison.yaml config file.",
 )
-@click.option("--recompute", is_flag=True, help="Retained for CLI compatibility.")
+@click.option("--recompute", is_flag=True, help="Regenerate comparison and plot outputs.")
 @click.option(
     "--allow-partial",
     is_flag=True,
@@ -1446,7 +1485,6 @@ def finalize_analysis_hpc(
     allow_partial: bool,
 ):
     """Run comparison + plotting from aggregated on-disk results."""
-    del recompute
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import (
         finalize_comparison_from_disk,
@@ -1480,28 +1518,49 @@ def finalize_analysis_hpc(
     analysis_root = prepared["analysis_root"]
     analysis_dirs: dict[str, Path] = {}
     aggregated_results: dict[str, object] = {}
+    expects_aggregated_results = bool(getattr(plugin, "has_compute_stage", True))
+    if not getattr(plugin, "has_aggregate_stage", True):
+        expects_aggregated_results = False
+
     for condition in valid_conditions:
         cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
-        aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
-        if aggregated is not None:
-            analysis_dirs[condition.label] = cond_dir
-            aggregated_results[condition.label] = aggregated
+        analysis_dirs[condition.label] = cond_dir
+        if expects_aggregated_results:
+            aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
+            if aggregated is not None:
+                aggregated_results[condition.label] = aggregated
 
-    missing_conditions = [
-        condition.label
-        for condition in valid_conditions
-        if condition.label not in aggregated_results
-    ]
+    missing_conditions: list[str] = []
+    if expects_aggregated_results:
+        missing_conditions = [
+            condition.label
+            for condition in valid_conditions
+            if condition.label not in aggregated_results
+        ]
+
     if missing_conditions:
+        expected_paths = []
+        for condition in valid_conditions:
+            if condition.label in missing_conditions:
+                cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
+                aggregate_result_path = getattr(plugin, "aggregate_result_path", None)
+                if callable(aggregate_result_path):
+                    expected_path = aggregate_result_path(cond_dir / "aggregated")
+                else:
+                    expected_path = cond_dir / "aggregated" / "result.json"
+                expected_paths.append(str(expected_path))
         click.echo(
             "Warning: missing aggregated results for condition(s): "
-            f"{', '.join(missing_conditions)}",
+            f"{', '.join(missing_conditions)}\n"
+            "Expected aggregate result path(s): "
+            f"{', '.join(expected_paths)}",
             err=True,
         )
         if not allow_partial:
             raise click.ClickException(
                 "Finalize aborted due to missing aggregated results. "
-                "Re-run failed jobs or pass --allow-partial to continue."
+                "Re-run failed aggregate jobs or pass --allow-partial to continue "
+                "(--allow-partial (CLI) / allow_partial=True (API))."
             )
 
     effective_control = (
@@ -1519,17 +1578,21 @@ def finalize_analysis_hpc(
 
     config_for_finalize = config.model_copy(deep=True)
     config_for_finalize.defaults.equilibration_time = equilibration
-    result = finalize_comparison_from_disk(
-        analysis=plugin,
-        config=config_for_finalize,
-        analysis_dirs=analysis_dirs,
-        aggregated_results=aggregated_results,
-        results_dir=results_dir,
-        figures_dir=figures_dir,
-        settings=settings,
-        effective_control=effective_control,
-        allow_partial=allow_partial,
-    )
+    try:
+        result = finalize_comparison_from_disk(
+            analysis=plugin,
+            config=config_for_finalize,
+            analysis_dirs=analysis_dirs,
+            aggregated_results=aggregated_results,
+            results_dir=results_dir,
+            figures_dir=figures_dir,
+            settings=settings,
+            effective_control=effective_control,
+            allow_partial=allow_partial,
+            recompute=recompute,
+        )
+    except PluginContractError as e:
+        raise _plugin_contract_click_exception(plugin.name, e) from e
     click.echo(f"Saved result: {result['comparison_path']}")
 
 
@@ -1550,7 +1613,10 @@ def worker_replicate(
 
     manifest = AnalysisJobManifest.load(manifest_path)
     config = ComparisonConfig.from_yaml(Path(manifest.comparison_yaml))
-    analysis_cls = get_analysis(manifest.analysis_name)
+    try:
+        analysis_cls = get_analysis(manifest.analysis_name)
+    except KeyError:
+        raise
     plugin = analysis_cls()
     valid_conditions, equilibration, analysis_root = validate_manifest_snapshot(
         manifest,
@@ -1578,7 +1644,7 @@ def worker_replicate(
         equilibration,
         run_dir,
         replicate,
-        manifest.recompute,
+        getattr(manifest, "recompute", False),
     )
     if result is None:
         raise click.ClickException("Replicate computation produced no result")
@@ -1596,7 +1662,10 @@ def worker_aggregate(manifest_path: Path, condition_index: int):
 
     manifest = AnalysisJobManifest.load(manifest_path)
     config = ComparisonConfig.from_yaml(Path(manifest.comparison_yaml))
-    analysis_cls = get_analysis(manifest.analysis_name)
+    try:
+        analysis_cls = get_analysis(manifest.analysis_name)
+    except KeyError:
+        raise
     plugin = analysis_cls()
     valid_conditions, equilibration, analysis_root = validate_manifest_snapshot(
         manifest,
@@ -1618,6 +1687,7 @@ def worker_aggregate(manifest_path: Path, condition_index: int):
         equilibration,
         cond_dir,
         tuple(spec.replicate for spec in cond_spec.replicate_specs),
+        recompute=getattr(manifest, "recompute", False),
     )
 
 
@@ -1632,7 +1702,10 @@ def worker_finalize(manifest_path: Path):
 
     manifest = AnalysisJobManifest.load(manifest_path)
     config = ComparisonConfig.from_yaml(Path(manifest.comparison_yaml))
-    analysis_cls = get_analysis(manifest.analysis_name)
+    try:
+        analysis_cls = get_analysis(manifest.analysis_name)
+    except KeyError:
+        raise
     plugin = analysis_cls()
     valid_conditions, equilibration, analysis_root = validate_manifest_snapshot(
         manifest,
@@ -1713,4 +1786,5 @@ def worker_finalize(manifest_path: Path):
         settings=settings,
         effective_control=effective_control,
         allow_partial=allow_partial,
+        recompute=getattr(manifest, "recompute", False),
     )

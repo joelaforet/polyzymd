@@ -44,18 +44,6 @@ import json
 import time
 from pathlib import Path
 
-import openmm
-from openmm import XmlSerializer, unit
-from openmm.app import (
-    DCDReporter,
-    ForceField,
-    Modeller,
-    PDBFile,
-    Simulation,
-    StateDataReporter,
-    Topology,
-)
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -187,6 +175,18 @@ def write_progress_file(workdir: Path, config_path: Path) -> None:
 
 
 def main():
+    import openmm
+    from openmm import XmlSerializer, unit
+    from openmm.app import (
+        DCDReporter,
+        ForceField,
+        Modeller,
+        PDBFile,
+        Simulation,
+        StateDataReporter,
+        Topology,
+    )
+
     t0 = time.time()
     print("=" * 70)
     print("Self-Resubmitting Job Test Environment Setup")
@@ -266,11 +266,11 @@ def main():
     try:
         platform = openmm.Platform.getPlatformByName("CUDA")
         print("  Using CUDA platform")
-    except Exception:
+    except openmm.OpenMMException:
         try:
             platform = openmm.Platform.getPlatformByName("OpenCL")
             print("  Using OpenCL platform")
-        except Exception:
+        except openmm.OpenMMException:
             platform = openmm.Platform.getPlatformByName("CPU")
             print("  Using CPU platform (slower but works)")
 

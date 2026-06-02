@@ -13,6 +13,7 @@ def minimal_config_data():
     """Provide minimal valid SimulationConfig input data."""
     return {
         "name": "test_simulation",
+        "engine": "openmm",
         "enzyme": {"name": "TestEnzyme", "pdb_path": "test.pdb"},
         "thermodynamics": {"temperature": 300.0},
         "simulation_phases": {
@@ -28,6 +29,8 @@ def minimal_config_data():
                 "ensemble": "NPT",
                 "duration": 1.0,
                 "samples": 10,
+                "report_interval": 50000,
+                "checkpoint_interval": 60.0,
             },
         },
     }
@@ -145,6 +148,14 @@ class TestConfigValidation:
         assert config.temperature == 300.0
         assert config.pressure == 1.0  # Default pressure
 
+    def test_ion_config_defaults_to_neutralization_without_salt(self):
+        """IonConfig should neutralize without adding bulk salt by default."""
+        from polyzymd.config.schema import IonConfig
+
+        config = IonConfig()
+        assert config.neutralize is True
+        assert config.nacl_concentration == 0.0
+
 
 class TestCoSolventVolumeValidation:
     """Test co-solvent volume fraction / concentration validation."""
@@ -211,6 +222,8 @@ class TestSimulationPhasesConfig:
             ensemble="NPT",
             duration=1.0,
             samples=10,
+            report_interval=50000,
+            checkpoint_interval=60.0,
             time_step=2.0,
         )
 
@@ -226,11 +239,40 @@ class TestSimulationPhasesConfig:
             ensemble="NPT",
             duration=1.0,
             samples=10,
+            report_interval=50000,
+            checkpoint_interval=60.0,
             time_step=2.0,
         )
 
         with pytest.raises(ValidationError, match="must contain at least one stage"):
             SimulationPhasesConfig(equilibration_stages=[], production=production)
+
+    def test_rejects_legacy_segments_field(self):
+        """Legacy simulation_phases.segments should be rejected."""
+        from pydantic import ValidationError
+
+        from polyzymd.config.schema import EquilibrationStageConfig, SimulationPhasesConfig
+
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            SimulationPhasesConfig(
+                equilibration_stages=[
+                    EquilibrationStageConfig(
+                        name="heating",
+                        ensemble="NVT",
+                        duration=1.0,
+                        samples=10,
+                        temperature=300.0,
+                    )
+                ],
+                production={
+                    "ensemble": "NPT",
+                    "duration": 1.0,
+                    "samples": 10,
+                    "report_interval": 50000,
+                    "checkpoint_interval": 60.0,
+                },
+                segments=[],
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -290,11 +332,39 @@ class TestStatepointCoSolventExport:
         assert "cosolvent_urea_molarity" in sp
 
 
+class TestOutputConfig:
+    """Tests for output path configuration."""
+
+    def test_defaults_use_projects_as_effective_scratch(self):
+        """Default output settings should write scratch data under projects."""
+        from polyzymd.config.schema import OutputConfig
+
+        config = OutputConfig()
+
+        assert config.projects_directory == Path(".")
+        assert config.scratch_directory is None
+        assert config.effective_scratch_directory == Path(".")
+
+    def test_base_directory_field_is_rejected(self):
+        """OutputConfig should reject the removed base_directory field."""
+        from polyzymd.config.schema import OutputConfig
+
+        with pytest.raises(ValidationError, match="base_directory"):
+            OutputConfig(base_directory="/tmp/old-output")
+
+    def test_output_base_directory_yaml_data_is_rejected(self, minimal_config_data):
+        """SimulationConfig data should reject stale output.base_directory."""
+        minimal_config_data["output"] = {"base_directory": "/tmp/old-output"}
+
+        with pytest.raises(ValidationError, match="base_directory"):
+            SimulationConfig(**minimal_config_data)
+
+
 class TestEngineConfig:
     """Tests for engine configuration fields."""
 
-    def test_default_engine_is_openmm(self, minimal_config_data):
-        """Default engine should be openmm for backward compatibility."""
+    def test_explicit_openmm_engine_parses(self, minimal_config_data):
+        """Explicit OpenMM engine should be accepted."""
         config = SimulationConfig(**minimal_config_data)
         assert config.engine == "openmm"
 
@@ -395,11 +465,11 @@ class TestEngineConfig:
         assert config.gromacs.env_exports["GMX_GPU_DD_COMMS"] == "true"
         assert config.gromacs.setup_commands[0] == "source /opt/gromacs/bin/GMXRC"
 
-    def test_old_config_without_engine_field(self, minimal_config_data):
-        """Old configs without engine field should default to openmm."""
+    def test_missing_engine_field_is_rejected(self, minimal_config_data):
+        """Configs without engine field should fail validation."""
         minimal_config_data.pop("engine", None)
-        config = SimulationConfig(**minimal_config_data)
-        assert config.engine == "openmm"
+        with pytest.raises(ValidationError):
+            SimulationConfig(**minimal_config_data)
 
 
 class TestGromacsEngineConfigWarnings:

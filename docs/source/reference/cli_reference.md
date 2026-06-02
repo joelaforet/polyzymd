@@ -181,11 +181,8 @@ polyzymd build -c <path> --format gromacs    # Export for GROMACS
 | `--replicates` | `-r` | No | "1" | Replicate range (for example "1", "1-3", "1,3,5") |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
-| `--output-dir` | `-o` | No | from config | Alias for --scratch-dir |
 | `--dry-run` | - | No | false | Validate only, don't build |
 | `--format` | - | No | OpenMM | Export format (`gromacs`, `lammps` (planned), or `amber` (planned)) |
-
-> **Note:** `--replicate` and `--gromacs` are retained as hidden deprecated aliases.
 
 ### Example
 
@@ -214,15 +211,25 @@ The build command creates:
 
 ### Output Files (GROMACS)
 
-With `--format gromacs`, the build command creates in `{projects_dir}/replicate_{N}/gromacs/`:
+With `--format gromacs`, the build command creates a build-only handoff in
+`{projects_dir}/replicate_{N}/gromacs/`. The core handoff files are:
+
 - `{system}.gro` - GROMACS coordinate file
 - `{system}.top` - GROMACS topology file
 - `*.itp` - Molecule parameter files (one per component)
+- Position restraints (`#ifdef POSRES_PROTEIN`, etc.) appended into molecule `.itp` files
+
+PolyzyMD may also generate convenience defaults:
+
 - `em.mdp` - Energy minimization parameters
 - `eq_XX_name.mdp` - Equilibration stage parameters
 - `prod.mdp` - Production parameters
-- Position restraints (`#ifdef POSRES_PROTEIN`, etc.) appended into molecule `.itp` files
-- `run_{system}_gromacs.sh` - Shell script to run the workflow
+- `run_*_gromacs.sh` - Convenience shell script
+
+The `.mdp` files and run script are not required to continue outside PolyzyMD;
+you may replace them with your own GROMACS workflow. Use
+`polyzymd run --engine gromacs` when you want PolyzyMD to perform the full local
+build-and-run workflow.
 
 ---
 
@@ -252,8 +259,6 @@ polyzymd run -c <path> --engine openmm --dry-run
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--gmx-path` | - | No | unset | Path to GROMACS executable (gromacs engine only) |
 | `--dry-run` | - | No | false | Validate and preview actions only (writes nothing) |
-
-> **Note:** `--replicate` is retained as a hidden deprecated alias.
 
 ### Example
 
@@ -670,6 +675,45 @@ Example configs: polyzymd/templates/examples/
 
 ---
 
+(polyzymd-new-analysis)=
+## polyzymd new-analysis
+
+Scaffold an analysis plugin and matching tests.
+
+```bash
+polyzymd new-analysis NAME [OPTIONS]
+
+Options:
+  --class-name TEXT                 PascalCase class prefix
+  --style [dict]                    Advanced package style
+  --advanced                        Request the advanced MDAnalysis-native package scaffold
+  --project-root DIRECTORY          Repository root
+  --force                           Overwrite existing files
+  --dry-run                         Print paths without writing files
+```
+
+By default, the command creates a single-file MDAnalysis-native plugin at
+`src/polyzymd/analyses/<NAME>.py`. The generated analysis subclasses `Analysis`,
+builds an `MDAAnalysisJob.from_function()` job, returns a `ReplicateArtifact`
+with explicit `payload["metrics"]`, and relies on the default artifact
+aggregation path.
+
+Omit `--style` to use the default single-file scaffold.
+
+`--advanced` and `--style dict` create an advanced package scaffold at
+`src/polyzymd/analyses/<NAME>/` with lifecycle wiring in `__init__.py`, a
+lazy-imported `AnalysisBase` helper in `_mda.py`, and dict metrics stored in
+canonical artifacts.
+
+```bash
+polyzymd new-analysis solvent_shell
+polyzymd new-analysis solvent_shell --advanced
+polyzymd new-analysis solvent_shell --style dict
+pixi run -e build pytest tests/analyses/plugins/test_solvent_shell.py -v
+```
+
+---
+
 ## polyzymd compare
 
 Compare analysis results across multiple simulation conditions with statistical testing.
@@ -852,9 +896,9 @@ polyzymd compare plot-all -a rmsf
 
 ### polyzymd compare submit
 
-Submit replicate-level SLURM analysis DAG for one plugin. Each replicate is
-computed as an independent SLURM job, followed by per-condition aggregation
-jobs and a final comparison + plotting job.
+Submit a replicate-level SLURM analysis DAG for one plugin. Each replicate runs
+as an independent SLURM job, followed by per-condition aggregation jobs and a
+final comparison + plotting job.
 
 Before submission, this command runs a dependency preflight check: if the
 target plugin declares `dependencies`, required upstream comparison results must
@@ -899,6 +943,16 @@ polyzymd compare submit rmsf --job-arrays --partition aa100
 
 # Rely on plugin memory hints and cluster default partition
 polyzymd compare submit secondary_structure --qos normal
+
+# Blanca condo nodes at CU Boulder
+module load slurm/blanca
+polyzymd compare submit sasa \
+    -f comparison.yaml \
+    --partition blanca-shirts \
+    --account blanca-shirts \
+    --qos blanca-shirts \
+    --mem 8G \
+    --time 02:00:00
 ```
 
 ### polyzymd compare submit-all
@@ -935,7 +989,7 @@ Options:
 polyzymd compare submit-all -f comparison.yaml --partition aa100 --qos normal
 
 # Skip selected plugins
-polyzymd compare submit-all -f comparison.yaml --exclude exposure --exclude polymer_affinity
+polyzymd compare submit-all -f comparison.yaml --exclude sasa --exclude hydrogen_bonds
 
 # Dry-run planning only
 polyzymd compare submit-all -f comparison.yaml --dry-run
@@ -982,7 +1036,7 @@ Arguments:
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
-  --recompute            Retained for CLI compatibility (no effect)
+  --recompute            Regenerate comparison and plot outputs
   --allow-partial        Allow finalize when some conditions are missing results
 ```
 
@@ -1063,7 +1117,7 @@ output:
 
 ## See Also
 
-- {doc}`../tutorials/quickstart` - Getting started tutorial
+- {doc}`../get_started/quickstart` - Getting started tutorial
 - {doc}`configuration` - Configuration file reference
 - {doc}`../how_to/hpc_slurm` - HPC and SLURM guide
 - {doc}`../how_to/analysis_rmsf_quickstart` - RMSF analysis tutorial

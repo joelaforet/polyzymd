@@ -15,6 +15,12 @@ from __future__ import annotations
 
 from polyzymd.analyses.distances._comparison_results import DistanceComparisonResult
 from polyzymd.analyses.shared.inferential_statistics import percent_change
+from polyzymd.analyses.shared.multi_run_formatting import (
+    SINGLE_REPLICATE_SEM_NOTE,
+    format_sem_phrase,
+    format_sem_value,
+    is_sem_estimable,
+)
 from polyzymd.analyses.stats import format_pct, interpret_direction
 
 
@@ -89,7 +95,7 @@ def format_distances_console_table(
             pair_data = cond.get_pair(pair_label)
             marker = "*" if label == result.control_label else " "
             dist_str = f"{pair_data.mean_distance:.2f} A"
-            sem_str = f"{pair_data.sem_distance:.3f}"
+            sem_str = format_sem_value(pair_data.sem_distance, cond.n_replicates, precision=3)
 
             if threshold is not None and pair_data.fraction_below_threshold is not None:
                 frac_pct = pair_data.fraction_below_threshold * 100
@@ -104,6 +110,8 @@ def format_distances_console_table(
                 )
 
         lines.append("-" * 80)
+        if any(not is_sem_estimable(result.get_condition(label).n_replicates) for label in ranking):
+            lines.append(SINGLE_REPLICATE_SEM_NOTE)
 
         # Secondary ranking (by fraction below threshold)
         if threshold is not None and fraction_ranking:
@@ -113,8 +121,18 @@ def format_distances_console_table(
                 pair_data = cond.get_pair(pair_label)
                 if pair_data.fraction_below_threshold is not None:
                     frac_pct = pair_data.fraction_below_threshold * 100
-                    sem_pct = (pair_data.sem_fraction_below or 0) * 100
-                    lines.append(f"  {rank}. {label}: {frac_pct:.1f}% (SEM: {sem_pct:.2f}%)")
+                    sem_pct = (
+                        pair_data.sem_fraction_below * 100
+                        if pair_data.sem_fraction_below is not None
+                        else None
+                    )
+                    sem_phrase = format_sem_phrase(
+                        sem_pct,
+                        cond.n_replicates,
+                        precision=2,
+                        unit="%",
+                    )
+                    lines.append(f"  {rank}. {label}: {frac_pct:.1f}% ({sem_phrase})")
 
         lines.append("")
 
@@ -147,13 +165,17 @@ def format_distances_console_table(
 
                 # Format p-value with significance marker
                 sig_marker = "*" if comp.distance_significant else ""
-                p_str = f"{comp.distance_p_value:.4f}{sig_marker}"
+                p_str = (
+                    f"{comp.distance_p_value:.4f}{sig_marker}"
+                    if comp.distance_testable
+                    else "not testable"
+                )
 
                 # Format percent change
                 pct_str = format_pct(comp.distance_percent_change)
 
                 # Format Cohen's d
-                d_str = f"{comp.distance_cohens_d:.2f}"
+                d_str = f"{comp.distance_cohens_d:.2f}" if comp.distance_testable else "n/a"
 
                 lines.append(
                     f"{comparison_name:<30} {pct_str:<10} {p_str:<12} "
@@ -164,7 +186,10 @@ def format_distances_console_table(
             lines.append("-" * 90)
 
             # Fraction comparisons (if available)
-            if pair_comparisons[0].fraction_p_value is not None:
+            if (
+                pair_comparisons[0].fraction_p_value is not None
+                or pair_comparisons[0].fraction_testable is False
+            ):
                 lines.append("\nFraction Below Threshold:")
                 lines.append("-" * 90)
 
@@ -178,9 +203,13 @@ def format_distances_console_table(
                 for comp in pair_comparisons:
                     comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
                     sig_marker = "*" if comp.fraction_significant else ""
-                    p_str = f"{comp.fraction_p_value:.4f}{sig_marker}"
+                    p_str = (
+                        f"{comp.fraction_p_value:.4f}{sig_marker}"
+                        if comp.fraction_testable
+                        else "not testable"
+                    )
                     pct_str = format_pct(comp.fraction_percent_change)
-                    d_str = f"{comp.fraction_cohens_d:.2f}"
+                    d_str = f"{comp.fraction_cohens_d:.2f}" if comp.fraction_testable else "n/a"
 
                     lines.append(
                         f"{comparison_name:<30} {pct_str:<10} {p_str:<12} "
@@ -192,6 +221,13 @@ def format_distances_console_table(
 
         lines.append("")
         lines.append("* p < 0.05")
+        if any(
+            not comp.distance_testable or comp.fraction_testable is False
+            for comp in result.pairwise_comparisons
+        ):
+            lines.append(
+                "Not testable: inferential statistics require at least two replicates per condition"
+            )
         lines.append("Negative % change in distance = closer")
         lines.append("Positive % change in fraction = more contact")
         lines.append("")
@@ -204,17 +240,23 @@ def format_distances_console_table(
         for anova in result.anova_by_pair:
             lines.append(f"\n{anova.pair_label}:")
             sig = "Yes" if anova.distance_significant else "No"
-            lines.append(
-                f"  Distance: F={anova.distance_f_statistic:.3f}, "
-                f"p={anova.distance_p_value:.4f}, Significant={sig}"
-            )
-
-            if anova.fraction_f_statistic is not None:
-                sig = "Yes" if anova.fraction_significant else "No"
+            if anova.distance_testable:
                 lines.append(
-                    f"  Fraction: F={anova.fraction_f_statistic:.3f}, "
-                    f"p={anova.fraction_p_value:.4f}, Significant={sig}"
+                    f"  Distance: F={anova.distance_f_statistic:.3f}, "
+                    f"p={anova.distance_p_value:.4f}, Significant={sig}"
                 )
+            else:
+                lines.append("  Distance: F=n/a, p=not testable, Significant=No")
+
+            if anova.fraction_f_statistic is not None or anova.fraction_testable is False:
+                sig = "Yes" if anova.fraction_significant else "No"
+                if anova.fraction_testable:
+                    lines.append(
+                        f"  Fraction: F={anova.fraction_f_statistic:.3f}, "
+                        f"p={anova.fraction_p_value:.4f}, Significant={sig}"
+                    )
+                else:
+                    lines.append("  Fraction: F=n/a, p=not testable, Significant=No")
 
         lines.append("")
 
@@ -344,15 +386,21 @@ def format_distances_markdown(
 
             if threshold is not None and pair_data.fraction_below_threshold is not None:
                 frac_pct = pair_data.fraction_below_threshold * 100
+                sem_str = format_sem_value(pair_data.sem_distance, cond.n_replicates, precision=3)
                 lines.append(
                     f"| {rank} | **{label}**{marker} | {pair_data.mean_distance:.2f} A | "
-                    f"{pair_data.sem_distance:.3f} | {frac_pct:.1f}% | {cond.n_replicates} |"
+                    f"{sem_str} | {frac_pct:.1f}% | {cond.n_replicates} |"
                 )
             else:
+                sem_str = format_sem_value(pair_data.sem_distance, cond.n_replicates, precision=3)
                 lines.append(
                     f"| {rank} | **{label}**{marker} | {pair_data.mean_distance:.2f} A | "
-                    f"{pair_data.sem_distance:.3f} | {cond.n_replicates} |"
+                    f"{sem_str} | {cond.n_replicates} |"
                 )
+
+        if any(not is_sem_estimable(result.get_condition(label).n_replicates) for label in ranking):
+            lines.append("")
+            lines.append(f"*{SINGLE_REPLICATE_SEM_NOTE}.*")
 
         lines.append("")
 
@@ -380,16 +428,23 @@ def format_distances_markdown(
             for comp in pair_comparisons:
                 comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
                 sig = "Yes*" if comp.distance_significant else "No"
+                p_value = (
+                    f"{comp.distance_p_value:.4f}" if comp.distance_testable else "not testable"
+                )
+                d_value = f"{comp.distance_cohens_d:.2f}" if comp.distance_testable else "n/a"
                 lines.append(
                     f"| {comparison_name} | {format_pct(comp.distance_percent_change)} | "
-                    f"{comp.distance_p_value:.4f} | {comp.distance_cohens_d:.2f} | "
+                    f"{p_value} | {d_value} | "
                     f"{comp.distance_effect_interpretation} | {comp.distance_direction} | {sig} |"
                 )
 
             lines.append("")
 
             # Fraction comparisons
-            if pair_comparisons[0].fraction_p_value is not None:
+            if (
+                pair_comparisons[0].fraction_p_value is not None
+                or pair_comparisons[0].fraction_testable is False
+            ):
                 lines.append("#### Fraction Below Threshold")
                 lines.append("")
                 lines.append(
@@ -402,9 +457,13 @@ def format_distances_markdown(
                 for comp in pair_comparisons:
                     comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
                     sig = "Yes*" if comp.fraction_significant else "No"
+                    p_value = (
+                        f"{comp.fraction_p_value:.4f}" if comp.fraction_testable else "not testable"
+                    )
+                    d_value = f"{comp.fraction_cohens_d:.2f}" if comp.fraction_testable else "n/a"
                     lines.append(
                         f"| {comparison_name} | {format_pct(comp.fraction_percent_change)} | "
-                        f"{comp.fraction_p_value:.4f} | {comp.fraction_cohens_d:.2f} | "
+                        f"{p_value} | {d_value} | "
                         f"{comp.fraction_effect_interpretation} | {comp.fraction_direction} | "
                         f"{sig} |"
                     )
@@ -412,6 +471,13 @@ def format_distances_markdown(
                 lines.append("")
 
         lines.append("*p < 0.05")
+        if any(
+            not comp.distance_testable or comp.fraction_testable is False
+            for comp in result.pairwise_comparisons
+        ):
+            lines.append(
+                "*Not testable: inferential statistics require at least two replicates per condition.*"
+            )
         lines.append("")
 
     # ANOVA
@@ -423,17 +489,23 @@ def format_distances_markdown(
             lines.append(f"### {anova.pair_label}")
             lines.append("")
             sig = "Yes" if anova.distance_significant else "No"
-            lines.append(
-                f"- **Distance:** F={anova.distance_f_statistic:.3f}, "
-                f"p={anova.distance_p_value:.4f}, Significant={sig}"
-            )
-
-            if anova.fraction_f_statistic is not None:
-                sig = "Yes" if anova.fraction_significant else "No"
+            if anova.distance_testable:
                 lines.append(
-                    f"- **Fraction:** F={anova.fraction_f_statistic:.3f}, "
-                    f"p={anova.fraction_p_value:.4f}, Significant={sig}"
+                    f"- **Distance:** F={anova.distance_f_statistic:.3f}, "
+                    f"p={anova.distance_p_value:.4f}, Significant={sig}"
                 )
+            else:
+                lines.append("- **Distance:** F=n/a, p=not testable, Significant=No")
+
+            if anova.fraction_f_statistic is not None or anova.fraction_testable is False:
+                sig = "Yes" if anova.fraction_significant else "No"
+                if anova.fraction_testable:
+                    lines.append(
+                        f"- **Fraction:** F={anova.fraction_f_statistic:.3f}, "
+                        f"p={anova.fraction_p_value:.4f}, Significant={sig}"
+                    )
+                else:
+                    lines.append("- **Fraction:** F=n/a, p=not testable, Significant=No")
 
             lines.append("")
 

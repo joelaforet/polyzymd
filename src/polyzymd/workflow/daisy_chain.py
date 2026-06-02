@@ -1,16 +1,16 @@
 """
 Job submission for HPC SLURM scheduler.
 
-This module provides utilities for submitting self-resubmitting MD
-simulation jobs to SLURM.  Each replicate gets a single job script
-that calls ``polyzymd run-segment``, checks progress, and resubmits
-itself until the simulation is complete.
+This module provides utilities for submitting daisy-chain MD simulation
+jobs to SLURM. In PolyzyMD, daisy-chain is the canonical term for serial
+MD segments on preempted hardware: each replicate gets a job script that
+calls ``polyzymd run-segment``, checks progress, and resubmits itself
+until the simulation is complete.
 
 .. versionchanged:: 1.1.0
-    Replaced the legacy daisy-chain (dependency-chain) model with
-    self-resubmitting jobs.  The public API (``submit_daisy_chain``,
-    ``DaisyChainConfig``, ``DaisyChainSubmitter``) is preserved for
-    backward compatibility but the internal behaviour is simplified.
+    Standardized daisy-chain execution on self-resubmitting jobs, where
+    each submission advances one serial MD segment before scheduling the
+    next segment as needed.
 """
 
 from __future__ import annotations
@@ -129,10 +129,12 @@ def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
 
 @dataclass
 class DaisyChainConfig:
-    """Configuration for job submission.
+    """Configuration for daisy-chain job submission.
 
-    Despite the legacy name, this now configures single self-resubmitting
-    jobs (one per replicate) rather than dependency chains.
+    Daisy-chain submission is PolyzyMD's canonical SLURM workflow for
+    serial MD segments on preempted hardware. Each replicate is managed by
+    one self-resubmitting job script that advances the trajectory segment
+    by segment until production is complete.
 
     Attributes
     ----------
@@ -240,7 +242,7 @@ class SubmissionResult:
     script_path : Path
         Path to the generated script.
     segment_index : int
-        Always 0 in the self-resubmitting model (kept for compatibility).
+        Initial segment index for the self-resubmitting daisy-chain job.
     replicate : int
         Replicate number.
     is_dry_run : bool
@@ -258,11 +260,12 @@ class SubmissionResult:
 
 
 class DaisyChainSubmitter:
-    """Handles job submission for MD simulations.
+    """Handle daisy-chain job submission for MD simulations.
 
-    In the self-resubmitting model, each replicate gets a single job
-    script.  The script calls ``polyzymd run-segment``, checks progress,
-    and resubmits itself until the simulation is complete.
+    In PolyzyMD's daisy-chain model, each replicate gets a single
+    self-resubmitting job script. The script calls ``polyzymd run-segment``,
+    checks progress, and resubmits itself to run serial MD segments until
+    the simulation is complete.
 
     Example
     -------
@@ -546,7 +549,7 @@ class DaisyChainSubmitter:
 
         result = self._submit_job(script_path=script_path, replicate=replicate)
 
-        # Store as a single-element list for backward compatibility
+        # One active daisy-chain job owns serial segment progression
         self._job_chains[replicate] = [result]
         return result
 
@@ -556,8 +559,7 @@ class DaisyChainSubmitter:
         Returns
         -------
         dict
-            Mapping of replicate numbers to their submission results
-            (each value is a single-element list for compatibility).
+            Mapping of replicate numbers to daisy-chain submission results.
         """
         self._print_submission_summary()
 
@@ -651,11 +653,12 @@ def submit_daisy_chain(
     openff_logs: bool = False,
     skip_build: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:
-    """Submit self-resubmitting simulation jobs from a YAML config.
+    """Submit daisy-chain simulation jobs from a YAML config.
 
-    This is the main entry point called by ``polyzymd submit``.  Despite
-    the legacy function name, it now submits one self-resubmitting job
-    per replicate rather than a chain of dependent jobs.
+    This is the main entry point called by ``polyzymd submit``. Daisy-chain
+    is PolyzyMD's canonical term for serial MD segments on preempted hardware;
+    this function submits one self-resubmitting job per replicate to advance
+    those segments until completion.
 
     Parameters
     ----------

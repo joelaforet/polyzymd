@@ -7,44 +7,56 @@ extraction for the default comparison pipeline, and plotting integration.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, ClassVar, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
+    ComparisonContext,
     MetricValue,
     PlotContext,
+    PluginContractError,
     ReplicateContext,
     SlurmResourceHint,
 )
-from polyzymd.analyses.hydrogen_bonds._results import (
+from polyzymd.analyses.hydrogen_bonds._mda import (
+    HydrogenBondArtifactCollector,
+    aggregate_hydrogen_bond_artifacts,
+    build_hydrogen_bond_jobs,
+    validate_and_order_replicate_artifacts,
+)
+from polyzymd.analyses.hydrogen_bonds._models import (
     AggregatedCompositionEntry,
     CompositionEntry,
     DirectedPairAggregate,
     DirectedResiduePairResult,
-    HydrogenBondAggregatedResult,
     HydrogenBondAggregatedSummary,
+    HydrogenBondConditionPayload,
     HydrogenBondReplicateSummary,
-    HydrogenBondResult,
     ResidueRef,
     UndirectedPairAggregate,
     UndirectedResiduePairResult,
 )
-from polyzymd.analyses.shared.config_hash import compute_config_hash
-from polyzymd.analyses.shared.loader import (
-    TrajectoryLoader,
-    parse_time_string,
-    time_to_frame,
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    ArtifactStoreError,
+    ComparisonArtifact,
+    ConditionArtifact,
+    ReplicateArtifact,
 )
+from polyzymd.analyses.shared.loader import TrajectoryLoader
 from polyzymd.analyses.shared.statistics import compute_sem
+
+if TYPE_CHECKING:
+    from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext
 
 logger = logging.getLogger("polyzymd.analyses.hydrogen_bonds")
 
@@ -52,6 +64,92 @@ COORDINATE_DEPENDENT_SELECTION_KEYWORDS = frozenset(
     {"around", "point", "prop", "cyzone", "sphzone", "isolayer"}
 )
 DEFAULT_GROUPS = {"protein": "chainid A", "polymer": "chainid C"}
+
+
+def _validate_aggregate_summary_completeness(
+    ctx: AggregateContext,
+    ordered_results: Sequence[dict[str, Any]],
+    expected_summaries: Sequence[HydrogenBondSummarySettings],
+) -> dict[str, list[HydrogenBondReplicateSummary]]:
+    """Validate configured summary coverage across replicate results.
+
+    Parameters
+    ----------
+    ctx : AggregateContext
+        Framework-provided aggregation context.
+    ordered_results : Sequence[dict[str, Any]]
+        Validated replicate payload mappings ordered to match ``ctx.replicates``.
+    expected_summaries : Sequence[HydrogenBondSummarySettings]
+        Summary specifications configured for this aggregation.
+
+    Returns
+    -------
+    dict[str, list[HydrogenBondReplicateSummary]]
+        Mapping of configured summary name to per-replicate summaries aligned to
+        ``ordered_results``.
+
+    Raises
+    ------
+    ValueError
+        Raised when any configured summary is missing, duplicated, or when a
+        replicate result contains unexpected summary names.
+    """
+
+    expected_summary_names = [summary.name for summary in expected_summaries]
+    summaries_by_name = {summary_name: [] for summary_name in expected_summary_names}
+    missing_by_summary: dict[str, list[int]] = defaultdict(list)
+    duplicates_by_summary: dict[str, list[int]] = defaultdict(list)
+    unexpected_by_replicate: dict[int, list[str]] = {}
+
+    for rep_result in ordered_results:
+        observed_by_name: dict[str, list[HydrogenBondReplicateSummary]] = defaultdict(list)
+        replicate_id = int(rep_result["replicate"])
+        for rep_summary in rep_result["summaries"]:
+            observed_by_name[rep_summary.name].append(rep_summary)
+
+        unexpected_summary_names = sorted(
+            summary_name
+            for summary_name in observed_by_name
+            if summary_name not in summaries_by_name
+        )
+        if unexpected_summary_names:
+            unexpected_by_replicate[replicate_id] = unexpected_summary_names
+
+        for summary_name in expected_summary_names:
+            matches = observed_by_name.get(summary_name, [])
+            if not matches:
+                missing_by_summary[summary_name].append(replicate_id)
+                continue
+            if len(matches) > 1:
+                duplicates_by_summary[summary_name].append(replicate_id)
+                continue
+            summaries_by_name[summary_name].append(matches[0])
+
+    if missing_by_summary or duplicates_by_summary or unexpected_by_replicate:
+        details: list[str] = []
+        for summary_name, missing_replicates in missing_by_summary.items():
+            details.append(
+                f"configured summary '{summary_name}' is missing from replicate results "
+                f"{missing_replicates}"
+            )
+        for summary_name, duplicate_replicates in duplicates_by_summary.items():
+            details.append(
+                f"configured summary '{summary_name}' is duplicated in replicate results "
+                f"{duplicate_replicates}"
+            )
+        for replicate, unexpected_summary_names in sorted(unexpected_by_replicate.items()):
+            details.append(
+                f"replicate result {replicate} contains unexpected summaries "
+                f"{unexpected_summary_names}"
+            )
+        detail_text = "; ".join(details)
+        raise ValueError(
+            f"Hydrogen-bond aggregation for condition '{ctx.condition.label}' is incomplete: "
+            f"{detail_text}. Recompute missing replicates or clear stale caches before "
+            "aggregating."
+        )
+
+    return summaries_by_name
 
 
 def _default_summaries() -> list[HydrogenBondSummarySettings]:
@@ -82,12 +180,84 @@ def _settings_hash(settings: HydrogenBondSettings) -> str:
     Returns
     -------
     str
-        First 8 characters of the SHA-256 hash of serialized settings.
+        First 8 characters of the shared settings fingerprint.
     """
 
-    settings_dict = settings.model_dump(mode="json")
-    settings_json = json.dumps(settings_dict, sort_keys=True)
-    return hashlib.sha256(settings_json.encode()).hexdigest()[:8]
+    return settings_fingerprint(settings)
+
+
+def _optional_float(value: Any) -> float | None:
+    """Return ``value`` as a float when present.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate value from artifact metadata.
+
+    Returns
+    -------
+    float or None
+        Parsed float, or ``None`` when no value was stored.
+    """
+
+    return None if value is None else float(value)
+
+
+def _optional_int(value: Any) -> int | None:
+    """Return ``value`` as an integer when present.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate value from artifact metadata.
+
+    Returns
+    -------
+    int or None
+        Parsed integer, or ``None`` when no value was stored.
+    """
+
+    return None if value is None else int(value)
+
+
+def _validated_replicate_payload_mapping(
+    artifact: ReplicateArtifact,
+) -> dict[str, Any]:
+    """Build a validated payload mapping from a replicate artifact.
+
+    Parameters
+    ----------
+    artifact : ReplicateArtifact
+        Canonical replicate artifact whose payload contains hydrogen-bond
+        summaries and optional composition entries.
+
+    Returns
+    -------
+    dict[str, Any]
+        Validated payload mapping enriched with metadata used during
+        aggregation.
+    """
+
+    metadata = artifact.metadata
+    return {
+        "config_hash": str(metadata.get("config_hash", "unknown")),
+        "replicate": artifact.replicate,
+        "equilibration_time": float(metadata.get("equilibration_time") or 0.0),
+        "equilibration_unit": str(metadata.get("equilibration_unit", "ns")),
+        "selection_string": str(metadata.get("selection_string", "")),
+        "settings_fingerprint": metadata.get("settings_fingerprint"),
+        "timestep_ps": _optional_float(metadata.get("timestep_ps")),
+        "raw_timestep_ps": _optional_float(metadata.get("raw_timestep_ps")),
+        "frame_stride": _optional_int(metadata.get("frame_stride")),
+        "summaries": [
+            HydrogenBondReplicateSummary.model_validate(summary)
+            for summary in artifact.payload.get("summaries", [])
+        ],
+        "composition_entries": [
+            CompositionEntry.model_validate(entry)
+            for entry in artifact.payload.get("composition_entries", [])
+        ],
+    }
 
 
 class HydrogenBondSummarySettings(BaseModel):
@@ -354,33 +524,211 @@ class HydrogenBondsAnalysis(Analysis):
 
     name: ClassVar[str] = "hydrogen_bonds"
     Settings: ClassVar[type] = HydrogenBondSettings
-    AggregatedResultClass: ClassVar[type | None] = HydrogenBondAggregatedResult
+    AggregatedResultClass: ClassVar[type | None] = None
     execution_cost_hint: ClassVar[str] = "high"
-    aliases: ClassVar[tuple[str, ...]] = ("hbonds", "hbond")
+    min_replicates: ClassVar[int] = 1
     has_compute_stage: ClassVar[bool] = True
     has_aggregate_stage: ClassVar[bool] = True
     slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(mem="16G")
-    ReplicateResultClass: ClassVar[type | None] = HydrogenBondResult
+    ReplicateResultClass: ClassVar[type | None] = None
     _defaults_warned: ClassVar[bool] = False
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Compute per-replicate hydrogen-bond results.
+    @classmethod
+    def _coerce_and_validate_aggregated_result(
+        cls,
+        result: Any,
+        settings: HydrogenBondSettings,
+        *,
+        condition_label: str | None = None,
+        source: Path | None = None,
+    ) -> ConditionArtifact:
+        """Validate a canonical aggregated artifact and settings identity.
 
         Parameters
         ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            Replicate index.
+        result : Any
+            Aggregated result loaded from disk or supplied in memory.
+        settings : HydrogenBondSettings
+            Current hydrogen-bond settings for comparison or plotting.
+        condition_label : str | None, optional
+            Condition label for error reporting.
+        source : Path | None, optional
+            Source file path for diagnostics.
 
         Returns
         -------
-        HydrogenBondResult
-            Per-replicate hydrogen-bond result.
-        """
-        settings: HydrogenBondSettings = ctx.settings
-        sim_config = ctx.sim_config
+        ConditionArtifact
+            Validated aggregated condition artifact.
 
+        Raises
+        ------
+        ValueError
+            Raised when the aggregated result is missing a settings
+            fingerprint or was computed with different settings.
+        """
+
+        if isinstance(result, dict) and result.get("artifact_type") == "condition":
+            result = ConditionArtifact.model_validate(result)
+
+        if not isinstance(result, ConditionArtifact):
+            raise PluginContractError(
+                f"Plugin '{cls.name}' expected canonical ConditionArtifact, got "
+                f"{type(result).__name__}"
+            )
+
+        if result.analysis_name != cls.name:
+            raise PluginContractError(
+                f"Plugin '{cls.name}' expected a hydrogen_bonds artifact, got "
+                f"{result.analysis_name!r}"
+            )
+
+        stored_fingerprint = result.metadata.get("settings_fingerprint")
+
+        current_fingerprint = _settings_hash(settings)
+        condition_text = (
+            f" for condition '{condition_label}'" if condition_label is not None else ""
+        )
+        source_text = f" at {source}" if source is not None else ""
+        if stored_fingerprint is None:
+            raise ValueError(
+                "Aggregated hydrogen-bond result"
+                f"{condition_text} is missing a settings fingerprint{source_text}. "
+                "Non-canonical hydrogen-bond aggregated caches are not compatible with "
+                "settings-sensitive compare/plot loading. Recompute the condition before "
+                "comparing or plotting."
+            )
+        if stored_fingerprint != current_fingerprint:
+            raise ValueError(
+                "Aggregated hydrogen-bond result"
+                f"{condition_text} was computed with settings fingerprint "
+                f"{stored_fingerprint}, but current settings require {current_fingerprint}"
+                f"{source_text}. Recompute the condition or clear stale caches before "
+                "comparing or plotting."
+            )
+        return result
+
+    @classmethod
+    def _coerce_and_validate_replicate_result(
+        cls,
+        result: Any,
+        settings: HydrogenBondSettings,
+        *,
+        condition_label: str | None = None,
+        replicate: int | None = None,
+        source: Path | None = None,
+    ) -> ReplicateArtifact:
+        """Validate a canonical replicate artifact and settings identity.
+
+        Parameters
+        ----------
+        result : Any
+            Replicate result loaded from disk or supplied in memory.
+        settings : HydrogenBondSettings
+            Current hydrogen-bond settings for plotting.
+        condition_label : str | None, optional
+            Condition label for error reporting.
+        replicate : int | None, optional
+            Replicate identifier for diagnostics when not present on ``result``.
+        source : Path | None, optional
+            Source file path for diagnostics.
+
+        Returns
+        -------
+        ReplicateArtifact
+            Validated replicate artifact.
+
+        Raises
+        ------
+        ValueError
+            Raised when the replicate result is missing a settings
+            fingerprint or was computed with different settings.
+        """
+
+        if isinstance(result, dict) and result.get("artifact_type") == "replicate":
+            result = ReplicateArtifact.model_validate(result)
+
+        if not isinstance(result, ReplicateArtifact):
+            raise PluginContractError(
+                f"Plugin '{cls.name}' expected canonical ReplicateArtifact, got "
+                f"{type(result).__name__}"
+            )
+
+        if result.analysis_name != cls.name:
+            raise PluginContractError(
+                f"Plugin '{cls.name}' expected a hydrogen_bonds artifact, got "
+                f"{result.analysis_name!r}"
+            )
+
+        stored_fingerprint = result.metadata.get("settings_fingerprint")
+
+        current_fingerprint = _settings_hash(settings)
+        condition_text = (
+            f" for condition '{condition_label}'" if condition_label is not None else ""
+        )
+        resolved_replicate = replicate
+        if resolved_replicate is None:
+            resolved_replicate = result.replicate
+        replicate_text = (
+            f" replicate {resolved_replicate}" if resolved_replicate is not None else ""
+        )
+        source_text = f" at {source}" if source is not None else ""
+
+        if stored_fingerprint is None:
+            raise ValueError(
+                "Hydrogen-bond replicate result"
+                f"{condition_text}{replicate_text} is missing a settings fingerprint"
+                f"{source_text}. Non-canonical hydrogen-bond replicate caches are not compatible "
+                "with settings-sensitive plot loading. Recompute the condition before "
+                "plotting."
+            )
+        if stored_fingerprint != current_fingerprint:
+            raise ValueError(
+                "Hydrogen-bond replicate result"
+                f"{condition_text}{replicate_text} was computed with settings fingerprint "
+                f"{stored_fingerprint}, but current settings require {current_fingerprint}"
+                f"{source_text}. Recompute the condition or clear stale caches before "
+                "plotting."
+            )
+        return result
+
+    def _resolve_aggregated_result_path(self, aggregated_dir: Path) -> Path | None:
+        """Resolve the aggregated hydrogen-bond result path.
+
+        Parameters
+        ----------
+        aggregated_dir : Path
+            Directory containing aggregated result files.
+
+        Returns
+        -------
+        Path | None
+            Path to the selected JSON result, or ``None`` when no result file
+            exists.
+        """
+
+        if not aggregated_dir.exists():
+            return None
+        canonical = self.aggregate_result_path(aggregated_dir)
+        if canonical.exists():
+            return canonical
+
+        return None
+
+    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[Any] | None:
+        """Build MDAnalysis-native hydrogen-bond jobs for one replicate.
+
+        Parameters
+        ----------
+        ctx : MDAReplicateJobContext
+            Framework-provided MDAnalysis job context.
+
+        Returns
+        -------
+        sequence of MDAAnalysisJob
+            One job wrapping MDAnalysis ``HydrogenBondAnalysis``.
+        """
+
+        settings: HydrogenBondSettings = ctx.settings
         if (
             not self.__class__._defaults_warned
             and settings.groups == DEFAULT_GROUPS
@@ -394,428 +742,108 @@ class HydrogenBondsAnalysis(Analysis):
                 [summary.model_dump(mode="json") for summary in settings.summaries],
             )
             self.__class__._defaults_warned = True
+        return build_hydrogen_bond_jobs(ctx)
 
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+    def build_mda_collector(self, ctx: MDACollectorContext) -> Any:
+        """Build the hydrogen-bond artifact collector.
 
-        config_hash = compute_config_hash(sim_config)
-        settings_hash = _settings_hash(settings)
-        cache_name = f"hbonds_eq{ctx.equilibration}_{settings_hash}.json"
-        result_file = ctx.output_dir / cache_name
-        cached = self._check_cache(
-            HydrogenBondResult,
-            result_file,
-            recompute=ctx.recompute,
-            sim_config=sim_config,
-            settings=ctx.settings,
-        )
-        if cached is not None:
-            return cached
+        Parameters
+        ----------
+        ctx : MDACollectorContext
+            Framework-provided collector context.
 
-        import MDAnalysis as mda
-        from MDAnalysis.analysis.hydrogenbonds.hbond_analysis import HydrogenBondAnalysis
+        Returns
+        -------
+        HydrogenBondArtifactCollector
+            Collector that maps raw MDAnalysis event tables to artifacts.
+        """
 
-        logger.debug("Using MDAnalysis %s", getattr(mda, "__version__", "unknown"))
+        del ctx
+        return HydrogenBondArtifactCollector()
 
-        loader = TrajectoryLoader(sim_config)
-        u = loader.load_universe(replicate)
-        timestep_ps = (
-            float(settings.timestep_ps)
-            if settings.timestep_ps is not None
-            else float(loader.get_timestep(replicate, unit="ps"))
-        )
+    def compare(self, ctx: ComparisonContext) -> ComparisonArtifact | None:
+        """Compare hydrogen-bond results across conditions.
 
-        n_total_frames = len(u.trajectory)
-        if n_total_frames == 0:
-            raise ValueError("Trajectory contains zero frames")
+        Parameters
+        ----------
+        ctx : ComparisonContext
+            Framework-provided comparison context.
 
-        start_frame = time_to_frame(eq_value, eq_unit, timestep_ps, "ps")
-        if start_frame >= n_total_frames:
-            raise ValueError(
-                f"Equilibration time {ctx.equilibration} corresponds to frame {start_frame}, "
-                f"but trajectory only has {n_total_frames} frames. "
-                "Reduce the equilibration time or check the trajectory."
-            )
-        n_frames = n_total_frames - start_frame
-        if n_frames <= 1:
-            logger.warning(
-                "Only %d frame(s) remain after equilibration %s — results may be unreliable",
-                n_frames,
-                ctx.equilibration,
-            )
+        Returns
+        -------
+        ComparisonArtifact or None
+            Canonical comparison artifact, or ``None`` when no metrics are
+            available.
+        """
 
-        resolved_groups: dict[str, Any] = {}
-        for group_name, selection_str in settings.groups.items():
-            atom_group = u.select_atoms(selection_str, updating=settings.update_selections)
-            if len(atom_group) == 0:
-                if not settings.allow_empty_groups:
-                    raise ValueError(
-                        f"Group '{group_name}' selection '{selection_str}' matched no atoms in "
-                        "the universe. Fix the selection or set allow_empty_groups: true to "
-                        "warn and skip."
-                    )
-            resolved_groups[group_name] = atom_group
-
-        group_names = list(resolved_groups.keys())
-        for i, group_a in enumerate(group_names):
-            for group_b in group_names[i + 1 :]:
-                atoms_a = resolved_groups[group_a]
-                atoms_b = resolved_groups[group_b]
-                if len(atoms_a) > 0 and len(atoms_b) > 0:
-                    overlap = atoms_a & atoms_b
-                    if len(overlap) > 0:
-                        logger.warning(
-                            "Groups '%s' and '%s' overlap by %d atoms — H-bonds in the overlap "
-                            "may be assigned to multiple summaries",
-                            group_a,
-                            group_b,
-                            len(overlap),
-                        )
-
-        active_summary_specs: list[HydrogenBondSummarySettings] = []
-        summary_results_by_name: dict[str, HydrogenBondReplicateSummary] = {}
-        for summary_spec in settings.summaries:
-            mode = "between" if summary_spec.between is not None else "within"
-            group_names_for_summary = (
-                list(summary_spec.between)
-                if summary_spec.between is not None
-                else [summary_spec.within]
-            )
-            group_names_for_summary = [g for g in group_names_for_summary if g is not None]
-
-            missing_groups = [
-                group_name
-                for group_name in group_names_for_summary
-                if len(resolved_groups[group_name]) == 0
-            ]
-            if missing_groups:
-                for group_name in missing_groups:
-                    logger.warning(
-                        "hydrogen_bonds: group '%s' selection '%s' matched 0 atoms for "
-                        "condition='%s' replicate=%d — skipping summary '%s'",
-                        group_name,
-                        settings.groups[group_name],
-                        ctx.condition.label,
-                        replicate,
-                        summary_spec.name,
-                    )
-
-                summary_results_by_name[summary_spec.name] = HydrogenBondReplicateSummary(
-                    name=summary_spec.name,
-                    mode=mode,
-                    group_names=group_names_for_summary,
-                    n_frames_used=n_frames,
-                    mean_hbonds_per_frame=0.0,
-                    mean_unique_pairs_per_frame=0.0,
-                    std_unique_pairs_per_frame=0.0,
-                    fraction_frames_with_any_hbond=0.0,
-                    counts_per_frame=[0] * n_frames,
-                    directed_residue_pairs=[],
-                    undirected_residue_pairs=[],
+        settings: HydrogenBondSettings = ctx.settings
+        for cond in ctx.conditions:
+            summary = ctx.aggregated_results.get(cond.label)
+            if summary is not None:
+                summary = self._coerce_and_validate_aggregated_result(
+                    summary,
+                    settings,
+                    condition_label=cond.label,
                 )
-                continue
+                ctx.aggregated_results[cond.label] = summary
 
-            active_summary_specs.append(summary_spec)
-
-        all_atoms = None
-        union_selections: set[str] = set()
-        for summary_spec in active_summary_specs:
-            if summary_spec.between is not None:
-                left_group, right_group = summary_spec.between
-                left_atoms = resolved_groups[left_group]
-                right_atoms = resolved_groups[right_group]
-                all_atoms = (
-                    (left_atoms | right_atoms)
-                    if all_atoms is None
-                    else (all_atoms | left_atoms | right_atoms)
-                )
-                union_selections.add(settings.groups[left_group])
-                union_selections.add(settings.groups[right_group])
-            elif summary_spec.within is not None:
-                within_group = summary_spec.within
-                within_atoms = resolved_groups[within_group]
-                all_atoms = within_atoms if all_atoms is None else (all_atoms | within_atoms)
-                union_selections.add(settings.groups[within_group])
-
-        union_sel = " or ".join(f"({selection})" for selection in sorted(union_selections))
-
-        if all_atoms is None or len(all_atoms) == 0 or not union_sel:
-            logger.warning("No atoms selected for any summary — returning empty result")
-            for summary_spec in settings.summaries:
-                if summary_spec.name in summary_results_by_name:
-                    continue
-
-                summary_results_by_name[summary_spec.name] = HydrogenBondReplicateSummary(
-                    name=summary_spec.name,
-                    mode="between" if summary_spec.between is not None else "within",
-                    group_names=(
-                        list(summary_spec.between)
-                        if summary_spec.between is not None
-                        else [summary_spec.within]
-                    ),
-                    n_frames_used=n_frames,
-                    mean_hbonds_per_frame=0.0,
-                    mean_unique_pairs_per_frame=0.0,
-                    std_unique_pairs_per_frame=0.0,
-                    fraction_frames_with_any_hbond=0.0,
-                    counts_per_frame=[0] * n_frames,
-                    directed_residue_pairs=[],
-                    undirected_residue_pairs=[],
-                )
-
-            summary_results = [summary_results_by_name[s.name] for s in settings.summaries]
-            result = HydrogenBondResult(
-                config_hash=config_hash,
-                replicate=replicate,
-                equilibration_time=eq_value,
-                equilibration_unit=eq_unit,
-                selection_string=union_sel,
-                timestep_ps=timestep_ps,
-                summaries=summary_results,
-                composition_entries=[],
+        result = super().compare(ctx)
+        if result is not None and not isinstance(result, ComparisonArtifact):
+            raise PluginContractError(
+                f"Plugin '{self.name}' expected canonical ComparisonArtifact from comparison, "
+                f"got {type(result).__name__}"
             )
-            result.save(result_file)
-            logger.info("Saved hydrogen bond result to %s", result_file)
-            return result
-
-        hbonds = HydrogenBondAnalysis(
-            universe=u,
-            donors_sel=union_sel,
-            hydrogens_sel=f"({union_sel}) and element H",
-            acceptors_sel=union_sel,
-            d_a_cutoff=settings.distance_cutoff,
-            d_h_a_angle_cutoff=settings.angle_cutoff,
-            update_selections=settings.update_selections,
-        )
-        hbonds.run(start=start_frame, stop=None, step=1, verbose=False)
-
-        hbond_events = np.asarray(hbonds.results.hbonds)
-
-        composition_entries: list[CompositionEntry] = []
-        if settings.composition is not None:
-            composition_entries = self._compute_composition(
-                composition_settings=settings.composition,
-                hbond_array=hbond_events,
-                universe=u,
-                start_frame=start_frame,
-                n_frames=n_frames,
-                allow_overlapping=settings.allow_overlapping_composition,
-            )
-
-        # Group selections are resolved once and used for post-classification
-        # This is exact for structural selections (chainid/resname/resid), and
-        # an acceptable approximation for coordinate-dependent selections
-        group_index_sets = {
-            group_name: set(atom_group.indices.tolist())
-            for group_name, atom_group in resolved_groups.items()
-        }
-
-        atom_info_by_index: dict[int, tuple[str, int, str, int]] = {}
-        for atom_group in resolved_groups.values():
-            for atom_index in atom_group.indices.tolist():
-                atom = u.atoms[int(atom_index)]
-                segid = str(getattr(atom, "segid", "")).strip()
-                chain_id = segid or str(getattr(atom, "chainID", "")).strip() or "?"
-                atom_info_by_index[int(atom_index)] = (
-                    chain_id,
-                    int(atom.resid),
-                    str(atom.resname),
-                    int(atom.resindex),
-                )
-
-        for summary_spec in active_summary_specs:
-            mode = "between" if summary_spec.between is not None else "within"
-            group_names_for_summary = (
-                list(summary_spec.between)
-                if summary_spec.between is not None
-                else [summary_spec.within]
-            )
-
-            counts_per_frame: dict[int, int] = defaultdict(int)
-            unique_pairs_per_frame: dict[int, set[tuple[int, int]]] = defaultdict(set)
-            directed_pairs: dict[
-                tuple[tuple[str, int, str], tuple[str, int, str]], dict[str, Any]
-            ] = {}
-            undirected_pairs: dict[frozenset[tuple[str, int, str]], dict[str, Any]] = {}
-
-            if hbond_events.size > 0:
-                for event in hbond_events:
-                    frame = int(event[0])
-                    donor_ix = int(event[1])
-                    acceptor_ix = int(event[3])
-
-                    donor_info = atom_info_by_index.get(donor_ix)
-                    if donor_info is None:
-                        donor_atom = u.atoms[donor_ix]
-                        donor_segid = str(getattr(donor_atom, "segid", "")).strip()
-                        donor_chain = (
-                            donor_segid or str(getattr(donor_atom, "chainID", "")).strip() or "?"
-                        )
-                        donor_info = (
-                            donor_chain,
-                            int(donor_atom.resid),
-                            str(donor_atom.resname),
-                            int(donor_atom.resindex),
-                        )
-
-                    acceptor_info = atom_info_by_index.get(acceptor_ix)
-                    if acceptor_info is None:
-                        acceptor_atom = u.atoms[acceptor_ix]
-                        acceptor_segid = str(getattr(acceptor_atom, "segid", "")).strip()
-                        acceptor_chain = (
-                            acceptor_segid
-                            or str(getattr(acceptor_atom, "chainID", "")).strip()
-                            or "?"
-                        )
-                        acceptor_info = (
-                            acceptor_chain,
-                            int(acceptor_atom.resid),
-                            str(acceptor_atom.resname),
-                            int(acceptor_atom.resindex),
-                        )
-
-                    donor_resindex = donor_info[3]
-                    acceptor_resindex = acceptor_info[3]
-                    if donor_resindex == acceptor_resindex:
-                        continue
-
-                    if summary_spec.between is not None:
-                        left_group, right_group = summary_spec.between
-                        left_indices = group_index_sets[left_group]
-                        right_indices = group_index_sets[right_group]
-                        matches = (donor_ix in left_indices and acceptor_ix in right_indices) or (
-                            donor_ix in right_indices and acceptor_ix in left_indices
-                        )
-                    else:
-                        within_group = summary_spec.within
-                        within_indices = group_index_sets[within_group]
-                        matches = donor_ix in within_indices and acceptor_ix in within_indices
-
-                    if not matches:
-                        continue
-
-                    counts_per_frame[frame] += 1
-                    unique_pairs_per_frame[frame].add((donor_resindex, acceptor_resindex))
-
-                    donor_residue_key = donor_info[:3]
-                    acceptor_residue_key = acceptor_info[:3]
-
-                    directed_key = (donor_residue_key, acceptor_residue_key)
-                    directed_entry = directed_pairs.setdefault(
-                        directed_key,
-                        {"frames_seen": set(), "event_count": 0},
-                    )
-                    directed_entry["frames_seen"].add(frame)
-                    directed_entry["event_count"] += 1
-
-                    undirected_key = frozenset((donor_residue_key, acceptor_residue_key))
-                    if len(undirected_key) == 2:
-                        undirected_entry = undirected_pairs.setdefault(
-                            undirected_key,
-                            {"frames_seen": set(), "event_count": 0},
-                        )
-                        undirected_entry["frames_seen"].add(frame)
-                        undirected_entry["event_count"] += 1
-
-            counts_list = [
-                counts_per_frame.get(frame_idx, 0)
-                for frame_idx in range(start_frame, n_total_frames)
-            ]
-            unique_pairs_counts = [
-                len(unique_pairs_per_frame.get(frame_idx, set()))
-                for frame_idx in range(start_frame, n_total_frames)
-            ]
-            mean_hbonds = float(np.mean(counts_list)) if counts_list else 0.0
-            mean_unique_pairs = float(np.mean(unique_pairs_counts)) if unique_pairs_counts else 0.0
-            std_unique_pairs = float(np.std(unique_pairs_counts)) if unique_pairs_counts else 0.0
-            fraction_with_any = (
-                float(np.mean([count > 0 for count in counts_list])) if counts_list else 0.0
-            )
-
-            directed_results: list[DirectedResiduePairResult] = []
-            for (donor_key, acceptor_key), pair_data in directed_pairs.items():
-                donor_chain, donor_resid, donor_resname = donor_key
-                acceptor_chain, acceptor_resid, acceptor_resname = acceptor_key
-                frames_present = len(pair_data["frames_seen"])
-                event_count = int(pair_data["event_count"])
-                directed_results.append(
-                    DirectedResiduePairResult(
-                        donor=ResidueRef(
-                            chain_id=donor_chain,
-                            resid=donor_resid,
-                            resname=donor_resname,
-                        ),
-                        acceptor=ResidueRef(
-                            chain_id=acceptor_chain,
-                            resid=acceptor_resid,
-                            resname=acceptor_resname,
-                        ),
-                        frames_present=frames_present,
-                        occupancy=(frames_present / n_frames) if n_frames > 0 else 0.0,
-                        event_count=event_count,
-                        mean_events_per_frame=(event_count / n_frames) if n_frames > 0 else 0.0,
-                    )
-                )
-
-            directed_results.sort(key=lambda pair: pair.occupancy, reverse=True)
-
-            undirected_results: list[UndirectedResiduePairResult] = []
-            for residue_key_set, pair_data in undirected_pairs.items():
-                residue_key_list = sorted(residue_key_set)
-                residue_a_key = residue_key_list[0]
-                residue_b_key = residue_key_list[1]
-                frames_present = len(pair_data["frames_seen"])
-                event_count = int(pair_data["event_count"])
-                undirected_results.append(
-                    UndirectedResiduePairResult(
-                        residue_a=ResidueRef(
-                            chain_id=residue_a_key[0],
-                            resid=residue_a_key[1],
-                            resname=residue_a_key[2],
-                        ),
-                        residue_b=ResidueRef(
-                            chain_id=residue_b_key[0],
-                            resid=residue_b_key[1],
-                            resname=residue_b_key[2],
-                        ),
-                        frames_present=frames_present,
-                        occupancy=(frames_present / n_frames) if n_frames > 0 else 0.0,
-                        event_count=event_count,
-                        mean_events_per_frame=(event_count / n_frames) if n_frames > 0 else 0.0,
-                    )
-                )
-
-            undirected_results.sort(key=lambda pair: pair.occupancy, reverse=True)
-
-            summary_results_by_name[summary_spec.name] = HydrogenBondReplicateSummary(
-                name=summary_spec.name,
-                mode=mode,
-                group_names=[g for g in group_names_for_summary if g is not None],
-                n_frames_used=n_frames,
-                mean_hbonds_per_frame=mean_hbonds,
-                mean_unique_pairs_per_frame=mean_unique_pairs,
-                std_unique_pairs_per_frame=std_unique_pairs,
-                fraction_frames_with_any_hbond=fraction_with_any,
-                counts_per_frame=counts_list,
-                directed_residue_pairs=directed_results,
-                undirected_residue_pairs=undirected_results,
-            )
-
-        summary_results = [summary_results_by_name[s.name] for s in settings.summaries]
-
-        result = HydrogenBondResult(
-            config_hash=config_hash,
-            replicate=replicate,
-            equilibration_time=eq_value,
-            equilibration_unit=eq_unit,
-            selection_string=union_sel,
-            timestep_ps=timestep_ps,
-            summaries=summary_results,
-            composition_entries=composition_entries,
-        )
-
-        result.save(result_file)
-        logger.info("Saved hydrogen bond result to %s", result_file)
         return result
+
+    def _trajectory_loader_factory(self) -> type[Any]:
+        """Return the hydrogen-bond loader class for the MDA job lifecycle.
+
+        Returns
+        -------
+        type[Any]
+            Loader class patched by hydrogen-bond unit tests.
+        """
+
+        return TrajectoryLoader
+
+    def get_trajectory_window(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        loader: Any,
+        universe: Any,
+    ) -> Any:
+        """Resolve the hydrogen-bond trajectory window with optional timestep override.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        loader : Any
+            Trajectory loader for the replicate.
+        universe : Any
+            Loaded universe.
+
+        Returns
+        -------
+        Any
+            Validated trajectory window.
+        """
+
+        from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
+
+        timestep_ps = (
+            float(ctx.settings.timestep_ps) if ctx.settings.timestep_ps is not None else None
+        )
+        return resolve_replicate_trajectory_window(
+            loader=loader,
+            replicate=replicate,
+            equilibration=ctx.equilibration,
+            n_frames_total=len(universe.trajectory),
+            timestep_ps=timestep_ps,
+        )
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
         """Aggregate per-replicate hydrogen-bond results.
@@ -829,57 +857,52 @@ class HydrogenBondsAnalysis(Analysis):
 
         Returns
         -------
-        HydrogenBondAggregatedResult
+        HydrogenBondConditionPayload
             Aggregated hydrogen-bond result for one condition.
         """
-
-        if len(results) != len(ctx.replicates):
-            raise ValueError(
-                f"Expected {len(ctx.replicates)} replicate results (replicates "
-                f"{list(ctx.replicates)}), got {len(results)}. Check that all replicates "
-                "computed successfully."
-            )
 
         if not results:
             raise ValueError(
                 "Cannot aggregate hydrogen-bond results: no replicate results provided"
             )
 
+        if not all(isinstance(result, ReplicateArtifact) for result in results):
+            raise TypeError(
+                "Hydrogen-bond aggregation requires ReplicateArtifact inputs from the "
+                "MDAnalysis artifact lifecycle. Received non-canonical or non-artifact replicate "
+                "results; remove stale non-canonical caches or rerun with recompute=True before "
+                "aggregating."
+            )
+
+        ordered_artifacts = validate_and_order_replicate_artifacts(
+            condition_label=ctx.condition.label,
+            replicates=ctx.replicates,
+            settings_fingerprint=_settings_hash(ctx.settings),
+            artifacts=results,
+            analysis_dir=ctx.output_dir.parent,
+        )
+        ordered_results = [
+            _validated_replicate_payload_mapping(artifact) for artifact in ordered_artifacts
+        ]
+
         settings: HydrogenBondSettings = ctx.settings
-        n_replicates = len(results)
+        n_replicates = len(ordered_results)
+        summaries_by_name = _validate_aggregate_summary_completeness(
+            ctx=ctx,
+            ordered_results=ordered_results,
+            expected_summaries=settings.summaries,
+        )
 
         aggregated_summaries: list[HydrogenBondAggregatedSummary] = []
         for summary_spec in settings.summaries:
-            per_rep_summaries: list[HydrogenBondReplicateSummary | None] = []
-            for rep_result in results:
-                matched_summary = next(
-                    (
-                        summary
-                        for summary in rep_result.summaries
-                        if summary.name == summary_spec.name
-                    ),
-                    None,
-                )
-                per_rep_summaries.append(matched_summary)
+            complete_summaries = summaries_by_name[summary_spec.name]
 
-            n_present = sum(1 for summary in per_rep_summaries if summary is not None)
-            if n_present == 0:
-                logger.warning(
-                    "No replicate data for summary '%s' — using zero values",
-                    summary_spec.name,
-                )
-
-            hbonds_values = [
-                summary.mean_hbonds_per_frame if summary is not None else 0.0
-                for summary in per_rep_summaries
-            ]
+            hbonds_values = [summary.mean_hbonds_per_frame for summary in complete_summaries]
             unique_pairs_values = [
-                summary.mean_unique_pairs_per_frame if summary is not None else 0.0
-                for summary in per_rep_summaries
+                summary.mean_unique_pairs_per_frame for summary in complete_summaries
             ]
             fraction_values = [
-                summary.fraction_frames_with_any_hbond if summary is not None else 0.0
-                for summary in per_rep_summaries
+                summary.fraction_frames_with_any_hbond for summary in complete_summaries
             ]
 
             hbonds_stats = compute_sem(np.array(hbonds_values, dtype=float))
@@ -890,9 +913,7 @@ class HydrogenBondsAnalysis(Analysis):
                 tuple[tuple[str, int, str], tuple[str, int, str]],
                 dict[str, ResidueRef | list[float]],
             ] = {}
-            for rep_idx, rep_summary in enumerate(per_rep_summaries):
-                if rep_summary is None:
-                    continue
+            for rep_idx, rep_summary in enumerate(complete_summaries):
                 for pair in rep_summary.directed_residue_pairs:
                     key = (
                         (pair.donor.chain_id, pair.donor.resid, pair.donor.resname),
@@ -929,9 +950,7 @@ class HydrogenBondsAnalysis(Analysis):
                 frozenset[tuple[str, int, str]],
                 dict[str, ResidueRef | list[float]],
             ] = {}
-            for rep_idx, rep_summary in enumerate(per_rep_summaries):
-                if rep_summary is None:
-                    continue
+            for rep_idx, rep_summary in enumerate(complete_summaries):
                 for pair in rep_summary.undirected_residue_pairs:
                     key = frozenset(
                         {
@@ -993,178 +1012,45 @@ class HydrogenBondsAnalysis(Analysis):
                 )
             )
 
-        if any(result.composition_entries for result in results):
-            aggregated_composition = self._aggregate_composition(results)
+        if any(result["composition_entries"] for result in ordered_results):
+            aggregated_composition = self._aggregate_composition(ordered_results)
         else:
             aggregated_composition = []
 
-        agg_result = HydrogenBondAggregatedResult(
-            config_hash=results[0].config_hash,
+        agg_result = HydrogenBondConditionPayload(
+            config_hash=ordered_results[0]["config_hash"],
+            settings_fingerprint=_settings_hash(settings),
             replicate=0,
-            equilibration_time=results[0].equilibration_time,
-            equilibration_unit=results[0].equilibration_unit,
-            selection_string=results[0].selection_string,
-            timestep_ps=results[0].timestep_ps,
+            equilibration_time=ordered_results[0]["equilibration_time"],
+            equilibration_unit=ordered_results[0]["equilibration_unit"],
+            selection_string=ordered_results[0]["selection_string"],
+            timestep_ps=ordered_results[0]["timestep_ps"],
+            raw_timestep_ps=ordered_results[0]["raw_timestep_ps"],
+            frame_stride=ordered_results[0]["frame_stride"],
             replicates=list(ctx.replicates),
             n_replicates=n_replicates,
             summaries=aggregated_summaries,
             composition_entries=aggregated_composition,
         )
 
-        target_path = (
-            ctx.result_path if ctx.result_path is not None else (ctx.output_dir / "result.json")
+        return aggregate_hydrogen_bond_artifacts(
+            condition_label=ctx.condition.label,
+            replicates=ctx.replicates,
+            output_dir=ctx.output_dir,
+            artifacts=ordered_artifacts,
+            condition_model=agg_result,
         )
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        self.save_result(agg_result, target_path)
-        logger.info("Saved aggregated hydrogen bond result to %s", target_path)
-        return agg_result
-
-    def _compute_composition(
-        self,
-        composition_settings: HydrogenBondCompositionSettings,
-        hbond_array: np.ndarray,
-        universe: Any,
-        start_frame: int,
-        n_frames: int,
-        allow_overlapping: bool = False,
-    ) -> list[CompositionEntry]:
-        """Compute hydrogen-bond composition across disjoint partitions.
-
-        Parameters
-        ----------
-        composition_settings : HydrogenBondCompositionSettings
-            Partition definitions mapping partition names to selection strings.
-        hbond_array : np.ndarray
-            Hydrogen-bond event table from MDAnalysis with shape ``(n_events, 6)``.
-        universe : Any
-            MDAnalysis universe used to resolve partition selections.
-        start_frame : int
-            First analyzed trajectory frame index.
-        n_frames : int
-            Number of analyzed frames.
-        allow_overlapping : bool, optional
-            If ``True``, overlapping partitions are allowed with warnings.
-            If ``False`` (default), overlap raises ``ValueError``.
-
-        Returns
-        -------
-        list[CompositionEntry]
-            Per partition-pair composition entries sorted by partition names.
-
-        Notes
-        -----
-        Partition selections are resolved once at the current trajectory frame
-        This is correct for structural selections (chainid, resname, etc) which
-        are frame-invariant. For coordinate-dependent selections (for example,
-        ``around 5.0 protein``), results reflect only the snapshot at which
-        selections were evaluated
-        """
-
-        partition_atoms: dict[str, set[int]] = {}
-        for partition_name, selection_str in composition_settings.partitions.items():
-            selection_lower = selection_str.lower()
-            for keyword in COORDINATE_DEPENDENT_SELECTION_KEYWORDS:
-                if keyword in selection_lower:
-                    logger.warning(
-                        "Composition partition '%s' uses coordinate-dependent selection '%s'. "
-                        "Partition membership is evaluated once (not per-frame) and may not "
-                        "reflect dynamic behavior",
-                        partition_name,
-                        selection_str,
-                    )
-                    break
-
-            try:
-                atom_group = universe.select_atoms(selection_str, updating=False)
-            except TypeError:
-                atom_group = universe.select_atoms(selection_str)
-            if len(atom_group) == 0:
-                logger.warning("Composition partition '%s' matched no atoms", partition_name)
-            partition_atoms[partition_name] = set(atom_group.indices.tolist())
-
-        partition_names = list(partition_atoms.keys())
-        for i, partition_a in enumerate(partition_names):
-            for partition_b in partition_names[i + 1 :]:
-                overlap = partition_atoms[partition_a] & partition_atoms[partition_b]
-                if overlap:
-                    if allow_overlapping:
-                        logger.warning(
-                            "Composition partitions '%s' and '%s' overlap by %d atoms. "
-                            "Overlapping atoms will be counted in BOTH partitions; "
-                            "composition fractions may exceed 1.0.",
-                            partition_a,
-                            partition_b,
-                            len(overlap),
-                        )
-                    else:
-                        raise ValueError(
-                            f"Composition partitions '{partition_a}' and '{partition_b}' overlap "
-                            f"by {len(overlap)} atoms. Make partitions disjoint or set "
-                            "allow_overlapping_composition: true."
-                        )
-
-        pair_counts: dict[tuple[str, str], int] = {}
-        total_events = 0
-
-        if hbond_array.size > 0:
-            for event in hbond_array:
-                frame_idx = int(event[0])
-                if frame_idx < start_frame:
-                    continue
-
-                donor_ix = int(event[1])
-                acceptor_ix = int(event[3])
-
-                donor_resindex = int(universe.atoms[donor_ix].resindex)
-                acceptor_resindex = int(universe.atoms[acceptor_ix].resindex)
-                if donor_resindex == acceptor_resindex:
-                    continue
-
-                donor_partitions = [
-                    partition_name
-                    for partition_name, indices in partition_atoms.items()
-                    if donor_ix in indices
-                ]
-                acceptor_partitions = [
-                    partition_name
-                    for partition_name, indices in partition_atoms.items()
-                    if acceptor_ix in indices
-                ]
-
-                if not donor_partitions or not acceptor_partitions:
-                    continue
-
-                for donor_partition in donor_partitions:
-                    for acceptor_partition in acceptor_partitions:
-                        pair_key = (donor_partition, acceptor_partition)
-                        pair_counts[pair_key] = pair_counts.get(pair_key, 0) + 1
-                total_events += 1
-
-        entries: list[CompositionEntry] = []
-        for (donor_partition, acceptor_partition), count in sorted(pair_counts.items()):
-            mean_per_frame = count / n_frames if n_frames > 0 else 0.0
-            fraction = count / total_events if total_events > 0 else 0.0
-            entries.append(
-                CompositionEntry(
-                    donor_partition=donor_partition,
-                    acceptor_partition=acceptor_partition,
-                    mean_hbonds_per_frame=mean_per_frame,
-                    fraction_of_total=fraction,
-                )
-            )
-
-        return entries
 
     def _aggregate_composition(
         self,
-        results: Sequence[HydrogenBondResult],
+        results: Sequence[dict[str, Any]],
     ) -> list[AggregatedCompositionEntry]:
         """Aggregate composition entries across replicates.
 
         Parameters
         ----------
-        results : Sequence[HydrogenBondResult]
-            Replicate-level hydrogen-bond results.
+        results : Sequence[dict[str, Any]]
+            Validated replicate payload mappings.
 
         Returns
         -------
@@ -1176,7 +1062,13 @@ class HydrogenBondsAnalysis(Analysis):
         composition_map: dict[tuple[str, str], dict[str, list[float]]] = {}
 
         for replicate_idx, result in enumerate(results):
-            for entry in result.composition_entries:
+            if not isinstance(result, dict):
+                raise TypeError(
+                    "Hydrogen-bond composition aggregation requires canonical payload mappings, "
+                    f"got {type(result).__name__}"
+                )
+            entries = result["composition_entries"]
+            for entry in entries:
                 pair_key = (entry.donor_partition, entry.acceptor_partition)
                 if pair_key not in composition_map:
                     composition_map[pair_key] = {
@@ -1222,12 +1114,23 @@ class HydrogenBondsAnalysis(Analysis):
             One metric per configured summary with mean H-bonds per frame.
         """
         if isinstance(summary, dict):
-            summaries = summary.get("summaries", [])
-        elif isinstance(summary, HydrogenBondAggregatedResult):
-            summaries = summary.summaries
-        else:
-            logger.warning("Unexpected result type for extract_metrics: %s", type(summary))
-            return {}
+            if summary.get("artifact_type") != "condition":
+                raise PluginContractError(
+                    "Hydrogen-bond metric extraction requires a canonical condition artifact dict"
+                )
+            summary = ConditionArtifact.model_validate(summary)
+
+        if not isinstance(summary, ConditionArtifact):
+            raise PluginContractError(
+                "Hydrogen-bond metric extraction requires a canonical ConditionArtifact, got "
+                f"{type(summary).__name__}"
+            )
+        if summary.analysis_name != self.name:
+            raise PluginContractError(
+                f"Hydrogen-bond metric extraction expected analysis '{self.name}', got "
+                f"{summary.analysis_name!r}"
+            )
+        summaries = summary.payload.get("summaries", [])
 
         metrics: dict[str, MetricValue] = {}
         for item in summaries:
@@ -1237,10 +1140,10 @@ class HydrogenBondsAnalysis(Analysis):
                 sem_val = float(item.get("sem_hbonds_per_frame", 0.0))
                 replicate_values = [float(v) for v in item.get("per_replicate_mean_hbonds", [])]
             else:
-                name = item.name
-                mean_val = float(item.mean_hbonds_per_frame)
-                sem_val = float(item.sem_hbonds_per_frame)
-                replicate_values = [float(v) for v in item.per_replicate_mean_hbonds]
+                raise PluginContractError(
+                    "Hydrogen-bond condition artifact payload summaries must be mappings, got "
+                    f"{type(item).__name__}"
+                )
 
             metric_key = f"mean_hbonds_{name}"
             metrics[metric_key] = MetricValue(
@@ -1269,45 +1172,48 @@ class HydrogenBondsAnalysis(Analysis):
         str
             Formatted output string.
         """
-        from polyzymd.analyses.base import ComparisonResult
-        from polyzymd.analyses.stats import format_scalar_comparison
+        from polyzymd.analyses.stats import format_scalar_comparison_artifact_payload
 
-        if isinstance(result, ComparisonResult):
-            metric_keys = (
-                list(result.rankings_by_metric.keys()) if result.rankings_by_metric else []
+        if not isinstance(result, ComparisonArtifact):
+            raise TypeError(
+                "Hydrogen-bond formatting requires canonical ComparisonArtifact input, got "
+                f"{type(result).__name__}"
             )
-            if not metric_keys and result.pairwise_comparisons:
-                metric_keys = [result.pairwise_comparisons[0].metric]
 
-            if len(metric_keys) == 1:
-                return format_scalar_comparison(
-                    result,
-                    title="Hydrogen Bond Analysis",
+        if output_format == "json":
+            return result.model_dump_json(indent=2)
+
+        metric_keys = list((result.payload.get("rankings_by_metric") or {}).keys())
+        if not metric_keys and result.payload.get("pairwise_comparisons"):
+            metric_keys = [str(result.payload["pairwise_comparisons"][0].get("metric"))]
+        if not metric_keys:
+            return format_scalar_comparison_artifact_payload(
+                result.payload,
+                title="Hydrogen Bond Analysis",
+                metric_label="Mean H-bonds/frame",
+                metric_unit="",
+                output_format=output_format,
+                higher_is_better=None,
+            )
+
+        chunks: list[str] = []
+        for metric_key in metric_keys:
+            summary_name = metric_key.replace("mean_hbonds_", "", 1)
+            title = (
+                "Hydrogen Bond Analysis" if len(metric_keys) == 1 else f"H-bonds: {summary_name}"
+            )
+            chunks.append(
+                format_scalar_comparison_artifact_payload(
+                    result.payload,
+                    title=title,
                     metric_label="Mean H-bonds/frame",
                     metric_unit="",
-                    metric_key=metric_keys[0],
+                    metric_key=metric_key,
                     output_format=output_format,
                     higher_is_better=None,
                 )
-
-            if len(metric_keys) > 1:
-                chunks: list[str] = []
-                for metric_key in metric_keys:
-                    summary_name = metric_key.replace("mean_hbonds_", "", 1)
-                    chunks.append(
-                        format_scalar_comparison(
-                            result,
-                            title=f"H-bonds: {summary_name}",
-                            metric_label="Mean H-bonds/frame",
-                            metric_unit="",
-                            metric_key=metric_key,
-                            output_format=output_format,
-                            higher_is_better=None,
-                        )
-                    )
-                return "\n\n".join(chunks)
-
-        return super().format(result, output_format)
+            )
+        return "\n\n".join(chunks)
 
     def plot(self, ctx: PlotContext) -> list[Path]:
         """Generate default hydrogen-bond comparison figures.
@@ -1336,7 +1242,7 @@ class HydrogenBondsAnalysis(Analysis):
 
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
-        loaded: dict[str, HydrogenBondAggregatedResult] = {}
+        loaded: dict[str, ConditionArtifact] = {}
         for label in labels:
             cond_data = data.get(label)
             if cond_data is None:
@@ -1346,7 +1252,11 @@ class HydrogenBondsAnalysis(Analysis):
                 continue
 
             try:
-                loaded_result = self._load_aggregated_result(Path(aggregated_dir))
+                loaded_result = self._load_aggregated_result(
+                    Path(aggregated_dir),
+                    settings=ctx.settings,
+                    condition_label=label,
+                )
             except (
                 json.JSONDecodeError,
                 FileNotFoundError,
@@ -1365,36 +1275,31 @@ class HydrogenBondsAnalysis(Analysis):
             if loaded_result is None:
                 continue
 
-            if isinstance(loaded_result, dict):
-                try:
-                    loaded_result = HydrogenBondAggregatedResult.model_validate(loaded_result)
-                except (
-                    json.JSONDecodeError,
-                    ValidationError,
-                    KeyError,
-                    FileNotFoundError,
-                    OSError,
-                ) as exc:
-                    logger.warning(
-                        "Skipping condition %s for plotting: invalid aggregated result (%s)",
-                        label,
-                        exc,
-                    )
-                    continue
-
-            if isinstance(loaded_result, HydrogenBondAggregatedResult):
-                loaded[label] = loaded_result
+            if not isinstance(loaded_result, ConditionArtifact):
+                raise PluginContractError(
+                    "Hydrogen-bond plotting requires canonical ConditionArtifact input, got "
+                    f"{type(loaded_result).__name__}"
+                )
+            loaded[label] = loaded_result
 
         labels_with_data = [label for label in labels if label in loaded]
         if not labels_with_data:
             return []
 
         plots: list[Path] = []
-        replicate_data = self._load_replicate_timeseries(data, labels_with_data)
+        replicate_data = self._load_replicate_timeseries(
+            data,
+            labels_with_data,
+            settings=ctx.settings,
+        )
         summary_names = self._get_summary_names(loaded, labels_with_data)
 
         summary_plot = plot_summary_comparison(
-            loaded, labels_with_data, ctx.output_dir, ctx.plot_settings
+            loaded,
+            labels_with_data,
+            ctx.output_dir,
+            ctx.plot_settings,
+            control_label=ctx.control_label,
         )
         if summary_plot is not None:
             plots.append(summary_plot)
@@ -1407,6 +1312,7 @@ class HydrogenBondsAnalysis(Analysis):
                 summary_name,
                 ctx.output_dir,
                 ctx.plot_settings,
+                control_label=ctx.control_label,
             )
             if timeseries_plot is not None:
                 plots.append(timeseries_plot)
@@ -1418,11 +1324,14 @@ class HydrogenBondsAnalysis(Analysis):
                 ctx.output_dir,
                 ctx.plot_settings,
                 top_n=ctx.settings.top_n_pairs,
+                control_label=ctx.control_label,
             )
             if top_pairs_plot is not None:
                 plots.append(top_pairs_plot)
 
-        has_composition = any(result.composition_entries for result in loaded.values())
+        has_composition = any(
+            result.payload.get("composition_entries", []) for result in loaded.values()
+        )
         if has_composition:
             composition_absolute_plot = plot_composition_absolute(
                 loaded,
@@ -1444,89 +1353,106 @@ class HydrogenBondsAnalysis(Analysis):
 
         return plots
 
-    def _load_replicate_result(self, run_dir: Path) -> Any | None:
-        """Load replicate result from a run directory.
+    def _load_aggregated_result(
+        self,
+        aggregated_dir: Path,
+        *,
+        settings: HydrogenBondSettings | None = None,
+        condition_label: str | None = None,
+    ) -> Any:
+        """Load and optionally validate an aggregated hydrogen-bond result.
 
-        Overrides the base class to find custom-named cache files
-        (``hbonds_eq*.json``) when the canonical ``result.json`` is absent.
+        Parameters
+        ----------
+        aggregated_dir : Path
+            Directory containing aggregated result files.
+        settings : HydrogenBondSettings | None, optional
+            Current settings used to validate settings-sensitive aggregated
+            caches. When omitted, the result is loaded without settings
+            identity validation.
+        condition_label : str | None, optional
+            Condition label for validation diagnostics.
+
+        Returns
+        -------
+        Any
+            Loaded aggregated result, or ``None`` when no result file exists.
+        """
+
+        result_path = self._resolve_aggregated_result_path(aggregated_dir)
+        if result_path is None:
+            return None
+
+        result = self._deserialize_result(result_path)
+        if settings is None:
+            return result
+
+        return self._coerce_and_validate_aggregated_result(
+            result,
+            settings,
+            condition_label=condition_label,
+            source=result_path,
+        )
+
+    def _load_replicate_result(
+        self,
+        run_dir: Path,
+        *,
+        settings: HydrogenBondSettings | None = None,
+        condition_label: str | None = None,
+        replicate: int | None = None,
+    ) -> Any | None:
+        """Load a canonical replicate artifact from a run directory.
 
         Parameters
         ----------
         run_dir : Path
             Replicate run directory (for example ``run_1``).
+        settings : HydrogenBondSettings | None, optional
+            Current settings used to validate settings-sensitive replicate
+            caches during plotting. When omitted, the result is loaded
+            without settings identity validation.
+        condition_label : str | None, optional
+            Condition label for validation diagnostics.
+        replicate : int | None, optional
+            Replicate identifier for validation diagnostics.
 
         Returns
         -------
-        HydrogenBondResult or None
-            Deserialized replicate result, or ``None`` if no result file
-            is present.
+        ReplicateArtifact or None
+            Deserialized canonical artifact, or ``None`` if no canonical result
+            file is present.
         """
-        # Try canonical path first (base class behavior)
-        result = super()._load_replicate_result(run_dir)
-        if result is not None:
-            return result
 
-        # Fall back to custom-named cache files
-        if not run_dir.exists():
+        result_path = self.replicate_result_path(run_dir)
+        if not result_path.exists():
             return None
-
         try:
-            candidates = sorted(run_dir.glob("hbonds_eq*.json"))
-        except OSError:
-            return None
-
-        if not candidates:
-            return None
-
-        if len(candidates) > 1:
-            by_equilibration: dict[str, list[Path]] = {}
-            for path in candidates:
-                stem = path.stem
-                if not stem.startswith("hbonds_eq"):
-                    continue
-                remainder = stem[len("hbonds_eq") :]
-                eq_key = remainder.split("_", maxsplit=1)[0]
-                by_equilibration.setdefault(eq_key, []).append(path)
-
-            if len(by_equilibration) != 1:
-                logger.warning(
-                    "Multiple hydrogen-bond cache files in %s with different equilibration "
-                    "settings. Refusing ambiguous cache load; run with --recompute.",
-                    run_dir,
-                )
-                return None
-
-            only_eq, eq_candidates = next(iter(by_equilibration.items()))
-            if len(eq_candidates) != 1:
-                logger.warning(
-                    "Multiple hydrogen-bond cache files in %s for equilibration '%s'. "
-                    "Refusing ambiguous cache load; run with --recompute.",
-                    run_dir,
-                    only_eq,
-                )
-                return None
-
-            best = eq_candidates[0]
-        else:
-            best = candidates[0]
-
-        logger.debug("Loading replicate result from custom cache %s", best)
-        try:
-            return self._deserialize_replicate_result(best)
-        except (
-            json.JSONDecodeError,
-            OSError,
-            PermissionError,
-            ValidationError,
-            KeyError,
-        ) as exc:
-            logger.debug("Failed to deserialize %s: %s", best, exc)
-            return None
+            result = ArtifactStore(run_dir).read_replicate_result("result.json")
+        except ArtifactStoreError as exc:
+            raise ValueError(
+                "Hydrogen-bond replicate result"
+                f" for condition '{condition_label}' replicate {replicate} is missing a "
+                "settings fingerprint. Non-canonical hydrogen-bond replicate caches are not "
+                "compatible with settings-sensitive plot loading. Recompute the condition "
+                "before plotting."
+            ) from exc
+        if settings is not None:
+            return self._coerce_and_validate_replicate_result(
+                result,
+                settings,
+                condition_label=condition_label,
+                replicate=replicate,
+                source=self.replicate_result_path(run_dir),
+            )
+        return result
 
     def _load_replicate_timeseries(
         self,
         data: dict[str, Any],
         labels: Sequence[str],
+        *,
+        settings: HydrogenBondSettings | None = None,
     ) -> dict[str, dict[str, list[list[int]]]]:
         """Load per-replicate counts-per-frame values for timeseries plots.
 
@@ -1536,6 +1462,9 @@ class HydrogenBondsAnalysis(Analysis):
             Plot data dictionary from :meth:`Analysis._build_plot_data`.
         labels : Sequence[str]
             Ordered condition labels to load.
+        settings : HydrogenBondSettings | None, optional
+            Current settings used to validate settings-sensitive replicate
+            caches during plotting.
 
         Returns
         -------
@@ -1558,7 +1487,12 @@ class HydrogenBondsAnalysis(Analysis):
             for replicate in replicate_ids:
                 run_dir = Path(analysis_dir) / f"run_{replicate}"
                 try:
-                    rep_result = self._load_replicate_result(run_dir)
+                    rep_result = self._load_replicate_result(
+                        run_dir,
+                        settings=settings,
+                        condition_label=label,
+                        replicate=replicate,
+                    )
                 except (
                     FileNotFoundError,
                     OSError,
@@ -1568,34 +1502,23 @@ class HydrogenBondsAnalysis(Analysis):
                 ) as exc:
                     logger.debug("Could not load replicate result from %s: %s", run_dir, exc)
                     continue
+                except ValueError as exc:
+                    if settings is not None:
+                        raise
+                    logger.debug("Could not load replicate result from %s: %s", run_dir, exc)
+                    continue
 
                 if rep_result is None:
                     continue
 
-                if isinstance(rep_result, dict):
-                    try:
-                        rep_result = HydrogenBondResult.model_validate(rep_result)
-                    except (
-                        json.JSONDecodeError,
-                        ValidationError,
-                        KeyError,
-                        FileNotFoundError,
-                        OSError,
-                    ) as exc:
-                        logger.warning(
-                            "Skipping replicate %s for %s in timeseries plotting: %s",
-                            replicate,
-                            label,
-                            exc,
-                        )
-                        continue
-
-                if not isinstance(rep_result, HydrogenBondResult):
+                if not isinstance(rep_result, ReplicateArtifact):
                     continue
 
-                for summary in rep_result.summaries:
-                    summary_traces.setdefault(summary.name, []).append(
-                        list(summary.counts_per_frame)
+                for summary in rep_result.payload.get("summaries", []):
+                    if not isinstance(summary, dict):
+                        continue
+                    summary_traces.setdefault(str(summary.get("name", "unknown")), []).append(
+                        [int(value) for value in summary.get("counts_per_frame", [])]
                     )
 
             if summary_traces:
@@ -1605,15 +1528,15 @@ class HydrogenBondsAnalysis(Analysis):
 
     @staticmethod
     def _get_summary_names(
-        loaded: dict[str, HydrogenBondAggregatedResult],
+        loaded: dict[str, ConditionArtifact],
         labels: Sequence[str],
     ) -> list[str]:
         """Collect summary names in first-seen order across conditions.
 
         Parameters
         ----------
-        loaded : dict[str, HydrogenBondAggregatedResult]
-            Loaded aggregated results by condition.
+        loaded : dict[str, ConditionArtifact]
+            Loaded condition artifacts by condition.
         labels : Sequence[str]
             Condition labels in plotting order.
 
@@ -1628,8 +1551,11 @@ class HydrogenBondsAnalysis(Analysis):
             result = loaded.get(label)
             if result is None:
                 continue
-            for summary in result.summaries:
-                if summary.name not in seen:
-                    seen.add(summary.name)
-                    names.append(summary.name)
+            for summary in result.payload.get("summaries", []):
+                if not isinstance(summary, dict):
+                    continue
+                summary_name = str(summary.get("name", "unknown"))
+                if summary_name not in seen:
+                    seen.add(summary_name)
+                    names.append(summary_name)
         return names

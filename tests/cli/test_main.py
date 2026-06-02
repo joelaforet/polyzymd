@@ -1,7 +1,7 @@
 """Tests for CLI replicate flag handling and run/submit UX.
 
-Tests the _resolve_replicates_option() helper and the updated
---replicates / --replicate flags on `build` and `run`.
+Tests the _resolve_replicates_option() helper and the --replicates flags on
+`build` and `run`.
 """
 
 from __future__ import annotations
@@ -12,9 +12,21 @@ from unittest.mock import patch
 
 import click
 import pytest
+import yaml
 from click.testing import CliRunner
+from jinja2 import UndefinedError
 
 from polyzymd.cli.main import _resolve_replicates_option, cli
+from polyzymd.utils.templates import render_package_template
+
+BRANDING_LINE = "PolyzyMD: Created by Joseph R. Laforet Jr."
+
+
+def _assert_no_jinja_markers(content: str) -> None:
+    """Assert rendered content contains no unresolved Jinja syntax."""
+    assert "{{" not in content
+    assert "{%" not in content
+    assert "%}" not in content
 
 
 def _make_dry_run_config() -> SimpleNamespace:
@@ -25,6 +37,7 @@ def _make_dry_run_config() -> SimpleNamespace:
     return SimpleNamespace(
         name="test_sim",
         description="test description",
+        engine="openmm",
         enzyme=SimpleNamespace(name="TestEnzyme", pdb_path=Path("structures/enzyme.pdb")),
         substrate=None,
         polymers=None,
@@ -58,57 +71,33 @@ class TestResolveReplicatesOption:
 
     def test_replicates_single(self) -> None:
         """--replicates '1' resolves to [1]."""
-        assert _resolve_replicates_option("1", None, "test") == [1]
+        assert _resolve_replicates_option("1") == [1]
 
     def test_replicates_range(self) -> None:
         """--replicates '1-3' resolves to [1, 2, 3]."""
-        assert _resolve_replicates_option("1-3", None, "test") == [1, 2, 3]
+        assert _resolve_replicates_option("1-3") == [1, 2, 3]
 
     def test_replicates_comma(self) -> None:
         """--replicates '1,3,5' resolves to [1, 3, 5]."""
-        assert _resolve_replicates_option("1,3,5", None, "test") == [1, 3, 5]
+        assert _resolve_replicates_option("1,3,5") == [1, 3, 5]
 
     def test_replicates_range_with_step(self) -> None:
         """--replicates '1-10:2' resolves to [1, 3, 5, 7, 9]."""
-        assert _resolve_replicates_option("1-10:2", None, "test") == [1, 3, 5, 7, 9]
-
-    def test_deprecated_replicate_single(self) -> None:
-        """--replicate 1 resolves to [1] with stderr warning."""
-        from click.testing import CliRunner
-
-        runner = CliRunner()
-        with runner.isolation() as (_stdin, _stdout, stderr):
-            result = _resolve_replicates_option(None, 1, "test")
-            assert result == [1]
-            assert "--replicate is deprecated" in stderr.getvalue().decode("utf-8")
-
-    def test_deprecated_replicate_preserves_value(self) -> None:
-        """--replicate 5 resolves to [5]."""
-        assert _resolve_replicates_option(None, 5, "test") == [5]
-
-    def test_both_flags_raises(self) -> None:
-        """Using both --replicates and --replicate raises UsageError."""
-        with pytest.raises(click.UsageError, match="Cannot use both"):
-            _resolve_replicates_option("1-3", 1, "test")
+        assert _resolve_replicates_option("1-10:2") == [1, 3, 5, 7, 9]
 
     def test_neither_flag_defaults_to_one(self) -> None:
         """Omitting both flags defaults to [1]."""
-        assert _resolve_replicates_option(None, None, "test") == [1]
-
-    def test_error_message_includes_command_name(self) -> None:
-        """Error message mentions the command name."""
-        with pytest.raises(click.UsageError, match="build"):
-            _resolve_replicates_option("1-3", 1, "build")
+        assert _resolve_replicates_option(None) == [1]
 
     def test_invalid_range_raises(self) -> None:
         """Invalid range string is converted to Click BadParameter."""
         with pytest.raises(click.BadParameter):
-            _resolve_replicates_option("abc", None, "test")
+            _resolve_replicates_option("abc")
 
     def test_empty_range_raises(self) -> None:
         """Empty string is converted to Click BadParameter."""
         with pytest.raises(click.BadParameter):
-            _resolve_replicates_option("", None, "test")
+            _resolve_replicates_option("")
 
 
 class TestResolveEngineName:
@@ -123,6 +112,15 @@ class TestResolveEngineName:
         config = SimpleNamespace(engine="openmm")
         assert _resolve_engine_name(config, override="gromacs") == "gromacs"
 
+    def test_override_works_without_config_engine(self) -> None:
+        """CLI --engine override should work when config has no engine."""
+        from types import SimpleNamespace
+
+        from polyzymd.cli.main import _resolve_engine_name
+
+        config = SimpleNamespace()
+        assert _resolve_engine_name(config, override="gromacs") == "gromacs"
+
     def test_reads_config_engine(self) -> None:
         """Should read engine from config when no override."""
         from types import SimpleNamespace
@@ -132,23 +130,35 @@ class TestResolveEngineName:
         config = SimpleNamespace(engine="gromacs")
         assert _resolve_engine_name(config) == "gromacs"
 
-    def test_defaults_to_openmm(self) -> None:
-        """Should default to openmm when config has no engine field."""
+    def test_missing_engine_raises_usage_error(self) -> None:
+        """Missing config engine should raise a usage error."""
         from types import SimpleNamespace
 
         from polyzymd.cli.main import _resolve_engine_name
 
         config = SimpleNamespace()
-        assert _resolve_engine_name(config) == "openmm"
+        with pytest.raises(click.UsageError, match="Configure 'engine'"):
+            _resolve_engine_name(config)
 
-    def test_none_engine_defaults_to_openmm(self) -> None:
-        """Should default to openmm when config.engine is None."""
+    def test_none_engine_raises_usage_error(self) -> None:
+        """None config engine should raise a usage error."""
         from types import SimpleNamespace
 
         from polyzymd.cli.main import _resolve_engine_name
 
         config = SimpleNamespace(engine=None)
-        assert _resolve_engine_name(config) == "openmm"
+        with pytest.raises(click.UsageError, match="Configure 'engine'"):
+            _resolve_engine_name(config)
+
+    def test_empty_engine_raises_usage_error(self) -> None:
+        """Empty config engine should raise a usage error."""
+        from types import SimpleNamespace
+
+        from polyzymd.cli.main import _resolve_engine_name
+
+        config = SimpleNamespace(engine="")
+        with pytest.raises(click.UsageError, match="Configure 'engine'"):
+            _resolve_engine_name(config)
 
     def test_case_insensitive(self) -> None:
         """Override should be case-insensitive."""
@@ -175,7 +185,7 @@ class TestBuildCommandReplicateFlags:
         assert "--replicates" in result.output
 
     def test_build_help_hides_replicate(self) -> None:
-        """'polyzymd build --help' should NOT show deprecated --replicate."""
+        """'polyzymd build --help' should NOT show removed --replicate."""
         from click.testing import CliRunner
 
         from polyzymd.cli.main import cli
@@ -187,9 +197,51 @@ class TestBuildCommandReplicateFlags:
         # (but --replicates will appear, so we check there's no standalone --replicate)
         lines = result.output.split("\n")
         for line in lines:
-            # If a line contains --replicate but NOT --replicates, that's the deprecated flag showing
+            # Detect removed singular option without matching the plural option
             if "--replicate" in line and "--replicates" not in line:
-                pytest.fail(f"Deprecated --replicate visible in help: {line}")
+                pytest.fail(f"Removed singular --replicate visible in help: {line}")
+
+    def test_build_gromacs_alias_is_rejected(self, tmp_path: Path) -> None:
+        """Build should reject the removed --gromacs alias as unknown."""
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["build", "-c", str(config_path), "--gromacs"])
+
+        assert result.exit_code != 0
+        assert "No such option: --gromacs" in result.output
+
+    def test_build_help_clarifies_gromacs_handoff(self) -> None:
+        """Build help should describe GROMACS as build-only handoff."""
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["build", "--help"])
+
+        assert result.exit_code == 0
+        assert "build-only GROMACS handoff" in result.output
+
+    def test_run_help_keeps_gromacs_engine(self) -> None:
+        """Run help should retain GROMACS as a full workflow engine."""
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["run", "--help"])
+
+        assert result.exit_code == 0
+        assert "gromacs" in result.output
+        assert "openmm" in result.output
+
+    @pytest.mark.parametrize("option", ["--output-dir", "-o"])
+    def test_build_output_dir_alias_is_rejected(self, option: str, tmp_path: Path) -> None:
+        """Build should reject removed output-dir aliases for scratch output."""
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["build", "-c", str(config_path), option, str(tmp_path)])
+
+        assert result.exit_code != 0
+        assert f"No such option: {option}" in result.output
 
 
 class TestRunCommandReplicateFlags:
@@ -207,7 +259,7 @@ class TestRunCommandReplicateFlags:
         assert "--replicates" in result.output
 
     def test_run_help_hides_replicate(self) -> None:
-        """'polyzymd run --help' should NOT show deprecated --replicate."""
+        """'polyzymd run --help' should NOT show removed --replicate."""
         from click.testing import CliRunner
 
         from polyzymd.cli.main import cli
@@ -218,7 +270,18 @@ class TestRunCommandReplicateFlags:
         lines = result.output.split("\n")
         for line in lines:
             if "--replicate" in line and "--replicates" not in line:
-                pytest.fail(f"Deprecated --replicate visible in help: {line}")
+                pytest.fail(f"Removed singular --replicate visible in help: {line}")
+
+    def test_run_replicate_alias_is_rejected(self, tmp_path: Path) -> None:
+        """Run should reject the removed singular --replicate option."""
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["run", "-c", str(config_path), "--replicate", "1"])
+
+        assert result.exit_code != 0
+        assert "No such option: --replicate" in result.output
 
     def test_run_help_shows_engine_flag(self) -> None:
         """'polyzymd run --help' should include required --engine option."""
@@ -318,6 +381,55 @@ class TestInternalCommandsUnchanged:
         assert "--replicate" in result.output
 
 
+class TestInitCommand:
+    """Tests for the project initialization scaffold."""
+
+    def test_init_creates_project_scaffold(self, tmp_path: Path) -> None:
+        """init should render project files with the requested project name."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(cli, ["init", "-n", "foo"])
+
+            assert result.exit_code == 0
+            project_dir = Path("foo")
+            assert project_dir.is_dir()
+            assert (project_dir / "config.yaml").is_file()
+            assert (project_dir / "structures").is_dir()
+            assert (project_dir / "job_scripts").is_dir()
+            assert (project_dir / "slurm_logs").is_dir()
+            assert (project_dir / "structures" / "place_protein_here.placeholder.txt").is_file()
+            assert (project_dir / "structures" / "place_ligand_here.placeholder.txt").is_file()
+
+            config_content = (project_dir / "config.yaml").read_text(encoding="utf-8")
+            config_data = yaml.safe_load(config_content)
+            assert config_data["name"] == "foo"
+            assert config_content.count(BRANDING_LINE) == 1
+            _assert_no_jinja_markers(config_content)
+
+            for path in project_dir.rglob("*"):
+                if path.is_file() and path.suffix in {".yaml", ".txt"}:
+                    content = path.read_text(encoding="utf-8")
+                    assert content.count(BRANDING_LINE) == 1
+                    _assert_no_jinja_markers(content)
+
+    def test_init_existing_directory_still_errors(self, tmp_path: Path) -> None:
+        """init should preserve the existing-directory error behavior."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            Path("foo").mkdir()
+            result = runner.invoke(cli, ["init", "-n", "foo"])
+
+            assert result.exit_code != 0
+            assert "already exists" in result.output
+
+    def test_shared_renderer_uses_strict_undefined(self) -> None:
+        """Missing template context values should fail fast."""
+        with pytest.raises(UndefinedError):
+            render_package_template("polyzymd.templates", "config_template.yaml", {})
+
+
 class TestDryRunOutput:
     """Tests for the enhanced --dry-run validation report."""
 
@@ -342,24 +454,6 @@ class TestDryRunOutput:
         assert "--dry-run" in result.output
 
 
-class TestDeprecatedReplicateValidation:
-    """Unit tests for deprecated --replicate validation."""
-
-    def test_replicate_zero_raises(self) -> None:
-        """Replicate zero should raise BadParameter."""
-        with pytest.raises(click.BadParameter):
-            _resolve_replicates_option(None, 0, "build")
-
-    def test_replicate_negative_raises(self) -> None:
-        """Negative replicate should raise BadParameter."""
-        with pytest.raises(click.BadParameter):
-            _resolve_replicates_option(None, -1, "build")
-
-    def test_replicate_positive_still_works(self) -> None:
-        """Positive replicate should still resolve correctly."""
-        assert _resolve_replicates_option(None, 3, "build") == [3]
-
-
 class TestBuildDryRunEndToEnd:
     """End-to-end CliRunner tests for build dry-run behavior."""
 
@@ -377,12 +471,12 @@ class TestBuildDryRunEndToEnd:
         assert "DRY RUN" in result.output
 
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
-    def test_build_dry_run_with_deprecated_replicate_warns(
+    def test_build_dry_run_rejects_singular_replicate(
         self,
         mock_from_yaml,
         tmp_path: Path,
     ) -> None:
-        """Deprecated --replicate should still work and emit warning."""
+        """Build should reject the removed singular --replicate option."""
         mock_from_yaml.return_value = _make_dry_run_config()
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
@@ -393,12 +487,11 @@ class TestBuildDryRunEndToEnd:
             ["build", "-c", str(config_path), "--replicate", "1", "--dry-run"],
         )
 
-        assert result.exit_code == 0
-        stderr = getattr(result, "stderr", "")
-        assert "deprecated" in f"{result.output}\n{stderr}".lower()
+        assert result.exit_code != 0
+        assert "No such option: --replicate" in result.output
 
     def test_build_with_replicate_zero_fails(self, tmp_path: Path) -> None:
-        """Replicate zero should fail with positive-integer guidance."""
+        """Removed singular --replicate should fail as an unknown option."""
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
         runner = CliRunner()
@@ -406,9 +499,7 @@ class TestBuildDryRunEndToEnd:
         result = runner.invoke(cli, ["build", "-c", str(config_path), "--replicate", "0"])
 
         assert result.exit_code != 0
-        stderr = getattr(result, "stderr", "")
-        message = f"{result.output}\n{stderr}".lower()
-        assert "positive" in message or "must be" in message
+        assert "No such option: --replicate" in result.output
 
 
 class TestCliExceptionHandlingNarrowing:
@@ -505,7 +596,7 @@ class TestCliExceptionHandlingNarrowing:
             )
 
     def test_build_with_replicate_negative_fails(self, tmp_path: Path) -> None:
-        """Negative replicate should fail with positive-integer guidance."""
+        """Removed singular --replicate should fail as an unknown option."""
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
         runner = CliRunner()
@@ -513,9 +604,7 @@ class TestCliExceptionHandlingNarrowing:
         result = runner.invoke(cli, ["build", "-c", str(config_path), "--replicate", "-1"])
 
         assert result.exit_code != 0
-        stderr = getattr(result, "stderr", "")
-        message = f"{result.output}\n{stderr}".lower()
-        assert "positive" in message or "must be" in message
+        assert "No such option: --replicate" in result.output
 
 
 class TestRunEngineGromacs:

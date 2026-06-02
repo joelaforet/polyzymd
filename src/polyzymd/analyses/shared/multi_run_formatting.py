@@ -2,30 +2,86 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 
+SINGLE_REPLICATE_SEM_NOTE = "SEM: n/a (single replicate; not estimable)"
 
-def _format_pct(pct: float) -> str:
-    """Format percent changes for multi-run output helpers.
+
+def is_sem_estimable(n_replicates: int) -> bool:
+    """Return whether SEM can be estimated from replicate-level values.
 
     Parameters
     ----------
-    pct : float
-        Percent change value.
+    n_replicates : int
+        Number of replicate values contributing to the summary.
+
+    Returns
+    -------
+    bool
+        ``True`` when at least two replicates are available.
+    """
+    return n_replicates >= 2
+
+
+def format_sem_value(
+    sem: float | None,
+    n_replicates: int,
+    *,
+    precision: int = 2,
+    unit: str = "",
+) -> str:
+    """Format SEM without implying singleton uncertainty is estimable.
+
+    Parameters
+    ----------
+    sem : float | None
+        SEM value to display when enough replicates are available.
+    n_replicates : int
+        Number of replicates contributing to the summary.
+    precision : int, optional
+        Decimal places for numeric SEM values, by default 2.
+    unit : str, optional
+        Unit suffix appended to numeric SEM values, by default ``""``.
 
     Returns
     -------
     str
-        Human-readable percent text with special handling for infinities and NaN.
+        ``"n/a"`` for singleton summaries, otherwise a formatted SEM value.
     """
-    pct = pct + 0.0
+    if not is_sem_estimable(n_replicates) or sem is None:
+        return "n/a"
+    return f"{sem:.{precision}f}{unit}"
 
-    if math.isnan(pct):
-        return "undefined"
-    if math.isinf(pct):
-        return "new (baseline=0)" if pct > 0 else "gone (current=0)"
-    return f"{pct:+.1f}%"
+
+def format_sem_phrase(
+    sem: float | None,
+    n_replicates: int,
+    *,
+    precision: int = 2,
+    unit: str = "",
+) -> str:
+    """Format a compact ``SEM: ...`` phrase for summaries.
+
+    Parameters
+    ----------
+    sem : float | None
+        SEM value to display when enough replicates are available.
+    n_replicates : int
+        Number of replicates contributing to the summary.
+    precision : int, optional
+        Decimal places for numeric SEM values, by default 2.
+    unit : str, optional
+        Unit suffix appended to numeric SEM values, by default ``""``.
+
+    Returns
+    -------
+    str
+        ``"SEM: n/a (single replicate)"`` for singleton summaries, otherwise
+        a numeric SEM phrase.
+    """
+    if not is_sem_estimable(n_replicates):
+        return "SEM: n/a (single replicate)"
+    return f"SEM: {format_sem_value(sem, n_replicates, precision=precision, unit=unit)}"
 
 
 def make_section_title(title: str, width: int) -> list[str]:
@@ -60,10 +116,12 @@ def format_pairwise_line(
     prefix: str = "Pairwise",
 ) -> str:
     """Format one standard pairwise comparison line."""
+    from polyzymd.analyses.stats import format_pct
+
     sig_marker = "*" if significant else ""
     return (
         f"{prefix}: {condition_b} vs {condition_a} — "
-        f"Δ={_format_pct(percent_change)}, p={p_value:.3f} {sig_marker}, "
+        f"Δ={format_pct(percent_change)}, p={p_value:.3f} {sig_marker}, "
         f"d={effect_size:.2f} ({effect_label}), {direction}"
     )
 

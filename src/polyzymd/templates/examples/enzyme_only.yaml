@@ -6,6 +6,7 @@
 # ============================================================================
 
 name: "LipA_ResorufinButyrate_control"
+engine: "openmm"
 description: "LipA enzyme with docked Resorufin-Butyrate substrate - no polymers"
 
 # ============================================================================
@@ -115,6 +116,8 @@ simulation_phases:
     ensemble: "NPT"
     duration: 100.0  # nanoseconds total
     samples: 2500  # frames to save (total across all segments)
+    report_interval: 20000  # MD steps between trajectory/report writes
+    checkpoint_interval: 60.0  # seconds between restart checkpoints
     time_step: 2.0  # femtoseconds
     thermostat: "LangevinMiddle"
     thermostat_timescale: 1.0  # picoseconds

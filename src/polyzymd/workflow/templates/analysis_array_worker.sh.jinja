@@ -1,0 +1,35 @@
+{{ header }}
+#SBATCH --array={{ array_spec }}
+
+set -u
+
+MAX_RETRIES={{ max_retries }}
+REP=$SLURM_ARRAY_TASK_ID
+
+case "$REP" in
+{% for branch in case_branches %}
+{{ branch.replicate }})
+    ATTEMPT=$({{ branch.status_attempt_cmd }} 2>/dev/null || echo "0")
+    ATTEMPT=$((ATTEMPT + 1))
+    {{ branch.status_running_cmd }}
+    {{ branch.worker_cmd }}
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -ne 0 ]; then
+        if [ $ATTEMPT -lt $MAX_RETRIES ]; then
+            {{ branch.status_retrying_cmd }}
+            scontrol requeue ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}
+            exit 0
+        fi
+        {{ branch.status_failed_cmd }}
+        exit $EXIT_CODE
+    fi
+    {{ branch.status_succeeded_cmd }}
+    ;;
+{% endfor %}
+*)
+    echo "Unknown array task id: $REP" >&2
+    exit 2
+    ;;
+esac
+
+exit 0

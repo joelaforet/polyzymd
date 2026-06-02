@@ -12,21 +12,52 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
-import openmm
-from openmm import XmlSerializer
-from openmm import unit as u
-from openmm.app import (
-    CheckpointReporter,
-    DCDReporter,
-    PDBFile,
-    Simulation,
-    StateDataReporter,
-)
-from openmm.unit import Quantity
+if TYPE_CHECKING:
+    import openmm
+    from openmm.app import Simulation
+    from openmm.unit import Quantity
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _get_openmm_module() -> Any:
+    """Import and return the OpenMM top-level module lazily."""
+
+    import openmm
+
+    return openmm
+
+
+def _get_openmm_app_classes() -> tuple[Any, Any, Any, Any, Any]:
+    """Import and return OpenMM app classes lazily."""
+
+    from openmm.app import (
+        CheckpointReporter,
+        DCDReporter,
+        PDBFile,
+        Simulation,
+        StateDataReporter,
+    )
+
+    return CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
+
+
+def _get_xml_serializer() -> Any:
+    """Import and return the OpenMM XML serializer lazily."""
+
+    from openmm import XmlSerializer
+
+    return XmlSerializer
+
+
+def _get_openmm_unit_module() -> Any:
+    """Import and return the OpenMM unit module lazily."""
+
+    from openmm import unit as u
+
+    return u
 
 
 def quantity_from_dict(qdict: Dict[str, Any]) -> Quantity:
@@ -38,6 +69,8 @@ def quantity_from_dict(qdict: Dict[str, Any]) -> Quantity:
     Returns:
         OpenMM Quantity with appropriate units.
     """
+    u = _get_openmm_unit_module()
+
     value = qdict["__values__"]["value"]
     unit_str = qdict["__values__"]["unit"]
 
@@ -136,22 +169,16 @@ class ContinuationManager:
         FileNotFoundError
             If no suitable PDB file is found.
         """
-        patterns = [
-            "*solvated*.pdb",
-            "*_solvated.pdb",
-            "solvated_*.pdb",
-            "production_0/*_topology.pdb",
-        ]
+        allowed_paths = (
+            self._working_dir / "solvated_system.pdb",
+            self._working_dir / "production_0" / "production_0_topology.pdb",
+            self._working_dir / "production" / "production_topology.pdb",
+        )
+        for pdb_path in allowed_paths:
+            if pdb_path.exists():
+                return pdb_path
 
-        for pattern in patterns:
-            pdb_files = list(self._working_dir.glob(pattern))
-            if pdb_files:
-                return pdb_files[0]
-
-        # Fallback to any PDB
-        pdb_files = list(self._working_dir.glob("**/*.pdb"))
-        if pdb_files:
-            return pdb_files[0]
+        # Arbitrary recursive PDB discovery is disallowed to avoid selecting decoys or inputs
 
         raise FileNotFoundError(f"Could not find solvated PDB file in {self._working_dir}")
 
@@ -173,11 +200,12 @@ class ContinuationManager:
             3. **Graceful interruption with restart checkpoint** —
                ``restart_state.xml`` saved by wall-time checkpoint loop.
                Uses ``loadState()`` (portable).
-            4. **Graceful interruption (legacy, .chk only)** —
+            4. **Emergency interruption (.chk only)** —
                ``interrupted_checkpoint.chk`` exists but no state XML.
-               Falls back to ``loadCheckpoint()`` (non-portable).
-            5. **Hard kill** — periodic ``checkpoint.chk`` from
-               CheckpointReporter exists but no XML state files.
+               Falls back to ``loadCheckpoint()`` (non-portable) only after
+               XML state recovery is unavailable.
+            5. **Hard kill/OOM/node failure** — periodic ``checkpoint.chk``
+               from CheckpointReporter exists but no XML state files.
                Falls back to ``loadCheckpoint()`` (non-portable).
         """
         prev_dir = self._working_dir / f"production_{self._prev_segment}"
@@ -221,18 +249,18 @@ class ContinuationManager:
                 system_path = restart_system
 
         elif interrupted_chk.exists() and interrupted_system.exists():
-            # Case 4: Legacy graceful interruption — only .chk available
+            # Case 4: Emergency recovery when only binary .chk survived
             LOGGER.warning(
                 f"Previous segment {self._prev_segment} was interrupted — "
-                f"no portable state XML found, falling back to "
-                f"interrupted_checkpoint.chk (non-portable)"
+                f"no portable state XML found, using emergency "
+                f"interrupted_checkpoint.chk recovery (non-portable)"
             )
             system_path = interrupted_system
             checkpoint_path = interrupted_chk
             use_checkpoint = True
 
         elif checkpoint_path.exists() and system_path.exists():
-            # Case 5: Hard kill — periodic CheckpointReporter .chk file
+            # Case 5: Emergency hard-kill/OOM/node-failure .chk recovery
             LOGGER.warning(
                 f"Previous segment {self._prev_segment} appears hard-killed — "
                 f"no state XML or interrupted files, recovering from "
@@ -290,6 +318,8 @@ class ContinuationManager:
 
         # Load system (either normal or interrupted system XML)
         LOGGER.info(f"Loading system from {paths['system']}")
+        XmlSerializer = _get_xml_serializer()
+        _, _, PDBFile, _, _ = _get_openmm_app_classes()
         with open(paths["system"], "r") as f:
             self._system = XmlSerializer.deserialize(f.read())
 
@@ -319,6 +349,8 @@ class ContinuationManager:
         if self._param_dict is None:
             raise RuntimeError("Parameters not loaded. Call load_previous_state first.")
 
+        openmm = _get_openmm_module()
+
         integ_raw = self._param_dict["__values__"]["integ_params"]["__values__"]
         time_step = quantity_from_dict(integ_raw["time_step"])
 
@@ -334,6 +366,8 @@ class ContinuationManager:
         """Add barostat to the system if parameters specify NPT."""
         if self._system is None or self._param_dict is None:
             raise RuntimeError("System/parameters not loaded")
+
+        openmm = _get_openmm_module()
 
         thermo_raw = self._param_dict["__values__"]["thermo_params"]["__values__"]
 
@@ -377,6 +411,8 @@ class ContinuationManager:
         if self._simulation is None:
             raise RuntimeError("Simulation not created")
 
+        CheckpointReporter, DCDReporter, _, _, StateDataReporter = _get_openmm_app_classes()
+
         # Trajectory reporter
         traj_path = output_dir / f"production_{self._segment_index}_trajectory.dcd"
         self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
@@ -415,6 +451,8 @@ class ContinuationManager:
         """
         if self._simulation is None:
             raise RuntimeError("Simulation not available")
+
+        XmlSerializer = _get_xml_serializer()
 
         # Save state (no enforcePeriodicBox to preserve molecular continuity)
         state_path = output_dir / f"production_{self._segment_index}_state.xml"
@@ -642,8 +680,9 @@ class ContinuationManager:
         duration_ns: float,
         num_samples: int = 250,
         timestep_fs: float = 2.0,
-        report_interval: int | None = None,
-        checkpoint_interval_s: float = 60.0,
+        *,
+        report_interval: int,
+        checkpoint_interval_s: float,
     ) -> Dict[str, Any]:
         """Run the continuation segment.
 
@@ -657,19 +696,15 @@ class ContinuationManager:
         duration_ns : float
             Duration of this segment in nanoseconds.
         num_samples : int
-            Number of trajectory frames to save. Ignored when
-            ``report_interval`` is provided.
+            Number of trajectory frames to save.
         timestep_fs : float
             Time step in femtoseconds.
-        report_interval : int or None
-            Fixed reporter interval in steps. When provided, this
-            overrides the per-segment ``total_steps // num_samples``
-            calculation to keep frame spacing uniform across segments.
+        report_interval : int
+            Explicit reporter interval in steps.
         checkpoint_interval_s : float
             Wall-time interval in seconds between portable restart
-            checkpoints.  Also controls how frequently the loop checks
-            for SLURM preemption signals.  Set to 0 to disable
-            wall-time checkpoints (reverts to legacy behaviour).
+            checkpoints. Also controls how frequently the loop checks
+            for SLURM preemption signals.
 
         Returns
         -------
@@ -685,19 +720,19 @@ class ContinuationManager:
 
         # Update parameters for this segment
         if self._param_dict:
-            self._param_dict["__values__"]["integ_params"]["__values__"]["total_time"] = {
+            integ_values = self._param_dict["__values__"]["integ_params"]["__values__"]
+            integ_values["total_time"] = {
                 "__class__": "Quantity",
                 "__values__": {"value": duration_ns, "unit": "nanosecond"},
             }
-            self._param_dict["__values__"]["integ_params"]["__values__"]["num_samples"] = (
-                num_samples
-            )
+            integ_values["num_samples"] = num_samples
 
         # Add barostat if needed
         self._add_barostat_if_needed()
 
         # Create integrator and simulation
         integrator = self._create_integrator()
+        _, _, _, Simulation, _ = _get_openmm_app_classes()
         self._simulation = Simulation(self._topology, self._system, integrator)
 
         # Load state from previous segment
@@ -721,6 +756,7 @@ class ContinuationManager:
         # recovery: loadCheckpoint() needs a matching System object.  The file
         # is overwritten at segment completion by _save_final_state().
         system_xml_path = output_dir / f"production_{self._segment_index}_system.xml"
+        XmlSerializer = _get_xml_serializer()
         with open(system_xml_path, "w") as f:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved initial system to {system_xml_path}")
@@ -728,12 +764,11 @@ class ContinuationManager:
         # Calculate total steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
 
-        # Determine report interval: prefer the fixed global value if given,
-        # otherwise fall back to per-segment calculation (legacy callers).
-        if report_interval is not None:
-            seg_report_interval = report_interval
-        else:
-            seg_report_interval = max(1, total_steps // num_samples)
+        if report_interval <= 0:
+            raise ValueError("report_interval must be a positive integer")
+        if checkpoint_interval_s <= 0:
+            raise ValueError("checkpoint_interval_s must be positive")
+        seg_report_interval = report_interval
 
         # Setup reporters
         self._setup_reporters(seg_report_interval, output_dir)
@@ -749,6 +784,7 @@ class ContinuationManager:
             GracefulExit,
             get_interrupt_signal,
             install_handlers,
+            interrupted_state_save_exceptions,
             is_interrupted,
             save_interrupted_state,
             save_restart_checkpoint,
@@ -792,11 +828,7 @@ class ContinuationManager:
                 _now = _time.monotonic()
 
                 # Adaptive sub-chunk calibration (once, after first interval)
-                if (
-                    not _adapted
-                    and checkpoint_interval_s > 0
-                    and (_now - _loop_start) >= checkpoint_interval_s
-                ):
+                if not _adapted and (_now - _loop_start) >= checkpoint_interval_s:
                     elapsed = _now - _loop_start
                     steps_per_sec = steps_done / elapsed if elapsed > 0 else 1.0
                     # Target sub-chunk duration = checkpoint_interval / 4
@@ -838,8 +870,7 @@ class ContinuationManager:
 
                 # Wall-time restart checkpoint
                 if (
-                    checkpoint_interval_s > 0
-                    and (_now - _last_checkpoint_write) >= checkpoint_interval_s
+                    (_now - _last_checkpoint_write) >= checkpoint_interval_s
                     and steps_done < total_steps  # skip if we're about to finish
                 ):
                     save_restart_checkpoint(
@@ -869,7 +900,7 @@ class ContinuationManager:
                     )
         except GracefulExit:
             raise  # Re-raise so caller can set exit code
-        except Exception:
+        except interrupted_state_save_exceptions():
             # On unexpected crash, still try to save interrupted state
             try:
                 save_interrupted_state(
@@ -879,8 +910,11 @@ class ContinuationManager:
                     steps_completed=steps_done,
                     total_steps=total_steps,
                 )
-            except Exception:
-                LOGGER.error("Failed to save interrupted state after crash")
+            except interrupted_state_save_exceptions() as save_exc:
+                LOGGER.exception(
+                    "Failed to save interrupted state after crash: %s",
+                    save_exc,
+                )
             raise
 
         # Save final state

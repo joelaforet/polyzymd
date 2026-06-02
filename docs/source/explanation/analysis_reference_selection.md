@@ -1,311 +1,236 @@
-# RMSF Analysis: Reference Structure Selection
+# How RMSF reference selection changes interpretation
 
-This guide explains how to choose the appropriate reference structure for RMSF
-(Root Mean Square Fluctuation) analysis in PolyzyMD. The choice of reference
-affects the interpretation of your results and should match your scientific
-question.
+Root mean square fluctuation (RMSF) is not an absolute property of a protein.
+In PolyzyMD's standard non-external modes, it measures motion around the
+**trajectory mean positions after alignment**. The selected `reference_mode`
+controls how the trajectory is aligned and how the alignment/reference structure
+is generated; it does not make centroid, average, or frame modes compute direct
+deviations from those fixed coordinates.
 
-## Overview
+For new contributors, this is the most important point: two RMSF analyses can
+use the same trajectory and the same atoms but produce different values because
+alignment choices change the coordinates whose mean and fluctuations are
+estimated. Only `external` mode supplies fixed RMSF reference positions and
+should be interpreted as an RMSF-like deviation from an external structure.
 
-RMSF measures how much each residue fluctuates around a reference position
-during a simulation. Before computing RMSF, the trajectory must be **aligned**
-to a reference structure to remove global translation and rotation.
+## The reference defines the question
 
-The choice of reference structure determines *what* you're measuring:
-
-| Reference Mode | What RMSF Measures |
-|----------------|-------------------|
-| `centroid` | Fluctuations around the equilibrium (most visited) conformation |
-| `average` | Pure thermal fluctuations around the mathematical mean |
-| `frame` | Fluctuations relative to a specific functional state |
-| `external` | Deviations from a condition-independent external structure (e.g., crystal structure) |
-
-## Reference Modes
-
-### Centroid (Default)
-
-```yaml
-plugins:
-  rmsf:
-    reference_mode: "centroid"  # Default
-```
-
-The **centroid mode** finds the most populated conformational state using
-K-Means clustering on all protein atoms. It returns the actual frame from
-the trajectory that best represents where the protein spends most of its time.
-
-**When to use:**
-- Standard protein flexibility analysis
-- You want to know how much residues deviate from the equilibrium state
-- You have a well-behaved single-state protein
-
-**Implementation details:**
-- Uses K-Means clustering with k=1 on all protein atoms (including side chains)
-- Finds the frame closest to the cluster center
-- This is a real sampled conformation, not a synthetic structure
-
-### Average Structure
-
-```yaml
-plugins:
-  rmsf:
-    reference_mode: "average"
-```
-
-The **average mode** computes the mathematical mean of all atomic positions
-and aligns the trajectory to this synthetic structure.
-
-**When to use:**
-- You want a pure measure of thermal fluctuations
-- Comparing to literature values that used average-based RMSF
-- The protein samples a single conformational basin
-
-**Caveats:**
-- The average structure may have unphysical geometry (distorted bond lengths,
-  angles) because it's a mathematical construct, not a real conformation
-- If the protein transitions between distinct states, the average may not
-  represent any physically meaningful conformation
-
-### Specific Frame
-
-```yaml
-plugins:
-  rmsf:
-    reference_mode: "frame"
-    reference_frame: 500
-```
-
-The **frame mode** aligns to a user-specified frame. This is powerful for
-analyzing fluctuations relative to a known functional state.
-
-**When to use:**
-- Enzyme catalysis studies where you want to measure deviations from a
-  "catalytically competent" conformation
-- Comparing flexibility before/after a conformational change
-- You have identified a specific frame of interest (e.g., substrate bound,
-  active site properly configured)
-
-**Example: Catalytic Competence Analysis**
-
-For enzyme studies, you might want to find a frame where:
-- The catalytic triad residues are properly hydrogen-bonded
-- The substrate is positioned correctly
-- The active site is in the "reactive" configuration
-
-```yaml
-# First, identify the catalytically competent frame
-# (e.g., by analyzing hydrogen bond distances, active site geometry)
-plugins:
-  rmsf:
-    reference_mode: "frame"
-    reference_frame: 1523
-
-# Then run RMSF with the configured frame reference
-# polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns
-
-# High RMSF values now indicate residues that frequently deviate
-# from the catalytically competent geometry
-```
-
-### External PDB
-
-`````{tab-set}
-
-````{tab-item} Python
-```python
-from polyzymd.analyses.discovery import get_analysis
-from polyzymd.analyses.orchestrator import run_comparison
-from polyzymd.config.comparison import ComparisonConfig
-
-config = ComparisonConfig.from_yaml("comparison.yaml")
-analysis = get_analysis("rmsf")()
-run_comparison(analysis, config, equilibration="100ns")
-```
-````
-
-````{tab-item} YAML (comparison.yaml)
-```yaml
-plugins:
-  rmsf:
-    enabled: true
-    selection: "protein and name CA"
-    reference_mode: "external"
-    reference_file: "/path/to/crystal_structure.pdb"
-```
-````
-
-````{tab-item} CLI
-```bash
-polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns
-```
-````
-
-`````
-
-The **external mode** uses an external PDB file — typically a crystal
-structure — as both the alignment target and the reference for RMSF
-computation. Unlike the other modes, the reference is **not derived from
-the trajectory itself**, making it condition-independent.
-
-RMSF then measures how much each residue deviates from the external
-structure's geometry during the simulation:
+In standard PolyzyMD RMSF modes (`centroid`, `average`, and `frame`), RMSF asks
+how far an atom or residue is, on average, from its mean position in the aligned
+analyzed trajectory:
 
 $$
-\text{RMSF}_i = \sqrt{\frac{1}{T} \sum_{t=1}^{T} \left( \mathbf{r}_i(t) - \mathbf{r}_i^{\text{ext}} \right)^2}
+\text{RMSF}_i = \sqrt{\frac{1}{T} \sum_{t=1}^{T}
+\left(\mathbf{r}_i^{\text{aligned}}(t) - \left\langle \mathbf{r}_i^{\text{aligned}} \right\rangle\right)^2}
 $$
 
-where $\mathbf{r}_i^{\text{ext}}$ is the position of atom $i$ in the external
-PDB, rather than the trajectory average $\langle \mathbf{r}_i \rangle$.
+Here $\left\langle \mathbf{r}_i^{\text{aligned}} \right\rangle$ is computed from
+the aligned frames that enter the RMSF calculation. For non-external modes,
+`reference_mode` affects how frames are superposed before this mean is computed.
+It does not replace the mean with centroid-frame coordinates or a selected
+trajectory frame.
 
-**When to use:**
-- Enzyme catalysis studies where a crystal structure represents the
-  catalytically competent geometry
-- Comparing how different conditions (polymer baths, temperatures, mutants)
-  affect deviation from a known functional conformation
-- You need a **condition-independent** reference so RMSF values are directly
-  comparable across conditions
-- Comparing to experimental B-factors derived from the same crystal structure
+External mode is different. It can use mapped external coordinates as fixed RMSF
+reference positions:
 
-**Validation:**
-PolyzyMD validates that the external PDB's protein atoms match the
-simulation topology exactly (same atom count for the selected atoms).
-If there is a mismatch, a clear error message reports the expected vs.
-actual atom counts.
+$$
+\text{RMSF-like deviation}_i = \sqrt{\frac{1}{T} \sum_{t=1}^{T}
+\left(\mathbf{r}_i^{\text{aligned}}(t) - \mathbf{r}_i^{\text{external}}\right)^2}
+$$
 
-```{note}
-The external PDB must contain the same protein with the same residue
-numbering as your simulation. It does **not** need to contain solvent,
-ions, or polymer — only the protein atoms that match your selection
-string are compared.
-```
+That external quantity includes both fluctuations within the simulated ensemble
+and systematic displacement from the external structure.
 
-**Example: Catalytic Competence Analysis**
+PolyzyMD exposes these choices through settings such as `reference_mode`,
+`reference_frame`, `reference_file`, `alignment_selection`, and
+`centroid_selection`. Most users set them in `comparison.yaml` and run RMSF
+through the CLI; this page explains why the choice matters rather than how to
+configure every option.
 
-For enzyme-polymer studies, a crystal structure provides a physically
-grounded reference for measuring how well each condition maintains the
-catalytically competent geometry:
+## Centroid mode: sampled-frame alignment, trajectory-mean RMSF
 
-```yaml
-# comparison.yaml
-plugins:
-  rmsf:
-    reference_mode: "external"
-    reference_file: "/path/to/enzyme_crystal.pdb"
-    selection: "protein and name CA and resid 5:175"
+The default centroid mode chooses a **real sampled frame** that is closest to an
+aligned mean or cluster center for alignment/reference generation. In PolyzyMD's
+current RMSF implementation, centroid mode uses k-means clustering with `k=1`
+over the centroid selection and then selects the sampled frame nearest that
+center.
 
-# Then run:
-# polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns
+This is useful because the alignment reference is an actual conformation from
+the trajectory, not a synthetic average structure. After alignment, however,
+standard PolyzyMD RMSF is still computed as fluctuation around the aligned
+trajectory mean positions. Residues with larger RMSF values are residues with
+larger fluctuations around that aligned mean, not necessarily residues with the
+largest direct deviation from the centroid frame.
 
-# Lower RMSF = closer to crystal structure = more catalytically competent
-# Compare active site residues across conditions from the saved output JSON
-```
+The caveat is that `k=1` should not be interpreted as "the most populated
+conformational state." In a multimodal trajectory, a single cluster center can
+fall between basins or be biased by transitions. The selected frame is closest
+to the global center under the chosen alignment and atom selection; it may not
+represent the dominant basin.
 
-```{tip}
-**Residue range truncation:** Flexible N/C-terminal loops often dominate
-RMSF statistics and obscure active-site signals. Use a residue range
-selection (e.g., `"protein and name CA and resid 5:175"`) to exclude
-terminal residues. No code changes are needed — MDAnalysis handles the
-selection natively.
-```
+## Average mode: average-structure alignment, trajectory-mean RMSF
 
-## Alignment Selection
+Average mode uses a trajectory-derived average structure for alignment/reference
+generation. Because standard RMSF is also computed around the aligned trajectory
+mean positions, this mode has the most direct interpretation as fluctuation
+around the sampled mean.
 
-Independently of the reference mode, you can control which atoms are used
-for the alignment superposition:
+For a stationary trajectory sampling one conformational basin, this can
+approximate a thermal-like fluctuation measure. That interpretation becomes
+weaker when the trajectory samples multiple long-lived states. In that case,
+the RMSF includes both within-state motion and between-state conformational
+heterogeneity. The average structure may also be geometrically unphysical
+because averaged coordinates are not required to preserve realistic bond
+lengths, angles, or side-chain conformations.
 
-```yaml
-plugins:
-  rmsf:
-    reference_mode: "centroid"
-    selection: "protein and name CA"
-```
+Average-based RMSF is therefore best understood as fluctuation around the
+sampled mean, not as a guaranteed measurement of pure thermal fluctuations.
 
-**Alignment selection** (`alignment_selection`):
-- Controls which atoms are used to superimpose frames
-- Default is `"protein and name CA"` (alpha carbons only)
-- This removes global rotation/translation of the protein backbone
+## Frame mode: selected-frame alignment, trajectory-mean RMSF
 
-**Centroid selection** (`centroid_selection`):
-- Controls which atoms are used for K-Means clustering (centroid mode only)
-- Default is `"protein"` (all protein atoms)
-- Using all atoms captures side chain conformations in the clustering
+Frame mode uses one specified frame from the trajectory for alignment/reference
+generation. In the current non-external RMSF path, it does **not** compute RMSF
+as direct deviation from that frame's coordinates. After alignment, PolyzyMD
+computes standard RMSF around the mean positions of the aligned analyzed
+trajectory.
 
-## Practical Recommendations
+That can still be scientifically useful when the selected frame has independent
+meaning, such as a catalytically competent active-site geometry, a ligand-bound
+pose, or a conformation immediately before a transition, because the chosen
+frame defines the alignment basis. The resulting RMSF values describe
+fluctuation around the aligned trajectory mean under that alignment choice, not
+persistence or loss of the selected frame geometry as a fixed coordinate target.
 
-### For General Flexibility Analysis
+The weakness is that a single frame may contain transient noise. A frame chosen
+because it is visually appealing or because it occurs at a convenient time point
+can overstate biological meaning. Contributors should describe why a selected
+`reference_frame` is scientifically meaningful whenever they use this mode.
 
-Use the default centroid mode:
+## External PDB: fixed-reference RMSF-like deviation
 
-```bash
-polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns
-```
+An external reference uses coordinates from an external structure file, commonly
+a prepared crystal or model structure, as mapped fixed RMSF reference positions.
+This asks how the simulated ensemble deviates from that external conformation
+after alignment.
 
-This gives you flexibility relative to the equilibrium state, which is
-usually what you want for comparing flexibility across conditions or mutants.
+This is not the same interpretation as standard trajectory-mean RMSF. The value
+combines two effects:
 
-### For Enzyme Mechanism Studies
+1. fluctuations within the simulated ensemble; and
+2. systematic offset between the simulation ensemble and the external
+   structure after alignment.
 
-Consider using **external mode** with a crystal structure, or **frame mode**
-with a catalytically relevant frame from the trajectory:
+That combination can be exactly what you want when the scientific question is
+whether different conditions preserve a known functional structure. It is less
+appropriate if the question is only local flexibility within each simulated
+condition.
 
-```yaml
-# Option 1 (Recommended): External crystal structure as reference
-# Best when you have a high-resolution crystal structure and want
-# condition-independent comparison
-plugins:
-  rmsf:
-    reference_mode: "external"
-    reference_file: "/path/to/crystal_structure.pdb"
-    selection: "protein and name CA and resid 5:175"
+External-reference RMSF should also not be equated directly with experimental
+B-factors. Qualitative comparisons may be informative, but they require careful
+atom selection, structure preparation, comparable methodology, and explicit
+attention to crystal-packing effects, refinement models, temperature,
+occupancy, unresolved regions, and the limits of interpreting crystallographic
+disorder as simulation fluctuation.
 
-# Option 2: Specific trajectory frame as reference
-# Useful when the relevant conformation differs from the crystal structure
-# (e.g., ligand-induced conformational change during simulation)
-# plugins:
-#   rmsf:
-#     reference_mode: "frame"
-#     reference_frame: <catalytic_frame_id>
-```
+## Alignment selection is part of the scientific definition
 
-RMSF values will then tell you which residues deviate from the active
-conformation, potentially disrupting catalysis.
+Alignment removes whole-protein translation and rotation before RMSF is
+computed. The atoms used for this superposition define what counts as internal
+motion.
 
-### For Comparing to Published Data
+For example, aligning on all C-alpha atoms emphasizes motion relative to the
+global backbone. Aligning on a stable domain can make motion in another domain
+appear larger because the analysis treats the stable domain as the reference
+body. This is not wrong, but it changes the question from whole-protein
+flexibility to domain-relative displacement.
 
-Check what reference the published study used:
-- Many older studies use average structures
-- Some use the first frame or crystal structure
-- If the study compares to crystallographic B-factors, use `external` mode
-  with the same crystal structure PDB
-- Match the methodology for fair comparison
+The same principle applies to `centroid_selection`: the atoms used to choose the
+centroid frame influence which sampled structure is used for alignment/reference
+generation. A centroid chosen from all protein atoms can be influenced by
+side-chain or loop motions, while a backbone-only centroid emphasizes the folded
+core.
 
-## Technical Notes
+## External references require structural equivalence
 
-### Why Alignment Matters
+For an external reference to be meaningful, the selected atoms in the external
+structure must correspond to the selected atoms in the trajectory. Atom count
+alone is insufficient. Contributors should consider at least the following
+sources of mismatch:
 
-Without alignment, RMSF measures the **total displacement** of atoms, which
-includes:
-1. Global translation (protein drifting through the box)
-2. Global rotation (protein tumbling)
-3. Internal flexibility (what we actually want)
+- atom ordering and atom-selection equivalence;
+- residue mapping and residue numbering;
+- chain IDs;
+- missing residues or unresolved loops;
+- alternate locations in experimental structures;
+- protonation and tautomer states;
+- residue and atom naming conventions;
+- terminal patches, caps, or other end-state differences.
 
-Alignment removes (1) and (2), leaving only the internal flexibility signal.
-This is why unaligned RMSF values can be ~50 Å while properly aligned values
-are typically 0.5-5 Å for a stable protein.
+If these details differ, a numerically successful alignment can still compare
+the wrong atoms or embed a systematic structural artifact in every RMSF value.
 
-### Memory Considerations
+## Choosing a reference by scientific question
 
-All alignment modes use in-memory trajectory alignment (`in_memory=True`).
-For very long trajectories, this may require significant RAM. Consider:
-- Using a larger equilibration time to reduce frames
-- Processing replicates sequentially rather than in parallel
+The best reference is the one that matches the claim you want the RMSF plot to
+support. Start from the question, then choose the mode whose interpretation fits
+that question.
 
-### Reproducibility
+### To ask which residues fluctuate most after representative-frame alignment
 
-The result files store all alignment metadata:
-- `reference_mode`: Which method was used
-- `reference_frame`: The specific frame (1-indexed, or None for average)
-- `reference_file`: Path to the external PDB (when using `external` mode)
-- `alignment_selection`: Which atoms were used for superposition
+Choose `centroid`.
 
-This ensures your analysis is fully reproducible.
+This is appropriate when you want alignment/reference generation based on a real
+sampled conformation that represents the trajectory under the chosen centroid
+selection. Interpret the RMSF values as fluctuations around the aligned
+trajectory mean, not as direct deviations from the centroid frame.
+
+Use extra caution for multimodal trajectories: the selected centroid frame may
+sit near a global center rather than represent the most populated state.
+
+### To ask how residues fluctuate around the sampled mean
+
+Choose `average`.
+
+This gives the most direct trajectory-mean interpretation among the
+non-external modes because both the alignment/reference generation and the RMSF
+calculation are tied to trajectory-derived mean structure. It is most
+straightforward for stationary, single-basin trajectories.
+
+If the trajectory samples multiple long-lived conformations, the result mixes
+within-state fluctuation with between-state heterogeneity.
+
+### To ask how fluctuations look under a meaningful trajectory-frame alignment
+
+Choose `frame`.
+
+This is useful when a particular trajectory frame has independent scientific
+meaning, such as a catalytically competent geometry, a ligand-bound pose, or a
+pre-transition conformation. The selected frame defines the alignment basis.
+
+Do not interpret `frame` mode as direct deviation from that frame. In the
+standard non-external RMSF path, PolyzyMD still reports fluctuations around the
+aligned trajectory mean.
+
+### To ask whether conditions preserve an independently known structure
+
+Choose `external`.
+
+This is the fixed-reference case. It is appropriate when the scientific claim is
+about preservation of, or departure from, a prepared crystal structure or other
+external model.
+
+Interpret the result as an RMSF-like deviation from fixed external coordinates,
+not as conventional trajectory-mean RMSF. The value combines ensemble
+fluctuation with systematic offset from the external structure.
+
+### When comparing conditions
+
+Keep the reference logic consistent with the comparison claim.
+
+A condition-independent external reference makes offsets from the same structure
+visible across conditions. A condition-specific non-external reference emphasizes
+within-condition fluctuation after alignment, but can hide differences in mean
+structure between conditions.
+
+Neither choice is universally better. They answer different scientific
+questions.

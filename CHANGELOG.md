@@ -9,10 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Large-scale refactoring of the analysis and comparison subsystems to achieve
 Open-Closed Principle compliance.  New analysis types can now be added by
-dropping a package in `analyses/<name>/` with no modifications to core code.
+dropping a module or package in `analyses/` with no modifications to core code.
 
 ### Breaking Changes
 
+- **Scalar Measurement API removed.**  The obsolete alternate scalar
+  measurement abstraction (`MetricSpec`, `CacheIdentity`, `Measurement`,
+  `ScalarMeasurement`, and `ScalarMeasurementAnalysis`) was deleted now that
+  the MDAnalysis job/artifact lifecycle is the true contributor extension path.
+  Catalytic triad now inherits directly from `Analysis` and exposes its primary
+  comparison metric through `extract_metrics()`.
 - **`compare/` package removed.**  The entire `compare/` package (lazy-export
   facade, re-export layer, registries, plotters, formatters, comparators) has
   been deleted.  Analysis-specific code now lives in each plugin's package under
@@ -31,30 +37,36 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   `analyses/rmsf/`.
 - **`compare/comparators/` directory removed.**  All 11 old comparator files
   deleted; comparison logic lives in each plugin's `compare()` method.
-- **Contacts plugin slimmed.**  `_binding_preference.py` (3,938 lines),
-  `_surface_exposure.py` (369 lines), and `_helpers.py` (369 lines) extracted
-  to `analyses/shared/` as reusable cross-plugin compute utilities.
+- **Contacts plugin slimmed.**  Obsolete binding-preference and surface-exposure
+  experiments were archived out of the active runtime instead of being exposed
+  as reusable shared compute utilities.  Contacts-specific implementation
+  details now remain private to the contacts plugin, while cross-plugin helpers
+  live only in the documented shared utility modules.
 
 ### Added
 
 - **`polyzymd new-analysis <name>` scaffold CLI command.**  Generates a complete
-  plugin package (`__init__.py`) and test file
-  (`tests/analyses/plugins/test_<name>.py`) with working discovery, compute,
-  aggregate, extract_metrics, format, and plot implementations.  Supports
-  `--class-name`, `--force`, `--dry-run`, `--style` (dict or pydantic), and
-  `--project-root` options.  Validates plugin names (snake_case, no collisions)
-  and class names (PascalCase, valid identifiers).  (`cli/scaffold.py`,
-  `cli/main.py`)
+  single-file MDAnalysis-native plugin at `src/polyzymd/analyses/<name>.py` and
+  test file (`tests/analyses/plugins/test_<name>.py`) with working discovery,
+  compute, aggregate, extract_metrics, format, and plot implementations.
+  Advanced/package scaffolds are available with `--advanced`, `--style dict`,
+  or `--style pydantic` and create package files such as
+  `src/polyzymd/analyses/<name>/__init__.py`.  Supports `--class-name`,
+  `--force`, `--dry-run`, `--style`, and `--project-root` options.  Validates
+  plugin names (snake_case, no collisions) and class names (PascalCase, valid
+  identifiers).  (`cli/scaffold.py`, `cli/main.py`)
 - **Analysis plugin framework.**  `Analysis` ABC (`analyses/base.py`),
   `pkgutil`-based auto-discovery (`analyses/discovery.py`), lifecycle
   orchestrator (`analyses/orchestrator.py`), and default scalar comparison
-  pipeline (`analyses/stats.py`).  Eight analysis types migrated as plugins:
-  RMSF, contacts, distances, catalytic triad, secondary structure, exposure,
-  binding free energy, polymer affinity.
+  pipeline (`analyses/stats.py`).  Active v1.3 plugins are contacts,
+  distances, hydrogen bonds, RMSD, RMSF, radius of gyration, SASA, secondary
+  structure, and catalytic triad.  Archived experiments such as exposure,
+  binding free energy, and polymer affinity are not active runtime plugins.
 - **Shared analysis utilities.**  `analyses/shared/` package with reusable
-  `TrajectoryLoader`, alignment helpers, autocorrelation, plot utilities,
-  `surface_exposure.py`, `binding_preference.py`, and
-  `binding_preference_helpers.py`.
+  `TrajectoryLoader`, alignment helpers, autocorrelation/statistics helpers,
+  selection utilities, path helpers, SASA compatibility utilities, multi-run
+  comparison helpers, convergence helpers, and plot utilities used by the
+  active plugin set.
 - **Framework hardening.**  `compute_replicate()` return values are validated
   (None rejected).  `ComparisonContext` gains `failed_conditions` and
   `aggregated_results` fields.  Orchestrator warns on undeclared plugin
@@ -158,11 +170,11 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 ### Changed
 
-- **All analysis plugins are now packages.**  Each plugin lives in
-  `analyses/<name>/` with `__init__.py` (plugin class) and optional private
+- **Bundled v1.3 analyses are package-organized.**  Active bundled plugins live
+  in `analyses/<name>/` with `__init__.py` (plugin class) and optional private
   modules (`_plotters.py`, `_results.py`, `_comparison_results.py`,
-  `_formatters.py`, `_aggregator.py`) as needed.
-  Single-file plugins no longer exist.
+  `_formatters.py`, `_aggregator.py`) as needed.  Contributor plugins and
+  discovery still support both single-file modules and packages.
 - **Plugin contract enforcement hardened.**  `compute_replicate()` returning
   `None` is now a hard `PluginContractError` (not a soft skip).
   `PluginContractError` propagates without being wrapped.  `compare()` and
@@ -170,9 +182,9 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   `list[Path]` for plot).  `run_comparison()` fails fast on contract
   violations.  (`analyses/orchestrator.py`)
 - **Discovery skip logic checks all path components.**  `_should_skip_module()`
-  now checks ALL path components (not just the last one), so
-  `shared.loader`, `shared.binding_preference`, etc. are properly skipped
-  instead of being probed as plugins.  (`analyses/discovery.py`)
+  now checks ALL path components (not just the last one), so shared utility
+  modules and private helper packages are skipped instead of being probed as
+  plugins.  (`analyses/discovery.py`)
 - **Settings fingerprint canonicalized.**  `settings_fingerprint()` now uses
   `json.dumps(settings.model_dump(mode="json"), sort_keys=True)` for
   deterministic hashing across Pydantic versions and Python dict ordering.
@@ -245,11 +257,11 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   (openmm, MDAnalysis, parmed, etc.) governs skip-vs-reraise for
   `ImportError` during plugin discovery.  Known heavy deps are skip+warn;
   unknown `ImportError`s re-raise immediately.  (`analyses/discovery.py`)
-- **Cache identity with settings fingerprint.**  Contact path resolver and
-  binding preference helpers now accept `settings_fp` parameter.
+- **Cache identity with settings fingerprint.**  Contact artifact path
+  resolution now includes settings fingerprints where applicable.
   Fingerprinted files are searched first, legacy files as fallback.
   `find_enzyme_pdb()` sorts glob results and warns on ambiguity.
-  (`analyses/contacts/_paths.py`, `analyses/shared/binding_preference_helpers.py`)
+  (`analyses/contacts/_paths.py`)
 
 ### Removed
 
@@ -286,11 +298,9 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - **Scaffold test path corrected.**  `new-analysis` now generates test files at
   `tests/analyses/plugins/test_<name>.py` matching the project's test layout.
   (`cli/scaffold.py`)
-- **Cache ambiguity detection.**  `contacts/_paths.py` and
-  `shared/binding_preference_helpers.py` now raise `ValueError` on ambiguous
-  glob matches (>1 file) instead of silently picking the last alphabetical
-  match.  (`analyses/contacts/_paths.py`,
-  `analyses/shared/binding_preference_helpers.py`)
+- **Cache ambiguity detection.**  `contacts/_paths.py` now raises `ValueError`
+  on ambiguous glob matches (>1 file) instead of silently picking the last
+  alphabetical match.  (`analyses/contacts/_paths.py`)
 - **GROMACS trajectory resolution order corrected.**  `resolve_trajectory_layout()`
   now prefers post-processed trajectories: `prod_centered.xtc` (whole molecules,
   centered protein) before `prod_nojump.xtc` before raw `prod.xtc`.
@@ -373,15 +383,15 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 ### Tests
 
-- 2,134 tests collected (up from 908 at branch start).
+- Expanded regression coverage substantially from the branch baseline.
 - Added GROMACS engine tests: binary resolution (`test_gromacs_binary.py`),
   engine adapter (`test_gromacs_engine.py`), SLURM script generation
   (`test_gromacs_slurm.py`), progress tracking (`test_gromacs_progress.py`),
   trajectory layout (`test_gromacs_layout.py`), and engine dispatch
-  (`test_dispatch.py`, `test_base.py`).  667 engine/workflow/cli/config tests
-  total.  (`tests/engines/`)
-- Added GROMACS smoke tests for all 13 analysis plugins, verifying that each
-  plugin resolves trajectory layouts from the GROMACS engine correctly.
+  (`test_dispatch.py`, `test_base.py`), with expanded engine/workflow/cli/config
+  coverage.  (`tests/engines/`)
+- Added GROMACS smoke tests for the active analysis plugin set, verifying that
+  plugins resolve trajectory layouts from the GROMACS engine correctly.
   (`tests/analyses/plugins/test_*_gromacs_smoke.py`)
 - Added `run_sbatch()` tests (`test_slurm_submit.py`) and engine-aware CLI
   tests for submit, recover, status, and check-progress.
@@ -392,7 +402,8 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - Added plugin contract enforcement tests (`TestContractEnforcement` in
   `test_orchestrator.py`).
 - Added discovery robustness tests (shared descendant skip, getattr logging).
-- Added cache ambiguity tests (contacts paths, binding preference helpers).
+- Added contacts cache identity/path regression tests and archived setting
+  rejection coverage.
 - Added settings fingerprint canonicalization tests (`test_config_hash.py`).
 - Added Phase 14 test hardening: exact Tukey pair assertions, BH/Tukey boundary
   tests, ANOVA alpha threading tests, `fdr_alpha` validation tests, cache
@@ -408,9 +419,6 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 - **Config hash mismatch warning prints 66+ times.**  The warning should print
   once per analysis run but currently fires per-frame.  Does not affect results.
-- **Contact criteria cutoff not included in cache key.**  Changing the contacts
-  cutoff (e.g. 4.0 Å → 4.5 Å) does not invalidate cached results.  Clear the
-  analysis output directory manually when changing cutoff values.
 
 ## [1.2.1] - 2026-04-01
 
@@ -438,12 +446,13 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - **Comparison engine for multi-condition studies.** Added registry-based
   comparators, typed comparison result models, shared statistical utilities, and
   a generic `polyzymd compare run` workflow for RMSF, contacts, distances,
-  catalytic triad, exposure dynamics, binding free energy, polymer affinity,
-  and secondary structure. (`src/polyzymd/compare/`)
+  catalytic triad, secondary structure, and historical experimental metrics
+  that were later archived from the v1.3 active runtime. (`src/polyzymd/compare/`)
 - **Config-driven plotting stack.** Added `polyzymd compare plot-all`,
   registry-based plot discovery, shared plot themes, and publication-oriented
   plotters for RMSF, contacts, distances, catalytic triad, secondary structure,
-  binding free energy, exposure, and polymer affinity. (`src/polyzymd/compare/plotter.py`,
+  and historical experimental metrics that were later archived from the v1.3
+  active runtime. (`src/polyzymd/compare/plotter.py`,
   `src/polyzymd/compare/plotters/`)
 - **Secondary-structure comparison support.** Added DSSP-backed secondary
   structure analysis, comparison results, and plotting so secondary structure is
@@ -458,10 +467,11 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 ### Changed
 
 - **Release presentation labeling for debated metrics.** Binding preference,
-  exposure dynamics, binding free energy, and polymer affinity remain available
-  from the CLI and plotting pipeline, but PolyzyMD now marks them explicitly as
-  experimental in command output, plot listings, generated text reports, figure
-  annotations, config templates, and user-facing docs. (`src/polyzymd/core/experimental.py`,
+  exposure dynamics, binding free energy, and polymer affinity were historical
+  v1.2 experimental metrics; they were later archived from the v1.3 active
+  runtime. At the time, PolyzyMD marked them explicitly as experimental in
+  command output, plot listings, generated text reports, figure annotations,
+  config templates, and user-facing docs. (`src/polyzymd/core/experimental.py`,
   `src/polyzymd/compare/cli.py`, `src/polyzymd/compare/plotter.py`, `README.md`)
 - **Stable release scope for analysis demos.** The presentation-ready stable
   comparison stack is now RMSF, contacts, distances, catalytic triad, and
@@ -473,9 +483,10 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 - **Comparison result and plotting reliability.** Fixed multiple comparison and
   plotting issues uncovered while building the release branch, including cached
-  result discovery, condition-specific result paths, partition-aware BFE plots,
-  shared-path bugs in the plot orchestrator, contacts/distances comparison edge
-  cases, and corrupted-trajectory handling in contacts/exposure workflows.
+  result discovery, condition-specific result paths, partition-aware historical
+  BFE plots, shared-path bugs in the plot orchestrator, contacts/distances
+  comparison edge cases, and corrupted-trajectory handling in historical
+  contacts/exposure workflows.
    (`src/polyzymd/compare/`, `src/polyzymd/analyses/contacts.py`,
     `src/polyzymd/analyses/distances.py`)
 

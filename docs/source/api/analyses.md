@@ -1,115 +1,132 @@
 # Analyses Plugin System API
 
-This page documents the `polyzymd.analyses` package — the plugin system for
-adding new analysis types to PolyzyMD.
+This reference page summarizes the public `polyzymd.analyses` API surface for
+plugin discovery, orchestration, statistics, the base facade, the public
+MDAnalysis layer, and built-in analysis plugin packages.
 
-## Public API
+PolyzyMD analyses run trajectory-native work at the replicate level and lift the
+outputs into condition and comparison artifacts. The stable contributor import
+surfaces are `polyzymd.analyses.base`, `polyzymd.analyses.mda`, selected
+`polyzymd.analyses.shared` utilities, and the built-in plugin packages listed
+below.
 
 ```{eval-rst}
 .. currentmodule:: polyzymd.analyses
 ```
 
-### Discovery
+## Public package facade
 
-- `list_analyses()` — return dict of `{name: class}` for all discovered plugins
-- `list_all_names()` — return list of all names including aliases
-- `get_analysis(name)` — get a plugin class by name or alias
-- `clear_cache()` — reset the discovery cache
+The package root exposes discovery helpers and selected convenience imports. Use
+the narrower modules below for detailed autodoc reference; the package facade is
+summarized here to avoid duplicating class entries from the dedicated pages.
 
-### Orchestration
+## Discovery
 
-- `run_analysis(analysis: Analysis, condition: Condition, settings: Any, equilibration: str = "0ns", output_dir: Path | None = None, recompute: bool = False)` — run compute + aggregate for one condition
-- `run_comparison(analysis: Analysis, config: ComparisonConfig, recompute: bool = False, equilibration: str | None = None)` — run full lifecycle (compute + aggregate + compare + plot)
-- `run_all_comparisons(config: ComparisonConfig, analysis_names: list[str] | None = None, recompute: bool = False, equilibration: str | None = None)` — run multiple analyses from one comparison config
+Discovery is package-based and uses importable modules under
+`polyzymd.analyses`. A plugin can be a single module or a package with private
+helper modules for plotting, result models, or MDAnalysis job construction.
 
-`ComparisonConfig` is defined in `polyzymd.config.comparison`.
-
-### Base Class
-
-- `Analysis` — abstract base class all plugins inherit from
-
-### Context Objects
-
-- `ReplicateContext` — passed to `compute_replicate()`
-- `AggregateContext` — passed to `aggregate()`
-- `ComparisonContext` — passed to `compare()`
-- `PlotContext` — passed to `plot()`
-- `Condition` — represents one simulation condition
-
-### Result Models
-
-- `ComparisonResult` — universal comparison result (Pydantic model with `.save()/.load()`)
-- `ConditionSummary` — per-condition statistics
-- `PairwiseResult` — pairwise t-test result
-- `ANOVAResult` — ANOVA result
-- `MetricValue` — scalar metric descriptor for default comparison
-- `BaseComparisonResult` — abstract base for custom plugin comparison results
-- `BaseConditionSummary` — abstract base for per-condition summaries
-
-## Available Plugins
-
-| Plugin | Module | Comparison Style |
-|--------|--------|-----------------|
-| `rmsd` | `analyses.rmsd` | Custom (per-run) |
-| `rg` | `analyses.rg` | Custom (per-run) |
-| `rmsf` | `analyses.rmsf` | Default (scalar) |
-| `catalytic_triad` | `analyses.catalytic_triad` | Default (scalar) |
-| `secondary_structure` | `analyses.secondary_structure` | Default (scalar) |
-| `sasa` | `analyses.sasa` | Custom (per-run) |
-| `distances` | `analyses.distances` | Custom |
-| `contacts` | `analyses.contacts` | Custom |
-| `exposure` | `analyses.exposure` | Custom (experimental) |
-| `hydrogen_bonds` | `analyses.hydrogen_bonds` | Default (scalar) |
-| `binding_free_energy` | `analyses.binding_free_energy` | Custom (experimental) |
-| `polymer_affinity` | `analyses.polymer_affinity` | Custom (experimental) |
-| `polymer_bridging` | `analyses.polymer_bridging` | Custom (experimental) |
-
-## Shared Utilities
-
-The `analyses/shared/` package provides reusable infrastructure used across
-plugins.
-
-### Convergence Diagnostics
-
-The `convergence` module provides a sliding-window slope heuristic for
-detecting sustained convergence in timeseries data (e.g., RMSD traces).
+| Function | Purpose |
+|----------|---------|
+| `list_analyses()` | Return discovered plugin classes keyed by canonical name. |
+| `list_all_names()` | Return canonical plugin names. |
+| `get_analysis(name)` | Resolve a plugin class by canonical name. |
+| `clear_cache()` | Clear the discovery cache, primarily for tests and dynamic plugin development. |
 
 ```{eval-rst}
-.. automodule:: polyzymd.analyses.shared.convergence
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-```
-
-### Multi-Run Comparison Orchestration
-
-The `multi_run_comparison` module provides helpers for plugins that compare
-multiple named runs (e.g., per-chain RMSD, per-domain Rg) across conditions.
-Used by the RMSD, Rg, and SASA plugins.
-
-```{eval-rst}
-.. automodule:: polyzymd.analyses.shared.multi_run_comparison
+.. automodule:: polyzymd.analyses.discovery
    :members:
    :undoc-members:
    :show-inheritance:
 ```
 
-### Multi-Run Formatting
+## Orchestration
 
-The `multi_run_formatting` module provides text and markdown formatting helpers
-for multi-run analysis CLI output — ranked tables, pairwise lines, and ANOVA
-summaries.
+The orchestrator coordinates compute, aggregation, comparison, plotting, cache
+identity, and result persistence for one analysis or a set of analyses defined
+by `ComparisonConfig`.
+
+| Function | Scope |
+|----------|-------|
+| `run_analysis()` | Run compute and aggregation for one analysis on one condition. |
+| `run_comparison()` | Run the full lifecycle for one analysis across all configured conditions. |
+| `run_all_comparisons()` | Run selected or discovered analyses from one comparison configuration. |
 
 ```{eval-rst}
-.. automodule:: polyzymd.analyses.shared.multi_run_formatting
+.. automodule:: polyzymd.analyses.orchestrator
    :members:
    :undoc-members:
    :show-inheritance:
 ```
 
-## Related Documentation
+## Public base facade
 
-- [Extending the Analysis Framework](../contributor_guide/extending_analyses.md) — tutorial
-- [Analysis API Overview](analysis.md) — entry point for the analysis API
-- [API Overview](overview.rst)
+`polyzymd.analyses.base` is the stable public facade for contributor imports. It
+re-exports the `Analysis` base class, lifecycle context objects, scalar metric
+descriptors, and comparison result models from implementation modules.
+
+For the complete class and context reference, see {doc}`analyses_base`.
+
+At a high level, compute-stage plugins implement `build_mda_jobs()` and
+`build_mda_collector()`. Collectors produce `ReplicateArtifact` objects;
+aggregation combines those into `ConditionArtifact` objects; comparison produces
+`ComparisonArtifact` outputs or an active custom comparison contract for plugins
+that still need specialized comparison models.
+
+The detailed autodoc for this facade lives on {doc}`analyses_base`.
+
+## Public MDAnalysis layer
+
+`polyzymd.analyses.mda` is the public MDAnalysis extension layer for jobs, frame
+selection, collectors, artifact envelopes, artifact storage, default aggregation,
+and artifact-based comparison. The primary contributor surface is documented in
+{doc}`analyses_mda`.
+
+The detailed autodoc for this layer lives on {doc}`analyses_mda`.
+
+## Statistics helpers
+
+`polyzymd.analyses.stats` contains reusable scalar comparison helpers used by
+the default `Analysis.compare()` path and by plugin-specific comparison code.
+
+Key public helpers include `default_scalar_comparison()` and
+`format_scalar_comparison()`.
+
+## Shared utilities
+
+Reusable plugin utilities live in `polyzymd.analyses.shared`. They are documented
+separately on {doc}`analyses_shared`; this overview intentionally omits detailed
+shared-utility autodoc blocks.
+
+## Built-in plugin packages
+
+| Plugin name | Public package | Primary output contract | Comparison style |
+|-------------|----------------|-------------------------|------------------|
+| `contacts` | `polyzymd.analyses.contacts` | Contact-event artifacts and sidecars | Custom comparison |
+| `distances` | `polyzymd.analyses.distances` | Pair-distance artifacts | Custom comparison |
+| `hydrogen_bonds` | `polyzymd.analyses.hydrogen_bonds` | Hydrogen-bond event artifacts | Custom comparison |
+| `rmsd` | `polyzymd.analyses.rmsd` | Per-run RMSD artifacts | Custom multi-run comparison |
+| `rg` | `polyzymd.analyses.rg` | Per-run radius-of-gyration artifacts | Custom multi-run comparison |
+| `rmsf` | `polyzymd.analyses.rmsf` | Per-residue profile artifacts | Default scalar comparison |
+| `sasa` | `polyzymd.analyses.sasa` | SASA artifacts and sidecars | Custom multi-run comparison |
+| `catalytic_triad` | `polyzymd.analyses.catalytic_triad` | Pair-distance-derived artifacts | Default scalar comparison |
+| `secondary_structure` | `polyzymd.analyses.secondary_structure` | Secondary-structure matrix artifacts | Default scalar comparison |
+
+Built-in plugin packages expose their public `Analysis` subclass and supported
+settings/result contracts from the package root. Helper modules with leading
+underscores inside those packages are implementation details unless a page
+explicitly labels them as internal developer reference.
+
+## Private framework internals
+
+`polyzymd.analyses._framework` is private/internal infrastructure for lifecycle
+contexts, artifact I/O, comparison models, and plugin contract enforcement. It
+is not a contributor import surface; contributor plugins should import public
+symbols from `polyzymd.analyses.base` and `polyzymd.analyses.mda`.
+
+## Related API pages
+
+- {doc}`analyses_base` — base class, contexts, metrics, and comparison models
+- {doc}`analyses_mda` — public MDAnalysis job/artifact layer
+- {doc}`analyses_shared` — reusable shared utility modules
+- {doc}`overview` — package-level API overview

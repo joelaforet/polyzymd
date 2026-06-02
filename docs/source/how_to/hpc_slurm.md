@@ -14,7 +14,17 @@ manual dependency chains.
 - know which `pixi` CUDA environment matches your cluster
 - know which SLURM preset you want to use
 
-If you are still setting up the project itself, start with {doc}`../tutorials/quickstart`.
+If you are still setting up the project itself, start with {doc}`../get_started/quickstart`.
+
+:::{admonition} Use compute resources, not login nodes
+:class: important
+
+Validation and SLURM script generation are lightweight. System builds and local
+simulation commands can require substantial RAM, CPU/GPU time, and scratch I/O.
+On shared HPC systems, submit jobs to compute nodes or use an interactive
+compute allocation; do not run heavy build or simulation commands directly on a
+login node.
+:::
 
 ## Step 1: validate and dry-run locally
 
@@ -323,7 +333,7 @@ scancel --signal=KILL <job_id>
 - command details: {doc}`../reference/cli_reference`
 - configuration fields: {doc}`../reference/configuration`
 - GROMACS HPC guide: {doc}`gromacs_export`
-- first-run setup: {doc}`../tutorials/quickstart`
+- first-run setup: {doc}`../get_started/quickstart`
 
 <!-- IMAGE OPPORTUNITY: Add a simple lifecycle diagram showing `submit ->
 run-segment -> check-progress -> resubmit`, plus a second annotated screenshot

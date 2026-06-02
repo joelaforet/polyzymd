@@ -11,6 +11,11 @@ plugins:
 
 Use this as a lookup table for field names, types, defaults, and meanings.
 
+FDR thresholds for comparison workflows are configured through top-level
+`defaults.fdr_alpha` in `comparison.yaml` where supported, not through
+plugin-local settings unless a plugin explicitly lists its own `fdr_alpha` field
+below.
+
 ## `rmsf`
 
 | Key | Type | Default | Description |
@@ -50,7 +55,6 @@ Use this as a lookup table for field names, types, defaults, and meanings.
 | `alignment_selection` | `str` | `"protein and name CA"` | Selection for alignment |
 | `alignment_mode` | `str` | `"centroid"` | Alignment reference mode: `centroid`, `average`, or `frame` |
 | `alignment_frame` | `int \| null` | `null` | Frame index (1-indexed) when `alignment_mode: frame` |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
 
 `DistancePairSettings` entries in `pairs`:
 
@@ -67,21 +71,14 @@ Use this as a lookup table for field names, types, defaults, and meanings.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `polymer_selection` | `str` | `"chainID C"` | MDAnalysis selection for polymer atoms |
-| `protein_selection` | `str` | `"protein"` | MDAnalysis selection for protein atoms |
+| `polymer_selection` | `str` | `"chainid C"` | MDAnalysis selection for polymer atoms |
+| `protein_selection` | `str` | `"chainid A"` | MDAnalysis selection for protein atoms |
 | `cutoff` | `float` | `4.5` | Contact cutoff distance in Å |
 | `polymer_types` | `list[str] \| null` | `null` | Optional polymer residue-name filter |
 | `grouping` | `str` | `"aa_class"` | Grouping mode: `aa_class`, `secondary_structure`, or `none` |
-| `compute_residence_times` | `bool` | `true` | Compute residence-time statistics |
-| `compute_binding_preference` | `bool` | `false` | Enable binding-preference enrichment sub-analysis |
-| `surface_exposure_threshold` | `float` | `0.2` | Relative SASA threshold for surface-exposed residues |
-| `enzyme_pdb_for_sasa` | `str \| null` | `null` | Optional PDB path for SASA calculations |
-| `include_default_aa_groups` | `bool` | `true` | Include built-in amino-acid class groups |
+| `compute_residence_times` | `bool` | `true` | Compute aggregate residence-time summaries and plots; per-replicate contact events remain stored when disabled |
 | `protein_groups` | `dict[str, list[int]] \| null` | `null` | Custom residue groups, e.g. `{name: [resid, ...]}` |
 | `protein_partitions` | `dict[str, list[str]] \| null` | `null` | Partition definitions over custom `protein_groups` |
-| `polymer_type_selections` | `dict[str, str] \| null` | `null` | Custom polymer-type selections |
-| `polymer_chain` | `str` | `"C"` | Polymer chain ID for auto-detection |
-| `enrichment_normalization` | `str` | `"residue"` | Deprecated compatibility key (ignored at runtime) |
 | `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
 | `min_effect_size` | `float` | `0.5` | Minimum Cohen's d highlighted in output |
 | `top_residues` | `int` | `10` | Number of top-contact residues shown in summaries |
@@ -97,10 +94,9 @@ Use this as a lookup table for field names, types, defaults, and meanings.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `runs` | `list[SASARunSettings]` | `[]` (must be non-empty) | SASA runs to compute |
-| `probe_radius_nm` | `float` | `0.14` | Shrake-Rupley probe radius (nm) |
-| `n_sphere_points` | `int` | `960` | Shrake-Rupley sphere point count |
+| `probe_radius_nm` | `float` | `0.14` | MDTraj Shrake-Rupley probe radius (nm) |
+| `n_sphere_points` | `int` | `960` | MDTraj Shrake-Rupley sphere point count |
 | `chunk_size` | `int` | `100` | Frames per chunk for SASA computation |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
 
 `SASARunSettings` entries in `runs`:
 
@@ -126,6 +122,10 @@ Use this as a lookup table for field names, types, defaults, and meanings.
 | `composition` | `HydrogenBondCompositionSettings \| null` | `null` | Optional partitioning for composition analysis |
 | `timestep_ps` | `float \| null` | `null` | Optional timestep override (ps) for time-axis plots |
 
+Time-axis plots assume uniformly saved frames. PolyzyMD maps frame index to time
+as `frame_index * timestep_ps`; variable-timestep concatenated trajectories are
+not supported.
+
 `HydrogenBondSummarySettings` entries in `summaries`:
 
 | Key | Type | Default | Description |
@@ -136,63 +136,21 @@ Use this as a lookup table for field names, types, defaults, and meanings.
 
 Exactly one of `between` or `within` must be set for each summary.
 
+Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` with hydrogens
+selected as `(<group union>) and element H`; explicit hydrogens and reliable
+element metadata are required for meaningful counts.
+
 `HydrogenBondCompositionSettings`:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `partitions` | `dict[str, str]` | `{}` | Named composition partitions as MDAnalysis selections |
 
-## `exposure`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `protein_selection` | `str` | `"protein"` | Protein selection |
-| `polymer_selection` | `str` | `"chainID C"` | Polymer selection |
-| `exposure_threshold` | `float` | `0.2` | Relative SASA cutoff for exposed vs buried residues |
-| `transient_lower` | `float` | `0.2` | Lower transient bound |
-| `transient_upper` | `float` | `0.8` | Upper transient bound (`> transient_lower`) |
-| `min_event_length` | `int` | `1` | Minimum contiguous exposed-frame length per event |
-| `probe_radius_nm` | `float` | `0.14` | SASA probe radius (nm) |
-| `n_sphere_points` | `int` | `960` | Sphere points for Shrake-Rupley SASA |
-| `protein_chain` | `str` | `"A"` | Protein chain letter |
-| `polymer_resnames` | `list[str] \| null` | `null` | Optional polymer residue-name subset |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
-
-## `binding_free_energy`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `units` | `str` | `"kT"` | Output free-energy units: `kT`, `kcal/mol`, or `kJ/mol` |
-| `compute_binding_preference` | `bool` | `true` | Compute binding preference if cache is missing |
-| `surface_exposure_threshold` | `float` | `0.2` | Relative SASA threshold for surface exposure |
-| `enzyme_pdb_for_sasa` | `str \| null` | `null` | Optional enzyme PDB for SASA |
-| `include_default_aa_groups` | `bool` | `true` | Include built-in amino-acid class groups |
-| `protein_groups` | `dict[str, list[int]] \| null` | `null` | Custom residue groups |
-| `protein_partitions` | `dict[str, list[str]] \| null` | `null` | Custom partitions over `protein_groups` |
-| `polymer_type_selections` | `dict[str, str] \| null` | `null` | Custom polymer-type selections |
-| `polymer_chain` | `str` | `"C"` | Polymer chain ID for auto-detection |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
-
-## `polymer_affinity`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `compute_binding_preference` | `bool` | `true` | Compute binding preference if cache is missing |
-| `surface_exposure_threshold` | `float` | `0.2` | Relative SASA threshold for surface exposure |
-| `enzyme_pdb_for_sasa` | `str \| null` | `null` | Optional enzyme PDB for SASA |
-| `include_default_aa_groups` | `bool` | `true` | Include built-in amino-acid class groups |
-| `protein_groups` | `dict[str, list[int]] \| null` | `null` | Custom residue groups |
-| `protein_partitions` | `dict[str, list[str]] \| null` | `null` | Custom partitions over `protein_groups` |
-| `polymer_type_selections` | `dict[str, str] \| null` | `null` | Custom polymer-type selections |
-| `polymer_chain` | `str` | `"C"` | Polymer chain ID for auto-detection |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
-
 ## `rg`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `runs` | `list[RgRunSettings]` | `[]` (must be non-empty) | Named Rg runs to compute |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
 
 `RgRunSettings` entries in `runs`:
 
@@ -210,7 +168,6 @@ Exactly one of `between` or `within` must be set for each summary.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `runs` | `list[RMSDRunSettings]` | `[]` (must be non-empty) | Named RMSD runs to compute |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
 
 `RMSDRunSettings` entries in `runs`:
 

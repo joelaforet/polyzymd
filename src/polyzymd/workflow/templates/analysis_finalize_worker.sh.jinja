@@ -1,0 +1,22 @@
+{{ header }}
+
+set -u
+
+STATUS_FILE="{{ status_file }}"
+MAX_RETRIES={{ max_retries }}
+ATTEMPT=$({{ status_attempt_cmd }} 2>/dev/null || echo "0")
+ATTEMPT=$((ATTEMPT + 1))
+{{ status_running_cmd }}
+{{ worker_cmd }}
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    if [ $ATTEMPT -lt $MAX_RETRIES ]; then
+        {{ status_retrying_cmd }}
+        scontrol requeue $SLURM_JOB_ID
+        exit 0
+    fi
+    {{ status_failed_cmd }}
+    exit $EXIT_CODE
+fi
+{{ status_succeeded_cmd }}
+exit 0

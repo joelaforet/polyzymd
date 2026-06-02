@@ -51,23 +51,15 @@ plugins:
     fdr_alpha: 0.05
     min_effect_size: 0.5
     top_residues: 10
-
-  binding_free_energy:
-    units: "kcal/mol"
-    fdr_alpha: 0.05
-
-  polymer_affinity:
-    surface_exposure_threshold: 0.2
-    fdr_alpha: 0.05
 ```
 
 ### Settings Support Matrix
 
-| Setting | contacts | binding_free_energy | polymer_affinity | Default |
-|---------|----------|---------------------|------------------|---------|
-| `fdr_alpha` | ✓ | ✓ | ✓ | 0.05 |
-| `min_effect_size` | ✓ | — | — | 0.5 |
-| `top_residues` | ✓ | — | — | 10 |
+| Setting | contacts | Default |
+|---------|----------|---------|
+| `fdr_alpha` | ✓ | 0.05 |
+| `min_effect_size` | ✓ | 0.5 |
+| `top_residues` | ✓ | 10 |
 
 ### Setting Descriptions
 
@@ -95,15 +87,7 @@ Stable analysis plugins:
 - `catalytic_triad`
 - `secondary_structure`
 - `sasa`
-- `hydrogen_bonds` (aliases: `hbonds`, `hbond`)
-
-Experimental but still available:
-
-- binding preference through `contacts`
-- `exposure`
-- `binding_free_energy`
-- `polymer_affinity`
-- `polymer_bridging` (alias: `bridging`)
+- `hydrogen_bonds`
 
 ## Plugin Summary Table
 
@@ -114,20 +98,24 @@ Experimental but still available:
 | `rmsf` | Yes | `mean_rmsf` | Per-residue flexibility | FDR-corrected pairwise t-tests + ANOVA |
 | `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests per residue |
 | `distances` | No (custom) | Multiple distance metrics | Named distance pairs | Per-distance t-tests + ANOVA |
-| `catalytic_triad` | Yes | `mean_triad_proximity` | Active-site geometry | FDR-corrected pairwise t-tests + ANOVA |
+| `catalytic_triad` | Yes | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected pairwise t-tests + ANOVA |
 | `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + ANOVA |
 | `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | Per-run pairwise t-tests + ANOVA |
-| `hydrogen_bonds` | Yes | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA |
-| `exposure` | No (custom) | Exposure dynamics metrics | Time-resolved surface exposure | Custom statistical pipeline |
-| `binding_free_energy` | No (custom) | Per-contact ΔG_sel | Free energy decomposition | Custom statistical pipeline |
-| `polymer_affinity` | No (custom) | Total interaction score | Combined contact + energetic scoring | Custom statistical pipeline |
-| `polymer_bridging` | No (custom) | Bridging event counts | Polymer-mediated inter-chain contacts | Custom statistical pipeline |
+| `hydrogen_bonds` | Custom loader with default-style scalar statistics | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA per configured summary |
 
 ## Path Rules
 
 - relative paths in `config:` are resolved relative to `comparison.yaml`
 - absolute paths are used as-is
 - `replicates` must be an explicit list such as `[1, 2, 3]`
+
+## Replicate Counts
+
+All stable shipped analyses support `replicates: [1]` for smoke tests and
+protocol validation. One-replicate runs compute aggregate metrics and plots, but
+inferential statistics, FDR correction, and uncertainty bands require at least
+two independent replicates per condition. Singleton pairwise tests and ANOVA are
+reported as not testable rather than significant.
 
 ## Commands
 
@@ -136,7 +124,7 @@ Experimental but still available:
 | `polyzymd compare init -n NAME` | Create a comparison workspace |
 | `polyzymd compare validate` | Check `comparison.yaml` before running |
 | `polyzymd compare run TYPE` | Run one analysis plugin |
-| `polyzymd compare run --list` | List available comparison types and aliases |
+| `polyzymd compare run --list` | List available comparison types |
 | `polyzymd compare run-all` | Run every enabled plugin in one pass |
 | `polyzymd compare plot-all` | Generate configured figures |
 | `polyzymd compare plot-all --list-available` | List available plots and experimental labels |
@@ -155,31 +143,26 @@ polyzymd compare run rg
 polyzymd compare run rmsf
 polyzymd compare run contacts
 polyzymd compare run distances
-polyzymd compare run triad
+polyzymd compare run catalytic_triad
 polyzymd compare run sasa
-polyzymd compare run hydrogen_bonds  # aliases: hbonds, hbond
+polyzymd compare run hydrogen_bonds
 polyzymd compare run-all
 polyzymd compare plot-all
 ```
 
-## Experimental Commands
-
-```bash
-polyzymd compare run exposure
-polyzymd compare run binding_free_energy
-polyzymd compare run polymer_affinity
-polyzymd compare run polymer_bridging   # alias: polyzymd compare run bridging
-```
-
-These remain callable, but PolyzyMD labels them as experimental in CLI output,
-docs, and generated figures.
-
 ## Output Locations
 
-- comparison JSON files are written to `comparison/<analysis>/result.json`
-- figures are written under the configured `plot_settings.output_dir`
-- default project scaffolds create a `figures/` directory next to
-  `comparison.yaml`
+- per-replicate cache files are written under
+  `analysis/<condition>/<analysis>/run_<replicate>/`
+- per-condition aggregate files are written under
+  `analysis/<condition>/<analysis>/aggregated/`
+- cross-condition comparison JSON files are written to
+  `comparison/<analysis>/result.json`
+- figures are written under the configured `plot_settings.output_dir`, usually
+  `figures/<analysis>/`
+- `polyzymd compare init` scaffolds `comparison/`, `figures/`, and
+  `structures/` next to `comparison.yaml`; `analysis/` is created and
+  populated during analysis runs
 
 Typical comparison cache paths:
 

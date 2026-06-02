@@ -2,7 +2,7 @@
 """Convert pre-PolyzyMD legacy simulation directories for PolyzyMD analysis.
 
 This script takes legacy simulation directories (pre-PolyzyMD format) and generates
-the files needed for PolyzyMD's analysis/compare pipeline:
+the files needed for PolyzyMD's current ``compare`` workflow:
 
 1. ``solvated_system.pdb`` — topology with corrected chain assignments
    (A=protein, B=substrate, C=polymer, D=solvent/ions)
@@ -286,6 +286,103 @@ def _parse_polymer_string(polymer_str: str, chain_count: int) -> PolymerInfo:
 # =============================================================================
 
 
+def _production_segment_index(path: Path) -> int | None:
+    """Return the numeric daisy-chain segment index for a production path.
+
+    Parameters
+    ----------
+    path : Path
+        Production directory path to inspect.
+
+    Returns
+    -------
+    int | None
+        Numeric segment index, or ``None`` when the directory name is not a
+        daisy-chain segment name.
+    """
+    match = re.fullmatch(r"production_(\d+)", path.name)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _expected_daisy_chain_paths(
+    sim_dir: Path, max_index: int
+) -> tuple[list[Path], Path, list[Path]]:
+    """Return required contiguous daisy-chain paths through ``max_index``.
+
+    Parameters
+    ----------
+    sim_dir : Path
+        Legacy simulation directory containing production segment directories.
+    max_index : int
+        Highest discovered or expected daisy-chain segment index.
+
+    Returns
+    -------
+    tuple[list[Path], Path, list[Path]]
+        Expected segment directories, required first-segment topology, and one
+        required trajectory path per segment.
+    """
+    segment_dirs = [sim_dir / f"production_{index}" for index in range(max_index + 1)]
+    topology_path = segment_dirs[0] / "production_0_topology.pdb"
+    trajectory_paths = [
+        segment_dir / f"{segment_dir.name}_trajectory.dcd" for segment_dir in segment_dirs
+    ]
+    return segment_dirs, topology_path, trajectory_paths
+
+
+def _format_missing_paths(paths: list[Path]) -> str:
+    """Format missing paths for user-facing error messages.
+
+    Parameters
+    ----------
+    paths : list[Path]
+        Missing paths to include in the message.
+
+    Returns
+    -------
+    str
+        Newline-delimited bullet list of missing paths.
+    """
+    return "\n".join(f"  - {path}" for path in paths)
+
+
+def _is_nonempty_file(path: Path) -> bool:
+    """Return whether ``path`` is a regular file with content.
+
+    Parameters
+    ----------
+    path : Path
+        Path to validate.
+
+    Returns
+    -------
+    bool
+        True when the path exists, is a file, and has non-zero size.
+    """
+    return path.is_file() and path.stat().st_size > 0
+
+
+def _split_invalid_trajectory_paths(paths: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Split trajectory paths into missing/non-file and empty files.
+
+    Parameters
+    ----------
+    paths : list[Path]
+        Trajectory paths to validate.
+
+    Returns
+    -------
+    tuple[list[Path], list[Path]]
+        Paths that are missing or not regular files, followed by existing files
+        whose size is zero bytes.
+    """
+    missing_or_nonfile = [path for path in paths if not path.is_file()]
+    empty = [path for path in paths if path.is_file() and path.stat().st_size == 0]
+    return missing_or_nonfile, empty
+
+
 def discover_files(sim_dir: Path, metadata: SimMetadata) -> None:
     """Discover topology, trajectory, and production directories in a legacy sim folder.
 
@@ -300,14 +397,42 @@ def discover_files(sim_dir: Path, metadata: SimMetadata) -> None:
     """
     # --- Discover production directories ---
     # Check for daisy-chain segments: production_0/, production_1/, ...
-    segment_dirs = sorted(
-        [d for d in sim_dir.iterdir() if d.is_dir() and re.match(r"production_\d+$", d.name)],
-        key=lambda d: int(d.name.split("_")[1]),
-    )
+    segment_map = {
+        index: d
+        for d in sim_dir.iterdir()
+        if d.is_dir() and (index := _production_segment_index(d)) is not None
+    }
+    segment_dirs = [segment_map[index] for index in sorted(segment_map)]
 
     if segment_dirs:
-        metadata.production_dirs = segment_dirs
-        metadata.n_segments = len(segment_dirs)
+        max_index = max(segment_map)
+        expected_dirs, required_topology, trajectories = _expected_daisy_chain_paths(
+            sim_dir, max_index
+        )
+        missing_paths = []
+        missing_paths.extend(path for path in expected_dirs if not path.is_dir())
+        if not required_topology.exists():
+            missing_paths.append(required_topology)
+        missing_trajectories, empty_trajectories = _split_invalid_trajectory_paths(trajectories)
+        missing_paths.extend(missing_trajectories)
+
+        if missing_paths:
+            missing = _format_missing_paths(missing_paths)
+            raise FileNotFoundError(
+                "Missing required contiguous daisy-chain production path(s):\n" f"{missing}"
+            )
+        if empty_trajectories:
+            empty = _format_missing_paths(empty_trajectories)
+            raise ValueError("Empty daisy-chain trajectory file(s):\n" f"{empty}")
+
+        metadata.production_dirs = expected_dirs
+        metadata.n_segments = len(expected_dirs)
+        metadata.topology_path = required_topology
+        metadata.trajectory_paths = trajectories
+
+        logger.info(f"  Topology: segment_0_topology -> {required_topology.name}")
+        logger.info(f"  Trajectories: {len(trajectories)} segment(s) found")
+        return
     else:
         # Single production directory
         prod_dir = sim_dir / "production"
@@ -350,17 +475,25 @@ def discover_files(sim_dir: Path, metadata: SimMetadata) -> None:
 
     if segment_dirs:
         # Daisy-chain: production_N/production_N_trajectory.dcd
+        missing_trajectories = []
         for seg_dir in segment_dirs:
             traj = seg_dir / f"{seg_dir.name}_trajectory.dcd"
             if traj.exists():
                 trajectories.append(traj)
             else:
-                logger.warning(f"  Missing trajectory: {traj}")
+                missing_trajectories.append(traj)
+        if missing_trajectories:
+            missing = "\n".join(f"  - {path}" for path in missing_trajectories)
+            raise FileNotFoundError(
+                "Missing expected daisy-chain segment trajectory file(s):\n" f"{missing}"
+            )
     else:
         # Single production: production/production_trajectory.dcd
         traj = sim_dir / "production" / "production_trajectory.dcd"
-        if traj.exists():
+        if _is_nonempty_file(traj):
             trajectories.append(traj)
+        elif traj.is_file():
+            raise ValueError(f"Empty production trajectory found at {traj}")
         else:
             raise FileNotFoundError(f"No production trajectory found in {sim_dir}")
 
@@ -541,6 +674,7 @@ def rewrite_topology(
     """Rewrite topology PDB with corrected chain IDs and protein atom names.
 
     Chain assignment convention:
+
     - A: protein (standard amino acid residues)
     - B: substrate (resname RBY)
     - C: polymer (resnames SBM, EGM, EGP, or other known polymer residues)
@@ -718,6 +852,7 @@ def generate_config_yaml(
         "description": (
             f"Legacy simulation converted for PolyzyMD analysis. Original: {metadata.folder_name}"
         ),
+        "engine": "openmm",
         # Enzyme
         "enzyme": {
             "name": metadata.enzyme_name,
@@ -781,7 +916,7 @@ def generate_config_yaml(
         f.write("# Generated by: scripts/convert_legacy.py\n")
         f.write("#\n")
         f.write("# NOTE: pdb_path, sdf_path, and sdf_directory are placeholders because\n")
-        f.write("# this config is only used for analysis, not for building new simulations.\n")
+        f.write("# this config is only used with current compare commands, not builds.\n")
         f.write(
             "# ============================================================================\n\n"
         )
@@ -821,14 +956,17 @@ def _build_phases_config(metadata: SimMetadata) -> dict:
             "ensemble": prod.ensemble,
             "duration": prod.duration_ns,
             "samples": prod.samples,
+            "report_interval": max(
+                1,
+                int(prod.duration_ns * 1e6 / prod.time_step_fs) // prod.samples,
+            ),
+            "checkpoint_interval": 60.0,
             "time_step": prod.time_step_fs,
             "thermostat": prod.thermostat,
             "thermostat_timescale": 1.0,
             "barostat": prod.barostat,
             "barostat_frequency": prod.barostat_frequency,
         }
-
-    phases["segments"] = metadata.n_segments
 
     return phases
 
@@ -881,6 +1019,7 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
     """Validate the converted output directory.
 
     Checks:
+
     1. solvated_system.pdb exists and is loadable
     2. config.yaml exists and is parseable
     3. Trajectory files are discoverable via symlinks
@@ -898,8 +1037,6 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
     bool
         True if validation passes.
     """
-    import MDAnalysis as mda
-
     success = True
 
     # Check solvated_system.pdb
@@ -910,8 +1047,9 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
 
     # Load and verify chain assignments
     try:
+        import MDAnalysis as mda
+
         u = mda.Universe(str(topo_path))
-        chains = set(u.atoms.chainIDs)
 
         # Must have chain A (protein)
         prot = u.select_atoms("protein and chainID A")
@@ -960,22 +1098,46 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
         logger.info("  OK: config.yaml exists")
 
     # Check trajectory discovery via symlinks
-    for prod_dir in metadata.production_dirs:
-        link = output_sim_dir / prod_dir.name
-        if not link.exists():
-            logger.error(f"  FAIL: Production symlink missing: {link}")
-            success = False
-        else:
-            # Check that trajectory files are accessible
-            if metadata.n_segments > 1:
-                traj_name = f"{prod_dir.name}_trajectory.dcd"
+    segment_indices = [
+        index
+        for prod_dir in metadata.production_dirs
+        if (index := _production_segment_index(prod_dir)) is not None
+    ]
+    if metadata.n_segments > 1 or segment_indices:
+        max_index = max([metadata.n_segments - 1, *segment_indices])
+        expected_dirs, _required_topology, trajectory_paths = _expected_daisy_chain_paths(
+            output_sim_dir, max_index
+        )
+        for segment_dir, traj_path in zip(expected_dirs, trajectory_paths, strict=True):
+            if not segment_dir.exists():
+                logger.error(f"  FAIL: Production symlink missing: {segment_dir}")
+                success = False
+            if _is_nonempty_file(traj_path):
+                logger.info(f"  OK: Trajectory accessible: {segment_dir.name}/{traj_path.name}")
+            elif traj_path.is_file():
+                logger.error(f"  FAIL: Trajectory is empty at expected path: {traj_path}")
+                success = False
             else:
-                traj_name = "production_trajectory.dcd"
-            traj_path = link / traj_name
-            if traj_path.exists():
-                logger.info(f"  OK: Trajectory accessible: {prod_dir.name}/{traj_name}")
+                logger.error(f"  FAIL: Trajectory not found at expected path: {traj_path}")
+                success = False
+    else:
+        for prod_dir in metadata.production_dirs:
+            link = output_sim_dir / prod_dir.name
+            if not link.exists():
+                logger.error(f"  FAIL: Production symlink missing: {link}")
+                success = False
             else:
-                logger.warning(f"  WARN: Trajectory not found at expected path: {traj_path}")
+                traj_path = link / "production_trajectory.dcd"
+                if _is_nonempty_file(traj_path):
+                    logger.info(
+                        f"  OK: Trajectory accessible: {prod_dir.name}/production_trajectory.dcd"
+                    )
+                elif traj_path.is_file():
+                    logger.error(f"  FAIL: Trajectory is empty at expected path: {traj_path}")
+                    success = False
+                else:
+                    logger.error(f"  FAIL: Trajectory not found at expected path: {traj_path}")
+                    success = False
 
     # Try loading config with PolyzyMD (optional — may not be installed)
     try:
@@ -990,7 +1152,8 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
     except ImportError:
         logger.info("  SKIP: PolyzyMD not importable, skipping config validation")
     except Exception as e:
-        logger.warning(f"  WARN: PolyzyMD config validation failed: {e}")
+        logger.error(f"  FAIL: PolyzyMD config validation failed: {e}")
+        success = False
 
     return success
 
@@ -1000,11 +1163,14 @@ def validate_output(output_sim_dir: Path, metadata: SimMetadata) -> bool:
 # =============================================================================
 
 
-def _condition_key(metadata: SimMetadata) -> tuple[str, str, float, str | None, float | None]:
+def _condition_key(
+    metadata: SimMetadata,
+) -> tuple[str, str, str, int | None, float, str | None, float | None, int | None]:
     """Return a hashable key that groups replicates into a single condition.
 
     The key captures everything about the simulation *except* replicate number:
-    (enzyme, substrate, temperature, polymer_type_prefix, polymer_percent_b).
+    restraint, enzyme, substrate, conformation, temperature, polymer type,
+    polymer percentage, and polymer chain count.
 
     Parameters
     ----------
@@ -1018,12 +1184,16 @@ def _condition_key(metadata: SimMetadata) -> tuple[str, str, float, str | None, 
     """
     poly_prefix = metadata.polymer.type_prefix if metadata.polymer else None
     poly_pct = metadata.polymer.percent_b if metadata.polymer else None
+    poly_chain_count = metadata.polymer.chain_count if metadata.polymer else None
     return (
+        metadata.restraint_distance,
         metadata.enzyme_name,
         metadata.substrate_name,
+        metadata.conformation,
         metadata.temperature_K,
         poly_prefix,
         poly_pct,
+        poly_chain_count,
     )
 
 
@@ -1051,6 +1221,59 @@ def _condition_label(metadata: SimMetadata) -> str:
 
     pct = int(poly.percent_b) if poly.percent_b == int(poly.percent_b) else poly.percent_b
     return f"{poly.type_prefix} {pct}%"
+
+
+def _format_float_token(value: float) -> str:
+    """Format a float for stable condition-label descriptors.
+
+    Parameters
+    ----------
+    value : float
+        Numeric value to format.
+
+    Returns
+    -------
+    str
+        Compact deterministic string representation.
+    """
+    return f"{value:g}"
+
+
+def _condition_descriptor(metadata: SimMetadata) -> str:
+    """Return a stable descriptor that disambiguates duplicate base labels.
+
+    Parameters
+    ----------
+    metadata : SimMetadata
+        Parsed simulation metadata for a condition.
+
+    Returns
+    -------
+    str
+        Descriptor built from condition-defining fields.
+    """
+    parts = [
+        metadata.restraint_distance,
+        metadata.enzyme_name,
+        metadata.substrate_name,
+    ]
+    if metadata.conformation is not None:
+        parts.append(f"conf{metadata.conformation}")
+    parts.append(f"{_format_float_token(metadata.temperature_K)}K")
+
+    if metadata.polymer is None:
+        parts.append("no polymer")
+    else:
+        poly = metadata.polymer
+        parts.extend(
+            [
+                poly.type_prefix,
+                f"{_format_float_token(poly.percent_b)}%",
+                f"{poly.chain_count} chains",
+            ]
+        )
+
+    return ", ".join(parts)
 
 
 def group_conditions(
@@ -1124,20 +1347,80 @@ def group_conditions(
             f"Scanned {len(sim_dirs)} directories, skipped {skipped}."
         )
 
-    # Finalize: sort replicates, pick run1 (or lowest) as canonical config
+    # Finalize: sort replicates, disambiguate duplicate labels, pick run1 (or lowest)
     result = {}
-    for key, cond in conditions.items():
+    label_counts: dict[str, int] = {}
+    for cond in conditions.values():
+        label_counts[cond["label"]] = label_counts.get(cond["label"], 0) + 1
+
+    for key, cond in sorted(
+        conditions.items(), key=lambda item: (_condition_label(item[1]["metadata"]), item[0])
+    ):
         cond["replicates"].sort()
         # Use the lowest replicate's config as the canonical one
         lowest_rep = cond["replicates"][0]
         cond["config"] = cond["config_paths"][lowest_rep]
         del cond["config_paths"]
-        result[cond["label"]] = cond
+        label = cond["label"]
+        if label_counts[label] > 1:
+            label = f"{label} ({_condition_descriptor(cond['metadata'])})"
+            cond["label"] = label
+        result[label] = cond
 
     if skipped > 0:
         logger.info(f"  Skipped {skipped} directories (parse error or temperature filter)")
 
     return result
+
+
+def _resolve_control_label(conditions: dict[str, dict], requested: str) -> str:
+    """Resolve a requested control label against generated condition labels.
+
+    Parameters
+    ----------
+    conditions : dict[str, dict]
+        Mapping of exact generated condition labels to condition metadata.
+    requested : str
+        User-requested control label, possibly a base label before disambiguation.
+
+    Returns
+    -------
+    str
+        Exact generated condition label to use as the control.
+
+    Raises
+    ------
+    ValueError
+        If the requested label does not resolve to exactly one generated label.
+    """
+    if requested in conditions:
+        return requested
+
+    base_matches = [
+        label
+        for label, cond in conditions.items()
+        if _condition_label(cond["metadata"]) == requested
+    ]
+    if len(base_matches) == 1:
+        resolved = base_matches[0]
+        logger.info("  Resolved control label %r to exact label %r", requested, resolved)
+        return resolved
+
+    available = "\n".join(f"  - {label}" for label in sorted(conditions))
+    if len(base_matches) > 1:
+        matches = "\n".join(f"  - {label}" for label in sorted(base_matches))
+        raise ValueError(
+            f"Control label '{requested}' is ambiguous after condition disambiguation.\n"
+            f"Matching exact labels:\n{matches}\n"
+            f'Pass --control "<exact label>" using one of the labels above.\n'
+            f"Available labels:\n{available}"
+        )
+
+    raise ValueError(
+        f"Control label '{requested}' not found in conditions.\n"
+        f"Available labels:\n{available}\n"
+        f'Pass --control "<exact label>" using one of the labels above.'
+    )
 
 
 def generate_comparison_yaml(
@@ -1196,11 +1479,7 @@ def generate_comparison_yaml(
         logger.info(f"    {label}: replicates {reps}")
 
     # --- Validate control ---
-    if control_label not in conditions:
-        available = ", ".join(sorted(conditions.keys()))
-        raise ValueError(
-            f"Control label '{control_label}' not found in conditions.\nAvailable: {available}"
-        )
+    resolved_control_label = _resolve_control_label(conditions, control_label)
 
     # --- Create project directory structure ---
     comparison_dir.mkdir(parents=True, exist_ok=True)
@@ -1225,7 +1504,9 @@ def generate_comparison_yaml(
 
     # Control first, then alphabetical
     sorted_labels = sorted(conditions.keys())
-    ordered_labels = [control_label] + [lb for lb in sorted_labels if lb != control_label]
+    ordered_labels = [resolved_control_label] + [
+        lb for lb in sorted_labels if lb != resolved_control_label
+    ]
 
     for label in ordered_labels:
         cond = conditions[label]
@@ -1260,13 +1541,12 @@ def generate_comparison_yaml(
             f"{f' at {temperature_filter:.0f} K' if temperature_filter else ''}"
             f" — {len(conditions)} conditions, generated by convert_legacy.py"
         ),
-        "control": control_label,
+        "control": resolved_control_label,
         "conditions": conditions_yaml,
         "defaults": {
             "equilibration_time": "10ns",
         },
-        "analysis_settings": _build_analysis_settings(enzyme_pdb_rel),
-        "comparison_settings": _build_comparison_settings(),
+        "plugins": _build_plugin_settings(enzyme_pdb_rel),
         "plot_settings": _build_plot_settings(),
     }
 
@@ -1281,7 +1561,7 @@ def generate_comparison_yaml(
         f.write("# Generated by: scripts/convert_legacy.py --generate-comparison\n")
         if temperature_filter:
             f.write(f"# Temperature filter: {temperature_filter:.0f} K\n")
-        f.write(f"# Control: {control_label}\n")
+        f.write(f"# Control: {resolved_control_label}\n")
         f.write(f"# Conditions: {len(conditions)}\n")
         f.write(
             "# ============================================================================\n\n"
@@ -1294,6 +1574,13 @@ def generate_comparison_yaml(
             allow_unicode=True,
         )
 
+    from polyzymd.config.comparison import ComparisonConfig
+
+    comparison = ComparisonConfig.from_yaml(comparison_yaml_path)
+    errors = comparison.validate_config()
+    if errors:
+        raise ValueError("Generated comparison.yaml failed validation: " + "; ".join(errors))
+
     # --- Summary ---
     logger.info(f"\n  Comparison project created at: {comparison_dir}")
     logger.info(f"  comparison.yaml: {comparison_yaml_path}")
@@ -1304,34 +1591,36 @@ def generate_comparison_yaml(
 
     logger.info(
         f"\n  Next steps:"
-        f"\n    1. Review and edit comparison.yaml if needed"
+        f"\n    1. Review and edit {comparison_yaml_path} if needed"
         f"\n    2. Ensure enzyme PDB is at {comparison_dir}/structures/enzyme.pdb"
-        f"\n    3. Run analyses:"
-        f"\n       polyzymd compare run rmsf -c {comparison_yaml_path}"
-        f"\n       polyzymd compare run catalytic_triad -c {comparison_yaml_path}"
-        f"\n       polyzymd compare run contacts -c {comparison_yaml_path}"
-        f"\n       polyzymd compare run exposure -c {comparison_yaml_path}"
-        f"\n       polyzymd compare run binding_free_energy -c {comparison_yaml_path}"
-        f"\n    4. Generate all plots:"
-        f"\n       polyzymd compare plot-all -c {comparison_yaml_path}"
+        f"\n    3. Validate the comparison configuration:"
+        f"\n       polyzymd compare validate -f {comparison_yaml_path}"
+        f"\n    4. Run analyses:"
+        f"\n       polyzymd compare run rmsf -f {comparison_yaml_path}"
+        f"\n       polyzymd compare run catalytic_triad -f {comparison_yaml_path}"
+        f"\n       polyzymd compare run contacts -f {comparison_yaml_path}"
+        f"\n    5. Generate all plots:"
+        f"\n       polyzymd compare plot-all -f {comparison_yaml_path}"
     )
 
     return comparison_yaml_path
 
 
-def _build_analysis_settings(enzyme_pdb_rel: str | None) -> dict:
-    """Build the analysis_settings section of comparison.yaml.
+def _build_plugin_settings(enzyme_pdb_rel: str | None) -> dict:
+    """Build the plugins section of comparison.yaml.
 
     Parameters
     ----------
     enzyme_pdb_rel : str or None
-        Relative path to enzyme PDB for SASA, or None.
+        Relative path to enzyme PDB retained for backward-compatible calls.
 
     Returns
     -------
     dict
-        Analysis settings configuration.
+        Plugin settings configuration.
     """
+    del enzyme_pdb_rel
+
     settings: dict = {
         # RMSF: per-residue fluctuations (backbone CA atoms)
         "rmsf": {
@@ -1356,70 +1645,20 @@ def _build_analysis_settings(enzyme_pdb_rel: str | None) -> dict:
                 },
             ],
         },
-        # Contacts: polymer-protein contacts with binding preference
+        # Contacts: polymer-protein contacts
         "contacts": {
-            "polymer_selection": "chainID C",
-            "protein_selection": "protein",
+            "polymer_selection": "chainid C",
+            "protein_selection": "chainid A",
             "cutoff": 4.5,
             "grouping": "aa_class",
             "compute_residence_times": True,
-            "compute_binding_preference": True,
-            "surface_exposure_threshold": 0.2,
-            "include_default_aa_groups": True,
-            "protein_groups": {
-                "catalytic_triad": [77, 133, 156],
-            },
-        },
-        # Exposure: polymer shielding of protein surface
-        "exposure": {
-            "protein_selection": "protein",
-            "polymer_selection": "chainID C",
-            "exposure_threshold": 0.2,
-            "protein_chain": "A",
-        },
-        # Binding free energy: thermodynamic analysis
-        "binding_free_energy": {
-            "units": "kcal/mol",
-            "compute_binding_preference": True,
-            "surface_exposure_threshold": 0.2,
-            "include_default_aa_groups": True,
             "protein_groups": {
                 "catalytic_triad": [77, 133, 156],
             },
         },
     }
-
-    # Add enzyme PDB path for SASA calculations
-    if enzyme_pdb_rel:
-        settings["contacts"]["enzyme_pdb_for_sasa"] = enzyme_pdb_rel
-        settings["binding_free_energy"]["enzyme_pdb_for_sasa"] = enzyme_pdb_rel
 
     return settings
-
-
-def _build_comparison_settings() -> dict:
-    """Build the comparison_settings section of comparison.yaml.
-
-    Every key in analysis_settings must have a corresponding entry here.
-
-    Returns
-    -------
-    dict
-        Comparison settings configuration.
-    """
-    return {
-        "rmsf": {},
-        "catalytic_triad": {},
-        "contacts": {
-            "fdr_alpha": 0.05,
-            "min_effect_size": 0.5,
-            "top_residues": 10,
-        },
-        "exposure": {},
-        "binding_free_energy": {
-            "fdr_alpha": 0.05,
-        },
-    }
 
 
 def _build_plot_settings() -> dict:
@@ -1434,7 +1673,7 @@ def _build_plot_settings() -> dict:
         "output_dir": "figures/",
         "format": "png",
         "dpi": 300,
-        "style": "publication",
+        "style": "compact",
         "color_palette": "tab10",
         "rmsf": {
             "show_error": True,
@@ -1442,21 +1681,13 @@ def _build_plot_settings() -> dict:
             "figsize_profile": [14, 4],
             "figsize_comparison": [8, 6],
         },
-        "triad": {
+        "catalytic_triad": {
             "generate_kde_panel": True,
             "generate_bars": True,
             "figsize_bars": [10, 6],
         },
         "contacts": {
             "figsize": [10, 8],
-            "generate_enrichment_heatmap": True,
-            "generate_enrichment_bars": True,
-        },
-        "binding_free_energy": {
-            "generate_heatmap": True,
-            "generate_bars": True,
-            "figsize_bars": [10, 6],
-            "show_error_bars": True,
         },
     }
 
@@ -1518,7 +1749,7 @@ def convert_simulation(
     # Step 2: Discover files
     try:
         discover_files(sim_dir, metadata)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         logger.error(f"  SKIP: {e}")
         return False
 
@@ -1545,14 +1776,14 @@ def convert_simulation(
     # Step 5: Rewrite topology
     try:
         rewrite_topology(metadata, reference_pdb, solvated_pdb)
-    except Exception as e:
+    except OSError as e:
         logger.error(f"  FAIL: Topology rewrite failed: {e}")
         return False
 
     # Step 6: Generate config.yaml
     try:
         generate_config_yaml(metadata, output_dir, config_yaml)
-    except Exception as e:
+    except OSError as e:
         logger.error(f"  FAIL: Config generation failed: {e}")
         return False
 
@@ -1566,9 +1797,9 @@ def convert_simulation(
     if valid:
         logger.info(f"\n  SUCCESS: {folder_name}")
     else:
-        logger.warning(f"\n  WARNINGS during conversion of {folder_name}")
+        logger.error(f"\n  FAIL: Validation failed for {folder_name}")
 
-    return True
+    return valid
 
 
 def find_legacy_sim_dirs(parent_dir: Path) -> list[Path]:
@@ -1783,18 +2014,15 @@ def main():
                 sys.exit(1)
         elif do_conversion:
             logger.info(
-                f"\n  Next steps:"
-                f"\n    1. cd {output_dir}/<simulation_folder>"
-                f"\n    2. polyzymd analyze init"
-                f"\n    3. Edit analysis.yaml to enable desired analyses"
-                f"\n    4. polyzymd analyze run"
-                f"\n"
-                f"\n  For cross-condition comparison:"
-                f"\n    1. Re-run with --generate-comparison <dir> to auto-generate"
-                f"\n    2. Or manually: polyzymd compare init -n my_comparison"
-                f"\n    3. Edit comparison.yaml to point to each condition's config.yaml"
-                f"\n    4. polyzymd compare run <analysis_type>"
-                f"\n    5. polyzymd compare plot-all"
+                "\n  Next steps:"
+                "\n    1. Re-run with --generate-comparison <dir> to create comparison.yaml"
+                "\n    2. Review comparison.yaml and point each condition to its config.yaml"
+                "\n    3. Validate the comparison configuration:"
+                "\n       polyzymd compare validate -f comparison.yaml"
+                "\n    4. Run analyses by canonical plugin name:"
+                "\n       polyzymd compare run <analysis_type> -f comparison.yaml"
+                "\n    5. Generate figures:"
+                "\n       polyzymd compare plot-all -f comparison.yaml"
             )
 
     # Exit code: success if no conversion was done, or all conversions passed

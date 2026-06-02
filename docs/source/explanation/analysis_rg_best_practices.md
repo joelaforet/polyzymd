@@ -1,7 +1,8 @@
 # Rg Analysis: Best Practices
 
-A guide to interpreting Radius of Gyration results, understanding what Rg
-measures, why it needs no alignment, and how to compare conditions rigorously.
+An interpretation guide for Radius of Gyration (Rg): what it measures, what it
+does not prove by itself, and how to compare conditions without over-reading a
+single compactness metric.
 
 ```{versionadded} 1.3.0
 The Rg analysis plugin was added in PolyzyMD 1.3.0.
@@ -37,22 +38,33 @@ Where:
 - $M = \sum_i m_i$ is the total mass
 - $N$ is the number of atoms in the selection
 
-Rg is a measure of **structural compactness**: a lower Rg means the atoms
-are packed more tightly around the center of mass. Unlike RMSD, Rg does not
-require a reference structure or alignment — it is an intrinsic property of
-the current conformation.
+Rg is a measure of **spatial spread around the center of mass**. Lower values
+are consistent with a more compact selected structure; higher values are
+consistent with expansion. These interpretations are non-unique: a similar Rg
+can arise from different conformations, and an Rg change does not by itself
+identify the structural mechanism. Treat Rg as one compactness observable to
+interpret alongside trajectory visualization and complementary analyses such as
+contacts, SASA, secondary structure, RMSD, and RMSF.
+
+```{warning}
+Rg assumes the selected atoms form the molecule or fragment you intend to
+measure. If a selected molecule is split across periodic boundaries, the center
+of mass and distances to it can be distorted. Make molecules/fragments whole
+before interpreting Rg, especially for polymers, oligomers, or wrapped protein
+complexes.
+```
 
 ### What Rg Measures
 
-| Rg Behavior | Structural Interpretation |
-|-------------|--------------------------|
-| Low and stable | Compact, well-folded structure |
-| Gradually increasing | Expansion — possible unfolding or swelling |
-| Gradually decreasing | Compaction — tighter folding or collapse |
-| Plateau after change | Equilibration to a new conformational state |
-| Sudden jump up | Partial unfolding event or domain separation |
-| Sudden jump down | Collapse or aggregation event |
-| Oscillating | Sampling between compact and extended states |
+| Rg Behavior | Cautious Interpretation |
+|-------------|-------------------------|
+| Low and stable | Consistent compactness for the selected atoms |
+| Gradually increasing | Possible expansion, swelling, unfolding, or domain separation |
+| Gradually decreasing | Possible compaction, collapse, or reorganization |
+| Plateau after change | Possible equilibration to a new size regime |
+| Sudden jump up | Possible conformational transition, unwrapping, or PBC artifact |
+| Sudden jump down | Possible collapse, wrapping, aggregation, or PBC artifact |
+| Oscillating | Possible exchange between compact and extended states |
 
 ## Interpreting Rg Values
 
@@ -72,8 +84,14 @@ The choice of atoms for Rg calculation affects the result:
 | `protein` | Overall protein compactness (all atoms) |
 | `protein and name CA` | Backbone compactness (less noise from sidechains) |
 | `protein and name CA and resid 20:250` | Core region, excluding flexible termini |
-| `chainID C` | Polymer compactness/extension |
-| `protein or chainID C` | Combined enzyme-polymer system size |
+| `chainid C` | Polymer compactness/extension |
+| `protein or chainid C` | Combined enzyme-polymer system size |
+
+Under the PolyzyMD chain convention, `chainid C` is the standard polymer
+selection for a single conjugated polymer chain. Use `resname`-based selections
+when you intentionally want to include a multi-fragment polymer population, such
+as several polymer chains or monomer chemistries, rather than because residue
+names are generally more reliable than the chain convention.
 
 ### Rg Scales with Protein Size
 
@@ -109,8 +127,9 @@ Rg (Å)
      0    10   20   30   40   50 ns
 ```
 
-A stable Rg plateau indicates the protein maintains consistent compactness
-throughout the simulation. The initial transient (if present) is equilibration.
+A stable Rg plateau suggests the selected atoms maintain consistent compactness
+throughout the analyzed interval. The initial transient (if present) may be
+equilibration.
 
 ### Expansion (Possible Unfolding)
 
@@ -125,11 +144,13 @@ Rg (Å)
   19 +-----------------------------→ Time
 ```
 
-A rising Rg trend suggests the protein is expanding — possibly unfolding,
-swelling, or sampling a more extended conformation. Possible responses:
-- Check for protein unfolding in a molecular viewer
-- Verify force field and simulation parameters
-- The system may genuinely be unstable under these conditions
+A rising Rg trend suggests the selected atoms are expanding. This may reflect
+unfolding, swelling, domain separation, ligand/polymer unwrapping, or a PBC
+artifact if the selection is not whole. Possible responses:
+
+- Inspect frames in a molecular viewer before assigning a mechanism.
+- Compare with RMSD/RMSF, secondary structure, contacts, and SASA when relevant.
+- Verify force-field, topology, and trajectory imaging choices.
 
 ### Compaction
 
@@ -144,20 +165,22 @@ Rg (Å)
   17 +-----------------------------→ Time
 ```
 
-A decreasing Rg trend indicates the protein is becoming more compact. This
-can indicate:
-- Polymer-induced stabilization and tighter packing
-- Hydrophobic collapse
-- Loss of secondary structure elements that maintain extended conformations
+A decreasing Rg trend indicates that the selected atoms are becoming more
+compact. This can be consistent with tighter packing, polymer wrapping,
+hydrophobic collapse, or loss of extended structural elements. It is not, by
+itself, evidence of stabilization; check whether native contacts, secondary
+structure, RMSD/RMSF, or active-site geometry support that interpretation.
 
 ### Sudden Jumps
 
 A sharp Rg change mid-trajectory typically indicates a conformational
 transition. Check the structure at the jump to understand what happened:
+
 - Domain rearrangement or hinge motion
 - Partial unfolding or refolding
 - Ligand unbinding leading to structural change
 - Polymer wrapping or unwrapping
+- Molecule or fragment wrapping across periodic boundaries
 
 ```{tip}
 When you observe a jump, load the trajectory in a molecular viewer (e.g.,
@@ -170,6 +193,7 @@ region is affected.
 
 Regular Rg oscillations suggest the system samples between compact and
 extended conformational states. This is often seen with:
+
 - Breathing motions in multi-domain enzymes
 - Allosteric transitions
 - Polymer wrapping/unwrapping cycles
@@ -180,12 +204,14 @@ than just the mean Rg.
 ## How PolyzyMD Handles Autocorrelation
 
 Rg timeseries are correlated — adjacent frames are similar because MD
-evolves continuously. PolyzyMD automatically accounts for this:
+evolves continuously. PolyzyMD reports correlation-aware diagnostics and
+uncertainty estimates for the Rg timeseries:
 
 1. **Computes Rg timeseries** using MDAnalysis `AtomGroup.radius_of_gyration()`
-2. **Estimates correlation time (τ)** via autocorrelation function integration
-3. **Computes effective sample size** — `n_independent = n_frames / (2τ)`
-4. **Reports autocorrelation-corrected SEM** — `SEM = σ / √n_independent`
+2. **Estimates correlation behavior** using autocorrelation-based diagnostics
+3. **Reports an effective-sample-size estimate** based on statistical
+   inefficiency rather than raw frame count
+4. **Reports correlation-aware SEM estimates** for within-trajectory summaries
 
 ### Example Autocorrelation Output
 
@@ -198,9 +224,17 @@ Run: Whole Protein
 ```
 
 This means:
-- Rg values decorrelate over ~3.8 ns timescales
-- You effectively have 19 independent measurements from 9000 frames
-- The reported SEM properly accounts for this correlation
+- Rg values appear to decorrelate on roughly nanosecond timescales for this
+  analyzed window
+- The raw 9000 frames contain far less independent information than the frame
+  count alone suggests
+- The reported SEM is a correlation-aware estimate, not a guarantee that all
+  sampling limitations have been removed
+
+These estimates depend on stationarity, sampling quality, and the reliability of
+the autocorrelation estimate. If the trajectory drifts, switches slowly between
+states, or samples too few transitions, correlation-aware uncertainty can still
+understate the true uncertainty in the condition-level conclusion.
 
 ```{seealso}
 For the mathematical details of autocorrelation functions and the LiveCoMS
@@ -219,8 +253,8 @@ Different Rg selections answer different questions:
 | "Whole Protein" | `protein` | Overall protein compactness? |
 | "Protein Backbone" | `protein and name CA` | Backbone compactness (less side-chain noise)? |
 | "Core Region" | Core residues only | Is the structured core stable? |
-| "Polymer" | `chainID C` | Is the polymer extended or collapsed? |
-| "Enzyme+Polymer" | `protein or chainID C` | Overall conjugate compactness? |
+| "Polymer" | `chainid C` | Is the polymer extended or collapsed? |
+| "Enzyme+Polymer" | `protein or chainid C` | Overall conjugate compactness? |
 
 ### When to Use Multi-Run
 
@@ -277,24 +311,34 @@ like before. Use both for comprehensive structural analysis.
 
 | Multiple Replicates | Single Long Simulation |
 |--------------------|------------------------|
-| Truly independent starting points | Frames remain correlated |
+| Independently initialized trajectories when setup supports it | Frames remain correlated |
 | Tests reproducibility of compactness | May be trapped in metastable state |
-| Robust SEM from replicate means | SEM requires autocorrelation correction |
+| Replicate-level SEM when runs are independent and comparably equilibrated | SEM requires autocorrelation correction |
 | Parallelizable | Sequential |
 
 ### How Many Replicates?
 
-| Replicates | Statistical Power | Practical Guidance |
-|------------|-----------------|-------------------|
-| 1 | Descriptive only | Exploratory — no inferential statistics |
-| 3 | Large effects (d > 2) | Minimum for publication |
-| 5 | Medium effects (d > 1.3) | Recommended standard |
+There is no universal replicate count that guarantees publishable or definitive
+Rg comparisons. The needed sampling depends on the system, effect size,
+timescales, equilibration quality, expected heterogeneity, and field-specific
+standards. Practical guidance is:
+
+| Replicates | What the result can usually support |
+|------------|-------------------------------------|
+| 1 | Descriptive checks, debugging, or exploratory summaries; no between-replicate uncertainty |
+| 2-3 | Preliminary evidence for large, reproducible effects, with substantial caution |
+| 4+ | More stable replicate-level uncertainty estimates, but still dependent on independent setup and adequate sampling |
+
+Use the smallest table entry that honestly matches the claim. Strong mechanistic
+claims generally require more evidence than descriptive screening, especially
+when condition differences are small or trajectories show slow transitions.
 
 ```{note}
-With only 1 replicate, PolyzyMD still computes Rg and reports
-within-trajectory statistics (mean, SEM from autocorrelation correction).
-Comparison across conditions requires at least 2 replicates per condition
-for pairwise t-tests.
+With only 1 replicate, PolyzyMD still computes Rg and includes the condition in
+descriptive summaries and rankings. Replicate SEM is unavailable and shown as
+n/a because variability across independent simulations cannot be estimated from
+a singleton. Pairwise inferential tests require at least 2 replicates per
+condition.
 ```
 
 ## Comparing Conditions
@@ -320,9 +364,9 @@ Rg relative to control:
 
 | Percent Change | Direction | Meaning |
 |---------------|-----------|---------|
-| < −1% | `compaction` | Treatment makes the protein more compact |
-| > +1% | `expansion` | Treatment makes the protein less compact |
-| −1% to +1% | `unchanged` | No meaningful difference in compactness |
+| < −1% | `compaction` | Mean Rg is lower than control for this selection |
+| > +1% | `expansion` | Mean Rg is higher than control for this selection |
+| −1% to +1% | `unchanged` | Mean Rg change is within the direction threshold |
 
 ### Interpreting the Comparison
 
@@ -340,14 +384,20 @@ Ranking (lower = more compact):
 100% EGMA vs No Polymer:
   Change: +3.5% (expansion), p=0.0078*, d=2.14 (large)
 
-ANOVA: F=22.31, p=0.0018* (significant across all conditions)
+ANOVA: F=22.31, p=0.0018* (evidence of differences across conditions)
 ```
 
 **Reading this output:**
-- SBMA polymer significantly compacts the enzyme (lower Rg)
-- EGMA polymer significantly expands it (higher Rg)
-- The ANOVA confirms at least one condition differs from the others
-- Large Cohen's d values mean these are substantial effects
+- SBMA is associated with lower whole-protein Rg for this selection.
+- EGMA is associated with higher whole-protein Rg for this selection.
+- The ANOVA suggests evidence that at least one condition differs from the
+  others, subject to model assumptions and sampling quality.
+- Large Cohen's d values mean the replicate-level Rg differences are large
+  relative to replicate variation.
+
+Lower or higher Rg alone does not establish stabilization or destabilization of
+the native fold. Use the comparison as evidence for a compactness difference,
+then check structural mechanisms with visualization and complementary analyses.
 
 ## Common Pitfalls
 
@@ -358,12 +408,11 @@ ANOVA: F=22.31, p=0.0018* (significant across all conditions)
 
 **Cause:** Including the initial equilibration phase biases the mean.
 
-**Solution:** Plot the Rg timeseries (or RMSD timeseries) and visually
-identify when the plateau begins. Set `--eq-time` to skip the transient:
-
-```bash
-polyzymd compare run rg -f comparison.yaml --eq-time 20ns
-```
+**Solution:** Plot the Rg timeseries (or RMSD timeseries), visually assess when
+the initial transient appears to end, and choose an equilibration cutoff before
+interpreting condition differences. For command syntax, see the
+[Rg quickstart](../how_to/analysis_rg_quickstart.md) and
+[compare workflow guide](../how_to/analysis_compare_conditions.md).
 
 ### 2. Comparing Different Selections
 
@@ -395,8 +444,9 @@ identical selections.
 **Cause:** Two conditions can have the same mean Rg but very different
 dynamics (one stable, one drifting upward then returning).
 
-**Solution:** Always examine the Rg timeseries plots. Use
-`polyzymd compare plot-all` to generate them automatically.
+**Solution:** Always examine the Rg timeseries plots produced by the comparison
+workflow. See the [compare workflow guide](../how_to/analysis_compare_conditions.md)
+for plotting commands and artifact locations.
 
 ### 5. Confusing Rg with RMSD
 
@@ -415,8 +465,10 @@ relative deviation measure. A 1 Å change in Rg is typically a smaller
 
 **Cause:** Treating autocorrelation-corrected SEM as sufficient.
 
-**Solution:** Use replicate-based statistics when available. The replicate
-SEM captures system-level variability that within-trajectory analysis cannot:
+**Solution:** Use replicate-based statistics when available. Replicate SEM is
+often the most interpretable uncertainty summary when replicates are
+independently initialized and comparably equilibrated, because it captures
+between-run variability that within-trajectory analysis cannot:
 
 ```text
 Replicate 1: mean Rg = 18.234 Å
@@ -424,8 +476,12 @@ Replicate 2: mean Rg = 18.291 Å
 Replicate 3: mean Rg = 18.244 Å
 
 Replicate mean: 18.256 Å
-Replicate SEM:  0.044 Å  ← This is the gold standard uncertainty
+Replicate SEM:  0.044 Å  ← Often preferable when replicates are independent
 ```
+
+Replicate SEM can still mislead if all replicates share the same setup bias,
+remain trapped in the same metastable state, or are not comparably equilibrated.
+Treat it as one uncertainty summary, not as automatic proof of convergence.
 
 ### 7. Using Inappropriate Selections
 
@@ -435,9 +491,10 @@ Replicate SEM:  0.044 Å  ← This is the gold standard uncertainty
 atoms in the selection.
 
 **Solution:** Match your selection to your scientific question:
+
 - Whole-protein Rg → `"protein"` or `"protein and name CA"`
 - Core stability → exclude flexible termini with specific residue ranges
-- Polymer behavior → `"chainID C"`
+- Polymer behavior → `"chainid C"`
 
 ## Fragment Mode Best Practices
 
@@ -452,42 +509,33 @@ between molecules rather than individual chain conformations.
 
 ### Selection Strategy
 
-Use `resname`-based selections for polymer fragment mode. These are more
-robust than `chainID` or `segid` because residue names are consistently
-assigned during system building, whereas chain and segment IDs can be
-reassigned during topology manipulations:
+For a standard PolyzyMD enzyme-polymer conjugate, `chainid C` remains the
+canonical polymer-chain selection. Use `resname`-based selections when your
+scientific question is explicitly about a multi-fragment polymer population,
+for example several independent chains or multiple polymer residue names in the
+same condition.
 
 ```{code-block} yaml
-:caption: Recommended — resname-based selection
+:caption: Fragment-mode run nested under plugins.rg.runs
 
-- label: polymer_blob_rg
-  selection: "resname SBM or resname EGM or resname EGP"
-  calculation_mode: fragments
+plugins:
+  rg:
+    runs:
+      - label: polymer_population_rg
+        selection: "resname SBM or resname EGM or resname EGP"
+        calculation_mode: fragments
 ```
 
-```{code-block} yaml
-:caption: Less robust — chainID may be reassigned
+### Verify Fragment Count Conceptually
 
-- label: polymer_blob_rg
-  selection: "chainID C"
-  calculation_mode: fragments
-```
-
-### Verify Fragment Count
-
-Before running large production analyses, verify that MDAnalysis detects the
-expected number of fragments with a quick test:
-
-```python
-import MDAnalysis as mda
-
-u = mda.Universe("topology.pdb", "trajectory.dcd")
-ag = u.select_atoms("resname SBM or resname EGM or resname EGP")
-print(f"Atoms: {len(ag)}, Fragments: {len(ag.fragments)}")
-```
-
-If the fragment count does not match the expected number of independent
-polymer chains, check your topology for unexpected bonds bridging chains.
+Before relying on fragment-mode results, confirm that the topology represents
+the physical fragments you intend to analyze. The number of detected fragments
+should match the expected number of independent polymer chains or oligomeric
+units. If it does not, check for unexpected bonds bridging chains, missing bonds
+within chains, or a selection that includes atoms outside the intended fragment
+population. Use the [Rg quickstart](../how_to/analysis_rg_quickstart.md) and
+[Rg reference](../reference/analysis_rg_reference.md) for task-oriented setup
+and field-level configuration details.
 
 ### When to Use Each Mode
 
@@ -503,7 +551,7 @@ polymer chains, check your topology for unexpected bonds bridging chains.
 
 - **`equal`** (default): Arithmetic mean — all fragments contribute equally
   regardless of size. Best when fragments are similar in length and you want
-  to treat each chain as an independent observation.
+  each chain to contribute equally to the per-frame reduced value.
 - **`mass`**: Mass-weighted mean — heavier fragments contribute more. Best
   when fragment sizes vary significantly and you want the average to reflect
   the total material, not just the chain count.
@@ -515,9 +563,11 @@ primary metric used for cross-condition statistical comparison (t-tests,
 ANOVA, ranking). This is stored in `rg_values` in the NPZ sidecar and
 drives the mean, SEM, and correlation time reported in JSON results.
 
-The **fragment Rg distribution** is supplementary — it provides
-conformational insight but is not used for hypothesis testing. Use it to
-understand *why* conditions differ, not *whether* they differ.
+The **fragment Rg distribution** is supplementary and descriptive. Fragment
+values pooled across frames and trajectories are correlated and should not be
+treated as independent evidence for statistical significance. Use fragment
+distributions to understand *why* replicate-level comparisons may differ, not
+as a substitute for reduced or replicate-level inference.
 
 ## Interpreting Distribution Plots
 
@@ -531,6 +581,7 @@ fragments (in fragment mode), this distribution is relatively **narrow** —
 a consequence of the central limit theorem.
 
 Use reduced distributions to:
+
 - Compare overall conformational states across conditions
 - Identify bimodal behavior (two distinct conformational states)
 - Assess whether conditions produce overlapping or distinct Rg ranges
@@ -543,18 +594,23 @@ that individual chains adopt, including rare extended or collapsed
 conformations that average out in the reduced series.
 
 Use fragment distributions to:
+
 - Detect conformational heterogeneity within a population
 - Identify subpopulations of chains with distinct sizes
 - Understand the physical origin of differences seen in reduced distributions
 
+Because these values are correlated within trajectories and across fragments in
+the same simulation box, interpret this distribution as descriptive structure,
+not as a collection of independent samples for p-values.
+
 ### Comparing Reduced and Fragment Distributions
 
-| Observation | Interpretation |
-|-------------|---------------|
-| Reduced distributions differ, fragment distributions also differ | All chains shift conformational state uniformly |
-| Reduced distributions differ, fragment distributions overlap | Differences arise from a few outlier chains |
-| Reduced distributions overlap, fragment distributions differ | Individual chains sample different states that average out |
-| Both distributions overlap | No meaningful conformational difference |
+| Observation | Possible Interpretation |
+|-------------|-------------------------|
+| Reduced distributions differ, fragment distributions also differ | Many chains may shift conformational state in the same direction |
+| Reduced distributions differ, fragment distributions overlap | The reduced mean may be influenced by a subset of chains or frames |
+| Reduced distributions overlap, fragment distributions differ | Individual chains may sample different states that average out |
+| Both distributions overlap | No clear descriptive distribution difference |
 
 ```{tip}
 If reduced distributions overlap but fragment distributions differ, this
@@ -563,30 +619,44 @@ cancel out in the average. This is a sign of **conformational heterogeneity**
 that merits visual inspection of trajectories.
 ```
 
-## Rg as a Folding Diagnostic
+## Rg as a Folding Clue
 
-Rg is a classical measure of protein folding state. The relationship between
-Rg and chain length follows distinct scaling laws
+Rg is a classical compactness measure used in folding studies. For idealized
+polymer ensembles, the relationship between Rg and chain length follows rough
+scaling expectations
 (Flory, *Principles of Polymer Chemistry*, Cornell University Press, 1953;
 de Gennes, *Scaling Concepts in Polymer Physics*, Cornell University Press, 1979;
 [Kohn et al., 2004](https://doi.org/10.1073/pnas.0403643101)):
 
-| State | Scaling | Description | Source |
-|-------|---------|-------------|--------|
-| Folded globular | $R_g \propto N^{1/3}$ | Compact, well-packed interior (empirical: $\nu \approx 0.38$–$0.40$) | [Dima & Thirumalai, 2004](https://doi.org/10.1021/jp037128y) |
-| Random coil | $R_g \propto N^{0.588}$ | Unfolded, self-avoiding random walk (Flory: $\approx 3/5$) | [Kohn et al., 2004](https://doi.org/10.1073/pnas.0403643101) |
-| Fully extended | $R_g \propto N^{1.0}$ | Stretched, all-trans backbone (geometric limit) | — |
+- **Folded globular expectation:** $R_g \propto N^{1/3}$ for ideal compact
+  packing. Empirical fits to protein structures are often closer to
+  $\nu \approx 0.38$–$0.40$ because real proteins have imperfect packing,
+  cavities, and rough surfaces ([Dima & Thirumalai, 2004](https://doi.org/10.1021/jp037128y)).
+- **Self-avoiding coil expectation:** $R_g \propto N^{0.588}$, often
+  approximated as a Flory exponent of $3/5$ for unfolded chains in good solvent
+  ([Kohn et al., 2004](https://doi.org/10.1073/pnas.0403643101)).
+- **Fully extended geometric limit:** $R_g \propto N^{1.0}$ for a stretched
+  chain-like object.
 
-Monitoring Rg during simulation can detect:
-- **Unfolding**: Rg increases from globular-like to coil-like values
-- **Refolding**: Rg decreases from extended to compact values
-- **Molten globule**: Rg slightly larger than native, high fluctuations
+These are polymer-physics expectations, not universal diagnostics for finite
+enzyme or enzyme-polymer MD trajectories. Finite size, domain architecture,
+glycosylation or conjugation, solvent quality, force-field behavior, and the
+chosen atom selection can all blur these categories.
+
+Monitoring Rg during simulation can provide clues about:
+
+- **Possible unfolding or swelling:** Rg increases away from a compact baseline.
+- **Possible refolding or compaction:** Rg decreases from an extended baseline.
+- **Possible molten-globule-like behavior:** Rg is moderately elevated and
+  fluctuating, but secondary-structure and contact analyses are needed before
+  assigning this state.
 
 ```{tip}
-For enzyme-polymer conjugate studies, comparing Rg of the protein component
-across conditions (with/without polymer, different polymer compositions) can
-reveal whether the polymer stabilizes the native fold (maintains or reduces
-Rg) or destabilizes it (increases Rg).
+For enzyme-polymer conjugate studies, comparing protein Rg across conditions
+can suggest whether a polymer is associated with compaction or expansion. It
+does not by itself prove stabilization or destabilization of the native fold;
+combine it with native contacts, secondary structure, RMSD/RMSF, SASA, and
+visual inspection.
 ```
 
 ## Complementary Use with RMSD
@@ -594,14 +664,14 @@ Rg) or destabilizes it (increases Rg).
 Rg and RMSD provide complementary structural information. Using both together
 gives a more complete picture:
 
-| Rg Trend | RMSD Trend | Likely Explanation |
-|----------|-----------|-------------------|
-| Stable | Stable | Structurally stable, well-equilibrated |
-| Increasing | Increasing | Unfolding or major conformational change |
-| Stable | Increasing | Local rearrangement without overall size change |
-| Increasing | Stable | Gradual expansion maintaining local structure |
-| Decreasing | Increasing | Compaction with structural reorganization |
-| Decreasing | Stable | Mild compaction maintaining fold |
+| Rg Trend | RMSD Trend | Possible Explanation |
+|----------|-----------|----------------------|
+| Stable | Stable | Similar size and similar reference-relative structure |
+| Increasing | Increasing | Possible unfolding, domain movement, or major conformational change |
+| Stable | Increasing | Local rearrangement or domain rotation without overall size change |
+| Increasing | Stable | Expansion that preserves the aligned reference-relative features |
+| Decreasing | Increasing | Compaction coupled to structural reorganization |
+| Decreasing | Stable | Mild compaction without large reference-relative deviation |
 
 ```{important}
 When Rg and RMSD disagree, investigate further. For example, a stable Rg
@@ -609,6 +679,11 @@ with increasing RMSD could mean a domain rotation that changes local structure
 without changing overall compactness. A molecular viewer is essential for
 interpreting such cases.
 ```
+
+Rg is also complementary to contacts, SASA, secondary structure, and RMSF. For
+example, a lower protein Rg with preserved native contacts and secondary
+structure supports a different interpretation than a lower Rg accompanied by
+lost helices or collapsed non-native contacts.
 
 ## References
 

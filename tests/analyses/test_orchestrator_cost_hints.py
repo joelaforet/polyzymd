@@ -19,12 +19,23 @@ class _HintSettings(BaseModel):
     value: float = 1.0
 
 
-class _DefaultHintAnalysis(Analysis):
+class _MDAContractMixin:
+    """Provide the required MDA lifecycle seam for direct compute fakes."""
+
+    def build_mda_jobs(self, ctx):
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+
+class _DefaultHintAnalysis(_MDAContractMixin, Analysis):
     name: ClassVar[str] = "hint_default"
     Settings: ClassVar[type] = _HintSettings
     min_replicates: ClassVar[int] = 1
 
-    def compute_replicate(self, ctx, replicate: int) -> dict[str, Any]:
+    def _run_compute_stage(self, ctx, replicate: int) -> dict[str, Any]:
+        del ctx
         return {"value": float(replicate)}
 
     def aggregate(self, ctx, results) -> dict[str, Any]:
@@ -58,7 +69,7 @@ def test_execution_cost_hint_default() -> None:
 
 @pytest.mark.parametrize(
     "analysis_name",
-    ["sasa", "contacts", "binding_free_energy", "exposure", "polymer_affinity"],
+    ["sasa", "contacts"],
 )
 def test_execution_cost_hint_high(analysis_name: str) -> None:
     """Expensive plugins should declare high execution cost hints."""

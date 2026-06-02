@@ -1,0 +1,105 @@
+"""Public MDAnalysis extension-layer primitives.
+
+This package exposes import-light protocol and typing helpers for integrations
+that wrap MDAnalysis ``AnalysisBase`` objects without importing MDAnalysis at
+module import time.
+"""
+
+from polyzymd.analyses.mda.aggregation import (
+    AggregatedMetric,
+    ExplicitReplicateMetricPolicy,
+    MDAAggregationContext,
+    MDAAggregationError,
+    ReplicateMetricPolicy,
+    aggregate_replicate_artifacts,
+    aggregate_replicate_artifacts_from_disk,
+)
+from polyzymd.analyses.mda.artifacts import (
+    MDA_ARTIFACT_SCHEMA_VERSION,
+    ArtifactEnvelope,
+    ArtifactManifest,
+    ArtifactSidecarRef,
+    ComparisonArtifact,
+    ConditionArtifact,
+    ReplicateArtifact,
+)
+from polyzymd.analyses.mda.base import (
+    MDA_EXTENSION_API_VERSION,
+    AnalysisBaseLike,
+    MDAnalysisExtensionError,
+    MDARunKwargs,
+)
+from polyzymd.analyses.mda.comparison import (
+    MDAComparisonContext,
+    MDAComparisonError,
+    compare_condition_artifacts,
+)
+from polyzymd.analyses.mda.frame_selection import FrameSelection
+from polyzymd.analyses.mda.job import (
+    MDAAnalysisJob,
+    MDAAnalysisJobError,
+    MDABackendPolicy,
+    MDAFunctionAdapter,
+    MDAJobResult,
+    MDAUniversePolicy,
+)
+from polyzymd.analyses.mda.lifecycle import MDAReplicateJobContext
+from polyzymd.analyses.mda.pair_distance import (
+    PairDistanceSpec,
+    build_pair_distance_analysis,
+    pair_distance_version,
+)
+from polyzymd.analyses.mda.plugin import (
+    MDAArtifactCollector,
+    MDACollectorContext,
+    StrictJSONMDAResultCollector,
+    frame_selection_payload,
+    strict_json_payload,
+)
+from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
+from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
+
+__all__ = [
+    "MDA_EXTENSION_API_VERSION",
+    "MDA_ARTIFACT_SCHEMA_VERSION",
+    "AnalysisBaseLike",
+    "MDAnalysisExtensionError",
+    "MDARunKwargs",
+    "AggregatedMetric",
+    "ExplicitReplicateMetricPolicy",
+    "MDAAggregationContext",
+    "MDAAggregationError",
+    "ReplicateMetricPolicy",
+    "aggregate_replicate_artifacts",
+    "aggregate_replicate_artifacts_from_disk",
+    "ArtifactEnvelope",
+    "ArtifactManifest",
+    "ArtifactSidecarRef",
+    "ComparisonArtifact",
+    "ConditionArtifact",
+    "ReplicateArtifact",
+    "ArtifactStore",
+    "ArtifactStoreError",
+    "MDAComparisonContext",
+    "MDAComparisonError",
+    "compare_condition_artifacts",
+    "FrameSelection",
+    "MDAAnalysisJob",
+    "MDAAnalysisJobError",
+    "MDABackendPolicy",
+    "MDAFunctionAdapter",
+    "MDAJobResult",
+    "MDAUniversePolicy",
+    "MDAReplicateJobContext",
+    "PairDistanceSpec",
+    "build_pair_distance_analysis",
+    "pair_distance_version",
+    "MDAArtifactCollector",
+    "MDACollectorContext",
+    "StrictJSONMDAResultCollector",
+    "frame_selection_payload",
+    "strict_json_payload",
+    "FileIdentity",
+    "UniverseProvider",
+    "UniverseProvenance",
+]

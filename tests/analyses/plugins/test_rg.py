@@ -1,378 +1,185 @@
-"""Tests for the Rg analysis plugin."""
+"""Tests for the MDAnalysis-native Rg analysis plugin."""
 
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
-from pathlib import Path
-from unittest.mock import MagicMock
+from types import ModuleType, SimpleNamespace
+from typing import Any
 
+import numpy as np
 import pytest
+from matplotlib.colors import to_hex
 
-from polyzymd.analyses.base import Condition
+from polyzymd.analyses._framework.cache_identity import settings_fingerprint
+from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
+from polyzymd.analyses.base import Analysis, PlotContext
 from polyzymd.analyses.discovery import get_analysis
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    ArtifactStoreError,
+    ConditionArtifact,
+    ReplicateArtifact,
+)
 from polyzymd.analyses.rg import RgAnalysis, RgRunSettings, RgSettings
 from polyzymd.analyses.rg._comparison_results import (
     RgComparisonResult,
     RgConditionSummary,
-    RgRunANOVA,
-    RgRunPairwiseComparison,
     RgRunSummary,
 )
-from polyzymd.analyses.rg._formatters import format_rg_comparison
-from polyzymd.analyses.rg._plot_settings import RgPlotSettings
-from polyzymd.analyses.rg._results import (
-    RgAggregatedResult,
-    RgResult,
-    RgRunAggregatedResult,
-    RgRunResult,
+from polyzymd.analyses.rg._mda import (
+    RG_FRAGMENT_POLICY_WARNING,
+    RG_PBC_POLICY_WARNING,
+    compute_rg_run,
 )
+from polyzymd.analyses.rg._plotters import (
+    _load_condition_aggregated,
+    _load_replicate_timeseries,
+    plot_rg_comparison_bars,
+    plot_rg_distributions,
+    plot_rg_timeseries,
+)
+from polyzymd.config.comparison import PlotSettings
 from tests._support.analysis_testkit import (
-    FakeUniverse,
     make_aggregate_context,
     make_comparison_context,
     make_condition,
     make_replicate_context,
-    patch_trajectory_loader,
 )
 
 
-def _make_run_settings() -> list[RgRunSettings]:
-    """Create two valid Rg run settings for tests."""
-    return [
-        RgRunSettings(label="protein_backbone", selection="protein and name CA"),
-        RgRunSettings(label="polymer_core", selection="segid C and backbone"),
-    ]
+class _FakeTrajectory:
+    """Small trajectory object that records the current frame."""
+
+    def __init__(self, universe: _FakeUniverse, n_frames: int = 5, dt: float = 10.0) -> None:
+        self.universe = universe
+        self.n_frames = n_frames
+        self.dt = dt
+
+    def __len__(self) -> int:
+        """Return the number of frames."""
+
+        return self.n_frames
+
+    def __getitem__(self, index: int) -> SimpleNamespace:
+        """Select one frame and expose frame/time metadata."""
+
+        self.universe.current_frame = int(index)
+        return SimpleNamespace(frame=int(index), time=float(index) * self.dt)
 
 
-def _make_run_result(replicate: int, run_label: str, mean_rg: float) -> RgRunResult:
-    """Create a minimal, valid RgRunResult for test fixtures."""
-    return RgRunResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=replicate,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA",
-        run_label=run_label,
-        selection="protein and name CA",
-        mean_rg=mean_rg,
-        std_rg=0.2,
-        median_rg=mean_rg,
-        min_rg=mean_rg - 0.3,
-        max_rg=mean_rg + 0.3,
-        final_rg=mean_rg + 0.1,
-        sem_rg=0.1,
-        n_frames_total=100,
-        n_frames_used=90,
-        npz_path=f"/fake/{run_label}_rep{replicate}.npz",
-        time_unit="ns",
-        timestep_ps=10.0,
-    )
+class _FakeAtomGroup:
+    """Atom group with deterministic frame-dependent Rg values."""
+
+    def __init__(
+        self,
+        universe: _FakeUniverse,
+        values: list[float],
+        *,
+        masses: float = 1.0,
+        fragments: list[_FakeAtomGroup] | None = None,
+    ) -> None:
+        self.universe = universe
+        self.values = list(values)
+        self._mass = float(masses)
+        self._fragments = fragments
+        self.indices = np.arange(len(values) or 1, dtype=np.int64)
+
+    def __len__(self) -> int:
+        """Return a nonzero atom count when values exist."""
+
+        return len(self.values)
+
+    @property
+    def fragments(self) -> list[_FakeAtomGroup]:
+        """Return static topology fragments."""
+
+        return list(self._fragments or [])
+
+    def radius_of_gyration(self) -> float:
+        """Return the value assigned to the current trajectory frame."""
+
+        index = min(self.universe.current_frame, len(self.values) - 1)
+        return float(self.values[index])
+
+    def total_mass(self) -> float:
+        """Return a static fragment mass."""
+
+        return self._mass
 
 
-def _make_aggregated_run(
-    run_label: str,
-    selection: str,
-    per_replicate_means: list[float],
-) -> RgRunAggregatedResult:
-    """Create an aggregated run result with deterministic values."""
-    mean_value = sum(per_replicate_means) / len(per_replicate_means)
-    return RgRunAggregatedResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=None,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string=selection,
-        replicates=[1, 2, 3][: len(per_replicate_means)],
-        n_replicates=len(per_replicate_means),
-        run_label=run_label,
-        selection=selection,
-        overall_mean=mean_value,
-        overall_sem=0.05,
-        overall_median=mean_value,
-        per_replicate_means=per_replicate_means,
-        per_replicate_stds=[0.2 for _ in per_replicate_means],
-        per_replicate_medians=per_replicate_means,
-    )
+class _FakeUniverse:
+    """Universe with configurable selections for Rg tests."""
+
+    def __init__(self, n_frames: int = 5, dt: float = 10.0) -> None:
+        self.current_frame = 0
+        self.trajectory = _FakeTrajectory(self, n_frames=n_frames, dt=dt)
+        self.selection_map: dict[str, _FakeAtomGroup] = {}
+
+    def select_atoms(self, selection: str) -> _FakeAtomGroup:
+        """Return the configured atom group for a selection."""
+
+        return self.selection_map[selection]
 
 
-def _make_condition_summary(
-    label: str, backbone_mean: float, polymer_mean: float
-) -> RgConditionSummary:
-    """Create a condition summary with two run summaries."""
-    return RgConditionSummary(
-        label=label,
-        config_path=f"/fake/{label}/config.yaml",
-        n_replicates=3,
-        run_summaries=[
-            RgRunSummary(
-                label="protein_backbone",
-                selection="protein and name CA",
-                mean_rg=backbone_mean,
-                sem_rg=0.05,
-                per_replicate_means=[backbone_mean - 0.05, backbone_mean, backbone_mean + 0.05],
-            ),
-            RgRunSummary(
-                label="polymer_core",
-                selection="segid C and backbone",
-                mean_rg=polymer_mean,
-                sem_rg=0.04,
-                per_replicate_means=[polymer_mean - 0.04, polymer_mean, polymer_mean + 0.04],
-            ),
-        ],
+class _FakeAnalysisBase:
+    """Minimal AnalysisBase replacement that calls ``_single_frame`` per frame."""
+
+    def __init__(self, trajectory: _FakeTrajectory) -> None:
+        self._trajectory = trajectory
+        self.results = SimpleNamespace()
+
+    def run(self, start: int = 0, stop: int | None = None, step: int = 1, **kwargs: Any) -> Any:
+        """Run frame iteration using the AnalysisBase lifecycle shape."""
+
+        if kwargs:
+            raise ValueError(f"Unexpected backend kwargs: {sorted(kwargs)}")
+        if stop is None:
+            stop = len(self._trajectory)
+        self.frames = np.asarray(list(range(start, stop, step)), dtype=np.int64)
+        self.times = self.frames.astype(np.float64) * float(self._trajectory.dt)
+        self._prepare()
+        for frame in self.frames:
+            self._trajectory[int(frame)]
+            self._single_frame()
+        self._conclude()
+        return self
+
+
+@pytest.fixture
+def fake_mdanalysis(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Install an import-light fake MDAnalysis AnalysisBase module."""
+
+    mda_module = ModuleType("MDAnalysis")
+    mda_module.__version__ = "test-mda"
+    analysis_module = ModuleType("MDAnalysis.analysis")
+    base_module = ModuleType("MDAnalysis.analysis.base")
+    base_module.AnalysisBase = _FakeAnalysisBase
+    monkeypatch.setitem(sys.modules, "MDAnalysis", mda_module)
+    monkeypatch.setitem(sys.modules, "MDAnalysis.analysis", analysis_module)
+    monkeypatch.setitem(sys.modules, "MDAnalysis.analysis.base", base_module)
+
+
+def _settings() -> RgSettings:
+    """Return two-run Rg settings for artifact tests."""
+
+    return RgSettings(
+        runs=[
+            RgRunSettings(label="protein_rg", selection="protein"),
+            RgRunSettings(label="polymer/frags", selection="polymer", calculation_mode="fragments"),
+        ]
     )
 
 
 def _make_comparison_result() -> RgComparisonResult:
-    """Create a complete RgComparisonResult for formatter and model tests."""
-    conditions = [
-        _make_condition_summary("Control", 15.0, 22.0),
-        _make_condition_summary("Treatment_A", 14.0, 20.0),
-        _make_condition_summary("Treatment_B", 16.0, 23.0),
-    ]
-    pairwise = [
-        RgRunPairwiseComparison(
-            run_label="protein_backbone",
-            condition_a="Control",
-            condition_b="Treatment_A",
-            t_statistic=2.5,
-            p_value=0.03,
-            cohens_d=1.1,
-            effect_interpretation="large",
-            direction="compaction",
-            significant=True,
-            percent_change=-6.7,
-        ),
-        RgRunPairwiseComparison(
-            run_label="protein_backbone",
-            condition_a="Control",
-            condition_b="Treatment_B",
-            t_statistic=-2.1,
-            p_value=0.04,
-            cohens_d=-0.9,
-            effect_interpretation="large",
-            direction="expansion",
-            significant=True,
-            percent_change=6.7,
-        ),
-        RgRunPairwiseComparison(
-            run_label="polymer_core",
-            condition_a="Control",
-            condition_b="Treatment_A",
-            t_statistic=3.0,
-            p_value=0.02,
-            cohens_d=1.4,
-            effect_interpretation="large",
-            direction="compaction",
-            significant=True,
-            percent_change=-9.1,
-        ),
-    ]
-    anova = [
-        RgRunANOVA(run_label="protein_backbone", f_statistic=8.5, p_value=0.01, significant=True),
-        RgRunANOVA(run_label="polymer_core", f_statistic=9.2, p_value=0.01, significant=True),
-    ]
+    """Create a compact comparison result for plotting and formatting tests."""
+
     return RgComparisonResult(
         metric="mean_rg",
-        name="test_project",
-        n_runs=2,
-        run_labels=["protein_backbone", "polymer_core"],
-        control_label="Control",
-        conditions=conditions,
-        pairwise_comparisons=pairwise,
-        anova_by_run=anova,
-        ranking_by_run={
-            "protein_backbone": ["Treatment_A", "Control", "Treatment_B"],
-            "polymer_core": ["Treatment_A", "Control", "Treatment_B"],
-        },
-        equilibration_time="10ns",
-        created_at=datetime.now(),
-        polyzymd_version="1.2.1",
-    )
-
-
-def test_rg_run_settings_creation() -> None:
-    """RgRunSettings should accept label and selection fields."""
-    settings = RgRunSettings(label="protein_backbone", selection="protein and name CA")
-    assert settings.label == "protein_backbone"
-    assert settings.selection == "protein and name CA"
-
-
-def test_rg_settings_valid() -> None:
-    """RgSettings should accept a valid multi-run configuration."""
-    settings = RgSettings(runs=_make_run_settings())
-    assert len(settings.runs) == 2
-
-
-def test_rg_settings_empty_runs_rejected() -> None:
-    """RgSettings should reject an empty runs list."""
-    with pytest.raises(ValueError, match="At least one Rg run"):
-        RgSettings(runs=[])
-
-
-def test_rg_settings_duplicate_labels_rejected() -> None:
-    """RgSettings should reject duplicate run labels."""
-    with pytest.raises(ValueError, match="labels must be unique"):
-        RgSettings(
-            runs=[
-                RgRunSettings(label="dup", selection="protein and name CA"),
-                RgRunSettings(label="dup", selection="backbone"),
-            ]
-        )
-
-
-def test_rg_settings_single_run() -> None:
-    """RgSettings should allow a single-run configuration."""
-    settings = RgSettings(runs=[RgRunSettings(label="single", selection="protein and name CA")])
-    assert len(settings.runs) == 1
-    assert settings.runs[0].label == "single"
-
-
-def test_rg_run_result_creation() -> None:
-    """RgRunResult should be constructible with all required fields."""
-    result = _make_run_result(replicate=1, run_label="protein_backbone", mean_rg=15.0)
-    assert result.run_label == "protein_backbone"
-    assert result.mean_rg == pytest.approx(15.0)
-
-
-def test_rg_run_result_summary() -> None:
-    """RgRunResult.summary should produce readable output."""
-    result = _make_run_result(replicate=1, run_label="protein_backbone", mean_rg=15.0)
-    summary = result.summary()
-    assert "Rg Run: protein_backbone" in summary
-    assert "Mean:" in summary
-
-
-def test_rg_result_n_runs() -> None:
-    """RgResult.n_runs should match number of run entries."""
-    result = RgResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=1,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA; segid C and backbone",
-        run_results=[
-            _make_run_result(replicate=1, run_label="protein_backbone", mean_rg=15.0),
-            _make_run_result(replicate=1, run_label="polymer_core", mean_rg=22.0),
-        ],
-        n_frames_total=100,
-        n_frames_used=90,
-        trajectory_files=["/fake/traj.dcd"],
-    )
-    assert result.n_runs == 2
-
-
-def test_rg_aggregated_result_creation() -> None:
-    """RgAggregatedResult should be constructible with run aggregates."""
-    aggregated = RgAggregatedResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=None,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA; segid C and backbone",
-        replicates=[1, 2, 3],
-        n_replicates=3,
-        run_results=[
-            _make_aggregated_run("protein_backbone", "protein and name CA", [14.9, 15.0, 15.1]),
-            _make_aggregated_run("polymer_core", "segid C and backbone", [21.9, 22.0, 22.1]),
-        ],
-        source_result_files=[],
-    )
-    assert aggregated.n_runs == 2
-    assert aggregated.n_replicates == 3
-
-
-def test_rg_aggregated_result_summary() -> None:
-    """RgAggregatedResult.summary should include key metadata."""
-    aggregated = RgAggregatedResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=None,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA",
-        replicates=[1, 2],
-        n_replicates=2,
-        run_results=[
-            _make_aggregated_run("protein_backbone", "protein and name CA", [14.9, 15.1]),
-        ],
-        source_result_files=[],
-    )
-    summary = aggregated.summary()
-    assert "Rg Aggregated Analysis" in summary
-    assert "Runs analyzed: 1" in summary
-
-
-def test_rg_comparison_result_creation() -> None:
-    """RgComparisonResult should be constructible with full fields."""
-    result = _make_comparison_result()
-    assert result.n_runs == 2
-    assert len(result.conditions) == 3
-
-
-def test_rg_comparison_get_run() -> None:
-    """RgComparisonResult.get_comparisons_for_run should filter by run label."""
-    result = _make_comparison_result()
-    comps = result.get_comparisons_for_run("protein_backbone")
-    assert len(comps) == 2
-    assert all(comp.run_label == "protein_backbone" for comp in comps)
-
-
-def test_rg_comparison_ranking() -> None:
-    """RgComparisonResult.get_ranking should return run-specific ranking."""
-    result = _make_comparison_result()
-    ranking = result.get_ranking("protein_backbone")
-    assert ranking[0] == "Treatment_A"
-
-
-def test_rg_condition_summary_get_run() -> None:
-    """RgConditionSummary.get_run should return matching run summary."""
-    condition = _make_condition_summary("Control", 15.0, 22.0)
-    run = condition.get_run("protein_backbone")
-    assert run.label == "protein_backbone"
-    assert run.mean_rg == pytest.approx(15.0)
-
-
-def test_rg_plugin_discovered() -> None:
-    """Rg plugin should be auto-discovered by analyses discovery."""
-    from polyzymd.analyses.discovery import clear_cache, list_analyses
-
-    clear_cache()
-    analyses = list_analyses()
-    assert "rg" in analyses
-    assert analyses["rg"] is RgAnalysis
-
-
-def test_rg_plugin_name() -> None:
-    """Rg plugin should expose correct analysis name."""
-    assert RgAnalysis.name == "rg"
-
-
-def test_format_table() -> None:
-    """Table formatting should produce human-readable Rg output."""
-    text = format_rg_comparison(_make_comparison_result(), "table")
-    assert "Rg Comparison: protein_backbone" in text
-    assert "Condition" in text
-
-
-def test_format_markdown() -> None:
-    """Markdown formatting should include markdown sections and table headers."""
-    text = format_rg_comparison(_make_comparison_result(), "markdown")
-    assert "## Rg Comparison: protein_backbone" in text
-    assert "| Condition | Mean Rg (A) | SEM | Rank |" in text
-
-
-def test_format_markdown_regression_includes_non_significant_and_non_testable_like_case() -> None:
-    """Markdown formatter should keep stable output across edge pairwise states."""
-    result = RgComparisonResult(
-        metric="mean_rg",
-        name="regression_case",
+        name="rg_compare",
         n_runs=1,
-        run_labels=["run_1"],
+        run_labels=["protein_rg"],
         control_label="Control",
         conditions=[
             RgConditionSummary(
@@ -381,1393 +188,798 @@ def test_format_markdown_regression_includes_non_significant_and_non_testable_li
                 n_replicates=2,
                 run_summaries=[
                     RgRunSummary(
-                        label="run_1",
-                        selection="protein and name CA",
-                        mean_rg=10.0,
-                        sem_rg=0.10,
-                        per_replicate_means=[9.9, 10.1],
-                    )
-                ],
-            ),
-            RgConditionSummary(
-                label="Treatment_A",
-                config_path="/fake/treatment_a.yaml",
-                n_replicates=2,
-                run_summaries=[
-                    RgRunSummary(
-                        label="run_1",
-                        selection="protein and name CA",
-                        mean_rg=10.3,
-                        sem_rg=0.12,
-                        per_replicate_means=[10.2, 10.4],
-                    )
-                ],
-            ),
-            RgConditionSummary(
-                label="Treatment_B",
-                config_path="/fake/treatment_b.yaml",
-                n_replicates=1,
-                run_summaries=[
-                    RgRunSummary(
-                        label="run_1",
-                        selection="protein and name CA",
+                        label="protein_rg",
+                        selection="protein",
                         mean_rg=10.5,
-                        sem_rg=0.00,
-                        per_replicate_means=[10.5],
+                        sem_rg=0.5,
+                        per_replicate_means=[10.0, 11.0],
+                        replicates=[1, 2],
+                        n_replicates=2,
                     )
                 ],
-            ),
-        ],
-        pairwise_comparisons=[
-            RgRunPairwiseComparison(
-                run_label="run_1",
-                condition_a="Control",
-                condition_b="Treatment_A",
-                t_statistic=1.2,
-                p_value=0.200,
-                cohens_d=0.4,
-                effect_interpretation="small",
-                direction="expansion",
-                significant=False,
-                percent_change=3.0,
-            ),
-            RgRunPairwiseComparison(
-                run_label="run_1",
-                condition_a="Control",
-                condition_b="Treatment_B",
-                effect_interpretation="not_testable",
-                direction="unchanged",
-                significant=False,
-                percent_change=0.0,
-                testable=False,
-                note="Insufficient replicates (n < 2) for inferential statistics",
-            ),
-        ],
-        anova_by_run=[
-            RgRunANOVA(
-                run_label="run_1",
-                f_statistic=1.1,
-                p_value=0.200,
-                significant=False,
             )
         ],
-        ranking_by_run={"run_1": ["Control", "Treatment_A", "Treatment_B"]},
-        equilibration_time="10ns",
+        pairwise_comparisons=[],
+        anova_by_run=None,
+        ranking_by_run={"protein_rg": ["Control"]},
+        equilibration_time="0ns",
         created_at=datetime.now(),
-        polyzymd_version="1.2.1",
-    )
-
-    text = format_rg_comparison(result, "markdown")
-
-    assert text == (
-        "## Rg Comparison: run_1\n"
-        "\n"
-        "| Condition | Mean Rg (A) | SEM | Rank |\n"
-        "|-----------|---------------|-----|------|\n"
-        "| Control | 10.00 | 0.10 | 1 |\n"
-        "| Treatment_A | 10.30 | 0.12 | 2 |\n"
-        "| Treatment_B | 10.50 | 0.00 | 3 |\n"
-        "\n"
-        "- Pairwise: Treatment_A vs Control — Δ=+3.0%, p=0.200 , d=0.40 (small), expansion\n"
-        "- Pairwise: Treatment_B vs Control — Δ=+0.0%, unchanged; "
-        "Insufficient replicates (n < 2) for inferential statistics\n"
-        "\n"
-        "- ANOVA: F=1.10, p=0.200 \n"
+        polyzymd_version="test",
     )
 
 
-def test_format_json() -> None:
-    """JSON formatting should return valid JSON with expected keys."""
-    text = format_rg_comparison(_make_comparison_result(), "json")
-    parsed = json.loads(text)
-    assert parsed["metric"] == "mean_rg"
-    assert "conditions" in parsed
+def _make_rg_condition_summary(label: str, mean_rg: float) -> RgConditionSummary:
+    """Create one Rg condition summary for semantic plotting tests."""
+
+    return RgConditionSummary(
+        label=label,
+        config_path=f"/fake/{label}.yaml",
+        n_replicates=2,
+        run_summaries=[
+            RgRunSummary(
+                label="protein_rg",
+                selection="protein",
+                mean_rg=mean_rg,
+                sem_rg=0.1,
+                per_replicate_means=[mean_rg - 0.1, mean_rg + 0.1],
+                replicates=[1, 2],
+                n_replicates=2,
+            )
+        ],
+    )
 
 
-def test_rg_plot_settings_model_attribute() -> None:
-    """Rg analysis should expose its plot settings model attribute."""
+def _make_semantic_rg_comparison_result() -> RgComparisonResult:
+    """Create an Rg comparison result with out-of-order conditions."""
+
+    return RgComparisonResult(
+        metric="mean_rg",
+        name="rg_semantic_compare",
+        n_runs=1,
+        run_labels=["protein_rg"],
+        control_label="Control",
+        conditions=[
+            _make_rg_condition_summary("Control", 10.0),
+            _make_rg_condition_summary("PEG 20", 8.0),
+            _make_rg_condition_summary("PEG 5", 9.0),
+        ],
+        pairwise_comparisons=[],
+        anova_by_run=None,
+        ranking_by_run={"protein_rg": ["PEG 20", "PEG 5", "Control"]},
+        equilibration_time="0ns",
+        created_at=datetime.now(),
+        polyzymd_version="test",
+    )
+
+
+def _make_semantic_plot_settings() -> PlotSettings:
+    """Create semantic plot settings for Rg regression tests."""
+
+    return PlotSettings(
+        semantic_colors={
+            "enabled": True,
+            "order": ["PEG 5", "Control", "PEG 20"],
+            "manual_colors": {
+                "PEG 5": "#ff0000",
+                "Control": "#000000",
+                "PEG 20": "#0000ff",
+            },
+        }
+    )
+
+
+def test_rg_plotters_apply_semantic_order_and_colors(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rg bars, timeseries, and distributions should use semantic colors."""
+
+    import matplotlib.pyplot as plt
+
+    import polyzymd.analyses.rg._plotters as plotters
+
+    captured: list[dict[str, list[str]]] = []
+
+    def fake_save_figure(fig, output_path, _plot_settings):
+        ax = fig.axes[0]
+        colors = [to_hex(patch.get_facecolor()) for patch in ax.patches]
+        if colors:
+            labels = [text.get_text() for text in ax.get_xticklabels() if text.get_text()]
+        else:
+            labels = [line.get_label() for line in ax.lines if not line.get_label().startswith("_")]
+            colors = [
+                to_hex(line.get_color())
+                for line in ax.lines
+                if not line.get_label().startswith("_")
+            ]
+        captured.append({"labels": labels, "colors": colors})
+        plt.close(fig)
+        return output_path
+
+    def fake_timeseries(_condition_dir, _run_label, _replicates):
+        return (
+            np.asarray([0.0, 1.0], dtype=np.float64),
+            np.asarray([[1.0, 1.1]], dtype=np.float64),
+        )
+
+    def fake_aggregated(_condition_dir):
+        return {
+            "runs": [
+                {
+                    "run_label": "protein_rg",
+                    "calculation_mode": "selection",
+                    "reduced_histogram_edges": [0.0, 1.0, 2.0],
+                    "reduced_histogram_density_mean": [0.2, 0.8],
+                    "reduced_histogram_density_sem": [0.01, 0.02],
+                }
+            ]
+        }
+
+    monkeypatch.setattr(plotters, "save_figure", fake_save_figure)
+    monkeypatch.setattr(plotters, "_load_replicate_timeseries", fake_timeseries)
+    monkeypatch.setattr(plotters, "_load_condition_aggregated", fake_aggregated)
+    comparison = _make_semantic_rg_comparison_result()
+    ctx = SimpleNamespace(
+        conditions=[
+            make_condition(label=label, replicates=(1, 2))
+            for label in ("Control", "PEG 20", "PEG 5")
+        ],
+        analysis_dirs={label: tmp_path / label for label in ("Control", "PEG 20", "PEG 5")},
+        output_dir=tmp_path,
+        plot_settings=_make_semantic_plot_settings(),
+    )
+
+    plot_rg_comparison_bars(ctx, comparison)
+    plot_rg_timeseries(ctx, comparison)
+    plot_rg_distributions(ctx, comparison)
+
+    expected_labels = ["PEG 5", "Control", "PEG 20"]
+    expected_colors = ["#ff0000", "#000000", "#0000ff"]
+    assert captured[0]["labels"] == expected_labels
+    assert captured[0]["colors"] == expected_colors
+    assert captured[1]["labels"] == expected_labels
+    assert captured[1]["colors"] == expected_colors
+    assert captured[2]["labels"] == expected_labels
+    assert captured[2]["colors"] == expected_colors
+
+
+def _replicate_artifact(
+    root: Any,
+    *,
+    condition_label: str,
+    replicate: int,
+    settings: RgSettings,
+    run_label: str = "protein_rg",
+    rg_values: list[float] | None = None,
+    skipped_runs: list[dict[str, Any]] | None = None,
+) -> ReplicateArtifact:
+    """Write one canonical Rg replicate artifact with a sidecar."""
+
+    rg_array = np.asarray(rg_values or [10.0 + replicate, 11.0 + replicate], dtype=np.float64)
+    run_dir = root / f"run_{replicate}"
+    store = ArtifactStore(run_dir)
+    sidecar = store.write_npz_sidecar(
+        f"sidecars/rg_{replicate}_{run_label}.npz",
+        rg_values=rg_array,
+        reduced_rg_values=rg_array,
+        time_ns=np.arange(rg_array.size, dtype=np.float64),
+        frames=np.arange(rg_array.size, dtype=np.int64),
+        raw_timestep_ps=np.asarray(10.0, dtype=np.float64),
+        frame_stride=np.asarray(1, dtype=np.int64),
+        effective_timestep_ps=np.asarray(10.0, dtype=np.float64),
+        metadata={"run_label": run_label},
+    )
+    mean_rg = float(np.mean(rg_array))
+    run_payload = {
+        "config_hash": "hash123",
+        "polyzymd_version": "test",
+        "replicate": replicate,
+        "equilibration_time": 0.0,
+        "equilibration_unit": "ns",
+        "selection_string": "protein",
+        "run_label": run_label,
+        "selection": "protein",
+        "calculation_mode": "selection",
+        "fragment_weighting": None,
+        "mean_rg": mean_rg,
+        "std_rg": float(np.std(rg_array, ddof=0)),
+        "median_rg": float(np.median(rg_array)),
+        "min_rg": float(np.min(rg_array)),
+        "max_rg": float(np.max(rg_array)),
+        "final_rg": float(rg_array[-1]),
+        "sem_rg": None,
+        "correlation_time_unit": None,
+        "statistical_inefficiency": None,
+        "autocorrelation_warning": None,
+        "n_frames_total": int(rg_array.size),
+        "n_frames_used": int(rg_array.size),
+        "npz_path": sidecar.path,
+        "sidecar": sidecar.model_dump(mode="json"),
+        "time_unit": "ns",
+        "timestep_ps": 10.0,
+        "raw_timestep_ps": 10.0,
+        "frame_stride": 1,
+    }
+    metrics = {f"{run_label}.mean_rg": mean_rg}
+    artifact = ReplicateArtifact(
+        analysis_name="rg",
+        condition_label=condition_label,
+        replicate=replicate,
+        payload={
+            "runs": [run_payload],
+            "skipped_runs": skipped_runs or [],
+            "metrics": metrics,
+            "replicate_metrics": metrics,
+            "n_frames_total": int(rg_array.size),
+            "n_frames_used": int(rg_array.size),
+        },
+        sidecars=[sidecar],
+        provenance={"pbc_policy": {"coordinates": "as_loaded"}},
+        metadata={
+            "result_kind": "rg_mda_replicate",
+            "settings_fingerprint": settings_fingerprint(settings),
+            "config_hash": "hash123",
+            "polyzymd_version": "test",
+            "equilibration_time": 0.0,
+            "equilibration_unit": "ns",
+            "selection_string": "protein",
+        },
+        warnings=[RG_PBC_POLICY_WARNING],
+    )
+    store.write_replicate_result(artifact)
+    return artifact
+
+
+def test_rg_plugin_discovered() -> None:
+    """Rg plugin should be auto-discovered and MDA-backed."""
+
     cls = get_analysis("rg")
-    assert cls.PlotSettingsModel is RgPlotSettings
 
+    assert cls is RgAnalysis
+    assert RgAnalysis.name == "rg"
+    assert RgAnalysis.min_replicates == 1
+    assert not hasattr(Analysis, "build_runner")
+    assert "build_runner" not in RgAnalysis.__dict__
+    assert RgAnalysis.ReplicateResultClass is None
 
-def test_rg_plot_settings_defaults() -> None:
-    """Rg plot settings defaults should match plugin defaults."""
-    settings = RgPlotSettings()
-    assert settings.show_per_replicate is False
-    assert settings.figsize == (10, 6)
-    assert settings.timeseries_figsize == (12, 5)
 
+def test_rg_settings_validate_fragment_options() -> None:
+    """Rg settings should preserve fragment-mode validation."""
 
-def test_compute_single_run_zero_atoms_returns_none(
-    condition: Condition,
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """_compute_single_run should skip zero-atom selections with warning."""
-    analysis = RgAnalysis()
-    settings = RgSettings(runs=[RgRunSettings(label="polymer_blob_rg", selection="resname SBM")])
-    ctx = make_replicate_context(
-        condition=condition,
-        replicate=1,
-        output_dir=tmp_path / "run_1",
-        settings=settings,
-        equilibration="10ns",
-    )
-
-    empty_group = MagicMock()
-    empty_group.__len__.return_value = 0
-    universe = MagicMock()
-    universe.select_atoms.return_value = empty_group
-    loader = MagicMock()
-    loader.load_universe.return_value = universe
-
-    run = settings.runs[0]
-    with caplog.at_level("WARNING"):
-        result = analysis._compute_single_run(
-            ctx=ctx,
-            replicate=1,
-            run=run,
-            loader=loader,
-            config_hash="hash123",
-            eq_value=10.0,
-            eq_unit="ns",
-            eq_str="eq10ns",
-            settings_tag="abcd1234",
-            start_frame=0,
-            n_frames_total=10,
-            n_frames_used=10,
-            timestep_ps=10.0,
-        )
-
-    assert result is None
-    assert "selection matched no atoms" in caplog.text
-
-
-def test_compute_replicate_skips_none_runs(
-    condition: Condition, tmp_path: Path, monkeypatch
-) -> None:
-    """compute_replicate should omit runs that returned None."""
-    import polyzymd.analyses.rg as rg_module
-
-    analysis = RgAnalysis()
-    settings = RgSettings(
-        runs=[
-            RgRunSettings(label="protein_rg", selection="protein and name CA"),
-            RgRunSettings(label="polymer_blob_rg", selection="resname SBM"),
-        ]
-    )
-    output_dir = tmp_path / "run_1"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    ctx = make_replicate_context(
-        condition=condition,
-        replicate=1,
-        output_dir=output_dir,
-        settings=settings,
-        equilibration="0ps",
-    )
-
-    fake_universe = FakeUniverse(n_atoms=50, n_frames=100, n_residues=10)
-    loader = patch_trajectory_loader(monkeypatch, "polyzymd.analyses.rg", fake_universe)
-    monkeypatch.setattr(rg_module, "compute_config_hash", lambda _sim_config: "hash123")
-    monkeypatch.setattr(analysis, "_check_cache", lambda *args, **kwargs: None)
-
-    def _mock_compute_single_run(*, run: RgRunSettings, **kwargs):
-        if run.label == "polymer_blob_rg":
-            return None
-        return _make_run_result(1, "protein_rg", 15.0)
-
-    monkeypatch.setattr(analysis, "_compute_single_run", _mock_compute_single_run)
-
-    result = analysis.compute_replicate(ctx, 1)
-
-    assert len(result.run_results) == 1
-    assert result.run_results[0].run_label == "protein_rg"
-
-
-def test_settings_cache_tag_changes_with_settings() -> None:
-    """_make_settings_cache_tag should differ when settings differ."""
-    analysis = RgAnalysis()
-    settings_a = RgSettings(runs=[RgRunSettings(label="run1", selection="protein and name CA")])
-    settings_b = RgSettings(runs=[RgRunSettings(label="run1", selection="segid C")])
-
-    tag_a = analysis._make_settings_cache_tag(settings_a)
-    tag_b = analysis._make_settings_cache_tag(settings_b)
-
-    assert tag_a != tag_b
-
-
-def test_compute_replicate_cache_includes_settings_tag(
-    condition: Condition, tmp_path: Path, monkeypatch
-) -> None:
-    """compute_replicate cache filename should include settings fingerprint tag."""
-    analysis = RgAnalysis()
-    settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein and name CA")])
-    ctx = make_replicate_context(
-        condition=condition,
-        replicate=1,
-        output_dir=tmp_path / "run_1",
-        settings=settings,
-        equilibration="10ns",
-    )
-
-    observed_path: Path | None = None
-
-    def _mock_check_cache(*args, **kwargs):
-        nonlocal observed_path
-        observed_path = args[1]
-        return {"cached": True}
-
-    monkeypatch.setattr(analysis, "_check_cache", _mock_check_cache)
-
-    result = analysis.compute_replicate(ctx, 1)
-
-    expected_tag = analysis._make_settings_cache_tag(settings)
-    assert observed_path is not None
-    assert observed_path.name == f"rg_eq10ns_{expected_tag}.json"
-    assert result == {"cached": True}
-
-
-def test_aggregate_handles_missing_run(
-    condition: Condition,
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """aggregate should skip runs with no replicate entries."""
-    analysis = RgAnalysis()
-    settings = RgSettings(runs=_make_run_settings())
-    ctx = make_aggregate_context(
-        condition=condition,
-        replicates=(1, 2),
-        output_dir=tmp_path / "aggregated",
-        settings=settings,
-        equilibration="10ns",
-    )
-    results = [
-        RgResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=rep,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
-            run_results=[_make_run_result(rep, "protein_backbone", 14.0 + rep)],
-            n_frames_total=100,
-            n_frames_used=90,
-            trajectory_files=["/fake/traj.dcd"],
-        )
-        for rep in (1, 2)
-    ]
-
-    with caplog.at_level("WARNING"):
-        aggregated = analysis.aggregate(ctx, results)
-
-    assert len(aggregated.run_results) == 1
-    assert aggregated.run_results[0].run_label == "protein_backbone"
-    assert "selection may match no atoms in this condition" in caplog.text
-
-
-def test_aggregate_single_replicate(
-    condition: Condition, tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """aggregate should handle a single replicate and log SEM warning."""
-    analysis = RgAnalysis()
-    settings = RgSettings(runs=_make_run_settings())
-    ctx = make_aggregate_context(
-        condition=condition,
-        replicates=(1,),
-        output_dir=tmp_path / "aggregated",
-        settings=settings,
-        equilibration="10ns",
-    )
-    result = RgResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=1,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA; segid C and backbone",
-        run_results=[
-            _make_run_result(1, "protein_backbone", 15.0),
-            _make_run_result(1, "polymer_core", 22.0),
-        ],
-        n_frames_total=100,
-        n_frames_used=90,
-        trajectory_files=["/fake/traj.dcd"],
-    )
-
-    with caplog.at_level("WARNING"):
-        aggregated = analysis.aggregate(ctx, [result])
-
-    assert aggregated.n_replicates == 1
-    assert len(aggregated.run_results) == 2
-    assert "Only one replicate available for Rg aggregation" in caplog.text
-
-
-def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> None:
-    """aggregate should compute expected means and preserve run structure."""
-    analysis = RgAnalysis()
-    settings = RgSettings(runs=_make_run_settings())
-    ctx = make_aggregate_context(
-        condition=condition,
-        replicates=(1, 2, 3),
-        output_dir=tmp_path / "aggregated",
-        settings=settings,
-        equilibration="10ns",
-    )
-    results = [
-        RgResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=rep,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA; segid C and backbone",
-            run_results=[
-                _make_run_result(rep, "protein_backbone", 14.0 + 0.5 * rep),
-                _make_run_result(rep, "polymer_core", 21.0 + 0.5 * rep),
-            ],
-            n_frames_total=100,
-            n_frames_used=90,
-            trajectory_files=["/fake/traj.dcd"],
-        )
-        for rep in (1, 2, 3)
-    ]
-
-    aggregated = analysis.aggregate(ctx, results)
-
-    assert aggregated.n_replicates == 3
-    backbone = next(run for run in aggregated.run_results if run.run_label == "protein_backbone")
-    assert backbone.overall_mean == pytest.approx(15.0)
-    assert backbone.per_replicate_means == pytest.approx([14.5, 15.0, 15.5])
-
-
-def test_aggregate_uses_median_for_overall_median(condition: Condition, tmp_path: Path) -> None:
-    """aggregate should use median of replicate medians for overall_median."""
-    analysis = RgAnalysis()
-    settings = RgSettings(
-        runs=[RgRunSettings(label="protein_backbone", selection="protein and name CA")]
-    )
-    ctx = make_aggregate_context(
-        condition=condition,
-        replicates=(1, 2, 3),
-        output_dir=tmp_path / "aggregated",
-        settings=settings,
-        equilibration="10ns",
-    )
-    replicate_medians = [1.0, 2.0, 100.0]
-    results = [
-        RgResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=rep,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
-            run_results=[
-                _make_run_result(rep, "protein_backbone", 10.0 + float(rep)).model_copy(
-                    update={"median_rg": median}
-                )
-            ],
-            n_frames_total=100,
-            n_frames_used=90,
-            trajectory_files=["/fake/traj.dcd"],
-        )
-        for rep, median in zip((1, 2, 3), replicate_medians)
-    ]
-
-    aggregated = analysis.aggregate(ctx, results)
-
-    backbone = next(run for run in aggregated.run_results if run.run_label == "protein_backbone")
-    assert backbone.per_replicate_medians == pytest.approx(replicate_medians)
-    assert backbone.overall_median == pytest.approx(2.0)
-
-
-def test_compare_two_conditions(tmp_path: Path) -> None:
-    """compare with two conditions should produce pairwise results without ANOVA."""
-    analysis = RgAnalysis()
-    settings = RgSettings(runs=_make_run_settings())
-    control = make_condition(label="Control")
-    treated = make_condition(label="Treated")
-
-    control_agg = RgAggregatedResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=None,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA; segid C and backbone",
-        replicates=[1, 2, 3],
-        n_replicates=3,
-        run_results=[
-            _make_aggregated_run("protein_backbone", "protein and name CA", [15.0, 15.1, 14.9]),
-            _make_aggregated_run("polymer_core", "segid C and backbone", [22.0, 22.1, 21.9]),
-        ],
-        source_result_files=[],
-    )
-    treated_agg = RgAggregatedResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=None,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA; segid C and backbone",
-        replicates=[1, 2, 3],
-        n_replicates=3,
-        run_results=[
-            _make_aggregated_run("protein_backbone", "protein and name CA", [14.0, 14.1, 13.9]),
-            _make_aggregated_run("polymer_core", "segid C and backbone", [20.0, 20.1, 19.9]),
-        ],
-        source_result_files=[],
-    )
-
-    ctx = make_comparison_context(
-        name="rg_compare",
-        conditions=[control, treated],
-        analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
-        results_dir=tmp_path / "comparison",
-        settings=settings,
-        control_label="Control",
-        equilibration="10ns",
-        recompute=False,
-        aggregated_results={"Control": control_agg, "Treated": treated_agg},
-    )
-
-    comparison = analysis.compare(ctx)
-
-    assert comparison is not None
-    assert comparison.anova_by_run is None
-    assert len(comparison.pairwise_comparisons) == 2
-
-
-def test_compare_three_conditions(tmp_path: Path) -> None:
-    """compare with three conditions should include ANOVA per run."""
-    analysis = RgAnalysis()
-    settings = RgSettings(runs=_make_run_settings())
-    conditions = [
-        make_condition(label="Control"),
-        make_condition(label="A"),
-        make_condition(label="B"),
-    ]
-
-    aggregated_results = {
-        "Control": RgAggregatedResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=None,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA; segid C and backbone",
-            replicates=[1, 2, 3],
-            n_replicates=3,
-            run_results=[
-                _make_aggregated_run("protein_backbone", "protein and name CA", [15.0, 15.1, 14.9]),
-                _make_aggregated_run("polymer_core", "segid C and backbone", [22.0, 22.1, 21.9]),
-            ],
-            source_result_files=[],
-        ),
-        "A": RgAggregatedResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=None,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA; segid C and backbone",
-            replicates=[1, 2, 3],
-            n_replicates=3,
-            run_results=[
-                _make_aggregated_run("protein_backbone", "protein and name CA", [14.0, 14.1, 13.9]),
-                _make_aggregated_run("polymer_core", "segid C and backbone", [20.0, 20.1, 19.9]),
-            ],
-            source_result_files=[],
-        ),
-        "B": RgAggregatedResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=None,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA; segid C and backbone",
-            replicates=[1, 2, 3],
-            n_replicates=3,
-            run_results=[
-                _make_aggregated_run("protein_backbone", "protein and name CA", [16.0, 16.1, 15.9]),
-                _make_aggregated_run("polymer_core", "segid C and backbone", [23.0, 23.1, 22.9]),
-            ],
-            source_result_files=[],
-        ),
-    }
-
-    ctx = make_comparison_context(
-        name="rg_compare",
-        conditions=conditions,
-        analysis_dirs={c.label: tmp_path / c.label for c in conditions},
-        results_dir=tmp_path / "comparison",
-        settings=settings,
-        control_label="Control",
-        equilibration="10ns",
-        recompute=False,
-        aggregated_results=aggregated_results,
-    )
-
-    comparison = analysis.compare(ctx)
-
-    assert comparison is not None
-    assert comparison.anova_by_run is not None
-    assert len(comparison.anova_by_run) == 2
-
-
-def test_compare_marks_untestable_with_single_replicates(tmp_path: Path) -> None:
-    """compare should mark pairwise and ANOVA as untestable for n<2 groups."""
-    analysis = RgAnalysis()
-    settings = RgSettings(
-        runs=[RgRunSettings(label="protein_backbone", selection="protein and name CA")]
-    )
-    conditions = [
-        make_condition(label="Control"),
-        make_condition(label="A"),
-        make_condition(label="B"),
-    ]
-
-    aggregated_results = {
-        "Control": RgAggregatedResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=None,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
-            replicates=[1],
-            n_replicates=1,
-            run_results=[
-                _make_aggregated_run("protein_backbone", "protein and name CA", [15.0]),
-            ],
-            source_result_files=[],
-        ),
-        "A": RgAggregatedResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=None,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
-            replicates=[1],
-            n_replicates=1,
-            run_results=[
-                _make_aggregated_run("protein_backbone", "protein and name CA", [14.0]),
-            ],
-            source_result_files=[],
-        ),
-        "B": RgAggregatedResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=None,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
-            replicates=[1],
-            n_replicates=1,
-            run_results=[
-                _make_aggregated_run("protein_backbone", "protein and name CA", [16.0]),
-            ],
-            source_result_files=[],
-        ),
-    }
-
-    ctx = make_comparison_context(
-        name="rg_compare",
-        conditions=conditions,
-        analysis_dirs={c.label: tmp_path / c.label for c in conditions},
-        results_dir=tmp_path / "comparison",
-        settings=settings,
-        control_label="Control",
-        equilibration="10ns",
-        recompute=False,
-        aggregated_results=aggregated_results,
-    )
-
-    comparison = analysis.compare(ctx)
-
-    assert comparison is not None
-    assert comparison.anova_by_run is not None
-    assert len(comparison.pairwise_comparisons) == 2
-    for pair in comparison.pairwise_comparisons:
-        assert pair.testable is False
-        assert pair.p_value is None
-        assert pair.cohens_d is None
-
-    for anova in comparison.anova_by_run:
-        assert anova.testable is False
-        assert anova.p_value is None
-
-
-def test_compare_skips_run_missing_in_some_conditions(tmp_path: Path) -> None:
-    """compare should keep rankings for partially available runs."""
-    analysis = RgAnalysis()
-    settings = RgSettings(runs=_make_run_settings())
-    control = make_condition(label="Control")
-    treated = make_condition(label="Treated")
-
-    control_agg = RgAggregatedResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=None,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA",
-        replicates=[1, 2, 3],
-        n_replicates=3,
-        run_results=[
-            _make_aggregated_run("protein_backbone", "protein and name CA", [15.0, 15.1, 14.9]),
-        ],
-        source_result_files=[],
-    )
-    treated_agg = RgAggregatedResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=None,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="protein and name CA; segid C and backbone",
-        replicates=[1, 2, 3],
-        n_replicates=3,
-        run_results=[
-            _make_aggregated_run("protein_backbone", "protein and name CA", [14.0, 14.1, 13.9]),
-            _make_aggregated_run("polymer_core", "segid C and backbone", [20.0, 20.1, 19.9]),
-        ],
-        source_result_files=[],
-    )
-
-    ctx = make_comparison_context(
-        name="rg_compare",
-        conditions=[control, treated],
-        analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
-        results_dir=tmp_path / "comparison",
-        settings=settings,
-        control_label="Control",
-        equilibration="10ns",
-        recompute=False,
-        aggregated_results={"Control": control_agg, "Treated": treated_agg},
-    )
-
-    comparison = analysis.compare(ctx)
-
-    assert comparison is not None
-    assert comparison.run_labels == ["protein_backbone", "polymer_core"]
-    assert len(comparison.pairwise_comparisons) == 1
-
-
-def test_rg_run_settings_fragment_mode_defaults() -> None:
-    """Fragment mode settings should retain fragment-aware defaults."""
     settings = RgRunSettings(label="frags", selection="segid C", calculation_mode="fragments")
 
-    assert settings.calculation_mode == "fragments"
     assert settings.fragment_weighting == "equal"
-    assert settings.save_fragment_distribution is True
-    assert settings.histogram_bins == 50
-
-
-def test_rg_run_settings_fragment_mode_mass_weighted() -> None:
-    """Fragment mode should accept explicit mass weighting."""
-    settings = RgRunSettings(
-        label="frags",
-        selection="segid C",
-        calculation_mode="fragments",
-        fragment_weighting="mass",
-    )
-
-    assert settings.calculation_mode == "fragments"
-    assert settings.fragment_weighting == "mass"
-
-
-def test_rg_run_settings_fragment_weighting_rejected_in_selection_mode() -> None:
-    """Selection mode should reject non-default fragment weighting."""
     with pytest.raises(ValueError, match="fragment_weighting is only meaningful"):
         RgRunSettings(
-            label="selection_mode",
+            label="bad",
             selection="protein",
             calculation_mode="selection",
             fragment_weighting="mass",
         )
+    with pytest.raises(ValueError, match="At least one Rg run"):
+        RgSettings(runs=[])
 
 
-def test_rg_run_settings_histogram_bins_minimum() -> None:
-    """Histogram bin validation should enforce lower bound of 2."""
-    valid = RgRunSettings(
-        label="frags",
-        selection="segid C",
-        calculation_mode="fragments",
-        histogram_bins=2,
+def test_compute_rg_run_selection_mode_uses_analysisbase(fake_mdanalysis: None) -> None:
+    """Custom Rg AnalysisBase should collect frame/time arrays in selection mode."""
+
+    universe = _FakeUniverse(n_frames=4, dt=20.0)
+    universe.selection_map["protein"] = _FakeAtomGroup(universe, [1.0, 2.0, 3.0, 4.0])
+
+    payload = compute_rg_run(
+        universe=universe,
+        run=RgRunSettings(label="protein_rg", selection="protein"),
+        replicate=1,
+        start=1,
+        stop=4,
+        step=2,
+        timestep_ps=20.0,
     )
-    assert valid.histogram_bins == 2
 
-    with pytest.raises(ValueError, match="histogram_bins must be >= 2"):
-        RgRunSettings(
-            label="frags_invalid",
-            selection="segid C",
+    assert payload.rg_values.tolist() == [2.0, 4.0]
+    assert payload.frames.tolist() == [1, 3]
+    assert payload.time_ns.tolist() == [0.02, 0.06]
+    assert payload.effective_timestep_ps == pytest.approx(40.0)
+
+
+def test_compute_rg_run_fragment_mode_records_distributions(fake_mdanalysis: None) -> None:
+    """Fragment mode should reduce fragment Rg values and retain masses/counts."""
+
+    universe = _FakeUniverse(n_frames=3, dt=10.0)
+    frag_a = _FakeAtomGroup(universe, [1.0, 2.0, 3.0], masses=2.0)
+    frag_b = _FakeAtomGroup(universe, [3.0, 4.0, 5.0], masses=1.0)
+    universe.selection_map["polymer"] = _FakeAtomGroup(
+        universe,
+        [0.0, 0.0, 0.0],
+        fragments=[frag_a, frag_b],
+    )
+
+    payload = compute_rg_run(
+        universe=universe,
+        run=RgRunSettings(
+            label="polymer_frags",
+            selection="polymer",
             calculation_mode="fragments",
-            histogram_bins=1,
-        )
-
-
-def test_rg_run_settings_selection_mode_defaults_unchanged() -> None:
-    """Selection mode defaults should remain unchanged."""
-    settings = RgRunSettings(label="test", selection="protein")
-
-    assert settings.calculation_mode == "selection"
-    assert settings.fragment_weighting == "equal"
-    assert settings.save_fragment_distribution is True
-    assert settings.histogram_bins == 50
-
-
-def test_rg_run_result_fragment_metadata_defaults() -> None:
-    """Selection-mode run results should keep fragment metadata unset."""
-    result = _make_run_result(1, "protein_backbone", 15.0)
-
-    assert result.calculation_mode == "selection"
-    assert result.fragment_weighting is None
-    assert result.mean_fragments_per_frame is None
-    assert result.min_fragments_per_frame is None
-    assert result.max_fragments_per_frame is None
-    assert result.fragment_mean_rg is None
-    assert result.fragment_std_rg is None
-    assert result.fragment_median_rg is None
-    assert result.fragment_min_rg is None
-    assert result.fragment_max_rg is None
-    assert result.fragment_rg_p10 is None
-    assert result.fragment_rg_p25 is None
-    assert result.fragment_rg_p50 is None
-    assert result.fragment_rg_p75 is None
-    assert result.fragment_rg_p90 is None
-
-
-def test_rg_run_result_fragment_metadata_populated() -> None:
-    """Run result should retain explicitly provided fragment metadata."""
-    result = _make_run_result(1, "polymer_frags", 8.0)
-    result = result.model_copy(
-        update={
-            "calculation_mode": "fragments",
-            "fragment_weighting": "equal",
-            "mean_fragments_per_frame": 5.0,
-            "min_fragments_per_frame": 5,
-            "max_fragments_per_frame": 5,
-            "fragment_mean_rg": 8.2,
-            "fragment_std_rg": 1.1,
-            "fragment_median_rg": 8.0,
-            "fragment_min_rg": 5.5,
-            "fragment_max_rg": 11.0,
-            "fragment_rg_p10": 6.5,
-            "fragment_rg_p25": 7.2,
-            "fragment_rg_p50": 8.0,
-            "fragment_rg_p75": 9.0,
-            "fragment_rg_p90": 10.0,
-        }
+            fragment_weighting="mass",
+        ),
+        replicate=1,
+        start=0,
+        stop=3,
+        step=1,
+        timestep_ps=10.0,
     )
 
-    assert result.calculation_mode == "fragments"
-    assert result.fragment_weighting == "equal"
-    assert result.mean_fragments_per_frame == pytest.approx(5.0)
-    assert result.min_fragments_per_frame == 5
-    assert result.max_fragments_per_frame == 5
-    assert result.fragment_mean_rg == pytest.approx(8.2)
-    assert result.fragment_std_rg == pytest.approx(1.1)
-    assert result.fragment_median_rg == pytest.approx(8.0)
-    assert result.fragment_min_rg == pytest.approx(5.5)
-    assert result.fragment_max_rg == pytest.approx(11.0)
-    assert result.fragment_rg_p10 == pytest.approx(6.5)
-    assert result.fragment_rg_p25 == pytest.approx(7.2)
-    assert result.fragment_rg_p50 == pytest.approx(8.0)
-    assert result.fragment_rg_p75 == pytest.approx(9.0)
-    assert result.fragment_rg_p90 == pytest.approx(10.0)
+    assert payload.rg_values.tolist() == pytest.approx([5.0 / 3.0, 8.0 / 3.0, 11.0 / 3.0])
+    assert payload.fragment_counts_per_frame.tolist() == [2, 2, 2]
+    assert payload.fragment_masses.tolist() == [2.0, 1.0]
+    assert payload.fragment_rg_values.tolist() == [1.0, 3.0, 2.0, 4.0, 3.0, 5.0]
 
 
-def test_rg_aggregated_result_fragment_histogram_fields() -> None:
-    """Aggregated run result should store fragment histogram metadata."""
-    agg = RgRunAggregatedResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=None,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="segid C",
-        replicates=[1, 2],
-        n_replicates=2,
-        run_label="polymer_frags",
-        selection="segid C",
-        overall_mean=8.0,
-        overall_sem=0.1,
-        overall_median=8.0,
-        per_replicate_means=[7.9, 8.1],
-        per_replicate_stds=[0.5, 0.5],
-        per_replicate_medians=[7.9, 8.1],
-        calculation_mode="fragments",
-        fragment_weighting="equal",
-        overall_mean_fragments_per_frame=5.0,
-        per_replicate_mean_fragments_per_frame=[5.0, 5.0],
-        fragment_histogram_edges=[5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
-        fragment_histogram_density_mean=[0.1, 0.2, 0.3, 0.25, 0.15],
-        fragment_histogram_density_sem=[0.01, 0.02, 0.03, 0.02, 0.01],
-        reduced_histogram_edges=[7.0, 7.5, 8.0, 8.5, 9.0],
-        reduced_histogram_density_mean=[0.2, 0.4, 0.3, 0.1],
-        reduced_histogram_density_sem=[0.02, 0.04, 0.03, 0.01],
-    )
-
-    assert agg.fragment_histogram_edges is not None
-    assert agg.fragment_histogram_density_mean is not None
-    assert agg.fragment_histogram_density_sem is not None
-    assert agg.reduced_histogram_edges is not None
-    assert agg.reduced_histogram_density_mean is not None
-    assert agg.reduced_histogram_density_sem is not None
-    assert len(agg.fragment_histogram_edges) == 6
-    assert len(agg.fragment_histogram_density_mean) == 5
-    assert len(agg.fragment_histogram_density_sem) == 5
-    assert len(agg.reduced_histogram_edges) == 5
-    assert len(agg.reduced_histogram_density_mean) == 4
-    assert len(agg.reduced_histogram_density_sem) == 4
-
-
-def test_rg_aggregated_result_histogram_fields_default_none() -> None:
-    """Selection-mode aggregated result should leave histogram fields unset."""
-    agg = _make_aggregated_run("protein_backbone", "protein and name CA", [14.9, 15.1])
-
-    assert agg.fragment_histogram_edges is None
-    assert agg.fragment_histogram_density_mean is None
-    assert agg.fragment_histogram_density_sem is None
-    assert agg.reduced_histogram_edges is None
-    assert agg.reduced_histogram_density_mean is None
-    assert agg.reduced_histogram_density_sem is None
-
-
-def test_rg_run_summary_fragment_fields() -> None:
-    """Run summary should preserve fragment metadata fields."""
-    summary = RgRunSummary(
-        label="polymer_frags",
-        selection="segid C",
-        mean_rg=8.0,
-        sem_rg=0.1,
-        per_replicate_means=[7.9, 8.1],
-        calculation_mode="fragments",
-        fragment_weighting="equal",
-        mean_fragments_per_frame=5.0,
-    )
-
-    assert summary.label == "polymer_frags"
-    assert summary.selection == "segid C"
-    assert summary.calculation_mode == "fragments"
-    assert summary.fragment_weighting == "equal"
-    assert summary.mean_fragments_per_frame == pytest.approx(5.0)
-
-
-def test_rg_run_summary_selection_mode_defaults() -> None:
-    """Run summary defaults should represent selection mode."""
-    summary = RgRunSummary(
-        label="protein_backbone",
-        selection="protein and name CA",
-        mean_rg=15.0,
-        sem_rg=0.1,
-        per_replicate_means=[14.9, 15.0, 15.1],
-    )
-
-    assert summary.calculation_mode == "selection"
-    assert summary.fragment_weighting is None
-    assert summary.mean_fragments_per_frame is None
-
-
-def test_compare_passes_fragment_metadata_to_summaries(tmp_path: Path) -> None:
-    """compare should pass fragment metadata into condition run summaries."""
-
-    def _make_fragment_aggregated_run(
-        run_label: str,
-        selection: str,
-        per_replicate_means: list[float],
-    ) -> RgRunAggregatedResult:
-        """Create an aggregated run result with fragment metadata."""
-        mean_value = sum(per_replicate_means) / len(per_replicate_means)
-        return RgRunAggregatedResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=None,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string=selection,
-            replicates=[1, 2, 3][: len(per_replicate_means)],
-            n_replicates=len(per_replicate_means),
-            run_label=run_label,
-            selection=selection,
-            overall_mean=mean_value,
-            overall_sem=0.05,
-            overall_median=mean_value,
-            per_replicate_means=per_replicate_means,
-            per_replicate_stds=[0.2 for _ in per_replicate_means],
-            per_replicate_medians=per_replicate_means,
-            calculation_mode="fragments",
-            fragment_weighting="equal",
-            overall_mean_fragments_per_frame=5.0,
-            per_replicate_mean_fragments_per_frame=[5.0] * len(per_replicate_means),
-        )
+def test_run_replicate_persists_artifact_and_empty_selection_skip(
+    fake_mdanalysis: None,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MDA lifecycle should persist a ReplicateArtifact and explicit skip provenance."""
 
     analysis = RgAnalysis()
     settings = RgSettings(
         runs=[
-            RgRunSettings(label="polymer_frags", selection="segid C", calculation_mode="fragments")
+            RgRunSettings(label="protein_rg", selection="protein"),
+            RgRunSettings(label="missing_rg", selection="missing"),
         ]
     )
-    control = make_condition(label="Control")
-    treated = make_condition(label="Treatment")
-
-    control_agg = RgAggregatedResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=None,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="segid C",
-        replicates=[1, 2, 3],
-        n_replicates=3,
-        run_results=[_make_fragment_aggregated_run("polymer_frags", "segid C", [8.0, 8.1, 7.9])],
-        source_result_files=[],
+    condition = make_condition(label="Control", replicates=(1,))
+    ctx = make_replicate_context(
+        condition=condition,
+        replicate=1,
+        output_dir=tmp_path / "run_1",
+        settings=settings,
+        equilibration="0ns",
     )
-    treated_agg = RgAggregatedResult(
-        config_hash="hash123",
-        polyzymd_version="1.2.1",
-        replicate=None,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="segid C",
-        replicates=[1, 2, 3],
-        n_replicates=3,
-        run_results=[_make_fragment_aggregated_run("polymer_frags", "segid C", [7.5, 7.6, 7.4])],
-        source_result_files=[],
+    universe = _FakeUniverse(n_frames=3, dt=10.0)
+    universe.selection_map["protein"] = _FakeAtomGroup(universe, [10.0, 11.0, 12.0])
+    universe.selection_map["missing"] = _FakeAtomGroup(universe, [])
+
+    class _Provider:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        @classmethod
+        def from_config(cls, *_args: Any, **_kwargs: Any) -> _Provider:
+            return cls()
+
+        def load_universe(self, _replicate: int) -> _FakeUniverse:
+            return universe
+
+        def provenance_for(self, _replicate: int) -> dict[str, Any]:
+            return {"warnings": []}
+
+    class _Loader:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def get_timestep(self, _replicate: int, unit: str = "ps") -> float:
+            """Return a fixed timestep for frame-window resolution."""
+
+            del unit
+            return 10.0
+
+    monkeypatch.setattr(analysis, "_mda_universe_provider_factory", lambda: _Provider)
+    monkeypatch.setattr(analysis, "_trajectory_loader_factory", lambda: _Loader)
+    monkeypatch.setattr("polyzymd.analyses.rg._mda.compute_config_hash", lambda _config: "hash123")
+
+    artifact = AnalysisLifecycle(analysis).run_replicate_once(
+        condition,
+        settings,
+        "0ns",
+        ctx.output_dir,
+        1,
+        recompute=True,
     )
 
-    ctx = make_comparison_context(
-        name="rg_fragment_compare",
+    assert isinstance(artifact, ReplicateArtifact)
+    assert [run["run_label"] for run in artifact.payload["runs"]] == ["protein_rg"]
+    assert artifact.payload["skipped_runs"][0]["run_label"] == "missing_rg"
+    assert RG_PBC_POLICY_WARNING in artifact.warnings
+    persisted = ArtifactStore(ctx.output_dir).read_replicate_result("result.json")
+    assert persisted.replicate == 1
+    assert persisted.sidecars[0].path.startswith("sidecars/rg_000_protein_rg_")
+
+
+def test_fragment_mode_lifecycle_records_structured_topology_provenance(
+    fake_mdanalysis: None,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fragment-mode execution should emit warning and structured provenance."""
+
+    analysis = RgAnalysis()
+    settings = RgSettings(
+        runs=[
+            RgRunSettings(
+                label="polymer/frags",
+                selection="polymer",
+                calculation_mode="fragments",
+                fragment_weighting="mass",
+            )
+        ]
+    )
+    condition = make_condition(label="Control", replicates=(1,))
+    output_dir = tmp_path / "run_1"
+    universe = _FakeUniverse(n_frames=3, dt=10.0)
+    frag_a = _FakeAtomGroup(universe, [1.0, 2.0, 3.0], masses=2.0)
+    frag_b = _FakeAtomGroup(universe, [3.0, 4.0, 5.0], masses=1.0)
+    universe.selection_map["polymer"] = _FakeAtomGroup(
+        universe,
+        [0.0, 0.0, 0.0],
+        fragments=[frag_a, frag_b],
+    )
+
+    class _Provider:
+        @classmethod
+        def from_config(cls, *_args: Any, **_kwargs: Any) -> _Provider:
+            return cls()
+
+        def load_universe(self, _replicate: int) -> _FakeUniverse:
+            return universe
+
+        def provenance_for(self, _replicate: int) -> dict[str, Any]:
+            return {"warnings": []}
+
+    class _Loader:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def get_timestep(self, _replicate: int, unit: str = "ps") -> float:
+            """Return a fixed timestep for frame-window resolution."""
+
+            del unit
+            return 10.0
+
+    monkeypatch.setattr(analysis, "_mda_universe_provider_factory", lambda: _Provider)
+    monkeypatch.setattr(analysis, "_trajectory_loader_factory", lambda: _Loader)
+    monkeypatch.setattr("polyzymd.analyses.rg._mda.compute_config_hash", lambda _config: "hash123")
+
+    artifact = AnalysisLifecycle(analysis).run_replicate_once(
+        condition,
+        settings,
+        "0ns",
+        output_dir,
+        1,
+        recompute=True,
+    )
+
+    assert isinstance(artifact, ReplicateArtifact)
+    assert RG_FRAGMENT_POLICY_WARNING in artifact.warnings
+    run_payload = artifact.payload["runs"][0]
+    assert run_payload["run_label"] == "polymer/frags"
+    assert run_payload["calculation_mode"] == "fragments"
+    assert run_payload["fragment_topology"]["fragment_source"] == ("MDAnalysis AtomGroup.fragments")
+    assert run_payload["fragment_topology"]["requires_topology_bonds"] is True
+    assert run_payload["fragment_topology"]["fallback_used"] is False
+    assert run_payload["fragment_topology"]["n_topology_fragments"] == 2
+    assert artifact.provenance["fragment_topology"]["polymer/frags"]["n_topology_fragments"] == 2
+
+    aggregate_ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1,),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="0ns",
+    )
+    aggregate = analysis.aggregate(aggregate_ctx, [artifact])
+
+    aggregate_topology = aggregate.provenance["fragment_topology"]["polymer/frags"]
+    assert aggregate_topology["fragment_source"] == "MDAnalysis AtomGroup.fragments"
+    assert aggregate_topology["requires_topology_bonds"] is True
+    assert aggregate_topology["per_replicate"] == [
+        {
+            "replicate": 1,
+            "n_topology_fragments": 2,
+            "fallback_used": False,
+            "single_fragment": False,
+            "fragment_weighting": "mass",
+            "save_fragment_distribution": True,
+        }
+    ]
+
+
+def test_aggregate_rejects_noncanonical_inputs(tmp_path) -> None:
+    """Rg aggregation should reject non-canonical inputs with recompute guidance."""
+
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
+    ctx = make_aggregate_context(
+        condition=make_condition(label="Control", replicates=(1,)),
+        replicates=(1,),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="0ns",
+    )
+    noncanonical = {"analysis_type": "rg_replicate", "replicate": 1, "run_results": []}
+
+    with pytest.raises(TypeError, match="Non-canonical Rg replicate caches are incompatible"):
+        analysis.aggregate(ctx, [noncanonical])
+
+
+def test_aggregate_artifacts_and_compare_via_adapter(tmp_path) -> None:
+    """Rg should aggregate ReplicateArtifact inputs and compare condition artifacts."""
+
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
+    control = make_condition(label="Control", replicates=(1, 2))
+    treated = make_condition(label="Treated", replicates=(1, 2))
+    control_dir = tmp_path / "control"
+    treated_dir = tmp_path / "treated"
+    control_artifacts = [
+        _replicate_artifact(control_dir, condition_label="Control", replicate=1, settings=settings),
+        _replicate_artifact(control_dir, condition_label="Control", replicate=2, settings=settings),
+    ]
+    treated_artifacts = [
+        _replicate_artifact(
+            treated_dir,
+            condition_label="Treated",
+            replicate=1,
+            settings=settings,
+            rg_values=[8.0, 9.0],
+        ),
+        _replicate_artifact(
+            treated_dir,
+            condition_label="Treated",
+            replicate=2,
+            settings=settings,
+            rg_values=[9.0, 10.0],
+        ),
+    ]
+    control_ctx = make_aggregate_context(
+        condition=control,
+        replicates=(1, 2),
+        output_dir=control_dir / "aggregated",
+        settings=settings,
+        equilibration="0ns",
+    )
+    treated_ctx = make_aggregate_context(
+        condition=treated,
+        replicates=(1, 2),
+        output_dir=treated_dir / "aggregated",
+        settings=settings,
+        equilibration="0ns",
+    )
+
+    control_agg = analysis.aggregate(control_ctx, control_artifacts)
+    treated_agg = analysis.aggregate(treated_ctx, treated_artifacts)
+
+    assert isinstance(control_agg, ConditionArtifact)
+    assert control_agg.payload["runs"][0]["overall_mean"] == pytest.approx(12.0)
+    assert control_agg.payload["runs"][0]["reduced_histogram_edges"] is not None
+    compare_ctx = make_comparison_context(
+        name="rg_compare",
         conditions=[control, treated],
-        analysis_dirs={"Control": tmp_path / "control", "Treatment": tmp_path / "treated"},
+        analysis_dirs={"Control": control_dir, "Treated": treated_dir},
         results_dir=tmp_path / "comparison",
         settings=settings,
         control_label="Control",
-        equilibration="10ns",
-        recompute=False,
-        aggregated_results={"Control": control_agg, "Treatment": treated_agg},
+        equilibration="0ns",
+        aggregated_results={"Control": control_agg, "Treated": treated_agg},
     )
-
-    comparison = analysis.compare(ctx)
-
+    comparison = analysis.compare(compare_ctx)
     assert comparison is not None
-    for condition_summary in comparison.conditions:
-        run_summary = condition_summary.get_run("polymer_frags")
-        assert run_summary.calculation_mode == "fragments"
-        assert run_summary.fragment_weighting == "equal"
-        assert run_summary.mean_fragments_per_frame == pytest.approx(5.0)
+    assert comparison.ranking_by_run["protein_rg"] == ["Treated", "Control"]
 
 
-def test_aggregate_fragment_mode_builds_histograms(condition: Condition, tmp_path: Path) -> None:
-    """aggregate should build fragment histogram metadata from NPZ sidecars."""
-    import numpy as np
+def test_aggregate_honors_skip_only_run(tmp_path) -> None:
+    """Aggregation should omit runs only when every missing entry has skip provenance."""
 
-    rng = np.random.default_rng(42)
     analysis = RgAnalysis()
-    run_label = "polymer_frags"
-
-    run_results: list[RgRunResult] = []
-    for rep in (1, 2):
-        run_dir = tmp_path / f"run_{rep}"
-        run_dir.mkdir(parents=True, exist_ok=True)
-        npz_path = run_dir / f"rg_{run_label}_timeseries.npz"
-
-        rg_values = rng.normal(loc=8.0, scale=0.5, size=50)
-        time_ns = np.linspace(0.0, 50.0, 50)
-        frames = np.arange(50)
-        fragment_rg_values = rng.normal(loc=8.0, scale=1.5, size=250)
-        fragment_counts_per_frame = np.full(50, 5, dtype=int)
-
-        np.savez(
-            npz_path,
-            rg_values=rg_values,
-            time_ns=time_ns,
-            frames=frames,
-            fragment_rg_values=fragment_rg_values,
-            fragment_counts_per_frame=fragment_counts_per_frame,
-        )
-
-        run_results.append(
-            _make_run_result(rep, run_label, float(np.mean(rg_values))).model_copy(
-                update={
-                    "selection": "segid C",
-                    "selection_string": "segid C",
-                    "npz_path": str(npz_path),
-                    "calculation_mode": "fragments",
-                    "fragment_weighting": "equal",
-                    "mean_fragments_per_frame": 5.0,
-                    "min_fragments_per_frame": 5,
-                    "max_fragments_per_frame": 5,
-                }
-            )
-        )
-
-    results = [
-        RgResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
-            replicate=rep,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="segid C",
-            run_results=[run_result],
-            n_frames_total=50,
-            n_frames_used=50,
-            trajectory_files=["/fake/traj.dcd"],
-        )
-        for rep, run_result in zip((1, 2), run_results)
-    ]
-
     settings = RgSettings(
-        runs=[RgRunSettings(label=run_label, selection="segid C", calculation_mode="fragments")]
+        runs=[
+            RgRunSettings(label="protein_rg", selection="protein"),
+            RgRunSettings(label="polymer_rg", selection="polymer"),
+        ]
     )
-    ctx = make_aggregate_context(
-        condition=condition,
-        replicates=(1, 2),
-        output_dir=tmp_path / "aggregated",
-        settings=settings,
-        equilibration="10ns",
-    )
+    condition = make_condition(label="No Polymer", replicates=(1, 2))
 
-    aggregated = analysis.aggregate(ctx, results)
+    def skipped(rep: int) -> list[dict[str, Any]]:
+        """Return skip provenance for one replicate."""
 
-    run_agg = aggregated.run_results[0]
-    assert run_agg.calculation_mode == "fragments"
-    assert run_agg.fragment_histogram_edges is not None
-    assert len(run_agg.fragment_histogram_edges) == 51
-    assert run_agg.fragment_histogram_density_mean is not None
-    assert len(run_agg.fragment_histogram_density_mean) == 50
-    assert run_agg.reduced_histogram_edges is not None
-    assert run_agg.overall_mean_fragments_per_frame == pytest.approx(5.0)
+        return [
+            {
+                "run_label": "polymer_rg",
+                "selection": "polymer",
+                "replicate": rep,
+                "reason": "selection matched no atoms",
+                "reason_code": "empty_selection",
+            }
+        ]
 
-
-def test_rg_plot_settings_distribution_defaults() -> None:
-    """Distribution plotting defaults should be enabled."""
-    settings = RgPlotSettings()
-
-    assert settings.generate_distribution_plots is True
-    assert settings.distribution_figsize == (12, 5)
-
-
-def test_rg_plot_settings_distribution_disabled() -> None:
-    """Distribution plotting can be disabled explicitly."""
-    settings = RgPlotSettings(generate_distribution_plots=False)
-
-    assert settings.generate_distribution_plots is False
-
-
-def test_format_table_fragment_mode() -> None:
-    """Table formatter should surface fragment mode metadata."""
-    conditions = [
-        RgConditionSummary(
-            label="Control",
-            config_path="/fake/control.yaml",
-            n_replicates=3,
-            run_summaries=[
-                RgRunSummary(
-                    label="polymer_frags",
-                    selection="segid C",
-                    mean_rg=8.0,
-                    sem_rg=0.1,
-                    per_replicate_means=[7.9, 8.0, 8.1],
-                    calculation_mode="fragments",
-                    fragment_weighting="equal",
-                    mean_fragments_per_frame=5.0,
-                ),
-            ],
-        ),
-        RgConditionSummary(
-            label="Treatment",
-            config_path="/fake/treatment.yaml",
-            n_replicates=3,
-            run_summaries=[
-                RgRunSummary(
-                    label="polymer_frags",
-                    selection="segid C",
-                    mean_rg=7.5,
-                    sem_rg=0.08,
-                    per_replicate_means=[7.4, 7.5, 7.6],
-                    calculation_mode="fragments",
-                    fragment_weighting="equal",
-                    mean_fragments_per_frame=5.0,
-                ),
-            ],
-        ),
-    ]
-
-    result = RgComparisonResult(
-        metric="mean_rg",
-        name="rg_fragment_compare",
-        n_runs=1,
-        run_labels=["polymer_frags"],
-        control_label="Control",
-        conditions=conditions,
-        pairwise_comparisons=[],
-        anova_by_run=None,
-        ranking_by_run={"polymer_frags": ["Treatment", "Control"]},
-        equilibration_time="10ns",
-        created_at=datetime.now(),
-        polyzymd_version="1.2.1",
-    )
-
-    text = format_rg_comparison(result, "table")
-
-    assert "fragments" in text
-
-
-def test_format_markdown_fragment_mode() -> None:
-    """Markdown formatter should surface fragment mode metadata."""
-    conditions = [
-        RgConditionSummary(
-            label="Control",
-            config_path="/fake/control.yaml",
-            n_replicates=3,
-            run_summaries=[
-                RgRunSummary(
-                    label="polymer_frags",
-                    selection="segid C",
-                    mean_rg=8.0,
-                    sem_rg=0.1,
-                    per_replicate_means=[7.9, 8.0, 8.1],
-                    calculation_mode="fragments",
-                    fragment_weighting="equal",
-                    mean_fragments_per_frame=5.0,
-                ),
-            ],
-        ),
-        RgConditionSummary(
-            label="Treatment",
-            config_path="/fake/treatment.yaml",
-            n_replicates=3,
-            run_summaries=[
-                RgRunSummary(
-                    label="polymer_frags",
-                    selection="segid C",
-                    mean_rg=7.5,
-                    sem_rg=0.08,
-                    per_replicate_means=[7.4, 7.5, 7.6],
-                    calculation_mode="fragments",
-                    fragment_weighting="equal",
-                    mean_fragments_per_frame=5.0,
-                ),
-            ],
-        ),
-    ]
-
-    result = RgComparisonResult(
-        metric="mean_rg",
-        name="rg_fragment_compare",
-        n_runs=1,
-        run_labels=["polymer_frags"],
-        control_label="Control",
-        conditions=conditions,
-        pairwise_comparisons=[],
-        anova_by_run=None,
-        ranking_by_run={"polymer_frags": ["Treatment", "Control"]},
-        equilibration_time="10ns",
-        created_at=datetime.now(),
-        polyzymd_version="1.2.1",
-    )
-
-    text = format_rg_comparison(result, "markdown")
-
-    assert "fragments" in text
-
-
-def test_aggregate_selection_mode_builds_reduced_histograms(
-    condition: Condition, tmp_path: Path
-) -> None:
-    """aggregate should build reduced histogram for selection-mode runs with NPZ data."""
-    import numpy as np
-
-    rng = np.random.default_rng(99)
-    analysis = RgAnalysis()
-    run_label = "protein_rg"
-
-    run_results: list[RgRunResult] = []
-    for rep in (1, 2):
-        run_dir = tmp_path / f"run_{rep}"
-        run_dir.mkdir(parents=True, exist_ok=True)
-        npz_path = run_dir / f"rg_{run_label}_timeseries.npz"
-
-        rg_values = rng.normal(loc=15.5, scale=0.3, size=50)
-        time_ns = np.linspace(0.0, 50.0, 50)
-        frames = np.arange(50)
-
-        np.savez(
-            npz_path,
-            rg_values=rg_values,
-            time_ns=time_ns,
-            frames=frames,
-        )
-
-        run_results.append(
-            _make_run_result(rep, run_label, float(np.mean(rg_values))).model_copy(
-                update={
-                    "npz_path": str(npz_path),
-                    "calculation_mode": "selection",
-                }
-            )
-        )
-
-    results = [
-        RgResult(
-            config_hash="hash123",
-            polyzymd_version="1.2.1",
+    artifacts = [
+        _replicate_artifact(
+            tmp_path,
+            condition_label="No Polymer",
             replicate=rep,
-            equilibration_time=10.0,
-            equilibration_unit="ns",
-            selection_string="protein and name CA",
-            run_results=[run_result],
-            n_frames_total=50,
-            n_frames_used=50,
-            trajectory_files=["/fake/traj.dcd"],
+            settings=settings,
+            skipped_runs=skipped(rep),
         )
-        for rep, run_result in zip((1, 2), run_results)
+        for rep in (1, 2)
     ]
-
-    settings = RgSettings(runs=[RgRunSettings(label=run_label, selection="protein and name CA")])
     ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2),
         output_dir=tmp_path / "aggregated",
         settings=settings,
-        equilibration="10ns",
+        equilibration="0ns",
     )
 
-    aggregated = analysis.aggregate(ctx, results)
+    aggregate = analysis.aggregate(ctx, artifacts)
 
-    run_agg = aggregated.run_results[0]
-    assert run_agg.calculation_mode == "selection"
-    # Selection mode should now build reduced histograms
-    assert run_agg.reduced_histogram_edges is not None
-    assert len(run_agg.reduced_histogram_edges) == 51  # 50 bins + 1 edges
-    assert run_agg.reduced_histogram_density_mean is not None
-    assert len(run_agg.reduced_histogram_density_mean) == 50
-    assert run_agg.reduced_histogram_density_sem is not None
-    assert len(run_agg.reduced_histogram_density_sem) == 50
-    # Fragment-specific fields should remain None
-    assert run_agg.fragment_histogram_edges is None
-    assert run_agg.fragment_histogram_density_mean is None
-    assert run_agg.overall_mean_fragments_per_frame is None
+    assert [run["run_label"] for run in aggregate.payload["runs"]] == ["protein_rg"]
+    assert len(aggregate.payload["skipped_runs"]) == 2
 
 
-def test_load_condition_aggregated_missing_dir(tmp_path: Path) -> None:
-    """Condition aggregated loader should return None when directory is missing."""
-    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
+def test_aggregate_rejects_missing_artifact_sidecar(tmp_path) -> None:
+    """Aggregation should validate canonical NPZ sidecars."""
 
-    assert _load_condition_aggregated(tmp_path) is None
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
+    artifact = _replicate_artifact(
+        tmp_path,
+        condition_label="Control",
+        replicate=1,
+        settings=settings,
+    )
+    sidecar_path = ArtifactStore(tmp_path / "run_1").resolve_sidecar(artifact.sidecars[0])
+    sidecar_path.unlink()
+    ctx = make_aggregate_context(
+        condition=make_condition(label="Control", replicates=(1,)),
+        replicates=(1,),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="0ns",
+    )
 
-
-def test_load_condition_aggregated_no_json(tmp_path: Path) -> None:
-    """Condition aggregated loader should return None without aggregated JSON files."""
-    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
-
-    (tmp_path / "aggregated").mkdir(parents=True)
-
-    assert _load_condition_aggregated(tmp_path) is None
-
-
-def test_load_condition_aggregated_loads_json(tmp_path: Path) -> None:
-    """Condition aggregated loader should parse latest aggregated JSON payload."""
-    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
-
-    payload = {
-        "run_results": [
-            {
-                "run_label": "polymer_frags",
-                "calculation_mode": "fragments",
-                "reduced_histogram_edges": [7.0, 7.5, 8.0, 8.5],
-                "reduced_histogram_density_mean": [0.2, 0.5, 0.3],
-                "reduced_histogram_density_sem": [0.02, 0.05, 0.03],
-            }
-        ]
-    }
-    json_path = tmp_path / "aggregated" / "rg_aggregated_rep1_2.json"
-    json_path.parent.mkdir(parents=True)
-    json_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    loaded = _load_condition_aggregated(tmp_path)
-
-    assert loaded is not None
-    assert "run_results" in loaded
-    assert loaded["run_results"][0]["run_label"] == "polymer_frags"
+    with pytest.raises(Exception, match="Missing sidecar"):
+        analysis.aggregate(ctx, [artifact])
 
 
-def test_load_condition_aggregated_canonical_result_json(tmp_path: Path) -> None:
-    """Condition aggregated loader should find canonical result.json from framework."""
-    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
+def test_plotters_load_canonical_artifacts_only(tmp_path) -> None:
+    """Rg plot helpers should read replicate and condition artifacts, not non-canonical names."""
 
-    payload = {
+    settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
+    analysis_dir = tmp_path / "control"
+    artifacts = [
+        _replicate_artifact(
+            analysis_dir, condition_label="Control", replicate=1, settings=settings
+        ),
+        _replicate_artifact(
+            analysis_dir, condition_label="Control", replicate=2, settings=settings
+        ),
+    ]
+    analysis = RgAnalysis()
+    ctx = make_aggregate_context(
+        condition=make_condition(label="Control", replicates=(1, 2)),
+        replicates=(1, 2),
+        output_dir=analysis_dir / "aggregated",
+        settings=settings,
+        equilibration="0ns",
+    )
+    aggregate = analysis.aggregate(ctx, artifacts)
+    ArtifactStore(ctx.output_dir).write_condition_result(aggregate)
+
+    time_ns, matrix = _load_replicate_timeseries(analysis_dir, "protein_rg", [1, 2])
+    aggregate_payload = _load_condition_aggregated(analysis_dir)
+
+    assert time_ns.tolist() == [0.0, 1.0]
+    assert matrix.shape == (2, 2)
+    assert aggregate_payload is not None
+    assert aggregate_payload["runs"][0]["run_label"] == "protein_rg"
+
+
+def test_plotters_fail_on_corrupted_canonical_artifacts(tmp_path) -> None:
+    """Rg plot helpers should fail loudly for corrupted canonical artifacts."""
+
+    run_dir = tmp_path / "control" / "run_1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "result.json").write_text("not-json", encoding="utf-8")
+
+    with pytest.raises(ArtifactStoreError, match="Failed to validate replicate artifact"):
+        _load_replicate_timeseries(tmp_path / "control", "protein_rg", [1])
+
+    agg_dir = tmp_path / "control" / "aggregated"
+    agg_dir.mkdir()
+    (agg_dir / "result.json").write_text("not-json", encoding="utf-8")
+
+    with pytest.raises(ArtifactStoreError, match="Failed to validate condition artifact"):
+        _load_condition_aggregated(tmp_path / "control")
+
+
+def test_plotters_fail_on_completed_run_without_sidecar_metadata(tmp_path) -> None:
+    """Completed Rg run payloads without sidecar metadata should be hard failures."""
+
+    settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
+    artifact = _replicate_artifact(
+        tmp_path / "control",
+        condition_label="Control",
+        replicate=1,
+        settings=settings,
+    )
+    artifact.payload["runs"][0].pop("sidecar")
+    ArtifactStore(tmp_path / "control" / "run_1").write_replicate_result(artifact)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Completed Rg run 'protein_rg'.*missing valid NPZ sidecar metadata",
+    ):
+        _load_replicate_timeseries(tmp_path / "control", "protein_rg", [1])
+
+
+def test_plot_rejects_non_artifact_aggregated_result_from_disk(tmp_path) -> None:
+    """plot should fail loudly when aggregated Rg cache lacks artifact identity."""
+
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
+    analysis_dir = tmp_path / "analysis" / "control" / "rg"
+    aggregated_dir = analysis_dir / "aggregated"
+    aggregated_dir.mkdir(parents=True)
+    noncanonical_payload = {
+        "analysis_type": "rg_aggregated",
+        "replicates": [1, 2],
+        "n_replicates": 2,
         "run_results": [
             {
                 "run_label": "protein_rg",
-                "calculation_mode": "selection",
-                "reduced_histogram_edges": [14.0, 14.5, 15.0, 15.5],
-                "reduced_histogram_density_mean": [0.1, 0.6, 0.3],
-                "reduced_histogram_density_sem": [0.01, 0.06, 0.03],
+                "selection": "protein",
+                "overall_mean": 1.0,
+                "per_replicate_means": [1.0, 1.0],
             }
-        ]
+        ],
     }
-    json_path = tmp_path / "aggregated" / "result.json"
-    json_path.parent.mkdir(parents=True)
-    json_path.write_text(json.dumps(payload), encoding="utf-8")
+    (aggregated_dir / "result.json").write_text(json.dumps(noncanonical_payload), encoding="utf-8")
+    results_dir = tmp_path / "comparison"
+    results_dir.mkdir()
+    _make_comparison_result().save(results_dir / "result.json")
+    plot_ctx = PlotContext(
+        conditions=[make_condition(label="Control", replicates=(1, 2))],
+        analysis_dirs={"Control": analysis_dir},
+        results_dir=results_dir,
+        output_dir=tmp_path / "figures",
+        settings=settings,
+        plot_settings=PlotSettings(),
+        equilibration="0ns",
+    )
 
-    loaded = _load_condition_aggregated(tmp_path)
-
-    assert loaded is not None
-    assert "run_results" in loaded
-    assert loaded["run_results"][0]["run_label"] == "protein_rg"
+    with pytest.raises(ValueError, match="canonical MDA ConditionArtifact"):
+        analysis.plot(plot_ctx)
 
 
-def test_load_condition_aggregated_current_rg_filename(tmp_path: Path) -> None:
-    """Condition aggregated loader should read current native Rg aggregated filename."""
-    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
+def test_condition_artifact_records_pbc_policy(tmp_path) -> None:
+    """Aggregates should preserve explicit PBC provenance."""
 
-    payload = {
-        "run_results": [
+    settings = _settings()
+    artifact = _replicate_artifact(
+        tmp_path,
+        condition_label="Control",
+        replicate=1,
+        settings=settings,
+        skipped_runs=[
             {
-                "run_label": "protein_rg",
-                "calculation_mode": "selection",
-                "reduced_histogram_edges": [14.0, 14.5, 15.0, 15.5],
-                "reduced_histogram_density_mean": [0.1, 0.6, 0.3],
-                "reduced_histogram_density_sem": [0.01, 0.06, 0.03],
+                "run_label": "polymer/frags",
+                "selection": "polymer",
+                "replicate": 1,
+                "reason": "selection matched no atoms",
+                "reason_code": "empty_selection",
             }
-        ]
-    }
-    json_path = tmp_path / "aggregated" / "rg_reps1-3_eq10ns.json"
-    json_path.parent.mkdir(parents=True)
-    json_path.write_text(json.dumps(payload), encoding="utf-8")
+        ],
+    )
+    ctx = make_aggregate_context(
+        condition=make_condition(label="Control", replicates=(1,)),
+        replicates=(1,),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="0ns",
+    )
 
-    loaded = _load_condition_aggregated(tmp_path)
+    aggregate = RgAnalysis().aggregate(ctx, [artifact])
 
-    assert loaded is not None
-    assert loaded["run_results"][0]["run_label"] == "protein_rg"
-
-
-def test_load_condition_aggregated_tagged_rg_filename(tmp_path: Path) -> None:
-    """Condition aggregated loader should read tagged native Rg aggregated filename."""
-    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
-
-    payload = {
-        "run_results": [
-            {
-                "run_label": "protein_rg",
-                "calculation_mode": "selection",
-                "reduced_histogram_edges": [14.0, 14.5, 15.0, 15.5],
-                "reduced_histogram_density_mean": [0.1, 0.6, 0.3],
-                "reduced_histogram_density_sem": [0.01, 0.06, 0.03],
-            }
-        ]
-    }
-    json_path = tmp_path / "aggregated" / "rg_reps1-3_eq10ns_abcd1234.json"
-    json_path.parent.mkdir(parents=True)
-    json_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    loaded = _load_condition_aggregated(tmp_path)
-
-    assert loaded is not None
-    assert loaded["run_results"][0]["run_label"] == "protein_rg"
+    assert aggregate.provenance["pbc_policy"]["coordinates"] == "as_loaded"
+    assert RG_PBC_POLICY_WARNING in aggregate.warnings

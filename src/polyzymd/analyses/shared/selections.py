@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -49,6 +50,21 @@ if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _expected_selection_exceptions() -> tuple[type[Exception], ...]:
+    """Return exception types that represent expected selection failures.
+
+    MDAnalysis exception classes are inspected only when already loaded so
+    selection helpers remain importable without the analysis stack installed.
+    """
+
+    exceptions: list[type[Exception]] = [ValueError, AttributeError]
+    mda_exceptions = sys.modules.get("MDAnalysis.exceptions")
+    selection_error = getattr(mda_exceptions, "SelectionError", None)
+    if isinstance(selection_error, type) and issubclass(selection_error, Exception):
+        exceptions.append(selection_error)
+    return tuple(exceptions)
 
 
 # =============================================================================
@@ -376,10 +392,10 @@ def validate_selection(universe: "Universe", selection: str) -> dict:
             "truncated": len(atoms) > 10,
         }
 
-    except Exception as e:
+    except _expected_selection_exceptions() as exc:
         return {
             "valid": False,
-            "error": str(e),
+            "error": str(exc),
             "n_atoms": 0,
         }
 

@@ -6,6 +6,7 @@
 # ============================================================================
 
 name: "LipA_ResorufinButyrate_DMSO10"
+engine: "openmm"
 description: "LipA enzyme with Resorufin-Butyrate in 10% DMSO co-solvent"
 
 # ============================================================================
@@ -115,6 +116,8 @@ simulation_phases:
     ensemble: "NPT"
     duration: 50.0  # 50 ns production
     samples: 1250
+    report_interval: 20000
+    checkpoint_interval: 60.0
     time_step: 2.0
     thermostat: "LangevinMiddle"
     thermostat_timescale: 1.0

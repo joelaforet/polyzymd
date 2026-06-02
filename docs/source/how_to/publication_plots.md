@@ -1,8 +1,8 @@
 # Customizing Plots for Publication
 
 PolyzyMD generates plots automatically when you run analyses. This guide shows
-you how to control output format, resolution, figure size, and style using
-`plot_settings` in `comparison.yaml`.
+you how to control output format, resolution, figure size, and PolyzyMD theme
+presets using `plot_settings` in `comparison.yaml`.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -24,7 +24,7 @@ Add this block to `comparison.yaml`:
 plot_settings:
   format: "png"              # or "pdf", "svg"
   dpi: 300
-  style: "publication"       # or "presentation", "minimal"
+  style: "compact"           # or "large_elements", "low_ink"
 ```
 
 These fields are defined in PolyzyMD's `PlotSettings` model:
@@ -37,8 +37,41 @@ These fields are defined in PolyzyMD's `PlotSettings` model:
   - Allowed range: `50` to `600`
   - Primarily affects raster output (`png`)
 - `style`
-  - Global style preset
-  - Allowed values: `publication`, `presentation`, `minimal`
+  - PolyzyMD built-in theme preset for standard analysis plots
+  - Allowed values: `compact`, `large_elements`, `low_ink`
+
+`style` is a PolyzyMD theme preset selector, not a matplotlib or seaborn
+stylesheet name. It does not choose the output `format`, `dpi`, figure sizes, or
+condition color palettes. Use `format`, `dpi`, per-plugin `figsize` settings,
+and `color_palette` or `semantic_colors` for those choices.
+
+The built-in presets are:
+
+- `compact` — the default compact print-style preset.
+- `large_elements` — larger fonts, markers, lines, error-bar caps, and fill
+  opacity for slides or high-visibility output.
+- `low_ink` — removes or reduces replicate dots, bar edges, and heavy reference
+  lines for simpler figures.
+
+Use `theme` to override individual visual values on top of the selected preset.
+For example, this starts from `large_elements` and then changes only the listed
+fields:
+
+```yaml
+plot_settings:
+  format: "png"
+  dpi: 300
+  style: "large_elements"
+  theme:
+    dot_size: 40
+    title_fontsize: 20
+    show_watermark: false
+```
+
+Standard PolyzyMD plots are designed for consistent screening and reporting.
+Final manuscript figures may still need custom plotting from saved analysis
+artifacts when a journal, panel layout, or statistical annotation requires
+bespoke styling.
 
 You can also set these optional global fields:
 
@@ -53,8 +86,130 @@ plot_settings:
   output_dir: "figures/"
   format: "png"
   dpi: 300
-  style: "publication"
+  style: "compact"
   color_palette: "tab10"
+```
+
+## Use semantic colors for condition series
+
+Use `plot_settings.semantic_colors` when the condition colors should carry
+experimental meaning, such as polymer family, composition, or dose. Semantic
+colors are opt-in and apply to condition-series plots. Plot elements that are
+not conditions, such as residue classes or secondary-structure categories, may
+keep their categorical colors.
+
+```yaml
+conditions:
+  - label: "No Polymer"
+    config: "../no_polymer/config.yaml"
+    replicates: [1, 2, 3]
+  - label: "100% SBMA"
+    config: "../sbma_100/config.yaml"
+    replicates: [1, 2, 3]
+  - label: "100% EGMA"
+    config: "../egma_100/config.yaml"
+    replicates: [1, 2, 3]
+  - label: "1% EGPMA"
+    config: "../egpma_1/config.yaml"
+    replicates: [1, 2, 3]
+  - label: "2% EGPMA"
+    config: "../egpma_2/config.yaml"
+    replicates: [1, 2, 3]
+  - label: "5% EGPMA"
+    config: "../egpma_5/config.yaml"
+    replicates: [1, 2, 3]
+  - label: "10% EGPMA"
+    config: "../egpma_10/config.yaml"
+    replicates: [1, 2, 3]
+
+control: "No Polymer"
+
+plot_settings:
+  style: "compact"
+  semantic_colors:
+    enabled: true
+
+    # Plot-only order. This does not change statistics, rankings, or artifacts.
+    order:
+      - "No Polymer"
+      - "100% SBMA"
+      - "100% EGMA"
+      - "1% EGPMA"
+      - "2% EGPMA"
+      - "5% EGPMA"
+      - "10% EGPMA"
+
+    control_color: "#222222"
+    missing_color: "#bdbdbd"
+
+    conditions:
+      "No Polymer":
+        role: control
+        order: 0
+      "100% SBMA":
+        family: sbma
+        value: 100
+        order: 10
+      "100% EGMA":
+        family: egma
+        value: 100
+        order: 20
+      "1% EGPMA":
+        family: egpma
+        value: 1
+        order: 30
+      "2% EGPMA":
+        family: egpma
+        value: 2
+        order: 40
+      "5% EGPMA":
+        family: egpma
+        value: 5
+        order: 50
+      "10% EGPMA":
+        family: egpma
+        value: 10
+        order: 60
+
+    families:
+      sbma:
+        colormap: "Blues"
+        scale: linear
+        vmin: 0
+        vmax: 100
+        colormap_range: [0.55, 0.85]
+      egma:
+        colormap: "Greens"
+        scale: linear
+        vmin: 0
+        vmax: 100
+        colormap_range: [0.55, 0.85]
+      egpma:
+        colormap: "Purples"
+        scale: ordinal
+        value_order: [1, 2, 5, 10]
+        colormap_range: [0.35, 0.9]
+```
+
+Labels containing `%` should be quoted in YAML. Every key under
+`semantic_colors.conditions`, every entry in `semantic_colors.order`, and the
+top-level `control` value must match a `conditions[*].label` exactly.
+
+For small percentage series such as `1`, `2`, `5`, and `10`, `scale: ordinal`
+often gives more readable figures than a linear scale because each configured
+level receives a visually distinct shade. For numeric gradients with many
+levels, `scale: linear` is usually appropriate.
+
+For multi-component chemistry, avoid naive additive RGB mixing: colors that add
+component hues together can become hard to interpret and hard to reproduce.
+Prefer a simpler mapping where hue identifies the family and shade identifies
+the ordered composition or dose within that family.
+
+After changing only plot settings, regenerate figures from cached comparison
+results:
+
+```bash
+polyzymd compare plot-all -f comparison.yaml
 ```
 
 ## Changing output format
@@ -67,7 +222,7 @@ Switch file format by changing `plot_settings.format`.
 plot_settings:
   format: "png"
   dpi: 300
-  style: "publication"
+  style: "compact"
 ```
 
 Use PNG for quick drafts, sharing in chat/slides, and embedding in docs.
@@ -78,7 +233,7 @@ Use PNG for quick drafts, sharing in chat/slides, and embedding in docs.
 plot_settings:
   format: "pdf"
   dpi: 300
-  style: "publication"
+  style: "compact"
 ```
 
 PDF is vector output, so it scales cleanly.
@@ -89,7 +244,7 @@ PDF is vector output, so it scales cleanly.
 plot_settings:
   format: "svg"
   dpi: 300
-  style: "publication"
+  style: "compact"
 ```
 
 SVG is vector output and is convenient for web use and post-editing.
@@ -102,7 +257,7 @@ Set `plot_settings.dpi` to control raster resolution.
 plot_settings:
   format: "png"
   dpi: 150
-  style: "publication"
+  style: "compact"
 ```
 
 Common ranges:
@@ -121,7 +276,7 @@ In addition to global settings, plugins can define their own plot options under
 ```yaml
 plot_settings:
   format: "pdf"
-  style: "publication"
+  style: "compact"
   rmsd:
     show_per_replicate: true
     figsize: [10, 6]
@@ -140,7 +295,7 @@ What changes:
 
 ```yaml
 plot_settings:
-  style: "publication"
+  style: "compact"
   rmsf:
     show_error: true
     highlight_residues: [77, 133, 156]
@@ -158,10 +313,12 @@ What changes:
 
 ```yaml
 plot_settings:
-  style: "publication"
+  style: "compact"
   contacts:
-    generate_enrichment_heatmap: true
-    generate_system_coverage_heatmap: false
+    generate_contact_fraction_profile: true
+    generate_residence_time_profile: true
+    generate_cf_by_aa_class_bars: true
+    generate_cf_by_partition_bars: true
     figsize_contact_fraction_profile: [16, 5]
     show_contact_fraction_profile_error: true
     highlight_residues: [77, 133, 156]
@@ -190,6 +347,7 @@ If a plugin has no cached comparison result yet, run that comparison first
 ## See Also
 
 - [How to Compare Simulation Conditions](analysis_compare_conditions.md)
+- [Create Custom Plots from Analysis Artifacts](custom_artifact_plotting.md)
 - [Comparison and Plotting Reference](../reference/analysis_comparison_reference.md)
 - [RMSD Analysis Reference](../reference/analysis_rmsd_reference.md)
 - [RMSF Analysis Reference](../reference/analysis_rmsf_reference.md)

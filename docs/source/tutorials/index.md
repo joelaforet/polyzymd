@@ -5,10 +5,10 @@ want a worked example with a clear beginning, middle, and end.
 
 ## Featured Tutorials
 
-- [Run Your First PolyzyMD Simulation](quickstart.md)
-  Build your first project scaffold and validate a minimal run.
 - [Run Your First Analysis](first_analysis.md)
   Go from finished trajectories to RMSF results in five steps.
+- [Prepare a PDB for OpenFF and PolyzyMD](prepare_pdb_for_openff.md)
+  Inspect and clean a raw 4CHA crystal structure before simulation setup.
 - [Analyze a Multi-Condition Study](analysis_complete_workflow.md)
   Follow the full path from finished trajectories to comparison figures.
 - [Measure Surface Accessibility with SASA](sasa_analysis.md)
@@ -27,15 +27,15 @@ If you already know what you want to do, jump to
 [How-To Guides](../how_to/index.md) instead.
 
 <!-- IMAGE OPPORTUNITY: Add a compact pipeline figure for the end-to-end
-analysis workflow, using the existing compare/analyze stages as a visual
-backbone. -->
+analysis workflow, from completed trajectories through analysis artifacts,
+comparison results, and figures. -->
 
 ```{toctree}
 :hidden:
 :maxdepth: 1
 
-Run Your First PolyzyMD Simulation <quickstart>
 Run Your First Analysis <first_analysis>
+Prepare a PDB for OpenFF and PolyzyMD <prepare_pdb_for_openff>
 Analyze a Multi-Condition Study <analysis_complete_workflow>
 Measure Surface Accessibility with SASA <sasa_analysis>
 ```

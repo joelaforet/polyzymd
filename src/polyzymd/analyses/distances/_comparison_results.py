@@ -180,6 +180,8 @@ class DistancePairwiseComparison(BaseModel):
     distance_direction: str
     distance_significant: bool
     distance_percent_change: float
+    distance_testable: bool = True
+    distance_note: str | None = None
 
     # Fraction metric (optional)
     fraction_t_statistic: float | None = None
@@ -189,6 +191,8 @@ class DistancePairwiseComparison(BaseModel):
     fraction_direction: str | None = None
     fraction_significant: bool | None = None
     fraction_percent_change: float | None = None
+    fraction_testable: bool | None = None
+    fraction_note: str | None = None
 
 
 class DistancePairANOVA(BaseModel):
@@ -216,9 +220,13 @@ class DistancePairANOVA(BaseModel):
     distance_f_statistic: float
     distance_p_value: float
     distance_significant: bool
+    distance_testable: bool = True
+    distance_note: str | None = None
     fraction_f_statistic: float | None = None
     fraction_p_value: float | None = None
     fraction_significant: bool | None = None
+    fraction_testable: bool | None = None
+    fraction_note: str | None = None
 
 
 class DistanceComparisonResult(

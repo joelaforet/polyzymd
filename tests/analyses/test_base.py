@@ -49,6 +49,8 @@ class ToyAggregatedResult(BaseModel):
     sem_value: float
     replicate_values: list[float]
     n_replicates: int
+    replicates: list[int] | None = None
+    settings_fingerprint: str | None = None
 
     def save(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,17 +62,26 @@ class ToyAggregatedResult(BaseModel):
         return cls.model_validate_json(path.read_text())
 
 
-class ToyAnalysis(Analysis):
+class _MDAContractMixin:
+    """Provide the required MDA lifecycle seam for direct compute fakes."""
+
+    def build_mda_jobs(self, ctx):
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+
+class ToyAnalysis(_MDAContractMixin, Analysis):
     """Concrete analysis for testing the plugin system."""
 
     name: ClassVar[str] = "toy"
     Settings: ClassVar[type] = ToySettings
     AggregatedResultClass: ClassVar[type] = ToyAggregatedResult
-    aliases: ClassVar[tuple[str, ...]] = ("toy_alias",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+    def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
         return ToyResult(value=replicate * 1.5, replicate=replicate)
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[ToyResult]) -> ToyAggregatedResult:
@@ -84,6 +95,8 @@ class ToyAnalysis(Analysis):
             sem_value=sem_val,
             replicate_values=values,
             n_replicates=len(values),
+            replicates=list(ctx.replicates),
+            settings_fingerprint=self.aggregate_settings_fingerprint(ctx.settings),
         )
 
     def extract_metrics(self, summary: ToyAggregatedResult) -> dict[str, MetricValue]:
@@ -132,11 +145,8 @@ class TestAnalysisABC:
         """Subclass without 'name' should fail at class creation."""
         with pytest.raises(TypeError, match="must define 'name'"):
 
-            class BadAnalysis(Analysis):
+            class BadAnalysis(_MDAContractMixin, Analysis):
                 Settings = ToySettings
-
-                def compute_replicate(self, ctx, replicate):
-                    pass
 
                 def aggregate(self, ctx, results):
                     pass
@@ -145,11 +155,8 @@ class TestAnalysisABC:
         """Subclass without 'Settings' should fail at class creation."""
         with pytest.raises(TypeError, match="must define 'Settings'"):
 
-            class BadAnalysis(Analysis):
+            class BadAnalysis(_MDAContractMixin, Analysis):
                 name = "bad"
-
-                def compute_replicate(self, ctx, replicate):
-                    pass
 
                 def aggregate(self, ctx, results):
                     pass
@@ -166,10 +173,190 @@ class TestAnalysisABC:
         # Should not raise — AbstractMiddle still has __abstractmethods__
         assert hasattr(AbstractMiddle, "__abstractmethods__")
 
+    def test_concrete_subclass_requires_compute_contract(self) -> None:
+        """Compute-stage plugins must provide MDA jobs."""
+
+        with pytest.raises(
+            TypeError,
+            match=r"public plugins must implement build_mda_jobs\(\) when has_compute_stage=True",
+        ):
+
+            class BadComputeContractAnalysis(Analysis):
+                name: ClassVar[str] = "bad_compute_contract"
+                Settings: ClassVar[type] = ToySettings
+
+                def aggregate(self, ctx, results):
+                    return {"dummy": True}
+
+    def test_noncanonical_compute_replicate_hook_is_not_supported(self) -> None:
+        """Non-canonical compute_replicate-only plugins should not satisfy the contract."""
+
+        assert not hasattr(Analysis, "compute_replicate")
+
+        with pytest.raises(
+            TypeError,
+            match=r"public plugins must implement build_mda_jobs\(\)",
+        ):
+
+            class NoncanonicalComputeOnlyAnalysis(Analysis):
+                name: ClassVar[str] = "noncanonical_compute_only"
+                Settings: ClassVar[type] = ToySettings
+
+                def compute_replicate(self, ctx, replicate):
+                    return {"replicate": replicate}
+
+                def aggregate(self, ctx, results):
+                    return {"dummy": True}
+
+    def test_run_replicate_override_is_rejected(self) -> None:
+        """Concrete plugins cannot define the removed replicate hook."""
+
+        with pytest.raises(TypeError, match=r"defines removed hook run_replicate\(\)"):
+
+            class RunReplicateAnalysis(_MDAContractMixin, Analysis):
+                name: ClassVar[str] = "run_replicate_removed"
+                Settings: ClassVar[type] = ToySettings
+
+                def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+                    del ctx
+                    return {"value": float(replicate)}
+
+                def aggregate(self, ctx, results):
+                    del ctx, results
+                    return {"dummy": True}
+
+    def test_run_replicate_inherited_from_mixin_is_rejected(self) -> None:
+        """Concrete plugins cannot inherit the removed replicate hook from mixins."""
+
+        class RemovedHookMixin:
+            def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+                """Non-canonical hook that should be rejected after MRO resolution."""
+
+                del ctx
+                return {"value": float(replicate)}
+
+        with pytest.raises(TypeError, match=r"inherits removed hook run_replicate\(\)"):
+
+            class InheritedRunReplicateAnalysis(_MDAContractMixin, RemovedHookMixin, Analysis):
+                name: ClassVar[str] = "inherited_run_replicate_removed"
+                Settings: ClassVar[type] = ToySettings
+
+                def aggregate(self, ctx, results):
+                    del ctx, results
+                    return {"dummy": True}
+
+    def test_run_replicate_inherited_from_abstract_intermediate_is_rejected(self) -> None:
+        """Concrete plugins cannot inherit the removed hook from abstract bases."""
+
+        from abc import abstractmethod
+
+        class AbstractNoncanonicalRunReplicate(Analysis):
+            @abstractmethod
+            def extra_method(self) -> None:
+                """Keep the intermediate class abstract during definition."""
+
+            def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+                """Non-canonical hook that should be rejected once concrete."""
+
+                del ctx
+                return {"value": float(replicate)}
+
+        assert getattr(AbstractNoncanonicalRunReplicate, "__abstractmethods__", None)
+
+        with pytest.raises(TypeError, match=r"inherits removed hook run_replicate\(\)"):
+
+            class ConcreteNoncanonicalRunReplicate(
+                _MDAContractMixin, AbstractNoncanonicalRunReplicate
+            ):
+                name: ClassVar[str] = "concrete_inherited_run_replicate_removed"
+                Settings: ClassVar[type] = ToySettings
+
+                def extra_method(self) -> None:
+                    """Implement the abstract method to trigger concrete validation."""
+
+                def aggregate(self, ctx, results):
+                    del ctx, results
+                    return {"dummy": True}
+
+    def test_internal_compute_dispatch_uses_mda_lifecycle(
+        self, toy_analysis, toy_condition
+    ) -> None:
+        """The internal compute dispatcher should run the configured compute seam."""
+        ctx = ReplicateContext(
+            condition=toy_condition,
+            replicate=2,
+            sim_config=toy_condition.sim_config,
+            output_dir=Path("/tmp/run_2"),
+            equilibration="10ns",
+            recompute=False,
+            settings=ToySettings(),
+        )
+
+        result = toy_analysis._run_compute_stage(ctx, replicate=2)
+
+        assert result == ToyResult(value=3.0, replicate=2)
+
+    def test_runner_hooks_are_rejected(self) -> None:
+        """Removed runner hooks should fail with migration guidance."""
+
+        with pytest.raises(
+            TypeError,
+            match=r"defines removed runner hook\(s\): build_runner.*Implement build_mda_jobs",
+        ):
+
+            class RemovedRunnerHookAnalysis(Analysis):
+                name: ClassVar[str] = "removed_runner_hook"
+                Settings: ClassVar[type] = ToySettings
+
+                def build_runner(self, ctx, replicate, universe, window):
+                    """Non-canonical hook that should be rejected."""
+
+                    del ctx, replicate, universe, window
+                    return object()
+
+                def aggregate(self, ctx, results):
+                    """Return a simple aggregate result."""
+
+                    del ctx, results
+                    return {"dummy": True}
+
+    def test_mda_job_subclass_satisfies_compute_contract(self) -> None:
+        """MDA job-backed plugins should satisfy the compute contract."""
+
+        class MDAJobOnlyAnalysis(Analysis):
+            name: ClassVar[str] = "mda_job_only_contract"
+            Settings: ClassVar[type] = ToySettings
+
+            def build_mda_jobs(self, ctx):
+                """Return no jobs for contract-only validation."""
+
+                del ctx
+                return []
+
+            def aggregate(self, ctx, results):
+                """Return a simple aggregate result."""
+
+                del ctx, results
+                return {"dummy": True}
+
+        assert MDAJobOnlyAnalysis().name == "mda_job_only_contract"
+
+    def test_compare_only_subclass_can_disable_compute_stage(self) -> None:
+        """Compare-only plugins should remain valid with compute disabled."""
+
+        class CompareOnlyAnalysis(Analysis):
+            name: ClassVar[str] = "compare_only"
+            Settings: ClassVar[type] = ToySettings
+            has_compute_stage: ClassVar[bool] = False
+            has_aggregate_stage: ClassVar[bool] = False
+
+        plugin = CompareOnlyAnalysis()
+        assert plugin.has_compute_stage is False
+        assert plugin.has_aggregate_stage is False
+
     def test_concrete_subclass_valid(self, toy_analysis):
         """ToyAnalysis should instantiate without error."""
         assert toy_analysis.name == "toy"
-        assert toy_analysis.aliases == ("toy_alias",)
         assert toy_analysis.min_replicates == 2
 
     def test_repr(self, toy_analysis):
@@ -214,7 +401,7 @@ class TestAnalysisABC:
     def test_subclass_can_set_slurm_resource_hint(self) -> None:
         """Subclass should be able to provide SLURM defaults."""
 
-        class SlurmHintAnalysis(Analysis):
+        class SlurmHintAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "slurm_hint"
             Settings: ClassVar[type] = ToySettings
             slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(
@@ -223,7 +410,8 @@ class TestAnalysisABC:
                 cpus_per_task=4,
             )
 
-            def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+            def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+                del ctx
                 return {"value": float(replicate)}
 
             def aggregate(
@@ -272,6 +460,39 @@ class TestContextObjects:
         assert ctx.equilibration == "10ns"
         assert ctx.settings.threshold == 2.0
 
+    def test_aggregate_context_preserves_positional_api(self, toy_condition, toy_settings):
+        """Old positional aggregate context construction should remain valid."""
+        result_path = Path("/tmp/aggregated/result.json")
+
+        ctx = AggregateContext(
+            toy_condition,
+            (1, 2),
+            Path("/tmp/aggregated"),
+            "10ns",
+            toy_settings,
+            result_path,
+        )
+
+        assert ctx.condition is toy_condition
+        assert ctx.replicates == (1, 2)
+        assert ctx.output_dir == Path("/tmp/aggregated")
+        assert ctx.equilibration == "10ns"
+        assert ctx.settings is toy_settings
+        assert ctx.result_path == result_path
+        assert ctx.recompute is False
+
+        recompute_ctx = AggregateContext(
+            toy_condition,
+            (1, 2),
+            Path("/tmp/aggregated"),
+            "10ns",
+            toy_settings,
+            result_path,
+            recompute=True,
+        )
+        assert recompute_ctx.result_path == result_path
+        assert recompute_ctx.recompute is True
+
     def test_comparison_context_effective_control(self, toy_condition):
         cond2 = Condition(
             label="Control",
@@ -309,6 +530,112 @@ class TestContextObjects:
         )
         assert ctx.effective_control is None
 
+    def test_comparison_context_preserves_positional_api(self, toy_condition):
+        """Old positional comparison context construction should remain valid."""
+        result_path = Path("/tmp/results/result.json")
+        failed_conditions = [toy_condition]
+        aggregated_results = {"Test Condition": {"ok": True}}
+
+        ctx = ComparisonContext(
+            "Test Project",
+            [toy_condition],
+            [],
+            None,
+            {"Test Condition": Path("/tmp/analysis/toy")},
+            Path("/tmp/results"),
+            "10ns",
+            ToySettings(),
+            0.1,
+            "welch",
+            "tukey_hsd",
+            result_path,
+            failed_conditions,
+            aggregated_results,
+        )
+
+        assert ctx.name == "Test Project"
+        assert ctx.conditions == [toy_condition]
+        assert ctx.excluded_conditions == []
+        assert ctx.control_label is None
+        assert ctx.analysis_dirs == {"Test Condition": Path("/tmp/analysis/toy")}
+        assert ctx.results_dir == Path("/tmp/results")
+        assert ctx.equilibration == "10ns"
+        assert isinstance(ctx.settings, ToySettings)
+        assert ctx.fdr_alpha == 0.1
+        assert ctx.ttest_method == "welch"
+        assert ctx.posthoc_method == "tukey_hsd"
+        assert ctx.result_path == result_path
+        assert ctx.failed_conditions == failed_conditions
+        assert ctx.aggregated_results == aggregated_results
+        assert ctx.recompute is False
+
+        recompute_ctx = ComparisonContext(
+            "Test Project",
+            [toy_condition],
+            [],
+            None,
+            {"Test Condition": Path("/tmp/analysis/toy")},
+            Path("/tmp/results"),
+            "10ns",
+            ToySettings(),
+            0.1,
+            "welch",
+            "tukey_hsd",
+            result_path,
+            failed_conditions,
+            aggregated_results,
+            recompute=True,
+        )
+        assert recompute_ctx.fdr_alpha == 0.1
+        assert recompute_ctx.aggregated_results == aggregated_results
+        assert recompute_ctx.recompute is True
+
+    def test_plot_context_preserves_positional_api(self, toy_condition):
+        """Old positional plot context construction should remain valid."""
+        from polyzymd.config.comparison import PlotSettings
+
+        plot_settings = PlotSettings()
+        comparison_path = Path("/tmp/results/result.json")
+
+        ctx = PlotContext(
+            [toy_condition],
+            {"Test Condition": Path("/tmp/analysis/toy")},
+            Path("/tmp/results"),
+            Path("/tmp/figures/toy"),
+            ToySettings(),
+            plot_settings,
+            comparison_path,
+            "Test Condition",
+            "10ns",
+        )
+
+        assert ctx.conditions == [toy_condition]
+        assert ctx.analysis_dirs == {"Test Condition": Path("/tmp/analysis/toy")}
+        assert ctx.results_dir == Path("/tmp/results")
+        assert ctx.output_dir == Path("/tmp/figures/toy")
+        assert isinstance(ctx.settings, ToySettings)
+        assert ctx.plot_settings is plot_settings
+        assert ctx.comparison_path == comparison_path
+        assert ctx.control_label == "Test Condition"
+        assert ctx.equilibration == "10ns"
+        assert ctx.recompute is False
+
+        recompute_ctx = PlotContext(
+            [toy_condition],
+            {"Test Condition": Path("/tmp/analysis/toy")},
+            Path("/tmp/results"),
+            Path("/tmp/figures/toy"),
+            ToySettings(),
+            plot_settings,
+            comparison_path,
+            "Test Condition",
+            "10ns",
+            recompute=True,
+        )
+        assert recompute_ctx.comparison_path == comparison_path
+        assert recompute_ctx.equilibration == "10ns"
+        assert recompute_ctx.recompute is True
+
     def test_metric_value_defaults(self):
         mv = MetricValue(name="test", mean=1.0, sem=0.1, replicate_values=[0.9, 1.1])
         assert mv.higher_is_better is True
@@ -342,11 +669,11 @@ class TestDefaultCompareContract:
     def test_compare_raises_on_empty_extract_metrics(self, tmp_path: Path) -> None:
         """Empty metric extraction should raise PluginContractError."""
 
-        class EmptyMetricsAnalysis(Analysis):
+        class EmptyMetricsAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "empty_metrics"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -369,7 +696,13 @@ class TestDefaultCompareContract:
             equilibration="10ns",
             settings=ToySettings(),
             recompute=False,
-            aggregated_results={"A": {"dummy": True}},
+            aggregated_results={
+                "A": {
+                    "dummy": True,
+                    "n_replicates": 2,
+                    "settings_fingerprint": analysis.aggregate_settings_fingerprint(ToySettings()),
+                }
+            },
         )
 
         with pytest.raises(
@@ -381,11 +714,11 @@ class TestDefaultCompareContract:
     def test_compare_raises_when_extract_metrics_returns_non_dict(self, tmp_path: Path) -> None:
         """extract_metrics must return a dict mapping metric names to MetricValue."""
 
-        class BadTypeAnalysis(Analysis):
+        class BadTypeAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "bad_type"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -412,7 +745,13 @@ class TestDefaultCompareContract:
             equilibration="10ns",
             settings=ToySettings(),
             recompute=False,
-            aggregated_results={"A": {"dummy": True}},
+            aggregated_results={
+                "A": {
+                    "dummy": True,
+                    "n_replicates": 2,
+                    "settings_fingerprint": analysis.aggregate_settings_fingerprint(ToySettings()),
+                }
+            },
         )
 
         with pytest.raises(
@@ -426,11 +765,11 @@ class TestDefaultCompareContract:
     ) -> None:
         """extract_metrics values must be MetricValue instances."""
 
-        class BadValueAnalysis(Analysis):
+        class BadValueAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "bad_value"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -457,7 +796,13 @@ class TestDefaultCompareContract:
             equilibration="10ns",
             settings=ToySettings(),
             recompute=False,
-            aggregated_results={"A": {"dummy": True}},
+            aggregated_results={
+                "A": {
+                    "dummy": True,
+                    "n_replicates": 2,
+                    "settings_fingerprint": analysis.aggregate_settings_fingerprint(ToySettings()),
+                }
+            },
         )
 
         with pytest.raises(

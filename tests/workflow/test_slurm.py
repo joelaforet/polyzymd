@@ -12,6 +12,7 @@ Covers:
 
 import pytest
 
+import polyzymd.workflow.slurm as slurm_module
 from polyzymd.workflow.slurm import (
     BRIDGES2_GPU_TYPES,
     SlurmConfig,
@@ -358,9 +359,8 @@ class TestJobTemplateExitCodeHandling:
         template = SlurmScriptGenerator.JOB_TEMPLATE
         pos_concurrent = template.index("if [ $RC -eq 2 ]")
         pos_fatal = template.index("if [ $RC -ne 0 ] && [ $RC -ne 99 ]")
-        assert pos_concurrent < pos_fatal, (
-            "Exit code 2 guard must appear before the generic fatal-error guard"
-        )
+        message = "Exit code 2 guard must appear before the generic fatal-error guard"
+        assert pos_concurrent < pos_fatal, message
 
     def test_template_fatal_check_excludes_code_2(self):
         """The fatal-error guard checks 'RC -ne 0 && RC -ne 99'.
@@ -370,6 +370,117 @@ class TestJobTemplateExitCodeHandling:
         """
         template = SlurmScriptGenerator.JOB_TEMPLATE
         assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]" in template
+
+    def test_sbatch_failure_path_disables_errexit(self):
+        """The sbatch failure warning path must remain reachable under set -e."""
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+
+        resubmit_pos = template.index('echo "Work remains — resubmitting job..."')
+        set_plus_pos = template.index("set +e", resubmit_pos)
+        sbatch_pos = template.index('sbatch "$THIS_SCRIPT"', resubmit_pos)
+        submit_rc_pos = template.index("SUBMIT_RC=$?", sbatch_pos)
+        set_e_pos = template.index("set -e", submit_rc_pos)
+        warning_pos = template.index("WARNING: sbatch resubmission failed", set_e_pos)
+
+        assert set_plus_pos < sbatch_pos < submit_rc_pos < set_e_pos < warning_pos
+
+
+class TestGeneratedOpenMMScript:
+    """Tests for rendered OpenMM self-resubmitting SLURM scripts."""
+
+    @staticmethod
+    def _render_script(monkeypatch: pytest.MonkeyPatch) -> str:
+        """Render a deterministic generated script for semantic assertions.
+
+        Parameters
+        ----------
+        monkeypatch : pytest.MonkeyPatch
+            Pytest monkeypatch fixture used to pin the pixi manifest path.
+
+        Returns
+        -------
+        str
+            Rendered SLURM script text.
+        """
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="cuda-12-4")
+        return generator.generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=3,
+            working_dir="/scratch/user/run_3",
+            job_name="r3_test",
+            output_file="slurm_logs/r3_test.%j.out",
+        )
+
+    def test_rendered_script_has_no_unresolved_jinja_markers(self, monkeypatch):
+        """Rendered scripts should not leak package-template syntax."""
+        script = self._render_script(monkeypatch)
+
+        for marker in ("{{", "}}", "{%", "%}"):
+            assert marker not in script
+
+    def test_rendered_script_preserves_openmm_semantics(self, monkeypatch):
+        """Key self-resubmission and OpenMM environment semantics remain unchanged."""
+        script = self._render_script(monkeypatch)
+
+        assert "#SBATCH --partition=aa100" in script
+        assert "#SBATCH --job-name=r3_test" in script
+        assert "#SBATCH --output=slurm_logs/r3_test.%j.out" in script
+        assert (
+            'eval "$(pixi shell-hook -e cuda-12-4 '
+            '--manifest-path /projects/user/polyzymd/pixi.toml)"' in script
+        )
+        assert "export INTERCHANGE_EXPERIMENTAL=1" in script
+        assert 'CONFIG_PATH="/projects/user/run/config.yaml"' in script
+        assert "REPLICATE=3" in script
+        assert 'WORKING_DIR="/scratch/user/run_3"' in script
+        assert "polyzymd run-segment \\" in script
+        assert '    --scratch-dir "$WORKING_DIR" &' in script
+        assert "if [ $RC -eq 2 ]; then" in script
+        assert "exit 0" in script
+        assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]; then" in script
+        assert 'polyzymd check-progress -c "$CONFIG_PATH" -r "$REPLICATE"' in script
+        assert 'sbatch "$THIS_SCRIPT"' in script
+
+    def test_rendered_script_quotes_pixi_args_with_spaces(self, monkeypatch):
+        """Pixi environment and manifest values render as single shell arguments."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/PolyzyMD Run/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(
+            SlurmConfig.from_preset("aa100"),
+            pixi_env="cuda-12-4 --manifest-path /tmp/evil",
+        )
+
+        script = generator.generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=3,
+            working_dir="/scratch/user/run_3",
+            job_name="r3_test",
+            output_file="slurm_logs/r3_test.%j.out",
+        )
+
+        assert (
+            "pixi shell-hook -e 'cuda-12-4 --manifest-path /tmp/evil' "
+            "--manifest-path '/projects/user/PolyzyMD Run/pixi.toml'"
+        ) in script
+
+    def test_rendered_script_preserves_setup_order(self, monkeypatch):
+        """Pixi activation, strict mode, and OpenFF export keep their ordering."""
+        script = self._render_script(monkeypatch)
+
+        pixi_pos = script.index("pixi shell-hook")
+        strict_pos = script.index("set -e")
+        export_pos = script.index("export INTERCHANGE_EXPERIMENTAL=1")
+        run_pos = script.index("polyzymd run-segment")
+
+        assert pixi_pos < strict_pos < export_pos < run_pos
 
 
 class TestScriptValueValidation:
@@ -392,6 +503,18 @@ class TestScriptValueValidation:
 
         with pytest.raises(ValueError, match="unsafe characters"):
             _validate_script_value("$HOME", "pixi_env")
+
+    def test_bare_dollar_in_path_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("/scratch/user/run$1", "working_dir")
+
+    def test_backslash_in_path_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value(r"C:\scratch\run_1", "working_dir")
 
     def test_backtick_injection_rejected(self):
         from polyzymd.workflow.slurm import _validate_script_value
@@ -429,6 +552,56 @@ class TestScriptValueValidation:
         from polyzymd.workflow.slurm import _validate_script_value
 
         assert _validate_script_value("", "mdrun_flags") == ""
+
+    def test_generate_rejects_bare_dollar_in_config_path(self, monkeypatch):
+        """Path validation should run before the Jinja template is rendered."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"))
+
+        with pytest.raises(ValueError, match="config_path"):
+            generator.generate_job_script(
+                config_path="/projects/user/run$config.yaml",
+                replicate=1,
+                working_dir="/scratch/user/run_1",
+            )
+
+    def test_generate_rejects_backslash_in_working_dir(self, monkeypatch):
+        """Backslash paths are rejected rather than shell-escaped by Jinja."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"))
+
+        with pytest.raises(ValueError, match="working_dir"):
+            generator.generate_job_script(
+                config_path="/projects/user/run/config.yaml",
+                replicate=1,
+                working_dir=r"C:\scratch\run_1",
+            )
+
+    @pytest.mark.parametrize("replicate", [0, -1, "1", 1.5, True])
+    def test_generate_rejects_non_positive_or_unsafe_replicate(self, monkeypatch, replicate):
+        """Replicate values must be positive integers before shell rendering."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"))
+
+        with pytest.raises(ValueError, match="replicate must be a positive integer"):
+            generator.generate_job_script(
+                config_path="/projects/user/run/config.yaml",
+                replicate=replicate,
+                working_dir="/scratch/user/run_1",
+                job_name="safe_name",
+            )
 
     def test_constraint_pipe_accepted(self):
         """Pipe is valid in constraint expressions (OR)."""

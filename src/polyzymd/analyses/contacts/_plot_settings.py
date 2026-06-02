@@ -2,9 +2,35 @@
 
 from __future__ import annotations
 
-from pydantic import Field
+from typing import Any
+
+from pydantic import Field, model_validator
 
 from polyzymd.analyses.base import BasePlotSettings
+
+ARCHIVED_BINDING_PREFERENCE_PLOT_SETTINGS: frozenset[str] = frozenset(
+    {
+        "generate_enrichment_heatmap",
+        "generate_enrichment_bars",
+        "figsize_enrichment_heatmap",
+        "figsize_enrichment_bars",
+        "enrichment_colormap",
+        "show_enrichment_error",
+        "generate_system_coverage_heatmap",
+        "generate_system_coverage_bars",
+        "figsize_system_coverage_heatmap",
+        "figsize_system_coverage_bars",
+        "show_system_coverage_error",
+        "generate_user_partition_bars",
+        "figsize_user_partition_bars",
+        "show_user_partition_error",
+    }
+)
+
+ARCHIVE_DIAGNOSTIC = (
+    "Contacts binding-preference plots are not shipped as active PolyzyMD contacts "
+    "plots. Remove these settings and use the current contacts plot settings."
+)
 
 
 class ContactsPlotSettings(BasePlotSettings):
@@ -14,34 +40,6 @@ class ContactsPlotSettings(BasePlotSettings):
     ----------
     figsize : tuple[float, float]
         Default figure size for contact plots
-    generate_enrichment_heatmap : bool
-        Generate binding preference enrichment heatmap (default True)
-    generate_enrichment_bars : bool
-        Generate binding preference bar charts (default True)
-    figsize_enrichment_heatmap : tuple[float, float] | None
-        Figure size for enrichment heatmap (auto-calculated if None)
-    figsize_enrichment_bars : tuple[float, float]
-        Figure size for enrichment bar charts
-    enrichment_colormap : str
-        Colormap for enrichment heatmap (diverging recommended)
-    show_enrichment_error : bool
-        Show error bars on enrichment bar charts (default True)
-    generate_system_coverage_heatmap : bool
-        Generate system coverage enrichment heatmap (default True)
-    generate_system_coverage_bars : bool
-        Generate system coverage bar charts (default True)
-    figsize_system_coverage_heatmap : tuple[float, float] | None
-        Figure size for system coverage heatmap (auto-calculated if None)
-    figsize_system_coverage_bars : tuple[float, float]
-        Figure size for system coverage bar charts
-    show_system_coverage_error : bool
-        Show error bars on system coverage bar charts (default True)
-    generate_user_partition_bars : bool
-        Generate user-defined partition bar charts (default True)
-    figsize_user_partition_bars : tuple[float, float]
-        Figure size for user-defined partition bar charts
-    show_user_partition_error : bool
-        Show error bars on user-defined partition bar charts (default True)
     generate_contact_fraction_profile : bool
         Generate per-residue contact fraction line plot (default True)
     figsize_contact_fraction_profile : tuple[float, float]
@@ -87,24 +85,6 @@ class ContactsPlotSettings(BasePlotSettings):
     """
 
     figsize: tuple[float, float] = (10, 8)
-    generate_enrichment_heatmap: bool = True
-    generate_enrichment_bars: bool = True
-    figsize_enrichment_heatmap: tuple[float, float] | None = None
-    figsize_enrichment_bars: tuple[float, float] = (10, 6)
-    enrichment_colormap: str = "RdBu_r"  # Diverging: red=high, blue=low
-    show_enrichment_error: bool = True
-
-    # System coverage plot settings
-    generate_system_coverage_heatmap: bool = True
-    generate_system_coverage_bars: bool = True
-    figsize_system_coverage_heatmap: tuple[float, float] | None = None
-    figsize_system_coverage_bars: tuple[float, float] = (10, 6)
-    show_system_coverage_error: bool = True
-
-    # User-defined partition plot settings
-    generate_user_partition_bars: bool = True
-    figsize_user_partition_bars: tuple[float, float] = (10, 6)
-    show_user_partition_error: bool = True
 
     # Contact fraction profile plot settings
     generate_contact_fraction_profile: bool = True
@@ -139,3 +119,19 @@ class ContactsPlotSettings(BasePlotSettings):
 
     # Shared profile plot settings
     highlight_residues: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_archived_binding_preference_plot_settings(cls, data: Any) -> Any:
+        """Reject archived contacts binding-preference plot settings."""
+
+        if not isinstance(data, dict):
+            return data
+        archived_keys = sorted(ARCHIVED_BINDING_PREFERENCE_PLOT_SETTINGS.intersection(data))
+        if archived_keys:
+            joined = ", ".join(archived_keys)
+            raise ValueError(
+                f"Archived contacts binding-preference plot setting(s): {joined}. "
+                f"{ARCHIVE_DIAGNOSTIC}"
+            )
+        return data

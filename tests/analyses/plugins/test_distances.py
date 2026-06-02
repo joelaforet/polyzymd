@@ -1,12 +1,14 @@
 """Tests for the distances analysis plugin.
 
-Covers discovery, settings, compute_replicate, aggregate, compare (full override),
-plot delegation, AggregatedResultClass, _make_aggregated_filename, and lifecycle.
+Covers discovery, settings, compute-stage dispatch, aggregate, compare (full override),
+plot delegation, AggregatedResultClass, artifact deserialization, and lifecycle.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -59,11 +61,6 @@ class TestClassAttributes:
 
         assert DistancesAnalysis.Settings is DistancesSettings
 
-    def test_aliases(self):
-        from polyzymd.analyses.distances import DistancesAnalysis
-
-        assert DistancesAnalysis.aliases == ()
-
     def test_dependencies(self):
         from polyzymd.analyses.distances import DistancesAnalysis
 
@@ -72,7 +69,34 @@ class TestClassAttributes:
     def test_min_replicates(self):
         from polyzymd.analyses.distances import DistancesAnalysis
 
-        assert DistancesAnalysis.min_replicates == 2
+        assert DistancesAnalysis.min_replicates == 1
+
+
+def test_singleton_distance_pairwise_not_testable() -> None:
+    """Distances singleton pairwise metrics should be marked not testable."""
+    from polyzymd.analyses.distances import DistancesAnalysis
+
+    pair_a = SimpleNamespace(
+        mean_distance=3.0,
+        fraction_below_threshold=0.4,
+        per_replicate_means=[3.0],
+        per_replicate_fractions=[0.4],
+    )
+    pair_b = SimpleNamespace(
+        mean_distance=2.5,
+        fraction_below_threshold=0.7,
+        per_replicate_means=[2.5],
+        per_replicate_fractions=[0.7],
+    )
+
+    result = DistancesAnalysis._compare_pair("Pair", "A", "B", pair_a, pair_b)
+
+    assert result.distance_testable is False
+    assert result.distance_significant is False
+    assert result.distance_note is not None
+    assert result.fraction_testable is False
+    assert result.fraction_significant is False
+    assert result.fraction_note is not None
 
 
 # ---------------------------------------------------------------------------
@@ -200,12 +224,16 @@ class TestSettings:
 
 
 # ---------------------------------------------------------------------------
-# compute_replicate
+# run_replicate
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_distance_result(replicate: int = 1, n_pairs: int = 2):
-    """Create a mock DistanceResult."""
+def _make_mock_distance_result(
+    replicate: int = 1,
+    n_pairs: int = 2,
+    pair_schemas: list[tuple[str, str, str]] | None = None,
+):
+    """Create a mock distance replicate artifact."""
     mock = MagicMock()
     mock.replicate = replicate
     mock.config_hash = "abc123"
@@ -215,9 +243,16 @@ def _make_mock_distance_result(replicate: int = 1, n_pairs: int = 2):
     pair_results = []
     for i in range(n_pairs):
         pr = MagicMock()
-        pr.pair_label = f"pair{i}"
-        pr.selection1 = f"sel_a_{i}"
-        pr.selection2 = f"sel_b_{i}"
+        if pair_schemas is None:
+            pair_label = f"pair{i}"
+            selection1 = f"sel_a_{i}"
+            selection2 = f"sel_b_{i}"
+        else:
+            pair_label, selection1, selection2 = pair_schemas[i]
+
+        pr.pair_label = pair_label
+        pr.selection1 = selection1
+        pr.selection2 = selection2
         pr.mean_distance = 3.5 + i * 0.5
         pr.std_distance = 0.5
         pr.median_distance = 3.4 + i * 0.5
@@ -234,57 +269,204 @@ def _make_mock_distance_result(replicate: int = 1, n_pairs: int = 2):
     return mock
 
 
-class TestComputeReplicate:
-    """compute_replicate delegates to DistanceCalculator."""
+def _make_distance_artifacts(tmp_path, condition_label, settings, n_reps: int = 3):
+    """Create canonical distance replicate artifacts with NPZ sidecars."""
+    import numpy as np
 
-    def test_delegates_to_calculator(self):
+    from polyzymd.analyses._framework.cache_identity import settings_fingerprint
+    from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
+
+    analysis_dir = tmp_path
+    artifacts = []
+    thresholds = settings.get_pair_thresholds()
+    for rep in range(1, n_reps + 1):
+        run_dir = analysis_dir / f"run_{rep}"
+        store = ArtifactStore(run_dir)
+        pair_payloads = []
+        matrix_rows = []
+        for pair_idx, (pair_setting, threshold) in enumerate(
+            zip(settings.pairs, thresholds, strict=True)
+        ):
+            distances = np.asarray(
+                [3.0 + pair_idx + rep * 0.01, 3.2 + pair_idx + rep * 0.01],
+                dtype=np.float64,
+            )
+            matrix_rows.append(distances)
+            pair_payloads.append(
+                {
+                    "pair_label": pair_setting.label,
+                    "selection1": pair_setting.selection_a,
+                    "selection2": pair_setting.selection_b,
+                    "mean_distance": float(np.mean(distances)),
+                    "std_distance": float(np.std(distances)),
+                    "median_distance": float(np.median(distances)),
+                    "min_distance": float(np.min(distances)),
+                    "max_distance": float(np.max(distances)),
+                    "sem_distance": 0.1,
+                    "correlation_time": None,
+                    "correlation_time_unit": None,
+                    "n_independent_frames": None,
+                    "statistical_inefficiency": None,
+                    "autocorrelation_warning": None,
+                    "threshold": threshold,
+                    "fraction_below_threshold": 0.6 - pair_idx * 0.1,
+                    "histogram_edges": [3.0, 3.5, 4.0],
+                    "histogram_counts": [1, 1],
+                    "kde_x": None,
+                    "kde_y": None,
+                    "kde_peak": 3.3 + pair_idx + rep * 0.01,
+                    "kde_bandwidth": None,
+                    "n_frames_total": 2,
+                    "n_frames_used": 2,
+                }
+            )
+        sidecar = store.write_npz_sidecar(
+            "sidecars/00_distances.npz",
+            distance_matrix=np.vstack(matrix_rows),
+            frames=np.asarray([0, 1], dtype=np.int64),
+            time_ns=np.asarray([0.0, 0.01], dtype=np.float64),
+            pair_labels=np.asarray([pair.label for pair in settings.pairs]),
+            metadata={"kind": "distance_matrix"},
+        )
+        artifact = ReplicateArtifact(
+            analysis_name="distances",
+            condition_label=condition_label,
+            replicate=rep,
+            payload={
+                "pairs": pair_payloads,
+                "pair_results": pair_payloads,
+                "metrics": {
+                    f"pair{idx}.mean_distance": pair["mean_distance"]
+                    for idx, pair in enumerate(pair_payloads)
+                },
+                "replicate_metrics": {},
+                "n_frames_total": 2,
+                "n_frames_used": 2,
+            },
+            sidecars=[sidecar],
+            provenance={"frame_selection": {"start": 0, "stop": 2, "step": 1}},
+            metadata={
+                "settings_fingerprint": settings_fingerprint(settings),
+                "config_hash": "hash123",
+                "polyzymd_version": "1.0.0-test",
+                "equilibration_time": 100.0,
+                "equilibration_unit": "ns",
+                "selection_string": "; ".join(
+                    f"({pair.selection_a} : {pair.selection_b})" for pair in settings.pairs
+                ),
+            },
+        )
+        artifacts.append(artifact)
+    return artifacts
+
+
+class TestDistancePairPayloadSerialization:
+    """Distance MDA payload helpers emit canonical artifact payload dictionaries."""
+
+    @staticmethod
+    def _make_payload():
+        """Create a representative runner payload for factory tests."""
+        import numpy as np
+
+        from polyzymd.analyses.distances._mda import DistancePairPayload
+
+        return DistancePairPayload(
+            pair_label="pair0",
+            selection1="sel_a",
+            selection2="sel_b",
+            distances=np.asarray([3.0, 3.2, 3.4], dtype=np.float64),
+            mean_distance=3.2,
+            std_distance=0.1,
+            median_distance=3.2,
+            min_distance=3.0,
+            max_distance=3.4,
+            sem_distance=0.05,
+            correlation_time=20.0,
+            correlation_time_unit="ps",
+            n_independent_frames=12,
+            statistical_inefficiency=1.5,
+            autocorrelation_warning=None,
+            threshold=3.5,
+            fraction_below_threshold=1.0,
+            histogram_edges=np.asarray([3.0, 3.2, 3.4], dtype=np.float64),
+            histogram_counts=np.asarray([1, 2], dtype=np.int64),
+            kde_x=np.asarray([3.0, 3.1, 3.2], dtype=np.float64),
+            kde_y=np.asarray([0.1, 0.2, 0.1], dtype=np.float64),
+            kde_peak=3.1,
+            kde_bandwidth=0.2,
+            n_frames_total=100,
+            n_frames_used=90,
+        )
+
+    def test_pair_payload_json_uses_minimal_canonical_fields(self):
+        """Canonical pair JSON should be a plain dictionary without cache metadata."""
+        from polyzymd.analyses.distances._mda import _pair_payload_to_json
+
+        payload = self._make_payload()
+        result = _pair_payload_to_json(payload)
+
+        assert result["pair_label"] == "pair0"
+        assert result["selection1"] == "sel_a"
+        assert result["histogram_counts"] == [1, 2]
+        assert "distances" not in result
+        assert "config_hash" not in result
+
+
+class TestRunReplicate:
+    """The compute-stage dispatcher delegates to the MDAnalysis job seam."""
+
+    def test_delegates_to_mda_job_seam(self, tmp_path):
         from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
         )
+        from polyzymd.analyses.mda import ReplicateArtifact
 
         analysis = DistancesAnalysis()
-
         settings = DistancesSettings(
-            pairs=[DistancePairSettings(label="P1", selection_a="sel_a", selection_b="sel_b")]
+            pairs=[
+                DistancePairSettings(
+                    label="Configured Label",
+                    selection_a="sel_a",
+                    selection_b="sel_b",
+                    threshold=3.2,
+                )
+            ]
         )
-
         mock_sim_config = MagicMock()
         cond = Condition(
             label="test",
             config_path=Path("/tmp/config.yaml"),
             replicates=(1, 2, 3),
-            sim_config=mock_sim_config,
+            sim_config=MagicMock(),
         )
         ctx = ReplicateContext(
             condition=cond,
             replicate=1,
-            sim_config=mock_sim_config,
-            output_dir=Path("/tmp/out/run_1"),
+            sim_config=cond.sim_config,
+            output_dir=tmp_path / "run_1",
             equilibration="10ns",
             recompute=False,
             settings=settings,
         )
-
-        mock_result = _make_mock_distance_result(replicate=1, n_pairs=1)
-
-        with patch("polyzymd.analyses.distances.DistanceCalculator") as MockCalc:
-            MockCalc.return_value.compute.return_value = mock_result
-            result = analysis.compute_replicate(ctx, 1)
-
-        assert result is mock_result
-        MockCalc.assert_called_once()
-        MockCalc.return_value.compute.assert_called_once_with(
+        artifact = ReplicateArtifact(
+            analysis_name="distances",
+            condition_label="test",
             replicate=1,
-            save=True,
-            output_dir=Path("/tmp/out/run_1"),
-            recompute=False,
+            payload={"metrics": {"distance.mean": 1.0}},
         )
+        with patch(
+            "polyzymd.analyses.mda.lifecycle.run_mda_replicate_jobs",
+            return_value=artifact,
+        ) as mock_run:
+            result = analysis._run_compute_stage(ctx, 1)
 
-    def test_passes_settings_to_calculator(self):
-        from polyzymd.analyses.base import Condition, ReplicateContext
+        assert result is artifact
+        mock_run.assert_called_once_with(analysis, ctx, 1)
+
+    def test_build_mda_jobs_delegates_to_builder(self):
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
@@ -292,48 +474,129 @@ class TestComputeReplicate:
         )
 
         analysis = DistancesAnalysis()
-
         settings = DistancesSettings(
-            threshold=5.0,
+            pairs=[DistancePairSettings(label="P1", selection_a="resid 10", selection_b="resid 20")]
+        )
+        ctx = MagicMock(settings=settings)
+        expected_jobs = [MagicMock()]
+
+        with patch("polyzymd.analyses.distances.build_distance_jobs", return_value=expected_jobs):
+            jobs = analysis.build_mda_jobs(ctx)
+
+        assert jobs is expected_jobs
+
+    def test_collector_writes_summary_json_and_npz_sidecar(self, tmp_path, monkeypatch):
+        """Distance collector should summarize JSON and retain raw distances in a sidecar."""
+        import numpy as np
+
+        from polyzymd.analyses.base import Condition, ReplicateContext
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesSettings,
+        )
+        from polyzymd.analyses.distances._mda import DistanceArtifactCollector
+        from polyzymd.analyses.mda import (
+            ArtifactStore,
+            FrameSelection,
+            MDACollectorContext,
+            ReplicateArtifact,
+        )
+        from polyzymd.analyses.mda.job import MDABackendPolicy, MDAJobResult, MDAUniversePolicy
+
+        captured: dict[str, float] = {}
+
+        def _fake_estimate_correlation_time(_series, **kwargs):
+            captured["timestep"] = kwargs["timestep"]
+            return SimpleNamespace(
+                tau=90.0,
+                tau_unit="ps",
+                n_independent=10,
+                statistical_inefficiency=2.0,
+                warning=None,
+            )
+
+        monkeypatch.setattr(
+            "polyzymd.analyses.shared.autocorrelation.estimate_correlation_time",
+            _fake_estimate_correlation_time,
+        )
+        settings = DistancesSettings(
             pairs=[
                 DistancePairSettings(
-                    label="P1",
-                    selection_a="resid 10",
-                    selection_b="resid 20",
-                    threshold=4.0,
+                    label="Configured Label",
+                    selection_a="sel_a",
+                    selection_b="sel_b",
+                    threshold=3.2,
                 )
-            ],
-            use_pbc=False,
+            ]
         )
-
-        mock_sim_config = MagicMock()
-        cond = Condition(
+        condition = Condition(
             label="test",
             config_path=Path("/tmp/config.yaml"),
             replicates=(1,),
-            sim_config=mock_sim_config,
+            sim_config=MagicMock(),
         )
         ctx = ReplicateContext(
-            condition=cond,
+            condition=condition,
             replicate=1,
-            sim_config=mock_sim_config,
-            output_dir=Path("/tmp/out/run_1"),
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
             equilibration="10ns",
-            recompute=False,
+            recompute=True,
             settings=settings,
         )
+        analysis_obj = MagicMock()
+        raw_distances = np.linspace(2.8, 3.8, 20, dtype=np.float64)
+        analysis_obj.results.distance_matrix = np.asarray([raw_distances], dtype=np.float64)
+        analysis_obj.results.frames = np.arange(0, 60, 3, dtype=np.int64)
+        analysis_obj.results.times_ps = np.arange(0, 600, 30, dtype=np.float64)
+        analysis_obj.results.warnings = []
+        frame_selection = FrameSelection(
+            start=0,
+            stop=60,
+            step=3,
+            n_frames_total=60,
+            timestep_ps=10.0,
+        )
+        job = MDAJobResult(
+            name="pair_distances",
+            analysis=analysis_obj,
+            results=analysis_obj.results,
+            run_kwargs={"start": 0, "stop": 60, "step": 3},
+            frame_selection=frame_selection,
+            backend_policy=MDABackendPolicy(),
+            universe_policy=MDAUniversePolicy(),
+        )
+        collector_ctx = MDACollectorContext(
+            analysis_name="distances",
+            replicate_context=ctx,
+            frame_selection=frame_selection,
+            universe_policy=MDAUniversePolicy(condition_label="test", replicate=1),
+            artifact_store=ArtifactStore(tmp_path / "run_1"),
+            settings_fingerprint="abc123",
+        )
 
-        mock_result = _make_mock_distance_result(replicate=1, n_pairs=1)
+        result = DistanceArtifactCollector()(collector_ctx, [job])
 
-        with patch("polyzymd.analyses.distances.DistanceCalculator") as MockCalc:
-            MockCalc.return_value.compute.return_value = mock_result
-            analysis.compute_replicate(ctx, 1)
-
-        # Verify settings were passed correctly
-        call_kwargs = MockCalc.call_args[1]
-        assert call_kwargs["pairs"] == [("resid 10", "resid 20")]
-        assert call_kwargs["thresholds"] == [4.0]  # per-pair threshold, not global
-        assert call_kwargs["use_pbc"] is False
+        assert result.replicate == 1
+        assert isinstance(result, ReplicateArtifact)
+        assert result.payload["n_frames_used"] == 20
+        metrics = result.payload["pairs"][0]
+        assert metrics["pair_label"] == "Configured Label"
+        assert metrics["mean_distance"] == pytest.approx(float(np.mean(raw_distances)))
+        assert metrics["fraction_below_threshold"] == pytest.approx(
+            float(np.mean(raw_distances < 3.2))
+        )
+        assert metrics["correlation_time"] == pytest.approx(90.0)
+        assert "distances" not in metrics
+        assert "distance_matrix" not in json.dumps(result.payload)
+        assert captured["timestep"] == pytest.approx(30.0)
+        assert result.sidecars[0].metadata["kind"] == "distance_matrix"
+        sidecar_path = ArtifactStore(tmp_path / "run_1").validate_sidecar(result.sidecars[0])
+        with np.load(sidecar_path) as npz_data:
+            assert npz_data["distance_matrix"].shape == (1, 20)
+            np.testing.assert_allclose(npz_data["distance_matrix"][0], raw_distances)
+            assert npz_data["pair_labels"].tolist() == ["Configured Label"]
+            assert npz_data["thresholds"].tolist() == pytest.approx([3.2])
 
 
 # ---------------------------------------------------------------------------
@@ -342,10 +605,13 @@ class TestComputeReplicate:
 
 
 class TestAggregate:
-    """aggregate produces a DistanceAggregatedResult."""
+    """aggregate produces a canonical distance condition artifact."""
 
-    def _make_mock_results(self, n_reps: int = 3, n_pairs: int = 2):
+    def _make_mock_results(self, settings, n_reps: int = 3):
         """Create mock per-replicate results for aggregation."""
+        from polyzymd.analyses.distances import _make_pair_label
+
+        thresholds = settings.get_pair_thresholds()
         results = []
         for rep in range(1, n_reps + 1):
             mock = MagicMock()
@@ -355,15 +621,17 @@ class TestAggregate:
             mock.equilibration_unit = "ns"
 
             pair_results = []
-            for pair_idx in range(n_pairs):
+            for pair_idx, (pair_setting, threshold) in enumerate(
+                zip(settings.pairs, thresholds, strict=True)
+            ):
                 pr = MagicMock()
-                pr.pair_label = f"pair{pair_idx}"
-                pr.selection1 = f"sel_a_{pair_idx}"
-                pr.selection2 = f"sel_b_{pair_idx}"
+                pr.pair_label = _make_pair_label(pair_setting.selection_a, pair_setting.selection_b)
+                pr.selection1 = pair_setting.selection_a
+                pr.selection2 = pair_setting.selection_b
                 pr.mean_distance = 3.5 + pair_idx * 0.5 + rep * 0.01
                 pr.std_distance = 0.5
                 pr.median_distance = 3.4 + pair_idx * 0.5 + rep * 0.01
-                pr.threshold = 3.5
+                pr.threshold = threshold
                 pr.fraction_below_threshold = 0.6 - pair_idx * 0.1
                 pr.kde_peak = 3.3 + pair_idx * 0.5 + rep * 0.01
                 pair_results.append(pr)
@@ -373,7 +641,8 @@ class TestAggregate:
         return results
 
     def test_aggregate_produces_result(self, tmp_path):
-        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses._framework.cache_identity import settings_fingerprint
+        from polyzymd.analyses.base import AggregateContext, AggregateValidationError, Condition
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
@@ -404,40 +673,33 @@ class TestAggregate:
             settings=settings,
         )
 
-        mock_results = self._make_mock_results(n_reps=3, n_pairs=2)
+        mock_results = _make_distance_artifacts(tmp_path, "test", settings, n_reps=3)
 
         with patch(
-            "polyzymd.analyses.shared.aggregation.aggregate_distance_pair_stats"
-        ) as mock_agg:
-            # Create mock return for aggregate_distance_pair_stats
-            mock_stats = MagicMock()
-            mock_stats.mean_stats.mean = 3.5
-            mock_stats.mean_stats.sem = 0.05
-            mock_stats.median_stats.mean = 3.4
-            mock_stats.per_rep_means = [3.49, 3.50, 3.51]
-            mock_stats.per_rep_stds = [0.5, 0.5, 0.5]
-            mock_stats.per_rep_medians = [3.39, 3.40, 3.41]
-            mock_stats.fraction_stats = MagicMock()
-            mock_stats.fraction_stats.mean = 0.6
-            mock_stats.fraction_stats.sem = 0.02
-            mock_stats.per_rep_fractions = [0.58, 0.60, 0.62]
-            mock_stats.kde_peak_stats = MagicMock()
-            mock_stats.kde_peak_stats.mean = 3.3
-            mock_stats.kde_peak_stats.sem = 0.03
-            mock_stats.per_rep_kde_peaks = [3.29, 3.30, 3.31]
-            mock_agg.return_value = mock_stats
-
-            with patch(
-                "polyzymd.analyses._results_base.get_polyzymd_version",
-                return_value="1.0.0-test",
-            ):
-                result = analysis.aggregate(ctx, mock_results)
+            "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+            return_value="1.0.0-test",
+        ):
+            result = analysis.aggregate(ctx, mock_results)
 
         assert result is not None
-        assert result.n_replicates == 3
-        assert len(result.pair_results) == 2
+        assert result.metadata["n_replicates"] == 3
+        assert len(result.payload["pair_results"]) == 2
+        assert [pair["pair_label"] for pair in result.payload["pair_results"]] == ["P0", "P1"]
+        assert result.metadata["settings_fingerprint"] == settings_fingerprint(settings)
 
-    def test_aggregate_saves_file(self, tmp_path):
+        stale = result.model_copy(
+            update={"metadata": {**result.metadata, "settings_fingerprint": "deadbeef"}}
+        )
+        with pytest.raises(AggregateValidationError, match="settings fingerprint mismatch"):
+            analysis.validate_aggregated_result(
+                stale,
+                condition=cond,
+                settings=settings,
+                equilibration="100ns",
+                expected_replicates=(1, 2, 3),
+            )
+
+    def test_aggregate_returns_artifact_without_canonical_result(self, tmp_path):
         from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.distances import (
             DistancePairSettings,
@@ -468,33 +730,97 @@ class TestAggregate:
             settings=settings,
         )
 
-        mock_results = self._make_mock_results(n_reps=2, n_pairs=1)
+        mock_results = _make_distance_artifacts(tmp_path, "test", settings, n_reps=2)
 
         with patch(
-            "polyzymd.analyses.shared.aggregation.aggregate_distance_pair_stats"
-        ) as mock_agg:
-            mock_stats = MagicMock()
-            mock_stats.mean_stats.mean = 3.5
-            mock_stats.mean_stats.sem = 0.05
-            mock_stats.median_stats.mean = 3.4
-            mock_stats.per_rep_means = [3.49, 3.51]
-            mock_stats.per_rep_stds = [0.5, 0.5]
-            mock_stats.per_rep_medians = [3.39, 3.41]
-            mock_stats.fraction_stats = None
-            mock_stats.per_rep_fractions = None
-            mock_stats.kde_peak_stats = None
-            mock_stats.per_rep_kde_peaks = None
-            mock_agg.return_value = mock_stats
+            "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+            return_value="1.0.0-test",
+        ):
+            result = analysis.aggregate(ctx, mock_results)
 
-            with patch(
-                "polyzymd.analyses._results_base.get_polyzymd_version",
-                return_value="1.0.0-test",
-            ):
-                analysis.aggregate(ctx, mock_results)
-
-        # Check that output file was created
+        assert result is not None
         json_files = list(output_dir.glob("*.json"))
-        assert len(json_files) == 1
+        assert json_files == []
+
+    def test_aggregate_rejects_pair_count_mismatch(self, tmp_path):
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+        )
+
+        analysis = DistancesAnalysis()
+        settings = DistancesSettings(
+            pairs=[
+                DistancePairSettings(label="P0", selection_a="sel_a_0", selection_b="sel_b_0"),
+                DistancePairSettings(label="P1", selection_a="sel_a_1", selection_b="sel_b_1"),
+            ]
+        )
+        condition = Condition(
+            label="test",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="100ns",
+            settings=settings,
+        )
+        results = _make_distance_artifacts(tmp_path, "test", settings, n_reps=2)
+        results[1].payload["pairs"] = results[1].payload["pairs"][:1]
+        results[1].payload["pair_results"] = results[1].payload["pairs"]
+
+        with pytest.raises(ValueError, match="expected 2"):
+            analysis.aggregate(ctx, results)
+
+    def test_aggregate_rejects_pair_order_and_threshold_mismatch(self, tmp_path):
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+        )
+
+        analysis = DistancesAnalysis()
+        settings = DistancesSettings(
+            pairs=[
+                DistancePairSettings(
+                    label="P0",
+                    selection_a="sel_a_0",
+                    selection_b="sel_b_0",
+                    threshold=3.0,
+                ),
+                DistancePairSettings(
+                    label="P1",
+                    selection_a="sel_a_1",
+                    selection_b="sel_b_1",
+                    threshold=4.0,
+                ),
+            ]
+        )
+        condition = Condition(
+            label="test",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="100ns",
+            settings=settings,
+        )
+        results = _make_distance_artifacts(tmp_path, "test", settings, n_reps=2)
+        results[1].payload["pairs"] = list(reversed(results[1].payload["pairs"]))
+        results[1].payload["pair_results"] = results[1].payload["pairs"]
+
+        with pytest.raises(ValueError, match="selection mismatch"):
+            analysis.aggregate(ctx, results)
 
 
 # ---------------------------------------------------------------------------
@@ -503,29 +829,98 @@ class TestAggregate:
 
 
 def _make_mock_agg_result(n_pairs: int = 2, n_reps: int = 3, offset: float = 0.0):
-    """Create a mock DistanceAggregatedResult for comparison tests."""
-    mock = MagicMock()
-    mock.n_replicates = n_reps
+    """Create a canonical condition artifact for comparison tests."""
+    from polyzymd.analyses._framework.cache_identity import settings_fingerprint
+    from polyzymd.analyses.distances import DistancePairSettings, DistancesSettings
+    from polyzymd.analyses.mda import ConditionArtifact
 
+    labels = ["Alpha", "Beta", "Gamma", "Delta"]
+    settings = DistancesSettings(
+        pairs=[
+            DistancePairSettings(
+                label=labels[i] if i < len(labels) else f"pair{i}",
+                selection_a=f"sel_a_{i}",
+                selection_b=f"sel_b_{i}",
+            )
+            for i in range(n_pairs)
+        ]
+    )
     pair_results = []
     for i in range(n_pairs):
-        pr = MagicMock()
-        pr.pair_label = f"pair{i}"
-        pr.selection1 = f"sel_a_{i}"
-        pr.selection2 = f"sel_b_{i}"
-        pr.overall_mean = 3.5 + i * 0.5 + offset
-        pr.overall_sem = 0.05
-        pr.threshold = 3.5
-        pr.overall_fraction_below = 0.6 - i * 0.1 - offset * 0.1
-        pr.sem_fraction_below = 0.02
-        pr.per_replicate_means = [3.5 + i * 0.5 + offset + j * 0.01 for j in range(n_reps)]
-        pr.per_replicate_fractions_below = [
-            0.6 - i * 0.1 - offset * 0.1 + j * 0.005 for j in range(n_reps)
-        ]
-        pair_results.append(pr)
+        pair_results.append(
+            {
+                "pair_label": f"pair{i}",
+                "selection1": f"sel_a_{i}",
+                "selection2": f"sel_b_{i}",
+                "overall_mean": 3.5 + i * 0.5 + offset,
+                "overall_sem": 0.05,
+                "threshold": 3.5,
+                "overall_fraction_below": 0.6 - i * 0.1 - offset * 0.1,
+                "sem_fraction_below": 0.02,
+                "per_replicate_means": [3.5 + i * 0.5 + offset + j * 0.01 for j in range(n_reps)],
+                "per_replicate_fractions_below": [
+                    0.6 - i * 0.1 - offset * 0.1 + j * 0.005 for j in range(n_reps)
+                ],
+                "replicates": list(range(1, n_reps + 1)),
+                "n_replicates": n_reps,
+            }
+        )
 
-    mock.pair_results = pair_results
-    return mock
+    return ConditionArtifact(
+        analysis_name="distances",
+        condition_label="mock",
+        replicates=list(range(1, n_reps + 1)),
+        payload={"pair_results": pair_results, "pairs": pair_results, "n_replicates": n_reps},
+        metadata={
+            "settings_fingerprint": settings_fingerprint(settings),
+            "config_hash": "unknown",
+            "equilibration_time": 100.0,
+            "equilibration_unit": "ns",
+        },
+    )
+
+
+def _distance_condition_artifact_from_pair_objects(
+    pairs: list[object], replicates: list[int], settings_fingerprint: str
+):
+    """Create a canonical distances condition artifact from pair-like objects."""
+
+    from polyzymd.analyses.mda import ConditionArtifact
+
+    pair_payloads = []
+    for pair in pairs:
+        pair_payloads.append(
+            {
+                "pair_label": pair.pair_label,
+                "selection1": pair.selection1,
+                "selection2": pair.selection2,
+                "threshold": pair.threshold,
+                "overall_mean": pair.overall_mean,
+                "overall_sem": pair.overall_sem,
+                "overall_fraction_below": pair.overall_fraction_below,
+                "sem_fraction_below": pair.sem_fraction_below,
+                "per_replicate_means": list(pair.per_replicate_means),
+                "per_replicate_fractions_below": list(pair.per_replicate_fractions_below),
+                "replicates": replicates,
+                "n_replicates": len(replicates),
+            }
+        )
+    return ConditionArtifact(
+        analysis_name="distances",
+        condition_label="Control",
+        replicates=replicates,
+        payload={
+            "pair_results": pair_payloads,
+            "pairs": pair_payloads,
+            "n_replicates": len(replicates),
+        },
+        metadata={
+            "settings_fingerprint": settings_fingerprint,
+            "config_hash": "unknown",
+            "equilibration_time": 100.0,
+            "equilibration_unit": "ns",
+        },
+    )
 
 
 class TestCompare:
@@ -736,6 +1131,176 @@ class TestCompare:
         # fraction_ranking_by_pair should be present since mock has fractions
         assert result.fraction_ranking_by_pair is not None
 
+    def test_compare_preserves_duplicate_selection_pair_labels_by_index(self, tmp_path):
+        from polyzymd.analyses._framework.cache_identity import settings_fingerprint
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+        )
+
+        analysis = DistancesAnalysis()
+        settings = DistancesSettings(
+            pairs=[
+                DistancePairSettings(
+                    label="Inner duplicate",
+                    selection_a="resid 10 and name CA",
+                    selection_b="resid 20 and name CA",
+                    threshold=3.0,
+                ),
+                DistancePairSettings(
+                    label="Outer duplicate",
+                    selection_a="resid 10 and name CA",
+                    selection_b="resid 20 and name CA",
+                    threshold=5.0,
+                ),
+            ]
+        )
+        condition = Condition(
+            label="Control",
+            config_path=Path("/tmp/Control/config.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="duplicate_selection_labels",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label="Control",
+            analysis_dirs={"Control": tmp_path / "Control" / "distances"},
+            results_dir=tmp_path / "results",
+            equilibration="100ns",
+            settings=settings,
+            recompute=False,
+        )
+        aggregate = MagicMock()
+        aggregate.config_hash = "unknown"
+        aggregate.equilibration_time = 100.0
+        aggregate.equilibration_unit = "ns"
+        aggregate.settings_fingerprint = settings_fingerprint(settings)
+        aggregate.replicates = [1, 2, 3]
+        aggregate.n_replicates = 3
+        aggregate.pair_results = []
+        for label, threshold, offset in (
+            ("Inner duplicate", 3.0, 0.0),
+            ("Outer duplicate", 5.0, 1.0),
+        ):
+            pair_result = MagicMock()
+            pair_result.pair_label = label
+            pair_result.selection1 = "resid 10 and name CA"
+            pair_result.selection2 = "resid 20 and name CA"
+            pair_result.threshold = threshold
+            pair_result.overall_mean = 4.0 + offset
+            pair_result.overall_sem = 0.1
+            pair_result.overall_fraction_below = 0.5 - offset * 0.1
+            pair_result.sem_fraction_below = 0.02
+            pair_result.per_replicate_means = [4.0 + offset, 4.1 + offset, 3.9 + offset]
+            pair_result.per_replicate_fractions_below = [0.5, 0.55, 0.45]
+            aggregate.pair_results.append(pair_result)
+
+        artifact = _distance_condition_artifact_from_pair_objects(
+            aggregate.pair_results, aggregate.replicates, aggregate.settings_fingerprint
+        )
+        with patch.object(analysis, "_load_aggregated_result", return_value=artifact):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        summary = result.conditions[0]
+        assert [pair.label for pair in summary.pair_summaries] == [
+            "Inner duplicate",
+            "Outer duplicate",
+        ]
+        assert summary.get_pair("Inner duplicate").threshold == pytest.approx(3.0)
+        assert summary.get_pair("Outer duplicate").threshold == pytest.approx(5.0)
+        assert result.ranking_by_pair["Inner duplicate"] == ["Control"]
+        assert result.ranking_by_pair["Outer duplicate"] == ["Control"]
+
+    def test_compare_remaps_duplicate_auto_labels_by_index(self, tmp_path):
+        from polyzymd.analyses._framework.cache_identity import settings_fingerprint
+        from polyzymd.analyses.base import ComparisonContext, Condition
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+        )
+
+        selection_a = "resid 10 and name CA"
+        selection_b = "resid 20 and name CA"
+        auto_label = "Residue 10 CA - residue 20 CA"
+        analysis = DistancesAnalysis()
+        settings = DistancesSettings(
+            pairs=[
+                DistancePairSettings(
+                    label=auto_label,
+                    selection_a=selection_a,
+                    selection_b=selection_b,
+                    threshold=3.0,
+                ),
+                DistancePairSettings(
+                    label="Distinct duplicate",
+                    selection_a=selection_a,
+                    selection_b=selection_b,
+                    threshold=5.0,
+                ),
+            ]
+        )
+        condition = Condition(
+            label="Control",
+            config_path=Path("/tmp/Control/config.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="duplicate_auto_labels",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label="Control",
+            analysis_dirs={"Control": tmp_path / "Control" / "distances"},
+            results_dir=tmp_path / "results",
+            equilibration="100ns",
+            settings=settings,
+            recompute=False,
+        )
+        aggregate = MagicMock()
+        aggregate.config_hash = "unknown"
+        aggregate.equilibration_time = 100.0
+        aggregate.equilibration_unit = "ns"
+        aggregate.settings_fingerprint = settings_fingerprint(settings)
+        aggregate.replicates = [1, 2, 3]
+        aggregate.n_replicates = 3
+        aggregate.pair_results = []
+        for threshold, offset in ((3.0, 0.0), (5.0, 1.0)):
+            pair_result = MagicMock()
+            pair_result.pair_label = auto_label
+            pair_result.selection1 = selection_a
+            pair_result.selection2 = selection_b
+            pair_result.threshold = threshold
+            pair_result.overall_mean = 4.0 + offset
+            pair_result.overall_sem = 0.1
+            pair_result.overall_fraction_below = 0.5 - offset * 0.1
+            pair_result.sem_fraction_below = 0.02
+            pair_result.per_replicate_means = [4.0 + offset, 4.1 + offset, 3.9 + offset]
+            pair_result.per_replicate_fractions_below = [0.5, 0.55, 0.45]
+            aggregate.pair_results.append(pair_result)
+
+        artifact = _distance_condition_artifact_from_pair_objects(
+            aggregate.pair_results, aggregate.replicates, aggregate.settings_fingerprint
+        )
+        with patch.object(analysis, "_load_aggregated_result", return_value=artifact):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        summary = result.conditions[0]
+        assert [pair.label for pair in summary.pair_summaries] == [
+            auto_label,
+            "Distinct duplicate",
+        ]
+        assert summary.get_pair(auto_label).threshold == pytest.approx(3.0)
+        assert summary.get_pair("Distinct duplicate").threshold == pytest.approx(5.0)
+        assert result.ranking_by_pair[auto_label] == ["Control"]
+        assert result.ranking_by_pair["Distinct duplicate"] == ["Control"]
+
 
 # ---------------------------------------------------------------------------
 # _compare_pair
@@ -820,66 +1385,23 @@ class TestComparePair:
 
 
 class TestDeserializeResult:
-    """AggregatedResultClass loads via DistanceAggregatedResult.load()."""
+    """Aggregated results load from canonical condition artifacts only."""
 
     def test_aggregated_result_class_set(self):
         from polyzymd.analyses.distances import DistancesAnalysis
-        from polyzymd.analyses.distances._results import DistanceAggregatedResult
 
-        assert DistancesAnalysis.AggregatedResultClass is DistanceAggregatedResult
+        assert DistancesAnalysis.AggregatedResultClass is None
 
-    def test_loads_via_result_class(self, tmp_path):
+    def test_rejects_noncanonical_aggregate_json(self, tmp_path):
         from polyzymd.analyses.distances import DistancesAnalysis
+        from polyzymd.analyses.exceptions import PluginContractError
 
         analysis = DistancesAnalysis()
+        noncanonical_path = tmp_path / "distances_noncanonical.json"
+        noncanonical_path.write_text('{"analysis_type": "distances_aggregated"}', encoding="utf-8")
 
-        mock_result = MagicMock()
-        with patch.object(
-            analysis.AggregatedResultClass, "load", return_value=mock_result
-        ) as mock_load:
-            result = analysis._deserialize_result(tmp_path / "test.json")
-
-        mock_load.assert_called_once_with(tmp_path / "test.json")
-        assert result is mock_result
-
-
-# ---------------------------------------------------------------------------
-# _make_aggregated_filename
-# ---------------------------------------------------------------------------
-
-
-class TestMakeAggregatedFilename:
-    """Filename generation matches existing convention."""
-
-    def test_consecutive_replicates(self):
-        from polyzymd.analyses.distances import DistancesAnalysis
-
-        mock_result = MagicMock()
-        mock_result.equilibration_time = 100.0
-        mock_result.equilibration_unit = "ns"
-
-        filename = DistancesAnalysis._make_aggregated_filename((1, 2, 3), mock_result, "a1b2c3d4")
-        assert filename == "distances_reps1-3_eq100ns_sa1b2c3d4.json"
-
-    def test_nonconsecutive_replicates(self):
-        from polyzymd.analyses.distances import DistancesAnalysis
-
-        mock_result = MagicMock()
-        mock_result.equilibration_time = 50.0
-        mock_result.equilibration_unit = "ns"
-
-        filename = DistancesAnalysis._make_aggregated_filename((1, 3, 5), mock_result, "a1b2c3d4")
-        assert filename == "distances_reps1_3_5_eq50ns_sa1b2c3d4.json"
-
-    def test_ps_equilibration(self):
-        from polyzymd.analyses.distances import DistancesAnalysis
-
-        mock_result = MagicMock()
-        mock_result.equilibration_time = 5000.0
-        mock_result.equilibration_unit = "ps"
-
-        filename = DistancesAnalysis._make_aggregated_filename((1, 2), mock_result, "a1b2c3d4")
-        assert filename == "distances_reps1-2_eq5000ps_sa1b2c3d4.json"
+        with pytest.raises(PluginContractError, match="canonical MDAnalysis condition artifact"):
+            analysis._deserialize_result(noncanonical_path)
 
 
 class TestSettingsCacheTag:
@@ -1072,6 +1594,90 @@ class TestPlot:
         call_args = MockKDE.call_args
         assert isinstance(call_args[0][3], PlotSettings)
 
+    def test_semantic_colors_apply_to_condition_plots_but_not_state_categories(self, tmp_path):
+        """Distance condition plots should use semantic colors while state bars stay categorical."""
+
+        import numpy as np
+
+        from polyzymd.analyses.distances._plotters import (
+            DistancePlotData,
+            _plot_distance_kde,
+            _plot_distance_state_bars,
+            _plot_distance_threshold_bars,
+        )
+        from polyzymd.config.comparison import PlotSettings
+
+        plot_settings = PlotSettings(
+            semantic_colors={
+                "enabled": True,
+                "order": ["Control", "Treatment"],
+                "conditions": {
+                    "Control": {"role": "control"},
+                    "Treatment": {"color": "#ff7f0e"},
+                },
+                "control_color": "#111111",
+            }
+        )
+        pair_result = {
+            "pair_label": "Pair 1",
+            "overall_fraction_below": 0.25,
+            "sem_fraction_below": 0.05,
+            "per_replicate_fractions_below": [0.2, 0.3],
+            "threshold": 3.5,
+        }
+        plot_data = DistancePlotData(
+            pooled_distances={
+                "Pair 1": {
+                    "Treatment": {"distances": np.asarray([3.0, 3.2, 3.4]), "threshold": 3.5},
+                    "Control": {"distances": np.asarray([2.7, 2.9, 3.1]), "threshold": 3.5},
+                }
+            },
+            aggregated_results={
+                "Treatment": {"pair_results": [pair_result]},
+                "Control": {"pair_results": [pair_result]},
+            },
+            control_label="Control",
+        )
+
+        with (
+            patch(
+                "polyzymd.analyses.distances._plotters.get_condition_colors",
+                return_value=["#111111", "#ff7f0e"],
+            ) as colors,
+            patch(
+                "polyzymd.analyses.distances._plotters.save_figure",
+                side_effect=lambda fig, path, _: path,
+            ),
+            patch("polyzymd.analyses.distances._plotters.grouped_bars") as grouped,
+        ):
+            kde_paths = _plot_distance_kde(
+                plot_data,
+                ["Treatment", "Control"],
+                tmp_path,
+                plot_settings,
+            )
+            threshold_paths = _plot_distance_threshold_bars(
+                plot_data,
+                ["Treatment", "Control"],
+                tmp_path,
+                plot_settings,
+            )
+            state_paths = _plot_distance_state_bars(
+                plot_data,
+                ["Treatment", "Control"],
+                tmp_path,
+                plot_settings,
+            )
+
+        assert kde_paths == [tmp_path / "distance_kde_pair_1.png"]
+        assert threshold_paths == [tmp_path / "distance_threshold_bars.png"]
+        assert state_paths == [tmp_path / "distance_state_pair_1.png"]
+        assert colors.call_args_list[0].args[0] == ["Control", "Treatment"]
+        assert grouped.call_args_list[0].args[2][0][0] == "Control"
+        assert grouped.call_args_list[0].args[3] == ["#111111", "#ff7f0e"]
+        assert grouped.call_args_list[1].args[2][0][0].startswith("Below")
+        assert grouped.call_args_list[1].args[3] != ["#111111", "#ff7f0e"]
+
 
 # ---------------------------------------------------------------------------
 # Plot loader cache filtering
@@ -1082,40 +1688,33 @@ class TestPlotLoadersCacheFiltering:
     """Plot data loaders should only read distances cache files."""
 
     def test_pooled_loader_ignores_unrelated_json_files(self, tmp_path):
-        import json
+        import numpy as np
 
         from polyzymd.analyses.distances._plotters import _load_pooled_distances
+        from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
 
         analysis_dir = tmp_path / "condition" / "distances"
         run_dir = analysis_dir / "run_1"
         run_dir.mkdir(parents=True)
+        sidecar = ArtifactStore(run_dir).write_npz_sidecar(
+            "sidecars/distances.npz",
+            distance_matrix=np.asarray([[3.0, 3.2, 3.4]], dtype=np.float64),
+            metadata={"kind": "distance_matrix"},
+        )
 
-        distances_payload = {
-            "pair_results": [
-                {
-                    "pair_label": "Distance Pair",
-                    "distances": [3.0, 3.2, 3.4],
-                    "threshold": 3.5,
-                }
-            ]
-        }
-        contacts_payload = {
-            "pair_results": [
-                {
-                    "pair_label": "Contacts Pair",
-                    "distances": [10.0, 10.5],
-                    "threshold": 11.0,
-                }
-            ]
-        }
-
-        (run_dir / "distances_result.json").write_text(
-            json.dumps(distances_payload), encoding="utf-8"
+        ArtifactStore(run_dir).write_replicate_result(
+            ReplicateArtifact(
+                analysis_name="distances",
+                condition_label="Cond1",
+                replicate=1,
+                payload={"pairs": [{"pair_label": "Distance Pair", "threshold": 3.5}]},
+                sidecars=[sidecar],
+            )
         )
         (run_dir / "contacts_result.json").write_text(
-            json.dumps(contacts_payload), encoding="utf-8"
+            '{"pair_results": [{"pair_label": "Contacts Pair"}]}', encoding="utf-8"
         )
-        (run_dir / "notes.json").write_text(json.dumps({"note": "ignore me"}), encoding="utf-8")
+        (run_dir / "notes.json").write_text('{"note": "ignore me"}', encoding="utf-8")
 
         pooled = _load_pooled_distances(analysis_dir, [1])
 
@@ -1123,26 +1722,25 @@ class TestPlotLoadersCacheFiltering:
         assert pooled["Distance Pair"]["threshold"] == pytest.approx(3.5)
 
     def test_aggregated_loader_ignores_unrelated_json_files(self, tmp_path):
-        import json
-
         from polyzymd.analyses.distances._plotters import _load_distance_aggregated_results
+        from polyzymd.analyses.mda import ArtifactStore, ConditionArtifact
 
         aggregated_dir = tmp_path / "condition" / "distances" / "aggregated"
         aggregated_dir.mkdir(parents=True)
 
-        distances_payload = {"pair_results": [{"pair_label": "Distance Pair", "overall_mean": 3.3}]}
-        contacts_payload = {"pair_results": [{"pair_label": "Contacts Pair", "overall_mean": 9.9}]}
-
-        (aggregated_dir / "distances_result.json").write_text(
-            json.dumps(distances_payload),
-            encoding="utf-8",
+        ArtifactStore(aggregated_dir).write_condition_result(
+            ConditionArtifact(
+                analysis_name="distances",
+                condition_label="Cond1",
+                replicates=[1],
+                payload={"pair_results": [{"pair_label": "Distance Pair", "overall_mean": 3.3}]},
+            )
         )
         (aggregated_dir / "contacts_result.json").write_text(
-            json.dumps(contacts_payload), encoding="utf-8"
+            '{"pair_results": [{"pair_label": "Contacts Pair", "overall_mean": 9.9}]}',
+            encoding="utf-8",
         )
-        (aggregated_dir / "notes.json").write_text(
-            json.dumps({"note": "ignore me"}), encoding="utf-8"
-        )
+        (aggregated_dir / "notes.json").write_text('{"note": "ignore me"}', encoding="utf-8")
 
         data = {"Cond1": {"aggregated_dir": aggregated_dir}}
         loaded = _load_distance_aggregated_results(data, ["Cond1"])
@@ -1220,24 +1818,8 @@ class TestLifecycle:
             sim_config=mock_sim_config,
         )
 
-        # 1. Compute replicates
-        rep_results = []
-        for rep in [1, 2]:
-            ctx = ReplicateContext(
-                condition=cond,
-                replicate=rep,
-                sim_config=mock_sim_config,
-                output_dir=tmp_path / f"run_{rep}",
-                equilibration="10ns",
-                recompute=False,
-                settings=settings,
-            )
-            mock_result = _make_mock_distance_result(replicate=rep, n_pairs=1)
-            with patch("polyzymd.analyses.distances.DistanceCalculator") as MockCalc:
-                MockCalc.return_value.compute.return_value = mock_result
-                result = analysis.compute_replicate(ctx, rep)
-                rep_results.append(result)
-
+        # 1. Compute-stage output is now canonical MDA replicate artifacts.
+        rep_results = _make_distance_artifacts(tmp_path, "Test", settings, n_reps=2)
         assert len(rep_results) == 2
 
         # 2. Aggregate
@@ -1250,29 +1832,13 @@ class TestLifecycle:
         )
 
         with patch(
-            "polyzymd.analyses.shared.aggregation.aggregate_distance_pair_stats"
-        ) as mock_agg:
-            mock_stats = MagicMock()
-            mock_stats.mean_stats.mean = 3.5
-            mock_stats.mean_stats.sem = 0.05
-            mock_stats.median_stats.mean = 3.4
-            mock_stats.per_rep_means = [3.49, 3.51]
-            mock_stats.per_rep_stds = [0.5, 0.5]
-            mock_stats.per_rep_medians = [3.39, 3.41]
-            mock_stats.fraction_stats = None
-            mock_stats.per_rep_fractions = None
-            mock_stats.kde_peak_stats = None
-            mock_stats.per_rep_kde_peaks = None
-            mock_agg.return_value = mock_stats
-
-            with patch(
-                "polyzymd.analyses._results_base.get_polyzymd_version",
-                return_value="1.0.0-test",
-            ):
-                agg_result = analysis.aggregate(agg_ctx, rep_results)
+            "polyzymd.analyses._framework.results_base.get_polyzymd_version",
+            return_value="1.0.0-test",
+        ):
+            agg_result = analysis.aggregate(agg_ctx, rep_results)
 
         assert agg_result is not None
-        assert agg_result.n_replicates == 2
+        assert agg_result.metadata["n_replicates"] == 2
 
     def test_extract_metrics_not_needed(self):
         """Since compare() is overridden, extract_metrics returns empty."""

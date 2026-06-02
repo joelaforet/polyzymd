@@ -7,21 +7,19 @@ All functions are called exclusively from ``RgAnalysis.plot()``.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import ValidationError
-
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
-from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
-    get_colors,
+    get_condition_colors,
     get_output_path,
+    order_condition_labels,
     save_figure,
+    scatter_replicate_values,
+    suppress_singleton_errors,
 )
 
 if TYPE_CHECKING:
@@ -53,13 +51,16 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
     import numpy as np
 
     plot_settings = _get_plot_settings(ctx)
-    result_json_name = _make_replicate_result_filename(ctx)
 
     replicates_by_condition = {
         condition.label: list(condition.replicates) for condition in ctx.conditions
     }
-    condition_labels = [condition.label for condition in comparison_result.conditions]
-    colors = get_colors(len(condition_labels), ctx.plot_settings)
+    condition_labels = _ordered_condition_labels(ctx, comparison_result)
+    colors = get_condition_colors(
+        condition_labels,
+        ctx.plot_settings,
+        control_label=comparison_result.control_label,
+    )
 
     generated: list[Path] = []
     for run_label in comparison_result.run_labels:
@@ -80,7 +81,6 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
                 condition_dir,
                 run_label,
                 replicates,
-                result_json_name,
             )
             if rg_matrix.size == 0 or time_ns.size == 0:
                 logger.warning(
@@ -116,14 +116,15 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
                 label=condition_label,
                 zorder=3,
             )
-            ax.fill_between(
-                time_ns,
-                mean_rg - sem_rg,
-                mean_rg + sem_rg,
-                color=color,
-                alpha=0.2,
-                zorder=2,
-            )
+            if rg_matrix.shape[0] > 1:
+                ax.fill_between(
+                    time_ns,
+                    mean_rg - sem_rg,
+                    mean_rg + sem_rg,
+                    color=color,
+                    alpha=0.2,
+                    zorder=2,
+                )
             had_data = True
 
         if not had_data:
@@ -186,8 +187,12 @@ def plot_rg_comparison_bars(
         labels: list[str] = []
         means: list[float] = []
         sems: list[float] = []
+        replicate_values: list[list[float]] = []
 
-        for condition in comparison_result.conditions:
+        conditions_by_label = _condition_summaries_by_label(comparison_result)
+        ordered_labels = _ordered_condition_labels(ctx, comparison_result)
+        for condition_label in ordered_labels:
+            condition = conditions_by_label[condition_label]
             try:
                 run_summary = condition.get_run(run_label)
             except KeyError:
@@ -201,25 +206,38 @@ def plot_rg_comparison_bars(
             labels.append(condition.label)
             means.append(run_summary.mean_rg)
             sems.append(run_summary.sem_rg)
+            replicate_values.append(run_summary.per_replicate_means)
 
         if not labels:
             logger.warning("No Rg summary data available for run '%s'", run_label)
             continue
 
         positions = np.arange(len(labels))
-        colors = get_colors(len(labels), ctx.plot_settings)
+        colors = get_condition_colors(
+            labels,
+            ctx.plot_settings,
+            control_label=comparison_result.control_label,
+        )
 
         fig, ax = plt.subplots(figsize=plot_settings.figsize)
         theme = ctx.plot_settings.theme
         ax.bar(
             positions,
             means,
-            yerr=sems,
+            yerr=suppress_singleton_errors(sems, replicate_values),
             color=colors,
             edgecolor=theme.bar_edgecolor,
             linewidth=theme.bar_linewidth,
             capsize=theme.bar_capsize,
             alpha=theme.bar_alpha,
+        )
+        scatter_replicate_values(
+            ax,
+            positions,
+            replicate_values,
+            ctx.plot_settings,
+            orientation="vertical",
+            bar_width=0.8,
         )
 
         ax.set_xticks(positions)
@@ -268,8 +286,12 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
         logger.info("Rg distribution plotting disabled by plot settings")
         return []
 
-    condition_labels = [condition.label for condition in comparison_result.conditions]
-    colors = get_colors(len(condition_labels), ctx.plot_settings)
+    condition_labels = _ordered_condition_labels(ctx, comparison_result)
+    colors = get_condition_colors(
+        condition_labels,
+        ctx.plot_settings,
+        control_label=comparison_result.control_label,
+    )
 
     generated: list[Path] = []
     for run_label in comparison_result.run_labels:
@@ -278,7 +300,9 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
             break
 
         first_run_summary = None
-        for condition in comparison_result.conditions:
+        conditions_by_label = _condition_summaries_by_label(comparison_result)
+        for condition_label in condition_labels:
+            condition = conditions_by_label[condition_label]
             try:
                 first_run_summary = condition.get_run(run_label)
                 break
@@ -317,7 +341,7 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
                 continue
 
             run_payload = None
-            for candidate in aggregated_payload.get("run_results", []):
+            for candidate in aggregated_payload.get("runs", []):
                 if candidate.get("run_label") == run_label:
                     run_payload = candidate
                     break
@@ -507,7 +531,6 @@ def _load_replicate_timeseries(
     condition_dir: Path,
     run_label: str,
     replicates: list[int],
-    result_json_name: str,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load Rg NPZ sidecars for one condition and run.
 
@@ -533,7 +556,7 @@ def _load_replicate_timeseries(
     traces: list[np.ndarray] = []
 
     for replicate in replicates:
-        npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate, result_json_name)
+        npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate)
         if npz_path is None:
             continue
 
@@ -542,8 +565,7 @@ def _load_replicate_timeseries(
                 rg_values = np.asarray(payload["rg_values"], dtype=np.float64)
                 time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
         except (OSError, ValueError, KeyError) as exc:
-            logger.warning("Failed to load Rg NPZ sidecar %s: %s", npz_path, exc)
-            continue
+            raise ValueError(f"Failed to load required Rg NPZ sidecar {npz_path}: {exc}") from exc
 
         if rg_values.ndim != 1 or time_ns.ndim != 1:
             logger.warning("Unexpected NPZ shape for %s; expected 1D arrays", npz_path)
@@ -579,13 +601,49 @@ def _load_replicate_timeseries(
     return reference_time, rg_matrix
 
 
+def _ordered_condition_labels(ctx: PlotContext, comparison_result: RgComparisonResult) -> list[str]:
+    """Return Rg condition labels in display order.
+
+    Parameters
+    ----------
+    ctx : PlotContext
+        Framework-provided plot context with global plot settings.
+    comparison_result : RgComparisonResult
+        Comparison result whose condition order remains unchanged on disk.
+
+    Returns
+    -------
+    list of str
+        Labels ordered for plotting only.
+    """
+
+    labels = [condition.label for condition in comparison_result.conditions]
+    return order_condition_labels(labels, ctx.plot_settings)
+
+
+def _condition_summaries_by_label(comparison_result: RgComparisonResult) -> dict[str, object]:
+    """Map Rg condition labels to comparison summaries.
+
+    Parameters
+    ----------
+    comparison_result : RgComparisonResult
+        Comparison result containing condition summaries.
+
+    Returns
+    -------
+    dict of str to object
+        Summary objects keyed by label.
+    """
+
+    return {condition.label: condition for condition in comparison_result.conditions}
+
+
 def _resolve_npz_sidecar_path(
     condition_dir: Path,
     run_label: str,
     replicate: int,
-    result_json_name: str,
 ) -> Path | None:
-    """Resolve a run NPZ sidecar via per-replicate result metadata.
+    """Resolve a run NPZ sidecar via canonical artifact metadata.
 
     Parameters
     ----------
@@ -595,89 +653,77 @@ def _resolve_npz_sidecar_path(
         Rg run label.
     replicate : int
         Replicate index.
-    result_json_name : str
-        Expected per-replicate Rg result JSON filename.
 
     Returns
     -------
     Path | None
-        NPZ sidecar path from metadata, or ``None`` when unavailable.
+        NPZ sidecar path from metadata, or ``None`` when the replicate or
+        requested run is not available.
+
+    Raises
+    ------
+    ValueError
+        Raised when a completed Rg run payload exists but lacks valid
+        canonical sidecar metadata.
     """
-    from polyzymd.analyses.rg._results import RgResult
+    from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
 
     run_dir = condition_dir / f"run_{replicate}"
     if not run_dir.exists():
         logger.warning("Missing Rg run directory: %s", run_dir)
         return None
 
-    result_path = run_dir / result_json_name
+    result_path = run_dir / "result.json"
     if not result_path.exists():
-        prefix = result_json_name.rsplit("_", maxsplit=1)[0] + "_"
-        legacy_matches = sorted(path for path in run_dir.glob(f"{prefix}*.json") if path.exists())
-        if legacy_matches:
-            logger.warning(
-                "Found Rg cache files with legacy/non-canonical tags (%s) but expected %s; "
-                "recompute Rg to refresh cache naming",
-                ", ".join(str(path.name) for path in legacy_matches),
-                result_path.name,
-            )
-        logger.warning("Missing Rg per-replicate result JSON %s", result_path)
+        logger.warning("Missing canonical Rg replicate artifact %s", result_path)
         return None
 
     try:
-        result = RgResult.load(result_path)
-    except (OSError, ValueError, ValidationError) as exc:
-        logger.warning("Failed to load Rg result JSON %s: %s", result_path, exc)
-        return None
+        artifact = ArtifactStore(run_dir).read_replicate_result("result.json")
+    except ArtifactStoreError:
+        raise
 
-    run_result = next((entry for entry in result.run_results if entry.run_label == run_label), None)
+    run_result = next(
+        (
+            entry
+            for entry in artifact.payload.get("runs", [])
+            if isinstance(entry, dict) and entry.get("run_label") == run_label
+        ),
+        None,
+    )
     if run_result is None:
         logger.warning(
-            "Run '%s' not found in Rg result JSON %s",
+            "Run '%s' not found in Rg replicate artifact %s",
             run_label,
             result_path,
         )
         return None
 
-    if run_result.npz_path is None:
-        logger.warning(
-            "Missing npz_path metadata for run '%s' in %s",
-            run_label,
-            result_path,
+    sidecar_payload = run_result.get("sidecar")
+    if not isinstance(sidecar_payload, dict):
+        raise ValueError(
+            f"Completed Rg run '{run_label}' in canonical artifact {result_path} is missing "
+            "valid NPZ sidecar metadata. Recompute the replicate or clear the corrupted "
+            "artifact before plotting."
         )
-        return None
 
-    npz_path = Path(run_result.npz_path)
-    if not npz_path.is_absolute():
-        npz_path = (run_dir / npz_path).resolve()
-    if not npz_path.exists():
-        logger.warning("Missing Rg NPZ sidecar from metadata path: %s", npz_path)
-        return None
+    from pydantic import ValidationError
+
+    from polyzymd.analyses.mda import ArtifactSidecarRef
+
+    try:
+        sidecar = ArtifactSidecarRef.model_validate(sidecar_payload)
+    except ValidationError as exc:
+        raise ValueError(
+            f"Invalid Rg NPZ sidecar metadata for run '{run_label}' in {result_path}: {exc}"
+        ) from exc
+    npz_path = ArtifactStore(run_dir).validate_sidecar(sidecar)
 
     return npz_path
 
 
-def _make_replicate_result_filename(ctx: PlotContext) -> str:
-    """Build the per-replicate Rg result filename for this plot request.
-
-    Parameters
-    ----------
-    ctx : PlotContext
-        Framework-provided plot context.
-
-    Returns
-    -------
-    str
-        Expected per-replicate Rg JSON filename.
-    """
-    eq_value, eq_unit = parse_time_string(ctx.equilibration)
-    eq_str = f"eq{eq_value:g}{eq_unit}"
-    settings_tag = settings_fingerprint(ctx.settings)
-    return f"rg_{eq_str}_{settings_tag}.json"
-
-
 def _load_condition_aggregated(condition_dir: Path) -> dict | None:
-    """Load the latest condition-level aggregated Rg JSON payload.
+    """Load the canonical condition-level aggregated Rg artifact payload.
 
     Parameters
     ----------
@@ -687,44 +733,22 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
     Returns
     -------
     dict | None
-        Parsed JSON payload, or ``None`` when no aggregated file is available.
+        Parsed artifact payload, or ``None`` when no aggregate artifact is available.
     """
+    from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
+
     agg_dir = condition_dir / "aggregated"
     if not agg_dir.exists():
         return None
 
-    # Try the canonical path first (framework default: result.json)
     canonical = agg_dir / "result.json"
-    if canonical.exists():
-        try:
-            return json.loads(canonical.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.warning("Failed to load aggregated Rg JSON %s: %s", canonical, exc)
-            return None
-
-    # Fallback search priority:
-    # 1) current native filenames (tagged and untagged)
-    # 2) legacy rg_aggregated_*.json
-    # 3) legacy rg_result_aggregated_*.json
-    pattern_families = [
-        "rg_reps*_eq*.json",
-        "rg_aggregated_*.json",
-        "rg_result_aggregated_*.json",
-    ]
-
-    for pattern in pattern_families:
-        matches = [path for path in agg_dir.glob(pattern) if path.is_file()]
-        if not matches:
-            continue
-
-        newest = max(matches, key=lambda path: path.stat().st_mtime)
-        try:
-            return json.loads(newest.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.warning("Failed to load aggregated Rg JSON %s: %s", newest, exc)
-            return None
-
-    return None
+    if not canonical.exists():
+        return None
+    try:
+        artifact = ArtifactStore(agg_dir).read_condition_result("result.json")
+    except ArtifactStoreError:
+        raise
+    return artifact.payload
 
 
 def _get_plot_settings(ctx: PlotContext) -> RgPlotSettings:

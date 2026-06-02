@@ -17,13 +17,16 @@ Key Features
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
+from numbers import Real
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import ValidationError
 
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
@@ -32,6 +35,27 @@ if TYPE_CHECKING:
     from polyzymd.engines.base import SimulationEngine, TrajectoryLayout
 
 LOGGER = logging.getLogger(__name__)
+_WARNED_GRO_TOPOLOGY_PATHS: set[Path] = set()
+
+
+def _normalized_warning_path(path: Path) -> Path:
+    """Return a stable key for topology warning de-duplication.
+
+    Parameters
+    ----------
+    path : Path
+        Topology path to normalize.
+
+    Returns
+    -------
+    Path
+        Expanded and resolved path suitable for process-wide warning gating.
+    """
+    expanded = Path(path).expanduser()
+    try:
+        return expanded.resolve(strict=False)
+    except OSError:
+        return expanded.absolute()
 
 
 def _require_mdanalysis(feature_name: str = "trajectory analysis") -> None:
@@ -58,6 +82,207 @@ def _require_matplotlib(feature_name: str = "plotting") -> None:
         ) from None
 
 
+def _trajectory_frame_index(trajectory: Any) -> int | None:
+    """Return the current trajectory frame index when available.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+
+    Returns
+    -------
+    int | None
+        Current frame index, or ``None`` when it cannot be determined.
+    """
+
+    for owner in (trajectory, getattr(trajectory, "ts", None)):
+        frame = getattr(owner, "frame", None)
+        if isinstance(frame, bool):
+            continue
+        try:
+            return int(frame)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _restore_trajectory_frame(trajectory: Any, frame_index: int | None) -> None:
+    """Restore a trajectory reader to a previous frame when possible.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+    frame_index : int | None
+        Frame index captured before a metadata probe.
+    """
+
+    if frame_index is None:
+        return
+    try:
+        trajectory[frame_index]
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return
+
+
+def _finite_numeric_time(value: object) -> float | None:
+    """Return a finite real-valued time or ``None``.
+
+    Parameters
+    ----------
+    value : object
+        Candidate time value from MDAnalysis metadata.
+
+    Returns
+    -------
+    float | None
+        Finite time value, or ``None`` when the value is missing, non-real, or
+        non-finite.
+    """
+
+    if value is None or isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    time_value = float(value)
+    if not math.isfinite(time_value):
+        return None
+    return time_value
+
+
+def _trajectory_raw_time(trajectory: Any) -> float | None:
+    """Return raw timestamp metadata from a trajectory timestep.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+
+    Returns
+    -------
+    float | None
+        Raw finite timestep time from ``ts.data['time']``, or ``None`` when it is
+        unavailable.
+    """
+
+    ts = getattr(trajectory, "ts", None)
+    data = getattr(ts, "data", None)
+    if not isinstance(data, dict):
+        return None
+    return _finite_numeric_time(data.get("time"))
+
+
+def _trajectory_time(trajectory: Any) -> float | None:
+    """Return the best finite timestamp exposed by a trajectory reader.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+
+    Returns
+    -------
+    float | None
+        Raw timestep time when available, otherwise ``trajectory.time`` when it
+        is finite.
+    """
+
+    raw_time = _trajectory_raw_time(trajectory)
+    if raw_time is not None:
+        return raw_time
+    return _finite_numeric_time(getattr(trajectory, "time", None))
+
+
+class _TimestampPreservingTrajectory:
+    """Proxy that exposes raw MDAnalysis timestep timestamps.
+
+    Some MDAnalysis multi-DCD ``ChainReader`` instances normalize
+    ``reader.time`` to a loaded-frame-relative origin even though each timestep
+    keeps the absolute source timestamp in ``reader.ts.data['time']``. This proxy
+    preserves the reader protocol while making ``time`` return that raw timestamp
+    when available.
+    """
+
+    def __init__(self, reader: Any) -> None:
+        """Store the wrapped trajectory reader.
+
+        Parameters
+        ----------
+        reader : Any
+            MDAnalysis trajectory reader to wrap.
+        """
+
+        object.__setattr__(self, "_reader", reader)
+
+    def __len__(self) -> int:
+        """Return the wrapped trajectory length."""
+
+        return len(self._reader)
+
+    def __iter__(self) -> Iterator[Any]:
+        """Iterate over the wrapped trajectory reader."""
+
+        return iter(self._reader)
+
+    def __getitem__(self, item: Any) -> Any:
+        """Delegate frame and slice access to the wrapped reader."""
+
+        return self._reader[item]
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate unknown attributes to the wrapped reader."""
+
+        return getattr(self._reader, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Delegate mutable reader attributes to the wrapped reader."""
+
+        if name == "_reader":
+            object.__setattr__(self, name, value)
+            return
+        setattr(self._reader, name, value)
+
+    @property
+    def time(self) -> float:
+        """Return raw timestep time when available."""
+
+        raw_time = _trajectory_raw_time(self._reader)
+        if raw_time is not None:
+            return raw_time
+        return self._reader.time
+
+
+def _wrap_timestamp_preserving_trajectory(trajectory: Any) -> Any:
+    """Wrap trajectory readers that hide raw source timestamps.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader.
+
+    Returns
+    -------
+    Any
+        Original reader when no correction is needed, otherwise a proxy that
+        exposes raw timestamp metadata through ``time``.
+    """
+
+    previous_frame = _trajectory_frame_index(trajectory)
+    try:
+        trajectory[0]
+        raw_time = _trajectory_raw_time(trajectory)
+        reported_time = _finite_numeric_time(getattr(trajectory, "time", None))
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return trajectory
+    finally:
+        _restore_trajectory_frame(trajectory, previous_frame)
+
+    if raw_time is None or reported_time is None:
+        return trajectory
+    if math.isclose(raw_time, reported_time, rel_tol=1e-12, abs_tol=1e-12):
+        return trajectory
+    return _TimestampPreservingTrajectory(trajectory)
+
+
 @dataclass
 class TrajectoryInfo:
     """Information about discovered trajectory files.
@@ -74,6 +299,12 @@ class TrajectoryInfo:
         Base working directory for this replicate
     replicate : int
         Replicate number
+    topology_format : str or None, optional
+        Engine-reported topology format, when available.
+    trajectory_format : str or None, optional
+        Engine-reported trajectory format, when available.
+    warnings : list[str]
+        Discovery warnings that should be preserved in downstream provenance.
     """
 
     topology_file: Path
@@ -81,6 +312,9 @@ class TrajectoryInfo:
     n_segments: int = 0
     working_directory: Path = field(default_factory=Path)
     replicate: int = 1
+    topology_format: str | None = None
+    trajectory_format: str | None = None
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def n_trajectory_files(self) -> int:
@@ -110,7 +344,8 @@ class TrajectoryLoader:
 
     File discovery is delegated to the simulation engine resolved from the
     config's ``engine`` field.  The engine is created lazily on the first
-    call that needs it, so construction remains cheap.
+    call that needs it, so construction remains cheap. Engine resolution errors
+    propagate unless an explicit ``engine_override`` is supplied.
 
     Parameters
     ----------
@@ -158,7 +393,6 @@ class TrajectoryLoader:
         self._engine_override = engine_override
         self._engine: SimulationEngine | None = None
         self._universe_cache: dict[int, "Universe"] = {}
-        self._warned_gro_topologies: set[Path] = set()
 
     # ------------------------------------------------------------------
     # Engine delegation helpers
@@ -167,8 +401,8 @@ class TrajectoryLoader:
     def _get_engine(self) -> "SimulationEngine":
         """Lazily create and cache the simulation engine.
 
-        Falls back to OpenMM when the config's ``engine`` field is
-        unrecognised (e.g. a mock object in tests).
+        Engine resolution errors from ``create_engine()`` propagate to callers
+        unless an explicit ``engine_override`` supplies a valid backend.
 
         Returns
         -------
@@ -178,19 +412,7 @@ class TrajectoryLoader:
         if self._engine is None:
             from polyzymd.engines import create_engine
 
-            try:
-                self._engine = create_engine(self.config, override=self._engine_override)
-            except (ValueError, TypeError):
-                # Unrecognised engine name (e.g. MagicMock in tests) —
-                # fall back to OpenMM which works with any directory layout.
-                LOGGER.debug(
-                    "Could not resolve engine from config (%s); "
-                    "falling back to OpenMM layout resolver.",
-                    getattr(self.config, "engine", "<no engine attr>"),
-                )
-                from polyzymd.engines.openmm import OpenMMEngine
-
-                self._engine = OpenMMEngine.from_config(self.config)
+            self._engine = create_engine(self.config, override=self._engine_override)
         return self._engine
 
     def _resolve_layout(
@@ -228,12 +450,11 @@ class TrajectoryLoader:
             engine_dir = working_dir
         try:
             layout = engine.resolve_trajectory_layout(engine_dir, replicate)
-        except Exception as exc:
-            # Pydantic ValidationError, TypeError, etc. when paths are
-            # invalid (e.g. MagicMock in tests).  Translate to
-            # FileNotFoundError so callers' existing handlers work.
-            if isinstance(exc, FileNotFoundError):
-                raise
+        except FileNotFoundError:
+            raise
+        except (TypeError, ValueError, ValidationError) as exc:
+            # Invalid path-like inputs are treated as missing layouts so callers
+            # can use the existing discovery fallback path
             raise FileNotFoundError(
                 f"Engine could not resolve trajectory layout in {working_dir}: {exc}"
             ) from exc
@@ -263,8 +484,8 @@ class TrajectoryLoader:
             return int(match.group(1))
         return 1
 
-    def _warn_gro_topology(self, layout: "TrajectoryLayout") -> None:
-        """Emit a one-time warning when the resolved topology is a GRO file.
+    def _gro_topology_warning(self, layout: "TrajectoryLayout") -> str | None:
+        """Build the chain-ID warning for GRO topology layouts.
 
         GRO files do not reliably preserve chain identifiers, which can
         break chain-based selections (``chainid A/B/C``) used by many
@@ -274,20 +495,43 @@ class TrajectoryLoader:
         ----------
         layout : TrajectoryLayout
             Resolved layout from the engine.
+
+        Returns
+        -------
+        str or None
+            Actionable warning text when the layout uses a GRO topology,
+            otherwise ``None``.
         """
-        if (
-            layout.topology_path is not None
-            and layout.topology_format.lower() == "gro"
-            and layout.topology_path not in self._warned_gro_topologies
-        ):
-            self._warned_gro_topologies.add(layout.topology_path)
-            LOGGER.warning(
-                "Using GRO topology %s — GRO files may not preserve chain "
-                "identifiers.  Chain-based selections (chainid A/B/C) used "
-                "by analysis plugins may be unreliable.  Prefer a PDB "
-                "topology when available.",
-                layout.topology_path,
-            )
+        if layout.topology_path is None or layout.topology_format.lower() != "gro":
+            return None
+        return (
+            f"Using GRO topology {layout.topology_path} — GRO files may not preserve "
+            "chain identifiers. Chain-based selections (chainid A/B/C) used by "
+            "analysis plugins may be unreliable. Prefer a PDB topology when available."
+        )
+
+    def _warn_gro_topology(self, layout: "TrajectoryLayout") -> str | None:
+        """Emit a one-time warning when the resolved topology is a GRO file.
+
+        Parameters
+        ----------
+        layout : TrajectoryLayout
+            Resolved layout from the engine.
+
+        Returns
+        -------
+        str or None
+            Actionable warning text when the layout uses a GRO topology,
+            otherwise ``None``.
+        """
+        warning = self._gro_topology_warning(layout)
+        if warning is not None and layout.topology_path is not None:
+            topology_key = _normalized_warning_path(layout.topology_path)
+            if topology_key in _WARNED_GRO_TOPOLOGY_PATHS:
+                return warning
+            _WARNED_GRO_TOPOLOGY_PATHS.add(topology_key)
+            LOGGER.warning(warning)
+        return warning
 
     # ------------------------------------------------------------------
     # Public API
@@ -316,11 +560,17 @@ class TrajectoryLoader:
 
         if not working_dir.exists():
             available = self._find_available_replicates()
-            available_str = ", ".join(str(r) for r in available) if available else "none found"
             raise FileNotFoundError(
-                f"Working directory not found: {working_dir}\n"
-                f"Has replicate {replicate} been simulated?\n"
-                f"Available replicates: {available_str}"
+                self._format_missing_data_message(
+                    "Working directory not found",
+                    working_dir=working_dir,
+                    replicate=replicate,
+                    available_replicates=available,
+                    action=(
+                        "Run or complete the simulation for this replicate, or verify "
+                        "the config output/scratch paths before rerunning analysis."
+                    ),
+                )
             )
 
         # Delegate file discovery to the simulation engine
@@ -329,7 +579,24 @@ class TrajectoryLoader:
         if layout.topology_path is None:
             raise FileNotFoundError(f"No topology file found in {working_dir}")
         if not layout.trajectory_paths:
-            raise FileNotFoundError(f"No production trajectory files found in {working_dir}")
+            available = self._find_available_replicates()
+            raise FileNotFoundError(
+                self._format_missing_data_message(
+                    "No production trajectory files found",
+                    working_dir=working_dir,
+                    replicate=replicate,
+                    available_replicates=available,
+                    action=(
+                        "Run or complete the production simulation for this replicate, "
+                        "then rerun analysis. Use --recompute only after trajectory files exist."
+                    ),
+                )
+            )
+
+        warnings = []
+        gro_warning = self._gro_topology_warning(layout)
+        if gro_warning is not None:
+            warnings.append(gro_warning)
 
         return TrajectoryInfo(
             topology_file=layout.topology_path,
@@ -337,6 +604,9 @@ class TrajectoryLoader:
             n_segments=len(layout.trajectory_paths),
             working_directory=working_dir,
             replicate=replicate,
+            topology_format=layout.topology_format,
+            trajectory_format=layout.trajectory_format,
+            warnings=warnings,
         )
 
     def load_universe(
@@ -384,6 +654,7 @@ class TrajectoryLoader:
                 str(info.topology_file),
                 [str(f) for f in info.trajectory_files],
             )
+        u.trajectory = _wrap_timestamp_preserving_trajectory(u.trajectory)
 
         if cache:
             self._universe_cache[replicate] = u
@@ -435,9 +706,22 @@ class TrajectoryLoader:
             Array of time values for each frame
         """
         u = self.load_universe(replicate)
+        trajectory = u.trajectory
 
-        # Get times from trajectory
-        times = np.array([ts.time for ts in u.trajectory], dtype=np.float64)
+        previous_frame = _trajectory_frame_index(trajectory)
+        try:
+            times_ps = []
+            for frame_index in range(len(trajectory)):
+                trajectory[frame_index]
+                time_ps = _trajectory_time(trajectory)
+                if time_ps is None:
+                    raise ValueError(
+                        "Trajectory timestamps are unavailable for frame-time extraction"
+                    )
+                times_ps.append(time_ps)
+        finally:
+            _restore_trajectory_frame(trajectory, previous_frame)
+        times = np.array(times_ps, dtype=np.float64)
 
         # Convert units (MDAnalysis uses ps internally)
         if unit == "ns":
@@ -463,15 +747,22 @@ class TrajectoryLoader:
             Time between consecutive frames
         """
         u = self.load_universe(replicate)
+        trajectory = u.trajectory
 
         # Get timestep from trajectory
-        if len(u.trajectory) < 2:
+        if len(trajectory) < 2:
             raise ValueError("Need at least 2 frames to determine timestep")
 
-        u.trajectory[0]
-        t0 = u.trajectory.time
-        u.trajectory[1]
-        t1 = u.trajectory.time
+        previous_frame = _trajectory_frame_index(trajectory)
+        try:
+            trajectory[0]
+            t0 = _trajectory_time(trajectory)
+            trajectory[1]
+            t1 = _trajectory_time(trajectory)
+        finally:
+            _restore_trajectory_frame(trajectory, previous_frame)
+        if t0 is None or t1 is None:
+            raise ValueError("Trajectory timestamps are unavailable for timestep detection")
 
         dt = t1 - t0  # in ps (MDAnalysis default)
 
@@ -481,6 +772,53 @@ class TrajectoryLoader:
             raise ValueError(f"Unknown time unit: {unit}")
 
         return float(dt)
+
+    def get_first_frame_time(self, replicate: int, unit: str = "ps") -> float | None:
+        """Return the first loaded frame timestamp when available.
+
+        MDAnalysis reports trajectory times in picoseconds. This method probes
+        cached Universe metadata without changing the caller-visible current
+        frame when the reader exposes a restorable frame index.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
+        unit : str, optional
+            Time unit for output. Options are ``"ps"`` and ``"ns"``, by default
+            ``"ps"``.
+
+        Returns
+        -------
+        float | None
+            Finite first-frame timestamp in the requested unit, or ``None`` when
+            the trajectory does not expose a usable timestamp.
+
+        Raises
+        ------
+        ValueError
+            Raised when ``unit`` is not ``"ps"`` or ``"ns"``.
+        """
+
+        if unit not in {"ps", "ns"}:
+            raise ValueError(f"Unknown time unit: {unit}")
+
+        u = self.load_universe(replicate)
+        trajectory = u.trajectory
+        previous_frame = _trajectory_frame_index(trajectory)
+        try:
+            trajectory[0]
+            time_ps = _trajectory_time(trajectory)
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+        finally:
+            _restore_trajectory_frame(trajectory, previous_frame)
+
+        if time_ps is None:
+            return None
+        if unit == "ns":
+            return time_ps / 1000.0
+        return time_ps
 
     def clear_cache(self) -> None:
         """Clear the Universe cache to free memory."""
@@ -494,7 +832,13 @@ class TrajectoryLoader:
         list[int]
             Sorted list of replicate numbers that have simulation directories
         """
-        scratch_dir = self.config.output.effective_scratch_directory
+        discovered = self._discover_replicates_from_config()
+        if discovered:
+            return discovered
+
+        scratch_dir = self._get_scratch_directory()
+        if scratch_dir is None:
+            return []
         if not scratch_dir.exists():
             return []
 
@@ -508,6 +852,105 @@ class TrajectoryLoader:
                 except (IndexError, ValueError):
                     continue
         return sorted(replicates)
+
+    def _discover_replicates_from_config(self) -> list[int]:
+        """Discover replicate directories through SimulationConfig when available.
+
+        Returns
+        -------
+        list[int]
+            Sorted replicate numbers discovered by the config helper, or an
+            empty list when unavailable.
+        """
+        discover = getattr(self.config, "discover_replicate_dirs", None)
+        if not callable(discover):
+            return []
+        try:
+            replicate_dirs = discover()
+        except (AttributeError, TypeError, OSError, ValueError):
+            return []
+
+        replicates: list[int] = []
+        for item in replicate_dirs:
+            if isinstance(item, tuple) and item:
+                try:
+                    replicates.append(int(item[0]))
+                    continue
+                except (TypeError, ValueError):
+                    item = item[-1]
+            try:
+                path = Path(item)
+            except TypeError:
+                continue
+            match = re.search(r"run_?(\d+)$", path.name)
+            if match:
+                replicates.append(int(match.group(1)))
+        return sorted(set(replicates))
+
+    def _get_scratch_directory(self) -> Path | None:
+        """Return configured scratch directory when it can be resolved.
+
+        Returns
+        -------
+        Path or None
+            Effective scratch directory, or ``None`` when config metadata is
+            incomplete.
+        """
+        try:
+            scratch_dir = self.config.output.effective_scratch_directory
+        except AttributeError:
+            return None
+        if scratch_dir is None:
+            return None
+        try:
+            return Path(scratch_dir)
+        except TypeError:
+            return None
+
+    def _format_missing_data_message(
+        self,
+        headline: str,
+        *,
+        working_dir: Path,
+        replicate: int,
+        available_replicates: Sequence[int],
+        action: str,
+    ) -> str:
+        """Build a user-facing message for missing replicate trajectory data.
+
+        Parameters
+        ----------
+        headline : str
+            Stable leading message used by existing tests.
+        working_dir : Path
+            Expected working directory for the replicate.
+        replicate : int
+            Requested replicate number.
+        available_replicates : sequence of int
+            Replicates discovered on disk.
+        action : str
+            Actionable hint for the user.
+
+        Returns
+        -------
+        str
+            Multi-line diagnostic message.
+        """
+        scratch_dir = self._get_scratch_directory()
+        available = (
+            ", ".join(str(rep) for rep in available_replicates)
+            if available_replicates
+            else "none found"
+        )
+        scratch_text = str(scratch_dir) if scratch_dir is not None else "not configured"
+        return (
+            f"{headline}: {working_dir}\n"
+            f"Replicate: {replicate}\n"
+            f"Expected working directory: {working_dir}\n"
+            f"Scratch directory: {scratch_text}\n"
+            f"Available replicates: {available}\n"
+            f"Action: {action}"
+        )
 
     def find_topology(self, working_dir: Path) -> Path:
         """Find topology file in working directory.
@@ -561,7 +1004,19 @@ class TrajectoryLoader:
         """
         layout = self._resolve_layout(working_dir, replicate=None)
         if not layout.trajectory_paths:
-            raise FileNotFoundError(f"No production trajectory files found in {working_dir}")
+            replicate = self._infer_replicate(working_dir)
+            raise FileNotFoundError(
+                self._format_missing_data_message(
+                    "No production trajectory files found",
+                    working_dir=working_dir,
+                    replicate=replicate,
+                    available_replicates=self._find_available_replicates(),
+                    action=(
+                        "Run or complete the production simulation for this replicate, "
+                        "then rerun analysis. Use --recompute only after trajectory files exist."
+                    ),
+                )
+            )
         return layout.trajectory_paths
 
 

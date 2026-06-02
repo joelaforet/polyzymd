@@ -43,8 +43,62 @@ class _Settings(BaseModel):
 
 
 class _ToyAnalysis(Analysis):
+    """Toy analysis used by SLURM manifest tests."""
+
     name: ClassVar[str] = "toy_slurm"
     Settings: ClassVar[type] = _Settings
+
+    def build_mda_jobs(self, ctx: Any) -> list[Any]:
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+    def _run_compute_stage(
+        self,
+        ctx: Any,
+        replicate: int,
+    ) -> dict[str, Any]:
+        """Return a serializable compute-stage result.
+
+        Parameters
+        ----------
+        ctx : Any
+            Framework-provided replicate context.
+        replicate : int
+            Replicate identifier.
+        Returns
+        -------
+        dict[str, Any]
+            Serialized replicate summary.
+        """
+
+        return {
+            "replicate": replicate,
+            "threshold": ctx.settings.threshold,
+        }
+
+    def aggregate(self, ctx: Any, results: list[Any]) -> dict[str, Any]:
+        """Aggregate toy replicate results for full-stage workflow tests.
+
+        Parameters
+        ----------
+        ctx : Any
+            Framework-provided aggregate context.
+        results : list[Any]
+            Replicate summaries.
+
+        Returns
+        -------
+        dict[str, Any]
+            Minimal aggregate summary.
+        """
+
+        del ctx
+        return {
+            "n_replicates": len(results),
+            "replicates": [result["replicate"] for result in results],
+        }
 
 
 class _CompareOnlyAnalysis(Analysis):
@@ -81,6 +135,9 @@ def _make_manifest(tmp_path: Path) -> AnalysisJobManifest:
             )
         ],
         settings_snapshot={"threshold": 1.0},
+        snapshot_hash="test-snapshot-hash",
+        pipeline_mode="full",
+        partial_policy="strict",
         equilibration="10ns",
         recompute=False,
         resources=resources,
@@ -122,11 +179,26 @@ def _make_manifest_two_conditions(tmp_path: Path) -> AnalysisJobManifest:
             ),
         ],
         settings_snapshot={"threshold": 1.0},
+        snapshot_hash="test-snapshot-hash",
+        pipeline_mode="full",
+        partial_policy="strict",
         equilibration="10ns",
         recompute=False,
         resources=resources,
         created_at="2026-01-01T00:00:00+00:00",
     )
+
+
+def _assert_no_unresolved_jinja_markers(script_text: str) -> None:
+    """Assert that rendered script content contains no Jinja syntax.
+
+    Parameters
+    ----------
+    script_text : str
+        Rendered script content to inspect.
+    """
+    for marker in ("{{", "}}", "{%", "%}"):
+        assert marker not in script_text
 
 
 def test_build_manifest_serialization(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -187,10 +259,35 @@ def test_script_generation_contains_worker_commands(tmp_path: Path) -> None:
     assert "worker-replicate" in rep_text
     assert "scontrol requeue" in rep_text
     assert "run -e build python -c" in rep_text
+    for state in ("running", "retrying", "failed", "succeeded"):
+        assert f"'{state}'" in rep_text
     assert "python3 -c" not in rep_text
 
     assert "worker-aggregate" in agg_script.read_text()
     assert "worker-finalize" in fin_script.read_text()
+
+
+def test_generated_worker_scripts_have_no_unresolved_jinja_markers(tmp_path: Path) -> None:
+    """Generated analysis scripts should be fully rendered from templates."""
+    manifest = _make_manifest(tmp_path)
+    resources = AnalysisSlurmResources(max_retries=3)
+    hpc_dir = tmp_path / "comparison" / "toy_slurm" / "_hpc"
+    cond_spec = manifest.condition_specs[0]
+
+    scripts = [
+        generate_replicate_script(
+            manifest,
+            cond_spec.replicate_specs[0],
+            resources,
+            hpc_dir,
+        ),
+        generate_aggregate_script(manifest, cond_spec, resources, hpc_dir),
+        generate_finalize_script(manifest, resources, hpc_dir),
+        generate_array_script(cond_spec, manifest, resources, [1, 2], hpc_dir),
+    ]
+
+    for script in scripts:
+        _assert_no_unresolved_jinja_markers(script.read_text())
 
 
 def test_slurm_header_omits_partition_when_unset(tmp_path: Path) -> None:
@@ -242,6 +339,20 @@ def test_generate_array_script_requeues_only_failing_task(tmp_path: Path) -> Non
 
     assert "scontrol requeue ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}" in text
     assert "scontrol requeue $SLURM_ARRAY_JOB_ID" not in text
+
+
+def test_generate_array_script_preserves_slurm_retry_key_literal(tmp_path: Path) -> None:
+    """Array templates should keep the SLURM retry key as a shell literal."""
+    manifest = _make_manifest(tmp_path)
+    resources = AnalysisSlurmResources(max_retries=3)
+    hpc_dir = tmp_path / "comparison" / "toy_slurm" / "_hpc"
+    cond_spec = manifest.condition_specs[0]
+
+    script = generate_array_script(cond_spec, manifest, resources, [1, 2], hpc_dir)
+    text = script.read_text()
+
+    assert "${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}" in text
+    _assert_no_unresolved_jinja_markers(text)
 
 
 def test_generate_array_script_uses_condition_index_dispatch(tmp_path: Path) -> None:
@@ -409,9 +520,9 @@ def test_submit_analysis_graph_finalize_only_uses_root_dependencies(
     assert calls == ["afterok:101:102"]
 
 
-def test_manifest_load_defaults_pipeline_mode_for_legacy_json(tmp_path: Path) -> None:
-    """Legacy manifests without pipeline_mode should default to full mode."""
-    legacy_payload = {
+def test_manifest_load_rejects_missing_pipeline_mode(tmp_path: Path) -> None:
+    """Manifests without pipeline_mode should fail validation."""
+    payload = {
         "analysis_name": "toy_slurm",
         "comparison_yaml": str(tmp_path / "comparison.yaml"),
         "condition_specs": [
@@ -430,18 +541,66 @@ def test_manifest_load_defaults_pipeline_mode_for_legacy_json(tmp_path: Path) ->
             }
         ],
         "settings_snapshot": {"threshold": 1.0},
-        "snapshot_hash": "",
+        "snapshot_hash": "test-snapshot-hash",
         "partial_policy": "strict",
         "equilibration": "10ns",
         "recompute": False,
         "resources": AnalysisSlurmResources().model_dump(mode="json"),
         "created_at": "2026-01-01T00:00:00+00:00",
     }
-    legacy_path = tmp_path / "legacy_manifest.json"
-    legacy_path.write_text(json.dumps(legacy_payload))
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload))
 
-    loaded = AnalysisJobManifest.load(legacy_path)
-    assert loaded.pipeline_mode == "full"
+    with pytest.raises(ValidationError):
+        AnalysisJobManifest.load(manifest_path)
+
+
+def test_manifest_load_rejects_missing_partial_policy(tmp_path: Path) -> None:
+    """Manifests without partial_policy should fail validation."""
+    manifest = _make_manifest(tmp_path)
+    payload = manifest.model_dump(mode="json")
+    payload.pop("partial_policy")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError):
+        AnalysisJobManifest.load(manifest_path)
+
+
+def test_manifest_load_rejects_missing_snapshot_hash(tmp_path: Path) -> None:
+    """Manifests without snapshot_hash should fail validation."""
+    manifest = _make_manifest(tmp_path)
+    payload = manifest.model_dump(mode="json")
+    payload.pop("snapshot_hash")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError):
+        AnalysisJobManifest.load(manifest_path)
+
+
+def test_manifest_load_rejects_missing_recompute(tmp_path: Path) -> None:
+    """Manifests without recompute should fail validation."""
+    manifest = _make_manifest(tmp_path)
+    payload = manifest.model_dump(mode="json")
+    payload.pop("recompute")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError):
+        AnalysisJobManifest.load(manifest_path)
+
+
+def test_manifest_load_rejects_empty_snapshot_hash(tmp_path: Path) -> None:
+    """Manifests with empty snapshot_hash should fail validation."""
+    manifest = _make_manifest(tmp_path)
+    payload = manifest.model_dump(mode="json")
+    payload["snapshot_hash"] = ""
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError):
+        AnalysisJobManifest.load(manifest_path)
 
 
 def test_submit_analysis_graph_with_arrays_builds_dependencies(
@@ -492,6 +651,9 @@ def test_submit_analysis_graph_with_arrays_builds_dependencies(
             ),
         ],
         settings_snapshot={"threshold": 1.0},
+        snapshot_hash="test-snapshot-hash",
+        pipeline_mode="full",
+        partial_policy="strict",
         equilibration="10ns",
         recompute=False,
         resources=AnalysisSlurmResources(),
@@ -882,6 +1044,10 @@ def test_sanitize_slurm_rejects_shell_metacharacters() -> None:
         "aa100|cat",
         "normal; rm -rf /",
         "${HOME}",
+        "$HOME",
+        "bad\\value",
+        "bad'value",
+        'bad"value',
         "normal < /etc/passwd",
         "normal > /tmp/evil",
     ):
@@ -937,6 +1103,9 @@ def test_sanitize_path_for_script_rejects_null_byte() -> None:
         Path("/home/user/bad\npath/analysis"),
         Path("/home/user/bad`path/analysis"),
         Path("/home/user/bad$(path)/analysis"),
+        Path("/home/user/bad${path}/analysis"),
+        Path("/home/user/bad$path/analysis"),
+        Path("/home/user/bad\\path/analysis"),
         Path("/home/user/bad|path/analysis"),
     ],
 )

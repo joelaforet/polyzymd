@@ -24,7 +24,7 @@ Alternatively, prefix each command with `pixi run -e build`.
 
 ```bash
 # Run catalytic triad comparison (all conditions in comparison.yaml)
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 
 # Equivalent full plugin name
 polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
@@ -33,7 +33,7 @@ polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 polyzymd compare run-all -f comparison.yaml --eq-time 100ns
 
 # Force recompute and machine-readable output
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns --recompute --format json
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns --recompute --format json
 ```
 
 ## Prerequisites
@@ -42,7 +42,8 @@ Before running catalytic triad analysis, you need:
 
 1. Completed production simulation output
 2. A `comparison.yaml` file with a `plugins.catalytic_triad` section
-3. At least two replicates per condition for robust aggregation and comparison
+3. One or more replicates per condition; use at least two replicates for SEM
+   and robust inferential comparisons
 
 ## What Catalytic Triad Analysis Provides
 
@@ -103,8 +104,8 @@ plugins:
 Then run:
 
 ```bash
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns --recompute
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns --recompute
 ```
 ````
 
@@ -112,7 +113,7 @@ polyzymd compare run triad -f comparison.yaml --eq-time 100ns --recompute
 Run the configured comparison:
 
 ```bash
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 ```
 
 Expected output pattern:
@@ -143,7 +144,7 @@ from polyzymd.analyses.orchestrator import run_comparison
 from polyzymd.config.comparison import ComparisonConfig
 
 config = ComparisonConfig.from_yaml("comparison.yaml")
-analysis = get_analysis("triad")()
+analysis = get_analysis("catalytic_triad")()
 
 pipeline_result = run_comparison(
     analysis,
@@ -193,7 +194,7 @@ Supported selection forms:
 Use one `comparison.yaml` with all conditions, then run one command:
 
 ```bash
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 ```
 
 The comparison includes:

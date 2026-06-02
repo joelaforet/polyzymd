@@ -9,7 +9,7 @@ HPC clusters using PolyzyMD's self-resubmitting SLURM workflow.
 - A working `config.yaml` validated with `polyzymd validate`
 - GROMACS installed on your cluster (via `module load` or container)
 - Familiarity with your cluster's SLURM partitions and GPU types
-- PolyzyMD installed with `pixi` (see {doc}`../tutorials/installation`)
+- PolyzyMD installed with `pixi` (see {doc}`../get_started/installation`)
 
 All commands below assume you prefix with `pixi run -e build` or have
 activated the environment with `pixi shell -e build`.
@@ -39,6 +39,24 @@ pixi run -e build polyzymd submit \
 
 This generates self-resubmitting SLURM scripts that run EM, equilibration,
 and production with checkpoint-based restart.
+
+## Build-only GROMACS export
+
+Use `polyzymd build --format gromacs` when you only want PolyzyMD to construct
+and parameterize the system:
+
+```bash
+pixi run -e build polyzymd build -c config.yaml --format gromacs
+```
+
+The core handoff is the `.gro` coordinate file, `.top` topology file, and
+component `.itp` parameter files. PolyzyMD may also generate MDP defaults and a
+run script as conveniences from the validated `config.yaml`, but those files are
+not required. You may use the generated defaults as a starting point or replace
+them and continue entirely in your own GROMACS workflow.
+
+Use `polyzymd run --engine gromacs` instead when you want PolyzyMD to build and
+execute the full local GROMACS workflow.
 
 ---
 
@@ -706,4 +724,4 @@ polyzymd submit -c config.yaml --engine gromacs --memory 64G ...
 - {doc}`../reference/cli_reference` — CLI options for `submit` and `recover`
 - {doc}`../reference/configuration` — Full configuration reference including `gromacs:` block
 - {doc}`hpc_slurm` — General SLURM submission workflow (OpenMM and GROMACS)
-- {doc}`../tutorials/quickstart` — Getting started guide
+- {doc}`../get_started/quickstart` — Getting started guide

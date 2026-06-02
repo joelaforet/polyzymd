@@ -146,6 +146,8 @@ def apply_fdr_correction(
     from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
     def _default_get_p_value(result: Any) -> float | None:
+        if hasattr(result, "testable") and not result.testable:
+            return None
         return getattr(result, "p_value", None)
 
     def _default_set_corrected(result: Any, bh_result: Any) -> None:

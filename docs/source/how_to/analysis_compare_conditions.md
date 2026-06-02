@@ -12,9 +12,8 @@ You will:
 
 ```{important}
 For the `v1.3.0` release, the stable comparison stack is RMSD, Rg, RMSF,
-contacts, distances, catalytic triad, secondary structure, and SASA. Binding
-preference, exposure dynamics, binding free energy, and polymer affinity remain
-available, but PolyzyMD labels them as experimental.
+contacts, distances, catalytic triad, secondary structure, SASA, and hydrogen
+bonds.
 ```
 
 ```{note}
@@ -32,6 +31,17 @@ pixi shell -e build
 ```
 
 Alternatively, prefix each command with `pixi run -e build`.
+:::
+
+:::{admonition} Resource requirements
+:class: important
+
+Validation, status, and help commands are lightweight. `polyzymd compare run`,
+`run-all`, and plotting over large cached results may load trajectories and can
+require substantial RAM, CPU/GPU time, and scratch I/O. On shared HPC systems,
+run these commands inside an allocated job or interactive compute session, not
+on a login node. If a command is killed or runs out of memory, request more
+resources or use `polyzymd compare submit`.
 :::
 
 ## Before You Start
@@ -106,8 +116,8 @@ plugins:
     selection: "protein and name CA"
 
   contacts:
-    polymer_selection: "chainID C"
-    protein_selection: "protein"
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A"
     cutoff: 4.5
 
   catalytic_triad:
@@ -148,8 +158,7 @@ plugins:
 
 Plugins that perform cross-condition statistical tests support per-plugin
 settings in the `plugins:` block. For example, contacts supports `fdr_alpha`,
-`min_effect_size`, and `top_residues`; binding free energy and polymer affinity
-support `fdr_alpha`. See the
+`min_effect_size`, and `top_residues`. See the
 [Comparison Reference](../reference/analysis_comparison_reference.md#per-plugin-statistical-settings)
 for the full settings table. For post-hoc method details (BH t-tests, Tukey
 HSD, Cohen's d, and significance markers), see the
@@ -236,6 +245,18 @@ After a successful run, expect files like these:
 ```text
 polymer_stability_study/
 ├── comparison.yaml
+├── analysis/
+│   ├── no_polymer/
+│   │   └── rmsf/
+│   │       ├── run_1/
+│   │       │   └── result.json
+│   │       ├── run_2/
+│   │       │   └── result.json
+│   │       └── aggregated/
+│   │           └── result.json
+│   └── 100_sbma/
+│       └── rmsf/
+│           └── ...
 ├── comparison/
 │   ├── rmsf/
 │   │   └── result.json
@@ -294,6 +315,7 @@ Common next additions to `comparison.yaml` are:
 - `distances` for custom atom-pair distances
 - `catalytic_triad` for active-site geometry
 - `secondary_structure` for helix/strand persistence and content
+- `hydrogen_bonds` for hydrogen-bond occupancy and lifetime summaries
 
 For end-to-end examples, see:
 
@@ -304,16 +326,10 @@ For end-to-end examples, see:
 - [Run Distance Analysis](analysis_distances_quickstart.md)
 - [Run Catalytic Triad Analysis](analysis_triad_quickstart.md)
 
-## Experimental Workflows
+Archived experimental analyses are not active v1.3 plugins. See
+[Experimental analyses](../reference/experimental_analyses_archive.md) for
+historical access details.
 
-Experimental workflows remain available, but they are not the default path for
-the presentation release:
-
-- [Experimental: Analyze Binding Preference](analysis_binding_preference.md)
-- [Experimental: Analyze Binding Free Energy](analysis_binding_free_energy.md)
-- [Experimental: Analyze Polymer Affinity](analysis_polymer_affinity.md)
-- [Experimental: Analyze Polymer Bridging](analysis_polymer_bridging.md)
-- [Experimental: Analyze Exposure Dynamics](analysis_exposure_dynamics.md)
 
 ## Troubleshooting
 
@@ -331,16 +347,6 @@ You need at least one configured section under `plugins:`.
 Check that the corresponding comparison JSON files already exist under
 `comparison/<analysis>/result.json` and use
 `polyzymd compare plot-all --list-available` to verify the enabled plot types.
-
-### `polyzymd compare run` fails for an experimental metric
-
-Run the prerequisite analysis first. For example, `binding_free_energy` and
-`polymer_affinity` depend on cached contact-derived data, so you usually run:
-
-```bash
-polyzymd compare run contacts
-polyzymd compare run binding_free_energy
-```
 
 ## See Also
 

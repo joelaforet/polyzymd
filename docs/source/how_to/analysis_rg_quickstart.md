@@ -96,7 +96,6 @@ conditions:
 
 plugins:
   rg:
-    enabled: true
     runs:
       - label: "Whole Protein"
         selection: "protein"
@@ -148,7 +147,7 @@ plugins:
         selection: "protein and name CA and resid 20:250"
 
       - label: "Polymer"
-        selection: "chainID C"
+        selection: "chainid C"
 ```
 
 ```{important}

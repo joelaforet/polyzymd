@@ -1,722 +1,287 @@
-# Catalytic Triad Analysis: Statistical Best Practices
+# Catalytic triad analysis: interpretation and best practices
 
-A comprehensive guide to analyzing catalytic triad geometry from MD simulations,
-including statistical considerations, interpretation guidelines, and worked
-examples from real enzyme-polymer systems.
+Catalytic triad analysis in PolyzyMD summarizes active-site geometry from MD
+trajectories. It is useful for asking whether a serine protease, lipase, or
+esterase active site tends to preserve the geometric arrangement associated
+with catalysis.
+
+It is not direct evidence of catalytic activity. The reported distances and
+contact fractions are **geometric proxies**. They should be interpreted with
+replicate uncertainty, substrate pose, hydrogen-bond geometry, protonation
+state, and experimental activity data whenever those are available.
 
 ```{note}
-**Just need quick results?** See the [Quick Start Guide](../how_to/analysis_triad_quickstart.md)
-for copy-paste commands and minimal setup.
+For command examples and setup steps, see the
+{doc}`../how_to/analysis_triad_quickstart`. For field-level lookup, see
+{doc}`../reference/analysis_triad_reference`.
 ```
 
-## Introduction
+## What the metric represents
 
-The catalytic triad is a fundamental structural motif in many enzyme families,
-including serine proteases, lipases, and esterases. Maintaining proper triad
-geometry is essential for catalytic activity. This guide explains:
+A classical Ser-His-Asp/Glu catalytic triad depends on a hydrogen-bond network
+that helps position histidine and activate the serine nucleophile. PolyzyMD does
+not model reactivity or proton transfer directly in this analysis. Instead, it
+tracks user-defined heavy-atom or point-to-point distances such as:
 
-- What catalytic triads are and why they matter
-- How to measure triad integrity in MD simulations
-- The "simultaneous contact fraction" metric
-- Statistical considerations for robust analysis
-- How to interpret results in the context of enzyme function
+- Asp/Glu carboxylate to His nitrogen
+- His nitrogen to Ser hydroxyl oxygen
+- other active-site distances chosen for a specific enzyme family
 
-## What is a Catalytic Triad?
-
-### The Ser-His-Asp/Glu Mechanism
-
-The classic catalytic triad consists of three amino acids working together:
-
-1. **Serine (Ser)** - The nucleophile that attacks the substrate
-2. **Histidine (His)** - The general base/acid that shuttles protons
-3. **Aspartate (Asp) or Glutamate (Glu)** - Orients and activates histidine
-
-These residues form a hydrogen bonding network:
-
-```
-        O                         O
-        ||                        ||
-Substrate-C     ->    Substrate-C-O-Ser
-        |                         |
-       ...                       ...
-
-    Asp/Glu --- His --- Ser --- Substrate
-       |         |       |
-      C=O      N-H     O-H
-       |         |       |
-      O-H .... N      [nucleophilic attack]
-```
-
-The proton relay works as follows:
-1. Asp stabilizes the positively charged His through a hydrogen bond
-2. His abstracts a proton from Ser's hydroxyl group
-3. The activated Ser oxygen attacks the substrate carbonyl
-
-### Critical Distances
-
-For the triad to function, specific hydrogen bonds must be maintained:
-
-| Pair | Donor | Acceptor | Typical Distance |
-|------|-------|----------|------------------|
-| Asp-His | His ND1 (N-H) | Asp OD1/OD2 | 2.7 - 3.5 A |
-| His-Ser | Ser OG (O-H) | His NE2 | 2.7 - 3.5 A |
-
-These distances are measured between heavy atoms (N, O). The actual H-bond
-length (H...acceptor) is ~1.0 A shorter.
-
-### Why Geometry Matters
-
-If these distances increase beyond ~4 A:
-- Hydrogen bonds break
-- Proton relay cannot function
-- Catalytic activity is lost or severely reduced
-
-MD simulations can reveal whether polymer conjugation, mutations, or other
-modifications disrupt triad geometry.
-
-## The Simultaneous Contact Metric
-
-### Definition
-
-The **simultaneous contact fraction** is the percentage of frames where
-**all** distance pairs in the triad are below the contact threshold at the
-same time:
+For each trajectory frame, the plugin asks whether every configured pair is
+below the contact threshold. The main scalar metric is the **simultaneous
+contact fraction**:
 
 $$
 f_{\text{contact}} = \frac{1}{N} \sum_{t=1}^{N} \prod_{i=1}^{M} \mathbb{1}[d_i(t) < \theta]
 $$
 
-Where:
-- $N$ = number of frames
-- $M$ = number of pairs (typically 2 for a triad)
-- $d_i(t)$ = distance of pair $i$ at frame $t$
-- $\theta$ = contact threshold (typically 3.5 A)
-- $\mathbb{1}[\cdot]$ = indicator function (1 if true, 0 if false)
+where $N$ is the number of analyzed frames, $M$ is the number of configured
+pairs, $d_i(t)$ is the distance for pair $i$ at frame $t$, and $\theta$ is the
+distance threshold.
 
-### Why Simultaneous Matters
+The simultaneous fraction is stricter than per-pair contact fractions. Two
+pairs can each be in contact 50% of the time but never be in contact in the
+same frames. In that case, the simultaneous contact fraction is 0%, which is
+often more relevant to an intact triad interpretation than either per-pair
+fraction alone.
 
-Consider two scenarios with 50% individual contact per pair:
+## Configuration shape and plugin name
 
-**Scenario A: Alternating**
-```
-Frame:    1  2  3  4  5  6  7  8
-Asp-His:  +  -  +  -  +  -  +  -   (50% contact)
-His-Ser:  -  +  -  +  -  +  -  +   (50% contact)
-Both:     -  -  -  -  -  -  -  -   (0% simultaneous!)
-```
+The plugin name is `catalytic_triad`. Use this canonical name in CLI commands
+and `comparison.yaml` configuration.
 
-**Scenario B: Correlated**
-```
-Frame:    1  2  3  4  5  6  7  8
-Asp-His:  +  +  +  +  -  -  -  -   (50% contact)
-His-Ser:  +  +  +  +  -  -  -  -   (50% contact)
-Both:     +  +  +  +  -  -  -  -   (50% simultaneous)
-```
-
-Scenario A has the same per-pair statistics but **zero** catalytic competence
-because the triad is never intact. The simultaneous contact fraction captures
-this critical distinction.
-
-### Interpretation Guidelines
-
-| Simultaneous Contact | Interpretation |
-|---------------------|----------------|
-| > 80% | Excellent triad integrity |
-| 50 - 80% | Good integrity, some flexibility |
-| 20 - 50% | Moderate disruption |
-| 5 - 20% | Significant disruption |
-| < 5% | Severely disrupted triad |
-
-```{warning}
-These thresholds are guidelines, not absolute rules. The relationship between
-simultaneous contact and actual catalytic activity depends on the enzyme and
-should be validated against experimental data when possible.
-```
-
-## H-Bond Distance Thresholds
-
-### Choosing a Threshold
-
-The default threshold of **3.5 A** is based on typical H-bond geometry:
-
-| Threshold | Rationale |
-|-----------|-----------|
-| 3.0 A | Strict - strong H-bonds only |
-| 3.5 A | Standard - typical H-bond cutoff |
-| 4.0 A | Relaxed - includes weaker interactions |
-
-### When to Adjust
-
-**Use a stricter threshold (3.0 A)** when:
-- Comparing to crystal structures (often show shorter distances)
-- Studying high-activity conformations
-- The default gives near-100% contact (not discriminating)
-
-**Use a relaxed threshold (4.0 A)** when:
-- Studying dynamic enzymes with flexible active sites
-- Default gives very low contact but enzyme is known to be active
-- Accounting for force field limitations
-
-### Heavy Atom vs Hydrogen Distances
-
-PolyzyMD measures **heavy atom distances** (N-O, O-O), not hydrogen positions:
-
-| Measurement | Typical Value |
-|-------------|---------------|
-| Heavy atom (N...O) | 2.7 - 3.5 A |
-| H-bond (H...O) | 1.7 - 2.5 A |
-
-This is more robust because hydrogen positions are often uncertain in MD
-(fast motion, force field limitations).
-
-## Autocorrelation Analysis
-
-### The Correlation Problem
-
-Contact states in MD are temporally correlated. If the triad is in contact at
-frame 100, it's very likely to be in contact at frame 101. This affects
-uncertainty estimation.
-
-### How PolyzyMD Handles This
-
-PolyzyMD computes the autocorrelation function of the simultaneous contact
-timeseries and estimates:
-
-1. **Correlation time (tau)** - characteristic decay time
-2. **N_independent** - effective number of independent samples
-3. **Corrected SEM** - uncertainty accounting for correlation
-
-### SEM for Proportions
-
-For a binary contact timeseries (1 = contact, 0 = no contact), the standard
-error of the proportion is:
-
-$$
-\text{SEM} = \sqrt{\frac{p(1-p)}{N_{\text{ind}}}}
-$$
-
-Where:
-- $p$ = simultaneous contact fraction
-- $N_{\text{ind}}$ = number of independent samples (after autocorrelation correction)
-
-This is the formula for the standard error of a binomial proportion.
-
-### The Low Reliability Warning
-
-When `N_independent < 10`, PolyzyMD warns about low statistical reliability.
-This doesn't mean your results are wrong, but uncertainties may be
-underestimated.
-
-**Solutions:**
-1. Use multiple independent replicates (recommended)
-2. Run longer simulations
-3. Interpret results with appropriate caution
-
-## Worked Example: LipA Polymer Study
-
-This example uses real data from simulations of Lipase A (LipA) from
-*Bacillus subtilis* with various polymer conjugations.
-
-### System Details
-
-- **Enzyme**: Lipase A (181 residues)
-- **Catalytic triad**: Ser77, His156, Asp133
-- **Simulations**: 200 ns production, 100 ns equilibration discarded
-- **Conditions**: 6 polymer compositions (3 replicates each)
-
-### comparison.yaml Configuration
+Current `comparison.yaml` files define triad settings under `plugins:`:
 
 ```yaml
-name: "LipA_polymer_study"
-description: "Effect of SBMA/EGMA polymer composition on LipA triad"
-control: "No Polymer"
-
-conditions:
-  - label: "No Polymer"
-    config: "../noPoly_LipA_DMSO/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "100% SBMA"
-    config: "../SBMA_100_DMSO/config.yaml"
-    replicates: [1, 2]
-
-  - label: "75% SBMA / 25% EGMA"
-    config: "../SBMA_75_EGMA_25_DMSO/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "50% SBMA / 50% EGMA"
-    config: "../SBMA_50_EGMA_50_DMSO/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "25% SBMA / 75% EGMA"
-    config: "../SBMA_25_EGMA_75_DMSO/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "100% EGMA"
-    config: "../EGMA_100_DMSO/config.yaml"
-    replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "100ns"
-
-catalytic_triad:
-  name: "LipA_catalytic_triad"
-  description: "Ser-His-Asp catalytic triad of Lipase A (Bacillus subtilis)"
-  threshold: 3.5
-  pairs:
-    - label: "Asp133-His156"
-      selection_a: "midpoint(resid 133 and name OD1 OD2)"
-      selection_b: "resid 156 and name ND1"
-    - label: "His156-Ser77"
-      selection_a: "resid 156 and name NE2"
-      selection_b: "resid 77 and name OG"
+plugins:
+  catalytic_triad:
+    name: "LipA_catalytic_triad"
+    description: "Ser-His-Asp catalytic triad of Lipase A"
+    threshold: 3.5
+    pairs:
+      - label: "Asp133-His156"
+        selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+        selection_b: "protein and resid 156 and name ND1"
+      - label: "His156-Ser77"
+        selection_a: "protein and resid 156 and name NE2"
+        selection_b: "protein and resid 77 and name OG"
 ```
 
-### Results Summary
+Older examples that used a top-level `catalytic_triad:` block are stale. Keep
+plugin settings under `plugins.catalytic_triad` so the comparison workflow can
+discover and configure the plugin consistently.
+
+## Artifact lifecycle and output interpretation
+
+Catalytic triad analysis uses the current PolyzyMD analysis artifact lifecycle:
+
+1. Per-replicate MDAnalysis jobs compute distance profiles and contact metrics.
+2. Per-replicate artifacts are written for each condition and replicate.
+3. Condition aggregation combines replicate artifacts without re-reading
+   trajectories.
+4. Cross-condition comparison reads condition artifacts and writes a comparison
+   artifact.
+5. Plotting reads cached artifacts and sidecars; it should not rerun the
+   trajectory analysis.
+
+Canonical artifact paths are:
+
+- Per replicate:
+  `analysis/<sanitized_condition_label>/catalytic_triad/run_<N>/result.json`
+- Per condition:
+  `analysis/<sanitized_condition_label>/catalytic_triad/aggregated/result.json`
+- Cross-condition comparison:
+  `comparison/catalytic_triad/result.json`
+
+Condition labels from `comparison.yaml` are sanitized before they become
+filesystem path components. For example, a label such as `75% SBMA / 25% EGMA`
+is written under a filesystem-safe directory name rather than the literal label.
+Use the label stored inside the artifact when you need the human-readable
+condition name.
 
-| Condition | n | Asp133-His156 | His156-Ser77 | Simultaneous Contact |
-|-----------|---|---------------|--------------|---------------------|
-| No Polymer | 3 | 3.09 +/- 0.21 A | 4.03 +/- 1.07 A | 49.9 +/- 27.3% |
-| 100% SBMA | 2 | 3.03 +/- 0.00 A | 3.75 +/- 0.86 A | 45.3 +/- 45.3% |
-| 75% SBMA / 25% EGMA | 3 | 3.67 +/- 0.51 A | 4.92 +/- 0.50 A | 6.9 +/- 6.8% |
-| 50% SBMA / 50% EGMA | 3 | 8.20 +/- 4.30 A | 4.23 +/- 0.20 A | 7.9 +/- 7.9% |
-| 25% SBMA / 75% EGMA | 3 | 5.25 +/- 0.56 A | 5.50 +/- 1.07 A | 14.0 +/- 14.0% |
-| **100% EGMA** | 3 | 3.29 +/- 0.30 A | 3.31 +/- 0.20 A | **50.6 +/- 17.0%** |
+Large arrays, such as distance time series or aggregated distance profiles, may
+be stored in artifact sidecars below `sidecars/`. Treat `result.json` as the
+entry point and sidecars as validated data referenced by the artifact.
 
-### Interpretation
+## Thresholds are heuristics, not activity cutoffs
 
-1. **Best triad preservation**: 100% EGMA shows the highest simultaneous
-   contact (50.6%) with the lowest variability (+/-17%), suggesting it
-   provides consistent triad stabilization.
+The default threshold of 3.5 Å is a practical heavy-atom cutoff for hydrogen-bond
+like contacts. It is not a universal boundary between active and inactive
+enzyme states.
 
-2. **No Polymer baseline**: 49.9% contact with high variability (+/-27.3%)
-   indicates the unmodified enzyme has dynamic triad geometry.
+Useful ways to think about threshold choices:
 
-3. **Mixed ratios disrupt triad**: 75% SBMA/25% EGMA, 50/50, and 25/75
-   all show severely reduced contact (6.9-14.0%), suggesting these mixed
-   polymer compositions interfere with triad geometry.
+- **Around 3.0 Å** is stricter and emphasizes close, well-formed contacts.
+- **Around 3.5 Å** is a common heavy-atom proxy for hydrogen-bond-like contact.
+- **Around 4.0 Å** is more permissive and may include weak or transient
+  interactions.
 
-4. **Diagnostic per-pair analysis**: The 50/50 condition shows very high
-   Asp133-His156 distance (8.20 A), indicating the Asp-His hydrogen bond
-   is specifically disrupted. The His-Ser distance remains closer to
-   normal (4.23 A).
+Choose thresholds before comparing conditions whenever possible. Avoid tuning a
+threshold after seeing the results just to make a preferred condition look
+active or inactive. That kind of post-hoc threshold selection makes the metric
+circular and can overstate the evidence.
+
+When a threshold is uncertain, report sensitivity analyses honestly. For
+example, note whether the same qualitative ordering appears at 3.0, 3.5, and
+4.0 Å, rather than selecting only the cutoff that gives the clearest story.
 
-### Conclusions
+## Heavy-atom distances are only hydrogen-bond proxies
 
-- Pure EGMA coating preserves triad geometry better than pure SBMA or no polymer
-- Mixed polymer ratios severely disrupt the catalytic triad
-- The Asp-His hydrogen bond appears most sensitive to disruption
+PolyzyMD triad distances are usually measured between heavy atoms or
+user-defined points such as `midpoint(...)`. This is robust and convenient, but
+it is only a proxy for hydrogen bonding.
 
-These results suggest that polymer composition significantly affects enzyme
-active site geometry, with implications for catalytic activity.
+Important cautions:
+
+- A short N···O or O···O heavy-atom distance does not guarantee a productive
+  hydrogen bond; angle and donor-hydrogen placement matter.
+- A distance slightly above the threshold does not prove the active site is
+  catalytically inactive; transient geometry, force-field behavior, and sampling
+  limitations can all matter.
+- Histidine tautomer and protonation state affect which nitrogen should be used
+  and how the Ser-His and Asp/Glu-His contacts should be interpreted.
+- Asp/Glu atom choices matter. A midpoint of the carboxylate atoms can be useful
+  for symmetric monitoring, but it is not the same as tracking a specific
+  oxygen involved in a particular hydrogen bond.
+- Substrate pose matters. A preserved Ser-His-Asp/Glu geometry is more
+  convincing when the substrate is also positioned consistently with the
+  proposed mechanism.
 
-## Selection Syntax Details
+For mechanistic claims, combine the triad metric with direct inspection of
+active-site snapshots, hydrogen-bond angle checks when available, substrate
+distance/orientation analyses, and experiment.
 
-### Standard MDAnalysis Selections
+## Replicate uncertainty matters more than frame count
+
+Frame-level contact states are temporally correlated. A trajectory with many
+closely spaced frames does not provide the same evidence as many independent
+samples. PolyzyMD summarizes replicate-level values and condition-level
+uncertainty so comparisons are not based solely on frame counts.
+
+Best interpretive practice:
 
-Most selections use standard MDAnalysis syntax:
+- Prefer at least three independent replicates per condition for conclusions.
+- Treat one-replicate output as descriptive or suitable for smoke tests, not as
+  strong comparative evidence.
+- Interpret large replicate-to-replicate variation as a signal that the active
+  site may occupy multiple metastable states or that more sampling is needed.
+- Compare conditions using replicate summaries and uncertainty, not raw frame
+  counts.
+
+See {doc}`analysis_statistics_best_practices` for the broader statistical
+context.
 
-```yaml
-selection_a: "resid 77 and name OG"    # Serine OG oxygen
-selection_b: "resid 156 and name NE2"  # Histidine NE2 nitrogen
-```
+## Reading common result patterns
 
-Common patterns:
-- `resid N` - residue number N
-- `name X` - atom name X
-- `resname ABC` - residue name ABC
-- `and`, `or`, `not` - logical operators
+### High simultaneous contact, low uncertainty
 
-### The midpoint() Function
+This is consistent with a stable triad geometry under the chosen selections and
+threshold. It is strongest when per-pair distances are also reasonable, substrate
+pose is compatible with catalysis, and replicates agree.
 
-For residues with two equivalent atoms (like Asp/Glu carboxylates), use
-`midpoint()` to compute the geometric center:
+### High per-pair contact but low simultaneous contact
 
-```yaml
-selection_a: "midpoint(resid 133 and name OD1 OD2)"
-```
+This suggests the contact network is not intact in the same frames. It may
+indicate alternating conformational states or a flexible active site. Per-pair
+plots and distance distributions are more informative than the scalar metric
+alone.
 
-This computes:
+### Low contact dominated by one pair
 
-$$
-\mathbf{r}_{\text{mid}} = \frac{\mathbf{r}_{\text{OD1}} + \mathbf{r}_{\text{OD2}}}{2}
-$$
+This often points to a specific disrupted interaction, incorrect atom choice, or
+incorrect residue numbering. It is a diagnostic clue, not by itself proof of a
+mechanistic cause.
 
-**When to use midpoint():**
-- Asp/Glu carboxylate groups (OD1/OD2 or OE1/OE2)
-- Symmetric groups where either atom could participate
+### Large differences with broad uncertainty
 
-### The com() Function
+Large apparent effects can be hypothesis-generating even when uncertainty is
+high, but they should be described cautiously. Strong conclusions require
+replicate support and ideally orthogonal evidence.
 
-For larger groups, use `com()` to compute the center of mass:
+## Worked example interpretation: keep conclusions tentative
 
-```yaml
-selection_a: "com(resid 133)"  # Center of mass of entire Asp133
-```
+Suppose a LipA polymer study reports that a pure EGMA condition has a higher
+simultaneous contact fraction than several mixed-polymer conditions, while the
+mixed conditions show one or both pair distances shifted upward.
 
-This weights atom positions by mass:
+A cautious interpretation would be:
 
-$$
-\mathbf{r}_{\text{com}} = \frac{\sum_i m_i \mathbf{r}_i}{\sum_i m_i}
-$$
+- The simulations suggest that EGMA may preserve the monitored triad geometry
+  better than the mixed-polymer conditions under the chosen model and threshold.
+- The mixed conditions may sample active-site geometries in which the monitored
+  hydrogen-bond proxy distances are less often simultaneously close.
+- If one pair, such as Asp-His, is especially shifted, that pair is a useful
+  target for structural inspection.
 
-**When to use com():**
-- Tracking overall residue position
-- Large binding site analysis
-- When specific atoms aren't well-defined
+Avoid stronger conclusions unless they are supported by the full evidence base.
+For example, do not state that a polymer composition "preserves activity" or
+"disrupts catalysis" from the contact fraction alone. Those claims need
+replicate uncertainty, substrate pose consistency, hydrogen-bond geometry, and
+experimental activity or other mechanistic validation.
 
-## Multi-Replicate Analysis
+## Plot behavior
 
-### Why Replicates Matter
+The current plugin plot lifecycle reads existing artifacts and generates
+high-level comparison figures. The primary outputs are:
 
-Single trajectories can be misleading due to:
-- Rare conformational events
-- Metastable states
-- Stochastic variation
+- `triad_kde_panel.<format>` — per-pair distance distributions across conditions,
+  with the configured threshold shown as a visual reference.
+- `triad_threshold_bars.<format>` — grouped summaries of fractions below threshold,
+  including the simultaneous contact metric and per-pair contact behavior.
 
-Multiple independent replicates provide:
-- Reproducibility testing
-- Robust uncertainty estimates
-- Detection of outlier trajectories
+The plot file format is configurable through PolyzyMD plot settings. Supported
+formats include `png`, `pdf`, and `svg`; `png` is the default. For example, the
+default filenames are `triad_kde_panel.png` and `triad_threshold_bars.png`, while
+PDF output would use `triad_kde_panel.pdf` and `triad_threshold_bars.pdf`.
 
-### Recommended Practice
+Use these plots to understand whether a scalar difference is driven by a broad
+distributional shift, a small subpopulation, or one limiting pair. The plots are
+interpretive aids; they do not replace statistical uncertainty or structural
+validation.
 
-Run **at least 3 replicates** per condition. The aggregated analysis will:
+## Common interpretation pitfalls
 
-1. Compute triad metrics for each replicate independently
-2. Report mean and SEM across replicates
-3. Show per-replicate values to assess variability
+**Treating geometry as activity.**
+: A preserved triad geometry is compatible with activity, but activity also
+  depends on substrate binding, chemical step feasibility, solvent, protonation,
+  and other factors.
 
-### Interpreting Replicate Variability
+**Using bare residue numbers without checking the topology.**
+: Residue numbering and chain assignment can differ across prepared systems.
+  Prefer chain-aware or protein-restricted selections and verify atom names.
 
-High replicate variability (large SEM) suggests:
-- The system samples multiple conformational states
-- Triad geometry is dynamic
-- More replicates may be needed for statistical confidence
+**Choosing atom names without considering histidine chemistry.**
+: `ND1` and `NE2` have different roles depending on tautomer/protonation and
+  enzyme family. Confirm that the selected nitrogen matches the intended
+  interaction.
 
-Low variability suggests:
-- Consistent behavior across trajectories
-- The observed state is representative
+**Overfitting the threshold.**
+: A threshold chosen after inspecting condition rankings can make the result
+  circular. Predefine thresholds or report a sensitivity analysis.
 
-## Handling Incomplete Data
-
-During active research, simulations are often in progress. You may want to analyze
-available data without waiting for all replicates to complete. PolyzyMD handles
-this gracefully by skipping missing or failed replicates with informative warnings.
-
-### Missing Replicates
-
-When a requested replicate's data cannot be found, PolyzyMD logs a warning and
-continues with the remaining replicates:
-
-```
-WARNING: Skipping replicate 2: trajectory data not found.
-Working directory not found: /scratch/user/project/run_2
-Has replicate 2 been simulated?
-```
-
-### Failed Replicates
-
-If a replicate exists but analysis fails (e.g., corrupted trajectory, missing
-atoms), PolyzyMD logs the error and continues:
-
-```
-WARNING: Skipping replicate 3: analysis failed with error: 
-Could not read DCD file: unexpected end of file
-```
-
-### Aggregation Summary
-
-When aggregating with incomplete data, PolyzyMD reports which replicates
-were successfully analyzed:
-
-```
-WARNING: Aggregating 2 of 3 requested replicates. Skipped: [2]
-```
-
-### Minimum Requirements
-
-**At least 2 successful replicates are required for aggregation.** This is
-because SEM calculation requires n ≥ 2. If fewer than 2 replicates succeed,
-PolyzyMD raises an error:
-
-```
-ValueError: Aggregation requires at least 2 successful replicates, but only
-1 succeeded. Failed replicates: [2, 3]
-```
-
-### Output File Naming
-
-Output filenames reflect the actual replicates used, not the requested range.
-This makes it clear which data contributed to the results:
-
-| Requested | Successful | Filename |
-|-----------|------------|----------|
-| 1-3 | 1, 2, 3 | `triad_*_reps1-3_eq100ns.json` |
-| 1-3 | 1, 3 | `triad_*_reps1_3_eq100ns.json` |
-| 1-5 | 1, 2, 4 | `triad_*_reps1_2_4_eq100ns.json` |
-
-Note: Contiguous ranges use a hyphen (`1-3`), non-contiguous use underscores (`1_3`).
-
-### Best Practices for Incomplete Data
-
-1. **Investigate missing data**: If replicates consistently fail, check:
-   - Did the simulation complete? Check SLURM logs for timeouts or errors.
-   - Are trajectory files in the expected location? Verify paths in config.yaml.
-   - Is the trajectory corrupted? Try loading it manually with MDAnalysis.
-
-2. **Document which replicates were used**: When publishing results from
-   incomplete data, clearly state which replicates contributed to aggregated
-   statistics. The JSON output includes a `replicates` field for this purpose.
-
-3. **Re-run with complete data**: Once all simulations finish, re-run
-   analysis with `--recompute` to include all replicates:
-   ```bash
-   polyzymd compare run triad -f comparison.yaml --recompute
-   ```
-
-4. **Consider statistical implications**: Results from 2 replicates have
-   larger uncertainty than 3+. Be appropriately cautious when interpreting
-   results with fewer replicates than planned.
-
-### Example: Analyzing During Active Simulations
-
-A common workflow when simulations are still running:
-
-```bash
-# Request all planned replicates as defined per condition in comparison.yaml
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns
-
-# Output shows:
-# Skipping replicate 4: trajectory data not found...
-# Skipping replicate 5: trajectory data not found...
-# Aggregating 3 of 5 requested replicates. Skipped: [4, 5]
-#
-# Results saved to: triad_LipA_reps1-3_eq100ns.json
-```
-
-Later, when all simulations complete:
-
-```bash
-# Re-run to include all replicates
-polyzymd compare run triad -f comparison.yaml --eq-time 100ns --recompute
-
-# Now all 5 are included:
-# Results saved to: triad_LipA_reps1-5_eq100ns.json
-```
-
-## Comparing Across Conditions
-
-### Statistical Considerations
-
-When comparing triad metrics across conditions:
-
-1. **Use replicate-based statistics**: Compare mean values across replicates,
-   not frame-by-frame values
-
-2. **Report effect sizes**: A large difference may be meaningful even if
-   not statistically significant with few replicates
-
-3. **Consider biological significance**: A 10% difference in contact fraction
-   might be functionally important even if p > 0.05
-
-### Example Comparison
-
-From the LipA study:
-
-```
-Condition         Contact      vs No Polymer
--------------------------------------------------
-No Polymer        49.9%        (control)
-100% EGMA         50.6%        +0.7% (similar)
-100% SBMA         45.3%        -4.6% (slightly lower)
-75/25 SBMA/EGMA   6.9%         -43.0% (much lower)
-```
-
-The 75/25 mixture shows a dramatic 43 percentage point reduction in triad
-contact compared to the control - a biologically meaningful difference
-regardless of statistical significance.
-
-## Common Pitfalls
-
-### Pitfall 1: Wrong Residue Numbering
-
-**Symptom**: Very high distances (> 10 A) or selection errors
-
-**Cause**: PDB residue numbers don't match your selections
-
-**Solution**: Check your topology file's residue numbering. Use VMD or
-PyMOL to visualize and verify:
-
-```bash
-# In VMD console
-atomselect top "resid 77 and name OG"
-```
-
-### Pitfall 2: Incorrect Atom Names
-
-**Symptom**: "Selection returned 0 atoms" error
-
-**Cause**: Atom names differ between force fields
-
-**Solution**: Check your topology for exact atom names. Common variations:
-
-| Residue | AMBER | CHARMM |
-|---------|-------|--------|
-| His (delta) | ND1 | ND1 |
-| His (epsilon) | NE2 | NE2 |
-| Ser | OG | OG |
-| Asp | OD1, OD2 | OD1, OD2 |
-
-### Pitfall 3: Threshold Too Strict
-
-**Symptom**: Near-zero contact fraction for active enzyme
-
-**Cause**: 3.5 A may be too strict for some systems
-
-**Solution**: Try 4.0 A threshold and compare. If the enzyme is
-experimentally active, some threshold should show reasonable contact.
-
-### Pitfall 4: Insufficient Equilibration
-
-**Symptom**: Contact fraction drifts over time; different equilibration
-times give very different results
-
-**Cause**: Including non-equilibrated frames
-
-**Solution**: Use RMSD analysis to determine equilibration time. The
-system should be equilibrated before triad analysis.
-
-### Pitfall 5: Ignoring Per-Pair Diagnostics
-
-**Symptom**: Low simultaneous contact but unclear why
-
-**Cause**: Not examining which pair is disrupted
-
-**Solution**: Always check per-pair distances. This reveals whether:
-- Both pairs are moderately disrupted
-- One pair is specifically broken
-- The issue is distance vs. variability
-
-## Python API
-
-### Programmatic Analysis
-
-```python
-from polyzymd.analyses.discovery import get_analysis
-from polyzymd.analyses.orchestrator import run_comparison
-from polyzymd.config.comparison import ComparisonConfig
-
-# Load comparison config
-comp_config = ComparisonConfig.from_yaml("comparison.yaml")
-
-# Create analysis plugin
-analysis = get_analysis("triad")()
-
-# Run full comparison workflow
-pipeline_result = run_comparison(
-    analysis,
-    comp_config,
-    recompute=False,
-    equilibration="100ns",
-)
-
-# Access condition-level aggregated result
-result = pipeline_result["aggregated"]["No Polymer"]
-print(f"Mean contact: {result.overall_simultaneous_contact * 100:.1f}%")
-
-# Comparison-level statistics
-comparison = pipeline_result["comparison"]
-print(f"Ranking: {comparison.ranking}")
-```
-
-### Accessing Detailed Results
-
-```python
-# Per-pair statistics
-for pair in result.pair_results:
-    print(f"{pair.pair_label}:")
-    print(f"  Mean: {pair.mean_distance:.2f} A")
-    print(f"  Std:  {pair.std_distance:.2f} A")
-    if pair.fraction_below_threshold:
-        print(f"  Contact: {pair.fraction_below_threshold * 100:.1f}%")
-
-# Autocorrelation info
-if result.sim_contact_correlation_time:
-    print(f"Correlation time: {result.sim_contact_correlation_time:.1f} "
-          f"{result.sim_contact_correlation_time_unit}")
-    print(f"N independent: {result.sim_contact_n_independent}")
-```
-
-### Loading Saved Results
-
-```python
-from polyzymd.analyses.catalytic_triad._results import TriadResult, TriadAggregatedResult
-
-# Load single replicate result (within comparison workspace)
-result = TriadResult.load(
-    "analysis/<condition>/catalytic_triad/run_1/triad_LipA_eq100ns.json"
-)
-print(result.summary())
-
-# Load aggregated result
-agg = TriadAggregatedResult.load(
-    "analysis/<condition>/catalytic_triad/aggregated/triad_LipA_reps1-3_eq100ns.json"
-)
-print(agg.summary())
-```
-
-## Plotting and Visualization
-
-```{admonition} TODO: Plotting Documentation
-:class: warning
-
-Detailed documentation for plotting catalytic triad results is planned for a
-future release. In the meantime, you can:
-
-1. Load JSON results and create custom plots with matplotlib
-2. Use VMD/PyMOL to visualize triad geometry along trajectories
-3. Export distance timeseries for external analysis
-
-See the [RMSF plotting documentation](../how_to/analysis_rmsf_quickstart.md#comparing-two-conditions)
-for general guidance on comparing analysis results across conditions.
-```
+**Ignoring pair-level diagnostics.**
+: The simultaneous fraction is compact but lossy. Always inspect which pair or
+  distribution drives a change before making a mechanistic claim.
 
 ## References
 
-### Enzyme Mechanism
-
 **Hedstrom L.** (2002) "Serine Protease Mechanism and Specificity."
-*Chemical Reviews* 102:4501-4524.
-https://doi.org/10.1021/cr000033x
-
-Classic review of serine protease catalytic mechanism.
+*Chemical Reviews* 102:4501-4524. https://doi.org/10.1021/cr000033x
 
 **Blow DM.** (1976) "Structure and Mechanism of Chymotrypsin."
 *Accounts of Chemical Research* 9:145-152.
-
-Foundational paper on catalytic triad structure.
-
-### MD Analysis Best Practices
 
 **Grossfield A, Patrone PN, Roe DR, Schultz AJ, Siderius DW, Zuckerman DM.**
 (2018) "Best Practices for Quantification of Uncertainty and Sampling Quality
 in Molecular Simulations." *Living Journal of Computational Molecular Science*
 1(1):5067. https://doi.org/10.33011/livecoms.1.1.5067
 
-Definitive guide to uncertainty quantification in MD - the basis for
-PolyzyMD's autocorrelation analysis.
-
-### H-Bond Geometry
-
 **Jeffrey GA, Saenger W.** (1991) *Hydrogen Bonding in Biological Structures.*
 Springer-Verlag.
 
-Comprehensive reference for hydrogen bond geometry in biomolecules.
+## See also
 
-## See Also
-
-- [Quick Start Guide](../how_to/analysis_triad_quickstart.md) - Get results fast
-- [RMSF Analysis](../how_to/analysis_rmsf_quickstart.md) - Analyze flexibility
-- [Comparing Conditions](../how_to/analysis_compare_conditions.md) - Statistical comparisons
-- [Statistical Best Practices](analysis_rmsf_best_practices.md) - Detailed statistics guide
+- {doc}`../how_to/analysis_triad_quickstart`
+- {doc}`../reference/analysis_triad_reference`
+- {doc}`analysis_statistics_best_practices`
+- {doc}`../how_to/analysis_compare_conditions`

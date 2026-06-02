@@ -107,6 +107,7 @@ def test_pairwise_result_inf_round_trip_json() -> None:
         metric="m",
         t_statistic=1.0,
         p_value=0.01,
+        p_value_adjusted=0.01,
         cohens_d=2.0,
         effect_size_interpretation="large",
         direction="higher",
@@ -252,6 +253,7 @@ def test_comparison_result_inf_round_trip_json() -> None:
                 metric="metric",
                 t_statistic=1.0,
                 p_value=0.01,
+                p_value_adjusted=0.01,
                 cohens_d=2.0,
                 effect_size_interpretation="large",
                 direction="higher",
@@ -289,6 +291,7 @@ def test_format_scalar_comparison_text_uses_semantic_infinity_label() -> None:
                 metric="metric",
                 t_statistic=1.0,
                 p_value=0.01,
+                p_value_adjusted=0.01,
                 cohens_d=2.0,
                 effect_size_interpretation="large",
                 direction="higher",
@@ -324,6 +327,7 @@ def test_format_scalar_comparison_markdown_uses_semantic_infinity_label() -> Non
                 metric="metric",
                 t_statistic=1.0,
                 p_value=0.01,
+                p_value_adjusted=0.01,
                 cohens_d=2.0,
                 effect_size_interpretation="large",
                 direction="higher",
@@ -373,37 +377,6 @@ def test_pairwise_comparison_zero_control_not_similar() -> None:
     assert comp.direction == "higher"
 
 
-def test_polymer_bridging_safe_pairwise_zero_control_direction() -> None:
-    """Polymer bridging safe pairwise helper should not report unchanged for zero-control inf."""
-    from polyzymd.analyses.polymer_bridging import _safe_pairwise_comparisons
-
-    metrics = {
-        "Control": MetricValue(
-            name="multisite_fraction",
-            mean=0.0,
-            sem=0.0,
-            replicate_values=[0.0, 0.0, 0.0],
-            higher_is_better=True,
-            direction_labels=("lower", "similar", "higher"),
-        ),
-        "Treatment": MetricValue(
-            name="multisite_fraction",
-            mean=0.5,
-            sem=0.1,
-            replicate_values=[0.4, 0.5, 0.6],
-            higher_is_better=True,
-            direction_labels=("lower", "similar", "higher"),
-        ),
-    }
-
-    results = _safe_pairwise_comparisons(metrics, control_label="Control")
-    assert len(results) == 1
-    comp = results[0]
-    assert math.isinf(comp.percent_change)
-    assert comp.direction == "higher"
-    assert comp.direction != "similar"
-
-
 def test_rg_compare_run_handles_zero_control_infinite_direction() -> None:
     """Custom Rg compare path should classify zero-control +inf as expansion."""
     run_a = SimpleNamespace(mean_rg=0.0, per_replicate_means=[0.0, 0.0, 0.0])
@@ -420,28 +393,6 @@ def test_rg_compare_run_handles_zero_control_infinite_direction() -> None:
     assert math.isinf(comp.percent_change)
     assert comp.percent_change > 0
     assert comp.direction == "expansion"
-
-
-def test_exposure_pairwise_comparison_zero_control_direction() -> None:
-    """Exposure custom comparison path should classify zero-control +inf as increased."""
-    from polyzymd.analyses.exposure import ExposureAnalysis
-
-    cond_a = SimpleNamespace(
-        label="Control",
-        replicate_values=[0.0, 0.0, 0.0],
-        mean_chaperone_fraction=0.0,
-    )
-    cond_b = SimpleNamespace(
-        label="Treatment",
-        replicate_values=[0.4, 0.5, 0.6],
-        mean_chaperone_fraction=0.5,
-    )
-
-    comp = ExposureAnalysis._compare_pair(cond_a, cond_b)
-    assert isinstance(comp, PairwiseResult)
-    assert math.isinf(comp.percent_change)
-    assert comp.percent_change > 0
-    assert comp.direction == "increased"
 
 
 def test_distances_formatter_zero_control_emits_infinity_with_direction() -> None:

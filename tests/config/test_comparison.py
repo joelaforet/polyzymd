@@ -1,11 +1,36 @@
 """Tests for comparison config validation."""
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 import yaml
+from pydantic import BaseModel
 
-from polyzymd.config.comparison import ComparisonConfig, ConditionConfig, PlotSettings
+from polyzymd.config.comparison import (
+    ComparisonConfig,
+    ConditionConfig,
+    MDABackendPolicyConfig,
+    PlotSettings,
+    PlotTheme,
+    SemanticColorSettings,
+    SemanticFamilyColorConfig,
+)
+
+
+class _FakePathSettings(BaseModel):
+    """Settings model with a plugin-declared path field."""
+
+    enzyme_pdb_for_sasa: str | None = None
+    units: str = "kT"
+
+
+class _FakePathAnalysis:
+    """Fake plugin used to test config path resolution."""
+
+    name: ClassVar[str] = "fake_paths"
+    Settings: ClassVar[type[_FakePathSettings]] = _FakePathSettings
+    settings_path_fields: ClassVar[tuple[str, ...]] = ("enzyme_pdb_for_sasa",)
 
 
 class TestUnknownTopLevelKeys:
@@ -60,6 +85,7 @@ class TestUnknownTopLevelKeys:
                     ],
                     "defaults": {"equilibration_time": "10ns"},
                     "plugins": {},
+                    "mda_backend_policy": {},
                     "plot_settings": {},
                 }
             )
@@ -67,8 +93,78 @@ class TestUnknownTopLevelKeys:
         config = ComparisonConfig.from_yaml(yaml_path)
         assert config.name == "test"
 
-    def test_legacy_analysis_settings_still_migrates(self, tmp_path: Path) -> None:
-        """Legacy analysis_settings key should warn but migrate to plugins."""
+
+class TestMDABackendPolicyConfig:
+    """MDAnalysis backend policy config should be opt-in and validated."""
+
+    def test_default_policy_forwards_no_backend_kwargs(self) -> None:
+        """Default config should keep per-replicate execution serial."""
+        policy = MDABackendPolicyConfig().to_policy()
+
+        assert policy.run_kwargs() == {}
+        assert policy.is_default()
+
+    def test_explicit_backend_accepts_workers_and_parts(self) -> None:
+        """Explicit backend should convert to an MDA job policy."""
+        policy = MDABackendPolicyConfig(
+            backend="multiprocessing",
+            n_workers=2,
+            n_parts=4,
+        ).to_policy()
+
+        assert policy.run_kwargs() == {
+            "backend": "multiprocessing",
+            "n_workers": 2,
+            "n_parts": 4,
+        }
+
+    @pytest.mark.parametrize("field_name", ["n_workers", "n_parts"])
+    def test_worker_controls_require_backend(self, field_name: str) -> None:
+        """Worker and part controls should not imply backend opt-in."""
+        with pytest.raises(ValueError, match="require an explicit backend"):
+            MDABackendPolicyConfig(**{field_name: 2})
+
+    @pytest.mark.parametrize("field_name", ["n_workers", "n_parts"])
+    def test_worker_controls_must_be_positive_integers(self, field_name: str) -> None:
+        """Worker and part counts should reject invalid values."""
+        with pytest.raises(ValueError):
+            MDABackendPolicyConfig(backend="multiprocessing", **{field_name: 0})
+
+        with pytest.raises(ValueError, match="positive integers"):
+            MDABackendPolicyConfig(backend="multiprocessing", **{field_name: True})
+
+    def test_backend_name_must_not_be_empty(self) -> None:
+        """Empty backend strings should not be treated as backend opt-in."""
+        with pytest.raises(ValueError, match="backend must not be empty"):
+            MDABackendPolicyConfig(backend="  ")
+
+    def test_from_yaml_accepts_top_level_policy(self, tmp_path: Path) -> None:
+        """comparison.yaml should expose a top-level MDA backend policy."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "backend-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "mda_backend_policy": {
+                        "backend": "multiprocessing",
+                        "n_workers": 2,
+                    },
+                }
+            )
+        )
+
+        config = ComparisonConfig.from_yaml(yaml_path)
+
+        assert config.mda_backend_policy.to_policy().run_kwargs() == {
+            "backend": "multiprocessing",
+            "n_workers": 2,
+        }
+
+    def test_legacy_analysis_settings_is_rejected(self, tmp_path: Path) -> None:
+        """Legacy analysis_settings key should be rejected as unknown."""
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
@@ -82,8 +178,8 @@ class TestUnknownTopLevelKeys:
             )
         )
 
-        config = ComparisonConfig.from_yaml(yaml_path)
-        assert config is not None
+        with pytest.raises(ValueError, match="analysis_settings"):
+            ComparisonConfig.from_yaml(yaml_path)
 
 
 class TestConditionReplicateValidation:
@@ -141,16 +237,257 @@ class TestPlotThemeValidation:
         assert ps.theme.dot_size == 42
 
     def test_none_theme_uses_default(self):
-        """None theme should use publication preset."""
+        """None theme should use compact preset."""
         ps = PlotSettings(theme=None)
         assert ps.theme is not None
+
+
+class TestPlotStylePresets:
+    """Plot style presets should use canonical names only."""
+
+    def test_default_style_is_compact(self) -> None:
+        """Omitted style should use the compact preset values."""
+        settings = PlotSettings()
+
+        assert settings.style == "compact"
+        assert settings.theme == PlotTheme.compact()
+
+    @pytest.mark.parametrize(
+        ("style", "expected_theme"),
+        [
+            ("compact", PlotTheme.compact()),
+            ("large_elements", PlotTheme.large_elements()),
+            ("low_ink", PlotTheme.low_ink()),
+        ],
+    )
+    def test_canonical_styles_are_accepted(
+        self,
+        style: str,
+        expected_theme: PlotTheme,
+    ) -> None:
+        """Canonical style names should select the expected theme."""
+        settings = PlotSettings(style=style)
+
+        assert settings.style == style
+        assert settings.theme == expected_theme
+
+    @pytest.mark.parametrize(
+        "style",
+        [
+            "publication",
+            "presentation",
+            "minimal",
+        ],
+    )
+    def test_old_aliases_raise_value_error(self, style: str) -> None:
+        """Old style aliases should be rejected as invalid strings."""
+        with pytest.raises(ValueError, match="compact.*large_elements.*low_ink"):
+            PlotSettings(style=style)
+
+    def test_theme_overrides_merge_after_canonical_style(self) -> None:
+        """Theme overrides should layer on top of canonical presets."""
+        settings = PlotSettings(style="large_elements", theme={"dot_size": 40})
+
+        assert settings.style == "large_elements"
+        assert settings.theme.dot_size == 40
+        assert settings.theme.title_fontsize == PlotTheme.large_elements().title_fontsize
+
+    def test_invalid_style_string_raises_value_error(self) -> None:
+        """Invalid style strings should list allowed canonical values."""
+        with pytest.raises(ValueError, match="compact.*large_elements.*low_ink"):
+            PlotSettings(style="poster")
+
+    @pytest.mark.parametrize("style", [123, None, ["compact"]])
+    def test_non_string_style_raises_type_error(self, style: object) -> None:
+        """Non-string style values should produce a clear type error."""
+        with pytest.raises(TypeError, match="plot_settings.style must be a string"):
+            PlotSettings(style=style)
+
+
+class TestSemanticColorSettings:
+    """Semantic color settings should parse canonical defaults."""
+
+    def test_defaults_disable_semantic_mapping(self) -> None:
+        """Semantic colors should be opt-in by default."""
+        settings = PlotSettings()
+
+        assert settings.semantic_colors.enabled is False
+        assert settings.semantic_colors.order == []
+        assert settings.semantic_colors.conditions == {}
+        assert settings.semantic_colors.families == {}
+        assert settings.semantic_colors.default_color is None
+
+    def test_plot_settings_accepts_semantic_colors(self) -> None:
+        """PlotSettings should parse the global semantic_colors block."""
+        settings = PlotSettings(
+            semantic_colors={
+                "enabled": True,
+                "order": ["Control", "Condition B"],
+                "manual_colors": {"Control": "#222222"},
+                "conditions": {
+                    "Control": {"role": "Control", "order": 0},
+                    "Condition B": {"family": "composition", "value": 0.5},
+                },
+                "families": {
+                    "composition": {
+                        "scale": "linear",
+                        "colormap": "viridis",
+                        "vmin": 0.0,
+                        "vmax": 1.0,
+                        "colormap_range": [0.2, 0.8],
+                    }
+                },
+            }
+        )
+
+        semantic = settings.semantic_colors
+        assert semantic.enabled is True
+        assert semantic.order == ["Control", "Condition B"]
+        assert semantic.conditions["Control"].role == "control"
+        assert semantic.conditions["Condition B"].family == "composition"
+        assert semantic.families["composition"].colormap_range == (0.2, 0.8)
+
+    def test_semantic_colors_is_global_plot_field(self) -> None:
+        """semantic_colors should not be treated as a plugin-specific key."""
+        settings = PlotSettings(semantic_colors=SemanticColorSettings(enabled=True))
+
+        assert settings.semantic_colors.enabled is True
+
+    def test_duplicate_explicit_order_raises(self) -> None:
+        """Explicit plot order labels should be unique."""
+        with pytest.raises(ValueError, match="order labels must be unique"):
+            SemanticColorSettings(order=["A", "A"])
+
+    def test_invalid_family_scale_raises(self) -> None:
+        """Family color scale should be linear or ordinal."""
+        with pytest.raises(ValueError):
+            SemanticFamilyColorConfig(scale="bad")
+
+    def test_invalid_colormap_range_raises(self) -> None:
+        """Family colormap ranges should be ordered fractions."""
+        with pytest.raises(ValueError, match="colormap_range"):
+            SemanticFamilyColorConfig(colormap_range=(0.8, 0.2))
+
+
+class TestUnknownAnalysisDiagnostics:
+    """Unknown analyses should fail with uniform plugin diagnostics."""
+
+    @pytest.mark.parametrize(
+        "analysis_name",
+        [
+            "exposure",
+            "binding_free_energy",
+            "bfe",
+            "polymer_affinity",
+            "pa",
+            "polymer_bridging",
+            "bridging",
+        ],
+    )
+    def test_plugins_unknown_analysis_reports_available_plugins(
+        self,
+        analysis_name: str,
+        tmp_path: Path,
+    ) -> None:
+        """Unknown plugin settings should report the standard plugin error."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "unknown-plugin-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {analysis_name: {}},
+                }
+            )
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            ComparisonConfig.from_yaml(yaml_path)
+
+        message = str(excinfo.value)
+        assert f"Unknown analysis plugin '{analysis_name}'" in message
+        assert "Available plugins:" in message
+        assert "feature/mda-analysis-migration" not in message
+
+    @pytest.mark.parametrize(
+        "analysis_name",
+        [
+            "exposure",
+            "binding_free_energy",
+            "bfe",
+            "polymer_affinity",
+            "pa",
+            "polymer_bridging",
+            "bridging",
+        ],
+    )
+    def test_plot_settings_unknown_analysis_reports_unknown_key(
+        self,
+        analysis_name: str,
+        tmp_path: Path,
+    ) -> None:
+        """Unknown plot settings should report the standard plot key error."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "unknown-plot-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {},
+                    "plot_settings": {analysis_name: {}},
+                }
+            )
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            ComparisonConfig.from_yaml(yaml_path)
+
+        message = str(excinfo.value)
+        assert f"Unknown plot settings key '{analysis_name}'" in message
+        assert "discovered analysis type with PlotSettingsModel" in message
+        assert "feature/mda-analysis-migration" not in message
+
+
+class TestPluginSettingsCanonicalNames:
+    """Plugin settings should use canonical analysis names only."""
+
+    @pytest.mark.parametrize("alias", ["triad", "ss", "hbonds", "hbond"])
+    def test_plugin_alias_keys_are_rejected(self, alias: str, tmp_path: Path) -> None:
+        """Known removed aliases should be reported as unknown plugins."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "alias-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {alias: {}},
+                }
+            )
+        )
+
+        with pytest.raises(ValueError, match=f"Unknown analysis plugin '{alias}'"):
+            ComparisonConfig.from_yaml(yaml_path)
 
 
 class TestPluginSettingsPathResolution:
     """Plugin path-like settings should resolve relative to comparison.yaml."""
 
-    def test_relative_plugin_path_resolves_from_yaml_parent(self, tmp_path: Path) -> None:
+    def test_relative_plugin_path_resolves_from_yaml_parent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         """Relative plugin path fields should be rebased to yaml directory."""
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.get_analysis",
+            lambda name: _FakePathAnalysis,
+        )
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
@@ -160,7 +497,7 @@ class TestPluginSettingsPathResolution:
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
                     "plugins": {
-                        "binding_free_energy": {
+                        "fake_paths": {
                             "enzyme_pdb_for_sasa": "structures/enzyme.pdb",
                         }
                     },
@@ -169,12 +506,20 @@ class TestPluginSettingsPathResolution:
         )
 
         config = ComparisonConfig.from_yaml(yaml_path)
-        settings = config.plugins.get("binding_free_energy")
+        settings = config.plugins.get("fake_paths")
         assert settings is not None
         assert settings.enzyme_pdb_for_sasa == str(tmp_path / "structures" / "enzyme.pdb")
 
-    def test_absolute_plugin_path_is_unchanged(self, tmp_path: Path) -> None:
+    def test_absolute_plugin_path_is_unchanged(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         """Absolute plugin path fields should remain unchanged."""
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.get_analysis",
+            lambda name: _FakePathAnalysis,
+        )
         yaml_path = tmp_path / "comparison.yaml"
         absolute_path = tmp_path / "already_absolute" / "enzyme.pdb"
         yaml_path.write_text(
@@ -185,7 +530,7 @@ class TestPluginSettingsPathResolution:
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
                     "plugins": {
-                        "polymer_affinity": {
+                        "fake_paths": {
                             "enzyme_pdb_for_sasa": str(absolute_path),
                         }
                     },
@@ -194,12 +539,20 @@ class TestPluginSettingsPathResolution:
         )
 
         config = ComparisonConfig.from_yaml(yaml_path)
-        settings = config.plugins.get("polymer_affinity")
+        settings = config.plugins.get("fake_paths")
         assert settings is not None
         assert settings.enzyme_pdb_for_sasa == str(absolute_path)
 
-    def test_missing_declared_path_field_is_ignored(self, tmp_path: Path) -> None:
+    def test_missing_declared_path_field_is_ignored(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         """Declared path fields missing from YAML should be ignored."""
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.get_analysis",
+            lambda name: _FakePathAnalysis,
+        )
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
@@ -209,7 +562,7 @@ class TestPluginSettingsPathResolution:
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
                     "plugins": {
-                        "binding_free_energy": {
+                        "fake_paths": {
                             "units": "kT",
                         }
                     },
@@ -218,6 +571,6 @@ class TestPluginSettingsPathResolution:
         )
 
         config = ComparisonConfig.from_yaml(yaml_path)
-        settings = config.plugins.get("binding_free_energy")
+        settings = config.plugins.get("fake_paths")
         assert settings is not None
         assert settings.enzyme_pdb_for_sasa is None

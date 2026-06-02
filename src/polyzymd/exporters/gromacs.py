@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 from polyzymd.core.branding import FULL_CREDIT_LINE, SHORT_CREDIT_LINE
+from polyzymd.utils.templates import render_package_template
+from polyzymd.workflow.slurm import _validate_script_value
 
 if TYPE_CHECKING:
     from openff.interchange import Interchange
@@ -79,6 +81,38 @@ WATER_COMPRESSIBILITY = 4.5e-5
 
 # Branding
 POLYZYMD_BRANDING = FULL_CREDIT_LINE
+_GROMACS_TEMPLATE_PACKAGE = "polyzymd.engines.gromacs"
+_LOCAL_RUN_TEMPLATE = "run_gromacs.sh.jinja"
+
+
+def _validate_local_shell_token(value: str, field_name: str) -> str:
+    """Reject unsafe local run-script values expanded as shell tokens.
+
+    Parameters
+    ----------
+    value : str
+        The configured value to validate.
+    field_name : str
+        Name of the field for error messages.
+
+    Returns
+    -------
+    str
+        The validated value unchanged.
+
+    Raises
+    ------
+    ValueError
+        If the value contains unsafe shell characters or whitespace.
+    """
+
+    _validate_script_value(value, field_name)
+    if any(char.isspace() for char in value):
+        raise ValueError(
+            f"Local GROMACS script field '{field_name}' contains whitespace: {value!r}. "
+            "Values expanded as shell tokens must not contain whitespace."
+        )
+    return value
 
 
 # =============================================================================
@@ -1093,7 +1127,13 @@ class PositionRestraintGenerator:
                     if parts:
                         return parts[0]
             return None
-        except Exception:
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(
+                "Could not read molecule name from %s (%s). "
+                "The exporter will fall back to filename-based molecule ordering.",
+                itp_path,
+                exc,
+            )
             return None
 
     @staticmethod
@@ -1123,25 +1163,27 @@ class PositionRestraintGenerator:
         """
         heavy_indices: List[int] = []
         try:
-            in_atoms_section = False
-            for line in itp_path.read_text().splitlines():
-                stripped = line.strip()
-                if not stripped or stripped.startswith(";"):
-                    continue
-                if stripped.startswith("["):
-                    section = stripped.strip("[] \t").lower()
-                    in_atoms_section = section == "atoms"
-                    continue
-                if in_atoms_section:
-                    parts = stripped.split()
-                    if len(parts) >= 5 and parts[0].isdigit():
-                        atom_index = int(parts[0])
-                        atom_name = parts[4]
-                        if not atom_name.startswith("H"):
-                            heavy_indices.append(atom_index)
-        except Exception as e:
-            logger.warning(f"Failed to parse ITP file {itp_path}: {e}")
+            lines = itp_path.read_text().splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f"Failed to read ITP file {itp_path}: {exc}")
             return []
+
+        in_atoms_section = False
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            if stripped.startswith("["):
+                section = stripped.strip("[] \t").lower()
+                in_atoms_section = section == "atoms"
+                continue
+            if in_atoms_section:
+                parts = stripped.split()
+                if len(parts) >= 5 and parts[0].isdigit():
+                    atom_index = int(parts[0])
+                    atom_name = parts[4]
+                    if not atom_name.startswith("H"):
+                        heavy_indices.append(atom_index)
         return sorted(heavy_indices)
 
     # ------------------------------------------------------------------
@@ -1161,24 +1203,26 @@ class PositionRestraintGenerator:
             Number of atoms in the molecule type, or 0 on error.
         """
         try:
-            in_atoms_section = False
-            atom_count = 0
-            for line in itp_path.read_text().splitlines():
-                stripped = line.strip()
-                if not stripped or stripped.startswith(";"):
-                    continue
-                if stripped.startswith("["):
-                    section = stripped.strip("[] \t").lower()
-                    in_atoms_section = section == "atoms"
-                    continue
-                if in_atoms_section:
-                    parts = stripped.split()
-                    if parts and parts[0].isdigit():
-                        atom_count += 1
-            return atom_count
-        except Exception as e:
-            logger.warning(f"Failed to parse ITP file {itp_path}: {e}")
+            lines = itp_path.read_text().splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f"Failed to read ITP file {itp_path}: {exc}")
             return 0
+
+        in_atoms_section = False
+        atom_count = 0
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            if stripped.startswith("["):
+                section = stripped.strip("[] \t").lower()
+                in_atoms_section = section == "atoms"
+                continue
+            if in_atoms_section:
+                parts = stripped.split()
+                if parts and parts[0].isdigit():
+                    atom_count += 1
+        return atom_count
 
     @staticmethod
     def _append_posres_to_itp(
@@ -1255,25 +1299,53 @@ class RunScriptGenerator:
     def generate(self, output_path: Path) -> Path:
         """Generate the GROMACS run script.
 
-        Args:
-            output_path: Path to write the script.
+        Parameters
+        ----------
+        output_path : Path
+            Path to write the script.
 
-        Returns:
+        Returns
+        -------
+        Path
             Path to the generated script.
         """
-        lines = self._generate_header()
-        lines.extend(self._generate_energy_minimization())
-        lines.extend(self._generate_equilibration())
-        lines.extend(self._generate_production())
-        lines.extend(self._generate_postprocessing())
-        lines.extend(self._generate_footer())
-
-        content = "\n".join(lines)
+        self._validate_script_values()
+        content = render_package_template(
+            _GROMACS_TEMPLATE_PACKAGE,
+            _LOCAL_RUN_TEMPLATE,
+            {
+                "branding": POLYZYMD_BRANDING,
+                "short_credit_line": SHORT_CREDIT_LINE,
+                "generated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "gmx_command": self._gmx,
+                "prefix": self._prefix,
+                "energy_minimization_block": "\n".join(
+                    self._generate_energy_minimization()
+                ).rstrip(),
+                "equilibration_block": "\n".join(self._generate_equilibration()).rstrip(),
+                "production_block": "\n".join(self._generate_production()).rstrip(),
+                "postprocessing_block": "\n".join(self._generate_postprocessing()).rstrip(),
+                "footer_block": "\n".join(self._generate_footer()).rstrip(),
+            },
+        ).rstrip("\n")
         output_path.write_text(content)
         output_path.chmod(0o755)  # Make executable
 
         logger.info(f"Generated GROMACS run script: {output_path}")
         return output_path
+
+    def _validate_script_values(self) -> None:
+        """Validate values interpolated into the local GROMACS shell script.
+
+        Raises
+        ------
+        ValueError
+            If a configured value contains unsafe shell metacharacters.
+        """
+        _validate_local_shell_token(self._gmx, "gmx_command")
+        _validate_local_shell_token(self._prefix, "prefix")
+        for mdp_name in self._eq_mdps:
+            _validate_local_shell_token(mdp_name, "equilibration_mdp")
 
     def _generate_header(self) -> List[str]:
         """Generate script header with configuration."""
@@ -1845,26 +1917,29 @@ class GromacsExporter:
         """
         molecules: List[Tuple[str, int]] = []
         try:
-            in_molecules = False
-            for line in top_path.read_text().splitlines():
-                stripped = line.strip()
-                if not stripped or stripped.startswith(";"):
-                    continue
-                if stripped.startswith("["):
-                    section = stripped.strip("[] \t").lower()
-                    in_molecules = section == "molecules"
-                    continue
-                if in_molecules:
-                    parts = stripped.split()
-                    if len(parts) >= 2:
-                        mol_name = parts[0]
-                        try:
-                            n_copies = int(parts[1])
-                        except ValueError:
-                            continue
-                        molecules.append((mol_name, n_copies))
-        except Exception as e:
-            logger.warning(f"Failed to parse molecules from {top_path}: {e}")
+            lines = top_path.read_text().splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f"Failed to read molecules from {top_path}: {exc}")
+            return molecules
+
+        in_molecules = False
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            if stripped.startswith("["):
+                section = stripped.strip("[] \t").lower()
+                in_molecules = section == "molecules"
+                continue
+            if in_molecules:
+                parts = stripped.split()
+                if len(parts) >= 2:
+                    mol_name = parts[0]
+                    try:
+                        n_copies = int(parts[1])
+                    except ValueError:
+                        continue
+                    molecules.append((mol_name, n_copies))
         return molecules
 
     @staticmethod
@@ -1882,26 +1957,28 @@ class GromacsExporter:
         n_atoms = 0
         residue_indices: set = set()
         try:
-            in_atoms = False
-            for line in itp_path.read_text().splitlines():
-                stripped = line.strip()
-                if not stripped or stripped.startswith(";"):
-                    continue
-                if stripped.startswith("["):
-                    section = stripped.strip("[] \t").lower()
-                    in_atoms = section == "atoms"
-                    continue
-                if in_atoms:
-                    parts = stripped.split()
-                    if len(parts) >= 3 and parts[0].isdigit():
-                        n_atoms += 1
-                        try:
-                            residue_indices.add(int(parts[2]))
-                        except ValueError:
-                            pass
-        except Exception as e:
-            logger.warning(f"Failed to parse ITP file {itp_path}: {e}")
+            lines = itp_path.read_text().splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f"Failed to read ITP file {itp_path}: {exc}")
             return 0, 1
+
+        in_atoms = False
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            if stripped.startswith("["):
+                section = stripped.strip("[] \t").lower()
+                in_atoms = section == "atoms"
+                continue
+            if in_atoms:
+                parts = stripped.split()
+                if len(parts) >= 3 and parts[0].isdigit():
+                    n_atoms += 1
+                    try:
+                        residue_indices.add(int(parts[2]))
+                    except ValueError:
+                        pass
         return n_atoms, max(len(residue_indices), 1)
 
     def _fix_zero_indexed_residues(self) -> None:

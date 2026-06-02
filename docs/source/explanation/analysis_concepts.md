@@ -10,17 +10,31 @@ read an output file, you know what happened and where to look.
 Every analysis in PolyzyMD follows the same four-stage pipeline:
 
 ```text
-compute_replicate  →  aggregate  →  compare  →  plot
+replicate stage  →  aggregate  →  compare  →  plot
 ```
 
 Here is what each stage does:
 
 | Stage | Scope | What it produces |
 |-------|-------|------------------|
-| **compute_replicate** | One replicate of one condition | Raw per-replicate result (e.g., RMSF values for each residue) |
-| **aggregate** | All replicates of one condition | Means, standard errors, and distributions across replicates |
-| **compare** | All conditions together | Statistical tests, effect sizes, and rankings |
-| **plot** | All conditions together | Figures saved as PNG files |
+| **replicate stage** | One replicate of one condition | `ReplicateArtifact` at `analysis/<condition_label>/<plugin_name>/run_<N>/result.json` |
+| **aggregate** | All replicates of one condition | `ConditionArtifact` at `analysis/<condition_label>/<plugin_name>/aggregated/result.json` |
+| **compare** | All conditions together | `ComparisonArtifact` or active custom comparison result at `comparison/<plugin_name>/result.json` |
+| **plot** | All conditions together | Figures saved in the configured format, with `png` as the default and `pdf` or `svg` also supported |
+
+Each artifact stores a validated payload plus metadata, provenance, warnings,
+and references to sidecar files when an analysis needs large tables or arrays
+outside the main JSON document.
+
+Trajectory-native plugins generally create `MDAAnalysisJob` objects for their
+per-replicate computation. The corresponding collectors translate completed
+jobs into `ReplicateArtifact` objects. PolyzyMD then owns the surrounding
+workflow: condition aggregation, cross-condition comparison, artifact storage,
+and plot orchestration.
+
+Plots are deliberately downstream of this artifact layer. They read cached
+artifacts and sidecars only; they do not reload trajectories or rerun the
+analysis calculation.
 
 You don't call these stages yourself. When you run `polyzymd compare run`, the
 CLI walks through the pipeline automatically. But knowing the stages helps when
@@ -63,7 +77,9 @@ The key sections are:
 
 Each entry points to a simulation's `config.yaml` and lists which replicate
 numbers to include. The `label` is a human-readable name that shows up in plots
-and result files.
+and result files. When labels appear in directory names, PolyzyMD sanitizes them
+for the filesystem; for example, `100% SBMA` may be written as `100_SBMA` in
+paths while remaining `100% SBMA` in summaries and plots.
 
 ### `control`
 
@@ -97,24 +113,29 @@ A **condition** is one simulation setup. Examples: "No Polymer", "SBMA-100",
 "PEG-50". Each condition has its own `config.yaml` that defines the system
 (which protein, which polymer, which force field, etc.).
 
-A **replicate** is an independent run of the same condition. Replicates are
-identified by number — 1, 2, 3, and so on. Each replicate uses the same
-`config.yaml` but starts from a different random seed or initial configuration,
-producing an independent trajectory.
+A **replicate** is a separate run of the same condition, intended to sample the
+same setup independently. Replicates are identified by number — 1, 2, 3, and so
+on. Each replicate uses the same
+`config.yaml` but usually starts from a different random seed, initial velocity
+assignment, or starting configuration. These choices help separate trajectories,
+but they do not guarantee statistical independence by themselves. Interpretation
+also depends on equilibration, stationarity, decorrelation, and whether the
+simulated timescales are long enough for the process being measured.
 
 The pipeline processes data in this order:
 
-1. **Per-replicate**: `compute_replicate` runs once for each replicate of each
-   condition. If you have 2 conditions with 3 replicates each, that's 6
-   compute calls.
-2. **Per-condition**: `aggregate` runs once per condition, combining the
-   replicate results. That's 2 aggregate calls.
-3. **Cross-condition**: `compare` and `plot` each run once, looking at all
-   conditions together.
+1. **Per-replicate**: the compute stage runs once for each replicate of each
+   condition and writes a `ReplicateArtifact`. If you have 2 conditions with 3
+   replicates each, that is 6 replicate artifacts.
+2. **Per-condition**: `aggregate` runs once per condition, combining replicate
+   artifacts into a `ConditionArtifact`. That's 2 aggregate calls.
+3. **Cross-condition**: `compare` runs once, looking at all conditions together
+   and writing a `ComparisonArtifact` or an active custom comparison result.
+   `plot` then reads those cached outputs and any referenced sidecars.
 
 ## Plugins — the analysis modules
 
-PolyzyMD ships with 13 analysis plugins. Each plugin is a self-contained
+PolyzyMD ships with 9 analysis plugins. Each plugin is a self-contained
 module that knows how to compute one type of measurement, aggregate it, compare
 across conditions, and generate plots.
 
@@ -131,14 +152,18 @@ The available plugins are:
 | `secondary_structure` | Secondary structure content (helix, sheet, coil fractions) |
 | `sasa` | Solvent-accessible surface area |
 | `hydrogen_bonds` | Hydrogen bond occupancy and lifetimes |
-| `binding_free_energy` | Per-contact binding free energy estimates (experimental) |
-| `exposure` | Exposure dynamics of active-site residues (experimental) |
-| `polymer_affinity` | Polymer–protein interaction scoring (experimental) |
-| `polymer_bridging` | Polymer bridging topology between protein regions (experimental) |
 
 Each plugin has a `Settings` model with configurable parameters. Most
 parameters have sensible defaults, so you often just need `plugin_name: {}` in
 your `comparison.yaml` to get started.
+
+For contributors, the plugin boundary is the supported extension point: a
+plugin defines its settings, replicate computation, aggregation behavior,
+comparison behavior, plotting behavior, and formatting behavior without changing
+the core orchestration code. The conceptual boundary is important because
+PolyzyMD owns artifact storage and orchestration, while plugins own the
+domain-specific measurement and interpretation logic. For a contributor-focused
+walkthrough, see {doc}`../contributor_guide/extending_analyses`.
 
 You configure plugins in the `plugins:` block. For example, to run RMSF with a
 custom selection and contacts with defaults:
@@ -153,8 +178,19 @@ plugins:
 ## Statistical comparison
 
 When you have two or more conditions, the compare stage produces statistical
-output so you can assess whether differences are meaningful. Here is what
-PolyzyMD computes:
+output so you can assess whether differences are meaningful. There are two
+comparison paths:
+
+- **Default scalar/artifact comparison**: plugins that expose scalar metrics can
+  use the framework's default comparison behavior. In that path, PolyzyMD can
+  compute pairwise tests, effect sizes, optional omnibus statistics, and metric
+  rankings from the condition artifacts.
+- **Custom comparison**: plugins with richer result structures can implement
+  their own comparison behavior. These plugins still write comparison output,
+  but they may not produce the same tests, tables, or rankings as the default
+  scalar path.
+
+For plugins using the default scalar comparison path, PolyzyMD computes:
 
 - **Pairwise t-tests** between each pair of conditions, with
   Benjamini–Hochberg FDR correction to account for multiple comparisons.
@@ -162,9 +198,9 @@ PolyzyMD computes:
   a difference is significant but how large it is.
 - **ANOVA** when there are three or more conditions, as an omnibus test before
   the pairwise comparisons.
-- **Rankings** of conditions from best to worst on each metric (where "best"
-  depends on the metric — lower RMSF is better, higher helix fraction is
-  better).
+- **Rankings** of conditions according to each metric's directionality. These
+  rankings are screening aids for follow-up interpretation, not biological truth
+  by themselves.
 
 The comparison results are saved as JSON and also printed to the terminal when
 you run `polyzymd compare run`. For details on interpreting these outputs, see
@@ -180,28 +216,34 @@ comparison_project/
 ├── analysis/
 │   └── <condition_label>/
 │       └── <plugin_name>/
-│           ├── run_<N>/        # Per-replicate results
-│           └── aggregated/     # Cross-replicate aggregation
+│           ├── run_<N>/
+│           │   └── result.json # ReplicateArtifact
+│           └── aggregated/
+│               └── result.json # ConditionArtifact
 ├── comparison/
 │   └── <plugin_name>/
-│       └── result.json         # Cross-condition comparison
+│       └── result.json         # ComparisonArtifact or active custom result
 └── figures/
     └── <plugin_name>/
-        └── *.png               # Plots
+        └── *.<format>          # Plots; png by default, pdf/svg supported
 ```
 
 The three output directories map directly to the pipeline stages:
 
 - **`analysis/`** holds the compute and aggregate output. Each condition gets
-  its own subdirectory, and within that, each plugin gets a directory with
-  per-replicate (`run_1/`, `run_2/`, ...) and `aggregated/` results.
+  its own filesystem-sanitized subdirectory, and within that, each plugin gets
+  a directory with `ReplicateArtifact` files in `run_1/`, `run_2/`, ... and a
+  `ConditionArtifact` in `aggregated/result.json`.
 - **`comparison/`** holds the compare output. One `result.json` per plugin
-  with the statistical tests and rankings.
+  stores a `ComparisonArtifact` or an active custom comparison result. Default
+  scalar comparisons include framework-generated tests and rankings; custom
+  comparison outputs may use plugin-specific summaries.
 - **`figures/`** holds the plot output. One subdirectory per plugin with PNG
-  files.
+  files by default, or another configured format such as PDF or SVG. Plots are
+  generated from cached artifacts and sidecars only.
 
 Results are cached: if you rerun the pipeline without changing settings, the
-compute stage skips replicates that already have results on disk.
+compute stage skips replicates that already have canonical artifacts on disk.
 
 ## See also
 

@@ -32,11 +32,11 @@ Run these before every commit:
 # Lint
 ruff check src/polyzymd/
 
-# Format check (add --diff to see what would change)
-ruff format --check src/polyzymd/
+# Format check
+black src/ --check
 
 # Auto-format
-ruff format src/polyzymd/
+black src/
 
 # Type check (config module)
 pixi run -e build mypy src/polyzymd/config/
@@ -59,8 +59,8 @@ Commit messages use imperative mood with a 50-character subject line:
 ```
 Add radius of gyration analysis plugin
 
-Implement compute_replicate using TrajectoryLoader for trajectory
-handling. Aggregate with SEM across replicates. Wire into default
+Implement build_mda_jobs and artifact aggregation for the MDAnalysis-native
+trajectory lifecycle. Aggregate with SEM across replicates. Wire into default
 scalar comparison path via extract_metrics.
 
 Closes #42
@@ -76,7 +76,7 @@ to core code**.
 
 ### Step-by-Step
 
-1. **Read the tutorial**: `docs/source/tutorials/extending_analyses.md` — it
+1. **Read the tutorial**: `docs/source/contributor_guide/extending_analyses.md` — it
    walks through every component of a plugin and has a complete working example.
 
 2. **Study an existing plugin**: Start with `src/polyzymd/analyses/secondary_structure/`
@@ -90,8 +90,11 @@ to core code**.
 4. **Subclass `Analysis`** and implement the required pieces:
    - `name` — unique lowercase string identifier
    - `Settings` — Pydantic v2 `BaseModel` with sensible defaults
-   - `compute_replicate(ctx, replicate)` — per-replicate computation
-   - `aggregate(ctx, results)` — summarize across replicates
+   - Choose the lifecycle mode that matches your plugin:
+      - **MDAnalysis-native plugin**: implement `build_mda_jobs()` and, when
+        needed, `build_mda_collector()` when `has_compute_stage=True`
+      - **Compare-only / no-compute plugin**: set `has_compute_stage=False`
+   - Implement `aggregate(ctx, results)` only when `has_aggregate_stage=True`
 
 5. **Choose your comparison path**:
    - **Default (recommended)**: Implement `extract_metrics()` returning
@@ -100,12 +103,12 @@ to core code**.
    - **Custom**: Override `compare()` entirely for multi-metric or entry-table
      analyses.
 
-6. **Write tests**: Create `tests/test_<name>_plugin.py` following the pattern
-   of existing plugin tests. The standard test structure covers:
+6. **Write tests**: Create `tests/analyses/plugins/test_<name>.py` following the
+   pattern of existing plugin tests. The standard test structure covers:
    - Discovery and class attributes
    - Settings validation
-   - `compute_replicate` with mocked trajectories
-   - `aggregate` with sample data
+   - `build_mda_jobs()` and collector behavior for MDAnalysis-native plugins
+   - `aggregate` with sample data when `has_aggregate_stage=True`
    - `extract_metrics` (if applicable)
    - Plot generation
    - Full lifecycle integration
@@ -115,8 +118,9 @@ to core code**.
 ### Key Rules
 
 - **Use `TrajectoryLoader`** from `analyses/shared/` for trajectory loading —
-  it handles topology discovery, segment daisy-chaining, timestep detection,
-  and equilibration skipping.
+  it handles topology and trajectory discovery, segment daisy-chaining, and
+  timestep access. Equilibration-aware frame slicing belongs in the shared
+  window helpers.
 
 - **Import rules**: Import framework utilities (TrajectoryLoader, etc.) at
   module level. Import heavy third-party packages (MDAnalysis, matplotlib,
@@ -139,12 +143,15 @@ to core code**.
 - [ ] Plugin package in `src/polyzymd/analyses/<name>/`
 - [ ] `name` class variable set (lowercase, unique)
 - [ ] `Settings` inner class with default values for all fields
-- [ ] `compute_replicate` and `aggregate` implemented
+- [ ] Lifecycle mode chosen and implemented correctly:
+  - `build_mda_jobs()` and any needed collector for MDAnalysis-native plugins, or
+  - `has_compute_stage=False` for compare-only / no-compute plugins
+- [ ] `aggregate` implemented when `has_aggregate_stage=True`
 - [ ] `extract_metrics` implemented (or `compare` overridden for custom path)
 - [ ] `AggregatedResultClass` set if using a Pydantic result model
-- [ ] Test file in `tests/test_<name>_plugin.py`
+- [ ] Test file in `tests/analyses/plugins/test_<name>.py`
 - [ ] `ruff check src/polyzymd/` passes
-- [ ] `ruff format --check src/polyzymd/` passes
+- [ ] `black src/ --check` passes
 - [ ] `pixi run -e build pytest tests/ -v` passes
 
 ## Other Types of Contributions
@@ -179,7 +186,8 @@ place it accordingly.
 PolyzyMD uses:
 - **hatchling** for the Python build backend
 - **pixi** for environment management (`pixi.toml`)
-- **ruff** for linting and formatting
+- **ruff** for linting
+- **black** for formatting
 - **pytest** for testing
 
 ## Project Layout
@@ -192,10 +200,9 @@ src/polyzymd/
 ├── simulation/   # OpenMM simulation runners
 ├── workflow/     # Orchestration (build, simulate, analyze)
 ├── core/         # Base classes, shared types
-├── analyses/     # Plugin system — primary extension point
+├── analyses/     # Plugin system + comparison framework — primary extension point
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics)
 │   └── <name>/   #   One sub-package per analysis type (all plugins are packages)
-├── compare/      # Cross-condition statistics, formatters, config, IO
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 └── utils/        # Shared utilities
@@ -207,7 +214,7 @@ are internal implementation details (calculators, result models, formatters).
 
 ## Getting Help
 
-- **Tutorial**: `docs/source/tutorials/extending_analyses.md`
+- **Tutorial**: `docs/source/contributor_guide/extending_analyses.md`
 - **Plugin contract**: `src/polyzymd/analyses/base.py` (class docstring)
 - **Issues**: https://github.com/joelaforet/polyzymd/issues
 

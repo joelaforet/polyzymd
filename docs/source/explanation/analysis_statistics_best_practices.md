@@ -1,439 +1,264 @@
 # Statistics Best Practices for MD Analysis
 
-This guide explains the statistical methods used in PolyzyMD's analysis module,
-following the **LiveCoMS Best Practices** for uncertainty quantification in
-molecular simulations (Grossfield et al., 2018).
+This page explains how to interpret statistical uncertainty in PolyzyMD
+analysis results. It follows the spirit of the LiveCoMS best-practices
+recommendations for molecular-simulation uncertainty quantification
+(Grossfield et al., 2018), while staying cautious about what finite trajectories
+can prove.
 
 ```{contents} On This Page
 :local:
 :depth: 2
 ```
 
-## Why Statistics Matter in MD
+## Why MD statistics need extra care
 
-Molecular dynamics trajectories are **highly correlated in time**. Unlike
-independent experimental measurements, consecutive MD frames show the system
-in nearly identical configurations. This correlation has profound implications
-for how we analyze and report results.
+Molecular dynamics trajectories are correlated in time. Consecutive frames are
+usually similar because they are snapshots from one continuous dynamical path,
+not independent experimental repeats. This does not make trajectory averages
+useless, but it does mean that the number of saved frames is not the number of
+independent observations.
+
+Autocorrelation mainly affects interpretation in three ways:
+
+- It reduces the effective amount of independent information in a trajectory.
+- It makes uncertainty estimates and convergence checks more difficult.
+- It can make finite-trajectory fluctuation estimates unreliable, especially
+  when dynamics are slow, rare events are missed, or the trajectory is not
+  stationary.
 
 ```{warning}
-Ignoring correlation in MD analysis leads to:
-- **Overconfident uncertainties** (SEM too small by factors of 10-100×)
-- **Biased variance estimates** (RMSF, heat capacity systematically wrong)
-- **Irreproducible conclusions** (apparent significance that doesn't replicate)
+Naive uncertainty estimates based on the raw frame count can be much too
+confident. Treat statistical significance from short, correlated, or
+non-stationary trajectories as provisional unless independent replicates and
+convergence diagnostics support the conclusion.
 ```
 
-PolyzyMD automatically handles these issues using methods from the
-`polyzymd.analyses.shared.autocorrelation` module.
+PolyzyMD analyses may account for correlation directly where a plugin supports
+it. A generalized metric-type system for automatic correlation handling is a
+planned design direction, not a universal implemented contract.
 
----
+## Key concepts
 
-## Key Concepts
+### Autocorrelation
 
-### Autocorrelation Function (ACF)
-
-The autocorrelation function measures how correlated a signal is with itself
-at different time lags:
+An autocorrelation function measures how much an observable resembles itself at
+later time lags:
 
 $$C(\tau) = \frac{\langle (x(t) - \mu)(x(t+\tau) - \mu) \rangle}{\sigma^2}$$
 
-- $C(0) = 1$ (perfectly correlated with itself)
-- $C(\tau) \to 0$ as $\tau \to \infty$ (decorrelation at long times)
+At zero lag, $C(0) = 1$. As the observable decorrelates, $C(\tau)$ approaches
+zero. Slow decay means that many saved frames contain overlapping information.
 
-```python
-from polyzymd.analyses.shared.autocorrelation import compute_acf
+### Statistical inefficiency and effective sample size
 
-# Compute ACF from a timeseries (e.g., RMSD, distance)
-acf_result = compute_acf(
-    timeseries,
-    timestep=10.0,      # ps between frames
-    timestep_unit="ps",
-)
+For a correlated time series, the effective number of independent samples is
+often described using the statistical inefficiency $g$:
 
-# acf_result.acf contains the autocorrelation values
-# acf_result.lags contains the time lags
-```
+$$N_{\mathrm{eff}} = \frac{N}{g}$$
 
-### Correlation Time (τ)
+For a simple exponentially decaying correlation, a useful approximation is:
 
-The **correlation time** τ is the characteristic timescale for decorrelation.
-Frames separated by more than 2τ are approximately independent.
+$$g \approx 1 + \frac{2\tau}{\Delta t}$$
 
-PolyzyMD estimates τ using numerical integration of the ACF (the most robust
-method for noisy data):
+where $\tau$ is an integrated correlation time and $\Delta t$ is the spacing
+between saved observations. The exact estimate depends on the observable, the
+trajectory length, and how the correlation function is truncated or blocked.
 
-$$\tau = \int_0^{\infty} C(t) \, dt$$
-
-```python
-from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
-
-tau_result = estimate_correlation_time(
-    acf_result,
-    method="integration",  # Most robust for MD data
-)
-
-print(f"Correlation time: {tau_result.tau:.1f} {tau_result.tau_unit}")
-print(f"Independent samples: {tau_result.n_independent}")
-```
-
-### Statistical Inefficiency (g)
-
-The **statistical inefficiency** quantifies how much correlation inflates
-variance estimates:
-
-$$g = 1 + 2\sum_{t=1}^{N} C(t) \left(1 - \frac{t}{N}\right)$$
-
-The effective number of independent samples is:
-
-$$N_{\text{eff}} = \frac{N}{g}$$
+Spacing frames by about $2\tau$ is therefore best understood as a heuristic for
+selecting approximately independent frames, not as a universal formula for the
+true number of independent samples.
 
 ```{tip}
-A typical 100 ns trajectory with 10,000 frames might have only 50-200
-effective independent samples, depending on the observable and system dynamics.
+A trajectory with 10,000 saved frames may contain far fewer effective samples
+for a slow observable. The relevant timescale is the decorrelation time of the
+observable being analyzed, not the output frequency alone.
 ```
 
----
+### Stationarity and convergence
 
-## The Critical Distinction: Means vs. Variances
+Correlation corrections assume that the sampled data represent one stationary
+distribution after equilibration. If the trajectory drifts between metastable
+states, remains trapped in one basin, or contains large relaxation transients,
+then a corrected SEM can still be misleading.
 
-**This is the most important concept in MD statistics.**
+For this reason, convergence is not just a numerical property of an error bar.
+It is a scientific judgment about whether the simulation sampled the states
+that matter for the question being asked.
 
-Different quantities require different statistical treatments depending on
-whether they involve first moments (means) or second moments (variances).
+## Means and fluctuations need different interpretation
 
-### First Moments: Use All Data, Correct Uncertainty
+### Averages
 
-For quantities that are **averages** (first moments):
-- Mean distance
-- Mean RMSD
-- Contact fraction
-- Average energy
+For observables such as mean distance, mean RMSD, contact fraction, or average
+energy, all frames can contribute information about the mean if the trajectory
+is equilibrated and representative. Autocorrelation mainly reduces precision:
+the mean may be estimated from all frames, but the uncertainty should reflect
+$N_{\mathrm{eff}}$ or an equivalent blocking/replicate-based estimate rather
+than the raw frame count.
 
-**Correlation affects precision but NOT accuracy.**
+Conceptually:
 
-The sample mean $\bar{x}$ is an unbiased estimator regardless of correlation.
-Correlated samples still provide valid information about the mean—they just
-don't provide as much *independent* information.
-
-**Correct approach**: Use all frames, but correct the standard error:
-
-$$\text{SEM} = \frac{\sigma}{\sqrt{N_{\text{eff}}}} = \frac{\sigma}{\sqrt{N/g}}$$
-
-This is exactly what PolyzyMD's distances plugin does internally in
-`compute_replicate()`:
-
-```python
-# From analyses/distances/__init__.py (DistanceCalculator internals)
-# SEM = std / sqrt(n_independent)
-if n_independent_frames > 0:
-    sem_distance = float(std_dist / np.sqrt(n_independent_frames))
+```text
+mean = average(all equilibrated frames)
+uncertainty = spread adjusted for correlation or estimated across replicates
 ```
 
-### Second Moments: Subsample to Independent Frames
+This is why a mean computed from a dense trajectory can be useful while its
+naive frame-based SEM is not.
 
-For quantities that measure **fluctuations** (second moments):
-- RMSF (root mean square fluctuation)
-- Heat capacity (energy variance)
-- Compressibility (volume variance)
-- Order parameters from variance
+### Fluctuations
 
-**Correlation introduces systematic BIAS, not just imprecision.**
+For observables that are themselves fluctuation measures, such as RMSF, energy
+variance, compressibility-like quantities, or variance-derived order
+parameters, finite correlated trajectories are harder to interpret. The issue is
+not that every correlated variance estimate is universally biased downward in a
+simple, predictable way. The problem is broader: finite, correlated, and
+possibly non-stationary trajectories may not sample the full distribution of
+motions that define the fluctuation.
 
-Correlated samples systematically **underestimate** the true variance because
-consecutive frames show the system in similar configurations.
+Conservative strategies include:
 
-#### Physical Intuition: The Pendulum Analogy
+- estimating fluctuations from approximately independent blocks or subsamples;
+- comparing results across independent replicates;
+- checking whether the estimate changes with trajectory length or block size;
+- reporting caveats when slow motions are undersampled.
 
-Imagine measuring the position variance of a swinging pendulum:
+Subsampling frames at roughly $2\tau$ spacing can help avoid treating adjacent
+frames as independent, but it does not rescue a trajectory that never visited
+important conformational states.
 
-| Sampling Rate | What You See | Apparent Variance |
-|--------------|--------------|-------------------|
-| 1000 Hz | Smooth continuous motion | **Small** (consecutive samples similar) |
-| 0.1 Hz | Independent snapshots at random phases | **Correct** (true swing amplitude) |
+## How to interpret PolyzyMD analysis results
 
-The fast sampling doesn't capture the full range of motion between samples—it
-oversamples the slow transitions and underestimates fluctuations.
+PolyzyMD's analysis plugins are responsible for choosing statistically
+appropriate handling for the quantities they report. Current plugins may use
+plugin-specific logic for correlation-aware uncertainty, replicate aggregation,
+or conservative subsampling. The details can differ because contact fractions,
+distances, RMSF, secondary structure, and other observables answer different
+scientific questions.
 
-**Correct approach**: Use only independent frames (spaced by ≥2τ):
+When reading output, focus on these questions:
 
-```python
-# From analyses/rmsf plugin internals
-frame_indices = get_independent_indices(
-    n_frames=n_frames_total,
-    correlation_time=correlation_time,
-    timestep=timestep,
-    start_frame=start_frame,
-)
-```
+Mean-like observables
+: Does the uncertainty account for correlation or independent replicates rather
+  than the raw number of frames?
 
----
+Fluctuation-like observables
+: Was the trajectory long enough to sample the motions that define the
+  fluctuation? Do replicate or block estimates agree?
 
-## How PolyzyMD Implements This
+Condition comparisons
+: Are the compared conditions based on comparable simulation protocols,
+  equilibration choices, and replicate counts?
 
-### Distance analysis
+Significance markers
+: Were multiple comparisons corrected, and are the effect sizes meaningful in
+  addition to being statistically significant?
 
-The distances plugin computes distances for **all frames** in
-`compute_replicate()` and uses autocorrelation to correct the uncertainty:
+For implementation details of shared analysis utilities, see
+{doc}`../api/analyses_shared`.
 
-```python
-# Compute distances for every frame
-for i, ts in enumerate(u.trajectory):
-    dist = np.linalg.norm(pos2 - pos1)
-    distances.append(dist)
+## Replicates and condition-level uncertainty
 
-# Compute autocorrelation
-tau_result = estimate_correlation_time(distances_arr, ...)
+Independent replicates are often the most interpretable basis for
+condition-level uncertainty. A replicate-level SEM estimates how much replicate
+means vary across independent starts, seeds, or prepared systems.
 
-# Correct SEM using effective sample size
-sem_distance = std_dist / np.sqrt(n_independent_frames)
-```
+This is preferred when the replicates are:
 
-**Why this works**: The mean distance estimate benefits from all data points.
-More frames = more precise mean estimate. The corrected SEM properly reflects
-our actual uncertainty.
+- genuinely independent;
+- generated with comparable protocols;
+- analyzed after appropriate equilibration removal;
+- long enough to sample the relevant states for each observable.
 
-### RMSF analysis
+Replicate SEM is not magically robust to bad sampling. If all replicates are
+trapped in the same metastable basin, or if different replicates have not
+reached comparable stationary behavior, the between-replicate spread may still
+understate or misrepresent uncertainty.
 
-The RMSF plugin **subsamples** to independent frames in `compute_replicate()`
-before computing fluctuations:
+## Practical interpretation principles
 
-```python
-# Compute RMSD timeseries for ACF
-rmsd_timeseries = self._compute_rmsd_timeseries(u, atoms, start_frame)
+### Compare timescales before trusting uncertainty
 
-# Estimate correlation time
-tau_result = estimate_correlation_time(acf_result, n_frames=n_frames_after_eq)
+Ask whether the process of interest decorrelates many times within the analyzed
+window. If a loop rearrangement, contact transition, or polymer conformation
+changes on a timescale comparable to the whole production trajectory, a small
+error bar is not strong evidence of convergence.
 
-# Select only independent frames (spaced by 2τ)
-frame_indices = get_independent_indices(
-    n_frames=n_frames_total,
-    correlation_time=correlation_time,
-    timestep=timestep,
-    start_frame=start_frame,
-)
+### Prefer effect sizes with uncertainty over p-values alone
 
-# Compute RMSF using ONLY independent frames
-rmsf_values = self._compute_rmsf(u, atoms, frame_indices)
-```
+A statistically significant difference can be scientifically small, while a
+large apparent effect can be uncertain if replicate counts are low. Interpret
+PolyzyMD comparison output by considering the direction, magnitude, confidence
+intervals or SEMs, and the physical plausibility of the change.
 
-**Why this is necessary**: RMSF measures fluctuations (variance). Using
-correlated frames would systematically underestimate protein flexibility.
+### Treat diagnostics as evidence, not proof
 
----
+Autocorrelation estimates, block averages, and replicate SEMs are diagnostics.
+They summarize available sampling; they cannot reveal unsampled states that the
+trajectory never visited. Use them alongside structural inspection and domain
+knowledge.
 
-## Summary Table
+## Multiple comparison correction
 
-| Quantity | Statistical Type | Effect of Correlation | PolyzyMD Approach |
-|----------|-----------------|----------------------|-------------------|
-| Mean distance | 1st moment | Reduces precision (no bias) | All frames + corrected SEM |
-| Contact fraction | 1st moment | Reduces precision (no bias) | All frames + corrected SEM |
-| RMSF | 2nd moment | **Introduces bias** | Subsample to independent frames |
-| Distance variance | 2nd moment | **Introduces bias** | Subsample to independent frames |
-
----
-
-## Practical Recommendations
-
-### 1. Check Your Correlation Time
-
-Always examine the correlation time relative to your trajectory length:
-
-```python
-from polyzymd.analyses.shared.autocorrelation import (
-    compute_acf,
-    estimate_correlation_time,
-    check_statistical_reliability,
-)
-
-acf = compute_acf(observable, timestep=10.0, timestep_unit="ps")
-tau = estimate_correlation_time(acf, n_frames=len(observable))
-
-print(f"Correlation time: {tau.tau:.1f} {tau.tau_unit}")
-print(f"Independent samples: {tau.n_independent}")
-print(f"Statistically reliable: {tau.is_reliable}")
-```
-
-```{warning}
-If `n_independent < 10`, your results may not be statistically reliable.
-Consider:
-1. Running longer simulations
-2. Using multiple independent replicates
-3. Reporting results with appropriate caveats
-```
-
-### 2. Use Multiple Replicates
-
-Independent replicates provide truly uncorrelated samples. PolyzyMD's
-aggregation functions properly combine replicates:
-
-```bash
-# Aggregate across configured independent replicates
-polyzymd compare run distances -f comparison.yaml --eq-time 100ns
-```
-
-Replicates are configured per condition in `comparison.yaml`.
-
-The aggregated SEM is computed from the **variance across replicate means**,
-which is statistically robust regardless of within-trajectory correlation.
-
-### 3. Report Uncertainties Correctly
-
-Always report uncertainties that account for correlation:
-
-```{admonition} Good Practice
-:class: tip
-
-"The mean Ser77-His133 distance was 3.42 ± 0.15 Å (SEM, N_eff = 47 independent
-samples from 5 replicates of 100 ns each)."
-```
-
-```{admonition} Poor Practice
-:class: warning
-
-"The mean distance was 3.42 ± 0.02 Å" (using naive SEM with N = 10,000 frames)
-```
-
-### 4. Understand What You're Measuring
-
-Before running analysis, ask yourself:
-
-1. **Am I computing a mean or a variance?**
-2. **What timescale does this process occur on?**
-3. **Is my trajectory long enough to sample this process multiple times?**
-
-For slow processes (e.g., loop conformational changes with τ ~ 10 ns), even
-a 100 ns trajectory may only contain ~10 independent samples.
-
----
-
-## Multiple Comparison Correction
-
-### Why It Matters
+### Why it matters
 
 When comparing *N* conditions pairwise, the number of hypothesis tests grows as
 *N*(*N*−1)/2. With 5 conditions this is already 10 tests; with 10 conditions,
 45 tests. Without correction, the probability of at least one false positive
-(the **familywise error rate**) increases rapidly — even when every null
-hypothesis is true.
+increases rapidly, even when every null hypothesis is true.
 
-### Benjamini-Hochberg Procedure
+### Benjamini-Hochberg FDR control
 
-When `posthoc_method` is `"ttest_bh"` (the default), PolyzyMD uses the
-**Benjamini-Hochberg (BH)** step-up procedure to control the **false discovery
-rate** (FDR) — the expected proportion of false positives among rejected
-hypotheses. The algorithm:
+When `posthoc_method` is `"ttest_bh"`, PolyzyMD uses the
+Benjamini-Hochberg procedure to control the false discovery rate: the expected
+proportion of false positives among rejected hypotheses. This is less
+conservative than controlling the probability of any false positive, and is
+often appropriate when many related comparisons are screened together.
 
-1. Rank all *m* p-values in ascending order: $p_{(1)} \le p_{(2)} \le \dots \le p_{(m)}$.
-2. For each rank *k*, compare $p_{(k)}$ to the threshold $(k / m) \times \alpha$.
-3. Find the largest *k* where $p_{(k)} \le (k / m) \times \alpha$.
-4. Reject all hypotheses with rank ≤ *k*.
+Conceptually, the procedure ranks p-values, compares them to rank-dependent
+thresholds, and marks discoveries only up to the largest rank that satisfies the
+threshold. Adjusted p-values and CLI significance markers are based on this
+correction rather than on raw p-values alone.
 
-Adjusted p-values are computed with step-down monotonicity enforcement so that
-$p_{\text{adj},(k)} \le p_{\text{adj},(k+1)}$ always holds.
+### Tukey HSD as an alternative
 
-### How PolyzyMD Applies BH Correction
+When `posthoc_method` is `"tukey_hsd"`, PolyzyMD uses Tukey's Honestly
+Significant Difference test. Tukey HSD compares all pairs simultaneously and
+controls the family-wise error rate. It is most appropriate for balanced designs
+with similar replicate counts and approximately equal variance across
+conditions.
 
-Each plugin defines its own hypothesis family:
+Choose the post-hoc method based on the scientific question:
 
-- **Contacts** — All pairwise t-test p-values (both coverage and
-  contact_fraction metrics) form **one hypothesis family**. ANOVA p-values
-  form a separate small family (typically 2 tests).
-- **Binding free energy** — Same-temperature pairwise entries form **one
-  family per temperature group**.
-- **Polymer affinity** — Same pattern as binding free energy: one family per
-  temperature group.
+- Use BH-corrected t-tests when specific pairs are of interest or sample sizes
+  are heterogeneous.
+- Use Tukey HSD when all pairwise contrasts are part of one balanced comparison
+  family.
 
-### Tukey's HSD Alternative
+### Within-trajectory uncertainty and multiple testing are separate
 
-When `posthoc_method` is `"tukey_hsd"`, PolyzyMD uses **Tukey's Honestly
-Significant Difference** test instead of pairwise t-tests. Tukey HSD tests all
-pairs simultaneously using a single studentized range distribution, controlling
-the **family-wise error rate** (FWER) rather than FDR.
+Autocorrelation handling and multiple-comparison correction address different
+problems. Autocorrelation affects the uncertainty of an observable within or
+across trajectories. Multiple-comparison correction controls how many false
+positives are expected when many hypotheses are tested.
 
-Key differences from BH-corrected t-tests:
+Both matter. A corrected p-value does not fix poor sampling, and a careful SEM
+does not control the false-positive rate across many condition pairs.
 
-- Tukey HSD is best suited for balanced designs (equal replicates per condition).
-- It assumes equal variance across conditions.
-- No separate FDR correction is needed — Tukey p-values are already family-wise
-  corrected.
-- The `p_value_adjusted` field mirrors `p_value` for Tukey results.
-- The `t_statistic` field is `NaN` for Tukey results (the test uses the
-  studentized range distribution, not a t-distribution).
+For field-level details on post-hoc methods, configuration keys, and output
+fields, see {doc}`../reference/posthoc_testing`.
 
-Choose Tukey HSD when all conditions are equally important and sample sizes are
-similar. Choose BH-corrected t-tests when you have specific pairs of interest
-or heterogeneous sample sizes.
+## References
 
-### The `fdr_alpha` Parameter
-
-`fdr_alpha` is configured in the `defaults:` block of `comparison.yaml`
-(applies to all plugins using the default comparison pipeline) or per plugin
-in the `plugins:` block for plugins with their own `fdr_alpha` setting. The
-default is 0.05.
-
-When `posthoc_method` is `"ttest_bh"`, `fdr_alpha` controls the BH
-false-discovery-rate threshold. When `posthoc_method` is `"tukey_hsd"`,
-`fdr_alpha` is used as the family-wise alpha threshold for determining
-significance. It is also used as the ANOVA significance threshold regardless
-of post-hoc method.
-
-Lowering the value (e.g., 0.01) makes the correction more conservative;
-raising it allows more discoveries at the cost of a higher expected false
-positive rate.
-
-```yaml
-defaults:
-  fdr_alpha: 0.01  # More conservative than default (applies to all plugins)
-  posthoc_method: "ttest_bh"  # or "tukey_hsd"
-
-plugins:
-  contacts:
-    fdr_alpha: 0.01  # Per-plugin override (takes precedence for this plugin)
-```
-
-### Raw vs Adjusted p-Values
-
-Both raw and BH-adjusted p-values are shown in formatted output. The
-`significant` field in saved JSON and the significance markers (`*`, `**`,
-`***`) in CLI tables are based on the **adjusted** value. This ensures that
-reported significance accounts for the number of comparisons performed.
-
-### Relationship to Within-Trajectory Statistics
-
-FDR correction and autocorrelation handling address **different** sources of
-statistical error:
-
-| Problem | Scope | PolyzyMD Solution |
-|---------|-------|-------------------|
-| **Autocorrelation** | Within a single trajectory — consecutive frames are not independent | Correct SEM via $N_{\text{eff}}$ or subsample by 2τ (see earlier sections) |
-| **Multiple comparisons** | Across conditions — many hypothesis tests inflate false positives | BH correction on pairwise p-values (`ttest_bh`) or Tukey HSD FWER control (`tukey_hsd`) |
-
-Both corrections are important. Autocorrelation handling ensures that the
-per-condition uncertainty is not artificially small; FDR correction ensures
-that the cross-condition significance claims are not inflated by the number of
-tests performed.
-
-For the full field-level reference of post-hoc output (methods, configuration
-keys, output JSON fields, and edge cases), see
-{doc}`/reference/posthoc_testing`.
-
----
-
-## LiveCoMS References
-
-This implementation follows the guidelines from:
+This explanation follows guidance from:
 
 > **Grossfield, A., et al.** (2018). "Best Practices for Quantification of
 > Uncertainty and Sampling Quality in Molecular Simulations."
 > *Living Journal of Computational Molecular Science*, 1(1), 5067.
 > [DOI: 10.33011/livecoms.1.1.5067](https://doi.org/10.33011/livecoms.1.1.5067)
 
-Key sections:
-- **Section 3.1**: Uncertainty in averages (first moments)
-- **Section 3.2**: Uncertainty in fluctuations (second moments)
-- **Section 4**: Practical recommendations for MD analysis
-
-Additional references:
+Useful background includes:
 
 > **Chodera, J. D., et al.** (2007). "Use of the Weighted Histogram Analysis
 > Method for the Analysis of Simulated and Parallel Tempering Simulations."
@@ -441,21 +266,3 @@ Additional references:
 
 > **Flyvbjerg, H., & Petersen, H. G.** (1989). "Error estimates on averages
 > of correlated data." *Journal of Chemical Physics*, 91(1), 461-466.
-
----
-
-## API Reference
-
-The statistical functions are available in `polyzymd.analyses.shared.autocorrelation`:
-
-| Function | Description |
-|----------|-------------|
-| `compute_acf()` | Compute autocorrelation function via FFT |
-| `estimate_correlation_time()` | Estimate τ from ACF or timeseries |
-| `get_independent_indices()` | Get frame indices spaced by 2τ |
-| `statistical_inefficiency()` | Compute g directly from timeseries |
-| `statistical_inefficiency_multiple()` | Compute g from multiple timeseries |
-| `n_effective()` | Compute N_eff = N / g |
-| `check_statistical_reliability()` | Warn if N_eff < 10 |
-
-See the {doc}`/api/core` documentation for full API details.

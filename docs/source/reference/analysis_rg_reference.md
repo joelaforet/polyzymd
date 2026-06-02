@@ -89,29 +89,66 @@ Because of that, Rg runs do not use RMSD-style fields such as
 
 ## Output Files
 
-Results are saved in your project analysis directory:
+Results are saved as canonical v1.3 artifacts. JSON files use framework-owned
+artifact envelopes, and per-frame or distribution arrays are stored as NPZ
+sidecars.
 
 ```text
-<projects_directory>/
-└── analysis/
+<comparison_workspace>/
+├── analysis/
+│   └── <condition>/
+│       └── rg/
+│           ├── run_1/
+│           │   ├── result.json
+│           │   └── sidecars/
+│           │       ├── rg_protein_rg_timeseries.npz
+│           │       └── rg_polymer_blob_rg_timeseries.npz
+│           ├── run_2/
+│           │   └── ...
+│           ├── run_3/
+│           │   └── ...
+│           └── aggregated/
+│               ├── result.json
+│               └── sidecars/
+│                   └── rg_polymer_blob_rg_distribution.npz
+└── comparison/
     └── rg/
-        ├── run_1/
-        │   ├── rg_eq10ns.json
-        │   ├── rg_Whole Protein_timeseries.npz
-        │   └── rg_Protein Backbone_timeseries.npz
-        ├── run_2/
-        │   ├── rg_eq10ns.json
-        │   ├── rg_Whole Protein_timeseries.npz
-        │   └── rg_Protein Backbone_timeseries.npz
-        ├── run_3/
-        │   └── ...
-        └── aggregated/
-            └── rg_reps1-3_eq10ns.json
+        └── result.json
 ```
 
-Each replicate directory contains:
-- JSON summary result for all configured runs
-- NPZ sidecars with per-frame timeseries data (one per run)
+The canonical paths are:
+
+| Level | Artifact | Path |
+|-------|----------|------|
+| Per replicate | `ReplicateArtifact` | `analysis/<condition>/rg/run_<replicate>/result.json` |
+| Per condition | `ConditionArtifact` | `analysis/<condition>/rg/aggregated/result.json` |
+| Cross condition | Comparison result | `comparison/rg/result.json` |
+| Large arrays | NPZ sidecars | `analysis/<condition>/rg/**/sidecars/*.npz` |
+
+Each replicate artifact contains JSON summaries for all configured runs. NPZ
+sidecars store per-frame Rg timeseries and optional fragment distributions.
+
+### Artifact envelope fields
+
+| Field | Description |
+|-------|-------------|
+| `payload` | Rg run summaries, scalar metrics, fragment statistics, and relative sidecar paths |
+| `metadata` | Run settings, calculation modes, equilibration labels, and units |
+| `provenance` | Input topology/trajectory identity and workflow details |
+| `sidecars` | Validated references to `sidecars/*.npz` arrays with hashes and sizes |
+
+Use `ArtifactStore` for programmatic access:
+
+```python
+from pathlib import Path
+
+from polyzymd.analyses.mda import ArtifactStore
+
+replicate = ArtifactStore(Path("analysis/PEGylated/rg/run_1")).read_replicate_result()
+condition = ArtifactStore(Path("analysis/PEGylated/rg/aggregated")).read_condition_result()
+print(replicate.payload["runs"][0]["mean_rg"])
+print(condition.payload["runs"][0]["metrics"]["mean_rg"])
+```
 
 ### NPZ sidecar arrays
 
@@ -128,116 +165,80 @@ Each `rg_<label>_timeseries.npz` may include:
 
 ### JSON result structures
 
-Per-replicate result (`RgResult`):
+Per-replicate result (`ReplicateArtifact`), representative structure:
 
 ```python
 {
-    "config_hash": "abc123...",
+    "schema_version": "1",
+    "artifact_type": "replicate",
+    "analysis_name": "rg",
+    "condition_label": "PEGylated",
     "replicate": 1,
-    "equilibration_time": 10.0,
-    "equilibration_unit": "ns",
-    "selection_string": "protein; resname SBM or resname EGM or resname EGP",
-    "n_frames_total": 10000,
-    "n_frames_used": 9000,
-    "trajectory_files": ["..."],
-    "run_results": [
-        {
-            "run_label": "protein_rg",
-            "selection": "protein",
-            "calculation_mode": "selection",
-            "fragment_weighting": null,
-            "mean_rg": 18.234,
-            "std_rg": 0.412,
-            "median_rg": 18.191,
-            "min_rg": 17.087,
-            "max_rg": 19.604,
-            "final_rg": 18.356,
-            "sem_rg": 0.098,
-            "correlation_time": 3821.3,
-            "correlation_time_unit": "ps",
-            "n_independent_frames": 19,
-            "statistical_inefficiency": 473.7,
-            "n_frames_total": 10000,
-            "n_frames_used": 9000,
-            "npz_path": ".../rg_protein_rg_timeseries.npz",
-            "time_unit": "ns",
-            "timestep_ps": 10.0
-        },
-        {
-            "run_label": "polymer_blob_rg",
-            "selection": "resname SBM or resname EGM or resname EGP",
-            "calculation_mode": "fragments",
-            "fragment_weighting": "equal",
-            "mean_rg": 8.412,
-            "std_rg": 0.231,
-            "median_rg": 8.389,
-            "min_rg": 7.612,
-            "max_rg": 9.103,
-            "final_rg": 8.467,
-            "sem_rg": 0.054,
-            "mean_fragments_per_frame": 50.0,
-            "min_fragments_per_frame": 50,
-            "max_fragments_per_frame": 50,
-            "fragment_mean_rg": 8.445,
-            "fragment_std_rg": 1.203,
-            "fragment_median_rg": 8.391,
-            "fragment_min_rg": 5.102,
-            "fragment_max_rg": 12.881,
-            "fragment_rg_p10": 7.012,
-            "fragment_rg_p25": 7.621,
-            "fragment_rg_p50": 8.391,
-            "fragment_rg_p75": 9.198,
-            "fragment_rg_p90": 10.022,
-            "npz_path": ".../rg_polymer_blob_rg_timeseries.npz",
-            "time_unit": "ns",
-            "timestep_ps": 10.0
-        }
+    "payload": {
+        "runs": [
+            {
+                "run_label": "protein_rg",
+                "selection": "protein",
+                "calculation_mode": "selection",
+                "mean_rg": 18.234,
+                "sem_rg": 0.098,
+                "timeseries_sidecar": "sidecars/rg_protein_rg_timeseries.npz"
+            },
+            {
+                "run_label": "polymer_blob_rg",
+                "selection": "resname SBM or resname EGM or resname EGP",
+                "calculation_mode": "fragments",
+                "fragment_weighting": "equal",
+                "mean_rg": 8.412,
+                "sem_rg": 0.054,
+                "mean_fragments_per_frame": 50.0,
+                "timeseries_sidecar": "sidecars/rg_polymer_blob_rg_timeseries.npz"
+            }
+        ]
+    },
+    "metadata": {"equilibration": "10ns", "time_unit": "ns"},
+    "provenance": {"trajectory_files": ["..."], "n_frames_used": 9000},
+    "sidecars": [
+        {"path": "sidecars/rg_protein_rg_timeseries.npz", "metadata": {"kind": "timeseries"}},
+        {"path": "sidecars/rg_polymer_blob_rg_timeseries.npz", "metadata": {"kind": "timeseries"}}
     ]
 }
 ```
 
-Aggregated result (`RgAggregatedResult`):
+Aggregated result (`ConditionArtifact`), representative structure:
 
 ```python
 {
+    "schema_version": "1",
+    "artifact_type": "condition",
+    "analysis_name": "rg",
+    "condition_label": "PEGylated",
     "replicates": [1, 2, 3],
-    "n_replicates": 3,
-    "run_results": [
-        {
-            "run_label": "protein_rg",
-            "selection": "protein",
-            "calculation_mode": "selection",
-            "fragment_weighting": null,
-            "overall_mean": 18.256,
-            "overall_sem": 0.044,
-            "overall_median": 18.223,
-            "per_replicate_means": [18.234, 18.291, 18.244],
-            "per_replicate_stds": [0.412, 0.398, 0.424],
-            "per_replicate_medians": [18.191, 18.262, 18.216],
-            "reduced_histogram_edges": [17.0, 17.04, "..."],
-            "reduced_histogram_density_mean": [0.012, 0.034, "..."],
-            "reduced_histogram_density_sem": [0.001, 0.002, "..."]
-        },
-        {
-            "run_label": "polymer_blob_rg",
-            "selection": "resname SBM or resname EGM or resname EGP",
-            "calculation_mode": "fragments",
-            "fragment_weighting": "equal",
-            "overall_mean": 8.432,
-            "overall_sem": 0.021,
-            "overall_median": 8.401,
-            "per_replicate_means": [8.412, 8.445, 8.439],
-            "per_replicate_stds": [0.231, 0.218, 0.225],
-            "per_replicate_medians": [8.389, 8.421, 8.394],
-            "overall_mean_fragments_per_frame": 50.0,
-            "per_replicate_mean_fragments_per_frame": [50.0, 50.0, 50.0],
-            "fragment_histogram_edges": [5.0, 5.16, "..."],
-            "fragment_histogram_density_mean": [0.005, 0.012, "..."],
-            "fragment_histogram_density_sem": [0.001, 0.002, "..."],
-            "reduced_histogram_edges": [7.8, 7.83, "..."],
-            "reduced_histogram_density_mean": [0.021, 0.045, "..."],
-            "reduced_histogram_density_sem": [0.002, 0.003, "..."]
-        }
+    "payload": {
+        "runs": [
+            {
+                "run_label": "protein_rg",
+                "calculation_mode": "selection",
+                "metrics": {
+                    "mean_rg": {"values": [18.234, 18.291, 18.244], "mean": 18.256, "sem": 0.044}
+                },
+                "distribution_sidecar": "sidecars/rg_protein_rg_distribution.npz"
+            },
+            {
+                "run_label": "polymer_blob_rg",
+                "calculation_mode": "fragments",
+                "metrics": {
+                    "mean_rg": {"values": [8.412, 8.445, 8.439], "mean": 8.432, "sem": 0.021}
+                },
+                "fragment_summary": {"overall_mean_fragments_per_frame": 50.0},
+                "distribution_sidecar": "sidecars/rg_polymer_blob_rg_distribution.npz"
+            }
+        ]
+    },
+    "metadata": {"equilibration": "10ns"},
+    "provenance": {"source_replicates": [1, 2, 3]},
+    "sidecars": [
+        {"path": "sidecars/rg_polymer_blob_rg_distribution.npz", "metadata": {"kind": "distribution"}}
     ]
 }
 ```

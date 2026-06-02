@@ -15,10 +15,11 @@ Typical usage in MD equilibration protocols:
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
-from openmm import CustomExternalForce, System
-from openmm.unit import Quantity, kilojoule_per_mole, nanometer
+if TYPE_CHECKING:
+    from openmm import CustomExternalForce, System
+    from openmm.unit import Quantity
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,8 @@ class PositionalRestraintForce:
         # All parameters are per-particle to avoid global parameter conflicts
         # Use periodicdistance() to correctly handle atoms that may be outside
         # the primary periodic box (e.g., after minimization or NPT equilibration)
+        from openmm import CustomExternalForce
+
         expression = "0.5*k*periodicdistance(x, y, z, x0, y0, z0)^2"
         self._force = CustomExternalForce(expression)
 
@@ -138,6 +141,8 @@ class PositionalRestraintForce:
         Returns:
             Number of particles added
         """
+        from openmm.unit import nanometer
+
         k = force_constant if force_constant is not None else self._default_force_constant
         count = 0
         for idx in atom_indices:

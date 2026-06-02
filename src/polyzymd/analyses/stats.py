@@ -22,6 +22,7 @@ polyzymd.analyses.shared.inferential_statistics : Lower-level statistical
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 from datetime import datetime
@@ -34,8 +35,17 @@ from polyzymd.analyses.base import (
     MetricValue,
     PairwiseResult,
 )
+from polyzymd.analyses.shared.multi_run_formatting import (
+    SINGLE_REPLICATE_SEM_NOTE,
+    format_sem_value,
+    is_sem_estimable,
+)
 
 logger = logging.getLogger("polyzymd.analyses")
+
+NOT_TESTABLE_SINGLETON_NOTE = (
+    "Inferential statistics require at least two replicates per condition."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -99,22 +109,6 @@ def format_pct(pct: float) -> str:
         return "new (baseline=0)" if pct > 0 else "gone (current=0)"
     # Canonical percent format for finite values
     return f"{pct:+.1f}%"
-
-
-def _format_pct(pct: float) -> str:
-    """Backward-compatible alias for ``format_pct``.
-
-    Parameters
-    ----------
-    pct : float
-        Percent change value.
-
-    Returns
-    -------
-    str
-        Formatted percent value.
-    """
-    return format_pct(pct)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +176,7 @@ def pairwise_comparisons(
         for label_a, label_b in pairs:
             mv_a = metrics_by_condition[label_a]
             mv_b = metrics_by_condition[label_b]
+            testable = len(mv_a.replicate_values) >= 2 and len(mv_b.replicate_values) >= 2
 
             ttest = independent_ttest(
                 mv_a.replicate_values,
@@ -204,19 +199,30 @@ def pairwise_comparisons(
                     cohens_d=effect.cohens_d,
                     effect_size_interpretation=effect.interpretation,
                     direction=direction,
-                    significant=ttest.significant,
+                    significant=ttest.significant if testable else False,
                     percent_change=pct,
+                    testable=testable,
+                    note=None if testable else NOT_TESTABLE_SINGLETON_NOTE,
                 )
             )
     elif posthoc_method == "tukey_hsd":
         if len(labels) < 2:
             return results  # Not enough conditions for pairwise Tukey
         group_arrays = [metrics_by_condition[label].replicate_values for label in labels]
-        tukey_results = tukey_hsd(*group_arrays)
+        if any(len(group) < 2 for group in group_arrays):
+            tukey_results = []
+            for i in range(len(labels)):
+                for j in range(i + 1, len(labels)):
+                    tukey_results.append((i, j, float("nan"), False))
+        else:
+            tukey_results = [
+                (item.group_i, item.group_j, item.p_value, True)
+                for item in tukey_hsd(*group_arrays)
+            ]
 
-        for tukey_result in tukey_results:
-            label_a = labels[tukey_result.group_i]
-            label_b = labels[tukey_result.group_j]
+        for group_i, group_j, p_value, testable in tukey_results:
+            label_a = labels[group_i]
+            label_b = labels[group_j]
 
             if (
                 control_label
@@ -240,14 +246,16 @@ def pairwise_comparisons(
                     condition_b=label_b,
                     metric=mv_a.name,
                     t_statistic=float("nan"),
-                    p_value=tukey_result.p_value,
-                    p_value_adjusted=tukey_result.p_value,
+                    p_value=p_value,
+                    p_value_adjusted=p_value if testable else None,
                     posthoc_method=posthoc_method,
                     cohens_d=effect.cohens_d,
                     effect_size_interpretation=effect.interpretation,
                     direction=direction,
-                    significant=tukey_result.p_value <= fdr_alpha,
+                    significant=p_value <= fdr_alpha if testable else False,
                     percent_change=pct,
+                    testable=testable,
+                    note=None if testable else NOT_TESTABLE_SINGLETON_NOTE,
                 )
             )
     else:
@@ -291,13 +299,16 @@ def anova_test(
     from polyzymd.analyses.shared.inferential_statistics import one_way_anova
 
     groups = [mv.replicate_values for mv in metrics_by_condition.values()]
+    testable = all(len(group) >= 2 for group in groups)
     result = one_way_anova(*groups)
 
     return ANOVAResult(
         metric=metric_name,
         f_statistic=result.f_statistic,
         p_value=result.p_value,
-        significant=result.p_value <= alpha,
+        significant=result.p_value <= alpha if testable else False,
+        testable=testable,
+        note=None if testable else NOT_TESTABLE_SINGLETON_NOTE,
     )
 
 
@@ -357,7 +368,7 @@ def rank_conditions(
 
 
 # ---------------------------------------------------------------------------
-# Default scalar comparison (full pipeline)
+# Scalar comparison utility (full statistical pipeline)
 # ---------------------------------------------------------------------------
 
 
@@ -371,11 +382,14 @@ def default_scalar_comparison(
     ttest_method: str = "student",
     posthoc_method: str = "ttest_bh",
 ) -> ComparisonResult:
-    """Run the standard scalar comparison pipeline.
+    """Run the framework scalar comparison statistics pipeline.
 
-    This is the default implementation used by :meth:`Analysis.compare`
-    for analyses with one or more simple scalar metrics (RMSF, triad,
-    secondary structure).
+    This utility converts condition-level scalar metrics into the framework
+    ``ComparisonResult`` statistical model used internally by the framework and
+    by tests of the statistical helpers. Built-in MDAnalysis plugins should
+    expose canonical comparison artifacts; the artifact comparison layer calls
+    this function as an implementation detail before wrapping the statistics in
+    a ``ComparisonArtifact``.
 
     For each metric:
     1. Pairwise t-tests + Cohen's d + percent-change.
@@ -496,10 +510,13 @@ def default_scalar_comparison(
     if all_pairwise and posthoc_method == "ttest_bh":
         from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
-        raw_p_values = [r.p_value for r in all_pairwise]
+        raw_p_values = [r.p_value if r.testable else None for r in all_pairwise]
         bh_results = benjamini_hochberg(raw_p_values, alpha=fdr_alpha)
         for result, bh in zip(all_pairwise, bh_results, strict=False):
             result.p_value_adjusted = bh.adjusted_p_value
+            if not result.testable:
+                result.significant = False
+                continue
             p_for_significance = (
                 bh.adjusted_p_value if bh.adjusted_p_value is not None else result.p_value
             )
@@ -564,12 +581,12 @@ def format_scalar_comparison(
     output_format: str = "text",
     higher_is_better: bool | None = True,
 ) -> str:
-    """Format a :class:`ComparisonResult` for CLI display.
+    """Format a framework ``ComparisonResult`` for CLI display.
 
-    This is a generic formatter for analyses that use the default scalar
-    comparison pipeline.  It handles text and markdown output with
-    condition rankings, pairwise statistical tests, ANOVA, and
-    interpretation.
+    This formatter is retained for framework/statistics callers that still work
+    directly with ``ComparisonResult`` instances. Built-in plugin formatters
+    should format canonical ``ComparisonArtifact`` payloads with
+    :func:`format_scalar_comparison_artifact_payload` instead.
 
     Parameters
     ----------
@@ -645,6 +662,150 @@ def format_scalar_comparison(
     )
 
 
+def format_scalar_comparison_artifact_payload(
+    payload: dict[str, Any],
+    *,
+    title: str = "Comparison",
+    metric_label: str = "Value",
+    metric_unit: str = "",
+    metric_key: str | None = None,
+    output_format: str = "text",
+    higher_is_better: bool | None = True,
+) -> str:
+    """Format a canonical comparison artifact payload for CLI display.
+
+    Parameters
+    ----------
+    payload : dict[str, Any]
+        Canonical comparison artifact payload produced by the default scalar
+        comparison pipeline.
+    title : str, optional
+        Display title, by default ``"Comparison"``.
+    metric_label : str, optional
+        Human-readable metric label, by default ``"Value"``.
+    metric_unit : str, optional
+        Unit suffix for metric values, by default ``""``.
+    metric_key : str | None, optional
+        Metric key to format. If omitted, the first ranking or pairwise metric
+        in the payload is used.
+    output_format : str, optional
+        ``"text"``, ``"markdown"``, or ``"json"``, by default ``"text"``.
+    higher_is_better : bool | None, optional
+        Ranking direction used for interpretation text, by default ``True``.
+
+    Returns
+    -------
+    str
+        Formatted comparison output.
+    """
+
+    if output_format == "json":
+        return json.dumps(payload, indent=2)
+
+    metric_key = _select_payload_metric_key(payload, metric_key)
+    unit_str = f" {metric_unit}" if metric_unit else ""
+    conditions = payload.get("condition_summaries", [])
+    condition_by_label = {str(item.get("label", "")): item for item in conditions}
+    ranking = _payload_ranking(payload, metric_key)
+    pairwise = [
+        item
+        for item in payload.get("pairwise_comparisons", [])
+        if not metric_key or item.get("metric") == metric_key
+    ]
+    statistical_parameters = payload.get("statistical_parameters", {})
+    comparison_name = str(statistical_parameters.get("project_name", payload.get("name", "")))
+    equilibration = str(statistical_parameters.get("equilibration", "0ns"))
+    control_label = payload.get("effective_control") or payload.get("control_label")
+
+    if output_format == "markdown":
+        lines = [f"# {title}: {comparison_name}", ""]
+        lines.append(f"**Equilibration:** {equilibration}")
+        if control_label:
+            lines.append(f"**Control:** {control_label}")
+        lines.extend(["", f"## Condition ranking ({metric_label})", ""])
+        lines.append(f"| Rank | Condition | {metric_label} | SEM |")
+        lines.append("|---:|---|---:|---:|")
+        for item in ranking:
+            label = str(item.get("label", ""))
+            condition = condition_by_label.get(label, {})
+            lines.append(
+                f"| {item.get('rank', '')} | {label} | "
+                f"{_payload_metric(condition, metric_key, 'mean'):.4f}{unit_str} | "
+                f"{_payload_metric(condition, metric_key, 'sem'):.4f}{unit_str} |"
+            )
+        return "\n".join(lines)
+
+    lines = ["", f"{title}: {comparison_name}", "=" * 60, f"Equilibration: {equilibration}"]
+    if control_label:
+        lines.append(f"Control: {control_label}")
+    lines.extend(["", f"Condition ranking ({metric_label}):"])
+    direction = _payload_direction_label(higher_is_better)
+    if direction:
+        lines.append(direction)
+    for item in ranking:
+        label = str(item.get("label", ""))
+        condition = condition_by_label.get(label, {})
+        lines.append(
+            f"  {item.get('rank', '')}. {label}: "
+            f"{_payload_metric(condition, metric_key, 'mean'):.4f}{unit_str} ± "
+            f"{_payload_metric(condition, metric_key, 'sem'):.4f}{unit_str}"
+        )
+    if pairwise:
+        lines.extend(["", "Pairwise comparisons:"])
+        for item in pairwise:
+            lines.append(
+                f"  {item.get('condition_a')} vs {item.get('condition_b')}: "
+                f"Δ={float(item.get('effect_size', item.get('mean_difference', 0.0))):.4f}, "
+                f"p={float(item.get('p_value', 1.0)):.4g}"
+            )
+    return "\n".join(lines)
+
+
+def _select_payload_metric_key(payload: dict[str, Any], metric_key: str | None) -> str:
+    """Return the metric key to format from a comparison payload."""
+
+    if metric_key is not None:
+        return metric_key
+    rankings_by_metric = payload.get("rankings_by_metric") or {}
+    if rankings_by_metric:
+        return str(next(iter(rankings_by_metric)))
+    pairwise = payload.get("pairwise_comparisons", [])
+    if pairwise:
+        return str(pairwise[0].get("metric", "value"))
+    return "value"
+
+
+def _payload_ranking(payload: dict[str, Any], metric_key: str) -> list[dict[str, Any]]:
+    """Return the selected ranking list from a comparison payload."""
+
+    rankings_by_metric = payload.get("rankings_by_metric") or {}
+    ranking = rankings_by_metric.get(metric_key, payload.get("ranking", []))
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(ranking, start=1):
+        if isinstance(item, dict):
+            normalized.append(item)
+        elif isinstance(item, str):
+            normalized.append({"rank": index, "label": item})
+    return normalized
+
+
+def _payload_metric(condition: dict[str, Any], metric_key: str, suffix: str) -> float:
+    """Return a scalar metric from a payload condition summary."""
+
+    value = condition.get(f"{metric_key}_{suffix}", condition.get(suffix, 0.0))
+    return float(value if value is not None else 0.0)
+
+
+def _payload_direction_label(higher_is_better: bool | None) -> str:
+    """Return a ranking direction label for payload formatting."""
+
+    if higher_is_better is True:
+        return "Higher values rank first."
+    if higher_is_better is False:
+        return "Lower values rank first."
+    return ""
+
+
 def _format_scalar_text(
     result: ComparisonResult,
     title: str,
@@ -700,14 +861,17 @@ def _format_scalar_text(
         marker = "*" if label == result.control_label else " "
         mean_val = _get_mean(cond)
         sem_val = _get_sem(cond)
+        sem_str = format_sem_value(sem_val, cond.n_replicates, precision=4)
         lines.append(
             f"{rank:<5} {cond.label:<20} {mean_val:>10.4f}{unit_str}  "
-            f"{sem_val:>8.4f}  {cond.n_replicates:<4}{marker}"
+            f"{sem_str:>8}  {cond.n_replicates:<4}{marker}"
         )
 
     lines.append("-" * 60)
     if result.control_label:
         lines.append("* = control condition")
+    if any(not is_sem_estimable(_get_cond(label).n_replicates) for label in selected_ranking):
+        lines.append(SINGLE_REPLICATE_SEM_NOTE)
     lines.append("")
 
     # Pairwise comparisons
@@ -742,12 +906,16 @@ def _format_scalar_text(
             name = f"{comp.condition_b} vs {comp.condition_a}"
             sig_marker = "*" if comp.significant else ""
             pct_str = format_pct(comp.percent_change)
-            d_str = f"{comp.cohens_d:.2f}"
+            d_str = f"{comp.cohens_d:.2f}" if comp.testable else "n/a"
             if comp.posthoc_method == "ttest_bh":
-                p_str = f"{comp.p_value:.4f}{sig_marker}"
+                p_str = f"{comp.p_value:.4f}{sig_marker}" if comp.testable else "not testable"
                 p_adj = comp.p_value_adjusted
                 p_adj_str = "n/a" if p_adj is None else f"{p_adj:.4f}{sig_marker}"
-                t_str = f"{comp.t_statistic:.3f}" if not math.isnan(comp.t_statistic) else "nan"
+                t_str = (
+                    f"{comp.t_statistic:.3f}"
+                    if comp.testable and not math.isnan(comp.t_statistic)
+                    else "n/a"
+                )
                 if has_adjusted:
                     lines.append(
                         f"{name:<30} {pct_str:<10} {t_str:<10} {p_str:<12} {p_adj_str:<12} "
@@ -759,7 +927,7 @@ def _format_scalar_text(
                         f"{d_str:<10} {comp.effect_size_interpretation:<12}"
                     )
             elif comp.posthoc_method == "tukey_hsd":
-                p_str = f"{comp.p_value:.4f}{sig_marker}"
+                p_str = f"{comp.p_value:.4f}{sig_marker}" if comp.testable else "not testable"
                 lines.append(
                     f"{name:<30} {pct_str:<10} {p_str:<12} "
                     f"{d_str:<10} {comp.effect_size_interpretation:<12}"
@@ -778,6 +946,10 @@ def _format_scalar_text(
             lines.append(f"* Tukey HSD p <= {alpha:g}")
         else:
             raise ValueError(f"Unknown posthoc method {posthoc_method!r}")
+        if any(not comp.testable for comp in selected_pairwise):
+            lines.append(
+                "Not testable: inferential statistics require at least two replicates per condition"
+            )
         lines.append("")
 
     # ANOVA
@@ -788,9 +960,15 @@ def _format_scalar_text(
             sig = "Yes" if a.significant else "No"
             if a.metric != "default":
                 lines.append(f"Metric: {a.metric}")
-            lines.append(f"F-statistic: {a.f_statistic:.3f}")
-            lines.append(f"p-value:     {a.p_value:.4f}")
-            lines.append(f"Significant: {sig} (alpha={alpha:g})")
+            if a.testable:
+                lines.append(f"F-statistic: {a.f_statistic:.3f}")
+                lines.append(f"p-value:     {a.p_value:.4f}")
+                lines.append(f"Significant: {sig} (alpha={alpha:g})")
+            else:
+                lines.append("F-statistic: n/a")
+                lines.append("p-value:     not testable")
+                lines.append("Significant: No")
+                lines.append(f"Note: {a.note or NOT_TESTABLE_SINGLETON_NOTE}")
         lines.append("")
 
     # Interpretation
@@ -885,10 +1063,15 @@ def _format_scalar_markdown(
         marker = " (control)" if label == result.control_label else ""
         mean_val = _get_mean(cond)
         sem_val = _get_sem(cond)
+        sem_str = format_sem_value(sem_val, cond.n_replicates, precision=4)
         lines.append(
             f"| {rank} | **{cond.label}**{marker} | "
-            f"{mean_val:.4f} | {sem_val:.4f} | {cond.n_replicates} |"
+            f"{mean_val:.4f} | {sem_str} | {cond.n_replicates} |"
         )
+
+    if any(not is_sem_estimable(_get_cond(label).n_replicates) for label in selected_ranking):
+        lines.append("")
+        lines.append(f"*{SINGLE_REPLICATE_SEM_NOTE}.*")
 
     lines.append("")
 
@@ -921,25 +1104,32 @@ def _format_scalar_markdown(
         for comp in selected_pairwise:
             name = f"{comp.condition_b} vs {comp.condition_a}"
             sig = "Yes" if comp.significant else "No"
+            d_str = f"{comp.cohens_d:.2f}" if comp.testable else "n/a"
             if comp.posthoc_method == "ttest_bh":
                 p_adj = "n/a" if comp.p_value_adjusted is None else f"{comp.p_value_adjusted:.4f}"
-                t_str = f"{comp.t_statistic:.3f}" if not math.isnan(comp.t_statistic) else "nan"
+                p_value = f"{comp.p_value:.4f}" if comp.testable else "not testable"
+                t_str = (
+                    f"{comp.t_statistic:.3f}"
+                    if comp.testable and not math.isnan(comp.t_statistic)
+                    else "n/a"
+                )
                 if has_adjusted:
                     lines.append(
                         f"| {name} | {format_pct(comp.percent_change)} | "
-                        f"{t_str} | {comp.p_value:.4f} | {p_adj} | {comp.cohens_d:.2f} | "
+                        f"{t_str} | {p_value} | {p_adj} | {d_str} | "
                         f"{comp.effect_size_interpretation} | {sig} |"
                     )
                 else:
                     lines.append(
                         f"| {name} | {format_pct(comp.percent_change)} | "
-                        f"{t_str} | {comp.p_value:.4f} | {comp.cohens_d:.2f} | "
+                        f"{t_str} | {p_value} | {d_str} | "
                         f"{comp.effect_size_interpretation} | {sig} |"
                     )
             elif comp.posthoc_method == "tukey_hsd":
+                p_value = f"{comp.p_value:.4f}" if comp.testable else "not testable"
                 lines.append(
                     f"| {name} | {format_pct(comp.percent_change)} | "
-                    f"{comp.p_value:.4f} | {comp.cohens_d:.2f} | "
+                    f"{p_value} | {d_str} | "
                     f"{comp.effect_size_interpretation} | {sig} |"
                 )
             else:
@@ -953,6 +1143,11 @@ def _format_scalar_markdown(
         elif posthoc_method == "tukey_hsd":
             lines.append("")
             lines.append(f"*Significance uses Tukey HSD p <= {alpha:g}.*")
+        if any(not comp.testable for comp in selected_pairwise):
+            lines.append("")
+            lines.append(
+                "*Not testable: inferential statistics require at least two replicates per condition.*"
+            )
         lines.append("")
 
     # ANOVA
@@ -961,8 +1156,13 @@ def _format_scalar_markdown(
         lines.append("")
         for a in selected_anova:
             sig = "Yes" if a.significant else "No"
-            lines.append(f"- **F-statistic:** {a.f_statistic:.3f}")
-            lines.append(f"- **p-value:** {a.p_value:.4f}")
+            if a.testable:
+                lines.append(f"- **F-statistic:** {a.f_statistic:.3f}")
+                lines.append(f"- **p-value:** {a.p_value:.4f}")
+            else:
+                lines.append("- **F-statistic:** n/a")
+                lines.append("- **p-value:** not testable")
+                lines.append(f"- **Note:** {a.note or NOT_TESTABLE_SINGLETON_NOTE}")
             lines.append(f"- **Significant:** {sig}")
         lines.append("")
 

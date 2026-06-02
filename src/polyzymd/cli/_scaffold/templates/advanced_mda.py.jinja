@@ -1,0 +1,68 @@
+"""MDAnalysis helpers for the {{ spec.name }} analysis."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from . import METRIC_NAME, {{ spec.class_name }}Settings
+
+
+def build_{{ spec.name }}_analysis(
+    universe: Any,
+    *,
+    settings: {{ spec.class_name }}Settings,
+) -> Any:
+    """Build the lazy MDAnalysis ``AnalysisBase`` helper.
+
+    Parameters
+    ----------
+    universe : Any
+        Loaded MDAnalysis universe.
+    settings : {{ spec.class_name }}Settings
+        Resolved plugin settings.
+
+    Returns
+    -------
+    Any
+        ``AnalysisBase`` subclass instance ready for ``MDAAnalysisJob``.
+    """
+
+    from MDAnalysis.analysis.base import AnalysisBase
+
+    class {{ spec.class_name }}AnalysisBase(AnalysisBase):
+        """Placeholder AnalysisBase implementation for {{ spec.title }}."""
+
+        def __init__(
+            self,
+            universe: Any,
+            *,
+            settings: {{ spec.class_name }}Settings,
+        ) -> None:
+            self.universe = universe
+            self.settings = settings
+            self._atoms = universe.select_atoms(settings.selection)
+            self._selected_atom_counts: list[int] = []
+            super().__init__(universe.trajectory)
+
+        def _prepare(self) -> None:
+            """Initialize per-run containers before frame iteration."""
+
+            self._selected_atom_counts = []
+
+        def _single_frame(self) -> None:
+            """Record one placeholder per-frame measurement."""
+
+            self._selected_atom_counts.append(len(self._atoms))
+
+        def _conclude(self) -> None:
+            """Store strict JSON-compatible results after frame iteration."""
+
+            n_frames = len(self._selected_atom_counts)
+            n_selected_atoms = len(self._atoms)
+            value = float(sum(self._selected_atom_counts)) * self.settings.scale
+            metrics = {METRIC_NAME: value}
+            self.results.metrics = metrics
+            self.results.n_selected_atoms = n_selected_atoms
+            self.results.n_frames = n_frames
+
+    return {{ spec.class_name }}AnalysisBase(universe, settings=settings)

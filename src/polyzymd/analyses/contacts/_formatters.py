@@ -12,8 +12,12 @@ Note:
 from __future__ import annotations
 
 from polyzymd.analyses.contacts._comparison_results import ContactsComparisonResult
+from polyzymd.analyses.shared.multi_run_formatting import (
+    SINGLE_REPLICATE_SEM_NOTE,
+    format_sem_value,
+    is_sem_estimable,
+)
 from polyzymd.analyses.stats import format_pct
-from polyzymd.core.experimental import prefix_experimental_output
 
 
 def format_contacts_console_table(
@@ -67,10 +71,12 @@ def format_contacts_console_table(
         cond = result.get_condition(label)
         marker = "*" if label == result.control_label else " "
         coverage_pct = cond.coverage_mean * 100
-        sem_pct = cond.coverage_sem * 100
+        sem_str = format_sem_value(
+            cond.coverage_sem * 100, cond.n_replicates, precision=2, unit="%"
+        )
         lines.append(
             f"{rank:<5} {cond.label:<25} {coverage_pct:>8.1f}%   "
-            f"{sem_pct:>8.2f}%  {cond.n_replicates:<4}{marker}"
+            f"{sem_str:>8}  {cond.n_replicates:<4}{marker}"
         )
 
     lines.append("-" * 80)
@@ -89,23 +95,30 @@ def format_contacts_console_table(
         cond = result.get_condition(label)
         marker = "*" if label == result.control_label else " "
         contact_pct = cond.mean_contact_fraction * 100
-        sem_pct = cond.mean_contact_fraction_sem * 100
+        sem_str = format_sem_value(
+            cond.mean_contact_fraction_sem * 100,
+            cond.n_replicates,
+            precision=2,
+            unit="%",
+        )
         lines.append(
             f"{rank:<5} {cond.label:<25} {contact_pct:>8.1f}%   "
-            f"{sem_pct:>8.2f}%  {cond.n_replicates:<4}{marker}"
+            f"{sem_str:>8}  {cond.n_replicates:<4}{marker}"
         )
 
     lines.append("-" * 80)
+    if any(not is_sem_estimable(cond.n_replicates) for cond in result.conditions):
+        lines.append(SINGLE_REPLICATE_SEM_NOTE)
     lines.append("")
 
-    # Residence Time by Polymer Type summary
+    # Residence time by polymer type is descriptive, not inferential
     # Collect all polymer types across conditions
     all_polymer_types: set[str] = set()
     for cond in result.conditions:
         all_polymer_types.update(cond.residence_time_by_polymer_type.keys())
 
     if all_polymer_types:
-        lines.append("Residence Time by Polymer Type (frames)")
+        lines.append("Residence Time by Polymer Type (ns, event-conditioned)")
         lines.append("-" * 80)
         # Build header with polymer types
         header_parts = [f"{'Condition':<25}"]
@@ -119,59 +132,16 @@ def format_contacts_console_table(
             row_parts = [f"{cond.label:<25}"]
             for ptype in sorted_types:
                 if ptype in cond.residence_time_by_polymer_type:
-                    mean, sem = cond.residence_time_by_polymer_type[ptype]
-                    row_parts.append(f"{mean:>5.1f}±{sem:<4.1f}")
+                    rt_summary = cond.residence_time_by_polymer_type[ptype]
+                    mean = rt_summary.mean_ns
+                    sem = rt_summary.sem_ns
+                    sem_str = format_sem_value(sem, cond.n_replicates, precision=1)
+                    row_parts.append(f"{mean:>5.1f}±{sem_str:<4}")
                 else:
                     row_parts.append(f"{'--':>12}")
             lines.append(" ".join(row_parts))
 
         lines.append("-" * 80)
-        lines.append("")
-
-    # Binding Preference Enrichment Summary
-    if result.binding_preference and result.binding_preference.entries:
-        bp = result.binding_preference
-        lines.append("Binding Preference - Enrichment by Amino Acid Class")
-        lines.append("-" * 95)
-        if bp.surface_exposure_threshold is not None:
-            lines.append(
-                f"Surface exposure threshold: {bp.surface_exposure_threshold * 100:.0f}% "
-                "relative SASA"
-            )
-        else:
-            lines.append("Surface exposure threshold: not specified")
-        lines.append("")
-
-        # Group entries by polymer type
-        for poly_type in sorted(bp.polymer_types):
-            lines.append(f"  Polymer: {poly_type}")
-            lines.append(
-                f"  {'Protein Group':<20} "
-                + " ".join(f"{cond[:15]:<18}" for cond in bp.condition_labels)
-            )
-            lines.append("  " + "-" * (20 + 18 * len(bp.condition_labels)))
-
-            for group in sorted(bp.protein_groups):
-                entry = bp.get_entry(poly_type, group)
-                if not entry:
-                    continue
-
-                row_parts = [f"  {group:<20}"]
-                for cond in bp.condition_labels:
-                    values = entry.condition_values.get(cond)
-                    if values:
-                        mean, sem = values
-                        # Enrichment > 1 means preference, < 1 means avoidance
-                        marker = "+" if mean > 1.0 else "-" if mean < 1.0 else " "
-                        row_parts.append(f"{mean:>5.2f}±{sem:<4.2f} {marker:<6}")
-                    else:
-                        row_parts.append(f"{'--':>18}")
-                lines.append("".join(row_parts))
-
-            lines.append("")
-
-        lines.append("  + = enriched (>1.0), - = depleted (<1.0)")
-        lines.append("-" * 95)
         lines.append("")
 
     # Pairwise aggregate comparisons
@@ -189,11 +159,11 @@ def format_contacts_console_table(
             comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
             for agg in comp.aggregate_comparisons:
                 sig_marker = "*" if agg.significant else ""
-                p_str = f"{agg.p_value:.4f}"
+                p_str = f"{agg.p_value:.4f}" if agg.testable else "not testable"
                 p_adj = agg.p_value_adjusted
                 p_adj_str = f"{p_adj:.4f}{sig_marker}" if p_adj is not None else "--"
                 pct_str = format_pct(agg.percent_change)
-                d_str = f"{agg.cohens_d:.2f}"
+                d_str = f"{agg.cohens_d:.2f}" if agg.testable else "n/a"
                 metric = agg.metric.replace("_", " ")[:14]
                 effect_marker = "†" if agg.meets_effect_size_threshold else ""
                 lines.append(
@@ -211,6 +181,14 @@ def format_contacts_console_table(
             f"{result.fdr_alpha} (BH-corrected); "
             f"† meets min effect size |d| >= {result.min_effect_size}"
         )
+        if any(
+            not agg.testable
+            for comp in result.pairwise_comparisons
+            for agg in comp.aggregate_comparisons
+        ):
+            lines.append(
+                "Not testable: inferential statistics require at least two replicates per condition"
+            )
         lines.append("positive % change = more contact in treatment")
         lines.append("")
 
@@ -228,10 +206,9 @@ def format_contacts_console_table(
             p_adj_str = (
                 f"{anova.p_value_adjusted:.4f}" if anova.p_value_adjusted is not None else "--"
             )
-            lines.append(
-                f"{metric:<25} {anova.f_statistic:<12.3f} {anova.p_value:<12.4f} "
-                f"{p_adj_str:<12} {sig:<12}"
-            )
+            f_stat = f"{anova.f_statistic:.3f}" if anova.testable else "n/a"
+            p_value = f"{anova.p_value:.4f}" if anova.testable else "not testable"
+            lines.append(f"{metric:<25} {f_stat:<12} {p_value:<12} {p_adj_str:<12} {sig:<12}")
         lines.append("-" * 84)
         lines.append(f"* p_adj < {result.fdr_alpha} (BH-corrected)")
         lines.append("")
@@ -344,13 +321,21 @@ def format_contacts_markdown(
         cond = result.get_condition(label)
         marker = " (control)" if label == result.control_label else ""
         coverage_pct = cond.coverage_mean * 100
-        sem_pct = cond.coverage_sem * 100
+        sem_str = format_sem_value(
+            cond.coverage_sem * 100, cond.n_replicates, precision=2, unit="%"
+        )
         lines.append(
             f"| {rank} | **{cond.label}**{marker} | {coverage_pct:.1f}% | "
-            f"{sem_pct:.2f}% | {cond.n_replicates} |"
+            f"{sem_str} | {cond.n_replicates} |"
         )
 
     lines.append("")
+    if any(
+        not is_sem_estimable(result.get_condition(label).n_replicates)
+        for label in result.ranking_by_coverage
+    ):
+        lines.append(f"*{SINGLE_REPLICATE_SEM_NOTE}.*")
+        lines.append("")
 
     # Mean contact fraction summary
     lines.append("## Condition Summary - Mean Contact Fraction")
@@ -364,60 +349,23 @@ def format_contacts_markdown(
         cond = result.get_condition(label)
         marker = " (control)" if label == result.control_label else ""
         contact_pct = cond.mean_contact_fraction * 100
-        sem_pct = cond.mean_contact_fraction_sem * 100
+        sem_str = format_sem_value(
+            cond.mean_contact_fraction_sem * 100,
+            cond.n_replicates,
+            precision=2,
+            unit="%",
+        )
         lines.append(
             f"| {rank} | **{cond.label}**{marker} | {contact_pct:.1f}% | "
-            f"{sem_pct:.2f}% | {cond.n_replicates} |"
+            f"{sem_str} | {cond.n_replicates} |"
         )
 
     lines.append("")
-
-    # Binding Preference Enrichment Summary
-    if result.binding_preference and result.binding_preference.entries:
-        bp = result.binding_preference
-        lines.append("## Binding Preference - Enrichment by Amino Acid Class")
-        lines.append("")
-        if bp.surface_exposure_threshold is not None:
-            lines.append(
-                f"Surface exposure threshold: {bp.surface_exposure_threshold * 100:.0f}% "
-                "relative SASA"
-            )
-        else:
-            lines.append("Surface exposure threshold: not specified")
-        lines.append("")
-
-        for poly_type in sorted(bp.polymer_types):
-            lines.append(f"### Polymer: {poly_type}")
-            lines.append("")
-
-            # Build header row
-            header = "| Protein Group |"
-            divider = "|---------------|"
-            for cond in bp.condition_labels:
-                header += f" {cond[:20]} |"
-                divider += "-------------|"
-            lines.append(header)
-            lines.append(divider)
-
-            for group in sorted(bp.protein_groups):
-                entry = bp.get_entry(poly_type, group)
-                if not entry:
-                    continue
-
-                row = f"| **{group}** |"
-                for cond in bp.condition_labels:
-                    values = entry.condition_values.get(cond)
-                    if values:
-                        mean, sem = values
-                        marker = "+" if mean > 1.0 else "-" if mean < 1.0 else ""
-                        row += f" {mean:.2f}±{sem:.2f} {marker} |"
-                    else:
-                        row += " -- |"
-                lines.append(row)
-
-            lines.append("")
-
-        lines.append("> **Key:** + = enriched (>1.0), - = depleted (<1.0)")
+    if any(
+        not is_sem_estimable(result.get_condition(label).n_replicates)
+        for label in result.ranking_by_contact_fraction
+    ):
+        lines.append(f"*{SINGLE_REPLICATE_SEM_NOTE}.*")
         lines.append("")
 
     # Aggregate comparisons
@@ -439,10 +387,12 @@ def format_contacts_markdown(
                 p_adj_str = (
                     f"{agg.p_value_adjusted:.4f}" if agg.p_value_adjusted is not None else "--"
                 )
+                p_value = f"{agg.p_value:.4f}" if agg.testable else "not testable"
+                d_value = f"{agg.cohens_d:.2f}" if agg.testable else "n/a"
                 effect_marker = "†" if agg.meets_effect_size_threshold else ""
                 lines.append(
                     f"| {comparison_name} | {metric} | {format_pct(agg.percent_change)} | "
-                    f"{agg.p_value:.4f} | {p_adj_str} | {agg.cohens_d:.2f} | "
+                    f"{p_value} | {p_adj_str} | {d_value} | "
                     f"{agg.effect_size_interpretation} | {effect_marker} | {sig} |"
                 )
 
@@ -451,6 +401,14 @@ def format_contacts_markdown(
             f"*p_adj < {result.fdr_alpha} (BH-corrected); "
             f"† meets min effect size |d| >= {result.min_effect_size}"
         )
+        if any(
+            not agg.testable
+            for comp in result.pairwise_comparisons
+            for agg in comp.aggregate_comparisons
+        ):
+            lines.append(
+                "*Not testable: inferential statistics require at least two replicates per condition.*"
+            )
         lines.append("positive % change = more contact in treatment")
         lines.append("")
 
@@ -466,9 +424,9 @@ def format_contacts_markdown(
             p_adj_str = (
                 f"{anova.p_value_adjusted:.4f}" if anova.p_value_adjusted is not None else "--"
             )
-            lines.append(
-                f"| {metric} | {anova.f_statistic:.3f} | {anova.p_value:.4f} | {p_adj_str} | {sig} |"
-            )
+            f_stat = f"{anova.f_statistic:.3f}" if anova.testable else "n/a"
+            p_value = f"{anova.p_value:.4f}" if anova.testable else "not testable"
+            lines.append(f"| {metric} | {f_stat} | {p_value} | {p_adj_str} | {sig} |")
         lines.append("")
         lines.append(f"*p_adj < {result.fdr_alpha} (BH-corrected)")
         lines.append("")
@@ -586,6 +544,4 @@ def format_contacts_result(
     else:
         raise ValueError(f"Unknown format: {format}. Use 'table', 'markdown', or 'json'.")
 
-    if result.binding_preference and result.binding_preference.entries:
-        return prefix_experimental_output(formatted, ("contacts_binding_preference",), format)
     return formatted

@@ -147,20 +147,17 @@ class TestBuildCommandFormatFlag:
         assert result.exit_code == 0
         assert "--format" in result.output
 
-    def test_build_help_hides_gromacs(self) -> None:
-        """Deprecated --gromacs flag should be hidden from help."""
+    def test_build_rejects_gromacs_alias(self) -> None:
+        """Removed --gromacs flag should be rejected by Click."""
         from click.testing import CliRunner
 
         from polyzymd.cli.main import cli
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["build", "--help"])
-        assert result.exit_code == 0
+        result = runner.invoke(cli, ["build", "--gromacs"])
 
-        lines = result.output.split("\n")
-        for line in lines:
-            if "--gromacs" in line and "--format" not in line:
-                pytest.fail(f"Deprecated --gromacs visible in help: {line}")
+        assert result.exit_code != 0
+        assert "No such option: --gromacs" in result.output
 
     def test_build_format_choices(self) -> None:
         """--format accepts gromacs, lammps, amber."""

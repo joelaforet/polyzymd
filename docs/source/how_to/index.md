@@ -82,36 +82,27 @@ Run Rg Analysis <analysis_rg_quickstart>
 Run RMSF Analysis <analysis_rmsf_quickstart>
 Run Distance Analysis <analysis_distances_quickstart>
 Run Contacts Analysis <analysis_contacts_quickstart>
+Run SASA Analysis <analysis_sasa_quickstart>
 Analyze Hydrogen Bonds <hydrogen_bonds>
 Run Catalytic Triad Analysis <analysis_triad_quickstart>
-```
-
-## Experimental Analysis Workflows
-
-```{warning}
-These workflows are available in PolyzyMD but their interpretation is still
-evolving. Treat results as exploratory, not settled science.
-```
-
-```{toctree}
-:maxdepth: 1
-
-Analyze Binding Preference <analysis_binding_preference>
-Analyze Binding Free Energy <analysis_binding_free_energy>
-Analyze Polymer Affinity <analysis_polymer_affinity>
-Analyze Polymer Bridging <analysis_polymer_bridging>
-Analyze Exposure Dynamics <analysis_exposure_dynamics>
 ```
 
 ## Plots & Troubleshooting
 
 Customize publication-quality figures and debug common issues.
 
+```{tip}
+Want to use the PolyzyMD artifacts to make your own plots? See
+{doc}`custom_artifact_plotting` for a post-processing workflow that reads cached
+analysis artifacts and sidecars. Start with {doc}`publication_plots` if you want
+to customize PolyzyMD's standard analysis plots.
+```
+
 ```{toctree}
 :maxdepth: 1
 
 Customizing Plots for Publication <publication_plots>
-Contacts Cookbook <analysis_contacts_cookbook>
+Create Custom Plots from Analysis Artifacts <custom_artifact_plotting>
 Broken Molecule Debugging <broken_molecules_debugging>
 Troubleshoot Common Problems <troubleshooting>
 ```

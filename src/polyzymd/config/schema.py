@@ -305,7 +305,7 @@ class PolymerConfig(BaseModel):
     """Configuration for polymer components.
 
     Supports two generation modes:
-    - "cached": Load pre-built polymer SDF files from sdf_directory (legacy)
+    - "cached": Load pre-built polymer SDF files from sdf_directory
     - "dynamic": Generate polymers on-the-fly using Polymerist from SMILES
 
     For dynamic mode, you must provide:
@@ -536,7 +536,7 @@ class IonConfig(BaseModel):
     """
 
     neutralize: bool = Field(True, description="Neutralize system charge")
-    nacl_concentration: float = Field(0.1, ge=0.0, description="NaCl conc. (mol/L)")
+    nacl_concentration: float = Field(0.0, ge=0.0, description="NaCl conc. (mol/L)")
     kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L)")
     mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L)")
 
@@ -654,6 +654,7 @@ class SimulationPhaseConfig(BaseModel):
         ensemble: Thermodynamic ensemble (NVT, NPT)
         duration: Simulation duration in nanoseconds
         samples: Number of trajectory frames to save
+        report_interval: Explicit reporter interval in MD steps
         time_step: Integration time step in femtoseconds
         thermostat: Thermostat type
         thermostat_timescale: Thermostat coupling timescale in ps
@@ -666,6 +667,7 @@ class SimulationPhaseConfig(BaseModel):
     ensemble: Ensemble = Field(..., description="Thermodynamic ensemble")
     duration: float = Field(..., gt=0.0, description="Duration (ns)")
     samples: int = Field(..., ge=1, description="Trajectory frames to save")
+    report_interval: int = Field(..., ge=1, description="Reporter interval in MD steps")
     time_step: float = Field(2.0, gt=0.0, description="Time step (fs)")
     thermostat: ThermostatType = Field(
         ThermostatType.LANGEVIN_MIDDLE, description="Thermostat type"
@@ -674,14 +676,14 @@ class SimulationPhaseConfig(BaseModel):
     barostat: BarostatType | None = Field(None, description="Barostat type")
     barostat_frequency: int = Field(25, ge=1, description="Barostat update frequency")
     checkpoint_interval: float = Field(
-        60.0,
-        ge=0.0,
+        ...,
+        gt=0.0,
         description=(
             "Wall-time interval in seconds between restart checkpoints. "
             "Controls how frequently simulation state is saved for automatic "
             "restart on SLURM preemption or hard kill. Independent of "
-            "trajectory/reporter output frequency. Default 60s ensures at "
-            "most 1 minute of lost work on unexpected termination."
+            "trajectory/reporter output frequency. Must be positive so "
+            "unexpected termination recovery remains enabled."
         ),
     )
 
@@ -866,31 +868,13 @@ class SimulationPhasesConfig(BaseModel):
         production: Production phase settings
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     equilibration_stages: list[EquilibrationStageConfig] | None = Field(
         None, description="Multi-stage equilibration protocol with position restraints"
     )
 
     production: SimulationPhaseConfig = Field(..., description="Production settings")
-
-    @model_validator(mode="before")
-    @classmethod
-    def warn_deprecated_segments(cls, data: Any) -> Any:
-        """Warn if the deprecated 'segments' field is present and remove it."""
-        if isinstance(data, dict) and "segments" in data:
-            import warnings
-
-            warnings.warn(
-                "The 'segments' field in simulation_phases is deprecated and ignored. "
-                "Simulation segmenting is now handled automatically by the self-resubmitting "
-                "job architecture. Remove 'segments' from your config YAML to suppress "
-                "this warning.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            data.pop("segments", None)
-        return data
 
     @model_validator(mode="after")
     def validate_equilibration_mode(self) -> "SimulationPhasesConfig":
@@ -977,6 +961,8 @@ class OutputConfig(BaseModel):
           naming_template: "{enzyme}_{substrate}_{temperature}K_run{replicate}"
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     # Directory configuration
     projects_directory: Path = Field(
         Path("."),
@@ -1006,14 +992,7 @@ class OutputConfig(BaseModel):
     save_state_data: bool = Field(True, description="Save state data CSV")
     trajectory_format: str = Field("dcd", description="Trajectory file format")
 
-    # Legacy compatibility
-    base_directory: Path | None = Field(
-        None,
-        description="Deprecated: Use scratch_directory instead",
-        exclude=True,
-    )
-
-    @field_validator("projects_directory", "scratch_directory", "base_directory", mode="before")
+    @field_validator("projects_directory", "scratch_directory", mode="before")
     @classmethod
     def expand_env_vars_in_paths(cls, v: str | Path | None) -> Path | None:
         """Expand environment variables and ~ in path fields.
@@ -1023,13 +1002,6 @@ class OutputConfig(BaseModel):
         if v is None:
             return None
         return expand_path(Path(v))
-
-    @model_validator(mode="after")
-    def handle_legacy_base_directory(self) -> "OutputConfig":
-        """Handle legacy base_directory field for backwards compatibility."""
-        if self.base_directory is not None and self.scratch_directory is None:
-            self.scratch_directory = self.base_directory
-        return self
 
     @property
     def effective_scratch_directory(self) -> Path:
@@ -1346,7 +1318,7 @@ class SimulationConfig(BaseModel):
     force_field: ForceFieldConfig = Field(
         default_factory=ForceFieldConfig, description="Force field settings"
     )
-    engine: Literal["openmm", "gromacs"] = Field("openmm", description="Simulation engine to use")
+    engine: Literal["openmm", "gromacs"] = Field(..., description="Simulation engine to use")
     openmm: OpenMMEngineConfig = Field(
         default_factory=OpenMMEngineConfig, description="OpenMM engine settings"
     )

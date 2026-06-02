@@ -13,12 +13,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Union
 
-import openmm
-from openmm import XmlSerializer
-from openmm import unit as omm_unit
-from openmm.app import CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
-
 if TYPE_CHECKING:
+    import openmm
+    from openmm import XmlSerializer
+    from openmm import unit as omm_unit
+    from openmm.app import CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
+
     from polyzymd.config.schema import (
         EquilibrationStageConfig,
         SimulationConfig,
@@ -26,11 +26,63 @@ if TYPE_CHECKING:
     )
     from polyzymd.core.atom_groups import AtomGroupResolver
     from polyzymd.core.parameters import SimulationParameters
+else:
+    openmm = None
+    XmlSerializer = None
+    omm_unit = None
+    CheckpointReporter = None
+    DCDReporter = None
+    PDBFile = None
+    Simulation = None
+    StateDataReporter = None
 
 LOGGER = logging.getLogger(__name__)
 
 # Phase types
 PhaseType = Literal["equilibration", "production"]
+
+
+def _ensure_openmm_loaded() -> None:
+    """Load OpenMM symbols used by the simulation runner lazily.
+
+    Returns
+    -------
+    None
+        The module globals are populated on first use.
+    """
+    global CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
+    global XmlSerializer, omm_unit, openmm
+
+    if openmm is not None:
+        return
+
+    import openmm as _openmm
+    from openmm import XmlSerializer as _XmlSerializer
+    from openmm import unit as _omm_unit
+    from openmm.app import (
+        CheckpointReporter as _CheckpointReporter,
+    )
+    from openmm.app import (
+        DCDReporter as _DCDReporter,
+    )
+    from openmm.app import (
+        PDBFile as _PDBFile,
+    )
+    from openmm.app import (
+        Simulation as _Simulation,
+    )
+    from openmm.app import (
+        StateDataReporter as _StateDataReporter,
+    )
+
+    openmm = _openmm
+    XmlSerializer = _XmlSerializer
+    omm_unit = _omm_unit
+    CheckpointReporter = _CheckpointReporter
+    DCDReporter = _DCDReporter
+    PDBFile = _PDBFile
+    Simulation = _Simulation
+    StateDataReporter = _StateDataReporter
 
 
 class SimulationRunner:
@@ -71,6 +123,8 @@ class SimulationRunner:
             working_dir: Working directory for output files.
             platform: Compute platform (CUDA, OpenCL, CPU).
         """
+        _ensure_openmm_loaded()
+
         self._topology = topology
         self._system = system
         self._positions = positions
@@ -117,11 +171,18 @@ class SimulationRunner:
         Returns:
             OpenMM Platform object.
         """
+        _ensure_openmm_loaded()
+
         try:
             platform = openmm.Platform.getPlatformByName(self._platform_name)
             LOGGER.info(f"Using {self._platform_name} platform")
-        except Exception:
-            LOGGER.warning(f"Platform {self._platform_name} not available, falling back to CPU")
+        except openmm.OpenMMException as exc:
+            LOGGER.warning(
+                "Platform %s is not available (%s); falling back to CPU. "
+                "Install/configure the requested OpenMM platform or set platform='CPU'.",
+                self._platform_name,
+                exc,
+            )
             platform = openmm.Platform.getPlatformByName("CPU")
         return platform
 
@@ -944,29 +1005,26 @@ class SimulationRunner:
         barostat_frequency: int = 25,
         output_prefix: str = "production",
         segment_index: int = 0,
-        report_interval: int | None = None,
-        checkpoint_interval_s: float = 60.0,
+        *,
+        report_interval: int,
+        checkpoint_interval_s: float,
     ) -> Dict[str, Any]:
         """Run NPT production simulation.
 
         Args:
             temperature: Temperature in Kelvin.
             duration_ns: Duration in nanoseconds.
-            num_samples: Number of trajectory frames to save. Ignored when
-                ``report_interval`` is provided.
+            num_samples: Number of trajectory frames to save.
             timestep_fs: Time step in femtoseconds.
             friction: Friction coefficient in 1/ps.
             pressure: Pressure in atmospheres.
             barostat_frequency: Barostat update frequency.
             output_prefix: Prefix for output files.
             segment_index: Segment index for multi-segment production.
-            report_interval: Fixed reporter interval in steps. When provided,
-                this overrides the per-segment ``total_steps // num_samples``
-                calculation to keep frame spacing uniform across segments.
+            report_interval: Explicit reporter interval in steps.
             checkpoint_interval_s: Wall-time interval in seconds between
-                portable restart checkpoints.  Also controls how frequently
-                the loop checks for SLURM preemption signals.  Set to 0 to
-                disable wall-time checkpoints (reverts to legacy behaviour).
+                portable restart checkpoints. Also controls how frequently
+                the loop checks for SLURM preemption signals.
 
         Returns:
             Dictionary with phase results.
@@ -991,10 +1049,10 @@ class SimulationRunner:
         # Calculate steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
 
-        # Determine report interval: prefer the fixed global value if given,
-        # otherwise fall back to per-segment calculation (legacy callers).
-        if report_interval is None:
-            report_interval = max(1, total_steps // num_samples)
+        if report_interval <= 0:
+            raise ValueError("report_interval must be a positive integer")
+        if checkpoint_interval_s <= 0:
+            raise ValueError("checkpoint_interval_s must be positive")
 
         # Create integrator and simulation
         integrator = self._create_integrator(
@@ -1153,6 +1211,7 @@ class SimulationRunner:
             GracefulExit,
             get_interrupt_signal,
             install_handlers,
+            interrupted_state_save_exceptions,
             is_interrupted,
             save_interrupted_state,
             save_restart_checkpoint,
@@ -1196,11 +1255,7 @@ class SimulationRunner:
                 _now = _time.monotonic()
 
                 # Adaptive sub-chunk calibration (once, after first interval)
-                if (
-                    not _adapted
-                    and checkpoint_interval_s > 0
-                    and (_now - _loop_start) >= checkpoint_interval_s
-                ):
+                if not _adapted and (_now - _loop_start) >= checkpoint_interval_s:
                     elapsed = _now - _loop_start
                     steps_per_sec = steps_done / elapsed if elapsed > 0 else 1.0
                     # Target sub-chunk duration = checkpoint_interval / 4
@@ -1247,8 +1302,7 @@ class SimulationRunner:
 
                 # Wall-time restart checkpoint
                 if (
-                    checkpoint_interval_s > 0
-                    and (_now - _last_checkpoint_write) >= checkpoint_interval_s
+                    (_now - _last_checkpoint_write) >= checkpoint_interval_s
                     and steps_done < total_steps  # skip if we're about to finish
                 ):
                     save_restart_checkpoint(
@@ -1278,7 +1332,7 @@ class SimulationRunner:
                     )
         except GracefulExit:
             raise  # Re-raise so caller can handle exit code
-        except Exception:
+        except interrupted_state_save_exceptions():
             # On unexpected crash, still try to save interrupted state
             try:
                 save_interrupted_state(
@@ -1288,8 +1342,11 @@ class SimulationRunner:
                     steps_completed=steps_done,
                     total_steps=total_steps,
                 )
-            except Exception:
-                LOGGER.error("Failed to save interrupted state after crash")
+            except interrupted_state_save_exceptions() as save_exc:
+                LOGGER.exception(
+                    "Failed to save interrupted state after crash: %s",
+                    save_exc,
+                )
             raise
 
         # Get final state (no enforcePeriodicBox to preserve molecular continuity)

@@ -18,10 +18,19 @@ Before starting, make sure you have:
 - The `config.yaml` file from that simulation
 - Trajectory files in the expected directory layout (see
   {doc}`../reference/data_requirements`)
-- PolyzyMD installed in a pixi environment (see {doc}`installation`)
+- PolyzyMD installed in a pixi environment (see {doc}`../get_started/installation`)
 
 If you have not run a simulation yet, complete
-{doc}`quickstart` first.
+{doc}`../get_started/quickstart` first.
+
+```{important}
+**Resource requirements:** `polyzymd compare init`, `validate`, `status`, and
+`--help` are lightweight. Commands that load trajectories, such as
+`polyzymd compare run` and `run-all`, can require substantial RAM, CPU/GPU time,
+and scratch I/O. On shared HPC systems, run them inside an allocated job or
+interactive compute session, not on a login node. If an analysis is killed or
+runs out of memory, request more resources or use `polyzymd compare submit`.
+```
 
 ## Step 1: Create a Comparison Project
 
@@ -37,13 +46,14 @@ This creates a small project scaffold:
 ```text
 my_first_analysis/
 ├── comparison.yaml    # Analysis configuration (you will edit this)
-├── comparison/        # Where result JSON files are written
+├── comparison/        # Cross-condition comparison outputs
 ├── figures/           # Where plots are saved
 └── structures/        # Optional shared structure files
 ```
 
 The generated `comparison.yaml` is a template with placeholder values. You
-will replace them in the next step.
+will replace them in the next step. Per-replicate and per-condition analysis
+artifacts are created under `analysis/` when you run an analysis.
 
 ## Step 2: Edit comparison.yaml
 
@@ -127,11 +137,13 @@ Equilibration: 10ns
 [My Simulation] Aggregating 1 replicate...
 
 RMSF Comparison Complete
-  My Simulation: mean RMSF = 0.621 ± 0.015 Å
+  My Simulation: mean RMSF = 0.621 Å
+  SEM: n/a (single replicate)
+  Statistical comparisons: not testable until each condition has at least 2 replicates
 ```
 
 ```{tip}
-If you see `RMSF Analysis Complete` with a mean value, the analysis succeeded.
+If you see `RMSF Comparison Complete` with a mean value, the analysis succeeded.
 If you see an error about a missing working directory or trajectory, check that
 the `config` path in `comparison.yaml` is correct and that your trajectory
 files exist on disk. See {doc}`../how_to/troubleshooting` for common fixes.
@@ -148,24 +160,41 @@ my_first_analysis/
 │   └── My_Simulation/
 │       └── rmsf/
 │           ├── run_1/
-│           │   └── rmsf_eq10ns.json           # Per-replicate result
+│           │   └── result.json                # ReplicateArtifact
 │           └── aggregated/
-│               └── result.json               # Combined result
+│               └── result.json                # ConditionArtifact
 ├── comparison/
 │   └── rmsf/
-│       └── result.json                       # Comparison summary
+│       └── result.json                        # Comparison artifact/summary
 ├── figures/
 └── structures/
 ```
 
 The key files are:
 
-- **`rmsf_eq10ns.json`** --- per-replicate RMSF values for every residue in
-  the selection, computed after discarding the first 10 ns.
-- **`aggregated/result.json`** --- aggregated statistics across replicates (with
-  one replicate, this matches the per-replicate file).
-- **`comparison/rmsf/result.json`** --- the comparison-level summary with mean
-  RMSF, standard error, and ranking information.
+- **`analysis/My_Simulation/rmsf/run_1/result.json`** --- a
+  `ReplicateArtifact` for replicate 1, including per-replicate RMSF values for
+  every residue in the selection after discarding the first 10 ns.
+- **`analysis/My_Simulation/rmsf/aggregated/result.json`** --- a
+  `ConditionArtifact` with statistics across replicates. With one replicate,
+  the values closely mirror the replicate artifact.
+- **`comparison/rmsf/result.json`** --- the comparison artifact/summary with mean
+  RMSF and ranking information. Singleton SEM is unavailable and suppressed
+  until at least 2 replicates contribute to a condition.
+
+```{note}
+PolyzyMD artifacts are more than bare result values. They also carry metadata,
+provenance, warnings, and references to sidecar files when an analysis needs to
+store larger tables or arrays outside the main JSON file.
+```
+
+```{note}
+This tutorial intentionally uses one replicate so you can complete the workflow
+quickly. RMSF supports this smoke-test mode, but a single replicate cannot
+estimate between-replicate uncertainty. SEM is unavailable, and condition-level
+statistical comparisons are not testable until each condition has at least 2
+replicates.
+```
 
 ## Step 5: Add Plotting (Optional)
 
@@ -187,11 +216,14 @@ Figures are saved to the `figures/` directory:
 ```text
 figures/
 └── rmsf/
+    ├── rmsf_comparison.png
     └── rmsf_profile.png
 ```
 
-With a single condition, the profile plot shows per-residue RMSF values.
-Comparison bar charts appear when you add a second condition.
+With a single condition, the comparison chart is a simple one-bar summary and
+the profile plot shows per-residue RMSF values. Error bars and statistical
+comparisons become more useful when you add additional conditions and
+replicates.
 
 ## What's Next
 

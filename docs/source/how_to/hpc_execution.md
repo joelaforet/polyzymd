@@ -23,6 +23,16 @@ You need:
 If you have not yet created a `comparison.yaml`, start with
 {doc}`analysis_compare_conditions`.
 
+:::{admonition} Use compute resources, not login nodes
+:class: important
+
+Trajectory-analysis jobs can require substantial RAM, CPU/GPU time, and scratch
+I/O. On shared HPC systems, run `polyzymd compare submit` from a place where it
+can submit jobs to compute nodes, and reserve interactive `polyzymd compare run`
+for an allocated compute session or suitably provisioned workstation. Do not run
+heavy analysis commands directly on a login node.
+:::
+
 ## What the DAG Looks Like
 
 When you run `polyzymd compare submit`, the framework generates and submits a
@@ -46,10 +56,10 @@ directed acyclic graph (DAG) of SLURM jobs:
                 └─────────────────────┘
 ```
 
-**Replicate jobs** each run `compute_replicate()` for one (condition, replicate)
-pair. **Aggregate jobs** wait for all replicates of their condition to finish,
-then run `aggregate()`. The **finalize job** waits for all aggregate jobs, then
-runs the cross-condition comparison and generates plots.
+**Replicate jobs** each run the per-replicate compute stage for one
+(condition, replicate) pair. **Aggregate jobs** wait for all replicates of their
+condition to finish, then run `aggregate()`. The **finalize job** waits for all
+aggregate jobs, then runs the cross-condition comparison and generates plots.
 
 Each job includes automatic retry logic. If a worker exits with a non-zero
 code, it requeues itself up to `--max-retries` times (default: 3) before
@@ -73,28 +83,29 @@ This command:
 - orders plugins by declared `dependencies`
 - submits each plugin DAG with cross-plugin finalize dependencies
 
-For example, analyses that depend on `contacts` (such as `exposure`,
-`binding_free_energy`, or `polymer_affinity`) are submitted after `contacts`,
-and their root finalize jobs are wired to the upstream `contacts` finalize job.
-
 Exclude one or more analyses with repeatable `--exclude`:
 
 ```bash
 pixi run -e build polyzymd compare submit-all \
     -f comparison.yaml \
-    --exclude exposure \
-    --exclude polymer_affinity \
+    --exclude sasa \
     --partition aa100
 ```
 
 Use `--dry-run` to generate all scripts and print the submission summary table
 without dispatching jobs.
 
-## Comparator-only plugins and finalize-only mode
+## Framework finalize-only mode
 
-Some plugins do not implement compute/aggregate stages and only run
-comparison/plot logic. For these, the manifest pipeline mode is
-`finalize_only`, and submission creates a single finalize job.
+The submission framework supports plugins that do not implement
+compute/aggregate stages and only run comparison/plot logic. For those plugins,
+the manifest pipeline mode is `finalize_only`, and submission creates a single
+finalize job.
+
+The stable v1.3 analysis plugins use compute and/or aggregate stages before
+finalization. Treat `finalize_only` as a framework capability for future or
+custom compare-only plugins, not as the normal path for the stable plugins
+listed in this guide.
 
 This behavior applies to both `compare submit` and `compare submit-all`.
 
@@ -155,7 +166,7 @@ plugins:
 plot_settings:
   format: "png"
   dpi: 300
-  style: "publication"
+  style: "compact"
 ```
 
 ## Step 1: Dry Run
@@ -427,7 +438,7 @@ without requiring `--allow-partial`.
 For true runtime data loss (failed/missing condition outputs), strict behavior
 still applies and you must pass `--allow-partial`.
 
-### MDAnalysis ChainReader errors (F13)
+### MDAnalysis ChainReader errors
 
 If a worker fails with MDAnalysis ChainReader exceptions, this is usually an
 external reader/data issue rather than a PolyzyMD logic bug.
@@ -438,7 +449,7 @@ Recommended checks:
 - verify topology/trajectory atom ordering consistency
 - re-run with a single replicate to isolate the broken input file
 
-### SLURM association and job-limit failures (for example MaxJobs=0, F15)
+### SLURM association and job-limit failures
 
 If `sbatch` rejects jobs due to association, account, or quota limits, inspect
 your scheduler associations:
@@ -510,8 +521,9 @@ For `--mem`, `--time`, and `--cpus-per-task`, submission precedence is:
 2. plugin `slurm_resource_hint`
 3. system default
 
-Current memory hints:
+Current plugin resource hints:
 
+- `sasa`: `8G`, `02:00:00`
 - `secondary_structure`: `16G`
 - `hydrogen_bonds`: `16G`
 
@@ -562,15 +574,15 @@ Use environment modules to select which cluster's SLURM scheduler you target:
 
 ```bash
 # Target Blanca (PI-owned condo nodes)
-ml slurm/blanca
+module load slurm/blanca
 
 # Target Alpine (shared campus resource)
-ml slurm/alpine
+module load slurm/alpine
 ```
 
-Run the appropriate `ml slurm/<cluster>` command **before** any `polyzymd`
-submission command. The module swap updates `sbatch`, `squeue`, and other
-SLURM utilities to point at the selected cluster.
+Run the appropriate `module load slurm/<cluster>` command **before** any
+`polyzymd` submission command. The module swap updates `sbatch`, `squeue`, and
+other SLURM utilities to point at the selected cluster.
 
 ### Required SLURM flags
 
@@ -593,7 +605,7 @@ Alpine. Add `--partition=blanca-<group>` and resubmit.
 ### Example: submit all analyses on Alpine
 
 ```bash
-ml slurm/alpine
+module load slurm/alpine
 
 pixi run -e build polyzymd compare submit-all \
     -f comparison.yaml \
@@ -608,7 +620,7 @@ On Blanca, the partition, account, and QoS are typically the same value —
 your PI's condo allocation name:
 
 ```bash
-ml slurm/blanca
+module load slurm/blanca
 
 pixi run -e build polyzymd compare submit-all \
     -f comparison.yaml \

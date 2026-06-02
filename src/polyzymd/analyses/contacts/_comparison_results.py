@@ -27,98 +27,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from polyzymd import __version__
 
 
-class BindingPreferenceComparisonEntry(BaseModel):
-    """Cross-condition binding preference comparison for one (polymer_type, protein_group) pair.
-
-    Provides statistical comparison of enrichment ratios across conditions.
-
-    Attributes
-    ----------
-    polymer_type : str
-        Polymer residue type (e.g., "SBM", "EGM")
-    protein_group : str
-        Protein group label (e.g., "aromatic", "charged_positive")
-    condition_values : dict[str, tuple[float, float]]
-        Mapping of condition label to (mean_enrichment, sem_enrichment)
-    pairwise_p_values : dict[str, float], optional
-        P-values for pairwise comparisons (e.g., "A_vs_B": 0.05)
-    highest_enrichment_condition : str
-        Condition with highest mean enrichment
-    lowest_enrichment_condition : str
-        Condition with lowest mean enrichment
-    """
-
-    polymer_type: str
-    protein_group: str
-    condition_values: dict[str, tuple[float, float]] = Field(
-        default_factory=dict, description="condition_label -> (mean, sem)"
-    )
-    pairwise_p_values: dict[str, float] = Field(
-        default_factory=dict, description="Pairwise comparison p-values"
-    )
-    highest_enrichment_condition: str | None = None
-    lowest_enrichment_condition: str | None = None
-
-
-class BindingPreferenceComparisonSummary(BaseModel):
-    """Summary of binding preference comparison across conditions.
-
-    Contains per-condition enrichment matrices and cross-condition comparisons.
-
-    Attributes
-    ----------
-    entries : list[BindingPreferenceComparisonEntry]
-        Comparison data for each (polymer_type, protein_group) pair
-    polymer_types : list[str]
-        All polymer types found across conditions
-    protein_groups : list[str]
-        All protein groups analyzed
-    n_conditions : int
-        Number of conditions compared
-    condition_labels : list[str]
-        Labels of all conditions
-    surface_exposure_threshold : float
-        SASA threshold used for surface filtering
-    """
-
-    entries: list[BindingPreferenceComparisonEntry] = Field(default_factory=list)
-    polymer_types: list[str] = Field(default_factory=list)
-    protein_groups: list[str] = Field(default_factory=list)
-    n_conditions: int = 0
-    condition_labels: list[str] = Field(default_factory=list)
-    surface_exposure_threshold: float | None = None
-
-    def get_entry(
-        self, polymer_type: str, protein_group: str
-    ) -> BindingPreferenceComparisonEntry | None:
-        """Get entry for a (polymer_type, protein_group) pair."""
-        for entry in self.entries:
-            if entry.polymer_type == polymer_type and entry.protein_group == protein_group:
-                return entry
-        return None
-
-    def get_enrichment_matrix_for_condition(
-        self, condition_label: str
-    ) -> dict[str, dict[str, float]]:
-        """Get enrichment matrix for a specific condition.
-
-        Returns
-        -------
-        dict[str, dict[str, float]]
-            {polymer_type: {protein_group: enrichment}}
-        """
-        result: dict[str, dict[str, float]] = {}
-        for entry in self.entries:
-            if entry.polymer_type not in result:
-                result[entry.polymer_type] = {}
-            values = entry.condition_values.get(condition_label)
-            if values:
-                result[entry.polymer_type][entry.protein_group] = values[0]  # mean
-            else:
-                result[entry.polymer_type][entry.protein_group] = 0.0
-        return result
-
-
 class AggregateComparisonResult(BaseModel):
     """Statistical comparison for aggregate metrics (coverage, mean contact fraction).
 
@@ -176,6 +84,18 @@ class AggregateComparisonResult(BaseModel):
     meets_effect_size_threshold: bool = True
     percent_change: float
     direction: str
+    testable: bool = True
+    note: str | None = None
+
+
+class ContactsResidenceTimeSummary(BaseModel):
+    """Descriptive event-conditioned residence time summary in ns."""
+
+    mean_ns: float = 0.0
+    sem_ns: float = 0.0
+    n_events: int = 0
+    replicates_with_events: list[int] = Field(default_factory=list)
+    replicate_means_ns: list[float] = Field(default_factory=list)
 
 
 class ContactsConditionSummary(BaseModel):
@@ -199,10 +119,10 @@ class ContactsConditionSummary(BaseModel):
         Mean of mean contact fractions across replicates
     mean_contact_fraction_sem : float
         SEM of mean contact fraction
-    residence_time_by_polymer_type : dict[str, tuple[float, float]]
-        Mean +/- SEM residence time in frames for each polymer type.
-        Keys are polymer residue names (e.g., "SBM", "EGM").
-        Values are (mean, sem) tuples.
+    residence_time_by_polymer_type : dict[str, ContactsResidenceTimeSummary]
+        Event-conditioned mean +/- SEM residence time in ns for each polymer type.
+    compute_residence_times : bool
+        Whether aggregate residence-time summaries were requested.
     """
 
     label: str
@@ -213,7 +133,10 @@ class ContactsConditionSummary(BaseModel):
     coverage_sem: float
     mean_contact_fraction: float
     mean_contact_fraction_sem: float
-    residence_time_by_polymer_type: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    residence_time_by_polymer_type: dict[str, ContactsResidenceTimeSummary] = Field(
+        default_factory=dict
+    )
+    compute_residence_times: bool = True
 
 
 class ContactsPairwiseComparison(BaseModel):
@@ -260,6 +183,8 @@ class ContactsANOVASummary(BaseModel):
     p_value: float
     p_value_adjusted: float | None = None
     significant: bool
+    testable: bool = True
+    note: str | None = None
 
 
 class ContactsComparisonResult(BaseModel):
@@ -274,8 +199,8 @@ class ContactsComparisonResult(BaseModel):
         This class does **not** inherit from
         :class:`~polyzymd.analyses.base.BaseComparisonResult` because the
         contacts plugin uses a dual-metric structure (coverage **and** mean
-        contact fraction) with separate rankings, ANOVA lists, and optional
-        binding-preference data.  That structure does not map to the
+        contact fraction) with separate rankings and ANOVA lists. That
+        structure does not map to the
         single-metric base class.  The ``save``/``load``/``get_condition``/
         ``get_comparison`` helpers are identical to the base class and kept
         inline for simplicity.
@@ -296,6 +221,8 @@ class ContactsComparisonResult(BaseModel):
         Contact cutoff distance in Angstroms
     contact_criteria : str
         Contact criteria used
+    compute_residence_times : bool
+        Whether aggregate residence-time summaries and plots were requested.
     fdr_alpha : float
         FDR alpha used for Benjamini-Hochberg correction
     min_effect_size : float
@@ -331,6 +258,7 @@ class ContactsComparisonResult(BaseModel):
     protein_selection: str
     cutoff: float
     contact_criteria: str
+    compute_residence_times: bool = True
     fdr_alpha: float = 0.05
     min_effect_size: float = 0.0
     top_residues: int = 0
@@ -343,10 +271,6 @@ class ContactsComparisonResult(BaseModel):
     excluded_conditions: list[str] = Field(
         default_factory=list,
         description="Conditions excluded from analysis (no polymer atoms found)",
-    )
-    binding_preference: BindingPreferenceComparisonSummary | None = Field(
-        default=None,
-        description="Binding preference comparison across conditions (if computed)",
     )
     top_contacted_residues: dict[str, list[tuple[int, str, float]]] | None = None
     equilibration_time: str

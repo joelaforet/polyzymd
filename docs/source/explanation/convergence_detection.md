@@ -3,6 +3,14 @@
 Understanding when a molecular dynamics simulation has converged — and what
 convergence means in practice — is essential for drawing reliable conclusions.
 
+```{important}
+Automated convergence detection is a **diagnostic heuristic**, not proof that a
+trajectory has converged, equilibrated, or sampled ergodically. Treat it as one
+line of evidence alongside visual inspection, agreement among independent
+replicates, uncertainty analysis, and scientific judgment about the system and
+observable being studied.
+```
+
 ```{versionadded} 1.3.0
 Automated convergence detection was added alongside the RMSD analysis plugin.
 ```
@@ -29,7 +37,7 @@ depending on how much data you include. Effect sizes between conditions may
 appear significant or insignificant depending on where you truncate the
 timeseries.
 
-Grossfield et al. (2019) emphasize that quantifying uncertainty requires
+Grossfield et al. (2018) emphasize that quantifying uncertainty requires
 sampling from a stationary distribution. If the distribution itself is still
 evolving — as it is during a drift — standard error estimates understate the
 true uncertainty.
@@ -67,13 +75,15 @@ proceeds as follows:
    the rate of change in the smoothed signal.
 
 4. **Check for sustained low slope.** If the absolute slope remains below a
-   threshold for a sustained duration, the timeseries is declared converged.
-   The convergence time is the start of the first sustained plateau.
+   threshold for a sustained duration, the diagnostic suggests that the
+   timeseries has reached an apparent plateau. The reported convergence time is
+   the start of the first sustained plateau.
 
-This approach is robust to brief transient excursions — a single window with a
-slightly elevated slope does not reset the clock unless it exceeds the
-threshold. The requirement for *sustained* low slope avoids false positives
-from momentary pauses in an otherwise drifting trajectory.
+This approach is designed to reduce sensitivity to brief transient excursions —
+a single window with a slightly elevated slope does not reset the clock unless
+it exceeds the threshold. The requirement for *sustained* low slope reduces,
+but does not eliminate, false positives from momentary pauses in an otherwise
+drifting trajectory.
 
 ## Default Parameters and When to Tune Them
 
@@ -81,20 +91,21 @@ from momentary pauses in an otherwise drifting trajectory.
 |-----------|---------|-------------|
 | `convergence_window_size_ns` | 15.0 | Width of each averaging window (ns) |
 | `convergence_step_size_ns` | 5.0 | Step between successive window starts (ns) |
-| `convergence_slope_threshold` | 0.0005 | Maximum absolute slope (Å/ns) to qualify as "flat" |
-| `convergence_sustained_for_ns` | 15.0 | Required duration below threshold to declare convergence (ns) |
+| `convergence_slope_threshold` | 0.0005 | Maximum absolute slope, in the observable's units per ns, to qualify as "flat" |
+| `convergence_sustained_for_ns` | 15.0 | Required duration below threshold before the diagnostic suggests convergence (ns) |
 
 ```{important}
-The slope threshold is an **absolute** value in Å/ns.  It is calibrated for
-protein backbone RMSD, where typical plateau values are 1–5 Å and a slope of
-0.0005 Å/ns represents ~0.05 Å drift over 100 ns — well below the noise
-floor for most systems.
+The slope threshold is an **absolute** value in the observable's units per ns.
+The default is calibrated for protein backbone RMSD reported in Ångströms,
+where typical plateau values are 1–5 Å and a slope of 0.0005 Å/ns represents
+~0.05 Å drift over 100 ns — well below the noise floor for many systems.
 
-For observables on a different scale (e.g. radius of gyration in nm, SASA in
-Å², or unitless order parameters), you **must** rescale the threshold to match
-the magnitude and natural variability of your signal. A threshold that is
-appropriate for RMSD in Ångströms will be far too stringent for SASA (hundreds
-of Å²) or far too permissive for a normalised order parameter (0–1).
+For observables on a different scale (for example, radius of gyration,
+solvent-accessible surface area, or unitless order parameters), you **must**
+choose a threshold that matches the units, magnitude, and natural variability of
+your signal. Thresholds do not transfer automatically across metrics or unit
+conventions. A threshold appropriate for RMSD in Ångströms may be too stringent
+for SASA or too permissive for a normalised order parameter (0–1).
 ```
 
 **Guidance for tuning:**
@@ -104,7 +115,7 @@ of Å²) or far too permissive for a normalised order parameter (0–1).
   1 μs trajectory may be too sensitive to short-timescale fluctuations.
 
 - **High-precision comparisons:** Decrease `convergence_slope_threshold` to
-  require a flatter plateau before declaring convergence.
+  require a flatter plateau before the diagnostic suggests convergence.
 
 - **Noisy observables:** Increase `convergence_slope_threshold` to tolerate
   larger fluctuations. Polymer RMSD, for example, tends to be noisier than
@@ -124,7 +135,7 @@ proof of convergence. Important limitations include:
   states. The system could be trapped in a metastable basin.
 
 - **Insensitive to slow conformational drift.** If the drift rate is below the
-  slope threshold, the algorithm will declare convergence even though the
+  slope threshold, the diagnostic may suggest convergence even though the
   observable is still changing — just slowly.
 
 - **Parameter dependent.** The four tunable parameters (window size, step size,
@@ -134,8 +145,8 @@ proof of convergence. Important limitations include:
 
 - **Scale-dependent threshold.** The default slope threshold (0.0005 Å/ns) is
   calibrated for protein backbone RMSD in Ångströms. Applying it to observables
-  with different units or magnitudes without adjustment will produce incorrect
-  convergence calls.
+  with different units or magnitudes without adjustment can produce misleading
+  diagnostic calls.
 
 - **Single-observable limitation.** Convergence in RMSD does not imply
   convergence in other observables (e.g., hydrogen bond occupancy, active site
@@ -143,7 +154,7 @@ proof of convergence. Important limitations include:
 
 - **Multiple independent replicates remain essential.** Even with a converged
   RMSD timeseries in a single replicate, independent replicates are needed to
-  quantify system-level variability and confirm reproducibility.
+  quantify system-level variability and test reproducibility.
 
 ## Relationship to Equilibration Time
 
@@ -155,9 +166,9 @@ distinct concerns:
   configuration. The equilibration time is a fixed cutoff applied *before*
   analysis begins.
 
-- **Convergence** confirms that the production region (after equilibration) is
-  stationary. It answers whether the remaining data is reliable for computing
-  time-averaged properties.
+- **Convergence detection** tests whether the production-region observable
+  (after equilibration) appears stationary. It helps diagnose whether the
+  remaining data is reliable for computing time-averaged properties.
 
 Convergence detection can help *inform* the choice of `--eq-time`. If the
 convergence diagnostic reports a convergence time of 12 ns but you set
@@ -171,20 +182,20 @@ an independent consistency check.
 
 ## Beyond RMSD
 
-The convergence utility (`analyses/shared/convergence.py`) accepts any 1D
-timeseries — it is not specific to RMSD. The `find_convergence_time()`
-function takes arrays of time values and signal values, making it applicable to
-radius of gyration, solvent-accessible surface area, or any other scalar
-observable that should plateau when the system reaches equilibrium.
+The public convergence utility (`polyzymd.analyses.shared.convergence`) accepts
+any 1D timeseries — it is not specific to RMSD. The `find_convergence_time()`
+function takes arrays of time values and signal values, so the heuristic can be
+used to test whether scalar observables such as radius of gyration,
+solvent-accessible surface area, or order parameters appear stationary.
 
-In future PolyzyMD versions, convergence detection may be integrated into
-additional analysis plugins. The algorithmic foundation is already
-general-purpose.
+Beyond documented RMSD usage, integration into additional PolyzyMD analysis
+plugins should be treated as future or aspirational until a specific plugin
+documents support for the diagnostic.
 
 ## References
 
 **Grossfield A, Patrone PN, Roe DR, Schultz AJ, Siderius DW, Zuckerman DM.**
-(2019) "Best Practices for Quantification of Uncertainty and Sampling Quality
+(2018) "Best Practices for Quantification of Uncertainty and Sampling Quality
 in Molecular Simulations." *Living Journal of Computational Molecular Science*
 1(1):5067. [doi:10.33011/livecoms.1.1.5067](https://doi.org/10.33011/livecoms.1.1.5067)
 

@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, List, Optional, Set
+from typing import TYPE_CHECKING, Dict, FrozenSet, List, Optional, Set
 
-from openmm.app import Topology as OpenMMTopology
+if TYPE_CHECKING:
+    from openmm.app import Topology as OpenMMTopology
 
 logger = logging.getLogger(__name__)
 

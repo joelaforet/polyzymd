@@ -24,7 +24,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 LOGGER = logging.getLogger(__name__)
 
@@ -298,7 +298,7 @@ def load_progress(working_dir: str | Path) -> SimulationProgress | None:
             f"{len(progress.segments)} segment(s)"
         )
         return progress
-    except (json.JSONDecodeError, Exception) as exc:
+    except (json.JSONDecodeError, ValidationError) as exc:
         LOGGER.warning(f"Failed to load progress from {path}: {exc}")
         return None
 

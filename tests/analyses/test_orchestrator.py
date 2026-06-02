@@ -27,6 +27,7 @@ from polyzymd.analyses.exceptions import (
 from polyzymd.analyses.orchestrator import (
     _validate_dependencies,
     aggregate_condition_from_disk,
+    finalize_comparison_from_disk,
     order_analyses_for_execution,
     prepare_comparison_run,
     run_analysis,
@@ -40,12 +41,22 @@ class _ParallelSettings(BaseModel):
     factor: float = 1.0
 
 
-class _ParallelAnalysis(Analysis):
+class _MDAContractMixin:
+    """Provide the required MDA lifecycle seam for direct compute fakes."""
+
+    def build_mda_jobs(self, ctx):
+        """Return no jobs for tests that override the internal dispatcher."""
+
+        del ctx
+        return []
+
+
+class _ParallelAnalysis(_MDAContractMixin, Analysis):
     name: ClassVar[str] = "parallel_toy"
     Settings: ClassVar[type] = _ParallelSettings
     min_replicates: ClassVar[int] = 1
 
-    def compute_replicate(self, ctx, replicate: int) -> dict[str, Any]:
+    def _run_compute_stage(self, ctx, replicate: int) -> dict[str, Any]:
         return {"value": float(replicate) * float(ctx.settings.factor), "replicate": replicate}
 
     def aggregate(self, ctx, results) -> dict[str, Any]:
@@ -96,9 +107,11 @@ class ToyAggregatedResult(BaseModel):
     sem_value: float
     replicate_values: list[float]
     n_replicates: int
+    replicates: list[int] | None = None
+    settings_fingerprint: str | None = None
 
 
-class ToyAnalysis(Analysis):
+class ToyAnalysis(_MDAContractMixin, Analysis):
     """Concrete analysis for orchestrator tests."""
 
     name: ClassVar[str] = "toy"
@@ -107,7 +120,7 @@ class ToyAnalysis(Analysis):
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+    def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
         return ToyResult(value=replicate * 1.5, replicate=replicate)
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[ToyResult]) -> ToyAggregatedResult:
@@ -119,17 +132,19 @@ class ToyAnalysis(Analysis):
             sem_value=sem_val,
             replicate_values=values,
             n_replicates=len(values),
+            replicates=list(ctx.replicates),
+            settings_fingerprint=self.aggregate_settings_fingerprint(ctx.settings),
         )
 
 
-class ToyDependentAnalysis(Analysis):
+class ToyDependentAnalysis(_MDAContractMixin, Analysis):
     """Analysis that depends on ToyAnalysis."""
 
     name: ClassVar[str] = "toy_dependent"
     Settings: ClassVar[type] = ToySettings
     dependencies: ClassVar[tuple[str, ...]] = ("toy",)
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+    def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
         return ToyResult(value=replicate * 2.0, replicate=replicate)
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[ToyResult]) -> ToyAggregatedResult:
@@ -139,6 +154,8 @@ class ToyDependentAnalysis(Analysis):
             sem_value=0.0,
             replicate_values=values,
             n_replicates=len(values),
+            replicates=list(ctx.replicates),
+            settings_fingerprint=self.aggregate_settings_fingerprint(ctx.settings),
         )
 
 
@@ -262,6 +279,70 @@ def test_run_analysis_and_helper_path_equivalence(tmp_path: Path) -> None:
     assert seq["n_replicates"] == helper["n_replicates"]
 
 
+def test_aggregate_from_disk_recompute_removes_stale_aggregate_dir(tmp_path: Path) -> None:
+    """aggregate_condition_from_disk should clean aggregate sidecars on recompute."""
+
+    class _AggregateCleanupAnalysis(_ParallelAnalysis):
+        name: ClassVar[str] = "aggregate_cleanup_toy"
+
+        def aggregate(self, ctx, results) -> dict[str, Any]:
+            assert ctx.recompute is True
+            assert not (ctx.output_dir / "stale_sidecar.txt").exists()
+            return super().aggregate(ctx, results)
+
+    analysis = _AggregateCleanupAnalysis()
+    condition = Condition("A", tmp_path / "a.yaml", (1, 2), SimpleNamespace())
+    settings = _ParallelSettings(factor=1.0)
+    output_dir = tmp_path / "analysis" / "A" / analysis.name
+
+    run_replicate_once(analysis, condition, settings, "10ns", output_dir / "run_1", 1, False)
+    run_replicate_once(analysis, condition, settings, "10ns", output_dir / "run_2", 2, False)
+    stale_sidecar = output_dir / "aggregated" / "stale_sidecar.txt"
+    stale_sidecar.parent.mkdir(parents=True, exist_ok=True)
+    stale_sidecar.write_text("stale")
+
+    aggregate_condition_from_disk(
+        analysis,
+        condition,
+        settings,
+        "10ns",
+        output_dir,
+        replicates=(1, 2),
+        recompute=True,
+    )
+
+    assert not stale_sidecar.exists()
+
+
+def test_aggregate_from_disk_missing_replicates_reports_expected_paths(tmp_path: Path) -> None:
+    """Missing replicate outputs should report expected run_N/result.json paths."""
+
+    class _NeedsTwoReplicates(_ParallelAnalysis):
+        name: ClassVar[str] = "needs_two_replicates"
+        min_replicates: ClassVar[int] = 2
+
+    analysis = _NeedsTwoReplicates()
+    condition = Condition("A", tmp_path / "a.yaml", (1, 2), SimpleNamespace())
+    settings = _ParallelSettings(factor=1.0)
+    output_dir = tmp_path / "analysis" / "A" / analysis.name
+
+    run_replicate_once(analysis, condition, settings, "10ns", output_dir / "run_1", 1, False)
+
+    with pytest.raises(ValueError, match=r"replicate result\(s\) on disk") as exc_info:
+        aggregate_condition_from_disk(
+            analysis,
+            condition,
+            settings,
+            "10ns",
+            output_dir,
+            replicates=(1, 2),
+        )
+
+    message = str(exc_info.value)
+    assert str(output_dir / "run_2" / "result.json") in message
+    assert "Expected missing replicate output path" in message
+
+
 def test_run_comparison_still_works_after_refactor(monkeypatch, tmp_path: Path) -> None:
     """run_comparison should still produce aggregated and comparison output."""
     analysis = _ParallelAnalysis()
@@ -287,8 +368,197 @@ def test_run_comparison_still_works_after_refactor(monkeypatch, tmp_path: Path) 
     assert result["comparison_path"].exists()
 
 
+def test_run_comparison_recompute_contexts_and_cleanup(monkeypatch, tmp_path: Path) -> None:
+    """run_comparison should propagate recompute and clean stale owned outputs."""
+
+    class _RecomputeCleanupAnalysis(_ParallelAnalysis):
+        name: ClassVar[str] = "recompute_cleanup_toy"
+
+        def __init__(self) -> None:
+            self.aggregate_recompute: list[bool] = []
+            self.compare_recompute: bool | None = None
+            self.plot_recompute: bool | None = None
+
+        def aggregate(self, ctx, results) -> dict[str, Any]:
+            self.aggregate_recompute.append(ctx.recompute)
+            assert not (ctx.output_dir / "stale_sidecar.txt").exists()
+            return super().aggregate(ctx, results)
+
+        def compare(self, ctx) -> dict[str, Any]:
+            self.compare_recompute = ctx.recompute
+            assert ctx.result_path is not None
+            assert not ctx.result_path.exists()
+            return {"ok": True}
+
+        def plot(self, ctx) -> list[Path]:
+            self.plot_recompute = ctx.recompute
+            assert not (ctx.output_dir / "stale_plot.png").exists()
+            assert (ctx.output_dir.parent / "unrelated" / "keep.txt").exists()
+            out = ctx.output_dir / "new_plot.png"
+            out.write_text("new")
+            return [out]
+
+    analysis = _RecomputeCleanupAnalysis()
+    config = _make_config(tmp_path)
+
+    def _from_cond(cond_cfg):
+        return Condition(
+            cond_cfg.label, cond_cfg.config, tuple(cond_cfg.replicates), SimpleNamespace()
+        )
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator.Condition.from_condition_config", _from_cond
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator._resolve_settings",
+        lambda analysis, config: _ParallelSettings(),
+    )
+
+    for label in ("A", "B"):
+        stale_sidecar = (
+            tmp_path / "analysis" / label / analysis.name / "aggregated" / "stale_sidecar.txt"
+        )
+        stale_sidecar.parent.mkdir(parents=True, exist_ok=True)
+        stale_sidecar.write_text("stale")
+    stale_result = tmp_path / "comparison" / analysis.name / "result.json"
+    stale_result.parent.mkdir(parents=True, exist_ok=True)
+    stale_result.write_text('{"stale": true}')
+    stale_plot = tmp_path / "figures" / analysis.name / "stale_plot.png"
+    stale_plot.parent.mkdir(parents=True, exist_ok=True)
+    stale_plot.write_text("stale")
+    unrelated = tmp_path / "figures" / "unrelated" / "keep.txt"
+    unrelated.parent.mkdir(parents=True, exist_ok=True)
+    unrelated.write_text("keep")
+
+    result = run_comparison(analysis, config, recompute=True, equilibration="10ns")
+
+    assert result["comparison"] == {"ok": True}
+    assert analysis.aggregate_recompute == [True, True]
+    assert analysis.compare_recompute is True
+    assert analysis.plot_recompute is True
+    assert not stale_plot.exists()
+    assert unrelated.exists()
+
+
+def test_finalize_missing_aggregates_reports_expected_paths(tmp_path: Path) -> None:
+    """Finalize errors should include aggregate paths and partial-finalize hints."""
+    analysis = _ParallelAnalysis()
+    condition_a = Condition("A", tmp_path / "a.yaml", (1,), SimpleNamespace())
+    condition_b = Condition("B", tmp_path / "b.yaml", (1,), SimpleNamespace())
+    config = _make_config(tmp_path)
+    analysis_root = tmp_path / "analysis"
+    analysis_dirs = {"A": analysis_root / "A" / analysis.name}
+    prepared_state = {
+        "all_conditions": [condition_a, condition_b],
+        "valid_conditions": [condition_a, condition_b],
+        "excluded_conditions": [],
+        "condition_by_label": {"A": condition_a, "B": condition_b},
+        "settings": _ParallelSettings(),
+        "equilibration": "10ns",
+        "analysis_root": analysis_root,
+    }
+
+    with pytest.raises(ValueError, match="missing aggregated results") as exc_info:
+        finalize_comparison_from_disk(
+            analysis=analysis,
+            config=config,
+            analysis_dirs=analysis_dirs,
+            aggregated_results={"A": {"ok": True}},
+            results_dir=tmp_path / "comparison" / analysis.name,
+            figures_dir=tmp_path / "figures" / analysis.name,
+            settings=_ParallelSettings(),
+            effective_control=None,
+            prepared_state=prepared_state,
+            allow_partial=False,
+        )
+
+    message = str(exc_info.value)
+    assert str(analysis_root / "B" / analysis.name / "aggregated" / "result.json") in message
+    assert "--allow-partial (CLI) / allow_partial=True (API)" in message
+
+
+def test_finalize_all_conditions_dropped_mentions_aggregate_jobs(tmp_path: Path) -> None:
+    """Dropping every condition should explain that aggregate files were absent."""
+    analysis = _ParallelAnalysis()
+    condition_a = Condition("A", tmp_path / "a.yaml", (1,), SimpleNamespace())
+    config = _make_config(tmp_path)
+    prepared_state = {
+        "all_conditions": [condition_a],
+        "valid_conditions": [condition_a],
+        "excluded_conditions": [],
+        "condition_by_label": {"A": condition_a},
+        "settings": _ParallelSettings(),
+        "equilibration": "10ns",
+        "analysis_root": tmp_path / "analysis",
+    }
+
+    with pytest.raises(ValueError, match="no aggregate files were found") as exc_info:
+        finalize_comparison_from_disk(
+            analysis=analysis,
+            config=config,
+            analysis_dirs={},
+            aggregated_results={},
+            results_dir=tmp_path / "comparison" / analysis.name,
+            figures_dir=tmp_path / "figures" / analysis.name,
+            settings=_ParallelSettings(),
+            effective_control=None,
+            prepared_state=prepared_state,
+            allow_partial=True,
+        )
+
+    assert "Re-run aggregate jobs" in str(exc_info.value)
+
+
 class TestOrchestrator:
     """Test the orchestrator's replicate running and dependency sorting."""
+
+    def test_run_replicate_once_uses_canonical_entry_point(
+        self,
+        toy_condition,
+        toy_settings,
+        tmp_path,
+    ):
+        """run_replicate_once should call the compute-stage dispatcher."""
+
+        class CanonicalRunAnalysis(_MDAContractMixin, Analysis):
+            """Analysis that tracks compute-stage calls."""
+
+            name: ClassVar[str] = "canonical_run"
+            Settings: ClassVar[type] = ToySettings
+            min_replicates: ClassVar[int] = 1
+
+            def __init__(self) -> None:
+                """Initialize call tracking for the canonical hook."""
+
+                self.called_replicates: list[int] = []
+
+            def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+                """Return a result through the compute-stage dispatcher."""
+
+                del ctx
+                self.called_replicates.append(replicate)
+                return ToyResult(value=float(replicate), replicate=replicate)
+
+            def aggregate(self, ctx, results):
+                """Return a simple aggregate result."""
+
+                del ctx, results
+                return {"ok": True}
+
+        analysis = CanonicalRunAnalysis()
+        result = run_replicate_once(
+            analysis,
+            toy_condition,
+            toy_settings,
+            "10ns",
+            tmp_path / "run_1",
+            1,
+            False,
+        )
+
+        assert result == ToyResult(value=1.0, replicate=1)
+        assert analysis.called_replicates == [1]
+        assert (tmp_path / "run_1" / "result.json").exists()
 
     def test_run_analysis_success(self, toy_analysis, toy_condition, toy_settings, tmp_path):
         result = run_analysis(
@@ -307,12 +577,12 @@ class TestOrchestrator:
     def test_run_analysis_partial_failure(self, toy_condition, toy_settings, tmp_path):
         """If some replicates fail but min_replicates is met, continue."""
 
-        class FailingAnalysis(Analysis):
+        class FailingAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "failing"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 if replicate == 2:
                     raise FileNotFoundError("Trajectory not found")
                 return ToyResult(value=float(replicate), replicate=replicate)
@@ -345,12 +615,12 @@ class TestOrchestrator:
     ):
         """ReplicateSkippedError should skip replicate without aborting condition."""
 
-        class SkipReplicateAnalysis(Analysis):
+        class SkipReplicateAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "skip_replicate"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 if replicate == 2:
                     raise ReplicateSkippedError("No trajectory data found for replicate 2")
                 return ToyResult(value=float(replicate), replicate=replicate)
@@ -378,12 +648,12 @@ class TestOrchestrator:
     def test_run_analysis_below_minimum_raises(self, toy_condition, toy_settings, tmp_path):
         """If fewer than min_replicates succeed, raise ValueError."""
 
-        class AlwaysFailAnalysis(Analysis):
+        class AlwaysFailAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "always_fail"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 2
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 raise FileNotFoundError("Missing trajectory")
 
             def aggregate(self, ctx, results):
@@ -401,12 +671,12 @@ class TestOrchestrator:
     def test_run_analysis_all_skipped_fails_minimum(self, toy_condition, toy_settings, tmp_path):
         """When all replicates skip, minimum replicate validation should fail."""
 
-        class AllSkippedAnalysis(Analysis):
+        class AllSkippedAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "all_skipped"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 raise ReplicateSkippedError(f"No trajectory data found for replicate {replicate}")
 
             def aggregate(self, ctx, results):
@@ -426,11 +696,11 @@ class TestOrchestrator:
     ):
         """Unexpected compute failures should raise structured ReplicateError."""
 
-        class ExplodingAnalysis(Analysis):
+        class ExplodingAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "exploding"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 raise RuntimeError("boom")
 
             def aggregate(self, ctx, results):
@@ -448,18 +718,18 @@ class TestOrchestrator:
     def test_run_analysis_rejects_invalid_compute_return_type(self, toy_condition, tmp_path):
         """Invalid compute return types should fail plugin contract validation."""
 
-        class InvalidComputeAnalysis(Analysis):
+        class InvalidComputeAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "invalid_compute"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return ["not", "valid"]
 
             def aggregate(self, ctx, results):
                 return {"ok": True}
 
-        with pytest.raises(PluginContractError, match="invalid_compute.compute_replicate"):
+        with pytest.raises(PluginContractError, match="invalid_compute.compute_stage"):
             run_analysis(
                 InvalidComputeAnalysis(),
                 toy_condition,
@@ -471,12 +741,12 @@ class TestOrchestrator:
     def test_run_analysis_rejects_invalid_aggregate_return_type(self, toy_condition, tmp_path):
         """Invalid aggregate return types should fail plugin contract validation."""
 
-        class InvalidAggregateAnalysis(Analysis):
+        class InvalidAggregateAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "invalid_aggregate"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -509,23 +779,23 @@ class TestOrchestrator:
     def test_topological_sort_circular_raises(self):
         from polyzymd.analyses.orchestrator import _topological_sort
 
-        class CircA(Analysis):
+        class CircA(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "circ_a"
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("circ_b",)
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 pass
 
             def aggregate(self, ctx, results):
                 pass
 
-        class CircB(Analysis):
+        class CircB(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "circ_b"
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("circ_a",)
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 pass
 
             def aggregate(self, ctx, results):
@@ -537,24 +807,23 @@ class TestOrchestrator:
     def test_order_analyses_for_execution_returns_dependency_order(self, monkeypatch) -> None:
         """Public ordering helper should return canonical dependency order."""
 
-        class _A(Analysis):
+        class _A(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "a"
-            aliases: ClassVar[tuple[str, ...]] = ("alias_a",)
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ()
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
                 return {"n": len(results)}
 
-        class _B(Analysis):
+        class _B(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "b"
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("a",)
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -562,36 +831,36 @@ class TestOrchestrator:
 
         monkeypatch.setattr(
             "polyzymd.analyses.discovery.get_analysis",
-            lambda name: _A if name in {"a", "alias_a"} else _B,
+            lambda name: _A if name == "a" else _B,
         )
         monkeypatch.setattr(
             "polyzymd.analyses.discovery.list_all_names",
-            lambda: ["a", "alias_a", "b"],
+            lambda: ["a", "b"],
         )
 
-        ordered = order_analyses_for_execution(["b", "alias_a"])
+        ordered = order_analyses_for_execution(["b", "a"])
         assert ordered == ["a", "b"]
 
     def test_order_analyses_allows_satisfied_external_dependencies(self, monkeypatch) -> None:
         """Ordering should allow dependencies satisfied outside the run list."""
 
-        class _Contacts(Analysis):
+        class _Contacts(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "contacts"
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ()
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
                 return {"n": len(results)}
 
-        class _Exposure(Analysis):
-            name: ClassVar[str] = "exposure"
+        class _DependentAnalysis(_MDAContractMixin, Analysis):
+            name: ClassVar[str] = "dependent_analysis"
             Settings: ClassVar[type] = ToySettings
             dependencies: ClassVar[tuple[str, ...]] = ("contacts",)
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 return {"replicate": replicate}
 
             def aggregate(self, ctx, results):
@@ -599,18 +868,18 @@ class TestOrchestrator:
 
         monkeypatch.setattr(
             "polyzymd.analyses.discovery.get_analysis",
-            lambda name: _Exposure if name == "exposure" else _Contacts,
+            lambda name: _DependentAnalysis if name == "dependent_analysis" else _Contacts,
         )
         monkeypatch.setattr(
             "polyzymd.analyses.discovery.list_all_names",
-            lambda: ["contacts", "exposure"],
+            lambda: ["contacts", "dependent_analysis"],
         )
 
         with pytest.raises(DependencyError, match="not in the current run list"):
-            order_analyses_for_execution(["exposure"])
+            order_analyses_for_execution(["dependent_analysis"])
 
-        ordered = order_analyses_for_execution(["exposure"], satisfied={"contacts"})
-        assert ordered == ["exposure"]
+        ordered = order_analyses_for_execution(["dependent_analysis"], satisfied={"contacts"})
+        assert ordered == ["dependent_analysis"]
 
     def test_run_analysis_full(self, toy_analysis, toy_condition, toy_settings, tmp_path):
         """Test the full run_analysis path (compute + aggregate)."""
@@ -653,14 +922,15 @@ class TestOrchestrator:
 class TestContractEnforcement:
     """Tests for plugin contract violation detection."""
 
-    def test_compute_replicate_none_raises_contract_error(self, tmp_path: Path) -> None:
-        """compute_replicate() returning None should raise PluginContractError."""
+    def test_compute_stage_none_raises_contract_error(self, tmp_path: Path) -> None:
+        """A compute-stage result of None should raise PluginContractError."""
 
-        class NoneComputeAnalysis(Analysis):
+        class NoneComputeAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "none_compute"
             Settings: ClassVar[type] = ToySettings
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
+                del ctx, replicate
                 return None
 
             def aggregate(self, ctx, results):
@@ -676,7 +946,7 @@ class TestContractEnforcement:
 
         with pytest.raises(
             PluginContractError,
-            match=r"none_compute.compute_replicate\(\) returned None",
+            match=r"none_compute.compute_stage\(\) returned None",
         ):
             run_replicate_once(
                 analysis,
@@ -691,12 +961,13 @@ class TestContractEnforcement:
     def test_contract_error_not_wrapped_as_replicate_error(self, tmp_path: Path) -> None:
         """PluginContractError should propagate, not be wrapped as ReplicateError."""
 
-        class RaisesContractAnalysis(Analysis):
+        class RaisesContractAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "raises_contract"
             Settings: ClassVar[type] = ToySettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
+                del ctx, replicate
                 raise PluginContractError("contract boom")
 
             def aggregate(self, ctx, results):
@@ -721,12 +992,13 @@ class TestContractEnforcement:
     def test_run_comparison_fails_fast_on_contract_error(self, monkeypatch, tmp_path: Path) -> None:
         """Contract violations should abort the comparison, not drop a condition."""
 
-        class NoneComputeAnalysis(Analysis):
+        class NoneComputeAnalysis(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "none_compute_comparison"
             Settings: ClassVar[type] = _ParallelSettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
+                del ctx, replicate
                 return None
 
             def aggregate(self, ctx, results):
@@ -757,12 +1029,12 @@ class TestContractEnforcement:
         """A contract error in one condition should stop processing subsequent conditions."""
         processed_labels: list[str] = []
 
-        class FailsOnFirstCondition(Analysis):
+        class FailsOnFirstCondition(_MDAContractMixin, Analysis):
             name: ClassVar[str] = "contract_stop"
             Settings: ClassVar[type] = _ParallelSettings
             min_replicates: ClassVar[int] = 1
 
-            def compute_replicate(self, ctx, replicate):
+            def _run_compute_stage(self, ctx, replicate):
                 del replicate
                 processed_labels.append(ctx.condition.label)
                 if ctx.condition.label == "A":

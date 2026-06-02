@@ -16,11 +16,14 @@ import numpy as np
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
-    find_json,
+    get_condition_colors,
     get_output_path,
     get_theme,
     grouped_bars,
+    order_condition_labels,
     save_figure,
+    scatter_replicate_values,
+    suppress_singleton_errors,
     symmetric_clim,
 )
 
@@ -61,7 +64,7 @@ def _plot_ss_timeline_heatmap(
     bounds = [-0.5, 0.5, 1.5, 2.5]
     norm = mcolors.BoundaryNorm(bounds, cmap.N)
 
-    for label in labels:
+    for label in order_condition_labels(labels, plot_settings):
         cond_data = data.get(label)
         if cond_data is None:
             continue
@@ -127,68 +130,10 @@ def _plot_ss_content_bars(
     output_dir: Path,
     plot_settings: Any,
 ) -> list[Path]:
-    """Generate grouped SS-content bars from comparison or aggregated results."""
-    import json as json_mod
-
+    """Generate grouped SS-content bars from condition artifacts."""
     import matplotlib.pyplot as plt
 
     t = get_theme(plot_settings)
-    result = _find_ss_comparison_result(data, labels)
-    if result is not None:
-        conditions = result.conditions
-        n = len(conditions)
-
-        cond_labels = [c.label for c in conditions]
-        helix_means = [c.mean_helix for c in conditions]
-        helix_sems = [c.sem_helix for c in conditions]
-        strand_means = [c.mean_strand for c in conditions]
-        strand_sems = [c.sem_strand for c in conditions]
-        coil_means = [c.mean_coil for c in conditions]
-        coil_sems = [c.sem_coil for c in conditions]
-
-        helix_reps = [c.per_replicate_helix for c in conditions]
-        strand_reps = [c.per_replicate_strand for c in conditions]
-        coil_reps = [c.per_replicate_coil for c in conditions]
-
-        x = np.arange(n)
-        series = [
-            ("Helix", helix_means, helix_sems),
-            ("\u03b2-Sheet", strand_means, strand_sems),
-            ("No SS", coil_means, coil_sems),
-        ]
-        ss_bar_colors = ["#E74C3C", "#3498DB", "#95A5A6"]
-        replicate_values = [
-            [helix_reps[i] for i in range(n)],
-            [strand_reps[i] for i in range(n)],
-            [coil_reps[i] for i in range(n)],
-        ]
-
-        fig, ax = plt.subplots(figsize=(max(8, n * 1.6), 5))
-        grouped_bars(
-            ax,
-            x,
-            series,
-            ss_bar_colors,
-            plot_settings,
-            reference_line=None,
-            replicate_values=replicate_values,
-        )
-        ax.set_xticks(x)
-        ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)
-        apply_legend(ax, plot_settings)
-        ax.set_ylim(bottom=0)
-        apply_axis_style(
-            ax,
-            plot_settings,
-            title="Secondary Structure Content Comparison",
-            xlabel=None,
-            ylabel="Fraction of (residue, frame) entries",
-        )
-        plt.tight_layout()
-
-        output_path = get_output_path(output_dir, "ss_content_bars", plot_settings)
-        return [save_figure(fig, output_path, plot_settings)]
-
     cond_labels: list[str] = []
     helix_means: list[float] = []
     helix_sems: list[float] = []
@@ -200,38 +145,19 @@ def _plot_ss_content_bars(
     strand_reps: list[list[float]] = []
     coil_reps: list[list[float]] = []
 
-    for label in labels:
-        cond_data = data.get(label)
-        if cond_data is None:
-            continue
-
-        aggregated_dir = cond_data.get("aggregated_dir")
-        if not aggregated_dir:
-            continue
-        aggregated_dir = Path(aggregated_dir)
-
-        result_file = find_json(aggregated_dir, "secondary_structure_aggregated.json")
-        if result_file is None:
-            result_file = find_json(aggregated_dir, "secondary_structure.json")
-        if result_file is None:
-            continue
-
-        try:
-            with result_file.open() as handle:
-                agg = json_mod.load(handle)
-
-            cond_labels.append(label)
-            helix_means.append(agg.get("mean_overall_helix", 0.0))
-            helix_sems.append(agg.get("sem_overall_helix", 0.0))
-            strand_means.append(agg.get("mean_overall_strand", 0.0))
-            strand_sems.append(agg.get("sem_overall_strand", 0.0))
-            coil_means.append(agg.get("mean_overall_coil", 0.0))
-            coil_sems.append(agg.get("sem_overall_coil", 0.0))
-            helix_reps.append(agg.get("per_replicate_helix", []))
-            strand_reps.append(agg.get("per_replicate_strand", []))
-            coil_reps.append(agg.get("per_replicate_coil", []))
-        except (OSError, json_mod.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.warning(f"Failed to load aggregated SS for {label}: {exc}")
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    for label, artifact in _condition_artifacts(data, ordered_labels):
+        payload = artifact.payload
+        cond_labels.append(label)
+        helix_means.append(float(payload.get("mean_overall_helix", 0.0)))
+        helix_sems.append(float(payload.get("sem_overall_helix", 0.0)))
+        strand_means.append(float(payload.get("mean_overall_strand", 0.0)))
+        strand_sems.append(float(payload.get("sem_overall_strand", 0.0)))
+        coil_means.append(float(payload.get("mean_overall_coil", 0.0)))
+        coil_sems.append(float(payload.get("sem_overall_coil", 0.0)))
+        helix_reps.append(list(payload.get("per_replicate_helix", [])))
+        strand_reps.append(list(payload.get("per_replicate_strand", [])))
+        coil_reps.append(list(payload.get("per_replicate_coil", [])))
 
     if not cond_labels:
         logger.warning("No aggregated SS data found for content bars")
@@ -281,39 +207,7 @@ def _plot_ss_individual_bars(
     output_dir: Path,
     plot_settings: Any,
 ) -> list[Path]:
-    """Generate per-SS-type bar charts."""
-    import json as json_mod
-
-    result = _find_ss_comparison_result(data, labels)
-    if result is not None:
-        conditions = result.conditions
-        cond_labels = [c.label for c in conditions]
-        ss_data = {
-            "helix": {
-                "means": [c.mean_helix for c in conditions],
-                "sems": [c.sem_helix for c in conditions],
-                "reps": [c.per_replicate_helix for c in conditions],
-            },
-            "strand": {
-                "means": [c.mean_strand for c in conditions],
-                "sems": [c.sem_strand for c in conditions],
-                "reps": [c.per_replicate_strand for c in conditions],
-            },
-            "coil": {
-                "means": [c.mean_coil for c in conditions],
-                "sems": [c.sem_coil for c in conditions],
-                "reps": [c.per_replicate_coil for c in conditions],
-            },
-        }
-        return _render_ss_individual_plots(
-            cond_labels,
-            len(cond_labels),
-            ss_data,
-            output_dir,
-            plot_settings,
-            has_reps=True,
-        )
-
+    """Generate per-SS-type bar charts from condition artifacts."""
     cond_labels: list[str] = []
     ss_data: dict[str, dict[str, list[Any]]] = {
         "helix": {"means": [], "sems": [], "reps": []},
@@ -321,38 +215,19 @@ def _plot_ss_individual_bars(
         "coil": {"means": [], "sems": [], "reps": []},
     }
 
-    for label in labels:
-        cond_data = data.get(label)
-        if cond_data is None:
-            continue
-
-        aggregated_dir = cond_data.get("aggregated_dir")
-        if not aggregated_dir:
-            continue
-        aggregated_dir = Path(aggregated_dir)
-
-        result_file = find_json(aggregated_dir, "secondary_structure_aggregated.json")
-        if result_file is None:
-            result_file = find_json(aggregated_dir, "secondary_structure.json")
-        if result_file is None:
-            continue
-
-        try:
-            with result_file.open() as handle:
-                agg = json_mod.load(handle)
-
-            cond_labels.append(label)
-            ss_data["helix"]["means"].append(agg.get("mean_overall_helix", 0.0))
-            ss_data["helix"]["sems"].append(agg.get("sem_overall_helix", 0.0))
-            ss_data["helix"]["reps"].append(agg.get("per_replicate_helix", []))
-            ss_data["strand"]["means"].append(agg.get("mean_overall_strand", 0.0))
-            ss_data["strand"]["sems"].append(agg.get("sem_overall_strand", 0.0))
-            ss_data["strand"]["reps"].append(agg.get("per_replicate_strand", []))
-            ss_data["coil"]["means"].append(agg.get("mean_overall_coil", 0.0))
-            ss_data["coil"]["sems"].append(agg.get("sem_overall_coil", 0.0))
-            ss_data["coil"]["reps"].append(agg.get("per_replicate_coil", []))
-        except (OSError, json_mod.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.warning(f"Failed to load aggregated SS for {label}: {exc}")
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    for label, artifact in _condition_artifacts(data, ordered_labels):
+        payload = artifact.payload
+        cond_labels.append(label)
+        ss_data["helix"]["means"].append(float(payload.get("mean_overall_helix", 0.0)))
+        ss_data["helix"]["sems"].append(float(payload.get("sem_overall_helix", 0.0)))
+        ss_data["helix"]["reps"].append(list(payload.get("per_replicate_helix", [])))
+        ss_data["strand"]["means"].append(float(payload.get("mean_overall_strand", 0.0)))
+        ss_data["strand"]["sems"].append(float(payload.get("sem_overall_strand", 0.0)))
+        ss_data["strand"]["reps"].append(list(payload.get("per_replicate_strand", [])))
+        ss_data["coil"]["means"].append(float(payload.get("mean_overall_coil", 0.0)))
+        ss_data["coil"]["sems"].append(float(payload.get("sem_overall_coil", 0.0)))
+        ss_data["coil"]["reps"].append(list(payload.get("per_replicate_coil", [])))
 
     if not cond_labels:
         logger.warning("No aggregated SS data found for individual bars")
@@ -365,6 +240,7 @@ def _plot_ss_individual_bars(
         ss_data,
         output_dir,
         plot_settings,
+        control_label=_control_label_from_data(data),
         has_reps=has_reps,
     )
 
@@ -376,42 +252,21 @@ def _plot_ss_persistence_diff_heatmap(
     plot_settings: Any,
 ) -> list[Path]:
     """Generate condition x residue Delta(helix persistence) heatmap."""
-    import json as json_mod
-
     import matplotlib.pyplot as plt
 
     t = get_theme(plot_settings)
     persistence_data: dict[str, dict[str, Any]] = {}
 
-    for label in labels:
-        cond_data = data.get(label)
-        if cond_data is None:
-            continue
-
-        aggregated_dir = cond_data.get("aggregated_dir")
-        if not aggregated_dir:
-            continue
-        aggregated_dir = Path(aggregated_dir)
-
-        result_file = find_json(aggregated_dir, "secondary_structure_aggregated.json")
-        if result_file is None:
-            result_file = find_json(aggregated_dir, "secondary_structure.json")
-        if result_file is None:
-            continue
-
-        try:
-            with result_file.open() as handle:
-                agg = json_mod.load(handle)
-
-            helix_persist = agg.get("mean_persistence_helix")
-            residue_ids = agg.get("residue_ids")
-            if helix_persist is not None and residue_ids is not None:
-                persistence_data[label] = {
-                    "helix": np.array(helix_persist),
-                    "residue_ids": residue_ids,
-                }
-        except (OSError, json_mod.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.warning(f"Failed to load SS persistence for {label}: {exc}")
+    ordered_labels = order_condition_labels(labels, plot_settings)
+    for label, artifact in _condition_artifacts(data, ordered_labels):
+        payload = artifact.payload
+        helix_persist = payload.get("mean_persistence_helix")
+        residue_ids = payload.get("residue_ids")
+        if helix_persist is not None and residue_ids is not None:
+            persistence_data[label] = {
+                "helix": np.array(helix_persist),
+                "residue_ids": residue_ids,
+            }
 
     if len(persistence_data) < 2:
         logger.warning("Need at least 2 conditions for persistence difference heatmap")
@@ -420,7 +275,7 @@ def _plot_ss_persistence_diff_heatmap(
     meta = data.get("__meta__", {})
     control_label: str | None = meta.get("control_label")
 
-    available_labels = [lbl for lbl in labels if lbl in persistence_data]
+    available_labels = [lbl for lbl in ordered_labels if lbl in persistence_data]
     if not available_labels:
         return []
 
@@ -498,29 +353,32 @@ def _plot_ss_persistence_diff_heatmap(
 # ---------------------------------------------------------------------------
 
 
-def _find_ss_comparison_result(
-    data: dict[str, Any],
-    labels: Sequence[str],
-    log: logging.Logger = logger,
-) -> Any | None:
-    """Try to locate a saved SSComparisonResult JSON."""
-    from polyzymd.analyses.secondary_structure._comparison_results import SSComparisonResult
-    from polyzymd.analyses.shared.result_io import find_comparison_result
+def _condition_artifacts(data: dict[str, Any], labels: Sequence[str]) -> list[tuple[str, Any]]:
+    """Return loaded condition artifacts already prepared by the plugin."""
 
-    return find_comparison_result(
-        data,
-        labels,
-        glob_patterns=["secondary_structure_comparison*.json"],
-        loader=SSComparisonResult.load,
-        analysis_type="secondary_structure",
-        fallback_filenames=["secondary_structure_comparison.json"],
-        log=log,
-    )
+    artifacts: list[tuple[str, Any]] = []
+    for label in labels:
+        cond_data = data.get(label)
+        if cond_data is None:
+            continue
+        artifact = cond_data.get("condition_artifact")
+        if artifact is not None:
+            artifacts.append((label, artifact))
+    return artifacts
+
+
+def _control_label_from_data(data: dict[str, Any]) -> str | None:
+    """Return the framework-provided control label when available."""
+
+    meta = data.get("__meta__", {})
+    control_label = meta.get("control_label")
+    return control_label if isinstance(control_label, str) else None
 
 
 def _load_ss_timeline_matrix(cond_data: dict[str, Any]) -> tuple[np.ndarray | None, list[int]]:
-    """Load per-frame SS matrix from replicate NPZ data."""
-    import json as json_mod
+    """Load a per-frame SS matrix from canonical replicate artifacts."""
+    from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
+    from polyzymd.analyses.secondary_structure._mda import load_replicate_matrix
 
     analysis_dir = cond_data.get("analysis_dir")
     if analysis_dir is None:
@@ -533,34 +391,13 @@ def _load_ss_timeline_matrix(cond_data: dict[str, Any]) -> tuple[np.ndarray | No
         rep_dir = analysis_dir / f"run_{rep}"
         if not rep_dir.is_dir():
             continue
-
-        npz_files = sorted(rep_dir.glob("*_matrix.npz"))
-        if not npz_files:
-            continue
-
-        json_files = sorted(rep_dir.glob("secondary_structure*.json"))
-        if not json_files:
-            with np.load(str(npz_files[0])) as npz_data:
-                matrix = np.asarray(npz_data["ss_matrix"])
-            residue_ids = list(range(1, matrix.shape[1] + 1))
-            return matrix, residue_ids
-
         try:
-            with json_files[0].open() as handle:
-                result_data = json_mod.load(handle)
-            residue_ids = result_data.get("residue_ids", [])
-        except (OSError, json_mod.JSONDecodeError, KeyError, ValueError) as exc:
-            logger.debug(f"Failed to load residue IDs from JSON: {exc}")
-            residue_ids = []
-
-        try:
-            with np.load(str(npz_files[0])) as npz_data:
-                matrix = np.asarray(npz_data["ss_matrix"])
-            if not residue_ids:
-                residue_ids = list(range(1, matrix.shape[1] + 1))
+            artifact = ArtifactStore(rep_dir).read_replicate_result("result.json")
+            matrix = load_replicate_matrix(artifact, rep_dir)
+            residue_ids = list(artifact.payload.get("residue_ids", []))
             return matrix, residue_ids
-        except (OSError, ValueError) as exc:
-            logger.debug(f"Failed to load NPZ from {npz_files[0]}: {exc}")
+        except (ArtifactStoreError, OSError, ValueError) as exc:
+            logger.debug("Failed to load canonical SS timeline artifact for %s: %s", rep_dir, exc)
 
     return None, []
 
@@ -572,6 +409,7 @@ def _render_ss_individual_plots(
     output_dir: Path,
     plot_settings: Any,
     *,
+    control_label: str | None,
     has_reps: bool,
 ) -> list[Path]:
     """Render one bar chart per SS type."""
@@ -581,8 +419,11 @@ def _render_ss_individual_plots(
     generated: list[Path] = []
     x = np.arange(n)
 
-    tab10 = plt.cm.get_cmap("tab10")
-    condition_colors = [tab10(i % 10) for i in range(n)]
+    condition_colors = get_condition_colors(
+        cond_labels,
+        plot_settings,
+        control_label=control_label,
+    )
 
     for internal_key, display_name, _bar_color in _SS_INDIVIDUAL_SPECS:
         means = ss_data[internal_key]["means"]
@@ -592,7 +433,7 @@ def _render_ss_individual_plots(
         ax.bar(
             x,
             means,
-            yerr=sems,
+            yerr=suppress_singleton_errors(sems, ss_data[internal_key].get("reps")),
             color=condition_colors,
             alpha=t.bar_alpha,
             edgecolor=t.bar_edgecolor,
@@ -601,21 +442,14 @@ def _render_ss_individual_plots(
         )
 
         if has_reps and "reps" in ss_data[internal_key]:
-            rng = np.random.default_rng(seed=42)
-            reps = ss_data[internal_key]["reps"]
-            for j in range(n):
-                if j < len(reps) and reps[j]:
-                    rep_vals = np.asarray(reps[j], dtype=float)
-                    jitter = rng.uniform(-0.2, 0.2, size=len(rep_vals))
-                    ax.scatter(
-                        np.full_like(rep_vals, float(j)) + jitter,
-                        rep_vals,
-                        color=t.dot_color,
-                        s=t.dot_size,
-                        zorder=5,
-                        alpha=t.dot_alpha,
-                        edgecolors="none",
-                    )
+            scatter_replicate_values(
+                ax,
+                x,
+                ss_data[internal_key]["reps"],
+                plot_settings,
+                orientation="vertical",
+                bar_width=0.8,
+            )
 
         ax.set_xticks(x)
         ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)

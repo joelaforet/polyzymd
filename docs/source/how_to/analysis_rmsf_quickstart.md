@@ -80,7 +80,6 @@ defaults:
 
 plugins:
   rmsf:
-    enabled: true
     selection: "protein and name CA"
     reference_mode: "centroid"
 ```

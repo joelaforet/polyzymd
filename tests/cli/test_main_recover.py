@@ -39,16 +39,16 @@ class TestFindTopologyPdb:
     """_find_topology_pdb locates a suitable PDB file."""
 
     def test_finds_solvated_pdb(self, tmp_path):
-        (tmp_path / "system_solvated.pdb").write_text("ATOM ...")
+        (tmp_path / "solvated_system.pdb").write_text("ATOM ...")
         result = _find_topology_pdb(tmp_path)
-        assert result.name == "system_solvated.pdb"
+        assert result.name == "solvated_system.pdb"
 
-    def test_finds_equilibration_topology(self, tmp_path):
+    def test_rejects_arbitrary_equilibration_topology(self, tmp_path):
         eq_dir = tmp_path / "equilibration_0_heating"
         eq_dir.mkdir()
         (eq_dir / "equilibration_0_heating_topology.pdb").write_text("ATOM ...")
-        result = _find_topology_pdb(tmp_path)
-        assert "topology.pdb" in result.name
+        with pytest.raises(FileNotFoundError, match="Could not find topology PDB"):
+            _find_topology_pdb(tmp_path)
 
     def test_finds_production_0_topology(self, tmp_path):
         prod_dir = tmp_path / "production_0"
@@ -56,6 +56,20 @@ class TestFindTopologyPdb:
         (prod_dir / "production_0_topology.pdb").write_text("ATOM ...")
         result = _find_topology_pdb(tmp_path)
         assert result.name == "production_0_topology.pdb"
+
+    def test_finds_approved_old_production_topology(self, tmp_path):
+        prod_dir = tmp_path / "production"
+        prod_dir.mkdir()
+        (prod_dir / "production_topology.pdb").write_text("ATOM ...")
+        result = _find_topology_pdb(tmp_path)
+        assert result == prod_dir / "production_topology.pdb"
+
+    def test_rejects_arbitrary_recursive_pdb(self, tmp_path):
+        nested_dir = tmp_path / "nested"
+        nested_dir.mkdir()
+        (nested_dir / "decoy.pdb").write_text("ATOM ...")
+        with pytest.raises(FileNotFoundError, match="Could not find topology PDB"):
+            _find_topology_pdb(tmp_path)
 
     def test_raises_if_no_pdb(self, tmp_path):
         with pytest.raises(FileNotFoundError, match="Could not find topology PDB"):
@@ -650,6 +664,8 @@ class TestRunInitialSegmentEquilibrationSkip:
                 duration_ns=20.0,
                 num_samples=250,
                 timestep_fs=2.0,
+                report_interval=40000,
+                checkpoint_interval_s=60.0,
             )
 
         # Should NOT have minimized or equilibrated
@@ -720,6 +736,8 @@ class TestRunInitialSegmentEquilibrationSkip:
                 duration_ns=20.0,
                 num_samples=250,
                 timestep_fs=2.0,
+                report_interval=40000,
+                checkpoint_interval_s=60.0,
             )
 
         # Should have minimized and equilibrated (full pipeline)
@@ -819,7 +837,7 @@ class TestHardKillNoSystemXmlRaises:
 
 
 class TestBuildDryRunGromacs:
-    """build --dry-run --gromacs must show an actual directory, not {projects_dir}."""
+    """build --dry-run --format gromacs shows the resolved export directory."""
 
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_gromacs_dry_run_shows_actual_path(self, mock_from_yaml, tmp_path):
@@ -841,12 +859,12 @@ class TestBuildDryRunGromacs:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["build", "-c", str(config_file), "--dry-run", "--gromacs", "-r", "1"]
+            cli,
+            ["build", "-c", str(config_file), "--dry-run", "--format", "gromacs", "-r", "1"],
         )
         assert result.exit_code == 0, result.output
-        assert "{projects_dir}" not in result.output, (
-            "Output path must be interpolated, not literal {projects_dir}"
-        )
+        message = "Output path must be interpolated, not literal {projects_dir}"
+        assert "{projects_dir}" not in result.output, message
         assert str(tmp_path / "projects") in result.output
 
 

@@ -1,0 +1,247 @@
+"""Tests for the {{ spec.name }} advanced MDAnalysis-native analysis package."""
+
+from __future__ import annotations
+
+import sys
+from types import SimpleNamespace
+
+import pytest
+from pydantic import ValidationError
+
+from polyzymd.analyses.base import (
+    AggregateContext,
+    Analysis,
+    Condition,
+    ReplicateContext,
+)
+from polyzymd.analyses.discovery import clear_cache, get_analysis
+from polyzymd.analyses.mda import (
+    ArtifactStore,
+    ConditionArtifact,
+    FrameSelection,
+    MDAAnalysisJob,
+    MDACollectorContext,
+    MDAUniversePolicy,
+    ReplicateArtifact,
+)
+from polyzymd.analyses.{{ spec.name }} import (
+    METRIC_NAME,
+    {{ spec.class_name }}Analysis,
+    {{ spec.class_name }}Settings,
+)
+
+
+class FakeAnalysisBase:
+    """AnalysisBase-like object that records run kwargs and exposes results."""
+
+    def __init__(self, metric_value: float) -> None:
+        self.metric_value = metric_value
+        self.results = SimpleNamespace()
+        self.run_kwargs: dict[str, int | None] = {}
+
+    def run(self, **kwargs):
+        """Store run kwargs and populate fake AnalysisBase results."""
+        self.run_kwargs = dict(kwargs)
+        self.results.metrics = {METRIC_NAME: self.metric_value}
+        self.results.n_selected_atoms = 3
+        self.results.n_frames = 2
+        return self
+
+
+class FakeUniverse:
+    """Minimal universe placeholder for job construction."""
+
+
+def _condition(tmp_path):
+    """Build a condition for scaffold tests."""
+    return Condition(
+        label="Scaffold Condition",
+        config_path=tmp_path / "config.yaml",
+        replicates=(1, 2),
+        sim_config=SimpleNamespace(name="scaffold_condition"),
+    )
+
+
+def _replicate_context(tmp_path, condition, replicate: int, settings):
+    """Build a replicate context for scaffold tests."""
+    output_dir = tmp_path / f"run_{replicate}"
+    return ReplicateContext(
+        condition=condition,
+        replicate=replicate,
+        sim_config=condition.sim_config,
+        output_dir=output_dir,
+        equilibration="0ns",
+        recompute=True,
+        settings=settings,
+        result_path=output_dir / "result.json",
+    )
+
+
+def _collector_context(tmp_path, condition, replicate: int, settings):
+    """Build a collector context for scaffold tests."""
+    rep_ctx = _replicate_context(tmp_path, condition, replicate, settings)
+    frame_selection = FrameSelection(start=1, stop=5, step=2, n_frames_total=10)
+    return MDACollectorContext(
+        analysis_name="{{ spec.name }}",
+        replicate_context=rep_ctx,
+        frame_selection=frame_selection,
+        universe_policy=MDAUniversePolicy(
+            condition_label=condition.label,
+            replicate=replicate,
+        ),
+        artifact_store=ArtifactStore(rep_ctx.output_dir),
+    )
+
+
+class TestDiscovery:
+    """Discovery and class-level contract behavior."""
+
+    def test_discoverable_by_name(self):
+        clear_cache()
+        analysis_cls = get_analysis("{{ spec.name }}")
+
+        assert analysis_cls is {{ spec.class_name }}Analysis
+        assert analysis_cls.name == "{{ spec.name }}"
+
+    def test_class_contract(self):
+        assert issubclass({{ spec.class_name }}Analysis, Analysis)
+        settings_cls = {{ spec.class_name }}Analysis.Settings
+        assert settings_cls is {{ spec.class_name }}Settings
+        assert "run_replicate" not in {{ spec.class_name }}Analysis.__dict__
+
+
+class TestSettings:
+    """Settings validation behavior."""
+
+    def test_defaults(self):
+        settings = {{ spec.class_name }}Settings()
+
+        assert settings.selection == "protein and name CA"
+        assert settings.scale == pytest.approx(1.0)
+
+    def test_selection_must_not_be_empty(self):
+        with pytest.raises(ValidationError):
+            {{ spec.class_name }}Settings(selection="")
+
+    def test_scale_must_be_positive(self):
+        with pytest.raises(ValidationError):
+            {{ spec.class_name }}Settings(scale=0.0)
+
+
+class TestMDAJobs:
+    """Advanced AnalysisBase job construction and execution."""
+
+    def test_mda_module_does_not_import_mdanalysis_at_module_level(self):
+        sys.modules.pop("MDAnalysis", None)
+
+        from polyzymd.analyses.{{ spec.name }} import _mda
+
+        assert _mda.__name__.endswith("._mda")
+        assert "MDAnalysis" not in sys.modules
+
+    def test_build_mda_jobs_uses_analysis_base_factory(self, monkeypatch):
+        from polyzymd.analyses.{{ spec.name }} import _mda
+
+        analysis = {{ spec.class_name }}Analysis()
+        settings = {{ spec.class_name }}Settings(scale=2.0)
+
+        def fake_builder(universe, *, settings):
+            assert isinstance(universe, FakeUniverse)
+            assert settings.scale == pytest.approx(2.0)
+            return FakeAnalysisBase(metric_value=12.0)
+
+        monkeypatch.setattr(
+            _mda,
+            "build_{{ spec.name }}_analysis",
+            fake_builder,
+        )
+        ctx = SimpleNamespace(
+            universe=FakeUniverse(),
+            frame_selection=FrameSelection(start=1, stop=5, step=2, n_frames_total=10),
+            universe_policy=MDAUniversePolicy(
+                condition_label="Scaffold Condition",
+                replicate=1,
+            ),
+            settings=settings,
+        )
+
+        jobs = analysis.build_mda_jobs(ctx)
+
+        assert len(jobs) == 1
+        assert isinstance(jobs[0], MDAAnalysisJob)
+        completed = jobs[0].run()
+        assert completed.results.metrics[METRIC_NAME] == pytest.approx(12.0)
+        assert completed.run_kwargs == {"start": 1, "stop": 5, "step": 2}
+
+
+class TestCollector:
+    """Collector output and artifact shape."""
+
+    def test_collector_returns_replicate_artifact(self, tmp_path):
+        analysis = {{ spec.class_name }}Analysis()
+        settings = {{ spec.class_name }}Settings()
+        condition = _condition(tmp_path)
+        completed = SimpleNamespace(
+            name="{{ spec.name }}",
+            results=SimpleNamespace(
+                metrics={METRIC_NAME: 12.0},
+                n_selected_atoms=3,
+                n_frames=2,
+            ),
+        )
+        collector_ctx = _collector_context(tmp_path, condition, 1, settings)
+
+        artifact = analysis.build_mda_collector(collector_ctx)(
+            collector_ctx,
+            [completed],
+        )
+
+        assert isinstance(artifact, ReplicateArtifact)
+        assert artifact.analysis_name == "{{ spec.name }}"
+        assert artifact.condition_label == condition.label
+        assert artifact.replicate == 1
+        assert artifact.payload["metrics"][METRIC_NAME] == pytest.approx(12.0)
+        assert artifact.payload["jobs"][0]["results"]["n_selected_atoms"] == 3
+        assert artifact.payload["jobs"][0]["results"]["n_frames"] == 2
+        assert artifact.sidecars == []
+
+
+class TestDefaultAggregation:
+    """Default artifact aggregation for generated metrics."""
+
+    def test_default_mda_aggregation_reads_replicate_artifacts(self, tmp_path):
+        analysis = {{ spec.class_name }}Analysis()
+        settings = {{ spec.class_name }}Settings()
+        condition = _condition(tmp_path)
+        artifacts = []
+        for replicate, value in ((1, 2.0), (2, 4.0)):
+            ctx = _collector_context(tmp_path, condition, replicate, settings)
+            artifact = ReplicateArtifact(
+                analysis_name="{{ spec.name }}",
+                condition_label=condition.label,
+                replicate=replicate,
+                payload={"metrics": {METRIC_NAME: value}},
+                provenance={"frame_selection": {"start": 0, "stop": None, "step": 1}},
+                metadata={
+                    "settings_fingerprint": analysis.aggregate_settings_fingerprint(
+                        settings,
+                    ),
+                },
+            )
+            ArtifactStore(ctx.output_dir).write_replicate_result(artifact)
+            artifacts.append(artifact)
+        agg_ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="0ns",
+            settings=settings,
+        )
+
+        aggregated = analysis.aggregate(agg_ctx, artifacts)
+        metrics = analysis.extract_metrics(aggregated)
+
+        assert isinstance(aggregated, ConditionArtifact)
+        assert aggregated.payload["metrics"][METRIC_NAME]["mean"] == pytest.approx(3.0)
+        assert METRIC_NAME in metrics
+        assert metrics[METRIC_NAME].mean == pytest.approx(3.0)

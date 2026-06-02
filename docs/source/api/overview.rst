@@ -11,6 +11,7 @@ Package Structure
     polyzymd/
     ├── config/           # Configuration and YAML loading
     │   ├── schema.py     # Pydantic models for all config sections
+    │   ├── comparison.py # ComparisonConfig, PlotSettings, condition models
     │   └── loader.py     # YAML loading utilities
     ├── builders/         # System building components
     │   ├── enzyme.py     # Enzyme/protein preparation
@@ -30,10 +31,12 @@ Package Structure
     │   ├── parameters.py # Simulation parameters
     │   └── restraints.py # Restraint definitions
     ├── analyses/         # ★ Plugin system — unified analysis lifecycle
-    │   ├── base.py       # Analysis ABC, context objects, result models
+    │   ├── base.py       # Public facade, contexts, result models
     │   ├── discovery.py  # pkgutil-based auto-discovery
     │   ├── orchestrator.py  # Framework engine
     │   ├── stats.py      # Shared statistical utilities
+    │   ├── _framework/   # Private/internal lifecycle and artifact internals
+    │   ├── mda/          # Public MDAnalysis job and artifact layer
     │   ├── shared/       # Reusable utilities (TrajectoryLoader, alignment, etc.)
     │   ├── rmsd/         # RMSD plugin package
     │   ├── rg/           # Rg plugin package
@@ -41,17 +44,15 @@ Package Structure
     │   ├── contacts/     # Contacts plugin package
     │   ├── distances/    # Distance analysis plugin package
     │   ├── secondary_structure/  # Secondary structure plugin package
-    │   └── ...           # One sub-package per analysis type
-    ├── config/
-    │   └── comparison.py # ComparisonConfig, PlotSettings, condition models
-    ├── analyses/shared/
-    │   ├── inferential_statistics.py # t-tests, ANOVA, effect sizes
-    │   ├── result_io.py  # Comparison result discovery/loading
-    │   └── paths.py      # sanitize_label() and path helpers
-    ├── cli/
-    │   └── compare.py    # `polyzymd compare` subcommands
+    │   └── ...           # Single-file or package plugins for each analysis type
     └── cli/              # Command-line interface
+        ├── compare.py    # `polyzymd compare` subcommands
         └── main.py       # Click CLI
+
+The ``analyses/_framework/`` package is private/internal implementation detail.
+Contributor plugins should import public lifecycle symbols from
+``polyzymd.analyses.base`` and MDAnalysis job/artifact utilities from
+``polyzymd.analyses.mda``.
 
 
 Key Classes
@@ -96,9 +97,14 @@ Analysis
 ~~~~~~~~
 
 - :py:class:`~polyzymd.analyses.base.Analysis` - Plugin base class for all analyses
-- :py:class:`~polyzymd.analyses.distances.DistanceCalculator` - Inter-group distances
+- :py:class:`~polyzymd.analyses.mda.job.MDAAnalysisJob` - Unit of trajectory-native MDAnalysis work
+- :py:class:`~polyzymd.analyses.mda.frame_selection.FrameSelection` - Frame selection and equilibration-window descriptor
+- :py:class:`~polyzymd.analyses.mda.artifacts.ReplicateArtifact` - Validated output for one replicate
+- :py:class:`~polyzymd.analyses.mda.artifacts.ConditionArtifact` - Aggregated output for one condition
+- :py:class:`~polyzymd.analyses.mda.artifacts.ComparisonArtifact` - Canonical comparison output for cross-condition results
+- :py:class:`~polyzymd.analyses.mda.store.ArtifactStore` - Canonical artifact persistence and loading helper
+- :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor for default comparisons
 - :py:class:`~polyzymd.analyses.contacts.ParallelContactAnalyzer` - Polymer-protein contacts
-- :py:class:`~polyzymd.analyses._results_base.BaseAnalysisResult` - Serializable result base class
 
 Comparison
 ~~~~~~~~~~

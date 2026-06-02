@@ -98,7 +98,6 @@ conditions:
 
 plugins:
   rmsd:
-    enabled: true
     runs:
       - label: "Protein Backbone"
         selection: "protein and name CA"
@@ -175,7 +174,7 @@ plugins:
         reference_mode: "centroid"
 
       - label: "Polymer Core"
-        selection: "chainID C and not name H*"
+        selection: "chainid C and not name H*"
         alignment_selection: "protein and name CA"
         reference_mode: "average"
 ```

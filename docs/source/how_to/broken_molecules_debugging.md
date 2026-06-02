@@ -241,7 +241,7 @@ The order of combination determines the final atom order.
 
 ### The Old Algorithm (Broken)
 
-Our original `_create_interchange_batched()` method was designed for efficiency. It grouped molecules by type to minimize redundant parameterization:
+An older interchange-construction path was designed for efficiency. It grouped molecules by type to minimize redundant parameterization:
 
 ```python
 # OLD CODE (simplified) - THE PROBLEM
@@ -530,15 +530,15 @@ for ts in u.trajectory[:1]:  # First frame
 
 **File:** `src/polyzymd/builders/system_builder.py`
 
-**Method:** `_create_interchange_batched()` (around line 500)
+**Area:** Interchange construction and atom-order preservation
 
 **Git commit:** `2047647` - "Fix atom order mismatch between solvated_system.pdb and Interchange"
 
 ### The Actual Fix (Abbreviated)
 
 ```python
-def _create_interchange_batched(self, ff: ForceField, water_mol: Molecule) -> Interchange:
-    """Create Interchange using batched molecule processing with preserved order.
+def create_interchange_preserving_order(self, ff: ForceField) -> Interchange:
+    """Create Interchange with molecule processing that preserves order.
     
     This implementation batches molecules by type for efficiency while preserving
     the exact molecule order from self._solvated_topology. This is critical for

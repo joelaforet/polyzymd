@@ -2,18 +2,63 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analyses.base import BasePlotSettings
-from polyzymd.analyses.shared.defaults import AnalysisDefaults
 from polyzymd.core.branding import prepend_file_header
+from polyzymd.utils.templates import render_package_template
 
-logger = logging.getLogger(__name__)
+CANONICAL_PLOT_STYLES: tuple[str, ...] = ("compact", "large_elements", "low_ink")
+_PLOT_STYLE_ALLOWED_MESSAGE = "allowed values are 'compact', 'large_elements', and 'low_ink'"
+
+
+def _normalize_plot_style(value: Any) -> str:
+    """Validate plot style presets before Pydantic stores them.
+
+    Parameters
+    ----------
+    value : Any
+        Raw ``plot_settings.style`` value from YAML or programmatic usage.
+
+    Returns
+    -------
+    str
+        Canonical style name.
+
+    Raises
+    ------
+    TypeError
+        If the style is not a string.
+    ValueError
+        If the style string is not a canonical style.
+    """
+    if not isinstance(value, str):
+        raise TypeError(
+            f"plot_settings.style must be a string, got {type(value).__name__}; "
+            f"{_PLOT_STYLE_ALLOWED_MESSAGE}"
+        )
+
+    if value in CANONICAL_PLOT_STYLES:
+        return value
+
+    raise ValueError(f"Invalid plot_settings.style '{value}'; {_PLOT_STYLE_ALLOWED_MESSAGE}")
+
+
+class AnalysisDefaults(BaseModel):
+    """Default parameters applied to every configured analysis.
+
+    The comparison config owns these project-level defaults because they are
+    parsed from ``comparison.yaml`` before plugin lifecycle contexts are built.
+    """
+
+    equilibration_time: str = "10ns"
+    fdr_alpha: float = Field(default=0.05, gt=0.0, le=1.0)
+    ttest_method: str = Field(default="student", pattern="^(welch|student)$")
+    posthoc_method: str = Field(default="ttest_bh", pattern="^(ttest_bh|tukey_hsd)$")
 
 
 # ============================================================================
@@ -86,9 +131,9 @@ class PluginSettingsContainer(BaseModel):
 
         parsed_settings: dict[str, Any] = {}
         for key, value in data.items():
+            key_lower = str(key).lower()
             if value is None:
                 continue
-            key_lower = key.lower()
             try:
                 analysis_cls = get_analysis(key_lower)
             except KeyError:
@@ -100,9 +145,6 @@ class PluginSettingsContainer(BaseModel):
                     f"Available plugins: {available}"
                 ) from None
 
-            # Always store under the canonical name so that
-            # _resolve_settings() (which queries by analysis.name) finds it,
-            # even when the YAML key is an alias like "triad".
             canonical_name = analysis_cls.name
 
             settings_class = analysis_cls.Settings
@@ -127,23 +169,6 @@ class PluginSettingsContainer(BaseModel):
         """Get the configured plugin names."""
         return [key for key, value in self.model_dump().items() if value is not None]
 
-    def to_analysis_yaml_dict(self, replicates: list[int], eq_time: str) -> dict[str, Any]:
-        """Convert unified plugin settings to analysis.yaml-compatible data."""
-        result: dict[str, Any] = {
-            "replicates": replicates,
-            "defaults": {"equilibration_time": eq_time},
-        }
-        for analysis_type in self.get_enabled_plugins():
-            settings = self.get(analysis_type)
-            if settings is not None:
-                if hasattr(settings, "to_analysis_yaml_dict"):
-                    result[analysis_type] = settings.to_analysis_yaml_dict()
-                elif hasattr(settings, "model_dump"):
-                    result[analysis_type] = settings.model_dump(exclude_none=True)
-                else:
-                    result[analysis_type] = settings
-        return result
-
 
 # ============================================================================
 # Plot Settings Configuration
@@ -156,6 +181,120 @@ class PluginSettingsContainer(BaseModel):
 # builds a mapping from analysis name to plot settings model.
 
 
+class SemanticConditionColorConfig(BaseModel):
+    """Semantic metadata for one plotted condition.
+
+    The model is intentionally chemistry-agnostic. Projects can describe any
+    condition family, numeric or ordinal value, display order, direct color,
+    or role without core PolyzyMD knowing domain-specific condition names.
+    """
+
+    color: Any | None = None
+    family: str | None = None
+    value: Any | None = None
+    order: int | None = None
+    role: str | None = None
+
+    @field_validator("family")
+    @classmethod
+    def strip_optional_family(cls, value: str | None) -> str | None:
+        """Normalize optional family text while rejecting empty values."""
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("semantic condition family must not be empty")
+        return stripped
+
+    @field_validator("role")
+    @classmethod
+    def strip_optional_role(cls, value: str | None) -> str | None:
+        """Normalize optional role text while rejecting empty values."""
+        if value is None:
+            return None
+        stripped = value.strip().lower()
+        if not stripped:
+            raise ValueError("semantic condition role must not be empty")
+        return stripped
+
+
+class SemanticFamilyColorConfig(BaseModel):
+    """Color mapping rules for a semantic family of conditions.
+
+    A family can map condition values through a matplotlib colormap using a
+    linear or ordinal scale, or through explicit ``value_colors`` for selected
+    values. Invalid color and colormap names are handled by plotting helpers so
+    figure generation can fall back with warnings.
+    """
+
+    colormap: str = "viridis"
+    scale: Literal["linear", "ordinal"] = "linear"
+    value_order: list[Any] = Field(default_factory=list)
+    vmin: float | None = None
+    vmax: float | None = None
+    colormap_range: tuple[float, float] = (0.0, 1.0)
+    reverse: bool = False
+    value_colors: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("colormap")
+    @classmethod
+    def validate_colormap_name(cls, value: str) -> str:
+        """Reject empty colormap names while deferring existence checks."""
+        colormap = value.strip()
+        if not colormap:
+            raise ValueError("colormap must not be empty")
+        return colormap
+
+    @field_validator("colormap_range")
+    @classmethod
+    def validate_colormap_range(cls, value: tuple[float, float]) -> tuple[float, float]:
+        """Ensure colormap sampling bounds are ordered fractions."""
+        low, high = value
+        if not 0.0 <= low <= 1.0 or not 0.0 <= high <= 1.0:
+            raise ValueError("colormap_range values must be between 0.0 and 1.0")
+        if low > high:
+            raise ValueError("colormap_range lower bound must be <= upper bound")
+        return value
+
+    @model_validator(mode="after")
+    def validate_linear_bounds(self) -> "SemanticFamilyColorConfig":
+        """Validate optional linear scale bounds."""
+        if self.vmin is not None and self.vmax is not None and self.vmin > self.vmax:
+            raise ValueError("vmin must be <= vmax")
+        return self
+
+
+class SemanticColorSettings(BaseModel):
+    """Semantic condition color and ordering settings for comparison plots.
+
+    Defaults define the canonical v1.3 plot behavior: semantic color mapping is
+    disabled until users opt in with ``enabled: true``.
+    """
+
+    enabled: bool = False
+    order: list[str] = Field(default_factory=list)
+    conditions: dict[str, SemanticConditionColorConfig] = Field(default_factory=dict)
+    families: dict[str, SemanticFamilyColorConfig] = Field(default_factory=dict)
+    manual_colors: dict[str, Any] = Field(default_factory=dict)
+    control_color: Any = "black"
+    missing_color: Any = "lightgray"
+    default_color: Any | None = None
+
+    @field_validator("order")
+    @classmethod
+    def validate_order_labels(cls, value: list[str]) -> list[str]:
+        """Reject duplicate or empty labels in explicit plot order."""
+        normalized: list[str] = []
+        for label in value:
+            stripped = label.strip()
+            if not stripped:
+                raise ValueError("semantic color order labels must not be empty")
+            normalized.append(stripped)
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("semantic color order labels must be unique")
+        return normalized
+
+
 class PlotTheme(BaseModel):
     """Centralized visual defaults for all comparison plots.
 
@@ -163,16 +302,16 @@ class PlotTheme(BaseModel):
     marker sizes, spine visibility, etc.) across all plugin ``plot()`` methods
     with a single configurable Pydantic model.
 
-    Three presets are available via class methods:
+    Canonical presets are available via class methods:
 
-    - ``PlotTheme.publication()`` — default; print-ready sizes and weights.
-    - ``PlotTheme.presentation()`` — ~1.3x larger fonts/dots/lines for slides.
-    - ``PlotTheme.minimal()`` — no dots, no bar edges, thinner lines.
+    - ``PlotTheme.compact()`` — default; print-ready sizes and weights.
+    - ``PlotTheme.large_elements()`` — ~1.3x larger fonts/dots/lines for slides.
+    - ``PlotTheme.low_ink()`` — no dots, no bar edges, thinner lines.
 
     Users can override individual values in ``comparison.yaml``::
 
         plot_settings:
-          style: "publication"
+          style: "compact"
           theme:
             title_fontsize: 16
             dot_size: 24
@@ -283,13 +422,13 @@ class PlotTheme(BaseModel):
     show_watermark: bool = True
 
     @classmethod
-    def publication(cls) -> PlotTheme:
-        """Publication preset — default values, print-ready."""
+    def compact(cls) -> PlotTheme:
+        """Compact preset with print-ready sizes and weights."""
         return cls()
 
     @classmethod
-    def presentation(cls) -> PlotTheme:
-        """Presentation preset — ~1.3x larger fonts/dots/lines for slides."""
+    def large_elements(cls) -> PlotTheme:
+        """Large-elements preset with slide-oriented fonts, dots, and lines."""
         return cls(
             title_fontsize=18,
             suptitle_fontsize=20,
@@ -307,8 +446,8 @@ class PlotTheme(BaseModel):
         )
 
     @classmethod
-    def minimal(cls) -> PlotTheme:
-        """Minimal preset — no dots, no bar edges, thinner lines."""
+    def low_ink(cls) -> PlotTheme:
+        """Low-ink preset with no dots, no bar edges, and thinner lines."""
         return cls(
             dot_size=0,
             dot_alpha=0.0,
@@ -338,7 +477,8 @@ class PlotSettings(BaseModel):
     dpi : int
         Resolution for raster formats (PNG)
     style : str
-        Plot style preset: "publication", "presentation", or "minimal"
+        Canonical plot style preset: "compact", "large_elements", or
+        "low_ink".
     color_palette : str
         Seaborn/matplotlib color palette name
     theme : PlotTheme
@@ -363,7 +503,7 @@ class PlotSettings(BaseModel):
           output_dir: "figures/"
           format: "png"
           dpi: 300
-          style: "publication"
+          style: "compact"
 
           rmsf:
             highlight_residues: [77, 133, 156]
@@ -381,30 +521,32 @@ class PlotSettings(BaseModel):
         "style",
         "color_palette",
         "theme",
+        "semantic_colors",
     }
 
     output_dir: Path = Field(default=Path("figures/"))
     format: str = Field(default="png", pattern="^(png|pdf|svg)$")
     dpi: int = Field(default=300, ge=50, le=600)
-    style: str = Field(default="publication", pattern="^(publication|presentation|minimal)$")
+    style: str = "compact"
     color_palette: str = "tab10"
     theme: PlotTheme = Field(default_factory=PlotTheme)
+    semantic_colors: SemanticColorSettings = Field(default_factory=SemanticColorSettings)
 
     def __init__(self, **data: Any):
         """Initialize with global fields and plugin-discovered per-analysis settings.
 
-        Theme resolution: the ``style`` field selects a preset (publication,
-        presentation, or minimal) and then any user-supplied ``theme:``
-        overrides are merged on top.  This allows ``style: presentation``
-        with ``theme: {dot_size: 40}`` to use the presentation preset but
-        override just the dot size.
+        Theme resolution: the ``style`` field selects a canonical preset
+        (compact, large_elements, or low_ink) and then any user-supplied
+        ``theme:`` overrides are merged on top. This allows
+        ``style: large_elements`` with ``theme: {dot_size: 40}`` to use
+        the large-elements preset but override just the dot size.
 
         Parameters
         ----------
         **data : Any
             Plot settings from YAML.  Keys matching discovered analysis
             types are parsed into their settings classes; global keys are
-            handled by Pydantic; unknown keys are logged and skipped.
+            handled by Pydantic; unknown keys raise ``ValueError``.
         """
         from polyzymd.analyses.discovery import list_analyses
 
@@ -416,18 +558,6 @@ class PlotSettings(BaseModel):
                 and analysis_cls.PlotSettingsModel is not None
             ):
                 _plot_models[analysis_name] = analysis_cls.PlotSettingsModel
-
-        # Check for deprecated "triad" key and give helpful warning
-        if "triad" in data and "triad" not in _plot_models:
-            import warnings
-
-            warnings.warn(
-                "plot_settings key 'triad' has been renamed to 'catalytic_triad'. "
-                "Please update your comparison.yaml to use 'catalytic_triad' instead.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            # Do NOT silently remap — raise the normal unknown-key error below
 
         global_data: dict[str, Any] = {}
         per_analysis: dict[str, BasePlotSettings] = {}
@@ -454,15 +584,16 @@ class PlotSettings(BaseModel):
                 )
 
         # ── Resolve theme from style preset + user overrides ──
-        style = global_data.get("style", "publication")
+        style = _normalize_plot_style(global_data.get("style", "compact"))
+        global_data["style"] = style
         theme_overrides = global_data.pop("theme", None)
 
         _THEME_PRESETS = {
-            "publication": PlotTheme.publication,
-            "presentation": PlotTheme.presentation,
-            "minimal": PlotTheme.minimal,
+            "compact": PlotTheme.compact,
+            "large_elements": PlotTheme.large_elements,
+            "low_ink": PlotTheme.low_ink,
         }
-        preset_factory = _THEME_PRESETS.get(style, PlotTheme.publication)
+        preset_factory = _THEME_PRESETS[style]
 
         if theme_overrides is None or (isinstance(theme_overrides, dict) and not theme_overrides):
             # No user overrides — use preset as-is
@@ -527,6 +658,69 @@ class PlotSettings(BaseModel):
 
 
 # ============================================================================
+# MDAnalysis Backend Policy Configuration
+# ============================================================================
+
+
+class MDABackendPolicyConfig(BaseModel):
+    """Configuration for optional MDAnalysis internal backend execution.
+
+    The default configuration forwards no backend-related keyword arguments to
+    MDAnalysis. This keeps PolyzyMD replicate-level scheduling as the default
+    execution model and avoids nested oversubscription unless users explicitly
+    opt in.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    backend: str | None = None
+    n_workers: int | None = Field(default=None, ge=1)
+    n_parts: int | None = Field(default=None, ge=1)
+
+    @field_validator("backend")
+    @classmethod
+    def validate_backend(cls, value: str | None) -> str | None:
+        """Reject empty backend names while preserving default serial behavior."""
+        if value is None:
+            return None
+        backend = value.strip()
+        if not backend:
+            raise ValueError("backend must not be empty")
+        return backend
+
+    @field_validator("n_workers", "n_parts", mode="before")
+    @classmethod
+    def reject_bool_counts(cls, value: Any) -> Any:
+        """Reject booleans before integer coercion handles worker counts."""
+        if isinstance(value, bool):
+            raise ValueError("worker and part counts must be positive integers")
+        return value
+
+    @model_validator(mode="after")
+    def validate_backend_required(self) -> "MDABackendPolicyConfig":
+        """Require an explicit backend before forwarding worker controls."""
+        if self.backend is None and (self.n_workers is not None or self.n_parts is not None):
+            raise ValueError("n_workers and n_parts require an explicit backend")
+        return self
+
+    def to_policy(self) -> Any:
+        """Convert this config to an MDAnalysis backend policy.
+
+        Returns
+        -------
+        MDABackendPolicy
+            Import-light policy object consumed by ``MDAAnalysisJob``.
+        """
+        from polyzymd.analyses.mda import MDABackendPolicy
+
+        return MDABackendPolicy(
+            backend=self.backend,
+            n_workers=self.n_workers,
+            n_parts=self.n_parts,
+        )
+
+
+# ============================================================================
 # Main Comparison Configuration
 # ============================================================================
 
@@ -555,6 +749,9 @@ class ComparisonConfig(BaseModel):
         Default analysis parameters (equilibration_time)
     plugins : PluginSettingsContainer
         Unified plugin parameters for compute, compare, and plot-aware metadata.
+    mda_backend_policy : MDABackendPolicyConfig
+        Optional MDAnalysis internal backend policy. Defaults to no backend
+        keyword arguments.
     plot_settings : PlotSettings
         Plot customization (HOW to visualize)
 
@@ -571,12 +768,15 @@ class ComparisonConfig(BaseModel):
     ...     print(f"RMSF selection: {rmsf_settings.selection}")
     """
 
+    model_config = {"extra": "forbid"}
+
     name: str
     description: str | None = None
     control: str | None = None
     conditions: list[ConditionConfig]
     defaults: AnalysisDefaults = Field(default_factory=AnalysisDefaults)
     plugins: PluginSettingsContainer = Field(default_factory=PluginSettingsContainer)
+    mda_backend_policy: MDABackendPolicyConfig = Field(default_factory=MDABackendPolicyConfig)
     plot_settings: PlotSettings = Field(default_factory=PlotSettings)
     source_path: Path | None = Field(default=None, exclude=True)
 
@@ -621,20 +821,6 @@ class ComparisonConfig(BaseModel):
         if data is None:
             data = {}
 
-        if "plugins" not in data and "analysis_settings" in data:
-            logger.warning(
-                "comparison.yaml uses legacy 'analysis_settings:'; treating it as 'plugins:' "
-                "for backward compatibility."
-            )
-            data["plugins"] = data.pop("analysis_settings")
-
-        if "analysis_settings" in data:
-            logger.warning(
-                "comparison.yaml contains both 'plugins' and legacy 'analysis_settings'; "
-                "ignoring 'analysis_settings'."
-            )
-            data.pop("analysis_settings")
-
         allowed_keys = {
             "name",
             "description",
@@ -642,6 +828,7 @@ class ComparisonConfig(BaseModel):
             "conditions",
             "defaults",
             "plugins",
+            "mda_backend_policy",
             "plot_settings",
         }
         unknown_keys = sorted(set(data.keys()) - allowed_keys)
@@ -775,35 +962,6 @@ class ComparisonConfig(BaseModel):
 
         return errors
 
-    def generate_analysis_yaml(self, condition: ConditionConfig) -> str:
-        """Generate analysis.yaml content for a specific condition.
-
-        Parameters
-        ----------
-        condition : ConditionConfig
-            The condition to generate analysis.yaml for.
-
-        Returns
-        -------
-        str
-            YAML content for the analysis.yaml file.
-        """
-        data = self.plugins.to_analysis_yaml_dict(
-            replicates=condition.replicates,
-            eq_time=self.defaults.equilibration_time,
-        )
-        return yaml.dump(data, default_flow_style=False, sort_keys=False)
-
-    def generate_analysis_yaml_for_all(self) -> dict[str, str]:
-        """Generate analysis.yaml content for all conditions.
-
-        Returns
-        -------
-        dict[str, str]
-            Dictionary mapping condition labels to analysis.yaml content.
-        """
-        return {cond.label: self.generate_analysis_yaml(cond) for cond in self.conditions}
-
 
 def generate_comparison_template(name: str, eq_time: str = "10ns") -> str:
     """Generate a template comparison.yaml file.
@@ -820,316 +978,9 @@ def generate_comparison_template(name: str, eq_time: str = "10ns") -> str:
     str
         YAML template content
     """
-    return prepend_file_header(f"""\
-# PolyzyMD Comparison Configuration
-# Compare analyses across simulation conditions (e.g., polymer, temperature).
-# Docs: https://polyzymd.readthedocs.io/en/latest/
-
-name: "{name}"
-description: "Comparison of simulation conditions"
-
-# Control condition for relative comparisons.
-# Must match one of the 'label' values in 'conditions' below, or null if none.
-control: null
-
-# ============================================================================
-# Conditions
-# ============================================================================
-# Each condition points to a simulation's config.yaml file.
-conditions:
-  - label: "Condition A"
-    config: "../path/to/condition_a/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "Condition B"
-    config: "../path/to/condition_b/config.yaml"
-    replicates: [1, 2, 3]
-
-# ============================================================================
-# Defaults
-# ============================================================================
-defaults:
-  equilibration_time: "{eq_time}"
-
-# ============================================================================
-# Plugins (unified analysis settings)
-# ============================================================================
-# Define which analyses to run. Presence of a section enables that analysis.
-
-plugins:
-  # RMSF Analysis
-  rmsf:
-    selection: "protein and name CA"
-    reference_mode: "centroid"  # centroid, average, or frame
-    # reference_frame: 500      # Required if reference_mode is "frame"
-    # reference_file: "structures/enzyme.pdb"  # Crystal/input PDB for SS annotation bar
-
-  # Secondary Structure (DSSP) Analysis
-  # Per-residue and per-frame secondary structure via mdtraj DSSP.
-  # Produces timeline heatmaps, content bar charts, and persistence profiles.
-  #
-  # secondary_structure:
-  #   chain_id: "A"              # chain letter for the protein to analyze
-
-  # SASA (Solvent Accessible Surface Area) Analysis
-  #
-  # sasa:
-  #   runs:
-  #     - label: "protein_total"
-  #       target_selection: "protein"
-  #       context_selection: "protein"  # optional, defaults to target_selection
-  #       stride: 1
-  #   probe_radius_nm: 0.14
-  #   n_sphere_points: 960
-  #   chunk_size: 100
-
-  # Catalytic Triad / Active Site Distances
-  #
-  # IMPORTANT: Always use "protein and resid X" for protein residues!
-  # Residue numbers restart per chain. Without "protein and", your selection
-  # may match atoms from polymer or water chains, causing incorrect distances.
-  #
-  # catalytic_triad:
-  #   name: "enzyme_catalytic_triad"
-  #   threshold: 3.5  # Angstroms (H-bond cutoff)
-  #   pairs:
-  #     - label: "Asp-His"
-  #       selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
-  #       selection_b: "protein and resid 156 and name ND1"
-  #     - label: "His-Ser"
-  #       selection_a: "protein and resid 156 and name NE2"
-  #       selection_b: "protein and resid 77 and name OG"
-
-  # Distance Analysis (general inter-atomic distances)
-  #
-  # IMPORTANT: Always use "protein and resid X" for protein residues!
-  # See warning above in catalytic_triad section.
-  #
-  # Each pair can have its own threshold and display labels for above/below
-  # states.  If threshold is omitted, the global threshold (default 3.5 Å)
-  # is used.  If below_label / above_label are omitted, defaults are
-  # "Below {{threshold}}Å" / "Above {{threshold}}Å".
-  #
-  # distances:
-  #   threshold: 3.5                         # global default threshold
-  #   pairs:
-  #     - label: "Ser77-Substrate"
-  #       selection_a: "protein and resid 77 and name OG"
-  #       selection_b: "resname RBY and name C1"
-  #       threshold: 3.5                     # per-pair override (optional)
-  #       below_label: "Bound"               # d <= threshold
-  #       above_label: "Unbound"             # d > threshold
-  #     - label: "Lid Domain"
-  #       selection_a: "com(resid 141:148 and chainID A)"
-  #       selection_b: "com(resid 281:289 and chainID A)"
-  #       threshold: 15.0
-  #       below_label: "Closed"
-  #       above_label: "Open"
-
-  # Polymer-Protein Contact Analysis
-  # contacts:
-  #   polymer_selection: "chainID C"
-  #   protein_selection: "protein"
-  #   cutoff: 4.5
-  #   grouping: "aa_class"  # aa_class, secondary_structure, or none
-  #   compute_residence_times: true
-  #
-  #   # EXPERIMENTAL: Binding Preference Analysis (enrichment by residue group)
-  #   # --------------------------------------------------------
-  #   # Computes which residue types (aromatic, polar, etc.) are preferentially
-  #   # contacted by the polymer, normalized by surface exposure.
-  #   # Definitions and interpretation may change after the presentation release.
-  #   #
-  #   # IMPORTANT: Place your enzyme PDB in the structures/ directory!
-  #   # The path is relative to this comparison.yaml file.
-  #   #
-  #   # compute_binding_preference: true
-  #   # surface_exposure_threshold: 0.2  # 20% relative SASA = surface exposed
-  #   # enzyme_pdb_for_sasa: "structures/enzyme.pdb"
-  #   # include_default_aa_groups: true  # aromatic, polar, nonpolar, charged
-  #   #
-  #   # Custom protein groups (residue IDs from your enzyme):
-  #   # protein_groups:
-  #   #   catalytic_triad: [77, 133, 156]
-  #   #   lid_helix_5: [141, 142, 143, 144, 145]
-  #   #   lid_helix_10: [281, 282, 283, 284, 285]
-  #   #
-  #   # User-defined partitions for system coverage plots
-  #   # -------------------------------------------------
-  #   # Groups within a partition MUST be mutually exclusive (no overlapping
-  #   # residues). A "rest_of_protein" element is automatically added if the
-  #   # groups don't cover all surface-exposed residues. One plot is generated
-  #   # per partition.
-  #   #
-  #   # protein_partitions:
-   #   #   lid_helices:          # partition name (becomes plot title)
-   #   #     - lid_helix_5       # must be defined in protein_groups above
-   #   #     - lid_helix_10
-
-  # Hydrogen-bond Analysis
-  #
-  # hydrogen_bonds:
-  #   distance_cutoff: 3.0
-  #   angle_cutoff: 150
-  #   groups:
-  #     protein_all: "protein"
-  #     substrate: "resname LIG"     # adjust to your ligand
-  #     polymer_all: "chainid C"
-  #   summaries:
-  #     protein_polymer:
-  #       between: [protein_all, polymer_all]
-  #     protein_substrate:
-  #       between: [protein_all, substrate]
-  #     protein_internal:
-  #       within: protein_all
-  #     polymer_internal:
-  #       within: polymer_all
-  #   composition:
-  #     partitions:
-  #       protein: "protein"
-  #       substrate: "resname LIG"
-  #       polymer: "chainid C"
-
-  # EXPERIMENTAL: Exposure Dynamics Analysis (chaperone-like polymer activity)
-  # Requires contacts analysis to be run first for each condition.
-  # Definitions and interpretation may change after the presentation release.
-  # Run: polyzymd compare exposure
-  #
-  # exposure:
-  #   exposure_threshold: 0.20     # fraction SASA defining 'exposed' residue
-  #   transient_lower: 0.20        # lower bound: residue must reach this to be transient
-  #   transient_upper: 0.80        # upper bound: residue must also reach this threshold
-  #   min_event_length: 1          # minimum consecutive frames to count as an event
-  #   protein_chain: "A"           # chain ID for the protein
-  #   protein_selection: "protein" # MDAnalysis selection for protein
-  #   polymer_selection: "chainID C"  # MDAnalysis selection for polymer
-  #   # polymer_resnames: [SBM, EGM]  # optional: residue names for enrichment analysis
-  #   probe_radius_nm: 0.14        # SASA probe radius (nm)
-  #   n_sphere_points: 960         # number of sphere points for SASA computation
-
-  # EXPERIMENTAL: Binding Free Energy Analysis (ΔG_sel via Boltzmann inversion)
-  # Requires contacts analysis with compute_binding_preference: true to be run first.
-  # Converts binding preference probabilities into ΔG_sel = -k_B·T·ln(contact_share / expected_share).
-  # Definitions and interpretation may change after the presentation release.
-  # Run: polyzymd compare binding-free-energy
-  #
-  # binding_free_energy:
-  #   units: kT                    # energy units: kT (default), kcal/mol, or kJ/mol
-  #   surface_exposure_threshold: 0.2  # minimum relative SASA to be considered surface-exposed
-  #   # protein_partitions: null   # optional: restrict to user-defined AA partitions
-
-  # EXPERIMENTAL: Polymer Affinity Score (composite selectivity metric)
-  # Requires contacts analysis with compute_binding_preference: true.
-  # Computes S = Σ N_pg × ΔG_sel_pg for each polymer composition.
-  # Definitions and interpretation may change after the presentation release.
-  # Run: polyzymd compare polymer-affinity
-  #
-  # polymer_affinity:
-  #   surface_exposure_threshold: 0.2
-  #   enzyme_pdb_for_sasa: "structures/enzyme.pdb"
-  #   include_default_aa_groups: true
-  #   # protein_groups:            # same format as contacts.protein_groups
-  #   #   catalytic_triad: [77, 133, 156]
-  #   # protein_partitions:        # same format as contacts.protein_partitions
-  #   #   lid_helices:
-  #   #     - lid_helix_5
-
-# ============================================================================
-# Plot Settings (HOW to visualize - figure customization)
-# ============================================================================
-# Controls plot generation for all analyses. Per-analysis sections override
-# defaults. Run `polyzymd compare plot` to generate all configured plots.
-
-plot_settings:
-  output_dir: "figures/"         # relative to this file
-  format: "png"                  # png, pdf, or svg
-  dpi: 300                       # resolution for raster formats
-  style: "publication"           # publication, presentation, or minimal
-  color_palette: "tab10"         # seaborn/matplotlib color palette
-
-  # ── Visual theme (all fields optional — defaults come from style preset) ──
-  # Uncomment individual lines to override the preset values.
-  # theme:
-  #   # Font sizes by semantic role
-  #   title_fontsize: 13           # axes titles
-  #   suptitle_fontsize: 14        # figure suptitles
-  #   label_fontsize: 11           # axis labels (xlabel/ylabel)
-  #   tick_fontsize: 9             # tick labels
-  #   legend_fontsize: 9           # legend entries
-  #   annotation_fontsize: 9       # heatmap cell annotations
-  #   small_fontsize: 8            # secondary annotations (SEM labels)
-  #   tiny_fontsize: 7             # fine-grained annotations (residue IDs)
-  #
-  #   # Bar chart defaults
-  #   bar_alpha: 0.85              # bar fill opacity
-  #   bar_edgecolor: "black"       # bar edge colour
-  #   bar_linewidth: 0.5           # bar edge line width
-  #   bar_capsize: 4               # error bar cap size (points)
-  #
-  #   # Replicate dot overlay
-  #   dot_size: 18                 # scatter marker size (s=)
-  #   dot_alpha: 0.7               # dot opacity
-  #   dot_color: "black"           # dot colour
-  #
-  #   # Line defaults
-  #   line_alpha: 0.8              # line plot opacity
-  #   fill_alpha: 0.25             # fill_between band opacity
-  #   reference_line_color: "black"   # reference/threshold line colour
-  #   reference_line_style: "--"      # reference line style
-  #   reference_line_width: 1.5       # reference line width
-  #   highlight_line_alpha: 0.5       # vertical highlight line opacity
-  #
-  #   # Axes chrome
-  #   hide_top_spine: true         # hide top axis spine
-  #   hide_right_spine: true       # hide right axis spine
-  #
-  #   # Title style
-  #   title_fontweight: "bold"     # title font weight
-  #
-  #   # Legend placement
-  #   legend_loc: "center left"           # matplotlib legend loc string
-  #   legend_bbox: [1.02, 0.5]            # bbox_to_anchor (outside right)
-
-  # Per-analysis plot customization (uncomment sections as needed):
-
-  # rmsf:
-  #   show_error: true             # show SEM fill_between bands
-  #   highlight_residues: []       # residue IDs for vertical reference lines
-  #   figsize_profile: [14, 4]     # per-residue profile figure size
-  #   figsize_comparison: [8, 6]   # bar comparison figure size
-
-  # catalytic_triad:
-  #   generate_kde_panel: true     # multi-row KDE panel
-  #   generate_bars: true          # threshold bar chart
-  #   generate_2d_kde: false       # 2D joint KDE (specialized)
-  #   kde_xlim: [0, 7]             # x-axis range for KDE panel (Angstroms)
-
-  # distances:
-  #   show_threshold: true         # threshold line on distributions
-  #   use_kde: true                # KDE vs histogram
-  #   generate_state_bars: true    # per-pair above/below threshold bars
-
-  # contacts:
-  #   generate_enrichment_heatmap: true
-  #   generate_enrichment_bars: true
-  #   generate_system_coverage_heatmap: true
-  #   generate_system_coverage_bars: true
-  #   generate_contact_fraction_profile: true
-  #   generate_residence_time_profile: true
-
-  # binding_free_energy:
-  #   generate_heatmap: true       # ΔG_sel heatmap (AA groups × conditions)
-  #   generate_bars: true          # ΔG_sel grouped bar chart
-  #   colormap: "RdBu_r"           # diverging colormap for heatmap
-
-  # polymer_affinity:
-  #   generate_stacked_bars: true  # total score by condition
-  #   generate_group_bars: true    # per-group contributions
-
-  # secondary_structure:
-  #   generate_timeline: true      # per-condition residue × time SS heatmap
-  #   generate_content_bars: true  # helix/strand/coil fraction bars
-  #   generate_individual_bars: true  # one bar chart per SS type
-  #   generate_diff_heatmap: true  # Δ(helix persistence) vs control
-  #   diff_colormap: "RdBu_r"     # diverging colormap for diff heatmap
-""")
+    rendered = render_package_template(
+        "polyzymd.templates",
+        "comparison_template.yaml.jinja",
+        {"name": name, "eq_time": eq_time},
+    )
+    return prepend_file_header(rendered, comment_prefix="#")

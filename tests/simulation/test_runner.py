@@ -130,9 +130,8 @@ class TestBarostatTemperatureRampUpdate:
 
         source = inspect.getsource(SimulationRunner.run_equilibration_stage)
         count = source.count("MonteCarloBarostat.Temperature()")
-        assert (
-            count == 2
-        ), f"Expected 2 barostat temperature updates (ramp loop + final), found {count}"
+        message = f"Expected 2 barostat temperature updates (ramp loop + final), found {count}"
+        assert count == 2, message
 
 
 class TestRampInterruptTemperature:
@@ -305,9 +304,10 @@ class TestRampResumeFastForward:
             break
 
         # After running 100, 110, 120, the next should be 130
-        assert first_run_temp == pytest.approx(
-            130.0
-        ), f"Expected next temperature 130.0 K after running 100, 110, 120 K; got {first_run_temp}"
+        message = (
+            f"Expected next temperature 130.0 K after running 100, 110, 120 K; got {first_run_temp}"
+        )
+        assert first_run_temp == pytest.approx(130.0), message
 
     def test_fast_forward_handles_no_resume(self):
         """Fresh start (no resume) should begin at temperature_start."""
@@ -356,9 +356,8 @@ class TestRampResumeFastForward:
 
         # All ramp chunks completed, should go to final temp section
         assert first_run_temp is None, "Expected no non-skipped chunk (all ramp chunks done)"
-        assert current_temp == pytest.approx(
-            130.0
-        ), f"current_temp should equal temp_end ({temp_end}) after fast-forward"
+        message = f"current_temp should equal temp_end ({temp_end}) after fast-forward"
+        assert current_temp == pytest.approx(130.0), message
 
 
 # ---------------------------------------------------------------------------
@@ -376,9 +375,8 @@ class TestLoadCheckpointRestoresVelocities:
         from polyzymd.simulation.runner import SimulationRunner
 
         src = inspect.getsource(SimulationRunner.load_checkpoint)
-        assert (
-            "getVelocities=True" in src
-        ), "load_checkpoint must call getState with getVelocities=True"
+        message = "load_checkpoint must call getState with getVelocities=True"
+        assert "getVelocities=True" in src, message
 
     def test_current_velocities_assigned(self):
         """_current_velocities must be set from state.getVelocities()."""

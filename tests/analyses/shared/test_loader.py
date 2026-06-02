@@ -1,7 +1,7 @@
 """Regression tests for TrajectoryLoader engine-aware refactor.
 
 Tests cover:
-- OpenMM daisy-chain and legacy directory layouts
+- OpenMM daisy-chain and non-canonical directory layouts
 - GROMACS flat production layout
 - GRO topology chain-ID warning
 - engine_override parameter
@@ -9,13 +9,14 @@ Tests cover:
 - find_topology() backward compatibility for direct callers
 - _infer_replicate() edge cases
 - Error paths (missing topology, missing trajectories, missing working dir)
-- Fallback when engine name is unrecognisable
+- Engine resolution error propagation
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -54,17 +55,17 @@ def _create_openmm_daisy_chain(run_dir: Path, n_segments: int = 3) -> None:
     for i in range(n_segments):
         seg_dir = run_dir / f"production_{i}"
         seg_dir.mkdir()
-        (seg_dir / f"production_{i}_trajectory.dcd").write_bytes(b"\x00")
+        (seg_dir / f"production_{i}_trajectory.dcd").write_bytes(b"DCD")
         (seg_dir / f"production_{i}_topology.pdb").write_text("ATOM topology")
 
 
-def _create_openmm_legacy(run_dir: Path) -> None:
-    """Populate *run_dir* with a legacy OpenMM single-directory layout."""
+def _create_openmm_noncanonical(run_dir: Path) -> None:
+    """Populate *run_dir* with a non-canonical OpenMM single-directory layout."""
     run_dir.mkdir(parents=True, exist_ok=True)
     prod_dir = run_dir / "production"
     prod_dir.mkdir()
     (prod_dir / "production_topology.pdb").write_text("ATOM topology")
-    (prod_dir / "production_trajectory.dcd").write_bytes(b"\x00")
+    (prod_dir / "production_trajectory.dcd").write_bytes(b"DCD")
 
 
 def _create_gromacs_flat(run_dir: Path, *, use_gro: bool = False) -> None:
@@ -76,6 +77,139 @@ def _create_gromacs_flat(run_dir: Path, *, use_gro: bool = False) -> None:
     else:
         (gromacs_dir / "solvated_system.pdb").write_text("ATOM topology")
     (gromacs_dir / "prod.xtc").write_bytes(b"\x00")
+
+
+class _FakeTrajectory:
+    """Minimal trajectory double with frame and time metadata."""
+
+    def __init__(
+        self,
+        times_ps: list[float],
+        *,
+        current_frame: int = 0,
+        expose_time: bool = True,
+        raw_times_ps: list[float] | None = None,
+    ) -> None:
+        self.times_ps = times_ps
+        self.raw_times_ps = raw_times_ps
+        self.frame = current_frame
+        self.expose_time = expose_time
+        self.ts = SimpleNamespace(frame=current_frame, data={})
+        self._update_timestep()
+
+    def __len__(self) -> int:
+        """Return the number of fake frames."""
+
+        return len(self.times_ps)
+
+    def __getitem__(self, frame_index: int) -> SimpleNamespace:
+        """Move to a fake frame and return a timestamp object."""
+
+        if frame_index < 0 or frame_index >= len(self.times_ps):
+            raise IndexError(frame_index)
+        self.frame = frame_index
+        self._update_timestep()
+        return SimpleNamespace(time=self.times_ps[frame_index], frame=frame_index)
+
+    @property
+    def time(self) -> float:
+        """Return the current fake frame time."""
+
+        if not self.expose_time:
+            raise AttributeError("time")
+        return self.times_ps[self.frame]
+
+    def _update_timestep(self) -> None:
+        """Update raw timestep metadata for the current fake frame."""
+
+        self.ts.frame = self.frame
+        if self.raw_times_ps is None:
+            self.ts.data = {}
+            return
+        self.ts.data = {"time": self.raw_times_ps[self.frame]}
+
+
+def _loader_for_trajectory(trajectory: _FakeTrajectory) -> TrajectoryLoader:
+    """Build a loader instance backed by a fake trajectory."""
+
+    loader = TrajectoryLoader.__new__(TrajectoryLoader)
+    loader.load_universe = MagicMock(return_value=SimpleNamespace(trajectory=trajectory))
+    return loader
+
+
+class TestTrajectoryTimingMetadata:
+    """Loader timing helpers preserve timestamps and reader position."""
+
+    def test_get_first_frame_time_returns_ps_and_ns(self) -> None:
+        """First-frame timestamps should be converted from MDAnalysis picoseconds."""
+
+        trajectory = _FakeTrajectory([198_400.0, 198_800.0], current_frame=1)
+        loader = _loader_for_trajectory(trajectory)
+
+        assert loader.get_first_frame_time(1, unit="ps") == pytest.approx(198_400.0)
+        assert loader.get_first_frame_time(1, unit="ns") == pytest.approx(198.4)
+
+    @pytest.mark.parametrize(
+        ("times_ps", "expose_time"),
+        [([float("nan"), 400.0], True), ([0.0, 400.0], False)],
+    )
+    def test_get_first_frame_time_returns_none_for_unusable_time(
+        self,
+        times_ps: list[float],
+        expose_time: bool,
+    ) -> None:
+        """Non-finite or missing trajectory times should return ``None``."""
+
+        trajectory = _FakeTrajectory(times_ps, current_frame=1, expose_time=expose_time)
+        loader = _loader_for_trajectory(trajectory)
+
+        assert loader.get_first_frame_time(1) is None
+
+    def test_get_first_frame_time_restores_current_frame(self) -> None:
+        """Timestamp probing should restore the previous reader frame when feasible."""
+
+        trajectory = _FakeTrajectory([198_400.0, 198_800.0, 199_200.0], current_frame=2)
+        loader = _loader_for_trajectory(trajectory)
+
+        assert loader.get_first_frame_time(1) == pytest.approx(198_400.0)
+        assert trajectory.frame == 2
+
+    def test_get_first_frame_time_prefers_raw_timestep_metadata(self) -> None:
+        """Raw timestep times should win over normalized ChainReader times."""
+
+        trajectory = _FakeTrajectory(
+            [0.0, 400.0],
+            raw_times_ps=[198_400.0, 198_800.0],
+            current_frame=1,
+        )
+        loader = _loader_for_trajectory(trajectory)
+
+        assert loader.get_first_frame_time(1) == pytest.approx(198_400.0)
+        assert trajectory.frame == 1
+
+    def test_get_frame_times_prefers_raw_timestep_metadata_and_restores_frame(self) -> None:
+        """Frame-time extraction should use raw timestamps and restore reader position."""
+
+        trajectory = _FakeTrajectory(
+            [0.0, 400.0, 800.0],
+            raw_times_ps=[198_400.0, 198_800.0, 199_200.0],
+            current_frame=1,
+        )
+        loader = _loader_for_trajectory(trajectory)
+
+        times = loader.get_frame_times(1, unit="ps")
+
+        assert times.tolist() == pytest.approx([198_400.0, 198_800.0, 199_200.0])
+        assert trajectory.frame == 1
+
+    def test_get_timestep_restores_current_frame(self) -> None:
+        """Timestep probing should restore the previous reader frame when feasible."""
+
+        trajectory = _FakeTrajectory([198_400.0, 198_800.0, 199_200.0], current_frame=2)
+        loader = _loader_for_trajectory(trajectory)
+
+        assert loader.get_timestep(1, unit="ps") == pytest.approx(400.0)
+        assert trajectory.frame == 2
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +274,19 @@ class TestOpenMMDaisyChain:
         for i, f in enumerate(info.trajectory_files):
             assert f.name == f"production_{i}_trajectory.dcd"
 
+    def test_rejects_zero_byte_segments(self, tmp_path):
+        """Loader should surface empty canonical OpenMM trajectory segments."""
+        run_dir = tmp_path / "run_1"
+        _create_openmm_daisy_chain(run_dir, n_segments=3)
+        empty_segment = run_dir / "production_3"
+        empty_segment.mkdir()
+        (empty_segment / "production_3_trajectory.dcd").write_bytes(b"")
+        config = _make_openmm_config(tmp_path)
+        loader = TrajectoryLoader(config)
+
+        with pytest.raises(FileNotFoundError, match="Empty OpenMM trajectory segment"):
+            loader.get_trajectory_info(replicate=1)
+
     def test_replicate_routing(self, tmp_path):
         for rep in (1, 3):
             run_dir = tmp_path / f"run_{rep}"
@@ -154,21 +301,21 @@ class TestOpenMMDaisyChain:
         assert info3.replicate == 3
 
 
-class TestOpenMMLegacy:
-    """Loader resolves legacy single-directory OpenMM layout."""
+class TestOpenMMNoncanonical:
+    """Loader resolves non-canonical single-directory OpenMM layout."""
 
-    def test_finds_legacy_topology(self, tmp_path):
+    def test_finds_noncanonical_topology(self, tmp_path):
         run_dir = tmp_path / "run_1"
-        _create_openmm_legacy(run_dir)
+        _create_openmm_noncanonical(run_dir)
         config = _make_openmm_config(tmp_path)
         loader = TrajectoryLoader(config)
 
         info = loader.get_trajectory_info(replicate=1)
         assert info.topology_file.name == "production_topology.pdb"
 
-    def test_finds_legacy_trajectory(self, tmp_path):
+    def test_finds_noncanonical_trajectory(self, tmp_path):
         run_dir = tmp_path / "run_1"
-        _create_openmm_legacy(run_dir)
+        _create_openmm_noncanonical(run_dir)
         config = _make_openmm_config(tmp_path)
         loader = TrajectoryLoader(config)
 
@@ -193,6 +340,7 @@ class TestGromacsFlat:
 
         info = loader.get_trajectory_info(replicate=1)
         assert info.topology_file.suffix == ".pdb"
+        assert info.topology_format == "pdb"
 
     def test_finds_prod_xtc(self, tmp_path):
         run_dir = tmp_path / "run_1"
@@ -203,6 +351,7 @@ class TestGromacsFlat:
         info = loader.get_trajectory_info(replicate=1)
         assert len(info.trajectory_files) == 1
         assert info.trajectory_files[0].name == "prod.xtc"
+        assert info.trajectory_format == "xtc"
 
     def test_n_segments_is_one(self, tmp_path):
         run_dir = tmp_path / "run_1"
@@ -212,6 +361,18 @@ class TestGromacsFlat:
 
         info = loader.get_trajectory_info(replicate=1)
         assert info.n_segments == 1
+
+    def test_records_gro_warning_in_metadata(self, tmp_path):
+        """GRO topology warnings should be available to provenance wrappers."""
+        run_dir = tmp_path / "run_1"
+        _create_gromacs_flat(run_dir, use_gro=True)
+        config = _make_gromacs_config(tmp_path)
+        loader = TrajectoryLoader(config)
+
+        info = loader.get_trajectory_info(replicate=1)
+
+        assert info.topology_format == "gro"
+        assert any("GRO topology" in warning for warning in info.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +455,19 @@ class TestEngineOverride:
         assert info.topology_file.name == "solvated_system.pdb"
         assert len(info.trajectory_files) == 2
 
+    def test_override_openmm_succeeds_when_config_engine_missing(self, tmp_path):
+        """OpenMM override should bypass a missing config.engine value."""
+        run_dir = tmp_path / "run_1"
+        _create_openmm_daisy_chain(run_dir, n_segments=1)
+        config = SimpleNamespace(
+            get_working_directory=lambda rep: tmp_path / f"run_{rep}",
+            output=SimpleNamespace(effective_scratch_directory=tmp_path),
+        )
+        loader = TrajectoryLoader(config, engine_override="openmm")
+
+        info = loader.get_trajectory_info(replicate=1)
+        assert info.topology_file == run_dir / "solvated_system.pdb"
+
 
 # ---------------------------------------------------------------------------
 # find_topology backward compatibility
@@ -362,10 +536,17 @@ class TestErrorPaths:
 
     def test_missing_working_directory(self, tmp_path):
         config = _make_openmm_config(tmp_path)
+        (tmp_path / "run_1").mkdir()
         loader = TrajectoryLoader(config)
 
-        with pytest.raises(FileNotFoundError, match="Working directory not found"):
+        with pytest.raises(FileNotFoundError, match="Working directory not found") as exc_info:
             loader.get_trajectory_info(replicate=99)
+        message = str(exc_info.value)
+        assert "Replicate: 99" in message
+        assert f"Expected working directory: {tmp_path / 'run_99'}" in message
+        assert f"Scratch directory: {tmp_path}" in message
+        assert "Available replicates: 1" in message
+        assert "Action:" in message
 
     def test_no_topology_in_get_trajectory_info(self, tmp_path):
         run_dir = tmp_path / "run_1"
@@ -390,8 +571,15 @@ class TestErrorPaths:
         config = _make_openmm_config(tmp_path)
         loader = TrajectoryLoader(config)
 
-        with pytest.raises(FileNotFoundError, match="No production trajectory files found"):
+        with pytest.raises(
+            FileNotFoundError,
+            match="No production trajectory files found",
+        ) as exc_info:
             loader.get_trajectory_info(replicate=1)
+        message = str(exc_info.value)
+        assert "Replicate: 1" in message
+        assert f"Expected working directory: {run_dir}" in message
+        assert "Action:" in message
 
     def test_find_trajectories_raises_on_empty_dir(self, tmp_path):
         run_dir = tmp_path / "run_1"
@@ -405,14 +593,14 @@ class TestErrorPaths:
 
 
 # ---------------------------------------------------------------------------
-# Mock config fallback
+# Engine resolution errors
 # ---------------------------------------------------------------------------
 
 
-class TestMockConfigFallback:
-    """Unrecognised engine names fall back to OpenMM resolver."""
+class TestEngineResolutionErrors:
+    """Invalid engine settings propagate instead of falling back."""
 
-    def test_mock_engine_falls_back_to_openmm(self, tmp_path):
+    def test_unknown_engine_error_propagates(self, tmp_path):
         run_dir = tmp_path / "run_1"
         _create_openmm_daisy_chain(run_dir, n_segments=1)
 
@@ -422,21 +610,39 @@ class TestMockConfigFallback:
         config.output.effective_scratch_directory = tmp_path
 
         loader = TrajectoryLoader(config)
-        topo = loader.find_topology(run_dir)
-        assert topo == run_dir / "solvated_system.pdb"
 
-    def test_fully_mocked_config_works(self, tmp_path):
-        """Purely mocked config (no engine attr value) still works."""
+        with pytest.raises(ValueError, match="Unknown engine"):
+            loader.find_topology(run_dir)
+
+    def test_missing_engine_error_propagates(self, tmp_path):
+        """Configs without an engine value should be rejected by the loader."""
         run_dir = tmp_path / "run_1"
         _create_openmm_daisy_chain(run_dir, n_segments=1)
 
+        config = SimpleNamespace(
+            get_working_directory=lambda rep: tmp_path / f"run_{rep}",
+            output=SimpleNamespace(effective_scratch_directory=tmp_path),
+        )
+
+        loader = TrajectoryLoader(config)
+
+        with pytest.raises(ValueError, match="non-empty string engine"):
+            loader.find_topology(run_dir)
+
+    @pytest.mark.parametrize("engine_value", [None, "", "   ", 123])
+    def test_invalid_engine_values_propagate(self, tmp_path, engine_value: object):
+        """Null, empty, and non-string config.engine values should be rejected."""
+        run_dir = tmp_path / "run_1"
+        _create_openmm_daisy_chain(run_dir, n_segments=1)
         config = MagicMock()
+        config.engine = engine_value
         config.get_working_directory.side_effect = lambda rep: tmp_path / f"run_{rep}"
         config.output.effective_scratch_directory = tmp_path
 
         loader = TrajectoryLoader(config)
-        topo = loader.find_topology(run_dir)
-        assert topo == run_dir / "solvated_system.pdb"
+
+        with pytest.raises(ValueError, match="non-empty string engine"):
+            loader.find_topology(run_dir)
 
 
 # ---------------------------------------------------------------------------

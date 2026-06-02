@@ -55,8 +55,25 @@ def create_engine(
     -------
     SimulationEngine
         Instantiated engine backend.
+
+    Raises
+    ------
+    ValueError
+        If neither an explicit override nor a valid ``config.engine`` value is
+        provided.
     """
-    engine_name = override or getattr(config, "engine", "openmm") or "openmm"
+    if override is not None:
+        if not isinstance(override, str) or not override.strip():
+            raise ValueError("Engine override must be a non-empty string")
+        engine_name = override.strip()
+    else:
+        configured_engine = getattr(config, "engine", None)
+        if not isinstance(configured_engine, str) or not configured_engine.strip():
+            raise ValueError(
+                "Simulation config must define a non-empty string engine "
+                "('openmm' or 'gromacs'), or pass an explicit engine override"
+            )
+        engine_name = configured_engine.strip()
     cls = get_engine_class(engine_name)
     if engine_name.lower() == "gromacs":
         return cls.from_config(config, defer_binary=defer_binary)

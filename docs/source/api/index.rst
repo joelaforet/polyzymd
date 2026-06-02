@@ -3,16 +3,11 @@ API Reference
 
 Use these pages for module-level API documentation.
 
-.. toctree::
-   :maxdepth: 1
+Start with one of the grouped API sections below.
 
-   overview
-   config
-   builders
-   simulation
-   workflow
-   core
-   analysis
-   analyses
-   analyses_base
-   analyses_shared
+- :doc:`Package and workflow APIs <package_api>` — configuration, builders,
+  simulation, workflow, and core shared types.
+- :doc:`Analysis APIs <analysis_api>` — plugin discovery, base classes, and
+  shared analysis utilities.
+- :doc:`MDAnalysis extension-layer APIs <mda_api>` — job execution, frame
+  selection, artifacts, aggregation, comparison, and MDAnalysis primitives.

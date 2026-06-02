@@ -1,0 +1,31 @@
+#!/bin/bash
+# GROMACS Workflow Script
+# {{ branding }}
+# Generated on {{ generated_on }}
+#
+# Usage: ./run_gromacs.sh
+#
+# This script runs the complete MD workflow:
+#   1. Energy minimization
+#   2. Equilibration (multiple stages if configured)
+#   3. Production MD
+#   4. Trajectory post-processing
+
+set -e  # Exit on error
+
+# Configuration
+GMX="{{ gmx_command }}"
+PREFIX="{{ prefix }}"
+
+echo "========================================"
+echo "GROMACS Workflow for ${PREFIX}"
+echo "========================================"
+echo "{{ short_credit_line }}"
+echo "Using GROMACS: $GMX"
+echo ""
+
+{{ energy_minimization_block }}
+{{ equilibration_block }}
+{{ production_block }}
+{{ postprocessing_block }}
+{{ footer_block }}

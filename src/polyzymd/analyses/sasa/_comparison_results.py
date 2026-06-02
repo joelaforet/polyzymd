@@ -53,23 +53,27 @@ class SASARunPairwiseComparison(BaseModel):
     run_label: str
     condition_a: str
     condition_b: str
-    t_statistic: float
-    p_value: float
+    t_statistic: float | None = None
+    p_value: float | None = None
     p_value_adjusted: float | None = None
-    cohens_d: float
+    cohens_d: float | None = None
     effect_interpretation: str
     direction: str
     significant: bool
     percent_change: float
+    testable: bool = True
+    note: str | None = None
 
 
 class SASARunANOVA(BaseModel):
     """ANOVA result for a single SASA run."""
 
     run_label: str
-    f_statistic: float
-    p_value: float
+    f_statistic: float | None = None
+    p_value: float | None = None
     significant: bool
+    testable: bool = True
+    note: str | None = None
 
 
 class SASAComparisonResult(BaseComparisonResult[SASAConditionSummary, SASARunPairwiseComparison]):

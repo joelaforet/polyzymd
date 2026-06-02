@@ -102,8 +102,23 @@ def _handler(signum: int, frame: Any) -> None:
     try:
         sig_name = signal.Signals(signum).name
         os.write(2, f"[signal] Received {sig_name} — requesting graceful shutdown\n".encode())
-    except Exception:
-        pass  # Best-effort; never let the handler itself crash
+    except (OSError, ValueError):
+        pass  # Best-effort; never let expected signal/write issues crash the handler
+
+
+def interrupted_state_save_exceptions() -> tuple[type[BaseException], ...]:
+    """Return expected exception types from interrupted-state saving.
+
+    Returns
+    -------
+    tuple[type[BaseException], ...]
+        Exceptions that can arise from filesystem writes, invalid signal-state
+        metadata, or OpenMM checkpoint/state serialization failures.
+    """
+    expected: tuple[type[BaseException], ...] = (OSError, RuntimeError, ValueError)
+    from openmm import OpenMMException
+
+    return (*expected, OpenMMException)
 
 
 def install_handlers() -> None:
