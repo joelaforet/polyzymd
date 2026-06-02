@@ -16,10 +16,10 @@ selection and cleanup steps are visible.
 
 ## What you will produce
 
-Starting from:
+Starting from a raw RCSB PDB download:
 
 ```text
-/projects/jola3134/Enzyme_Immobilization/polyzymd_sims_config_and_run_files/4CHA/lor_help/structures/4CHA.pdb
+structures/4CHA.pdb
 ```
 
 The intended final enzyme file has:
@@ -47,16 +47,24 @@ whether every protein fragment has a unique chain label.
 - PolyzyMD installed in a pixi environment that includes PDBFixer, OpenMM, and
   OpenFF
 - PyMOL for interactive inspection
-- the raw 4CHA PDB file at the path shown above
+- the raw 4CHA PDB file downloaded into `structures/4CHA.pdb`
 - a scientific decision about whether any missing coordinates must be modeled
   before simulation
+
+Create a clean working directory and download the raw PDB file:
+
+```bash
+mkdir -p 4cha_pdb_prep/structures
+cd 4cha_pdb_prep
+curl -L https://files.rcsb.org/download/4CHA.pdb -o structures/4CHA.pdb
+```
 
 ## Inspect the raw 4CHA biological contents
 
 Open the raw file in PyMOL:
 
 ```text
-load /projects/jola3134/Enzyme_Immobilization/polyzymd_sims_config_and_run_files/4CHA/lor_help/structures/4CHA.pdb, raw4cha
+load structures/4CHA.pdb, raw4cha
 hide everything, raw4cha
 show cartoon, polymer.protein
 show sticks, polymer.protein and resn CYS
@@ -129,10 +137,7 @@ from openmm.app import PDBFile
 from pdbfixer import PDBFixer
 
 
-RAW_PDB = Path(
-    "/projects/jola3134/Enzyme_Immobilization/"
-    "polyzymd_sims_config_and_run_files/4CHA/lor_help/structures/4CHA.pdb"
-)
+RAW_PDB = Path("structures/4CHA.pdb")
 OUTPUT_PDB = Path("structures/4cha_chymotrypsin_chain_a_openff.pdb")
 KEEP_CHAINS = {"A", "B", "C"}
 PH = 7.0
