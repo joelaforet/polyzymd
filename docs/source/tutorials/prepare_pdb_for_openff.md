@@ -30,8 +30,9 @@ The intended final enzyme file has:
 - no crystallographic waters
 - no second enzyme copy
 - explicit hydrogens
-- successful `openff.toolkit.Topology.from_pdb()` validation after required
-  residue and heavy-atom curation is complete
+- simple structural checks that pass before OpenFF chemistry assignment
+- successful `openff.toolkit.Topology.from_pdb()` validation after any required
+  upstream residue, atom, protonation, or connectivity curation is complete
 
 ```{important}
 PolyzyMD-prepared structures must use chain ID `A` for all protein residues.
@@ -209,8 +210,15 @@ def main() -> None:
     if "H" not in elements:
         raise SystemExit("Expected explicit hydrogens")
 
+    print("Structural PDB checks passed")
+    print(f"  Atom records use chains: {sorted(chains)}")
+    print(f"  TER records: {ter_count}")
+    print("  Crystallographic waters: absent")
+    print("  Explicit hydrogens: present")
+
+    print("Running OpenFF chemistry validation")
     Topology.from_pdb(str(PDB_PATH))
-    print("OpenFF accepted the prepared PDB")
+    print("OpenFF chemistry assignment succeeded")
 
 
 if __name__ == "__main__":
@@ -220,14 +228,24 @@ if __name__ == "__main__":
 Expected success for a fully curated input is:
 
 ```text
-OpenFF accepted the prepared PDB
+Structural PDB checks passed
+  Atom records use chains: ['A']
+  TER records: 3
+  Crystallographic waters: absent
+  Explicit hydrogens: present
+Running OpenFF chemistry validation
+OpenFF chemistry assignment succeeded
 ```
 
 When this exact script is run on the uncurated raw 4CHA file, the chain, TER,
-water, and hydrogen checks pass, but OpenFF can still reject the file because the
-deposited coordinates include unresolved chemistry such as REMARK 465 missing
-residues. That failure is useful: it tells you to stop and provide a curated
-protein model before using PolyzyMD.
+water, and hydrogen checks pass, but OpenFF can still reject the file. In a
+collaborator reproduction, the mechanically prepared PDB had all atom records on
+chain `A`, three TER records, waters removed, the second enzyme copy removed, and
+hydrogens present, while OpenFF still reported chemistry errors around terminal
+CYS#0001 hydrogen and disulfide assignment and SER#0011. That failure is useful:
+it separates successful structural preparation from unsuccessful chemistry
+assignment and tells you to stop and provide a curated protein model before using
+PolyzyMD.
 
 If the chain, TER, water, or hydrogen checks fail, fix the preparation script or
 your file paths. If `Topology.from_pdb()` fails after those simple checks pass,
@@ -235,6 +253,35 @@ OpenFF is telling you that the file still has unresolved chemistry such as
 missing residues, missing heavy atoms, unsupported atom naming, or ambiguous
 connectivity. Resolve those issues in a curated input PDB before running
 PolyzyMD.
+
+## What curate upstream means
+
+OpenFF failures after the simple structural checks pass are chemistry-modeling
+problems in the enzyme input, not PolyzyMD configuration problems. Curating
+upstream means producing an externally inspected PDB whose residue templates,
+atom names, protonation states, coordinates, and connectivity are chemically
+consistent before PolyzyMD loads it.
+
+Common issues to inspect include:
+
+- terminal atom naming and terminal hydrogen counts
+- disulfide cysteine protonation and SG-SG connectivity
+- missing-coordinate fragments reported in the PDB header
+- missing heavy atoms in otherwise retained residues
+- biologically excised residues that should remain absent, with TER records kept
+  between the mature fragments
+
+Possible curation paths include manual editing and inspection in PyMOL or
+ChimeraX, deliberate PDBFixer use with careful review of every modeled atom,
+Amber-oriented cleanup with `pdb4amber`, or rebuilding missing structural regions
+with tools such as MODELLER, AlphaFold, or SWISS-MODEL when that is scientifically
+appropriate. These are external modeling decisions. PolyzyMD should receive the
+curated result; do not ask PolyzyMD or this preparation script to infer missing
+heavy atoms or missing residues automatically.
+
+After curation, preserve the PolyzyMD conventions from this tutorial: all protein
+atom records use chain `A`, and TER records remain between disconnected protein
+fragments.
 
 ## Use the validated PDB in PolyzyMD
 
@@ -252,6 +299,14 @@ Then run the normal PolyzyMD config and build checks:
 ```bash
 pixi run -e build polyzymd validate -c config.yaml
 pixi run -e build polyzymd build -c config.yaml --dry-run
+```
+
+```{warning}
+These commands check PolyzyMD configuration and planned build inputs. They do not
+prove that OpenFF can assign enzyme chemistry from the PDB. A config validation
+and dry-run build can pass even when a real build later fails while loading the
+enzyme. Use the OpenFF validation snippet above, or a real PolyzyMD build/load,
+to confirm OpenFF chemistry validity.
 ```
 
 ## Why not just run `polyzymd clean-pdb`?
