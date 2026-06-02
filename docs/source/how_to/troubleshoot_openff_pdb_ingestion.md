@@ -1,0 +1,182 @@
+# Troubleshoot OpenFF PDB ingestion
+
+Use this guide when a PolyzyMD build fails while OpenFF loads an enzyme PDB, or
+when direct `openff.toolkit.Topology.from_pdb()` validation fails.
+
+```{important}
+Do not bypass a charge mismatch or monkeypatch OpenFF to continue. OpenFF is
+reporting that the PDB chemistry it inferred does not match a supported residue
+graph. Fix or curate the structure first.
+```
+
+## Quick triage
+
+1. Reproduce the failure outside PolyzyMD.
+2. Run simple structural checks on the PDB.
+3. Read the OpenFF error dump for the residue names, atom names, and charges it
+   expected versus found.
+4. Fix the PDB upstream, or use a documented narrow proof of concept only when
+   the user accepts the caveat.
+5. Add newly diagnosed error signatures to the durable error catalog.
+
+## Check the structure first
+
+Use a small script or text inspection to answer these questions. Some checks are
+OpenFF chemistry checks; chain-ID checks are PolyzyMD input conventions that keep
+protein, substrate, polymer, and solvent roles unambiguous later in the build.
+
+- Do protein atom records use PolyzyMD chain `A`?
+- Are substrate, polymer, and solvent chains kept out of the enzyme PDB or placed
+  on the expected chains `B`, `C`, and `D+` when relevant?
+- Are TER records present between disconnected protein fragments?
+- Are crystallographic waters and unrelated heterogens removed from the enzyme
+  PDB unless intentionally retained elsewhere?
+- Are hydrogens explicit?
+- Do PDB header records report missing residues or missing heavy atoms?
+- Do disulfide cysteines have SG-SG connectivity and no SG-bound HG proton?
+
+Example quick check:
+
+```python
+import argparse
+from pathlib import Path
+
+
+def summarize_pdb(path: str) -> None:
+    lines = Path(path).read_text().splitlines()
+    atoms = [line for line in lines if line.startswith(("ATOM", "HETATM"))]
+    chains = sorted({line[21] for line in atoms})
+    residues = sorted({line[17:20].strip() for line in atoms})
+    elements = {line[76:78].strip() for line in atoms if len(line) >= 78}
+    print(f"chains: {chains}")
+    print(f"TER records: {sum(line.startswith('TER') for line in lines)}")
+    print(f"hydrogens present: {'H' in elements}")
+    print(f"residue names include CYX: {'CYX' in residues}")
+    print(f"SSBOND records: {sum(line.startswith('SSBOND') for line in lines)}")
+    print(f"CONECT records: {sum(line.startswith('CONECT') for line in lines)}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Summarize a PDB before OpenFF validation")
+    parser.add_argument("pdb", help="Prepared enzyme PDB to inspect")
+    args = parser.parse_args()
+    summarize_pdb(args.pdb)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+## Validate directly with OpenFF
+
+Run direct validation before editing PolyzyMD configuration:
+
+```python
+import argparse
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Validate PDB ingestion with OpenFF")
+    parser.add_argument("pdb", help="Prepared enzyme PDB to validate")
+    args = parser.parse_args()
+
+    from openff.toolkit import Topology
+
+    Topology.from_pdb(args.pdb)
+    print("OpenFF PDB ingestion succeeded")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+With pixi:
+
+```bash
+pixi run -e build python validate_openff.py prepared_enzyme.pdb
+```
+
+If direct validation fails, the problem is in the PDB chemistry OpenFF sees. A
+passing `polyzymd validate` or `polyzymd build --dry-run` does not prove OpenFF
+can ingest the enzyme PDB.
+
+## Interpret OpenFF error dumps
+
+OpenFF PDB errors often include a residue-level description of atoms, bonds, and
+charges. Focus on:
+
+- the first residue name and number mentioned in the mismatch
+- unexpected hydrogens on terminal atoms or cysteine SG atoms
+- residues OpenFF matched as a different protonation or connectivity state
+- formal-charge totals that differ between the PDB graph and the template
+- nearby TER records, SSBOND records, and CONECT records
+
+Do not delete atoms just to make the message disappear. Make a chemically
+consistent model and validate it again.
+
+## Common signatures
+
+| Error signature | Likely cause | Diagnostic | Acceptable fix | Caveats |
+|---|---|---|---|---|
+| `Molecule has more/fewer total formal charges than the matched substructure` | Residue graph, hydrogens, termini, or disulfide state differs from OpenFF's matched template | Inspect the named residue's hydrogens, bonds, and neighboring TER/SSBOND/CONECT records | Correct protonation/connectivity or use a reviewed custom substructure proof of concept | Never ignore the mismatch |
+| Failure around `CYS#0001`, terminal `H`, or N-terminal cysteine | N-terminal cysteine/cystine has terminal hydrogens and disulfide state OpenFF does not match cleanly | Check N-terminal atom names, SG-HG absence, and SG-SG bond | Curate the terminal cystine or use a narrow `NCYX` custom substructure proof of concept | Private OpenFF API; not universal |
+| Residue names include `CYX`, but OpenFF still fails | `CYX` may be treated as a cysteine alias, not a complete public template solution | Compare residue atoms and SG-SG connectivity | Add/verify disulfide connectivity and hydrogens; consider upstream issue/PR | Do not assume renaming to CYX is sufficient |
+| Failure near residues reported in `REMARK 465` | Missing-coordinate residues or missing heavy atoms affect chemistry or termini | Read PDB header and visualize gaps | Model missing regions with an external tool when scientifically appropriate | PolyzyMD should receive a curated result |
+
+## Disulfides
+
+For each disulfide:
+
+1. Confirm the paired cysteine SG atoms are close and intentionally bonded.
+2. Remove inappropriate SG-bound `HG` protons from disulfide cysteines.
+3. Preserve or add reliable connectivity records. `SSBOND` is useful metadata;
+   `CONECT` can make the actual SG-SG bond explicit for parser paths that use it.
+4. Validate again with `Topology.from_pdb()`.
+
+## Termini and hydrogen naming
+
+Terminal residues combine residue chemistry with chain-fragment state. A mature
+protein can have multiple TER-separated fragments, each with termini. Verify that
+terminal hydrogens and atom names match the intended protonation state. This is
+especially important for N-terminal cystines.
+
+## Missing residues and heavy atoms
+
+`REMARK 465` and related header records are not instructions to auto-fill a PDB.
+They are warnings that the deposited model is incomplete. Decide whether to model
+missing residues or heavy atoms with external tools such as PDBFixer, MODELLER,
+SWISS-MODEL, AlphaFold-derived models, ChimeraX, or PyMOL workflows, then review
+the result before passing it to PolyzyMD.
+
+## Charge mismatch
+
+Treat charge mismatch as a blocker. It means OpenFF's inferred molecule and the
+matched substructure disagree. The fix is to make the residue graph, atom names,
+bonds, hydrogens, and protonation state consistent, not to suppress the error.
+
+## 4CHA case study
+
+The 4CHA alpha-chymotrypsin preparation can pass structural checks after selecting
+one enzyme copy, relabeling protein atoms to chain `A`, preserving TER records,
+removing waters, and adding hydrogens. Direct OpenFF validation may still fail
+around the N-terminal cystine and nearby residues. That failure separates PDB
+cleanup from chemistry assignment.
+
+See `examples/pdb_preparation/4cha/` for proof-of-concept scripts, including an
+`NCYX` custom substructure example. The `_custom_substructures` argument is a
+private OpenFF API, so this example is evidence for a targeted workaround or
+upstream contribution, not a production-ready universal preparation method.
+
+## Keep the error catalog current
+
+When you diagnose a new OpenFF PDB ingestion error, update this page and
+{doc}`../reference/openff_pdb_ingestion` before marking the task complete. Add:
+
+- exact error text or shortest unique traceback excerpt
+- likely cause
+- diagnostic snippet or command
+- acceptable fix
+- caveats, especially private APIs or structure-specific assumptions
+
+If the user explicitly defers the update, record that deferral in your final
+response.

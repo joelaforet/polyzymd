@@ -259,6 +259,11 @@ missing residues, missing heavy atoms, unsupported atom naming, or ambiguous
 connectivity. Resolve those issues in a curated input PDB before running
 PolyzyMD.
 
+For task-oriented debugging steps, see
+{doc}`../how_to/troubleshoot_openff_pdb_ingestion`. For lookup details on known
+signatures, disulfides, charge diagnostics, and custom-substructure JSON shape,
+see {doc}`../reference/openff_pdb_ingestion`.
+
 ## What curate upstream means
 
 OpenFF failures after the simple structural checks pass are chemistry-modeling
@@ -322,3 +327,7 @@ simulate, removing unwanted molecules, preserving fragment boundaries, assigning
 PolyzyMD chain IDs, or modeling missing residues and heavy atoms. Use it only
 when those scientific decisions have already been made and the input is already
 close to simulation-ready.
+
+If OpenFF ingestion fails after cleanup, continue with the dedicated
+troubleshooting guide rather than assuming the cleanup command can guarantee
+chemistry assignment: {doc}`../how_to/troubleshoot_openff_pdb_ingestion`.

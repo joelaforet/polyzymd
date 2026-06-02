@@ -79,6 +79,10 @@ implementation to private `_framework/` modules such as `compare.py`,
 ## Key Patterns
 
 - **Chain convention:** A=protein, B=substrate, C=polymer, D+=solvent
+- **OpenFF PDB ingestion:** New diagnosed protein/PDB ingestion failures must be
+  documented in `docs/source/how_to/troubleshoot_openff_pdb_ingestion.md` and
+  `docs/source/reference/openff_pdb_ingestion.md` before the task is closed,
+  unless the user explicitly defers the durable documentation update.
 - **Factory pattern:** `ClassName.from_config(config)` or `ClassName.from_yaml(path)`
 - **Lazy imports:** Heavy deps (OpenMM, MDAnalysis) imported inside functions/methods
 - **ABC + Strategy:** `ContactCriteria`, `MolecularSelector`, `MoleculeCharger`
@@ -202,4 +206,5 @@ See `.opencode/instructions/` for detailed rules on specific topics:
 - `testing.md` — test infrastructure, running tests, writing new tests
 - `analysis-module.md` — analysis plugin system patterns and contracts
 - `documentation.md` — Sphinx/MyST conventions, API docs, zero-warning build gate, `:no-index:` rules
+- `openff-pdb-ingestion.md` — OpenFF protein/PDB ingestion troubleshooting and living error-log rules
 - `known-issues.md` — detailed bug descriptions and workarounds

@@ -16,7 +16,14 @@ basics.
 :link: polymers
 :link-type: doc
 
-Add polymers, restraints, equilibration stages, or export to GROMACS.
+Add polymers, prepare inputs, configure restraints, or export to GROMACS.
+:::
+
+:::{grid-item-card} Build Input Troubleshooting
+:link: troubleshoot_openff_pdb_ingestion
+:link-type: doc
+
+Diagnose OpenFF PDB ingestion failures before running a PolyzyMD build.
 :::
 
 :::{grid-item-card} Analysis Workflows
@@ -42,15 +49,16 @@ Adjust themes, colors, and figure sizes for publication-quality output.
 
 ::::
 
-## Simulation Setup
+## Simulation Setup & Input Preparation
 
-Build and configure your enzyme-polymer conjugate systems.
+Prepare build inputs and configure your enzyme-polymer conjugate systems.
 
 ```{toctree}
 :maxdepth: 1
 
 Add Polymers to a Simulation <polymers>
 Generate Polymers from SMILES <dynamic_polymers>
+Troubleshoot OpenFF PDB Ingestion <troubleshoot_openff_pdb_ingestion>
 Add Distance Restraints <restraints>
 Set Up Equilibration Stages <equilibration>
 Run GROMACS Simulations on HPC Clusters <gromacs_export>

@@ -25,6 +25,13 @@ All `polyzymd` commands, flags, and options.
 Every key in `config.yaml` — types, defaults, and constraints.
 :::
 
+:::{grid-item-card} PDB Input Requirements
+:link: openff_pdb_ingestion
+:link-type: doc
+
+OpenFF chemistry requirements and PolyzyMD chain conventions for enzyme PDBs.
+:::
+
 :::{grid-item-card} Analysis Plugin Reference
 :link: analysis_plugin_settings
 :link-type: doc
@@ -42,14 +49,22 @@ analysis.
 
 ::::
 
-## CLI, Configuration & Data
+## CLI & Configuration
 
 ```{toctree}
 :maxdepth: 1
 
 CLI Reference <cli_reference>
 Configuration Reference <configuration>
+```
+
+## Input Data & PDB Requirements
+
+```{toctree}
+:maxdepth: 1
+
 Data Requirements & Directory Layout <data_requirements>
+OpenFF PDB Ingestion Reference <openff_pdb_ingestion>
 Benchmarks <benchmarks>
 ```
 
