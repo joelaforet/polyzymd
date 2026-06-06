@@ -231,7 +231,7 @@ solvent:
     model: "tip3p"
   co_solvents:
     - name: "dmso"
-      volume_fraction: 0.30
+      mole_fraction: 0.10
       residue_name: "DMS"
   ions:
     neutralize: true

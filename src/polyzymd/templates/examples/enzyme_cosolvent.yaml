@@ -5,9 +5,9 @@
 # Useful for studying solvent effects on enzyme activity
 # ============================================================================
 
-name: "LipA_ResorufinButyrate_DMSO10"
+name: "LipA_ResorufinButyrate_DMSO10mol"
 engine: "openmm"
-description: "LipA enzyme with Resorufin-Butyrate in 10% DMSO co-solvent"
+description: "LipA enzyme with Resorufin-Butyrate in 10 mol% DMSO co-solvent"
 
 # ============================================================================
 # Enzyme Configuration
@@ -44,7 +44,7 @@ solvent:
   co_solvents:
     - name: "dmso"
       smiles: "CS(=O)C"  # DMSO SMILES
-      volume_fraction: 0.10  # 10% v/v DMSO
+      mole_fraction: 0.10  # 10 mol% DMSO
       residue_name: "DMS"
   
   ions:

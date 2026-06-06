@@ -101,9 +101,9 @@ yaml.scanner.ScannerError: mapping values are not allowed here
 ```
 Build failed: 3 validation errors for SimulationConfig
 solvent.co_solvents.0
-  Value error, Co-solvent 'dmso': Must specify either 'volume_fraction' or 'concentration'
+  Value error, Co-solvent 'dmso': Must specify either 'mole_fraction' or 'concentration'
 solvent.co_solvents.1.name
-  Field required [type=missing, input_value={'volume_fraction': 0.5}, input_type=dict]
+  Field required [type=missing, input_value={'mole_fraction': 0.1}, input_type=dict]
 solvent.co_solvents.2.name
   Field required [type=missing, input_value={'residue_name': 'DMS'}, input_type=dict]
 ```
@@ -114,7 +114,7 @@ solvent.co_solvents.2.name
 ```yaml
 co_solvents:
   - name: "dmso"
-  - volume_fraction: 0.5
+  - mole_fraction: 0.1
   - residue_name: "DMS"
 ```
 
@@ -122,7 +122,7 @@ co_solvents:
 ```yaml
 co_solvents:
   - name: "dmso"
-    volume_fraction: 0.5
+    mole_fraction: 0.1
     residue_name: "DMS"
 ```
 

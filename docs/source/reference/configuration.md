@@ -225,43 +225,44 @@ solvent:
 
 ### Co-solvents
 
-PolyzyMD supports adding co-solvents to your simulation system. You can specify co-solvents using either **volume fraction** (v/v) or **molar concentration**.
+PolyzyMD supports adding co-solvents to your simulation system. You can specify co-solvents using either **mole fraction** or **molar concentration**.
 
 #### Specification Methods
 
 | Method | Field | Description | Effect on Water |
 |--------|-------|-------------|-----------------|
-| Volume Fraction | `volume_fraction` | Fraction of box volume (0-1) | Reduces water proportionally |
+| Mole Fraction | `mole_fraction` | Fraction of neutral solvent molecules (0-1) | Replaces water in the neutral solvent mixture |
 | Concentration | `concentration` | Molar concentration (mol/L) | Additive (water unchanged) |
 
-**Important:** Use exactly ONE method per co-solvent. Do not specify both `volume_fraction` and `concentration` for the same co-solvent.
+**Important:** Use exactly ONE method per co-solvent. Do not specify both `mole_fraction` and `concentration` for the same co-solvent. The previous `volume_fraction` key has been removed and is rejected instead of converted automatically.
 
-#### Volume Fraction Method
+#### Mole Fraction Method
 
-Use this when you want a specific percentage of the solvent to be the co-solvent (e.g., "30% DMSO").
+Use this when you want a specific molecule fraction of the neutral solvent mixture to be the co-solvent (e.g., "10 mol% DMSO").
 
 ```yaml
 co_solvents:
   - name: "dmso"
-    volume_fraction: 0.30    # 30% v/v DMSO
+    mole_fraction: 0.10      # 10 mol% DMSO
 ```
 
 **Formula:**
 
 ```
-n = (V_box × phi × rho) / M
+x_water = 1 - sum(x_i)
+M_avg   = x_water × M_water + sum(x_i × M_i)
+N_total = neutral_solvent_mass / M_avg
+n_i     = x_i × N_total
+n_water = N_total - sum(n_i)
 
 Where:
-  n     = number of co-solvent molecules
-  V_box = simulation box volume (L)
-  phi   = volume fraction (e.g., 0.30 for 30%)
-  rho   = co-solvent density (g/mL)
-  M     = molar mass (g/mol)
+  x_i   = mole fraction for co-solvent i
+  M_i   = molecular mass for co-solvent i
 ```
 
-**Source:** [`src/polyzymd/builders/solvent.py:267-287`](https://github.com/joelaforet/polyzymd/blob/main/src/polyzymd/builders/solvent.py#L267-L287)
+**Source:** [`src/polyzymd/builders/solvent.py`](https://github.com/joelaforet/polyzymd/blob/main/src/polyzymd/builders/solvent.py)
 
-The water count is reduced proportionally: if you specify 30% DMSO, water fills the remaining 70% of the box.
+Mole-fraction co-solvents replace water in the neutral solvent mass budget. If you specify 10 mol% DMSO, DMSO molecules account for about 10% of neutral solvent molecules after rounding.
 
 #### Concentration Method
 
@@ -282,16 +283,16 @@ Where:
   n     = number of co-solvent molecules
   C     = concentration (mol/L)
   V_box = simulation box volume (L)
-  N_A   = Avogadro's number (implicit in OpenMM)
+  N_A   = Avogadro's number
 ```
 
-**Source:** [`src/polyzymd/builders/solvent.py:295-312`](https://github.com/joelaforet/polyzymd/blob/main/src/polyzymd/builders/solvent.py#L295-L312)
+**Source:** [`src/polyzymd/builders/solvent.py`](https://github.com/joelaforet/polyzymd/blob/main/src/polyzymd/builders/solvent.py)
 
 The water count is NOT reduced when using concentration. The co-solvent molecules are added to the existing water, which may slightly increase the effective density.
 
 #### Built-in Co-solvent Library
 
-PolyzyMD includes a library of common co-solvents with pre-defined SMILES and densities. Density values are sourced from [PubChem](https://pubchem.ncbi.nlm.nih.gov/), a public database of chemical compounds. Each compound has a unique Compound Identification Number (CID) that can be used to look up detailed information including density, structure, and safety data.
+PolyzyMD includes a library of common co-solvents with pre-defined SMILES and densities. Density values are retained as metadata and are sourced from [PubChem](https://pubchem.ncbi.nlm.nih.gov/), a public database of chemical compounds. Each compound has a unique Compound Identification Number (CID) that can be used to look up detailed information including density, structure, and safety data.
 
 | Name | SMILES | Density (g/mL) | Reference |
 |------|--------|----------------|-----------|
@@ -308,25 +309,24 @@ PolyzyMD includes a library of common co-solvents with pre-defined SMILES and de
 | `dioxane` | `C1COCCO1` | 1.033 | [CID 31275](https://pubchem.ncbi.nlm.nih.gov/compound/31275) |
 | `ethylene_glycol` | `C(CO)O` | 1.114 | [CID 174](https://pubchem.ncbi.nlm.nih.gov/compound/174) |
 
-For library co-solvents, you only need to specify the `name` and either `volume_fraction` or `concentration`:
+For library co-solvents, you only need to specify the `name` and either `mole_fraction` or `concentration`:
 
 ```yaml
 co_solvents:
   - name: "dmso"
-    volume_fraction: 0.10    # 10% v/v DMSO - smiles and density auto-populated
+    mole_fraction: 0.10      # 10 mol% DMSO - smiles auto-populated
 ```
 
 #### Custom Co-solvents
 
-For molecules not in the library, you must provide the SMILES string. Density is required only when using `volume_fraction`:
+For molecules not in the library, you must provide the SMILES string:
 
 ```yaml
 co_solvents:
-  # Custom co-solvent with volume fraction (density required)
+  # Custom co-solvent with mole fraction
   - name: "ethyl_acetate"
     smiles: "CCOC(=O)C"
-    density: 0.902           # g/mL - required for volume_fraction
-    volume_fraction: 0.15
+    mole_fraction: 0.05
 
   # Custom co-solvent with concentration (density not needed)
   - name: "my_additive"
@@ -341,12 +341,12 @@ You can combine multiple co-solvents. Each can use either specification method i
 ```yaml
 co_solvents:
   - name: "dmso"
-    volume_fraction: 0.20    # 20% v/v DMSO
+    mole_fraction: 0.10      # 10 mol% DMSO
   - name: "urea"
     concentration: 1.0       # Plus 1 M urea
 ```
 
-**Warning:** When using multiple co-solvents with `volume_fraction`, ensure the total does not exceed 1.0 (100%). The remaining fraction is filled with water.
+**Warning:** When using multiple co-solvents with `mole_fraction`, ensure the total is less than 1.0 (100%). The remaining mole fraction is filled with water.
 
 ```{warning}
 **YAML List Syntax**
@@ -357,7 +357,7 @@ A common mistake is placing each field on a separate line with its own `-`, whic
 ~~~yaml
 co_solvents:
   - name: "dmso"
-  - volume_fraction: 0.30
+  - mole_fraction: 0.10
   - residue_name: "DMS"
 ~~~
 
@@ -365,7 +365,7 @@ co_solvents:
 ~~~yaml
 co_solvents:
   - name: "dmso"
-    volume_fraction: 0.30
+    mole_fraction: 0.10
     residue_name: "DMS"
 ~~~
 
@@ -374,7 +374,7 @@ The `-` character starts a **new list item**. All fields belonging to the same i
 
 #### Assumptions and Limitations
 
-- **Ideal mixing:** Volume fractions assume ideal mixing (volumes are additive). Real solutions may deviate.
+- **Ideal composition:** Mole fractions are converted to molecule counts by a weighted average molar mass. Real solutions may deviate from ideal density behavior.
 - **Room temperature densities:** Library densities are approximate values at ~25C.
 - **PACKMOL placement:** Co-solvent molecules are placed randomly by PACKMOL and may require equilibration to achieve uniform distribution.
 
