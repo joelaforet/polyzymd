@@ -82,7 +82,7 @@ solvent:
     model: "tip3p"
   co_solvents:
     - name: "formamide"
-      volume_fraction: 0.10
+      mole_fraction: 0.05
 ```
 
 Then verify the build path:

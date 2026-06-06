@@ -412,22 +412,14 @@ class PolymerConfig(BaseModel):
 class CoSolventSpec(BaseModel):
     """Specification for a co-solvent component.
 
-    You must specify EITHER volume_fraction OR concentration, not both.
+    You must specify either ``mole_fraction`` or ``concentration``, not both.
 
     For co-solvents in the built-in library (dmso, dmf, urea, ethanol, etc.),
     you can omit the smiles and density fields - they will be looked up
     automatically.
 
-    Attributes:
-        name: Identifier for the co-solvent (e.g., "dmso")
-        smiles: SMILES string (optional if co-solvent is in library)
-        volume_fraction: Volume fraction (0-1), e.g., 0.30 for 30% v/v
-        concentration: Molar concentration (mol/L)
-        density: Density in g/mL (required for volume_fraction with custom molecules)
-        residue_name: 3-letter residue name (default: first 3 chars of name)
-
-    Example (library co-solvent with volume fraction):
-        >>> CoSolventSpec(name="dmso", volume_fraction=0.30)
+    Example (library co-solvent with mole fraction):
+        >>> CoSolventSpec(name="dmso", mole_fraction=0.10)
 
     Example (library co-solvent with concentration):
         >>> CoSolventSpec(name="urea", concentration=2.0)
@@ -436,51 +428,62 @@ class CoSolventSpec(BaseModel):
         >>> CoSolventSpec(
         ...     name="my_solvent",
         ...     smiles="CCOC(=O)C",
-        ...     density=0.902,
-        ...     volume_fraction=0.15
+        ...     mole_fraction=0.05
         ... )
     """
 
     name: str = Field(..., description="Co-solvent identifier")
     smiles: str | None = Field(None, description="SMILES string (optional if in library)")
 
-    # Specification method 1: Volume fraction
-    volume_fraction: float | None = Field(
+    # Specification method 1: Mole fraction
+    mole_fraction: float | None = Field(
         None,
         gt=0.0,
         lt=1.0,
-        description="Volume fraction (0-1), e.g., 0.30 for 30% v/v",
+        description="Mole fraction (0-1), e.g., 0.10 for 10 mol%",
     )
 
     # Specification method 2: Molar concentration
     concentration: float | None = Field(None, gt=0.0, description="Molar concentration (mol/L)")
 
-    # Physical property for volume fraction calculation
+    # Optional physical property for library metadata
     density: float | None = Field(
         None,
         gt=0.0,
-        description="Density in g/mL (required for volume_fraction with custom molecules)",
+        description="Optional density in g/mL for co-solvent metadata",
     )
 
     residue_name: str | None = Field(None, max_length=3, description="Residue name")
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_volume_fraction(cls, data: Any) -> Any:
+        """Reject removed volume-fraction configuration keys."""
+        if isinstance(data, dict) and "volume_fraction" in data:
+            raise ValueError(
+                "Co-solvent 'volume_fraction' has been removed. Use 'mole_fraction' "
+                "for solvent mole fractions or 'concentration' for molarity; values are "
+                "not converted automatically."
+            )
+        return data
 
     @model_validator(mode="after")
     def validate_and_populate(self) -> "CoSolventSpec":
         """Validate specification and populate missing fields from library."""
         from polyzymd.data.cosolvent_library import get_cosolvent
 
-        # Check that exactly one of volume_fraction or concentration is specified
-        has_vf = self.volume_fraction is not None
+        # Check that exactly one composition method is specified
+        has_mole_fraction = self.mole_fraction is not None
         has_conc = self.concentration is not None
 
-        if not has_vf and not has_conc:
+        if not has_mole_fraction and not has_conc:
             raise ValueError(
-                f"Co-solvent '{self.name}': Must specify either 'volume_fraction' "
+                f"Co-solvent '{self.name}': Must specify either 'mole_fraction' "
                 f"or 'concentration'"
             )
-        if has_vf and has_conc:
+        if has_mole_fraction and has_conc:
             raise ValueError(
-                f"Co-solvent '{self.name}': Cannot specify both 'volume_fraction' "
+                f"Co-solvent '{self.name}': Cannot specify both 'mole_fraction' "
                 f"and 'concentration' - choose one"
             )
 
@@ -496,15 +499,9 @@ class CoSolventSpec(BaseModel):
                     f"Co-solvent '{self.name}' not in library. Please provide 'smiles' field."
                 )
 
-        # For volume_fraction, we need density
-        if has_vf and self.density is None:
-            if library_data:
-                object.__setattr__(self, "density", library_data.density)
-            else:
-                raise ValueError(
-                    f"Co-solvent '{self.name}' not in library. "
-                    f"Please provide 'density' field (g/mL) for volume_fraction calculation."
-                )
+        # Preserve library density as metadata when available
+        if self.density is None and library_data:
+            object.__setattr__(self, "density", library_data.density)
 
         # Set default residue name
         if self.residue_name is None:
@@ -558,14 +555,7 @@ class BoxConfig(BaseModel):
 
 
 class SolventConfig(BaseModel):
-    """Complete solvent configuration.
-
-    Attributes:
-        primary: Primary solvent settings
-        co_solvents: List of co-solvent specifications
-        ions: Ion configuration
-        box: Box geometry settings
-    """
+    """Complete solvent configuration."""
 
     primary: PrimarySolventConfig = Field(
         default_factory=PrimarySolventConfig, description="Primary solvent"
@@ -575,11 +565,11 @@ class SolventConfig(BaseModel):
     box: BoxConfig = Field(default_factory=BoxConfig, description="Box settings")
 
     @model_validator(mode="after")
-    def validate_volume_fractions(self) -> "SolventConfig":
-        """Ensure co-solvent volume fractions don't exceed 1.0."""
-        total = sum(cs.volume_fraction for cs in self.co_solvents if cs.volume_fraction is not None)
+    def validate_mole_fractions(self) -> "SolventConfig":
+        """Ensure co-solvent mole fractions leave room for water."""
+        total = sum(cs.mole_fraction for cs in self.co_solvents if cs.mole_fraction is not None)
         if total >= 1.0:
-            raise ValueError(f"Total co-solvent volume fraction must be < 1.0, got {total}")
+            raise ValueError(f"Total co-solvent mole fraction must be < 1.0, got {total}")
         return self
 
 
@@ -1482,8 +1472,8 @@ class SimulationConfig(BaseModel):
 
         # Include co-solvent info
         for cosolvent in self.solvent.co_solvents:
-            if cosolvent.volume_fraction is not None:
-                statepoint[f"cosolvent_{cosolvent.name}_fraction"] = cosolvent.volume_fraction
+            if cosolvent.mole_fraction is not None:
+                statepoint[f"cosolvent_{cosolvent.name}_mole_fraction"] = cosolvent.mole_fraction
             elif cosolvent.concentration is not None:
                 statepoint[f"cosolvent_{cosolvent.name}_molarity"] = cosolvent.concentration
 

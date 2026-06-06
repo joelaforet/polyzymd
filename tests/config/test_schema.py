@@ -157,57 +157,70 @@ class TestConfigValidation:
         assert config.nacl_concentration == 0.0
 
 
-class TestCoSolventVolumeValidation:
-    """Test co-solvent volume fraction / concentration validation."""
+class TestCoSolventCompositionValidation:
+    """Test co-solvent mole fraction and concentration validation."""
 
     def test_concentration_cosolvent_does_not_crash_validator(self):
-        """Concentration-based co-solvents must not crash validate_volume_fractions.
-
-        Regression: sum() over volume_fraction raised TypeError when any
-        co-solvent used concentration (volume_fraction=None).
-        """
+        """Concentration-based co-solvents should validate without mole fractions."""
         from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
         config = SolventConfig(co_solvents=[CoSolventSpec(name="urea", concentration=2.0)])
         assert len(config.co_solvents) == 1
 
-    def test_mixed_volume_fraction_and_concentration_cosolvents(self):
-        """Mixed volume_fraction + concentration co-solvents should validate."""
+    def test_mixed_mole_fraction_and_concentration_cosolvents(self):
+        """Mixed mole_fraction and concentration co-solvents should validate."""
         from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
         config = SolventConfig(
             co_solvents=[
-                CoSolventSpec(name="dmso", volume_fraction=0.3),
+                CoSolventSpec(name="dmso", mole_fraction=0.3),
                 CoSolventSpec(name="urea", concentration=2.0),
             ]
         )
         assert len(config.co_solvents) == 2
 
-    def test_volume_fractions_exceeding_one_rejected(self):
-        """Total volume fractions >= 1.0 should still be rejected."""
+    def test_mole_fractions_exceeding_one_rejected(self):
+        """Total mole fractions >= 1.0 should be rejected."""
         from pydantic import ValidationError
 
         from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
-        with pytest.raises(ValidationError, match="volume fraction must be < 1.0"):
+        with pytest.raises(ValidationError, match="mole fraction must be < 1.0"):
             SolventConfig(
                 co_solvents=[
-                    CoSolventSpec(name="dmso", volume_fraction=0.6),
-                    CoSolventSpec(name="ethanol", volume_fraction=0.5),
+                    CoSolventSpec(name="dmso", mole_fraction=0.6),
+                    CoSolventSpec(name="ethanol", mole_fraction=0.5),
                 ]
             )
 
-    def test_volume_fractions_below_one_accepted(self):
-        """Total volume fractions < 1.0 should pass validation."""
+    def test_mole_fractions_below_one_accepted(self):
+        """Total mole fractions < 1.0 should pass validation."""
         from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
         config = SolventConfig(
             co_solvents=[
-                CoSolventSpec(name="dmso", volume_fraction=0.3),
-                CoSolventSpec(name="ethanol", volume_fraction=0.2),
+                CoSolventSpec(name="dmso", mole_fraction=0.3),
+                CoSolventSpec(name="ethanol", mole_fraction=0.2),
             ]
         )
         assert len(config.co_solvents) == 2
+
+    def test_volume_fraction_key_rejected_with_migration_error(self):
+        """Removed volume_fraction keys should fail with a migration message."""
+        from polyzymd.config.schema import CoSolventSpec
+
+        with pytest.raises(ValidationError, match="volume_fraction.*removed"):
+            CoSolventSpec(name="dmso", volume_fraction=0.3)
+
+    def test_exactly_one_composition_method_required(self):
+        """Each co-solvent should have exactly one composition method."""
+        from polyzymd.config.schema import CoSolventSpec
+
+        with pytest.raises(ValidationError, match="Must specify either 'mole_fraction'"):
+            CoSolventSpec(name="dmso")
+
+        with pytest.raises(ValidationError, match="Cannot specify both 'mole_fraction'"):
+            CoSolventSpec(name="dmso", mole_fraction=0.1, concentration=1.0)
 
 
 class TestSimulationPhasesConfig:
@@ -282,9 +295,9 @@ class TestSimulationPhasesConfig:
 
 class TestStatepointCoSolventExport:
     """to_statepoint must not crash when co-solvents use concentration instead
-    of volume_fraction."""
+    of mole_fraction."""
 
-    def _make_config(self, *, volume_fraction=None, concentration=None):
+    def _make_config(self, *, mole_fraction=None, concentration=None):
         """Build a minimal SimulationConfig with one co-solvent."""
         from unittest.mock import MagicMock
 
@@ -296,19 +309,19 @@ class TestStatepointCoSolventExport:
 
         cs = MagicMock()
         cs.name = "urea"
-        cs.volume_fraction = volume_fraction
+        cs.mole_fraction = mole_fraction
         cs.concentration = concentration
         config.solvent.co_solvents = [cs]
         return config
 
-    def test_volume_fraction_exported_as_fraction_key(self):
-        """volume_fraction co-solvent produces a _fraction key."""
+    def test_mole_fraction_exported_as_mole_fraction_key(self):
+        """mole_fraction co-solvent produces a _mole_fraction key."""
         from polyzymd.config.schema import SimulationConfig
 
         _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
-        cfg = self._make_config(volume_fraction=0.3)
+        cfg = self._make_config(mole_fraction=0.3)
         sp = _to_statepoint(cfg)
-        assert sp["cosolvent_urea_fraction"] == 0.3
+        assert sp["cosolvent_urea_mole_fraction"] == 0.3
         assert "cosolvent_urea_molarity" not in sp
 
     def test_concentration_exported_as_molarity_key(self):
@@ -319,10 +332,10 @@ class TestStatepointCoSolventExport:
         cfg = self._make_config(concentration=2.0)
         sp = _to_statepoint(cfg)
         assert sp["cosolvent_urea_molarity"] == 2.0
-        assert "cosolvent_urea_fraction" not in sp
+        assert "cosolvent_urea_mole_fraction" not in sp
 
-    def test_no_crash_with_none_volume_fraction(self):
-        """Previously crashed with TypeError when volume_fraction was None."""
+    def test_no_crash_with_none_mole_fraction(self):
+        """Concentration statepoints should allow no mole_fraction."""
         from polyzymd.config.schema import SimulationConfig
 
         _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
