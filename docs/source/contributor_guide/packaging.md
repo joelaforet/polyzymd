@@ -8,8 +8,8 @@ project is pixi-first, and what release automation expects from contributors.
 PolyzyMD uses standard Python packaging for metadata and distributions, but the
 full molecular-simulation stack is managed by pixi. A wheel can be built with
 `pyproject.toml`, but pip alone is not the recommended full install path because
-OpenMM, OpenFF, MDAnalysis, AmberTools, RDKit, PACKMOL, and related scientific
-packages are resolved most reliably from conda-forge.
+OpenMM, OpenFF, AmberTools, RDKit, PACKMOL, CUDA, and full simulation workflows
+are supported through conda-forge environments.
 
 For contributor and user workflows, prefer:
 
@@ -18,9 +18,17 @@ pixi install -e build
 pixi run -e build polyzymd --help
 ```
 
-Use pip-only installs only for package metadata checks, lightweight import
-checks, or release validation jobs that intentionally avoid the simulation
-stack.
+Use pip-only installs for package metadata checks, lightweight import checks,
+release validation jobs that intentionally avoid the simulation stack, and
+best-effort analysis-only workflows through the analysis extra:
+
+```bash
+pip install ".[analysis]"
+```
+
+The `analysis` extra may install MDAnalysis and MDTraj for trajectory-analysis
+workflows. Label those instructions as best-effort and analysis-only; use pixi
+for supported full-stack science and simulation workflows.
 
 ## Repository layout
 
@@ -118,9 +126,11 @@ pixi install -e cuda-12-6
 pixi shell -e cuda-12-6
 ```
 
-Heavy scientific dependencies must remain pixi-managed. Do not add OpenMM,
-OpenFF, MDAnalysis, AmberTools, PACKMOL, or RDKit installation instructions that
-ask contributors to install them into a system Python.
+Full-stack scientific dependencies must remain pixi-managed. Do not add OpenMM,
+OpenFF, AmberTools, PACKMOL, RDKit, CUDA, or full simulation-stack installation
+instructions that ask contributors to install them into a system Python.
+MDAnalysis and MDTraj pip instructions are acceptable only through the
+`.[analysis]` extra and must be labeled best-effort analysis-only.
 
 ## Lazy imports for heavy dependencies
 
@@ -200,6 +210,8 @@ For a normal version bump:
 
 - Keep `__init__.py` lightweight and preserve lazy imports.
 - Keep the full simulation stack in pixi environments.
+- Keep pip analysis-extra instructions clearly labeled as best-effort
+  analysis-only workflows.
 - Use `src/` layout conventions for new package modules.
 - Update docs, tests, CLI help, and configuration reference pages when behavior
   changes.

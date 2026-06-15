@@ -6,8 +6,8 @@ everything you need to get started.
 ## Setting Up Your Development Environment
 
 PolyzyMD uses [pixi](https://pixi.sh) for environment management. Pixi resolves
-OpenMM, OpenFF, MDAnalysis, and all other heavy dependencies from conda-forge
-with reproducible lockfiles.
+the full scientific and simulation stack from conda-forge with reproducible
+lockfiles.
 
 ```bash
 # 1. Install pixi (if you don't have it)
@@ -21,8 +21,11 @@ pixi shell -e build
 ```
 
 After `pixi shell`, the `polyzymd` CLI and all development tools are on your
-PATH. **Do not `pip install` OpenMM, MDAnalysis, or other simulation-stack
-packages outside the pixi environment.**
+PATH. Pixi/conda-forge is the recommended and supported route for full
+scientific, simulation, and CUDA workflows. A best-effort pip path is available
+for analysis-only workflows with `pip install "polyzymd[analysis]"`; that extra
+may install MDAnalysis and MDTraj. Do not use system-pip installs for OpenMM,
+OpenFF, AmberTools, RDKit, PACKMOL, CUDA, or full simulation-stack workflows.
 
 ## Code Quality Checks
 
