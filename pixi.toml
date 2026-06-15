@@ -5,8 +5,8 @@
 # ENVIRONMENTS
 # ------------
 #   build       — structure building, PDB prep, local use (no CUDA required)
-#   cuda-12-4   — CUDA 12.4 driver (e.g. CU Boulder Blanca): OpenMM 8.1
-#   cuda-12-6   — CUDA 12.6 driver (e.g. PSC Bridges2):      OpenMM 8.4
+#   cuda-12-4   — CUDA 12.4 driver (e.g. CU Boulder Blanca)
+#   cuda-12-6   — CUDA 12.6 driver (e.g. PSC Bridges2)
 #
 # HOW TO FIND YOUR CUDA VERSION
 # ------------------------------
@@ -55,8 +55,8 @@ platforms   = ["linux-64", "osx-64", "osx-arm64"]
 # imports (directly or transitively).
 # =============================================================================
 [feature.base.dependencies]
-python              = "3.11.*"
-numpy               = "1.26.*"       # pinned: OpenMM ABI-sensitive
+python              = "3.12.*"
+numpy               = ">=2.0,<3"
 pydantic            = ">=2.5"
 pyyaml              = ">=6.0"
 click               = ">=8.1"
@@ -82,7 +82,7 @@ openbabel           = ">=3.1"        # required at import time by polymerist.pol
 rdkit               = ">=2023.09"
 pdbfixer            = ">=1.9"        # conditional import in polyzymd
 packmol             = ">=20.0"       # called as subprocess by mbuild/polymerist
-ambertools          = ">=23.3"        # relaxed: 23.3 lacks py311 on osx-arm64
+ambertools          = ">=23.3"
 
 # PyTorch (required by openff-nagl)
 pytorch             = "2.6.*"
@@ -92,12 +92,13 @@ black = ">=23.0"
 ruff = ">=0.1"
 
 # Analysis stack (MDAnalysis, plotting, stats)
-mdanalysis          = ">=2.4"
-mdtraj              = ">=1.9"
-scikit-learn        = ">=1.0"
-pandas              = ">=2.0"
-matplotlib          = ">=3.5"
-seaborn             = ">=0.12"
+mdanalysis          = ">=2.8"
+mdtraj              = ">=1.10"
+scipy               = ">=1.13"
+scikit-learn        = ">=1.4"
+pandas              = ">=2.2"
+matplotlib          = ">=3.8"
+seaborn             = ">=0.13"
 
 # Documentation toolchain
 sphinx              = ">=6.0"
@@ -110,7 +111,7 @@ autodoc-pydantic    = ">=2.1"
 
 [feature.base.pypi-dependencies]
 polyzymd            = { path = ".", editable = true }
-polymerist          = ">=1.0.1"
+polymerist          = ">=1.1.0"
 # NOTE: espaloma-charge is intentionally excluded. polymerist eagerly imports
 # it at module level (_toolkits.py), which triggers a broken dgl -> graphbolt
 # import chain that crashes when dgl and PyTorch versions are mismatched.
@@ -125,7 +126,7 @@ polymerist          = ">=1.0.1"
 # Suitable for local use: PDB writing, system building, validation.
 # =============================================================================
 [feature.openmm-any.dependencies]
-openmm = ">=8.1,<8.5"
+openmm = ">=8.4,<8.5"
 
 
 # =============================================================================
@@ -140,10 +141,10 @@ twine        = ">=5.0"
 # =============================================================================
 # FEATURE: cuda-12-6
 # CUDA 12.6 driver — e.g. PSC Bridges2 (V100, sm_70)
-# OpenMM 8.4 is the tested version for this CUDA/GPU combination.
+# OpenMM 8.4-compatible builds are used for this CUDA/GPU combination.
 # =============================================================================
 [feature.cuda-12-6.target.linux-64.dependencies]
-openmm       = "=8.4.0"
+openmm       = ">=8.4,<8.5"
 cuda-version = "=12.6"
 
 [feature.cuda-12-6.system-requirements]
@@ -153,10 +154,10 @@ cuda = "12.6"
 # =============================================================================
 # FEATURE: cuda-12-4
 # CUDA 12.4 driver — e.g. CU Boulder Blanca
-# OpenMM 8.1 is the tested version for this CUDA/GPU combination.
+# OpenMM 8.4-compatible builds are used for this CUDA/GPU combination.
 # =============================================================================
 [feature.cuda-12-4.target.linux-64.dependencies]
-openmm       = "=8.1.2"
+openmm       = ">=8.4,<8.5"
 cuda-version = "=12.4"
 
 [feature.cuda-12-4.system-requirements]
@@ -191,7 +192,7 @@ clean-pdb     = { cmd = "polyzymd clean-pdb" }
 
 # --- CUDA 12.6 simulation tasks (e.g. PSC Bridges2) ---
 [feature.cuda-12-6.tasks]
-submit         = { cmd = "polyzymd submit",         description = "Submit SLURM jobs (OpenMM 8.4, CUDA 12.6)" }
+submit         = { cmd = "polyzymd submit",         description = "Submit SLURM jobs (CUDA 12.6)" }
 run-segment    = { cmd = "polyzymd run-segment",    description = "Run next simulation segment" }
 run            = { cmd = "polyzymd run --engine gromacs", description = "Run local simulation (select engine)" }
 recover        = { cmd = "polyzymd recover",         description = "Resume stalled simulation" }
@@ -199,7 +200,7 @@ check-progress = { cmd = "polyzymd check-progress", description = "Check simulat
 
 # --- CUDA 12.4 simulation tasks (e.g. CU Boulder Blanca) ---
 [feature.cuda-12-4.tasks]
-submit         = { cmd = "polyzymd submit",         description = "Submit SLURM jobs (OpenMM 8.1, CUDA 12.4)" }
+submit         = { cmd = "polyzymd submit",         description = "Submit SLURM jobs (CUDA 12.4)" }
 run-segment    = { cmd = "polyzymd run-segment",    description = "Run next simulation segment" }
 run            = { cmd = "polyzymd run --engine gromacs", description = "Run local simulation (select engine)" }
 recover        = { cmd = "polyzymd recover",         description = "Resume stalled simulation" }

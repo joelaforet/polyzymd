@@ -13,6 +13,9 @@ dropping a module or package in `analyses/` with no modifications to core code.
 
 ### Breaking Changes
 
+- **Python 3.12 is now required.**  Python 3.10 and 3.11 support has been
+  dropped for v1.3 and later.  Project metadata, CI, Read the Docs, legacy conda
+  environment files, and pixi environments now target Python 3.12 with NumPy 2.
 - **Scalar Measurement API removed.**  The obsolete alternate scalar
   measurement abstraction (`MetricSpec`, `CacheIdentity`, `Measurement`,
   `ScalarMeasurement`, and `ScalarMeasurementAnalysis`) was deleted now that
@@ -170,6 +173,11 @@ dropping a module or package in `analyses/` with no modifications to core code.
 
 ### Changed
 
+- **Scientific dependency stack updated for NumPy 2.**  Runtime metadata now
+  requires `numpy>=2,<3` with Python 3.12-compatible lower bounds for SciPy,
+  pandas, scikit-learn, matplotlib, seaborn, MDAnalysis, and MDTraj.  Pixi CUDA
+  environments retain separate CUDA 12.4 and CUDA 12.6 targets while using
+  Python 3.12-compatible OpenMM builds.
 - **Bundled v1.3 analyses are package-organized.**  Active bundled plugins live
   in `analyses/<name>/` with `__init__.py` (plugin class) and optional private
   modules (`_plotters.py`, `_results.py`, `_comparison_results.py`,

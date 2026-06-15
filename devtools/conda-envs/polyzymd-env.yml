@@ -2,7 +2,7 @@ name: polyzymd-env
 channels:
   - conda-forge
 dependencies:
-  - python=3.11
+  - python=3.12
   - pip
 
   # Testing
@@ -10,13 +10,15 @@ dependencies:
   - pytest-cov
 
   # Core simulation stack (must be conda)
-  - openmm>=8.0
+  - openmm>=8.4,<8.5
   - openff-toolkit>=0.16
-  - openff-interchange>=0.4
-  - openff-nagl>=0.3
+  - openff-interchange>=0.5
+  - openff-nagl>=0.4
   - openff-nagl-models
   - openff-forcefields
   - openff-units
+  - ambertools>=23.3
+  - rdkit>=2023.09
 
   # Molecule building (must be conda)
   - mbuild
@@ -24,12 +26,16 @@ dependencies:
   - packmol
 
   # MD trajectory analysis
-  - mdtraj
+  - mdanalysis>=2.8
+  - mdtraj>=1.10
 
   # Numerical/utility (conda)
-  - numpy
-  - scipy
-  - pandas
+  - numpy>=2.0,<3
+  - scipy>=1.13
+  - pandas>=2.2
+  - scikit-learn>=1.4
+  - matplotlib>=3.8
+  - seaborn>=0.13
   - networkx
   - pydantic>=2.0
   - pyyaml
@@ -39,6 +45,5 @@ dependencies:
 
   # Pip-only packages
   - pip:
-    - polymerist>=1.0.0
-    - rdkit
+    - polymerist>=1.1.0
     - biopandas

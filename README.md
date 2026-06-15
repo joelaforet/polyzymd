@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml"><img src="https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11-blue.svg" alt="Python 3.11"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python 3.12+"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
@@ -68,10 +68,10 @@ pixi shell -e build
 
 Pick the environment that matches your cluster's CUDA version:
 
-| Cluster | CUDA | Environment | OpenMM |
-|---------|------|-------------|--------|
-| CU Boulder Blanca | 12.4 | `cuda-12-4` | 8.1 |
-| PSC Bridges2 | 12.6 | `cuda-12-6` | 8.4 |
+| Cluster | CUDA | Environment |
+|---------|------|-------------|
+| CU Boulder Blanca | 12.4 | `cuda-12-4` |
+| PSC Bridges2 | 12.6 | `cuda-12-6` |
 
 ```bash
 # Example for Blanca:
@@ -153,7 +153,7 @@ PolyzyMD uses [pixi](https://pixi.sh) instead of conda/mamba. Key differences:
 - **No `conda activate`** — use `pixi shell -e <env>` instead
 - **No environment YAML** — `pixi.toml` + `pixi.lock` are the single source of truth
 - **Reproducible** — the lockfile pins every package to exact versions
-- **CUDA-aware** — each environment pins the correct CUDA and OpenMM versions
+- **CUDA-aware** — each environment pins the correct CUDA version
 
 | Environment | Use case | Requires GPU? |
 |-------------|----------|---------------|

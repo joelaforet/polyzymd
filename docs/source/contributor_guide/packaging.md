@@ -79,7 +79,7 @@ build-backend = "hatchling.build"
 [project]
 name = "polyzymd"
 version = "1.3.0"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 
 [project.scripts]
 polyzymd = "polyzymd.cli.main:main"
@@ -101,8 +101,8 @@ Current pixi environments are:
 | Environment | Use |
 |-------------|-----|
 | `build` | Local contributor environment with docs, tests, packaging tools, and flexible non-CUDA OpenMM. Use this for editing, docs, configuration, system-building checks, and most tests. |
-| `cuda-12-4` | Cluster/GPU workflow for systems whose driver supports CUDA 12.4, including OpenMM pinned for that stack. |
-| `cuda-12-6` | Cluster/GPU workflow for systems whose driver supports CUDA 12.6, including OpenMM pinned for that stack. |
+| `cuda-12-4` | Cluster/GPU workflow for systems whose driver supports CUDA 12.4. |
+| `cuda-12-6` | Cluster/GPU workflow for systems whose driver supports CUDA 12.6. |
 
 Install the local contributor environment with:
 
@@ -161,7 +161,7 @@ The main CI workflow runs on pushes and pull requests to `main` and `dev`.
 
 The full test workflow runs on pushes and pull requests to `main` and `dev`, on a
 weekly schedule, and by manual dispatch. It uses the pixi `build` environment on
-Ubuntu and macOS with Python 3.11, then runs:
+Ubuntu and macOS with Python 3.12, then runs:
 
 ```bash
 pixi run -e build pytest -v --cov=polyzymd --cov-report=xml --color=yes tests/

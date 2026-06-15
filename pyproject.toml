@@ -26,19 +26,19 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Chemistry",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 
 # =============================================================================
 # Core Dependencies
 # =============================================================================
 # NOTE: polyzymd is intended to be installed via pixi (see pixi.toml).
-# The dependencies below are listed for pip compatibility but many require
-# conda-forge packages that cannot be installed via pip alone.
+# The dependencies below are the lightweight pip-installable runtime subset.
+# Simulation packages such as OpenMM, OpenFF, AmberTools, RDKit, and PACKMOL
+# are managed by pixi/conda-forge and are not advertised as pip extras.
 #
 # Recommended installation:
 #   git clone <repo> && cd polyzymd
@@ -54,42 +54,28 @@ dependencies = [
     "jinja2>=3.1",
     
     # Utilities (these install cleanly via pip)
-    "numpy>=1.21.0,<2.0.0",  # Pin to 1.x for OpenMM compatibility
+    "numpy>=2.0,<3",
     "tqdm>=4.60.0",
     
     # Analysis
     "biopandas>=0.4.0",
-    "scipy>=1.9.0",
+    "scipy>=1.13",
 ]
 
 [project.optional-dependencies]
-# Core simulation packages - install via conda, listed here for documentation
-# These are NOT pip-installable in most cases
-simulation = [
-    "openmm>=8.0",
-    "openff-toolkit>=0.16.0",
-    "openff-interchange>=0.4.0",
-    "openff-units>=0.2.0",
-    "openff-nagl>=0.3.0",
-    "openff-forcefields>=2024.0.0",
-    "ambertools>=23.0",
-    "rdkit>=2024.0.0",
-    "packmol>=20.0",
-]
-
 # Analysis packages
 analysis = [
-    "mdanalysis>=2.4.0",
-    "mdtraj>=1.9.0",
-    "scikit-learn>=1.0.0",
-    "pandas>=2.0.0",
-    "matplotlib>=3.5.0",
-    "seaborn>=0.12.0",
+    "mdanalysis>=2.8.0",
+    "mdtraj>=1.10.0",
+    "scikit-learn>=1.4",
+    "pandas>=2.2",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
 ]
 
 # Polymer building (polymerist integration)
 polymers = [
-    "polymerist>=1.0.0",
+    "polymerist>=1.1.0",
     "networkx>=3.0",
     "anytree>=2.8.0",
 ]
@@ -139,10 +125,11 @@ include = [
 
 [tool.black]
 line-length = 100
-target-version = ["py310", "py311"]
+target-version = ["py312"]
 
 [tool.ruff]
 line-length = 100
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [
@@ -161,12 +148,12 @@ ignore = [
     "F821",  # undefined name (false positives from quoted type hints for forward refs)
     "B007",  # unused loop control variable (often intentional for clarity)
     "B904",  # raise without from (would require refactoring)
-    "B905",  # zip without strict (Python 3.10+ feature)
+    "B905",  # zip without strict (legacy code uses implicit truncation)
     "C414",  # unnecessary list() in sorted() (harmless)
 ]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
