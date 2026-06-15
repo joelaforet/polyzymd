@@ -82,7 +82,7 @@ openbabel           = ">=3.1"        # required at import time by polymerist.pol
 rdkit               = ">=2023.09"
 pdbfixer            = ">=1.9"        # conditional import in polyzymd
 packmol             = ">=20.0"       # called as subprocess by mbuild/polymerist
-ambertools          = ">=23.3"
+ambertools          = ">=24"
 
 # PyTorch (required by openff-nagl)
 pytorch             = "2.6.*"
