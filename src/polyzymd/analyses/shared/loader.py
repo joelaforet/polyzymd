@@ -215,6 +215,17 @@ def _context_allows_type_element(symbol: str, name: object, resname: object | No
         element.
     """
 
+    name_token = str(name).strip().upper()
+    name_symbol = _canonical_element_symbol(name_token)
+    residue = str(resname).strip().upper().rstrip("+-") if resname is not None else ""
+    if (
+        len(name_token) == 2
+        and name_symbol == symbol
+        and residue not in _STANDARD_BIOMOLECULAR_RESIDUES
+        and residue not in _COMMON_ION_ELEMENTS
+    ):
+        return True
+
     name_symbol = _infer_element_from_atom_name(name, resname)
     return name_symbol == symbol
 
@@ -301,6 +312,13 @@ def _infer_element_from_atom_name(name: object, resname: object | None = None) -
         return None
     if base_token in {"CL", "BR"}:
         return _canonical_element_symbol(base_token)
+    if (
+        len(base_token) == 2
+        and base_token == token
+        and residue not in _STANDARD_BIOMOLECULAR_RESIDUES
+        and _canonical_element_symbol(base_token)
+    ):
+        return None
     if (
         has_numeric_suffix
         and len(base_token) == 2

@@ -316,6 +316,67 @@ class TestUniverseElementEnrichment:
         assert metadata["applied"] is True
         assert universe.atoms.elements == [expected]
 
+    @pytest.mark.parametrize(
+        ("name", "atom_type", "resname", "expected", "first_letter"),
+        [
+            ("FE", "FE", "HEM", "Fe", "F"),
+            ("CU", "CU", "LIG", "Cu", "C"),
+            ("NI", "NI", "LIG", "Ni", "N"),
+        ],
+    )
+    def test_exact_type_name_nonstandard_metals_use_types(
+        self,
+        name: str,
+        atom_type: str,
+        resname: str,
+        expected: str,
+        first_letter: str,
+    ) -> None:
+        """Exact type/name metal tokens in nonstandard residues should use types."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=[name], types=[atom_type], resnames=[resname])
+        )
+
+        metadata = enrich_universe_elements(
+            universe, topology_key=f"metal-type-{name}-{atom_type}-{resname}.gro"
+        )
+
+        assert metadata["applied"] is True
+        assert metadata["source"] == "types"
+        assert universe.atoms.elements == [expected]
+        assert universe.atoms.elements != [first_letter]
+
+    @pytest.mark.parametrize(
+        ("name", "atom_type", "resname", "first_letter"),
+        [
+            ("FE", "XX", "HEM", "F"),
+            ("CU", "XX", "LIG", "C"),
+            ("NI", "XX", "LIG", "N"),
+        ],
+    )
+    def test_exact_name_only_nonstandard_metals_skip_enrichment(
+        self,
+        name: str,
+        atom_type: str,
+        resname: str,
+        first_letter: str,
+    ) -> None:
+        """Name-only metal tokens should not fall back to first letters."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=[name], types=[atom_type], resnames=[resname])
+        )
+
+        metadata = enrich_universe_elements(
+            universe, topology_key=f"metal-name-{name}-{atom_type}-{resname}.gro"
+        )
+
+        assert metadata["applied"] is False
+        assert metadata["source"] is None
+        assert not hasattr(universe.atoms, "elements")
+        assert getattr(universe.atoms, "elements", [None]) != [first_letter]
+
     def test_suffixed_chlorine_ligand_name_uses_halogen_context(self) -> None:
         """Suffixed chlorine names should not fall back to carbon."""
 
