@@ -298,6 +298,7 @@ Each entry in `runs`:
 | `allow_empty_groups` | bool | `true` | Allow empty group selections: `true` = warn and skip summaries when a group matches no atoms; `false` = raise error |
 | `allow_overlapping_composition` | bool | `false` | Whether overlapping composition partitions are allowed |
 | `composition` | mapping | `null` | Composition analysis settings |
+| `hydrogens_selection` | string | `null` | Advanced explicit-hydrogen selection override for unusual atom names |
 | `timestep_ps` | float | `null` | Override trajectory timestep in picoseconds for time-axis plots |
 
 Time-axis plots assume uniformly saved frames. PolyzyMD converts frame index to
@@ -314,9 +315,12 @@ Each summary entry in `summaries` has:
 
 For mapping-form input, keys are treated as `name` values.
 
-Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` with hydrogens
-selected as `(<group union>) and element H`; topologies need explicit hydrogens
-and usable element metadata.
+Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` and requires explicit
+hydrogens. PolyzyMD prefers `(<group union>) and (element H)`. For GRO-like
+topologies without MDAnalysis `elements`, PolyzyMD tries safe element inference
+from atom types or atom names; if elements remain unavailable, the plugin falls
+back to `(<group union>) and (name H* or name [123]H*)`. Set
+`hydrogens_selection` only for unusual explicit-hydrogen naming schemes.
 
 `composition` sub-fields:
 
