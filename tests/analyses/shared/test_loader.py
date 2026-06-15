@@ -316,6 +316,45 @@ class TestUniverseElementEnrichment:
         assert metadata["applied"] is True
         assert universe.atoms.elements == [expected]
 
+    def test_suffixed_chlorine_ligand_name_uses_halogen_context(self) -> None:
+        """Suffixed chlorine names should not fall back to carbon."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=["CL1"], types=["CL"], resnames=["LIG"])
+        )
+
+        metadata = enrich_universe_elements(universe, topology_key="ligand-cl1.gro")
+
+        assert metadata == {
+            "applied": True,
+            "source": "types",
+            "message": "elements inferred from atom types",
+        }
+        assert universe.atoms.elements == ["Cl"]
+
+    @pytest.mark.parametrize(
+        ("name", "atom_type"),
+        [("CA1", "CA"), ("NA1", "NA"), ("MG1", "MG"), ("ZN1", "ZN")],
+    )
+    def test_ambiguous_numeric_two_letter_ligand_names_skip_enrichment(
+        self,
+        name: str,
+        atom_type: str,
+    ) -> None:
+        """Ambiguous suffixed metal-like ligand names should not use first letters."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=[name], types=[atom_type], resnames=["LIG"])
+        )
+
+        metadata = enrich_universe_elements(
+            universe, topology_key=f"ambiguous-ligand-{name}-{atom_type}.gro"
+        )
+
+        assert metadata["applied"] is False
+        assert metadata["source"] is None
+        assert not hasattr(universe.atoms, "elements")
+
     @pytest.mark.parametrize(
         ("name", "atom_type", "resname"),
         [("NA", "NA", "CLA"), ("CAX", "CA", "CAL")],

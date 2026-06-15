@@ -90,6 +90,42 @@ _COMMON_ION_ELEMENTS = {
     "MN": "Mn",
 }
 _BIOMOLECULAR_NAME_PREFIX_ELEMENTS = {"C", "N", "O", "S", "P", "F", "I"}
+_STANDARD_BIOMOLECULAR_RESIDUES = {
+    "ALA",
+    "ARG",
+    "ASN",
+    "ASP",
+    "CYS",
+    "CYX",
+    "GLN",
+    "GLU",
+    "GLY",
+    "HID",
+    "HIE",
+    "HIP",
+    "HIS",
+    "ILE",
+    "LEU",
+    "LYS",
+    "MET",
+    "PHE",
+    "PRO",
+    "SER",
+    "THR",
+    "TRP",
+    "TYR",
+    "VAL",
+    "A",
+    "C",
+    "G",
+    "T",
+    "U",
+    "DA",
+    "DC",
+    "DG",
+    "DT",
+    "DU",
+}
 
 
 def _normalized_warning_path(path: Path) -> Path:
@@ -253,13 +289,24 @@ def _infer_element_from_atom_name(name: object, resname: object | None = None) -
     token = re.sub(r"^\d+", "", raw_name).upper()
     if not token:
         return None
+    base_token = re.sub(r"\d+$", "", token)
+    has_numeric_suffix = base_token != token
 
     residue = str(resname).strip().upper().rstrip("+-") if resname is not None else ""
     residue_element = _COMMON_ION_ELEMENTS.get(residue)
     if residue_element is not None:
-        name_element = _COMMON_ION_ELEMENTS.get(token)
+        name_element = _COMMON_ION_ELEMENTS.get(base_token)
         if name_element == residue_element:
             return name_element
+        return None
+    if base_token in {"CL", "BR"}:
+        return _canonical_element_symbol(base_token)
+    if (
+        has_numeric_suffix
+        and len(base_token) == 2
+        and residue not in _STANDARD_BIOMOLECULAR_RESIDUES
+        and _canonical_element_symbol(base_token)
+    ):
         return None
     if token in _COMMON_ION_ELEMENTS and token != "CA" and not residue:
         return _COMMON_ION_ELEMENTS[token]
