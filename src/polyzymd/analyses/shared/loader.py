@@ -160,8 +160,31 @@ def _canonical_element_symbol(value: object) -> str | None:
     return None
 
 
+def _context_allows_type_element(symbol: str, name: object, resname: object | None) -> bool:
+    """Return whether atom context supports an element inferred from type.
+
+    Parameters
+    ----------
+    symbol : str
+        Element symbol inferred from the atom type.
+    name : object
+        Atom name from the topology.
+    resname : object or None
+        Residue name used to reject ambiguous ion aliases.
+
+    Returns
+    -------
+    bool
+        ``True`` when the atom name and residue context support the type-derived
+        element.
+    """
+
+    name_symbol = _infer_element_from_atom_name(name, resname)
+    return name_symbol == symbol
+
+
 def _infer_elements_from_atom_types(universe: Any) -> tuple[list[str] | None, str]:
-    """Infer topology elements from atom types when every type is element-like.
+    """Infer topology elements from atom types when context agrees.
 
     Parameters
     ----------
@@ -172,21 +195,40 @@ def _infer_elements_from_atom_types(universe: Any) -> tuple[list[str] | None, st
     -------
     tuple[list[str] | None, str]
         Inferred element symbols and a diagnostic message. The element list is
-        ``None`` when any atom type is missing or ambiguous.
+        ``None`` when any atom type is missing, ambiguous, or conflicts with
+        atom name and residue context.
     """
 
     try:
         atom_types = list(universe.atoms.types)
     except (AttributeError, TypeError):
         return None, "atom types are unavailable"
+    try:
+        names = list(universe.atoms.names)
+    except (AttributeError, TypeError):
+        return None, "atom names are unavailable for type validation"
+    try:
+        resnames = list(universe.atoms.resnames)
+    except (AttributeError, TypeError):
+        resnames = [None] * len(names)
+
+    if len(atom_types) != len(names) or len(atom_types) != len(resnames):
+        return None, "atom type, name, and residue metadata lengths differ"
 
     inferred: list[str] = []
-    for atom_type in atom_types:
+    for index, (atom_type, name, resname) in enumerate(
+        zip(atom_types, names, resnames, strict=True)
+    ):
         symbol = _canonical_element_symbol(atom_type)
         if symbol is None:
             return None, f"atom type {atom_type!r} is not element-like"
+        if not _context_allows_type_element(symbol, name, resname):
+            return None, (
+                f"atom type {atom_type!r} at index {index} conflicts with "
+                f"atom name {name!r} and residue {resname!r}"
+            )
         inferred.append(symbol)
-    return inferred, "all atom types are element-like"
+    return inferred, "all atom types are element-like and context-safe"
 
 
 def _infer_element_from_atom_name(name: object, resname: object | None = None) -> str | None:

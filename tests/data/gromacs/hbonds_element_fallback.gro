@@ -1,0 +1,9 @@
+PolyzyMD hydrogen-bond element fallback fixture
+6
+    1ALA      N    1   0.000   0.000   0.000
+    1ALA     CA    2   0.100   0.000   0.000
+    1ALA      H    3   0.000   0.100   0.000
+    2SOD     NA    4   0.300   0.000   0.000
+    3CLA     CL    5   0.400   0.000   0.000
+    4CAL     CA    6   0.500   0.000   0.000
+   1.00000   1.00000   1.00000

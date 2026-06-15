@@ -23,6 +23,8 @@ import pytest
 
 from polyzymd.analyses.shared.loader import TrajectoryLoader, enrich_universe_elements
 
+TEST_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -269,7 +271,11 @@ class TestUniverseElementEnrichment:
         """Element-like GROMACS atom types should be copied as elements."""
 
         universe = _ElementFakeUniverse(
-            _ElementFakeAtoms(names=["CA", "H1", "NA", "CL"], types=["C", "H", "NA", "CL"])
+            _ElementFakeAtoms(
+                names=["CA", "H1", "NA", "CL"],
+                types=["C", "H", "NA", "CL"],
+                resnames=["ALA", "ALA", "SOD", "CLA"],
+            )
         )
 
         metadata = enrich_universe_elements(universe, topology_key="safe-types.gro")
@@ -280,6 +286,59 @@ class TestUniverseElementEnrichment:
             "message": "elements inferred from atom types",
         }
         assert universe.atoms.elements == ["C", "H", "Na", "Cl"]
+
+    @pytest.mark.parametrize(
+        ("name", "atom_type", "resname", "expected"),
+        [
+            ("CA", "CA", "ALA", "C"),
+            ("NA", "NA", "SOD", "Na"),
+            ("CL", "CL", "CLA", "Cl"),
+            ("CA", "CA", "CAL", "Ca"),
+        ],
+    )
+    def test_atom_types_are_validated_against_name_and_residue_context(
+        self,
+        name: str,
+        atom_type: str,
+        resname: str,
+        expected: str,
+    ) -> None:
+        """Type inference should accept only context-safe element assignments."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=[name], types=[atom_type], resnames=[resname])
+        )
+
+        metadata = enrich_universe_elements(
+            universe, topology_key=f"type-context-{name}-{atom_type}-{resname}.gro"
+        )
+
+        assert metadata["applied"] is True
+        assert universe.atoms.elements == [expected]
+
+    @pytest.mark.parametrize(
+        ("name", "atom_type", "resname"),
+        [("NA", "NA", "CLA"), ("CAX", "CA", "CAL")],
+    )
+    def test_conflicting_ion_like_atom_types_skip_enrichment(
+        self,
+        name: str,
+        atom_type: str,
+        resname: str,
+    ) -> None:
+        """Conflicting ion aliases should not be enriched from atom types."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=[name], types=[atom_type], resnames=[resname])
+        )
+
+        metadata = enrich_universe_elements(
+            universe, topology_key=f"type-conflict-{name}-{atom_type}-{resname}.gro"
+        )
+
+        assert metadata["applied"] is False
+        assert metadata["source"] is None
+        assert not hasattr(universe.atoms, "elements")
 
     def test_unsafe_atom_types_fall_back_to_names(self) -> None:
         """Force-field-like atom types should use conservative atom names."""
@@ -297,6 +356,19 @@ class TestUniverseElementEnrichment:
         assert metadata["applied"] is True
         assert metadata["source"] == "names"
         assert universe.atoms.elements == ["C", "H", "O", "H"]
+
+    def test_ambiguous_type_path_falls_back_to_names_for_protein_alpha_carbon(self) -> None:
+        """Protein alpha carbons typed as ``CA`` should not become calcium."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=["CA", "H"], types=["CA", "H"], resnames=["ALA", "ALA"])
+        )
+
+        metadata = enrich_universe_elements(universe, topology_key="ala-ca-type.gro")
+
+        assert metadata["applied"] is True
+        assert metadata["source"] == "names"
+        assert universe.atoms.elements == ["C", "H"]
 
     @pytest.mark.parametrize(
         ("name", "resname", "expected"),
@@ -356,6 +428,24 @@ class TestUniverseElementEnrichment:
         assert metadata["applied"] is False
         assert metadata["source"] is None
         assert not hasattr(universe.atoms, "elements")
+
+    def test_committed_gro_fixture_enables_element_h_selection(self) -> None:
+        """Committed GRO fixture should exercise portable element enrichment."""
+
+        import MDAnalysis as mda
+
+        gro_path = TEST_DATA_DIR / "gromacs" / "hbonds_element_fallback.gro"
+        universe = mda.Universe(str(gro_path))
+
+        metadata = enrich_universe_elements(universe, topology_key=gro_path)
+
+        assert metadata["applied"] is True
+        assert metadata["source"] == "names"
+        assert list(universe.atoms.elements) == ["N", "C", "H", "Na", "Cl", "Ca"]
+        assert universe.select_atoms("resname ALA and name CA").elements.tolist() == ["C"]
+        assert universe.select_atoms("resname SOD and name NA").elements.tolist() == ["Na"]
+        assert universe.select_atoms("resname CLA and name CL").elements.tolist() == ["Cl"]
+        assert len(universe.select_atoms("element H")) == 1
 
     @pytest.mark.skipif(
         not Path("/home/joelaforet/Shirts-Lab-Linux/polyzymd_debugging/fn-d10.gro").exists(),
