@@ -212,9 +212,13 @@ def _infer_element_from_atom_name(name: object, resname: object | None = None) -
     if not token:
         return None
 
-    residue = str(resname).strip().upper() if resname is not None else ""
-    if token in _COMMON_ION_ELEMENTS and residue in {token, f"{token}+", f"{token}-"}:
-        return _COMMON_ION_ELEMENTS[token]
+    residue = str(resname).strip().upper().rstrip("+-") if resname is not None else ""
+    residue_element = _COMMON_ION_ELEMENTS.get(residue)
+    if residue_element is not None:
+        name_element = _COMMON_ION_ELEMENTS.get(token)
+        if name_element == residue_element:
+            return name_element
+        return None
     if token in _COMMON_ION_ELEMENTS and token != "CA" and not residue:
         return _COMMON_ION_ELEMENTS[token]
     if token.startswith("H"):

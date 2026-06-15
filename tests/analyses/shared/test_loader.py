@@ -298,6 +298,52 @@ class TestUniverseElementEnrichment:
         assert metadata["source"] == "names"
         assert universe.atoms.elements == ["C", "H", "O", "H"]
 
+    @pytest.mark.parametrize(
+        ("name", "resname", "expected"),
+        [
+            ("CA", "ALA", "C"),
+            ("CA", "CAL", "Ca"),
+            ("NA", "SOD", "Na"),
+            ("CL", "CLA", "Cl"),
+        ],
+    )
+    def test_ion_aliases_are_inferred_from_names(
+        self,
+        name: str,
+        resname: str,
+        expected: str,
+    ) -> None:
+        """Common ion aliases should distinguish ions from biomolecular names."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=[name], types=["XX"], resnames=[resname])
+        )
+
+        metadata = enrich_universe_elements(universe, topology_key=f"ion-{name}-{resname}.gro")
+
+        assert metadata["applied"] is True
+        assert metadata["source"] == "names"
+        assert universe.atoms.elements == [expected]
+
+    @pytest.mark.parametrize(
+        ("name", "resname"),
+        [("NA", "CLA"), ("CAX", "CAL")],
+    )
+    def test_ion_residue_conflicts_skip_enrichment(self, name: str, resname: str) -> None:
+        """Recognized ion residues should reject conflicting atom-name aliases."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=[name], types=["XX"], resnames=[resname])
+        )
+
+        metadata = enrich_universe_elements(
+            universe, topology_key=f"ion-conflict-{name}-{resname}.gro"
+        )
+
+        assert metadata["applied"] is False
+        assert metadata["source"] is None
+        assert not hasattr(universe.atoms, "elements")
+
     def test_unguessable_names_skip_enrichment(self) -> None:
         """No partial elements should be added when any atom is ambiguous."""
 
