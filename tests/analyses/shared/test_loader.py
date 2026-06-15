@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from polyzymd.analyses.shared.loader import TrajectoryLoader
+from polyzymd.analyses.shared.loader import TrajectoryLoader, enrich_universe_elements
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -129,6 +129,43 @@ class _FakeTrajectory:
         self.ts.data = {"time": self.raw_times_ps[self.frame]}
 
 
+class _ElementFakeAtoms:
+    """Minimal atom container for element-enrichment tests."""
+
+    def __init__(
+        self,
+        *,
+        names: list[str],
+        types: list[str] | None = None,
+        resnames: list[str] | None = None,
+        elements: list[str] | None = None,
+    ) -> None:
+        self.names = names
+        self.types = types if types is not None else []
+        self.resnames = resnames if resnames is not None else ["ALA"] * len(names)
+        if elements is not None:
+            self.elements = elements
+
+    def __len__(self) -> int:
+        """Return the number of fake atoms."""
+
+        return len(self.names)
+
+
+class _ElementFakeUniverse:
+    """Minimal universe that records added element topology attributes."""
+
+    def __init__(self, atoms: _ElementFakeAtoms) -> None:
+        self.atoms = atoms
+        self.added_topology_attrs: dict[str, list[str]] = {}
+
+    def add_TopologyAttr(self, name: str, values: list[str]) -> None:
+        """Record an added topology attribute on the fake atoms object."""
+
+        self.added_topology_attrs[name] = values
+        setattr(self.atoms, name, values)
+
+
 def _loader_for_trajectory(trajectory: _FakeTrajectory) -> TrajectoryLoader:
     """Build a loader instance backed by a fake trajectory."""
 
@@ -210,6 +247,86 @@ class TestTrajectoryTimingMetadata:
 
         assert loader.get_timestep(1, unit="ps") == pytest.approx(400.0)
         assert trajectory.frame == 2
+
+
+class TestUniverseElementEnrichment:
+    """Universe element enrichment handles GRO-like missing element metadata."""
+
+    def test_existing_elements_are_preserved(self) -> None:
+        """Existing element metadata should not be overwritten."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=["CA", "H1"], types=["C", "H"], elements=["C", "H"])
+        )
+
+        metadata = enrich_universe_elements(universe, topology_key="existing.gro")
+
+        assert metadata["applied"] is False
+        assert metadata["source"] == "existing"
+        assert universe.added_topology_attrs == {}
+
+    def test_safe_atom_types_add_elements(self) -> None:
+        """Element-like GROMACS atom types should be copied as elements."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=["CA", "H1", "NA", "CL"], types=["C", "H", "NA", "CL"])
+        )
+
+        metadata = enrich_universe_elements(universe, topology_key="safe-types.gro")
+
+        assert metadata == {
+            "applied": True,
+            "source": "types",
+            "message": "elements inferred from atom types",
+        }
+        assert universe.atoms.elements == ["C", "H", "Na", "Cl"]
+
+    def test_unsafe_atom_types_fall_back_to_names(self) -> None:
+        """Force-field-like atom types should use conservative atom names."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(
+                names=["CA", "1HA", "OW", "HW1"],
+                types=["CT", "HC", "OW", "HW1"],
+                resnames=["ALA", "ALA", "HOH", "HOH"],
+            )
+        )
+
+        metadata = enrich_universe_elements(universe, topology_key="unsafe-types.gro")
+
+        assert metadata["applied"] is True
+        assert metadata["source"] == "names"
+        assert universe.atoms.elements == ["C", "H", "O", "H"]
+
+    def test_unguessable_names_skip_enrichment(self) -> None:
+        """No partial elements should be added when any atom is ambiguous."""
+
+        universe = _ElementFakeUniverse(
+            _ElementFakeAtoms(names=["CA", "BB"], types=["CT", "XX"], resnames=["ALA", "UNK"])
+        )
+
+        metadata = enrich_universe_elements(universe, topology_key="unguessable.gro")
+
+        assert metadata["applied"] is False
+        assert metadata["source"] is None
+        assert not hasattr(universe.atoms, "elements")
+
+    @pytest.mark.skipif(
+        not Path("/home/joelaforet/Shirts-Lab-Linux/polyzymd_debugging/fn-d10.gro").exists(),
+        reason="external GRO smoke-test topology is not available",
+    )
+    def test_external_gro_smoke_infers_elements(self) -> None:
+        """External beta GRO topology should gain element metadata when present."""
+
+        import MDAnalysis as mda
+
+        gro_path = Path("/home/joelaforet/Shirts-Lab-Linux/polyzymd_debugging/fn-d10.gro")
+        universe = mda.Universe(str(gro_path))
+
+        metadata = enrich_universe_elements(universe, topology_key=gro_path)
+
+        assert metadata["applied"] is True
+        assert len(universe.atoms.elements) == len(universe.atoms)
 
 
 # ---------------------------------------------------------------------------
