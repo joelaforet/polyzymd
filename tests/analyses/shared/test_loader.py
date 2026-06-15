@@ -328,6 +328,43 @@ class TestUniverseElementEnrichment:
         assert metadata["applied"] is True
         assert len(universe.atoms.elements) == len(universe.atoms)
 
+    @pytest.mark.skipif(
+        not Path(
+            "/home/joelaforet/Shirts-Lab-Linux/polyzymd_debugging/fn-d10_OEG_n25.gro"
+        ).exists(),
+        reason="external polymer GRO smoke-test topology is not available",
+    )
+    def test_external_polymer_gro_enables_element_h_selection(self) -> None:
+        """Element enrichment should preserve GRO hydrogen-selection UX for polymers."""
+
+        import MDAnalysis as mda
+
+        gro_path = Path("/home/joelaforet/Shirts-Lab-Linux/polyzymd_debugging/fn-d10_OEG_n25.gro")
+        union_selection = "(protein) or (resid 95:219 and not resname HOH)"
+        name_hydrogen_selection = f"({union_selection}) and (name H* or name [123]H*)"
+        element_hydrogen_selection = f"({union_selection}) and element H"
+
+        raw_universe = mda.Universe(str(gro_path))
+        polymer_atoms = raw_universe.select_atoms("resid 95:219 and not resname HOH")
+        name_hydrogens = raw_universe.select_atoms(name_hydrogen_selection)
+
+        assert len(polymer_atoms) > 0
+        assert len(name_hydrogens) == 4400
+        if hasattr(raw_universe.atoms, "elements"):
+            with pytest.raises(AttributeError):
+                raw_universe.select_atoms(element_hydrogen_selection)
+        else:
+            with pytest.raises(AttributeError):
+                raw_universe.select_atoms("element H")
+
+        enriched_universe = mda.Universe(str(gro_path))
+        metadata = enrich_universe_elements(enriched_universe, topology_key=gro_path)
+        element_hydrogens = enriched_universe.select_atoms(element_hydrogen_selection)
+
+        assert metadata["applied"] is True
+        assert len(enriched_universe.atoms.elements) == len(enriched_universe.atoms)
+        assert len(element_hydrogens) == len(name_hydrogens)
+
 
 # ---------------------------------------------------------------------------
 # Lazy engine creation
