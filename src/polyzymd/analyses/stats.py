@@ -753,10 +753,13 @@ def format_scalar_comparison_artifact_payload(
     if pairwise:
         lines.extend(["", "Pairwise comparisons:"])
         for item in pairwise:
+            delta_mean = _payload_pairwise_delta_mean(item, condition_by_label, metric_key)
+            percent_change = _payload_float_or_nan(item.get("percent_change"))
+            p_value = _payload_float_or_nan(item.get("p_value"))
             lines.append(
                 f"  {item.get('condition_a')} vs {item.get('condition_b')}: "
-                f"Δ={float(item.get('effect_size', item.get('mean_difference', 0.0))):.4f}, "
-                f"p={float(item.get('p_value', 1.0)):.4g}"
+                f"Δmean={delta_mean:.4f}{unit_str}, %Δ={format_pct(percent_change)}, "
+                f"p={p_value:.4g}"
             )
     return "\n".join(lines)
 
@@ -792,8 +795,96 @@ def _payload_ranking(payload: dict[str, Any], metric_key: str) -> list[dict[str,
 def _payload_metric(condition: dict[str, Any], metric_key: str, suffix: str) -> float:
     """Return a scalar metric from a payload condition summary."""
 
-    value = condition.get(f"{metric_key}_{suffix}", condition.get(suffix, 0.0))
-    return float(value if value is not None else 0.0)
+    exact_key = f"{metric_key}_{suffix}"
+    if exact_key in condition:
+        return _payload_float_or_nan(condition.get(exact_key))
+    if suffix in condition:
+        return _payload_float_or_nan(condition.get(suffix))
+    return 0.0
+
+
+def _payload_float_or_nan(value: Any) -> float:
+    """Return a float value or ``nan`` for absent and malformed payload values.
+
+    Parameters
+    ----------
+    value : Any
+        Payload value to coerce.
+
+    Returns
+    -------
+    float
+        Float-converted value, or ``nan`` when conversion is not possible.
+    """
+
+    if value is None:
+        return float("nan")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def _payload_required_metric(condition: dict[str, Any], metric_key: str, suffix: str) -> float:
+    """Return an exact selected metric value from a payload condition summary.
+
+    Parameters
+    ----------
+    condition : dict[str, Any]
+        Payload condition summary.
+    metric_key : str
+        Selected metric key.
+    suffix : str
+        Metric suffix, such as ``"mean"`` or ``"sem"``.
+
+    Returns
+    -------
+    float
+        Float-converted value for ``f"{metric_key}_{suffix}"``, or ``nan``
+        when the exact selected key is absent or malformed.
+    """
+
+    exact_key = f"{metric_key}_{suffix}"
+    if exact_key not in condition:
+        return float("nan")
+    return _payload_float_or_nan(condition.get(exact_key))
+
+
+def _payload_pairwise_delta_mean(
+    pairwise_item: dict[str, Any],
+    condition_by_label: dict[str, dict[str, Any]],
+    metric_key: str,
+) -> float:
+    """Return signed pairwise mean difference from payload condition summaries.
+
+    Parameters
+    ----------
+    pairwise_item : dict[str, Any]
+        Pairwise comparison payload entry with ``condition_a`` and ``condition_b`` labels.
+    condition_by_label : dict[str, dict[str, Any]]
+        Mapping from condition label to condition summary payload.
+    metric_key : str
+        Metric key whose condition means should be compared.
+
+    Returns
+    -------
+    float
+        Signed ``mean(condition_b) - mean(condition_a)`` in metric units. Missing labels or
+        non-numeric means return ``nan`` so CLI formatting does not fail.
+    """
+
+    label_a = str(pairwise_item.get("condition_a", ""))
+    label_b = str(pairwise_item.get("condition_b", ""))
+    condition_a = condition_by_label.get(label_a)
+    condition_b = condition_by_label.get(label_b)
+    if condition_a is None or condition_b is None:
+        return float("nan")
+
+    mean_a = _payload_required_metric(condition_a, metric_key, "mean")
+    mean_b = _payload_required_metric(condition_b, metric_key, "mean")
+    if math.isnan(mean_a) or math.isnan(mean_b):
+        return float("nan")
+    return mean_b - mean_a
 
 
 def _payload_direction_label(higher_is_better: bool | None) -> str:
