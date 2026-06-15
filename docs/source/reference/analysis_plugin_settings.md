@@ -128,6 +128,7 @@ DSSP requires complete residues; do not use CA-only selections such as
 | `allow_empty_groups` | `bool` | `true` | Warn/skip empty groups instead of raising |
 | `allow_overlapping_composition` | `bool` | `false` | Allow overlapping composition partitions (otherwise raise) |
 | `composition` | `HydrogenBondCompositionSettings \| null` | `null` | Optional partitioning for composition analysis |
+| `hydrogens_selection` | `str \| null` | `null` | Advanced explicit-hydrogen selection override for unusual atom names |
 | `timestep_ps` | `float \| null` | `null` | Optional timestep override (ps) for time-axis plots |
 
 Time-axis plots assume uniformly saved frames. PolyzyMD maps frame index to time
@@ -144,9 +145,12 @@ not supported.
 
 Exactly one of `between` or `within` must be set for each summary.
 
-Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` with hydrogens
-selected as `(<group union>) and element H`; explicit hydrogens and reliable
-element metadata are required for meaningful counts.
+Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` and requires explicit
+hydrogens. PolyzyMD prefers `(<group union>) and (element H)` and infers missing
+elements for GRO-like topologies when atom types or atom names are conservative
+enough. If elements remain unavailable, the plugin falls back to
+`(<group union>) and (name H* or name [123]H*)`. Set `hydrogens_selection` only
+for unusual explicit-hydrogen naming schemes.
 
 `HydrogenBondCompositionSettings`:
 
