@@ -40,7 +40,9 @@ from polyzymd.analyses.secondary_structure._mda import (
     DSSP_MATRIX_SIDECAR,
     SecondaryStructureArtifactCollector,
     _compute_dssp_state_matrix,
+    _effective_protein_selection,
     aggregate_secondary_structure_artifacts,
+    build_dssp_analysis,
     build_secondary_structure_jobs,
     encode_dssp_matrix,
     load_replicate_matrix,
@@ -71,6 +73,7 @@ def test_plugin_attributes(settings: SecondaryStructureSettings) -> None:
     """Plugin attributes should describe the MDA artifact lifecycle."""
 
     assert settings.chain_id == "A"
+    assert settings.selection is None
     assert SecondaryStructureAnalysis.name == "secondary_structure"
     assert SecondaryStructureAnalysis.AggregatedResultClass is None
     assert SecondaryStructureAnalysis.ReplicateResultClass is None
@@ -78,6 +81,55 @@ def test_plugin_attributes(settings: SecondaryStructureSettings) -> None:
         get_analysis("ss")
     assert SecondaryStructureAnalysis.slurm_resource_hint == SlurmResourceHint(mem="16G")
     assert "run_replicate" not in SecondaryStructureAnalysis.__dict__
+
+
+def test_secondary_structure_effective_default_selection() -> None:
+    """Default settings should preserve the legacy chain-based selection."""
+
+    settings = SecondaryStructureSettings()
+
+    assert _effective_protein_selection(settings) == "protein and chainid A"
+
+
+def test_secondary_structure_explicit_selection_overrides_chain_id() -> None:
+    """Explicit selection should override chain_id and avoid chainid syntax."""
+
+    settings = SecondaryStructureSettings(chain_id="B", selection=" protein ")
+
+    assert settings.selection == "protein"
+    assert _effective_protein_selection(settings) == "protein"
+
+
+def test_secondary_structure_settings_reject_empty_values() -> None:
+    """Settings validation should reject empty chain IDs and selections."""
+
+    with pytest.raises(ValueError, match="chain_id"):
+        SecondaryStructureSettings(chain_id=" ")
+    with pytest.raises(ValueError, match="selection"):
+        SecondaryStructureSettings(selection=" ")
+
+
+def test_secondary_structure_default_fingerprint_preserves_legacy_payload() -> None:
+    """Default cache identity should match the pre-selection chain-only payload."""
+
+    class LegacySecondaryStructureSettings(SecondaryStructureSettings):
+        selection: None = None
+
+        def model_dump(self, *args, **kwargs):
+            del args, kwargs
+            return {"chain_id": self.chain_id}
+
+    analysis = SecondaryStructureAnalysis()
+    default_settings = SecondaryStructureSettings()
+    explicit_settings = SecondaryStructureSettings(selection="protein")
+    legacy_settings = LegacySecondaryStructureSettings()
+
+    assert analysis.aggregate_settings_fingerprint(default_settings) == settings_fingerprint(
+        legacy_settings
+    )
+    assert analysis.aggregate_settings_fingerprint(explicit_settings) != settings_fingerprint(
+        legacy_settings
+    )
 
 
 def test_dssp_encoding() -> None:
@@ -123,6 +175,63 @@ def test_dssp_trajectory_uses_mdtraj_topology_keyword(monkeypatch) -> None:
     assert encoded.tolist() == [[1, 0]]
 
 
+def test_dssp_chainid_attribute_error_mentions_gromacs(monkeypatch) -> None:
+    """Chain-ID selection failures should give actionable GROMACS guidance."""
+
+    _install_fake_analysis_base(monkeypatch)
+
+    class FakeUniverse:
+        trajectory = []
+
+        def select_atoms(self, selection):
+            raise AttributeError("'Topology' object has no attribute 'chainIDs'")
+
+    with pytest.raises(ValueError, match="GROMACS.*selection.*protein"):
+        build_dssp_analysis(
+            universe=FakeUniverse(),
+            selection="protein and chainid A",
+            timestep_ps=None,
+        )
+
+
+def test_dssp_partial_residue_selection_is_rejected(monkeypatch) -> None:
+    """CA-only selections should be rejected before DSSP topology construction."""
+
+    _install_fake_analysis_base(monkeypatch)
+
+    residue = SimpleNamespace(atoms=[object(), object(), object(), object()])
+    atom_group = _FakeAtomGroup(atoms=[object()], residues=[residue])
+
+    class FakeUniverse:
+        trajectory = []
+
+        def select_atoms(self, selection):
+            return atom_group
+
+    with pytest.raises(ValueError, match="complete residues.*CA-only"):
+        build_dssp_analysis(
+            universe=FakeUniverse(),
+            selection="protein and name CA",
+            timestep_ps=None,
+        )
+
+
+def test_dssp_zero_atom_selection_mentions_selection_or_chain_id(monkeypatch) -> None:
+    """Empty selections should point users to both selection and chain_id settings."""
+
+    _install_fake_analysis_base(monkeypatch)
+    atom_group = _FakeAtomGroup(atoms=[], residues=[])
+
+    class FakeUniverse:
+        trajectory = []
+
+        def select_atoms(self, selection):
+            return atom_group
+
+    with pytest.raises(ValueError, match="selection or chain_id"):
+        build_dssp_analysis(universe=FakeUniverse(), selection="protein", timestep_ps=None)
+
+
 def test_build_mda_jobs_uses_frame_selection(monkeypatch, tmp_path, condition, settings) -> None:
     """Job construction should return an MDA job with the original frame selection."""
 
@@ -155,6 +264,50 @@ def test_build_mda_jobs_uses_frame_selection(monkeypatch, tmp_path, condition, s
     assert jobs[0].name == "dssp"
     assert jobs[0].frame_selection is frame_selection
     assert jobs[0].frame_selection.run_kwargs()["frames"] == [0, 3, 7]
+    assert jobs[0].universe_policy.metadata["secondary_structure_selection"] == (
+        "protein and chainid A"
+    )
+
+
+def test_build_mda_jobs_records_explicit_selection(monkeypatch, tmp_path, condition) -> None:
+    """Job metadata should record the effective explicit selection."""
+
+    import polyzymd.analyses.secondary_structure._mda as mda_mod
+
+    captured: dict[str, object] = {}
+    fake_analysis = SimpleNamespace(run=lambda **kwargs: None, results={})
+
+    def fake_build_dssp_analysis(**kwargs):
+        captured.update(kwargs)
+        return fake_analysis
+
+    monkeypatch.setattr(mda_mod, "build_dssp_analysis", fake_build_dssp_analysis)
+    settings = SecondaryStructureSettings(chain_id="A", selection="protein and resid 1:269")
+    replicate_ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="0ns",
+        recompute=True,
+        settings=settings,
+        result_path=tmp_path / "run_1" / "result.json",
+    )
+    frame_selection = FrameSelection(frames=np.asarray([0]), n_frames_total=1)
+    ctx = MDAReplicateJobContext(
+        replicate_context=replicate_ctx,
+        universe=MagicMock(),
+        frame_selection=frame_selection,
+        universe_policy=MDAUniversePolicy(condition_label="Control", replicate=1),
+        artifact_store=ArtifactStore(tmp_path / "run_1"),
+    )
+
+    jobs = build_secondary_structure_jobs(ctx, settings)
+
+    assert captured["selection"] == "protein and resid 1:269"
+    assert jobs[0].universe_policy.metadata["secondary_structure_selection"] == (
+        "protein and resid 1:269"
+    )
 
 
 def test_collector_writes_sidecar_artifact(tmp_path, condition, settings) -> None:
@@ -223,7 +376,7 @@ def test_aggregate_computes_occupancy_without_writing_condition_artifact(
         equilibration="0ns",
         output_dir=output_dir,
         artifacts=[artifact_1, artifact_2],
-        settings_fingerprint=settings_fingerprint(settings),
+        settings_fingerprint=_secondary_structure_settings_fingerprint(settings),
     )
 
     assert isinstance(artifact, ConditionArtifact)
@@ -261,7 +414,7 @@ def test_aggregate_rejects_residue_identity_mismatch(tmp_path, condition, settin
             equilibration="0ns",
             output_dir=tmp_path / "aggregated",
             artifacts=[artifact_1, artifact_2],
-            settings_fingerprint=settings_fingerprint(settings),
+            settings_fingerprint=_secondary_structure_settings_fingerprint(settings),
         )
 
 
@@ -513,7 +666,7 @@ def _collect_artifact(
         frame_selection=frame_selection,
         universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=replicate),
         artifact_store=ArtifactStore(run_dir),
-        settings_fingerprint=settings_fingerprint(settings),
+        settings_fingerprint=_secondary_structure_settings_fingerprint(settings),
     )
     job_result = MDAJobResult(
         name="dssp",
@@ -549,6 +702,42 @@ def _write_replicate_artifact(
     )
     ArtifactStore(run_dir).write_replicate_result(artifact, "result.json")
     return artifact
+
+
+class _FakeAtomGroup:
+    """Minimal atom-group fake for DSSP selection validation tests."""
+
+    def __init__(self, *, atoms: list[object], residues: list[object]) -> None:
+        self.atoms = atoms
+        self.residues = residues
+
+    def __len__(self) -> int:
+        """Return the number of selected atoms."""
+
+        return len(self.atoms)
+
+
+def _install_fake_analysis_base(monkeypatch) -> None:
+    """Install a minimal MDAnalysis AnalysisBase replacement."""
+
+    class FakeAnalysisBase:
+        def __init__(self, trajectory) -> None:
+            self._trajectory = trajectory
+            self.results = SimpleNamespace()
+
+    monkeypatch.setitem(sys.modules, "MDAnalysis", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "MDAnalysis.analysis", SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules,
+        "MDAnalysis.analysis.base",
+        SimpleNamespace(AnalysisBase=FakeAnalysisBase),
+    )
+
+
+def _secondary_structure_settings_fingerprint(settings: SecondaryStructureSettings) -> str:
+    """Return the plugin-specific secondary-structure settings fingerprint."""
+
+    return SecondaryStructureAnalysis._make_settings_cache_tag(settings)
 
 
 def _plot_condition_artifact(label: str, helix_fraction: float) -> ConditionArtifact:
@@ -608,5 +797,5 @@ def _condition_artifact(
                 }
             },
         },
-        metadata={"settings_fingerprint": settings_fingerprint(settings)},
+        metadata={"settings_fingerprint": _secondary_structure_settings_fingerprint(settings)},
     )

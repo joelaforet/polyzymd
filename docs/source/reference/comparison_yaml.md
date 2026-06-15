@@ -163,6 +163,14 @@ defaults.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `chain_id` | string | `"A"` | Chain letter for the protein to analyze via DSSP |
+| `selection` | string | `null` | Explicit MDAnalysis protein-residue selection. Overrides `chain_id` when provided. |
+
+The default secondary-structure selection is `protein and chainid A`, preserving
+the PolyzyMD/PDB convention that chain A is the protein. GROMACS `.gro`
+topologies may not preserve chain IDs, so use `selection` for those files, for
+example `selection: "protein"`, `selection: "protein and resid 1:269"`, or
+`selection: "protein and resindex 0:268"`. DSSP needs complete residues; do not
+use CA-only selections such as `protein and name CA`.
 
 ### `plugins.sasa`
 
