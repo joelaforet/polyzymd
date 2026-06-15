@@ -24,10 +24,10 @@
 #
 # FIRST-TIME CLUSTER SETUP
 # ------------------------
-# 1. Install pixi:  curl -fsSL https://pixi.sh/install.sh | sh
-# 2. Clone the repo and cd into it
-# 3. Run: pixi install -e cuda-12-6   (or whichever matches your cluster)
-# 4. Run: pixi shell -e cuda-12-6
+# - Install pixi:  curl -fsSL https://pixi.sh/install.sh | sh
+# - Clone the repo and cd into it
+# - Run: pixi install -e cuda-12-6   (or whichever matches your cluster)
+# - Run: pixi shell -e cuda-12-6
 #
 # After `pixi shell`, the `polyzymd` binary is on PATH and works exactly
 # as before — no `pixi run` prefix needed.
