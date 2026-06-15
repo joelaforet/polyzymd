@@ -10,10 +10,41 @@ Top-level plugin key: `plugins.secondary_structure`.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `chain_id` | `str` | `"A"` | Protein chain letter passed to DSSP. Chain A is the PolyzyMD protein convention. |
+| `selection` | `str \| null` | `null` | Explicit MDAnalysis selection for the protein residues. When set, this overrides `chain_id`. |
 
 The plugin computes simplified DSSP classes with MDTraj, aggregates helix,
 strand, and coil persistence across replicates, and uses default scalar
 comparison on `helix_fraction`.
+
+By default, PolyzyMD selects `protein and chainid A`. This matches the PDB and
+PolyzyMD chain convention where chain A is the protein. GROMACS `.gro`
+topologies may not preserve chain IDs, so `chainid` selections can fail in
+MDAnalysis. For `.gro` inputs, set `selection` explicitly, for example:
+
+```yaml
+plugins:
+  secondary_structure:
+    selection: "protein"
+```
+
+Use MDAnalysis residue syntax to restrict the protein region:
+
+```yaml
+plugins:
+  secondary_structure:
+    selection: "protein and resid 1:269"
+```
+
+or zero-based residue indices:
+
+```yaml
+plugins:
+  secondary_structure:
+    selection: "protein and resindex 0:268"
+```
+
+DSSP requires complete, backbone-compatible protein residues. Do not use
+CA-only selections such as `protein and name CA` for this plugin.
 
 ## Output files
 

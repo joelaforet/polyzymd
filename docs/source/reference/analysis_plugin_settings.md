@@ -88,6 +88,14 @@ below.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `chain_id` | `str` | `"A"` | Protein chain letter to analyze (PolyzyMD convention: chain A) |
+| `selection` | `str \| null` | `null` | Explicit MDAnalysis protein-residue selection. Overrides `chain_id` when set |
+
+The default is `protein and chainid A` for PDB/PolyzyMD chain-convention
+compatibility. GROMACS `.gro` topologies may not preserve chain IDs; use
+`selection: "protein"`, `selection: "protein and resid 1:269"`, or
+`selection: "protein and resindex 0:268"` when chain IDs are unavailable.
+DSSP requires complete residues; do not use CA-only selections such as
+`protein and name CA`.
 
 ## `sasa`
 

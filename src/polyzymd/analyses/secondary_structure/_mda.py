@@ -62,13 +62,13 @@ def build_secondary_structure_jobs(
         One job backed by an AnalysisBase-compatible DSSP adapter.
     """
 
-    selection = _protein_chain_selection(settings.chain_id)
+    selection = _effective_protein_selection(settings)
     return [
         MDAAnalysisJob(
             name="dssp",
             analysis=build_dssp_analysis(
                 universe=ctx.universe,
-                chain_id=settings.chain_id,
+                selection=selection,
                 timestep_ps=ctx.frame_selection.timestep_ps,
             ),
             frame_selection=ctx.frame_selection,
@@ -87,7 +87,7 @@ def build_secondary_structure_jobs(
     ]
 
 
-def build_dssp_analysis(*, universe: Any, chain_id: str, timestep_ps: float | None) -> Any:
+def build_dssp_analysis(*, universe: Any, selection: str, timestep_ps: float | None) -> Any:
     """Build an AnalysisBase-compatible DSSP adapter.
 
     The adapter lets MDAnalysis own frame iteration, including explicit frame
@@ -97,8 +97,8 @@ def build_dssp_analysis(*, universe: Any, chain_id: str, timestep_ps: float | No
     ----------
     universe : Any
         MDAnalysis universe for one replicate.
-    chain_id : str
-        Protein chain ID following the PolyzyMD chain convention.
+    selection : str
+        Effective MDAnalysis selection for complete protein residues.
     timestep_ps : float or None
         Trajectory timestep in picoseconds when available.
 
@@ -110,18 +110,27 @@ def build_dssp_analysis(*, universe: Any, chain_id: str, timestep_ps: float | No
 
     from MDAnalysis.analysis.base import AnalysisBase
 
-    selection = _protein_chain_selection(chain_id)
-
     class DSSPAnalysis(AnalysisBase):
         """Collect protein-chain coordinates and compute DSSP states."""
 
         def __init__(self) -> None:
-            atom_group = universe.select_atoms(selection)
+            try:
+                atom_group = universe.select_atoms(selection)
+            except AttributeError as exc:
+                if "chainid" in selection:
+                    raise ValueError(
+                        "Secondary-structure selection failed while using chain IDs. GROMACS "
+                        ".gro topologies may not preserve chain IDs for MDAnalysis selections. "
+                        "Set plugins.secondary_structure.selection to an explicit protein "
+                        "selection such as 'protein' or 'protein and resid START:STOP'."
+                    ) from exc
+                raise
             if len(atom_group) == 0:
                 raise ValueError(
                     f"Secondary-structure selection matched no atoms: {selection!r}. "
-                    "Check the configured chain_id."
+                    "Check plugins.secondary_structure.selection or chain_id."
                 )
+            _validate_complete_residue_selection(atom_group, selection)
             super().__init__(universe.trajectory)
             self._atom_group = atom_group
             self._raw_timestep_ps = float(timestep_ps) if timestep_ps is not None else None
@@ -468,6 +477,51 @@ def _protein_chain_selection(chain_id: str) -> str:
     """Return the MDAnalysis selection for a protein chain."""
 
     return f"protein and chainid {chain_id}"
+
+
+def _effective_protein_selection(settings: SecondaryStructureSettings) -> str:
+    """Return the configured secondary-structure atom selection.
+
+    Parameters
+    ----------
+    settings : SecondaryStructureSettings
+        User-facing secondary-structure settings.
+
+    Returns
+    -------
+    str
+        Explicit selection when configured, otherwise the chain-based default.
+    """
+
+    if settings.selection is not None:
+        return settings.selection
+    return _protein_chain_selection(settings.chain_id)
+
+
+def _validate_complete_residue_selection(atom_group: Any, selection: str) -> None:
+    """Reject selections that include only part of one or more residues.
+
+    Parameters
+    ----------
+    atom_group : Any
+        MDAnalysis atom group returned by the effective selection.
+    selection : str
+        Effective MDAnalysis selection string.
+
+    Raises
+    ------
+    ValueError
+        If selected atoms do not cover complete residues.
+    """
+
+    selected_atom_count = len(atom_group)
+    residue_atom_count = sum(len(residue.atoms) for residue in atom_group.residues)
+    if residue_atom_count != selected_atom_count:
+        raise ValueError(
+            f"Secondary-structure selection {selection!r} does not select complete residues. "
+            "DSSP requires complete, backbone-compatible protein residues; use a selection such "
+            "as 'protein' or 'protein and resid START:STOP' instead of CA-only selections."
+        )
 
 
 def _build_mdtraj_topology(atom_group: Any) -> tuple[Any, dict[str, list[Any]]]:
