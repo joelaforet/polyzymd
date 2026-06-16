@@ -17,7 +17,7 @@ dependencies:
   - openff-nagl-models
   - openff-forcefields
   - openff-units
-  - ambertools>=24
+  - ambertools=24.8
   - rdkit>=2023.09
 
   # Molecule building (must be conda)
