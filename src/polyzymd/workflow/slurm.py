@@ -28,7 +28,7 @@ from polyzymd.utils.templates import render_package_template
 LOGGER = logging.getLogger(__name__)
 
 # Preset types
-PresetType = Literal["aa100", "al40", "blanca-shirts", "bridges2", "testing"]
+PresetType = Literal["aa100", "al40", "blanca-shirts", "blanca-chbe-rdi", "bridges2", "testing"]
 
 # Valid GPU types for Bridges2 (PSC).  Adding a new type is a one-line change here.
 BRIDGES2_GPU_TYPES: List[str] = ["v100-16", "v100-32", "l40s-48", "h100-80"]
@@ -335,6 +335,13 @@ class SlurmConfig:
                 "partition": "blanca,blanca-shirts",
                 "qos": "preemptable",
                 "account": "blanca-shirts",
+                "time_limit": "23:59:59",
+                "exclude": "bgpu-bortz1",
+            },
+            "blanca-chbe-rdi": {
+                "partition": "blanca,blanca-chbe-rdi",
+                "qos": "preemptable",
+                "account": "blanca-chbe-rdi",
                 "time_limit": "23:59:59",
                 "exclude": "bgpu-bortz1",
             },

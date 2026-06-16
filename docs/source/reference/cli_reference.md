@@ -132,7 +132,7 @@ polyzymd validate -c <path>
   warnings when missing
 - Monomer probabilities sum to 1.0
 - Valid enum values (water model, ensemble, etc.)
-- Co-solvent specification (volume_fraction XOR concentration)
+- Co-solvent specification (mole_fraction XOR concentration)
 
 ### Example
 

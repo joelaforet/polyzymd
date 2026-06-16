@@ -17,15 +17,20 @@ Top-level plugin key and CLI name: `hydrogen_bonds`.
 | `allow_empty_groups` | `bool` | `true` | Warn and skip summaries with empty groups instead of raising |
 | `allow_overlapping_composition` | `bool` | `false` | Permit overlapping composition partitions |
 | `composition` | mapping or `null` | `null` | Optional donor/acceptor partition analysis |
+| `hydrogens_selection` | `str \| null` | `null` | Advanced explicit-hydrogen selection override for unusual atom names |
 | `timestep_ps` | `float \| null` | `null` | Optional uniform frame spacing for time-axis plots |
 
 Each summary defines exactly one of `between: [group_a, group_b]` or
 `within: group_name`. Mapping-form summaries use the mapping key as the summary
 name.
 
-Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` with hydrogens
-selected as `(<group union>) and element H`; topologies need explicit hydrogens
-and reliable element metadata.
+Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` and requires explicit
+hydrogen atoms in the topology. PolyzyMD prefers `(<group union>) and (element H)`
+for hydrogen selection. For GRO-like topologies that do not provide MDAnalysis
+`elements`, PolyzyMD first tries to infer missing elements safely from atom types
+or atom names. If element metadata remains unavailable, `hydrogen_bonds` falls
+back to `(<group union>) and (name H* or name [123]H*)`. Set
+`hydrogens_selection` only for unusual explicit-hydrogen naming schemes.
 
 ## Comparison mode
 

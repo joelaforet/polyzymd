@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from numpy.typing import NDArray
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from polyzymd.config.schema import SolventConfig
 
 LOGGER = logging.getLogger(__name__)
+AVOGADRO_CONSTANT = 6.02214076e23
 
 # Water model type
 WaterModelType = Literal["tip3p", "spce", "tip4p", "tip4pew", "opc"]
@@ -51,8 +52,9 @@ class CoSolvent:
     """Specification for a co-solvent component.
 
     Supports two specification methods:
-    - volume_fraction: Specify as fraction (0-1), e.g., 0.30 for 30% v/v
-    - concentration: Specify as molarity (mol/L)
+
+    - ``mole_fraction``: Specify as molecule fraction (0-1)
+    - ``concentration``: Specify as molarity (mol/L)
 
     Note: The molecule is NOT created in __post_init__ to avoid running
     charge calculations prematurely. Instead, molecules are loaded via
@@ -62,20 +64,20 @@ class CoSolvent:
     Attributes:
         name: Identifier for the co-solvent.
         smiles: SMILES string for the molecule.
-        volume_fraction: Volume fraction (0-1), mutually exclusive with concentration.
-        concentration: Molar concentration (mol/L), mutually exclusive with volume_fraction.
-        density: Density in g/mL (required for volume_fraction calculation).
+        mole_fraction: Mole fraction (0-1), mutually exclusive with concentration.
+        concentration: Molar concentration (mol/L), mutually exclusive with mole_fraction.
+        density: Optional density in g/mL for metadata.
         residue_name: 3-letter residue name.
         molecule: OpenFF Molecule (assigned later with cached charges).
     """
 
     name: str
     smiles: str
-    volume_fraction: Optional[float] = None
-    concentration: Optional[float] = None
-    density: Optional[float] = None  # g/mL
+    mole_fraction: float | None = None
+    concentration: float | None = None
+    density: float | None = None  # g/mL
     residue_name: str = "COS"
-    molecule: Optional[Molecule] = field(default=None, repr=False)
+    molecule: Molecule | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Validate co-solvent specification.
@@ -88,21 +90,19 @@ class CoSolvent:
         if len(self.residue_name) > 3:
             self.residue_name = self.residue_name[:3].upper()
 
-        # Validate that exactly one specification method is used
-        if self.volume_fraction is None and self.concentration is None:
+        # Validate that exactly one composition method is used
+        if self.mole_fraction is None and self.concentration is None:
             raise ValueError(
-                f"CoSolvent '{self.name}': Must specify either volume_fraction or concentration"
+                f"CoSolvent '{self.name}': Must specify either mole_fraction or concentration"
             )
-        if self.volume_fraction is not None and self.concentration is not None:
+        if self.mole_fraction is not None and self.concentration is not None:
             raise ValueError(
-                f"CoSolvent '{self.name}': Cannot specify both volume_fraction and concentration"
+                f"CoSolvent '{self.name}': Cannot specify both mole_fraction and concentration"
             )
-
-        # Density is required for volume_fraction
-        if self.volume_fraction is not None and self.density is None:
-            raise ValueError(
-                f"CoSolvent '{self.name}': density (g/mL) is required for volume_fraction calculation"
-            )
+        if self.mole_fraction is not None and not 0.0 < self.mole_fraction < 1.0:
+            raise ValueError(f"CoSolvent '{self.name}': mole_fraction must be between 0 and 1")
+        if self.concentration is not None and self.concentration <= 0.0:
+            raise ValueError(f"CoSolvent '{self.name}': concentration must be greater than 0")
 
 
 @dataclass
@@ -155,15 +155,23 @@ class SolventComposition:
     mgcl2_concentration: float = 0.0
     neutralize: bool = True
 
-    @property
-    def water_volume_fraction(self) -> float:
-        """Get the water volume fraction (1 - sum of co-solvent fractions).
+    def __post_init__(self) -> None:
+        """Validate co-solvent mole fractions."""
+        total_cosolvent = sum(
+            cs.mole_fraction for cs in self.co_solvents if cs.mole_fraction is not None
+        )
+        if total_cosolvent >= 1.0:
+            raise ValueError(f"Total co-solvent mole fraction must be < 1.0, got {total_cosolvent}")
 
-        Note: Only counts co-solvents specified by volume_fraction.
-        Co-solvents specified by concentration don't reduce water volume.
+    @property
+    def water_mole_fraction(self) -> float:
+        """Get the water mole fraction in the neutral solvent mixture.
+
+        Note: Only counts co-solvents specified by mole_fraction.
+        Co-solvents specified by concentration don't reduce water count.
         """
         total_cosolvent = sum(
-            cs.volume_fraction for cs in self.co_solvents if cs.volume_fraction is not None
+            cs.mole_fraction for cs in self.co_solvents if cs.mole_fraction is not None
         )
         return 1.0 - total_cosolvent
 
@@ -174,7 +182,7 @@ class SolventBuilder:
     This class handles:
     - Water solvation with different water models
     - Ion addition for neutralization and ionic strength
-    - Co-solvent addition with specified volume fractions
+    - Co-solvent addition with specified mole fractions or concentrations
     - Box shape and padding configuration
 
     Example:
@@ -182,7 +190,7 @@ class SolventBuilder:
         >>> composition = SolventComposition(
         ...     water_model="tip3p",
         ...     nacl_concentration=0.15,
-        ...     co_solvents=[CoSolvent("dmso", "CS(=O)C", 0.1)]
+        ...     co_solvents=[CoSolvent("dmso", "CS(=O)C", mole_fraction=0.1)]
         ... )
         >>> solvated = builder.solvate(
         ...     topology=solute_topology,
@@ -299,15 +307,6 @@ class SolventBuilder:
         nacl_mass_to_add = solvent_mass * nacl_mass_fraction
         nacl_to_add = (nacl_mass_to_add / nacl_mass).m_as("dimensionless").round()
 
-        # Calculate water to add
-        water_mass_to_add = solvent_mass - nacl_mass_to_add
-        water_to_add = (water_mass_to_add / water_mass).m_as("dimensionless").round()
-
-        # Adjust for co-solvents (reduce water proportionally)
-        if composition.co_solvents:
-            water_fraction = composition.water_volume_fraction
-            water_to_add = int(water_to_add * water_fraction)
-
         # Neutralize system
         solute_charge = sum(mol.total_charge for mol in topology.molecules)
         if composition.neutralize:
@@ -316,6 +315,40 @@ class SolventBuilder:
         else:
             na_to_add = int(nacl_to_add)
             cl_to_add = int(nacl_to_add)
+
+        # Load co-solvents before count calculations so molar masses are known
+        cosolvent_masses: list[tuple[str, float, Any]] = []
+        for cosolvent in composition.co_solvents:
+            if cosolvent.molecule is None:
+                # Load molecule with pre-computed charges to ensure all copies
+                # of the same co-solvent have identical parameters
+                cosolvent.molecule = get_solvent_molecule(
+                    name=cosolvent.name,
+                    smiles=cosolvent.smiles,
+                    residue_name=cosolvent.residue_name,
+                )
+
+            cosolvent_molar_mass = sum(atom.mass for atom in cosolvent.molecule.atoms)
+            if cosolvent.mole_fraction is not None:
+                cosolvent_masses.append(
+                    (cosolvent.name, cosolvent.mole_fraction, cosolvent_molar_mass)
+                )
+            elif cosolvent.concentration is None:
+                # Should not reach here due to validation in CoSolvent.__post_init__
+                raise ValueError(
+                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction nor concentration"
+                )
+
+        neutral_solvent_mass = solvent_mass - nacl_mass_to_add
+        if cosolvent_masses:
+            water_to_add, mole_fraction_counts = self._calculate_mole_fraction_counts(
+                neutral_solvent_mass=neutral_solvent_mass,
+                water_mass=water_mass,
+                cosolvent_mole_fractions=cosolvent_masses,
+            )
+        else:
+            water_to_add = self._round_dimensionless_to_int(neutral_solvent_mass / water_mass)
+            mole_fraction_counts = []
 
         LOGGER.info(f"Adding {int(water_to_add)} water, {na_to_add} Na+, {cl_to_add} Cl-")
 
@@ -327,45 +360,15 @@ class SolventBuilder:
         cosolvent_counts_list: List[Tuple[str, int]] = []
 
         # Add co-solvents (using cached charges for consistency)
+        mole_fraction_count_index = 0
         for cosolvent in composition.co_solvents:
-            if cosolvent.molecule is None:
-                # Load molecule with pre-computed charges to ensure all copies
-                # of the same co-solvent have identical parameters
-                cosolvent.molecule = get_solvent_molecule(
-                    name=cosolvent.name,
-                    smiles=cosolvent.smiles,
-                    residue_name=cosolvent.residue_name,
-                )
-
-            # Get molar mass of co-solvent
-            cosolvent_molar_mass = sum(atom.mass for atom in cosolvent.molecule.atoms)
-
-            if cosolvent.volume_fraction is not None:
-                # =============================================================
-                # VOLUME FRACTION METHOD
-                # =============================================================
-                # Formula: n = (V_box × φ × ρ) / M
-                # Where:
-                #   V_box = simulation box volume
-                #   φ     = volume fraction (e.g., 0.30 for 30%)
-                #   ρ     = co-solvent density (g/mL)
-                #   M     = molar mass (g/mol)
-                #
-                # This assumes ideal mixing (volumes are additive).
-                # =============================================================
-                cosolvent_density = Quantity(cosolvent.density, "gram / milliliter")
-                # Volume of co-solvent = box_volume × volume_fraction
-                cosolvent_volume = box_vol * cosolvent.volume_fraction
-                # Mass of co-solvent = volume × density
-                cosolvent_mass_to_add = cosolvent_volume * cosolvent_density
-                # Number of molecules = mass / molar_mass
-                n_cosolvent = int(
-                    (cosolvent_mass_to_add / cosolvent_molar_mass).m_as("dimensionless").round()
-                )
+            if cosolvent.mole_fraction is not None:
+                _, n_cosolvent = mole_fraction_counts[mole_fraction_count_index]
+                mole_fraction_count_index += 1
 
                 LOGGER.info(
                     f"Adding {n_cosolvent} {cosolvent.name} molecules "
-                    f"({cosolvent.volume_fraction * 100:.1f}% v/v, ρ={cosolvent.density} g/mL)"
+                    f"({cosolvent.mole_fraction * 100:.1f} mol%)"
                 )
 
             elif cosolvent.concentration is not None:
@@ -376,13 +379,15 @@ class SolventBuilder:
                 # Where:
                 #   C   = concentration (mol/L)
                 #   V   = box volume (L)
-                #   N_A = Avogadro's number (implicit in unit conversion)
+                #   N_A = Avogadro's number
                 #
-                # This directly gives the number of moles, then molecules.
+                # Convert volume to liters explicitly before applying N_A
                 # =============================================================
-                conc = Quantity(cosolvent.concentration, "mole / liter")
-                n_moles = conc * box_vol
-                n_cosolvent = int(n_moles.m_as("dimensionless").round())
+                box_volume_liters = self._box_volume_liters(box_vol)
+                n_cosolvent = self._count_concentration_molecules(
+                    concentration_molar=cosolvent.concentration,
+                    box_volume_liters=box_volume_liters,
+                )
 
                 LOGGER.info(
                     f"Adding {n_cosolvent} {cosolvent.name} molecules ({cosolvent.concentration} M)"
@@ -391,7 +396,7 @@ class SolventBuilder:
             else:
                 # Should not reach here due to validation in CoSolvent.__post_init__
                 raise ValueError(
-                    f"CoSolvent '{cosolvent.name}' has neither volume_fraction nor concentration"
+                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction nor concentration"
                 )
 
             solvent_molecules.append(cosolvent.molecule)
@@ -447,7 +452,7 @@ class SolventBuilder:
             CoSolvent(
                 name=cs.name,
                 smiles=cs.smiles,  # type: ignore[arg-type]  # Validated in schema
-                volume_fraction=cs.volume_fraction,
+                mole_fraction=cs.mole_fraction,
                 concentration=cs.concentration,
                 density=cs.density,
                 residue_name=cs.residue_name or cs.name[:3].upper(),
@@ -472,6 +477,107 @@ class SolventBuilder:
             target_density=config.box.target_density,
             tolerance=config.box.tolerance,
         )
+
+    @staticmethod
+    def _round_dimensionless_to_int(value: Any) -> int:
+        """Round a dimensionless value to an integer molecule count.
+
+        Parameters
+        ----------
+        value : Any
+            Dimensionless scalar or quantity-like object with ``m_as``.
+
+        Returns
+        -------
+        int
+            Rounded integer count.
+        """
+        if hasattr(value, "m_as"):
+            value = value.m_as("dimensionless")
+        return int(round(float(value)))
+
+    @staticmethod
+    def _box_volume_liters(box_volume: Any) -> float:
+        """Convert a box volume to liters.
+
+        Parameters
+        ----------
+        box_volume : Any
+            Volume as an OpenFF quantity-like object or a numeric value already
+            expressed in liters.
+
+        Returns
+        -------
+        float
+            Box volume in liters.
+        """
+        if hasattr(box_volume, "m_as"):
+            return float(box_volume.m_as("liter"))
+        return float(box_volume)
+
+    @staticmethod
+    def _count_concentration_molecules(concentration_molar: float, box_volume_liters: float) -> int:
+        """Count additive co-solvent molecules from concentration.
+
+        Parameters
+        ----------
+        concentration_molar : float
+            Co-solvent concentration in mol/L.
+        box_volume_liters : float
+            Simulation box volume in liters.
+
+        Returns
+        -------
+        int
+            Number of co-solvent molecules to add.
+        """
+        return int(round(concentration_molar * box_volume_liters * AVOGADRO_CONSTANT))
+
+    @classmethod
+    def _calculate_mole_fraction_counts(
+        cls,
+        neutral_solvent_mass: Any,
+        water_mass: Any,
+        cosolvent_mole_fractions: Sequence[tuple[str, float, Any]],
+    ) -> tuple[int, list[tuple[str, int]]]:
+        """Count water and mole-fraction co-solvents from a mass budget.
+
+        Parameters
+        ----------
+        neutral_solvent_mass : Any
+            Mass allocated to water plus mole-fraction co-solvents.
+        water_mass : Any
+            Molecular mass of one water molecule.
+        cosolvent_mole_fractions : Sequence[tuple[str, float, Any]]
+            Tuples of co-solvent name, mole fraction, and molecular mass.
+
+        Returns
+        -------
+        water_count : int
+            Number of water molecules in the neutral solvent mixture.
+        cosolvent_counts : list[tuple[str, int]]
+            Number of molecules for each mole-fraction co-solvent.
+        """
+        total_mole_fraction = sum(mole_fraction for _, mole_fraction, _ in cosolvent_mole_fractions)
+        if total_mole_fraction >= 1.0:
+            raise ValueError(
+                f"Total co-solvent mole fraction must be < 1.0, got {total_mole_fraction}"
+            )
+
+        water_mole_fraction = 1.0 - total_mole_fraction
+        average_mass = water_mass * water_mole_fraction
+        for _, mole_fraction, cosolvent_mass in cosolvent_mole_fractions:
+            average_mass += cosolvent_mass * mole_fraction
+
+        total_neutral_molecules = cls._round_dimensionless_to_int(
+            neutral_solvent_mass / average_mass
+        )
+        cosolvent_counts = [
+            (name, int(round(mole_fraction * total_neutral_molecules)))
+            for name, mole_fraction, _ in cosolvent_mole_fractions
+        ]
+        water_count = total_neutral_molecules - sum(count for _, count in cosolvent_counts)
+        return water_count, cosolvent_counts
 
     def _get_box_shape_matrix(self, shape: BoxShapeType) -> NDArray:
         """Get the transformation matrix for the box shape.

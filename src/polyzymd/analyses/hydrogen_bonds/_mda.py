@@ -62,6 +62,8 @@ class HydrogenBondMDAPlan:
     """Selection and summary state prepared for one hydrogen-bond replicate."""
 
     selection_string: str
+    hydrogens_selection_string: str
+    hydrogens_selection_source: str
     frame_indices: list[int]
     n_frames: int
     timestep_ps: float
@@ -157,7 +159,7 @@ class HydrogenBondMDAAnalysis:
         hbonds = HydrogenBondAnalysis(
             universe=self.universe,
             donors_sel=self.plan.selection_string,
-            hydrogens_sel=f"({self.plan.selection_string}) and element H",
+            hydrogens_sel=self.plan.hydrogens_selection_string,
             acceptors_sel=self.plan.selection_string,
             d_a_cutoff=self.settings.distance_cutoff,
             d_h_a_angle_cutoff=self.settings.angle_cutoff,
@@ -203,6 +205,7 @@ def build_hydrogen_bond_jobs(ctx: MDAReplicateJobContext) -> list[MDAAnalysisJob
             "angle_cutoff": settings.angle_cutoff,
             "update_selections": settings.update_selections,
             "allow_empty_groups": settings.allow_empty_groups,
+            "hydrogens_selection": settings.hydrogens_selection,
             "dynamic_selection_policy": dynamic_selection_policy_payload(settings),
         },
     )
@@ -292,6 +295,13 @@ class HydrogenBondArtifactCollector:
                 "dynamic_selection_policy": dynamic_selection_policy_payload(analysis.settings),
                 "composition_warnings": composition_warnings,
                 "update_selections": analysis.settings.update_selections,
+                "hydrogens_selection_policy": {
+                    "selection": analysis.plan.hydrogens_selection_string,
+                    "source": analysis.plan.hydrogens_selection_source,
+                    "element_enrichment": getattr(
+                        analysis.universe, "_polyzymd_element_enrichment", None
+                    ),
+                },
             },
             metadata={
                 "result_kind": "hydrogen_bonds_mda_replicate",
@@ -302,6 +312,8 @@ class HydrogenBondArtifactCollector:
                 "equilibration_time": eq_value,
                 "equilibration_unit": eq_unit,
                 "selection_string": analysis.plan.selection_string,
+                "hydrogens_selection_string": analysis.plan.hydrogens_selection_string,
+                "hydrogens_selection_source": analysis.plan.hydrogens_selection_source,
                 "timestep_ps": analysis.plan.timestep_ps,
                 "raw_timestep_ps": analysis.plan.raw_timestep_ps,
                 "frame_stride": analysis.plan.frame_stride,
@@ -425,6 +437,9 @@ def aggregate_hydrogen_bond_artifacts(
         provenance={
             "source": "hydrogen_bonds_replicate_artifact_aggregation",
             "frame_selection": ordered_artifacts[0].provenance.get("frame_selection"),
+            "hydrogens_selection_policy": ordered_artifacts[0].provenance.get(
+                "hydrogens_selection_policy"
+            ),
         },
         metadata={
             "result_kind": "hydrogen_bonds_mda_condition",
@@ -434,6 +449,12 @@ def aggregate_hydrogen_bond_artifacts(
             "equilibration_time": condition_model.equilibration_time,
             "equilibration_unit": condition_model.equilibration_unit,
             "selection_string": condition_model.selection_string,
+            "hydrogens_selection_string": ordered_artifacts[0].metadata.get(
+                "hydrogens_selection_string"
+            ),
+            "hydrogens_selection_source": ordered_artifacts[0].metadata.get(
+                "hydrogens_selection_source"
+            ),
             "timestep_ps": condition_model.timestep_ps,
             "raw_timestep_ps": condition_model.raw_timestep_ps,
             "frame_stride": condition_model.frame_stride,
@@ -829,6 +850,8 @@ def _prepare_hydrogen_bond_plan(
             summary_results_by_name[summary_spec.name] = summary_result
 
     union_sel = _build_union_selection(active_summary_specs, settings, resolved_groups)
+    hydrogens_selection_string = ""
+    hydrogens_selection_source = "none"
     if not union_sel:
         message = "No atoms selected for any summary — returning empty result"
         LOGGER.warning(message)
@@ -838,9 +861,24 @@ def _prepare_hydrogen_bond_plan(
                 summary_spec.name,
                 _build_zero_summary(summary_spec, n_frames=n_frames),
             )
+    else:
+        (
+            hydrogens_selection_string,
+            hydrogens_selection_source,
+            hydrogens_selection_warning,
+        ) = _resolve_hydrogens_selection(
+            universe=universe,
+            settings=settings,
+            group_union_selection=union_sel,
+        )
+        if hydrogens_selection_warning is not None:
+            LOGGER.warning(hydrogens_selection_warning)
+            warnings.append(hydrogens_selection_warning)
 
     return HydrogenBondMDAPlan(
         selection_string=union_sel,
+        hydrogens_selection_string=hydrogens_selection_string,
+        hydrogens_selection_source=hydrogens_selection_source,
         frame_indices=frame_indices,
         n_frames=n_frames,
         timestep_ps=effective_timestep_ps,
@@ -851,6 +889,68 @@ def _prepare_hydrogen_bond_plan(
         summary_results_by_name=summary_results_by_name,
         warnings=warnings,
     )
+
+
+def _universe_has_element_metadata(universe: Any) -> bool:
+    """Return whether a universe exposes complete element metadata.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+
+    Returns
+    -------
+    bool
+        ``True`` when elements are readable for all atoms.
+    """
+
+    try:
+        elements = list(universe.atoms.elements)
+        n_atoms = len(universe.atoms)
+    except (AttributeError, TypeError):
+        return False
+    return len(elements) == n_atoms
+
+
+def _resolve_hydrogens_selection(
+    *,
+    universe: Any,
+    settings: HydrogenBondSettings,
+    group_union_selection: str,
+) -> tuple[str, str, str | None]:
+    """Resolve the hydrogen selection used by MDAnalysis H-bond detection.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+    settings : HydrogenBondSettings
+        User-facing hydrogen-bond settings.
+    group_union_selection : str
+        Union of all active summary groups.
+
+    Returns
+    -------
+    tuple[str, str, str or None]
+        Selection string, source label, and optional warning.
+    """
+
+    if settings.hydrogens_selection is not None:
+        return f"({group_union_selection}) and ({settings.hydrogens_selection})", "user", None
+
+    if _universe_has_element_metadata(universe):
+        return f"({group_union_selection}) and (element H)", "element", None
+
+    enrichment = getattr(universe, "_polyzymd_element_enrichment", None)
+    enrichment_text = f" Element enrichment metadata: {enrichment}." if enrichment else ""
+    warning = (
+        "hydrogen_bonds could not read element metadata; falling back to hydrogen atom-name "
+        "patterns 'name H* or name [123]H*'. Explicit hydrogens are required. For unusual "
+        "hydrogen naming, set hydrogen_bonds.hydrogens_selection."
+        f"{enrichment_text}"
+    )
+    return f"({group_union_selection}) and (name H* or name [123]H*)", "name_fallback", warning
 
 
 def _warn_on_group_overlap(resolved_groups: dict[str, Any]) -> None:
@@ -1178,6 +1278,8 @@ def _write_event_sidecar(
             "shape": [int(dim) for dim in events.shape],
             "n_events": int(events.shape[0]),
             "selection_string": plan.selection_string,
+            "hydrogens_selection_string": plan.hydrogens_selection_string,
+            "hydrogens_selection_source": plan.hydrogens_selection_source,
             "distance_cutoff": settings.distance_cutoff,
             "angle_cutoff": settings.angle_cutoff,
             "update_selections": settings.update_selections,

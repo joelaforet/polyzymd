@@ -36,6 +36,96 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 _WARNED_GRO_TOPOLOGY_PATHS: set[Path] = set()
+_WARNED_ELEMENT_ENRICHMENT_KEYS: set[str] = set()
+
+_ELEMENT_SYMBOLS = frozenset(
+    {
+        "H",
+        "He",
+        "Li",
+        "Be",
+        "B",
+        "C",
+        "N",
+        "O",
+        "F",
+        "Ne",
+        "Na",
+        "Mg",
+        "Al",
+        "Si",
+        "P",
+        "S",
+        "Cl",
+        "Ar",
+        "K",
+        "Ca",
+        "Sc",
+        "Ti",
+        "V",
+        "Cr",
+        "Mn",
+        "Fe",
+        "Co",
+        "Ni",
+        "Cu",
+        "Zn",
+        "Br",
+        "I",
+    }
+)
+_COMMON_ION_ELEMENTS = {
+    "NA": "Na",
+    "SOD": "Na",
+    "CL": "Cl",
+    "CLA": "Cl",
+    "MG": "Mg",
+    "CA": "Ca",
+    "CAL": "Ca",
+    "ZN": "Zn",
+    "K": "K",
+    "POT": "K",
+    "FE": "Fe",
+    "CU": "Cu",
+    "MN": "Mn",
+}
+_BIOMOLECULAR_NAME_PREFIX_ELEMENTS = {"C", "N", "O", "S", "P", "F", "I"}
+_STANDARD_BIOMOLECULAR_RESIDUES = {
+    "ALA",
+    "ARG",
+    "ASN",
+    "ASP",
+    "CYS",
+    "CYX",
+    "GLN",
+    "GLU",
+    "GLY",
+    "HID",
+    "HIE",
+    "HIP",
+    "HIS",
+    "ILE",
+    "LEU",
+    "LYS",
+    "MET",
+    "PHE",
+    "PRO",
+    "SER",
+    "THR",
+    "TRP",
+    "TYR",
+    "VAL",
+    "A",
+    "C",
+    "G",
+    "T",
+    "U",
+    "DA",
+    "DC",
+    "DG",
+    "DT",
+    "DU",
+}
 
 
 def _normalized_warning_path(path: Path) -> Path:
@@ -80,6 +170,281 @@ def _require_matplotlib(feature_name: str = "plotting") -> None:
             "Ensure matplotlib is available in the PolyzyMD pixi environment "
             '(for example: pixi run -e analysis python -c "import matplotlib")'
         ) from None
+
+
+def _canonical_element_symbol(value: object) -> str | None:
+    """Return a canonical element symbol for an unambiguous token.
+
+    Parameters
+    ----------
+    value : object
+        Candidate atom type or atom name token.
+
+    Returns
+    -------
+    str or None
+        Canonical element symbol, or ``None`` when the token is not a plain
+        element symbol.
+    """
+
+    token = str(value).strip()
+    if not token or not token.isalpha() or len(token) > 2:
+        return None
+    symbol = token[0].upper() + token[1:].lower()
+    if symbol in _ELEMENT_SYMBOLS:
+        return symbol
+    return None
+
+
+def _context_allows_type_element(symbol: str, name: object, resname: object | None) -> bool:
+    """Return whether atom context supports an element inferred from type.
+
+    Parameters
+    ----------
+    symbol : str
+        Element symbol inferred from the atom type.
+    name : object
+        Atom name from the topology.
+    resname : object or None
+        Residue name used to reject ambiguous ion aliases.
+
+    Returns
+    -------
+    bool
+        ``True`` when the atom name and residue context support the type-derived
+        element.
+    """
+
+    name_token = str(name).strip().upper()
+    name_symbol = _canonical_element_symbol(name_token)
+    residue = str(resname).strip().upper().rstrip("+-") if resname is not None else ""
+    if (
+        len(name_token) == 2
+        and name_symbol == symbol
+        and residue not in _STANDARD_BIOMOLECULAR_RESIDUES
+        and residue not in _COMMON_ION_ELEMENTS
+    ):
+        return True
+
+    name_symbol = _infer_element_from_atom_name(name, resname)
+    return name_symbol == symbol
+
+
+def _infer_elements_from_atom_types(universe: Any) -> tuple[list[str] | None, str]:
+    """Infer topology elements from atom types when context agrees.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+
+    Returns
+    -------
+    tuple[list[str] | None, str]
+        Inferred element symbols and a diagnostic message. The element list is
+        ``None`` when any atom type is missing, ambiguous, or conflicts with
+        atom name and residue context.
+    """
+
+    try:
+        atom_types = list(universe.atoms.types)
+    except (AttributeError, TypeError):
+        return None, "atom types are unavailable"
+    try:
+        names = list(universe.atoms.names)
+    except (AttributeError, TypeError):
+        return None, "atom names are unavailable for type validation"
+    try:
+        resnames = list(universe.atoms.resnames)
+    except (AttributeError, TypeError):
+        resnames = [None] * len(names)
+
+    if len(atom_types) != len(names) or len(atom_types) != len(resnames):
+        return None, "atom type, name, and residue metadata lengths differ"
+
+    inferred: list[str] = []
+    for index, (atom_type, name, resname) in enumerate(
+        zip(atom_types, names, resnames, strict=True)
+    ):
+        symbol = _canonical_element_symbol(atom_type)
+        if symbol is None:
+            return None, f"atom type {atom_type!r} is not element-like"
+        if not _context_allows_type_element(symbol, name, resname):
+            return None, (
+                f"atom type {atom_type!r} at index {index} conflicts with "
+                f"atom name {name!r} and residue {resname!r}"
+            )
+        inferred.append(symbol)
+    return inferred, "all atom types are element-like and context-safe"
+
+
+def _infer_element_from_atom_name(name: object, resname: object | None = None) -> str | None:
+    """Infer an element from a conservative atom-name heuristic.
+
+    Parameters
+    ----------
+    name : object
+        Atom name from the topology.
+    resname : object or None, optional
+        Residue name used to distinguish ions such as calcium from protein
+        alpha carbons named ``CA``.
+
+    Returns
+    -------
+    str or None
+        Inferred element symbol, or ``None`` when no conservative inference is
+        possible.
+    """
+
+    raw_name = str(name).strip()
+    token = re.sub(r"^\d+", "", raw_name).upper()
+    if not token:
+        return None
+    base_token = re.sub(r"\d+$", "", token)
+    has_numeric_suffix = base_token != token
+
+    residue = str(resname).strip().upper().rstrip("+-") if resname is not None else ""
+    residue_element = _COMMON_ION_ELEMENTS.get(residue)
+    if residue_element is not None:
+        name_element = _COMMON_ION_ELEMENTS.get(base_token)
+        if name_element == residue_element:
+            return name_element
+        return None
+    if base_token in {"CL", "BR"}:
+        return _canonical_element_symbol(base_token)
+    if (
+        len(base_token) == 2
+        and base_token == token
+        and residue not in _STANDARD_BIOMOLECULAR_RESIDUES
+        and _canonical_element_symbol(base_token)
+    ):
+        return None
+    if (
+        has_numeric_suffix
+        and len(base_token) == 2
+        and residue not in _STANDARD_BIOMOLECULAR_RESIDUES
+        and _canonical_element_symbol(base_token)
+    ):
+        return None
+    if token in _COMMON_ION_ELEMENTS and token != "CA" and not residue:
+        return _COMMON_ION_ELEMENTS[token]
+    if token.startswith("H"):
+        return "H"
+    first_letter = token[0]
+    if first_letter in _BIOMOLECULAR_NAME_PREFIX_ELEMENTS:
+        return first_letter
+    return None
+
+
+def _infer_elements_from_atom_names(universe: Any) -> tuple[list[str] | None, str]:
+    """Infer topology elements from atom names when all atoms are recognized.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+
+    Returns
+    -------
+    tuple[list[str] | None, str]
+        Inferred element symbols and a diagnostic message. The element list is
+        ``None`` when any atom cannot be inferred conservatively.
+    """
+
+    try:
+        names = list(universe.atoms.names)
+    except (AttributeError, TypeError):
+        return None, "atom names are unavailable"
+    try:
+        resnames = list(universe.atoms.resnames)
+    except (AttributeError, TypeError):
+        resnames = [None] * len(names)
+
+    inferred: list[str] = []
+    for index, (name, resname) in enumerate(zip(names, resnames, strict=True)):
+        symbol = _infer_element_from_atom_name(name, resname)
+        if symbol is None:
+            return None, f"atom name {name!r} at index {index} is not safely inferable"
+        inferred.append(symbol)
+    return inferred, "all atom names matched conservative element rules"
+
+
+def _universe_has_elements(universe: Any) -> bool:
+    """Return whether a universe exposes complete element metadata.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+
+    Returns
+    -------
+    bool
+        ``True`` when element metadata can be read for all atoms.
+    """
+
+    try:
+        elements = list(universe.atoms.elements)
+    except (AttributeError, TypeError):
+        return False
+    return len(elements) == len(universe.atoms)
+
+
+def enrich_universe_elements(
+    universe: Any, *, topology_key: str | Path | None = None
+) -> dict[str, Any]:
+    """Add missing MDAnalysis element metadata when it can be inferred safely.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe to enrich in place.
+    topology_key : str or Path or None, optional
+        Stable key for one-time logging, usually the topology path.
+
+    Returns
+    -------
+    dict[str, Any]
+        Lightweight enrichment metadata with ``applied``, ``source``, and
+        diagnostic ``message`` or ``reason`` fields.
+    """
+
+    if _universe_has_elements(universe):
+        metadata = {"applied": False, "source": "existing", "message": "elements already present"}
+        universe._polyzymd_element_enrichment = metadata
+        return metadata
+
+    elements, type_reason = _infer_elements_from_atom_types(universe)
+    source = "types"
+    if elements is None:
+        elements, name_reason = _infer_elements_from_atom_names(universe)
+        source = "names"
+        reason = f"type inference skipped: {type_reason}; name inference skipped: {name_reason}"
+    else:
+        reason = type_reason
+
+    if elements is None:
+        metadata = {"applied": False, "source": None, "reason": reason}
+        universe._polyzymd_element_enrichment = metadata
+        return metadata
+
+    universe.add_TopologyAttr("elements", elements)
+    metadata = {
+        "applied": True,
+        "source": source,
+        "message": f"elements inferred from atom {source}",
+    }
+    universe._polyzymd_element_enrichment = metadata
+
+    warning_key = str(topology_key or id(universe))
+    if warning_key not in _WARNED_ELEMENT_ENRICHMENT_KEYS:
+        _WARNED_ELEMENT_ENRICHMENT_KEYS.add(warning_key)
+        LOGGER.info(
+            "Inferred missing topology elements from atom %s for %s",
+            source,
+            topology_key or "MDAnalysis universe",
+        )
+    return metadata
 
 
 def _trajectory_frame_index(trajectory: Any) -> int | None:
@@ -654,6 +1019,7 @@ class TrajectoryLoader:
                 str(info.topology_file),
                 [str(f) for f in info.trajectory_files],
             )
+        enrich_universe_elements(u, topology_key=info.topology_file)
         u.trajectory = _wrap_timestamp_preserving_trajectory(u.trajectory)
 
         if cache:

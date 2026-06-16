@@ -20,6 +20,7 @@ from polyzymd.analyses.stats import (
     anova_test,
     default_scalar_comparison,
     format_scalar_comparison,
+    format_scalar_comparison_artifact_payload,
     pairwise_comparisons,
     rank_conditions,
 )
@@ -374,6 +375,331 @@ def test_format_scalar_comparison_includes_adjusted_pvalues_in_text_and_markdown
     assert "p (adj)" in markdown_output
     assert "0.0300" in markdown_output
     assert "0.0400" in markdown_output
+
+
+def test_format_scalar_comparison_artifact_payload_computes_pairwise_delta_mean() -> None:
+    """Artifact payload formatter should show mean differences, not Cohen's d."""
+    payload = {
+        "condition_summaries": [
+            {
+                "label": "Control",
+                "n_replicates": 3,
+                "mean_rmsf_mean": 1.2000,
+                "mean_rmsf_sem": 0.0100,
+            },
+            {
+                "label": "PEG",
+                "n_replicates": 3,
+                "mean_rmsf_mean": 0.9892,
+                "mean_rmsf_sem": 0.0200,
+            },
+        ],
+        "pairwise_comparisons": [
+            {
+                "condition_a": "Control",
+                "condition_b": "PEG",
+                "metric": "mean_rmsf",
+                "p_value": 0.02717,
+                "p_value_adjusted": 0.02717,
+                "posthoc_method": "ttest_bh",
+                "cohens_d": -1.25,
+                "effect_size_interpretation": "large",
+                "direction": "decreased",
+                "significant": True,
+                "percent_change": -17.6,
+                "testable": True,
+                "note": None,
+            }
+        ],
+        "ranking": ["PEG", "Control"],
+        "rankings_by_metric": {"mean_rmsf": ["PEG", "Control"]},
+        "statistical_parameters": {"project_name": "RMSF beta", "equilibration": "10ns"},
+    }
+
+    text_output = format_scalar_comparison_artifact_payload(
+        payload,
+        title="RMSF Comparison",
+        metric_label="Mean RMSF",
+        metric_unit="A",
+        metric_key="mean_rmsf",
+        output_format="text",
+        higher_is_better=False,
+    )
+    json_output = format_scalar_comparison_artifact_payload(
+        payload,
+        metric_key="mean_rmsf",
+        output_format="json",
+    )
+
+    assert "Control vs PEG: Δmean=-0.2108 A" in text_output
+    assert "%Δ=-17.6%" in text_output
+    assert "p=0.02717" in text_output
+    assert "Δ=0.0000" not in text_output
+    assert json.loads(json_output) == payload
+
+
+def test_format_scalar_comparison_artifact_payload_requires_selected_mean_for_delta() -> None:
+    """Pairwise delta should not fall back to generic condition means."""
+    payload = {
+        "condition_summaries": [
+            {
+                "label": "Control",
+                "n_replicates": 3,
+                "mean": 1.2000,
+                "mean_rmsf_sem": 0.0100,
+            },
+            {
+                "label": "PEG",
+                "n_replicates": 3,
+                "mean": 0.9892,
+                "mean_rmsf_sem": 0.0200,
+            },
+        ],
+        "pairwise_comparisons": [
+            {
+                "condition_a": "Control",
+                "condition_b": "PEG",
+                "metric": "mean_rmsf",
+                "p_value": 0.02717,
+                "p_value_adjusted": 0.02717,
+                "posthoc_method": "ttest_bh",
+                "cohens_d": -1.25,
+                "effect_size_interpretation": "large",
+                "direction": "decreased",
+                "significant": True,
+                "percent_change": -17.6,
+                "testable": True,
+                "note": None,
+            }
+        ],
+        "ranking": ["PEG", "Control"],
+        "rankings_by_metric": {"mean_rmsf": ["PEG", "Control"]},
+        "statistical_parameters": {"project_name": "RMSF beta", "equilibration": "10ns"},
+    }
+
+    text_output = format_scalar_comparison_artifact_payload(
+        payload,
+        title="RMSF Comparison",
+        metric_label="Mean RMSF",
+        metric_unit="A",
+        metric_key="mean_rmsf",
+        output_format="text",
+        higher_is_better=False,
+    )
+
+    assert "Control vs PEG: Δmean=nan A" in text_output
+    assert "Δmean=-0.2108 A" not in text_output
+    assert "Δmean=0.0000 A" not in text_output
+
+
+def test_format_scalar_comparison_artifact_payload_handles_missing_pairwise_stats() -> None:
+    """Missing pairwise percent and p-values should format without crashing."""
+    payload = {
+        "condition_summaries": [
+            {
+                "label": "Control",
+                "n_replicates": 3,
+                "mean_rmsf_mean": 1.2000,
+                "mean_rmsf_sem": 0.0100,
+            },
+            {
+                "label": "PEG",
+                "n_replicates": 3,
+                "mean_rmsf_mean": 0.9892,
+                "mean_rmsf_sem": 0.0200,
+            },
+        ],
+        "pairwise_comparisons": [
+            {
+                "condition_a": "Control",
+                "condition_b": "PEG",
+                "metric": "mean_rmsf",
+                "p_value": None,
+                "p_value_adjusted": None,
+                "posthoc_method": "ttest_bh",
+                "cohens_d": -1.25,
+                "effect_size_interpretation": "large",
+                "direction": "decreased",
+                "significant": False,
+                "percent_change": None,
+                "testable": False,
+                "note": None,
+            }
+        ],
+        "ranking": ["PEG", "Control"],
+        "rankings_by_metric": {"mean_rmsf": ["PEG", "Control"]},
+        "statistical_parameters": {"project_name": "RMSF beta", "equilibration": "10ns"},
+    }
+
+    text_output = format_scalar_comparison_artifact_payload(
+        payload,
+        title="RMSF Comparison",
+        metric_label="Mean RMSF",
+        metric_unit="A",
+        metric_key="mean_rmsf",
+        output_format="text",
+        higher_is_better=False,
+    )
+
+    assert "Control vs PEG: Δmean=-0.2108 A" in text_output
+    assert "%Δ=undefined" in text_output
+    assert "p=nan" in text_output
+
+
+def test_format_scalar_comparison_artifact_payload_handles_malformed_ranking_values() -> None:
+    """Malformed selected condition means and SEMs should render as nan."""
+    payload = {
+        "condition_summaries": [
+            {
+                "label": "Control",
+                "n_replicates": 3,
+                "mean_rmsf_mean": "bad",
+                "mean_rmsf_sem": ["bad"],
+            },
+            {
+                "label": "PEG",
+                "n_replicates": 3,
+                "mean_rmsf_mean": {},
+                "mean_rmsf_sem": "bad",
+            },
+        ],
+        "pairwise_comparisons": [],
+        "ranking": ["PEG", "Control"],
+        "rankings_by_metric": {"mean_rmsf": ["PEG", "Control"]},
+        "statistical_parameters": {"project_name": "RMSF beta", "equilibration": "10ns"},
+    }
+
+    text_output = format_scalar_comparison_artifact_payload(
+        payload,
+        title="RMSF Comparison",
+        metric_label="Mean RMSF",
+        metric_unit="A",
+        metric_key="mean_rmsf",
+        output_format="text",
+        higher_is_better=False,
+    )
+    markdown_output = format_scalar_comparison_artifact_payload(
+        payload,
+        title="RMSF Comparison",
+        metric_label="Mean RMSF",
+        metric_unit="A",
+        metric_key="mean_rmsf",
+        output_format="markdown",
+        higher_is_better=False,
+    )
+
+    assert "1. PEG: nan A ± nan A" in text_output
+    assert "2. Control: nan A ± nan A" in text_output
+    assert "| 1 | PEG | nan A | nan A |" in markdown_output
+    assert "| 2 | Control | nan A | nan A |" in markdown_output
+
+
+def test_format_scalar_comparison_artifact_payload_handles_malformed_delta_mean() -> None:
+    """Malformed selected means should render a nan pairwise delta."""
+    payload = {
+        "condition_summaries": [
+            {
+                "label": "Control",
+                "n_replicates": 3,
+                "mean_rmsf_mean": "bad",
+                "mean_rmsf_sem": 0.0100,
+            },
+            {
+                "label": "PEG",
+                "n_replicates": 3,
+                "mean_rmsf_mean": ["bad"],
+                "mean_rmsf_sem": 0.0200,
+            },
+        ],
+        "pairwise_comparisons": [
+            {
+                "condition_a": "Control",
+                "condition_b": "PEG",
+                "metric": "mean_rmsf",
+                "p_value": 0.02717,
+                "p_value_adjusted": 0.02717,
+                "posthoc_method": "ttest_bh",
+                "cohens_d": -1.25,
+                "effect_size_interpretation": "large",
+                "direction": "decreased",
+                "significant": True,
+                "percent_change": -17.6,
+                "testable": True,
+                "note": None,
+            }
+        ],
+        "ranking": ["PEG", "Control"],
+        "rankings_by_metric": {"mean_rmsf": ["PEG", "Control"]},
+        "statistical_parameters": {"project_name": "RMSF beta", "equilibration": "10ns"},
+    }
+
+    text_output = format_scalar_comparison_artifact_payload(
+        payload,
+        title="RMSF Comparison",
+        metric_label="Mean RMSF",
+        metric_unit="A",
+        metric_key="mean_rmsf",
+        output_format="text",
+        higher_is_better=False,
+    )
+
+    assert "Control vs PEG: Δmean=nan A" in text_output
+
+
+@pytest.mark.parametrize("malformed_value", ["bad", ["bad"], {"bad": "value"}])
+def test_format_scalar_comparison_artifact_payload_handles_malformed_pairwise_stats(
+    malformed_value: object,
+) -> None:
+    """Malformed pairwise percent and p-values should format without crashing."""
+    payload = {
+        "condition_summaries": [
+            {
+                "label": "Control",
+                "n_replicates": 3,
+                "mean_rmsf_mean": 1.2000,
+                "mean_rmsf_sem": 0.0100,
+            },
+            {
+                "label": "PEG",
+                "n_replicates": 3,
+                "mean_rmsf_mean": 0.9892,
+                "mean_rmsf_sem": 0.0200,
+            },
+        ],
+        "pairwise_comparisons": [
+            {
+                "condition_a": "Control",
+                "condition_b": "PEG",
+                "metric": "mean_rmsf",
+                "p_value": malformed_value,
+                "p_value_adjusted": malformed_value,
+                "posthoc_method": "ttest_bh",
+                "cohens_d": -1.25,
+                "effect_size_interpretation": "large",
+                "direction": "decreased",
+                "significant": False,
+                "percent_change": malformed_value,
+                "testable": False,
+                "note": None,
+            }
+        ],
+        "ranking": ["PEG", "Control"],
+        "rankings_by_metric": {"mean_rmsf": ["PEG", "Control"]},
+        "statistical_parameters": {"project_name": "RMSF beta", "equilibration": "10ns"},
+    }
+
+    text_output = format_scalar_comparison_artifact_payload(
+        payload,
+        title="RMSF Comparison",
+        metric_label="Mean RMSF",
+        metric_unit="A",
+        metric_key="mean_rmsf",
+        output_format="text",
+        higher_is_better=False,
+    )
+
+    assert "%Δ=undefined" in text_output
+    assert "p=nan" in text_output
 
 
 def test_comparison_result_rejects_missing_adjusted_pvalues() -> None:

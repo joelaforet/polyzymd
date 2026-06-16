@@ -91,12 +91,16 @@ hydrogen). The angle is measured at the hydrogen: D–H···A.
 :class: important
 
 The plugin passes your configured group union to MDAnalysis as the donor and
-acceptor selection, and uses `(<group union>) and element H` for hydrogens. This
-means your topology must contain explicit hydrogen atoms and usable element
-metadata for hydrogen selection. Topologies without hydrogens, with missing or
-incorrect element records, or with coarse-grained beads will undercount or
-return no H-bonds. The current public settings do not expose separate donor,
-hydrogen, and acceptor selection strings.
+acceptor selection. Your topology must contain explicit hydrogen atoms; systems
+without hydrogens or with coarse-grained beads will undercount or return no
+H-bonds.
+
+PolyzyMD prefers `(<group union>) and (element H)` for hydrogen selection. For
+GRO-like topologies with missing MDAnalysis `elements`, PolyzyMD tries to infer
+elements safely from atom types or atom names. If elements remain unavailable,
+`hydrogen_bonds` falls back to the conservative name pattern
+`(<group union>) and (name H* or name [123]H*)`. Use `hydrogens_selection` only
+for unusual explicit-hydrogen names.
 :::
 
 ### Groups
@@ -184,6 +188,7 @@ overlap, the plugin raises an error by default. Set
 | `top_n_pairs` | int | `15` | Number of top residue pairs to report per summary |
 | `allow_empty_groups` | bool | `true` | If `true` (default), warn and skip summaries when a referenced group selection matches no atoms. Set `false` for strict validation (raise `ValueError`). |
 | `allow_overlapping_composition` | bool | `false` | If `false`, overlapping composition partitions raise an error. Set `true` to allow overlap with warnings. |
+| `hydrogens_selection` | string or null | `null` | Advanced explicit-hydrogen selection override for unusual atom names. The default uses element metadata, with GRO-safe inference/name fallback when needed. |
 | `timestep_ps` | float or null | `null` | Manual frame spacing in ps for time-axis plots. If null, read from trajectory metadata. |
 
 If you want composition partitions to mirror group selections, define them

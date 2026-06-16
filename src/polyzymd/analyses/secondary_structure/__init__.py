@@ -8,11 +8,12 @@ comparison path.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
@@ -48,17 +49,84 @@ if TYPE_CHECKING:
     from polyzymd.analyses.mda import MDAAnalysisJob, MDAReplicateJobContext
 
 
+def _legacy_secondary_structure_fingerprint(chain_id: str) -> str:
+    """Return the legacy settings fingerprint for chain-only settings.
+
+    Parameters
+    ----------
+    chain_id : str
+        Effective protein chain ID.
+
+    Returns
+    -------
+    str
+        First eight hexadecimal characters of the SHA-256 digest.
+    """
+
+    serialized = json.dumps({"chain_id": chain_id}, sort_keys=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:8]
+
+
 class SecondaryStructureSettings(BaseModel):
     """Settings for secondary structure analysis.
 
     Chain ``A`` is the default protein chain under the PolyzyMD chain
-    convention.
+    convention. Set ``selection`` to an explicit MDAnalysis selection when
+    topology files do not preserve chain IDs.
     """
 
     chain_id: str = Field(
         default="A",
         description="Chain letter for the protein chain",
     )
+    selection: str | None = Field(
+        default=None,
+        description="Explicit MDAnalysis protein selection. Overrides chain_id when provided.",
+    )
+
+    @field_validator("chain_id")
+    @classmethod
+    def _validate_chain_id(cls, value: str) -> str:
+        """Validate and normalize the protein chain ID.
+
+        Parameters
+        ----------
+        value : str
+            User-provided protein chain ID.
+
+        Returns
+        -------
+        str
+            Stripped chain ID.
+        """
+
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Secondary-structure chain_id must not be empty")
+        return stripped
+
+    @field_validator("selection")
+    @classmethod
+    def _validate_selection(cls, value: str | None) -> str | None:
+        """Validate and normalize an explicit protein selection.
+
+        Parameters
+        ----------
+        value : str or None
+            Optional MDAnalysis selection string.
+
+        Returns
+        -------
+        str or None
+            Stripped selection string, or ``None`` when not configured.
+        """
+
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Secondary-structure selection must not be empty when provided")
+        return stripped
 
 
 class SecondaryStructureAnalysis(Analysis):
@@ -88,6 +156,8 @@ class SecondaryStructureAnalysis(Analysis):
             Stable settings fingerprint.
         """
 
+        if isinstance(settings, SecondaryStructureSettings) and settings.selection is None:
+            return _legacy_secondary_structure_fingerprint(settings.chain_id)
         return settings_fingerprint(settings)
 
     def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:

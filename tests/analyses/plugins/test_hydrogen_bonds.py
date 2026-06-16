@@ -76,11 +76,26 @@ class _MockAtom:
 
 
 class _MockAtomCollection:
-    def __init__(self, atoms_by_index: dict[int, _MockAtom]) -> None:
+    """Minimal atom collection with optional element metadata."""
+
+    def __init__(
+        self, atoms_by_index: dict[int, _MockAtom], elements: list[str] | None = None
+    ) -> None:
+        """Store atoms and optional element topology metadata."""
+
         self._atoms_by_index = atoms_by_index
+        if elements is not None:
+            self.elements = elements
 
     def __getitem__(self, item: int) -> _MockAtom:
+        """Return one atom by topology index."""
+
         return self._atoms_by_index[item]
+
+    def __len__(self) -> int:
+        """Return the number of stored atoms."""
+
+        return len(self._atoms_by_index)
 
 
 class _MockAtomGroup:
@@ -246,6 +261,7 @@ def test_settings_defaults() -> None:
     assert settings.summaries[0].name == "protein_polymer"
     assert settings.summaries[0].between == ("protein", "polymer")
     assert settings.allow_empty_groups is True
+    assert settings.hydrogens_selection is None
 
 
 def test_settings_custom() -> None:
@@ -259,6 +275,13 @@ def test_settings_custom() -> None:
     )
     assert set(settings.groups) == {"enzyme", "ligand", "polymer"}
     assert [summary.name for summary in settings.summaries] == ["enzyme_polymer", "ligand_internal"]
+
+
+def test_empty_hydrogens_selection_is_rejected() -> None:
+    """Blank hydrogen selection overrides should fail validation."""
+
+    with pytest.raises(ValidationError, match="hydrogens_selection must not be empty"):
+        HydrogenBondSettings(hydrogens_selection="   ")
 
 
 def test_settings_accepts_mapping_summaries_form() -> None:
@@ -450,6 +473,137 @@ def test_mda_analysis_records_effective_timestep_metadata() -> None:
     assert analysis.plan.timestep_ps == pytest.approx(30.0)
     assert analysis.plan.raw_timestep_ps == pytest.approx(10.0)
     assert analysis.plan.frame_stride == 3
+
+
+def test_mda_analysis_uses_element_h_when_elements_available() -> None:
+    """Element metadata should drive the default hydrogen selection."""
+
+    instances: list[MockHydrogenBondAnalysis] = []
+
+    class MockHydrogenBondAnalysis:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
+            instances.append(self)
+
+        def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
+            del start, stop, step, verbose
+
+    universe = MagicMock()
+    universe.trajectory = [object()] * 3
+    universe.atoms = _MockAtomCollection(
+        {
+            0: _MockAtom(0, "A", 10, "SER", 0),
+            1: _MockAtom(1, "C", 100, "OEG", 1),
+        },
+        elements=["C", "O"],
+    )
+    universe.select_atoms.side_effect = lambda selection, updating: {
+        "chainid A": _MockAtomGroup([0]),
+        "chainid C": _MockAtomGroup([1]),
+    }[selection]
+    analysis = HydrogenBondMDAAnalysis(
+        universe=universe,
+        settings=HydrogenBondSettings(),
+        condition_label="test",
+        replicate=1,
+        raw_timestep_ps=10.0,
+    )
+
+    with patch.dict(sys.modules, _make_mdanalysis_module(MockHydrogenBondAnalysis)):
+        analysis.run(start=0, stop=3, step=1)
+
+    assert analysis.plan is not None
+    assert analysis.plan.hydrogens_selection_source == "element"
+    assert instances[0].kwargs["hydrogens_sel"] == "((chainid A) or (chainid C)) and (element H)"
+
+
+def test_mda_analysis_uses_name_fallback_without_elements() -> None:
+    """Missing element metadata should fall back to explicit hydrogen names."""
+
+    instances: list[MockHydrogenBondAnalysis] = []
+
+    class MockHydrogenBondAnalysis:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
+            instances.append(self)
+
+        def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
+            del start, stop, step, verbose
+
+    universe = MagicMock()
+    universe.trajectory = [object()] * 3
+    universe.atoms = _MockAtomCollection(
+        {
+            0: _MockAtom(0, "A", 10, "SER", 0),
+            1: _MockAtom(1, "C", 100, "OEG", 1),
+        }
+    )
+    universe._polyzymd_element_enrichment = {"applied": False, "reason": "test"}
+    universe.select_atoms.side_effect = lambda selection, updating: {
+        "chainid A": _MockAtomGroup([0]),
+        "chainid C": _MockAtomGroup([1]),
+    }[selection]
+    analysis = HydrogenBondMDAAnalysis(
+        universe=universe,
+        settings=HydrogenBondSettings(),
+        condition_label="test",
+        replicate=1,
+        raw_timestep_ps=10.0,
+    )
+
+    with patch.dict(sys.modules, _make_mdanalysis_module(MockHydrogenBondAnalysis)):
+        analysis.run(start=0, stop=3, step=1)
+
+    assert analysis.plan is not None
+    assert analysis.plan.hydrogens_selection_source == "name_fallback"
+    assert instances[0].kwargs["hydrogens_sel"] == (
+        "((chainid A) or (chainid C)) and (name H* or name [123]H*)"
+    )
+    assert any("hydrogens_selection" in warning for warning in analysis.plan.warnings)
+
+
+def test_mda_analysis_wraps_user_hydrogens_selection() -> None:
+    """User hydrogen selection overrides should still be limited to active groups."""
+
+    instances: list[MockHydrogenBondAnalysis] = []
+
+    class MockHydrogenBondAnalysis:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
+            instances.append(self)
+
+        def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
+            del start, stop, step, verbose
+
+    universe = MagicMock()
+    universe.trajectory = [object()] * 3
+    universe.atoms = _MockAtomCollection(
+        {
+            0: _MockAtom(0, "A", 10, "SER", 0),
+            1: _MockAtom(1, "C", 100, "OEG", 1),
+        }
+    )
+    universe.select_atoms.side_effect = lambda selection, updating: {
+        "chainid A": _MockAtomGroup([0]),
+        "chainid C": _MockAtomGroup([1]),
+    }[selection]
+    analysis = HydrogenBondMDAAnalysis(
+        universe=universe,
+        settings=HydrogenBondSettings(hydrogens_selection="name HW*"),
+        condition_label="test",
+        replicate=1,
+        raw_timestep_ps=10.0,
+    )
+
+    with patch.dict(sys.modules, _make_mdanalysis_module(MockHydrogenBondAnalysis)):
+        analysis.run(start=0, stop=3, step=1)
+
+    assert analysis.plan is not None
+    assert analysis.plan.hydrogens_selection_source == "user"
+    assert instances[0].kwargs["hydrogens_sel"] == "((chainid A) or (chainid C)) and (name HW*)"
 
 
 def test_replicate_artifact_preserves_timing_metadata(tmp_path: Path) -> None:
@@ -777,6 +931,15 @@ def test_compute_stage_basic(tmp_path: Path) -> None:
     assert len(instances) == 1
     assert instances[0].kwargs["d_a_cutoff"] == pytest.approx(settings.distance_cutoff)
     assert instances[0].kwargs["d_h_a_angle_cutoff"] == pytest.approx(settings.angle_cutoff)
+    assert instances[0].kwargs["hydrogens_sel"] == (
+        "((chainid A) or (chainid C)) and (name H* or name [123]H*)"
+    )
+    assert artifact.metadata["hydrogens_selection_source"] == "name_fallback"
+    assert artifact.metadata["hydrogens_selection_string"] == (
+        "((chainid A) or (chainid C)) and (name H* or name [123]H*)"
+    )
+    assert artifact.provenance["hydrogens_selection_policy"]["source"] == "name_fallback"
+    assert any("hydrogens_selection" in warning for warning in artifact.warnings)
     assert instances[0].run_args is not None
     assert instances[0].run_args["start"] == 0
 
@@ -4727,7 +4890,7 @@ def test_compute_stage_hydrogens_sel_explicit(tmp_path: Path) -> None:
     }
     universe = MagicMock()
     universe.trajectory = [object(), object(), object()]
-    universe.atoms = _MockAtomCollection(atoms)
+    universe.atoms = _MockAtomCollection(atoms, elements=["C", "O"])
     selections = {
         "chainid A": _MockAtomGroup([0]),
         "chainid C": _MockAtomGroup([1]),
@@ -4770,7 +4933,7 @@ def test_compute_stage_hydrogens_sel_explicit(tmp_path: Path) -> None:
     hydrogens_sel = captured_kwargs[0]["hydrogens_sel"]
     assert hydrogens_sel is not None, "hydrogens_sel must not be None (causes NoDataError on PDB)"
     assert "element H" in hydrogens_sel
-    expected = "((chainid A) or (chainid C)) and element H"
+    expected = "((chainid A) or (chainid C)) and (element H)"
     assert hydrogens_sel == expected
 
 

@@ -8,14 +8,55 @@ providing validation, type safety, and YAML/JSON serialization support.
 from __future__ import annotations
 
 import logging
+import re
 import shlex
 from enum import Enum
 from pathlib import Path
+from string import Formatter
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 LOGGER = logging.getLogger(__name__)
+
+_TOKEN_UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
+_TOKEN_UNDERSCORES = re.compile(r"_+")
+
+
+def _format_safe_token(value: object) -> str:
+    """Convert a value into a safe lowercase naming token.
+
+    Parameters
+    ----------
+    value : object
+        Value to normalize for a directory or job-name token.
+
+    Returns
+    -------
+    str
+        Sanitized token using only alphanumerics, underscores, and hyphens.
+    """
+    token = str(value).strip().lower()
+    token = _TOKEN_UNSAFE_CHARS.sub("_", token)
+    token = _TOKEN_UNDERSCORES.sub("_", token)
+    return token.strip("_") or "unknown"
+
+
+def _format_decimal_token(value: float) -> str:
+    """Format a decimal value without raw decimal points.
+
+    Parameters
+    ----------
+    value : float
+        Numeric value to format.
+
+    Returns
+    -------
+    str
+        Compact token, using ``p`` as the decimal separator when needed.
+    """
+    formatted = f"{value:g}"
+    return formatted.replace(".", "p")
 
 
 class ChargeMethod(str, Enum):
@@ -412,22 +453,14 @@ class PolymerConfig(BaseModel):
 class CoSolventSpec(BaseModel):
     """Specification for a co-solvent component.
 
-    You must specify EITHER volume_fraction OR concentration, not both.
+    You must specify either ``mole_fraction`` or ``concentration``, not both.
 
     For co-solvents in the built-in library (dmso, dmf, urea, ethanol, etc.),
     you can omit the smiles and density fields - they will be looked up
     automatically.
 
-    Attributes:
-        name: Identifier for the co-solvent (e.g., "dmso")
-        smiles: SMILES string (optional if co-solvent is in library)
-        volume_fraction: Volume fraction (0-1), e.g., 0.30 for 30% v/v
-        concentration: Molar concentration (mol/L)
-        density: Density in g/mL (required for volume_fraction with custom molecules)
-        residue_name: 3-letter residue name (default: first 3 chars of name)
-
-    Example (library co-solvent with volume fraction):
-        >>> CoSolventSpec(name="dmso", volume_fraction=0.30)
+    Example (library co-solvent with mole fraction):
+        >>> CoSolventSpec(name="dmso", mole_fraction=0.10)
 
     Example (library co-solvent with concentration):
         >>> CoSolventSpec(name="urea", concentration=2.0)
@@ -436,51 +469,62 @@ class CoSolventSpec(BaseModel):
         >>> CoSolventSpec(
         ...     name="my_solvent",
         ...     smiles="CCOC(=O)C",
-        ...     density=0.902,
-        ...     volume_fraction=0.15
+        ...     mole_fraction=0.05
         ... )
     """
 
     name: str = Field(..., description="Co-solvent identifier")
     smiles: str | None = Field(None, description="SMILES string (optional if in library)")
 
-    # Specification method 1: Volume fraction
-    volume_fraction: float | None = Field(
+    # Specification method 1: Mole fraction
+    mole_fraction: float | None = Field(
         None,
         gt=0.0,
         lt=1.0,
-        description="Volume fraction (0-1), e.g., 0.30 for 30% v/v",
+        description="Mole fraction (0-1), e.g., 0.10 for 10 mol%",
     )
 
     # Specification method 2: Molar concentration
     concentration: float | None = Field(None, gt=0.0, description="Molar concentration (mol/L)")
 
-    # Physical property for volume fraction calculation
+    # Optional physical property for library metadata
     density: float | None = Field(
         None,
         gt=0.0,
-        description="Density in g/mL (required for volume_fraction with custom molecules)",
+        description="Optional density in g/mL for co-solvent metadata",
     )
 
     residue_name: str | None = Field(None, max_length=3, description="Residue name")
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_volume_fraction(cls, data: Any) -> Any:
+        """Reject removed volume-fraction configuration keys."""
+        if isinstance(data, dict) and "volume_fraction" in data:
+            raise ValueError(
+                "Co-solvent 'volume_fraction' has been removed. Use 'mole_fraction' "
+                "for solvent mole fractions or 'concentration' for molarity; values are "
+                "not converted automatically."
+            )
+        return data
 
     @model_validator(mode="after")
     def validate_and_populate(self) -> "CoSolventSpec":
         """Validate specification and populate missing fields from library."""
         from polyzymd.data.cosolvent_library import get_cosolvent
 
-        # Check that exactly one of volume_fraction or concentration is specified
-        has_vf = self.volume_fraction is not None
+        # Check that exactly one composition method is specified
+        has_mole_fraction = self.mole_fraction is not None
         has_conc = self.concentration is not None
 
-        if not has_vf and not has_conc:
+        if not has_mole_fraction and not has_conc:
             raise ValueError(
-                f"Co-solvent '{self.name}': Must specify either 'volume_fraction' "
+                f"Co-solvent '{self.name}': Must specify either 'mole_fraction' "
                 f"or 'concentration'"
             )
-        if has_vf and has_conc:
+        if has_mole_fraction and has_conc:
             raise ValueError(
-                f"Co-solvent '{self.name}': Cannot specify both 'volume_fraction' "
+                f"Co-solvent '{self.name}': Cannot specify both 'mole_fraction' "
                 f"and 'concentration' - choose one"
             )
 
@@ -496,15 +540,9 @@ class CoSolventSpec(BaseModel):
                     f"Co-solvent '{self.name}' not in library. Please provide 'smiles' field."
                 )
 
-        # For volume_fraction, we need density
-        if has_vf and self.density is None:
-            if library_data:
-                object.__setattr__(self, "density", library_data.density)
-            else:
-                raise ValueError(
-                    f"Co-solvent '{self.name}' not in library. "
-                    f"Please provide 'density' field (g/mL) for volume_fraction calculation."
-                )
+        # Preserve library density as metadata when available
+        if self.density is None and library_data:
+            object.__setattr__(self, "density", library_data.density)
 
         # Set default residue name
         if self.residue_name is None:
@@ -558,14 +596,7 @@ class BoxConfig(BaseModel):
 
 
 class SolventConfig(BaseModel):
-    """Complete solvent configuration.
-
-    Attributes:
-        primary: Primary solvent settings
-        co_solvents: List of co-solvent specifications
-        ions: Ion configuration
-        box: Box geometry settings
-    """
+    """Complete solvent configuration."""
 
     primary: PrimarySolventConfig = Field(
         default_factory=PrimarySolventConfig, description="Primary solvent"
@@ -575,11 +606,11 @@ class SolventConfig(BaseModel):
     box: BoxConfig = Field(default_factory=BoxConfig, description="Box settings")
 
     @model_validator(mode="after")
-    def validate_volume_fractions(self) -> "SolventConfig":
-        """Ensure co-solvent volume fractions don't exceed 1.0."""
-        total = sum(cs.volume_fraction for cs in self.co_solvents if cs.volume_fraction is not None)
+    def validate_mole_fractions(self) -> "SolventConfig":
+        """Ensure co-solvent mole fractions leave room for water."""
+        total = sum(cs.mole_fraction for cs in self.co_solvents if cs.mole_fraction is not None)
         if total >= 1.0:
-            raise ValueError(f"Total co-solvent volume fraction must be < 1.0, got {total}")
+            raise ValueError(f"Total co-solvent mole fraction must be < 1.0, got {total}")
         return self
 
 
@@ -1014,24 +1045,49 @@ class OutputConfig(BaseModel):
         substrate: str,
         polymer_type: str,
         temperature: float,
-        replicate: int,
+        replicate: int | str,
         duration: float = 0.0,
+        primary_solvent: str = "water_tip3p",
+        cosolvent_composition: str = "none",
+        solvent_composition: str | None = None,
         **kwargs: Any,
     ) -> str:
         """Format the directory name using the template.
 
-        Args:
-            enzyme: Enzyme name
-            substrate: Substrate name
-            polymer_type: Polymer type (or "none")
-            temperature: Temperature in K
-            replicate: Replicate number
-            duration: Production duration in ns
-            **kwargs: Additional template variables
+        Parameters
+        ----------
+        enzyme : str
+            Enzyme name.
+        substrate : str
+            Substrate name.
+        polymer_type : str
+            Polymer type, or ``"none"``.
+        temperature : float
+            Temperature in K.
+        replicate : int or str
+            Replicate number or glob token.
+        duration : float, optional
+            Production duration in ns, by default 0.0.
+        primary_solvent : str, optional
+            Primary solvent token, by default ``"water_tip3p"``.
+        cosolvent_composition : str, optional
+            Co-solvent composition token, by default ``"none"``.
+        solvent_composition : str or None, optional
+            Full solvent composition token. When not provided, the primary solvent
+            and co-solvent tokens are combined.
+        **kwargs : Any
+            Additional template variables.
 
-        Returns:
-            Formatted directory name
+        Returns
+        -------
+        str
+            Formatted directory name.
         """
+        if solvent_composition is None:
+            solvent_composition = primary_solvent
+            if cosolvent_composition != "none":
+                solvent_composition = f"{primary_solvent}_{cosolvent_composition}"
+
         return self.naming_template.format(
             enzyme=enzyme,
             substrate=substrate,
@@ -1039,6 +1095,9 @@ class OutputConfig(BaseModel):
             temperature=int(temperature),
             replicate=replicate,
             duration=int(duration),
+            primary_solvent=primary_solvent,
+            cosolvent_composition=cosolvent_composition,
+            solvent_composition=solvent_composition,
             **kwargs,
         )
 
@@ -1354,6 +1413,101 @@ class SimulationConfig(BaseModel):
 
         save_config(self, path)
 
+    def _primary_solvent_token(self) -> str:
+        """Format the primary solvent naming token.
+
+        Returns
+        -------
+        str
+            Primary solvent token for naming templates.
+        """
+        primary = self.solvent.primary
+        primary_type = _format_safe_token(primary.type)
+        if primary_type == "water":
+            return f"water_{_format_safe_token(primary.model.value)}"
+        return primary_type
+
+    def _cosolvent_composition_token(self) -> str:
+        """Format the co-solvent composition naming token.
+
+        Returns
+        -------
+        str
+            Co-solvent token or ``none`` when no co-solvents are configured.
+        """
+        if not self.solvent.co_solvents:
+            return "none"
+
+        tokens: list[tuple[str, str]] = []
+        for cosolvent in self.solvent.co_solvents:
+            name = _format_safe_token(cosolvent.name)
+            if cosolvent.volume_fraction is not None:
+                percent = _format_decimal_token(cosolvent.volume_fraction * 100)
+                token = f"{name}_{percent}pctv"
+            elif cosolvent.concentration is not None:
+                concentration = _format_decimal_token(cosolvent.concentration)
+                token = f"{name}_{concentration}M"
+            else:
+                # Validation guarantees one composition mode, but keep errors explicit
+                raise ValueError(f"Co-solvent '{cosolvent.name}' has no composition value")
+            tokens.append((name, token))
+
+        return "_".join(token for _, token in sorted(tokens, key=lambda item: item[0]))
+
+    def _run_directory_template_values(self, replicate: int | str = 1) -> dict[str, Any]:
+        """Build centralized values for run-directory naming templates.
+
+        Parameters
+        ----------
+        replicate : int or str, optional
+            Replicate token to insert into the template, by default 1.
+
+        Returns
+        -------
+        dict of str to Any
+            Template values shared by directory naming and replicate discovery.
+        """
+        polymer_type = "none"
+        if self.polymers and self.polymers.enabled:
+            probs = {m.label: m.probability for m in self.polymers.monomers}
+            sorted_labels = sorted(probs.keys())
+            composition = "_".join(f"{lbl}{probs[lbl] * 100:.0f}" for lbl in sorted_labels)
+            polymer_type = f"{self.polymers.type_prefix}_{composition}"
+
+        substrate_name = self.substrate.name if self.substrate else "apo"
+        primary_solvent = self._primary_solvent_token()
+        cosolvent_composition = self._cosolvent_composition_token()
+        solvent_composition = primary_solvent
+        if cosolvent_composition != "none":
+            solvent_composition = f"{primary_solvent}_{cosolvent_composition}"
+
+        return {
+            "enzyme": self.enzyme.name,
+            "substrate": substrate_name.replace("-", ""),
+            "polymer_type": polymer_type,
+            "temperature": int(self.thermodynamics.temperature),
+            "replicate": replicate,
+            "duration": int(self.simulation_phases.production.duration),
+            "primary_solvent": primary_solvent,
+            "cosolvent_composition": cosolvent_composition,
+            "solvent_composition": solvent_composition,
+        }
+
+    def format_run_directory_name(self, replicate: int | str = 1) -> str:
+        """Format the run directory name for a replicate.
+
+        Parameters
+        ----------
+        replicate : int or str, optional
+            Replicate number or glob token, by default 1.
+
+        Returns
+        -------
+        str
+            Formatted run directory name.
+        """
+        return self.output.format_directory_name(**self._run_directory_template_values(replicate))
+
     def get_working_directory(self, replicate: int = 1) -> Path:
         """Get the working directory path for a given replicate (in scratch).
 
@@ -1366,7 +1520,7 @@ class SimulationConfig(BaseModel):
         Returns:
             Path to the working directory (in scratch)
         """
-        dir_name = self._format_run_directory_name(replicate)
+        dir_name = self.format_run_directory_name(replicate)
         return self.output.effective_scratch_directory / dir_name
 
     def get_projects_directory(self) -> Path:
@@ -1388,41 +1542,32 @@ class SimulationConfig(BaseModel):
         Returns:
             Sorted list of ``(replicate_number, directory_path)`` tuples.
         """
-        import re
+        fields = {
+            field for _, field, _, _ in Formatter().parse(self.output.naming_template) if field
+        }
+        if "replicate" not in fields:
+            raise ValueError(
+                "Cannot discover replicate directories because output.naming_template does not "
+                "include the {replicate} placeholder."
+            )
 
-        # Build the same template values as _format_run_directory_name
-        # but substitute replicate with "*" for globbing.
-        polymer_type = "none"
-        if self.polymers and self.polymers.enabled:
-            probs = {m.label: m.probability for m in self.polymers.monomers}
-            sorted_labels = sorted(probs.keys())
-            composition = "_".join(f"{lbl}{probs[lbl] * 100:.0f}" for lbl in sorted_labels)
-            polymer_type = f"{self.polymers.type_prefix}_{composition}"
-
-        substrate_name = self.substrate.name if self.substrate else "apo"
-
-        glob_pattern = self.output.naming_template.format(
-            enzyme=self.enzyme.name,
-            substrate=substrate_name.replace("-", ""),
-            polymer_type=polymer_type,
-            temperature=int(self.thermodynamics.temperature),
-            replicate="*",
-            duration=int(self.simulation_phases.production.duration),
-        )
+        glob_pattern = self.format_run_directory_name(replicate="*")
+        regex_pattern = "^" + re.escape(glob_pattern).replace(r"\*", r"(?P<replicate>\d+)") + "$"
+        replicate_regex = re.compile(regex_pattern)
 
         scratch = self.output.effective_scratch_directory
         results: list[tuple[int, Path]] = []
         for path in scratch.glob(glob_pattern):
             if not path.is_dir():
                 continue
-            match = re.search(r"run(\d+)$", path.name)
+            match = replicate_regex.fullmatch(path.name)
             if match:
-                results.append((int(match.group(1)), path))
+                results.append((int(match.group("replicate")), path))
 
         results.sort(key=lambda t: t[0])
         return results
 
-    def _format_run_directory_name(self, replicate: int) -> str:
+    def _format_run_directory_name(self, replicate: int | str) -> str:
         """Format the run directory name for a replicate.
 
         Args:
@@ -1431,25 +1576,7 @@ class SimulationConfig(BaseModel):
         Returns:
             Formatted directory name
         """
-        polymer_type = "none"
-        if self.polymers and self.polymers.enabled:
-            # Format polymer type with full composition info
-            # Sort by label (A, B, C...) alphabetically - user controls which is "A"
-            probs = {m.label: m.probability for m in self.polymers.monomers}
-            sorted_labels = sorted(probs.keys())
-            composition = "_".join(f"{lbl}{probs[lbl] * 100:.0f}" for lbl in sorted_labels)
-            polymer_type = f"{self.polymers.type_prefix}_{composition}"
-
-        substrate_name = self.substrate.name if self.substrate else "apo"
-
-        return self.output.format_directory_name(
-            enzyme=self.enzyme.name,
-            substrate=substrate_name.replace("-", ""),
-            polymer_type=polymer_type,
-            temperature=self.thermodynamics.temperature,
-            replicate=replicate,
-            duration=self.simulation_phases.production.duration,
-        )
+        return self.format_run_directory_name(replicate)
 
     def to_signac_statepoint(self, replicate: int = 1) -> dict[str, Any]:
         """Convert configuration to a Signac-compatible state point dictionary.
@@ -1482,8 +1609,8 @@ class SimulationConfig(BaseModel):
 
         # Include co-solvent info
         for cosolvent in self.solvent.co_solvents:
-            if cosolvent.volume_fraction is not None:
-                statepoint[f"cosolvent_{cosolvent.name}_fraction"] = cosolvent.volume_fraction
+            if cosolvent.mole_fraction is not None:
+                statepoint[f"cosolvent_{cosolvent.name}_mole_fraction"] = cosolvent.mole_fraction
             elif cosolvent.concentration is not None:
                 statepoint[f"cosolvent_{cosolvent.name}_molarity"] = cosolvent.concentration
 

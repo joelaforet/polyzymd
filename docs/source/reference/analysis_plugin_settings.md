@@ -88,6 +88,14 @@ below.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `chain_id` | `str` | `"A"` | Protein chain letter to analyze (PolyzyMD convention: chain A) |
+| `selection` | `str \| null` | `null` | Explicit MDAnalysis protein-residue selection. Overrides `chain_id` when set |
+
+The default is `protein and chainid A` for PDB/PolyzyMD chain-convention
+compatibility. GROMACS `.gro` topologies may not preserve chain IDs; use
+`selection: "protein"`, `selection: "protein and resid 1:269"`, or
+`selection: "protein and resindex 0:268"` when chain IDs are unavailable.
+DSSP requires complete residues; do not use CA-only selections such as
+`protein and name CA`.
 
 ## `sasa`
 
@@ -120,6 +128,7 @@ below.
 | `allow_empty_groups` | `bool` | `true` | Warn/skip empty groups instead of raising |
 | `allow_overlapping_composition` | `bool` | `false` | Allow overlapping composition partitions (otherwise raise) |
 | `composition` | `HydrogenBondCompositionSettings \| null` | `null` | Optional partitioning for composition analysis |
+| `hydrogens_selection` | `str \| null` | `null` | Advanced explicit-hydrogen selection override for unusual atom names |
 | `timestep_ps` | `float \| null` | `null` | Optional timestep override (ps) for time-axis plots |
 
 Time-axis plots assume uniformly saved frames. PolyzyMD maps frame index to time
@@ -136,9 +145,12 @@ not supported.
 
 Exactly one of `between` or `within` must be set for each summary.
 
-Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` with hydrogens
-selected as `(<group union>) and element H`; explicit hydrogens and reliable
-element metadata are required for meaningful counts.
+Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` and requires explicit
+hydrogens. PolyzyMD prefers `(<group union>) and (element H)` and infers missing
+elements for GRO-like topologies when atom types or atom names are conservative
+enough. If elements remain unavailable, the plugin falls back to
+`(<group union>) and (name H* or name [123]H*)`. Set `hydrogens_selection` only
+for unusual explicit-hydrogen naming schemes.
 
 `HydrogenBondCompositionSettings`:
 

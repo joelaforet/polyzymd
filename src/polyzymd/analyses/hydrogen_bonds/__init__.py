@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 import numpy as np
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import (
@@ -337,6 +337,10 @@ class HydrogenBondSettings(BaseModel):
         If False, raise when composition partitions overlap.
     composition : HydrogenBondCompositionSettings | None
         Optional composition-partition settings.
+    hydrogens_selection : str | None
+        Advanced override for selecting explicit hydrogens. When omitted,
+        element metadata is preferred and atom-name fallback is used only when
+        elements are unavailable.
     """
 
     groups: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_GROUPS))
@@ -377,6 +381,14 @@ class HydrogenBondSettings(BaseModel):
         ),
     )
     composition: HydrogenBondCompositionSettings | None = None
+    hydrogens_selection: str | None = Field(
+        default=None,
+        description=(
+            "Advanced MDAnalysis selection for explicit hydrogens. If omitted, "
+            "hydrogen_bonds uses element H when element metadata are available and "
+            "falls back to hydrogen atom-name patterns otherwise."
+        ),
+    )
     timestep_ps: float | None = Field(
         default=None,
         gt=0,
@@ -438,6 +450,34 @@ class HydrogenBondSettings(BaseModel):
         new_data = dict(data)
         new_data["summaries"] = normalized
         return new_data
+
+    @field_validator("hydrogens_selection")
+    @classmethod
+    def validate_hydrogens_selection(cls, value: str | None) -> str | None:
+        """Validate the optional explicit-hydrogen selection override.
+
+        Parameters
+        ----------
+        value : str or None
+            User-provided MDAnalysis selection for hydrogens.
+
+        Returns
+        -------
+        str or None
+            Stripped selection text, or ``None`` when no override is provided.
+
+        Raises
+        ------
+        ValueError
+            Raised when the override is an empty string.
+        """
+
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("hydrogens_selection must not be empty when provided")
+        return stripped
 
     @model_validator(mode="after")
     def validate_summary_references(self) -> HydrogenBondSettings:

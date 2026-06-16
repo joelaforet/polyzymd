@@ -157,57 +157,218 @@ class TestConfigValidation:
         assert config.nacl_concentration == 0.0
 
 
-class TestCoSolventVolumeValidation:
-    """Test co-solvent volume fraction / concentration validation."""
+class TestCoSolventCompositionValidation:
+    """Test co-solvent mole fraction and concentration validation."""
 
     def test_concentration_cosolvent_does_not_crash_validator(self):
-        """Concentration-based co-solvents must not crash validate_volume_fractions.
-
-        Regression: sum() over volume_fraction raised TypeError when any
-        co-solvent used concentration (volume_fraction=None).
-        """
+        """Concentration-based co-solvents should validate without mole fractions."""
         from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
         config = SolventConfig(co_solvents=[CoSolventSpec(name="urea", concentration=2.0)])
         assert len(config.co_solvents) == 1
 
-    def test_mixed_volume_fraction_and_concentration_cosolvents(self):
-        """Mixed volume_fraction + concentration co-solvents should validate."""
+    def test_mixed_mole_fraction_and_concentration_cosolvents(self):
+        """Mixed mole_fraction and concentration co-solvents should validate."""
         from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
         config = SolventConfig(
             co_solvents=[
-                CoSolventSpec(name="dmso", volume_fraction=0.3),
+                CoSolventSpec(name="dmso", mole_fraction=0.3),
                 CoSolventSpec(name="urea", concentration=2.0),
             ]
         )
         assert len(config.co_solvents) == 2
 
-    def test_volume_fractions_exceeding_one_rejected(self):
-        """Total volume fractions >= 1.0 should still be rejected."""
+    def test_mole_fractions_exceeding_one_rejected(self):
+        """Total mole fractions >= 1.0 should be rejected."""
         from pydantic import ValidationError
 
         from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
-        with pytest.raises(ValidationError, match="volume fraction must be < 1.0"):
+        with pytest.raises(ValidationError, match="mole fraction must be < 1.0"):
             SolventConfig(
                 co_solvents=[
-                    CoSolventSpec(name="dmso", volume_fraction=0.6),
-                    CoSolventSpec(name="ethanol", volume_fraction=0.5),
+                    CoSolventSpec(name="dmso", mole_fraction=0.6),
+                    CoSolventSpec(name="ethanol", mole_fraction=0.5),
                 ]
             )
 
-    def test_volume_fractions_below_one_accepted(self):
-        """Total volume fractions < 1.0 should pass validation."""
+    def test_mole_fractions_below_one_accepted(self):
+        """Total mole fractions < 1.0 should pass validation."""
         from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
         config = SolventConfig(
             co_solvents=[
-                CoSolventSpec(name="dmso", volume_fraction=0.3),
-                CoSolventSpec(name="ethanol", volume_fraction=0.2),
+                CoSolventSpec(name="dmso", mole_fraction=0.3),
+                CoSolventSpec(name="ethanol", mole_fraction=0.2),
             ]
         )
         assert len(config.co_solvents) == 2
+
+    def test_volume_fraction_key_rejected_with_migration_error(self):
+        """Removed volume_fraction keys should fail with a migration message."""
+        from polyzymd.config.schema import CoSolventSpec
+
+        with pytest.raises(ValidationError, match="volume_fraction.*removed"):
+            CoSolventSpec(name="dmso", volume_fraction=0.3)
+
+    def test_exactly_one_composition_method_required(self):
+        """Each co-solvent should have exactly one composition method."""
+        from polyzymd.config.schema import CoSolventSpec
+
+        with pytest.raises(ValidationError, match="Must specify either 'mole_fraction'"):
+            CoSolventSpec(name="dmso")
+
+        with pytest.raises(ValidationError, match="Cannot specify both 'mole_fraction'"):
+            CoSolventSpec(name="dmso", mole_fraction=0.1, concentration=1.0)
+
+
+class TestRunDirectoryNaming:
+    """Test centralized run-directory naming helpers."""
+
+    def test_output_config_format_directory_name_accepts_solvent_tokens(self):
+        """Output formatter should support solvent template placeholders directly."""
+        from polyzymd.config.schema import OutputConfig
+
+        output = OutputConfig(
+            naming_template=(
+                "{enzyme}_{primary_solvent}_{cosolvent_composition}_{solvent_composition}_"
+                "r{replicate}"
+            ),
+        )
+
+        assert (
+            output.format_directory_name(
+                enzyme="LipA",
+                substrate="apo",
+                polymer_type="none",
+                temperature=310.0,
+                replicate=2,
+                primary_solvent="water_tip3p",
+                cosolvent_composition="dmso_30pctv",
+                solvent_composition="water_tip3p_dmso_30pctv",
+            )
+            == "LipA_water_tip3p_dmso_30pctv_water_tip3p_dmso_30pctv_r2"
+        )
+        assert (
+            output.format_directory_name(
+                enzyme="LipA",
+                substrate="apo",
+                polymer_type="none",
+                temperature=310.0,
+                replicate=2,
+                primary_solvent="water_tip3p",
+                cosolvent_composition="dmso_30pctv",
+            )
+            == "LipA_water_tip3p_dmso_30pctv_water_tip3p_dmso_30pctv_r2"
+        )
+
+    def test_format_run_directory_name_uses_output_formatter(self, minimal_config_data):
+        """Simulation formatter should route centralized values through OutputConfig."""
+        from polyzymd.config.schema import SimulationConfig
+
+        config = SimulationConfig(**minimal_config_data)
+        calls = []
+        original = config.output.format_directory_name
+
+        def spy_format_directory_name(**values):
+            calls.append(values)
+            return original(**values)
+
+        object.__setattr__(config.output, "format_directory_name", spy_format_directory_name)
+
+        assert config.format_run_directory_name(4) == "TestEnzyme_apo_none_1ns_300K_run4"
+        assert calls == [config._run_directory_template_values(4)]
+
+    def test_solvent_token_formatting(self, minimal_config_data):
+        """Solvent placeholders should render safe composition tokens."""
+        minimal_config_data["solvent"] = {
+            "primary": {"type": "water", "model": "tip3p"},
+            "co_solvents": [
+                {"name": "urea", "concentration": 2.5},
+                {
+                    "name": "tert butanol",
+                    "smiles": "CC(C)(C)O",
+                    "density": 0.78,
+                    "volume_fraction": 0.125,
+                },
+                {"name": "dmso", "volume_fraction": 0.30},
+            ],
+        }
+        minimal_config_data["output"] = {
+            "naming_template": "{primary_solvent}_{cosolvent_composition}_{solvent_composition}"
+        }
+
+        config = SimulationConfig(**minimal_config_data)
+
+        assert config.format_run_directory_name() == (
+            "water_tip3p_dmso_30pctv_tert_butanol_12p5pctv_urea_2p5M_"
+            "water_tip3p_dmso_30pctv_tert_butanol_12p5pctv_urea_2p5M"
+        )
+
+    def test_absent_cosolvent_uses_none_and_primary_only_composition(self, minimal_config_data):
+        """No co-solvents should produce none and primary-only solvent composition."""
+        minimal_config_data["output"] = {
+            "naming_template": "{primary_solvent}_{cosolvent_composition}_{solvent_composition}"
+        }
+
+        config = SimulationConfig(**minimal_config_data)
+
+        assert config.format_run_directory_name() == "water_tip3p_none_water_tip3p"
+
+    def test_non_water_primary_solvent_is_sanitized(self, minimal_config_data):
+        """Non-water primary solvent names should normalize unsafe punctuation."""
+        minimal_config_data["solvent"] = {"primary": {"type": "ACN / MeOH"}}
+        minimal_config_data["output"] = {"naming_template": "{primary_solvent}"}
+
+        config = SimulationConfig(**minimal_config_data)
+
+        assert config.format_run_directory_name() == "acn_meoh"
+
+    def test_format_run_directory_name_and_working_directory_match(
+        self, minimal_config_data, tmp_path
+    ):
+        """The public formatter should match get_working_directory().name."""
+        minimal_config_data["output"] = {
+            "scratch_directory": str(tmp_path),
+            "naming_template": "{enzyme}_{temperature}K_run{replicate}_{solvent_composition}",
+        }
+        config = SimulationConfig(**minimal_config_data)
+
+        run_name = config.format_run_directory_name(3)
+
+        assert run_name == "TestEnzyme_300K_run3_water_tip3p"
+        assert config.get_working_directory(3).name == run_name
+
+    def test_discover_replicate_dirs_with_solvent_placeholder_and_middle_replicate(
+        self, minimal_config_data, tmp_path
+    ):
+        """Discovery should work when solvent placeholders are present after replicate."""
+        minimal_config_data["output"] = {
+            "scratch_directory": str(tmp_path),
+            "naming_template": "run{replicate}_{solvent_composition}_{enzyme}",
+        }
+        config = SimulationConfig(**minimal_config_data)
+        first = tmp_path / config.format_run_directory_name(1)
+        third = tmp_path / config.format_run_directory_name(3)
+        first.mkdir()
+        third.mkdir()
+        (tmp_path / "runX_water_tip3p_TestEnzyme").mkdir()
+
+        assert config.discover_replicate_dirs() == [(1, first), (3, third)]
+
+    def test_discover_replicate_dirs_requires_replicate_placeholder(
+        self, minimal_config_data, tmp_path
+    ):
+        """Discovery should fail clearly when the template has no replicate token."""
+        minimal_config_data["output"] = {
+            "scratch_directory": str(tmp_path),
+            "naming_template": "{enzyme}_{solvent_composition}",
+        }
+        config = SimulationConfig(**minimal_config_data)
+
+        with pytest.raises(ValueError, match=r"does not include the \{replicate\} placeholder"):
+            config.discover_replicate_dirs()
 
 
 class TestSimulationPhasesConfig:
@@ -282,9 +443,9 @@ class TestSimulationPhasesConfig:
 
 class TestStatepointCoSolventExport:
     """to_statepoint must not crash when co-solvents use concentration instead
-    of volume_fraction."""
+    of mole_fraction."""
 
-    def _make_config(self, *, volume_fraction=None, concentration=None):
+    def _make_config(self, *, mole_fraction=None, concentration=None):
         """Build a minimal SimulationConfig with one co-solvent."""
         from unittest.mock import MagicMock
 
@@ -296,19 +457,19 @@ class TestStatepointCoSolventExport:
 
         cs = MagicMock()
         cs.name = "urea"
-        cs.volume_fraction = volume_fraction
+        cs.mole_fraction = mole_fraction
         cs.concentration = concentration
         config.solvent.co_solvents = [cs]
         return config
 
-    def test_volume_fraction_exported_as_fraction_key(self):
-        """volume_fraction co-solvent produces a _fraction key."""
+    def test_mole_fraction_exported_as_mole_fraction_key(self):
+        """mole_fraction co-solvent produces a _mole_fraction key."""
         from polyzymd.config.schema import SimulationConfig
 
         _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
-        cfg = self._make_config(volume_fraction=0.3)
+        cfg = self._make_config(mole_fraction=0.3)
         sp = _to_statepoint(cfg)
-        assert sp["cosolvent_urea_fraction"] == 0.3
+        assert sp["cosolvent_urea_mole_fraction"] == 0.3
         assert "cosolvent_urea_molarity" not in sp
 
     def test_concentration_exported_as_molarity_key(self):
@@ -319,10 +480,10 @@ class TestStatepointCoSolventExport:
         cfg = self._make_config(concentration=2.0)
         sp = _to_statepoint(cfg)
         assert sp["cosolvent_urea_molarity"] == 2.0
-        assert "cosolvent_urea_fraction" not in sp
+        assert "cosolvent_urea_mole_fraction" not in sp
 
-    def test_no_crash_with_none_volume_fraction(self):
-        """Previously crashed with TypeError when volume_fraction was None."""
+    def test_no_crash_with_none_mole_fraction(self):
+        """Concentration statepoints should allow no mole_fraction."""
         from polyzymd.config.schema import SimulationConfig
 
         _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]

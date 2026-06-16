@@ -1286,7 +1286,7 @@ def _print_gromacs_dry_run_details(
 )
 @click.option(
     "--preset",
-    type=click.Choice(["aa100", "al40", "blanca-shirts", "bridges2", "testing"]),
+    type=click.Choice(["aa100", "al40", "blanca-shirts", "blanca-chbe-rdi", "bridges2", "testing"]),
     default="aa100",
     help="SLURM partition preset (default: aa100)",
 )
@@ -2704,7 +2704,7 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 )
 @click.option(
     "--preset",
-    type=click.Choice(["aa100", "al40", "blanca-shirts", "bridges2", "testing"]),
+    type=click.Choice(["aa100", "al40", "blanca-shirts", "blanca-chbe-rdi", "bridges2", "testing"]),
     default="aa100",
     help="SLURM partition preset (default: aa100)",
 )
