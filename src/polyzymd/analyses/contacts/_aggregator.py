@@ -48,7 +48,8 @@ CONTACTS_LEGACY_RECOMPUTE_GUIDANCE = (
     "with recompute enabled or clear stale contacts caches."
 )
 _ABSOLUTE_TIMESTAMP_REFERENCES = frozenset({"trajectory_timestamp"})
-_FRAME_TIME_ABS_TOL_PS = 1e-6
+_FRAME_TIME_ABS_TOL_PS = 1e-5
+_FRAME_TIME_REL_TOL = 1e-7
 
 
 def _compute_sem(values: Sequence[float]) -> tuple[float, float]:
@@ -1083,11 +1084,12 @@ def _validate_timestamp_sidecar_window(
             "Recompute contacts."
         )
     expected_time_ps = first_frame_time_ps + expected_frame_indices.astype(np.float64) * timestep_ps
+    time_abs_tol = _time_axis_abs_tolerance(timestep_ps)
     if time_ps.size and not math.isclose(
         float(time_ps[0]),
         selected_start_time_ps,
-        rel_tol=1e-12,
-        abs_tol=_FRAME_TIME_ABS_TOL_PS,
+        rel_tol=_FRAME_TIME_REL_TOL,
+        abs_tol=time_abs_tol,
     ):
         raise MDAAggregationError(
             f"contacts: replicate {replicate} sidecar first time mismatch: "
@@ -1097,13 +1099,24 @@ def _validate_timestamp_sidecar_window(
     if not np.allclose(
         time_ps,
         expected_time_ps,
-        rtol=1e-12,
-        atol=_FRAME_TIME_ABS_TOL_PS,
+        rtol=_FRAME_TIME_REL_TOL,
+        atol=time_abs_tol,
     ):
         raise MDAAggregationError(
             f"contacts: replicate {replicate} sidecar time_ps mismatch: "
             "sidecar times do not align with frame indices and timestep. Recompute contacts."
         )
+
+
+def _time_axis_abs_tolerance(timestep_ps: float) -> float:
+    """Return absolute tolerance for timestamp sidecar comparisons.
+
+    Timestamp sidecars may store values rounded differently from the raw
+    trajectory timestep. The tolerance allows sub-femtosecond per-step drift but
+    still rejects shifted or stale time axes.
+    """
+
+    return max(_FRAME_TIME_ABS_TOL_PS, abs(timestep_ps) * _FRAME_TIME_REL_TOL)
 
 
 def _protein_identity(data: Mapping[str, Any]) -> tuple[tuple[int, str, str, str], ...]:

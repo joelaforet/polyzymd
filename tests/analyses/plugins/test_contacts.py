@@ -602,6 +602,7 @@ def _write_contacts_replicate_artifact(
     contact_fractions: list[float] | None = None,
     event_durations_ns: list[tuple[int, str, float]] | None = None,
     frame_selection_overrides: dict[str, object] | None = None,
+    sidecar_time_ps: list[float] | None = None,
 ):
     """Write a synthetic contacts replicate artifact and event sidecar.
 
@@ -623,6 +624,8 @@ def _write_contacts_replicate_artifact(
         Synthetic residence-time events, by default ``None``.
     frame_selection_overrides : dict[str, object] | None, optional
         Frame-selection provenance fields to override, by default ``None``.
+    sidecar_time_ps : list of float or None, optional
+        Explicit sidecar time axis to write, by default ``None``.
 
     Returns
     -------
@@ -681,6 +684,8 @@ def _write_contacts_replicate_artifact(
     if frame_indices.size != n_frames_selected:
         frame_indices = frame_indices[:n_frames_selected]
     time_ps = time_origin_ps + frame_indices.astype(np.float64) * timestep_ps
+    if sidecar_time_ps is not None:
+        time_ps = np.asarray(sidecar_time_ps, dtype=np.float64)
     protein_resids = np.arange(1, len(fractions) + 1, dtype=np.int64)
     protein_resnames = np.asarray(["ALA", "ASP"][: len(fractions)], dtype="U16")
     protein_groups = np.asarray(["nonpolar", "charged"][: len(fractions)], dtype="U32")
@@ -1024,6 +1029,92 @@ class TestAggregate:
         result = ContactsAnalysis().aggregate(ctx, artifacts)
 
         assert result.payload["total_frames_per_replicate"] == [10, 10]
+
+    def test_aggregate_accepts_rounded_timestamp_sidecar_axis(self, tmp_path):
+        """Aggregation should tolerate harmless timestamp rounding drift."""
+
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        settings = ContactsSettings()
+        analysis_dir = tmp_path / "contacts"
+        artifact = _write_contacts_replicate_artifact(
+            analysis_dir,
+            settings,
+            equilibration="0ns",
+            frame_selection_overrides={
+                "start": 0,
+                "stop": 3,
+                "equilibration_start": 0,
+                "equilibration_ps": 0.0,
+                "timestep_ps": 33.959999,
+                "first_frame_time_ps": 0.0,
+                "selected_start_time_ps": 0.0,
+                "n_frames_total": 3,
+                "n_frames_selected": 3,
+            },
+            sidecar_time_ps=[0.0, 33.96, 67.92],
+        )
+        cond = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1,),
+            sim_config=_make_hashable_sim_config(tmp_path),
+        )
+        ctx = AggregateContext(
+            condition=cond,
+            replicates=(1,),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="0ns",
+            settings=settings,
+        )
+
+        result = ContactsAnalysis().aggregate(ctx, [artifact])
+
+        assert result.payload["total_frames_per_replicate"] == [3]
+
+    def test_aggregate_rejects_shifted_timestamp_sidecar_axis(self, tmp_path):
+        """Aggregation should still reject clearly shifted timestamp sidecars."""
+
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.mda.aggregation import MDAAggregationError
+
+        settings = ContactsSettings()
+        analysis_dir = tmp_path / "contacts"
+        artifact = _write_contacts_replicate_artifact(
+            analysis_dir,
+            settings,
+            equilibration="0ns",
+            frame_selection_overrides={
+                "start": 0,
+                "stop": 3,
+                "equilibration_start": 0,
+                "equilibration_ps": 0.0,
+                "timestep_ps": 33.959999,
+                "first_frame_time_ps": 0.0,
+                "selected_start_time_ps": 0.0,
+                "n_frames_total": 3,
+                "n_frames_selected": 3,
+            },
+            sidecar_time_ps=[1.0, 34.96, 68.92],
+        )
+        cond = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1,),
+            sim_config=_make_hashable_sim_config(tmp_path),
+        )
+        ctx = AggregateContext(
+            condition=cond,
+            replicates=(1,),
+            output_dir=analysis_dir / "aggregated",
+            equilibration="0ns",
+            settings=settings,
+        )
+
+        with pytest.raises(MDAAggregationError, match="sidecar first time mismatch"):
+            ContactsAnalysis().aggregate(ctx, [artifact])
 
     def test_aggregate_rejects_stale_timestamp_window_for_requested_equilibration(self, tmp_path):
         """Aggregation should validate timestamp-derived starts per artifact."""
