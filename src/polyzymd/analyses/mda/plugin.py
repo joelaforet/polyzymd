@@ -15,7 +15,11 @@ from polyzymd.analyses.mda.artifacts import (
     ReplicateArtifact,
     raw_mdanalysis_results_path,
 )
-from polyzymd.analyses.mda.frame_selection import FrameSelection, _normalize_frame_selector_values
+from polyzymd.analyses.mda.frame_selection import (
+    FrameSelection,
+    _normalize_frame_selector_values,
+    _normalize_scalar_value,
+)
 from polyzymd.analyses.mda.job import MDAJobResult, MDAUniversePolicy
 from polyzymd.analyses.mda.store import ArtifactStore
 
@@ -198,19 +202,19 @@ def frame_selection_payload(frame_selection: FrameSelection) -> dict[str, Any]:
     """
 
     return {
-        "start": frame_selection.start,
-        "stop": frame_selection.stop,
-        "step": frame_selection.step,
+        "start": _normalize_scalar_value(frame_selection.start),
+        "stop": _normalize_scalar_value(frame_selection.stop),
+        "step": _normalize_scalar_value(frame_selection.step),
         "frames": _frame_selector_payload(frame_selection.frames),
         "equilibration": frame_selection.equilibration,
-        "equilibration_start": frame_selection.equilibration_start,
-        "equilibration_ps": frame_selection.equilibration_ps,
-        "timestep_ps": frame_selection.timestep_ps,
-        "first_frame_time_ps": frame_selection.first_frame_time_ps,
-        "selected_start_time_ps": frame_selection.selected_start_time_ps,
+        "equilibration_start": _normalize_scalar_value(frame_selection.equilibration_start),
+        "equilibration_ps": _normalize_scalar_value(frame_selection.equilibration_ps),
+        "timestep_ps": _normalize_scalar_value(frame_selection.timestep_ps),
+        "first_frame_time_ps": _normalize_scalar_value(frame_selection.first_frame_time_ps),
+        "selected_start_time_ps": _normalize_scalar_value(frame_selection.selected_start_time_ps),
         "equilibration_time_reference": frame_selection.equilibration_time_reference,
-        "n_frames_total": frame_selection.n_frames_total,
-        "n_frames_selected": frame_selection.n_frames_selected,
+        "n_frames_total": _normalize_scalar_value(frame_selection.n_frames_total),
+        "n_frames_selected": _normalize_scalar_value(frame_selection.n_frames_selected),
         "warning_message": frame_selection.warning_message,
     }
 

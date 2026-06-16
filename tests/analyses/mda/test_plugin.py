@@ -38,13 +38,18 @@ class FakeMDAnalysisResults(dict):
     __module__ = "MDAnalysis.analysis.results"
 
 
-def _collector_context(tmp_path: Path) -> MDACollectorContext:
+def _collector_context(
+    tmp_path: Path,
+    frame_selection: FrameSelection | None = None,
+) -> MDACollectorContext:
     """Build a minimal collector context.
 
     Parameters
     ----------
     tmp_path : Path
         Temporary artifact root.
+    frame_selection : FrameSelection or None, optional
+        Frame selection to attach to the collector context.
 
     Returns
     -------
@@ -64,18 +69,19 @@ def _collector_context(tmp_path: Path) -> MDACollectorContext:
         settings=settings,
         result_path=tmp_path / "run_1" / "result.json",
     )
+    resolved_frame_selection = frame_selection or FrameSelection(
+        start=1,
+        stop=5,
+        step=2,
+        n_frames_total=8,
+        first_frame_time_ps=198_400.0,
+        selected_start_time_ps=198_800.0,
+        equilibration_time_reference="trajectory_timestamp",
+    )
     return MDACollectorContext(
         analysis_name="example",
         replicate_context=replicate_context,
-        frame_selection=FrameSelection(
-            start=1,
-            stop=5,
-            step=2,
-            n_frames_total=8,
-            first_frame_time_ps=198_400.0,
-            selected_start_time_ps=198_800.0,
-            equilibration_time_reference="trajectory_timestamp",
-        ),
+        frame_selection=resolved_frame_selection,
         universe_policy=MDAUniversePolicy(condition_label="Cond", replicate=1),
         artifact_store=ArtifactStore(tmp_path / "run_1"),
         settings_fingerprint="abc123",
@@ -169,6 +175,48 @@ def test_frame_selection_payload_serializes_numpy_bool_masks() -> None:
     assert all(isinstance(value, bool) for value in payload["frames"])
 
 
+def test_frame_selection_payload_serializes_numpy_slice_scalars() -> None:
+    """Frame-selection payload should serialize NumPy slice scalars as Python values."""
+
+    selection = FrameSelection(
+        start=np.int64(1),
+        stop=np.int64(6),
+        step=np.int64(2),
+        equilibration_start=np.int64(1),
+        equilibration_ps=np.float32(100.0),
+        timestep_ps=np.float64(2.0),
+        first_frame_time_ps=np.float64(10.0),
+        selected_start_time_ps=np.float32(12.0),
+        n_frames_total=np.int64(8),
+    )
+
+    payload = frame_selection_payload(selection)
+
+    assert payload["start"] == 1
+    assert payload["stop"] == 6
+    assert payload["step"] == 2
+    assert payload["equilibration_start"] == 1
+    assert payload["equilibration_ps"] == pytest.approx(100.0)
+    assert payload["timestep_ps"] == pytest.approx(2.0)
+    assert payload["first_frame_time_ps"] == pytest.approx(10.0)
+    assert payload["selected_start_time_ps"] == pytest.approx(12.0)
+    assert payload["n_frames_total"] == 8
+    assert payload["n_frames_selected"] == 3
+    numeric_values = [
+        payload["start"],
+        payload["stop"],
+        payload["step"],
+        payload["equilibration_start"],
+        payload["equilibration_ps"],
+        payload["timestep_ps"],
+        payload["first_frame_time_ps"],
+        payload["selected_start_time_ps"],
+        payload["n_frames_total"],
+        payload["n_frames_selected"],
+    ]
+    assert all(not hasattr(value, "item") for value in numeric_values)
+
+
 def test_strict_json_collector_serializes_numpy_bool_run_kwargs(tmp_path: Path) -> None:
     """Default collector should emit JSON-safe run kwargs for NumPy boolean masks."""
 
@@ -193,6 +241,57 @@ def test_strict_json_collector_serializes_numpy_bool_run_kwargs(tmp_path: Path) 
     json.dumps(artifact.model_dump(mode="json"))
     assert run_frames == [True, False, True]
     assert all(isinstance(value, bool) for value in run_frames)
+
+
+def test_strict_json_collector_serializes_numpy_slice_run_kwargs(tmp_path: Path) -> None:
+    """Default collector should emit JSON-safe slice kwargs from NumPy scalars."""
+
+    frame_selection = FrameSelection(
+        start=np.int64(1),
+        stop=np.int64(6),
+        step=np.int64(2),
+        equilibration_start=np.int64(1),
+        equilibration_ps=np.float32(100.0),
+        timestep_ps=np.float64(2.0),
+        first_frame_time_ps=np.float64(10.0),
+        selected_start_time_ps=np.float32(12.0),
+        n_frames_total=np.int64(8),
+    )
+    ctx = _collector_context(tmp_path, frame_selection=frame_selection)
+    job = MDAJobResult(
+        name="slice_job",
+        analysis=SimpleNamespace(results={"value": 1.0}),
+        results={"value": 1.0},
+        run_kwargs=frame_selection.run_kwargs(),
+        frame_selection=frame_selection,
+        backend_policy=MDABackendPolicy(),
+        universe_policy=MDAUniversePolicy(condition_label="Cond", replicate=1),
+    )
+
+    artifact = StrictJSONMDAResultCollector()(ctx, [job])
+    run_kwargs = artifact.payload["jobs"][0]["run_kwargs"]
+    job_selection = artifact.payload["jobs"][0]["frame_selection"]
+    provenance_selection = artifact.provenance["frame_selection"]
+
+    json.dumps(artifact.model_dump(mode="json"))
+    assert run_kwargs == {"start": 1, "stop": 6, "step": 2}
+    assert job_selection["equilibration_start"] == 1
+    assert job_selection["equilibration_ps"] == pytest.approx(100.0)
+    assert provenance_selection["n_frames_total"] == 8
+    assert provenance_selection["n_frames_selected"] == 3
+    numeric_values = [
+        *run_kwargs.values(),
+        job_selection["start"],
+        job_selection["stop"],
+        job_selection["step"],
+        job_selection["equilibration_start"],
+        job_selection["equilibration_ps"],
+        provenance_selection["first_frame_time_ps"],
+        provenance_selection["selected_start_time_ps"],
+        provenance_selection["n_frames_total"],
+        provenance_selection["n_frames_selected"],
+    ]
+    assert all(not hasattr(value, "item") for value in numeric_values)
 
 
 def test_strict_json_payload_rejects_raw_mdanalysis_results() -> None:

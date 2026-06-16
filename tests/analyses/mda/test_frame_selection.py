@@ -27,6 +27,43 @@ def test_slice_selection_omits_none_run_kwargs() -> None:
     assert selection.n_frames_selected == 5
 
 
+def test_numpy_slice_scalars_return_python_run_kwargs() -> None:
+    """NumPy slice scalars should normalize before MDAnalysis receives them."""
+
+    selection = FrameSelection(
+        start=np.int64(1),
+        stop=np.int64(6),
+        step=np.int64(2),
+        equilibration_start=np.int64(1),
+        equilibration_ps=np.float32(100.0),
+        timestep_ps=np.float64(2.0),
+        first_frame_time_ps=np.float64(10.0),
+        selected_start_time_ps=np.float32(12.0),
+        n_frames_total=np.int64(8),
+    )
+
+    run_kwargs = selection.run_kwargs()
+
+    assert run_kwargs == {"start": 1, "stop": 6, "step": 2}
+    assert all(
+        isinstance(value, int) and not hasattr(value, "item") for value in run_kwargs.values()
+    )
+    assert isinstance(selection.equilibration_start, int)
+    assert isinstance(selection.equilibration_ps, float)
+    assert isinstance(selection.timestep_ps, float)
+    assert isinstance(selection.first_frame_time_ps, float)
+    assert isinstance(selection.selected_start_time_ps, float)
+    assert isinstance(selection.n_frames_total, int)
+    assert isinstance(selection.n_frames_selected, int)
+    assert not hasattr(selection.equilibration_start, "item")
+    assert not hasattr(selection.equilibration_ps, "item")
+    assert not hasattr(selection.timestep_ps, "item")
+    assert not hasattr(selection.first_frame_time_ps, "item")
+    assert not hasattr(selection.selected_start_time_ps, "item")
+    assert not hasattr(selection.n_frames_total, "item")
+    assert not hasattr(selection.n_frames_selected, "item")
+
+
 def test_frames_selection_returns_only_frames() -> None:
     """Explicit frames should be forwarded without slice arguments."""
 

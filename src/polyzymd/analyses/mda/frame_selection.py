@@ -32,6 +32,37 @@ def _is_scalar_frame_selector(frames: Any) -> bool:
     return isinstance(frames, (bool, int, float, complex))
 
 
+def _normalize_scalar_value(value: Any) -> Any:
+    """Return NumPy-like scalar values as Python scalars.
+
+    The helper intentionally avoids importing NumPy so lightweight analysis
+    modules can normalize scalar provenance in environments without the full
+    simulation stack.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate value to normalize.
+
+    Returns
+    -------
+    Any
+        Python ``bool``, ``int``, or ``float`` when ``value`` is a NumPy-like
+        scalar value, otherwise the original value.
+    """
+
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            native_value = item()
+        except (TypeError, ValueError):
+            native_value = value
+        if isinstance(native_value, (bool, int, float)):
+            return native_value
+
+    return value
+
+
 def _is_boolean_frame_value(frame: Any) -> bool:
     """Return whether a frame selector value is a boolean mask entry.
 
@@ -288,6 +319,7 @@ class FrameSelection:
             keyword arguments or an empty known frame selection.
         """
 
+        self._normalize_scalar_fields()
         self._validate_total_frame_count()
 
         if self.frames is not None:
@@ -311,11 +343,11 @@ class FrameSelection:
 
         kwargs = MDARunKwargs()
         if self.start is not None:
-            kwargs["start"] = self.start
+            kwargs["start"] = _normalize_scalar_value(self.start)
         if self.stop is not None:
-            kwargs["stop"] = self.stop
+            kwargs["stop"] = _normalize_scalar_value(self.stop)
         if self.step is not None:
-            kwargs["step"] = self.step
+            kwargs["step"] = _normalize_scalar_value(self.step)
         return kwargs
 
     @classmethod
@@ -408,6 +440,33 @@ class FrameSelection:
         selection = cls.from_trajectory_window(window)
         object.__setattr__(selection, "equilibration", equilibration)
         return selection
+
+    def _normalize_scalar_fields(self) -> None:
+        """Normalize NumPy-like scalar selector and provenance fields.
+
+        Returns
+        -------
+        None
+            The dataclass fields are updated in place through frozen dataclass
+            attribute assignment.
+        """
+
+        for field_name in (
+            "start",
+            "stop",
+            "step",
+            "equilibration_start",
+            "equilibration_ps",
+            "timestep_ps",
+            "first_frame_time_ps",
+            "selected_start_time_ps",
+            "n_frames_total",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _normalize_scalar_value(getattr(self, field_name)),
+            )
 
     def _validate_total_frame_count(self) -> None:
         """Validate the optional total frame count.
