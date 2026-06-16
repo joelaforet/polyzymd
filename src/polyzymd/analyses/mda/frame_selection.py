@@ -51,6 +51,10 @@ def _normalize_scalar_value(value: Any) -> Any:
         scalar value, otherwise the original value.
     """
 
+    shape = getattr(value, "shape", None)
+    if shape not in (None, ()):  # Avoid turning array selectors into scalar selectors
+        return value
+
     item = getattr(value, "item", None)
     if callable(item):
         try:
