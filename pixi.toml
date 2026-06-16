@@ -234,7 +234,7 @@ compare-plot-all = { cmd = "polyzymd compare plot-all" }
 [feature.sim-cuda-12-6.tasks]
 submit         = { cmd = "polyzymd submit", description = "Submit SLURM jobs (CUDA 12.6)" }
 run-segment    = { cmd = "polyzymd run-segment", description = "Run next simulation segment" }
-run            = { cmd = "polyzymd run --engine gromacs", description = "Run local simulation (select engine)" }
+run-openmm     = { cmd = "polyzymd run --engine openmm", description = "Run local OpenMM simulation" }
 recover        = { cmd = "polyzymd recover", description = "Resume stalled simulation" }
 check-progress = { cmd = "polyzymd check-progress", description = "Check simulation progress" }
 
@@ -242,6 +242,6 @@ check-progress = { cmd = "polyzymd check-progress", description = "Check simulat
 [feature.sim-cuda-12-4.tasks]
 submit         = { cmd = "polyzymd submit", description = "Submit SLURM jobs (CUDA 12.4)" }
 run-segment    = { cmd = "polyzymd run-segment", description = "Run next simulation segment" }
-run            = { cmd = "polyzymd run --engine gromacs", description = "Run local simulation (select engine)" }
+run-openmm     = { cmd = "polyzymd run --engine openmm", description = "Run local OpenMM simulation" }
 recover        = { cmd = "polyzymd recover", description = "Resume stalled simulation" }
 check-progress = { cmd = "polyzymd check-progress", description = "Check simulation progress" }

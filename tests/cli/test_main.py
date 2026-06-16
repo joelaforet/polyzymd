@@ -170,6 +170,28 @@ class TestResolveEngineName:
         assert _resolve_engine_name(config, override="GROMACS") == "gromacs"
 
 
+class TestResolveSubmissionPixiEnv:
+    """Unit tests for submit/recover pixi environment resolution."""
+
+    def test_explicit_env_takes_priority(self) -> None:
+        """An explicit --pixi-env should be preserved for any engine."""
+        from polyzymd.cli.main import _resolve_submission_pixi_env
+
+        assert _resolve_submission_pixi_env("aa100", "gromacs", "sim-cuda-12-6") == "sim-cuda-12-6"
+
+    def test_gromacs_defaults_to_build(self) -> None:
+        """GROMACS should use build when no explicit pixi env is provided."""
+        from polyzymd.cli.main import _resolve_submission_pixi_env
+
+        assert _resolve_submission_pixi_env("bridges2", "gromacs") == "build"
+
+    def test_openmm_defaults_from_preset(self) -> None:
+        """OpenMM should keep preset-specific CUDA environment defaults."""
+        from polyzymd.cli.main import _resolve_submission_pixi_env
+
+        assert _resolve_submission_pixi_env("bridges2", "openmm") == "sim-cuda-12-6"
+
+
 class TestBuildCommandReplicateFlags:
     """Test that the build command accepts the new flags via Click invocation."""
 
@@ -761,6 +783,17 @@ class TestSubmitDryRunVsGenerateOnly:
 class TestSubmitEngineAware:
     """Tests for engine-aware submit command."""
 
+    def test_submit_help_includes_build_pixi_env_choice(self) -> None:
+        """submit --help should list build as an allowed pixi environment."""
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["submit", "--help"])
+
+        assert result.exit_code == 0
+        assert "build" in result.output
+        assert "sim-cuda-12-4" in result.output
+        assert "sim-cuda-12-6" in result.output
+
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     @patch("polyzymd.engines.create_engine")
     def test_submit_dry_run_gromacs(
@@ -810,6 +843,7 @@ class TestSubmitEngineAware:
 
         assert result.exit_code == 0
         assert "DRY RUN" in result.output
+        assert "Pixi env:    build" in result.output
         mock_create_engine.assert_called_once_with(
             mock_config,
             override="gromacs",
@@ -1019,6 +1053,64 @@ class TestSubmitEngineAware:
 
         assert result.exit_code == 0
         mock_engine_submit.assert_called_once()
+        request = mock_engine_submit.call_args.args[0]
+        assert request.extra["pixi_env"] == "build"
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_submit_gromacs_allows_explicit_cuda_pixi_env(
+        self,
+        mock_from_yaml,
+        mock_resolve_gmx,
+        mock_engine_submit,
+        tmp_path: Path,
+    ) -> None:
+        """GROMACS submit should preserve explicit CUDA pixi env overrides."""
+        _ = mock_resolve_gmx
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            grompp_flags="",
+            mdrun_flags="",
+            module_load=None,
+            gmx_binary=None,
+            ntmpi=1,
+            slurm_ntasks=None,
+            ntomp=4,
+            gpu=True,
+            gpus=1,
+            memory="16G",
+        )
+        mock_from_yaml.return_value = mock_config
+        mock_engine_submit.return_value = {
+            "submitted": False,
+            "script_path": "/tmp/script.sh",
+            "reason": "sbatch_not_available",
+        }
+
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        with patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[]):
+            with patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="test_job"):
+                result = runner.invoke(
+                    cli,
+                    [
+                        "submit",
+                        "-c",
+                        str(config_path),
+                        "--engine",
+                        "gromacs",
+                        "--pixi-env",
+                        "sim-cuda-12-6",
+                    ],
+                )
+
+        assert result.exit_code == 0
+        request = mock_engine_submit.call_args.args[0]
+        assert request.extra["pixi_env"] == "sim-cuda-12-6"
 
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_submit_openff_logs_warns_for_gromacs(self, mock_from_yaml, tmp_path: Path) -> None:

@@ -524,14 +524,14 @@ generated beyond the base 7 types.
 cd /home/joelaforet/Desktop/enzyme_immobilization/BRIDGES_2_TESTING/fib_8_to_10/
 
 # Quick local test (4 chains, small box)
-pixi run -e cuda-12-6 python profile_build.py \
+pixi run -e sim-cuda-12-6 python profile_build.py \
     --config testing_key_config.yaml \
     --count 4 \
     --box-padding 0.3 \
     --output-dir _benchmark_quick
 
 # A/B comparison (single-call vs batched)
-pixi run -e cuda-12-6 python benchmark_interchange.py \
+pixi run -e sim-cuda-12-6 python benchmark_interchange.py \
     --config testing_key_config.yaml \
     --count 4 \
     --box-padding 0.3 \

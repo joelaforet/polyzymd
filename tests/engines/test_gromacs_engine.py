@@ -425,6 +425,7 @@ class TestPrepareSubmissionPassThrough:
         engine.prepare_submission(request)
 
         kwargs = mock_generator_cls.call_args.kwargs
+        assert kwargs["pixi_env"] == "build"
         assert kwargs["env_exports"] == config.gromacs.env_exports
         assert kwargs["setup_commands"] == config.gromacs.setup_commands
 

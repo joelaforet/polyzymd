@@ -15,7 +15,10 @@ dropping a module or package in `analyses/` with no modifications to core code.
 
 - **Python 3.12 is now required.**  Python 3.10 and 3.11 support has been
   dropped for v1.3 and later.  Project metadata, CI, Read the Docs, legacy conda
-  environment files, and pixi environments now target Python 3.12 with NumPy 2.
+  environment files, and the build, analysis, test, and CUDA 12.6 pixi
+  environments now target Python 3.12 with NumPy 2. The `sim-cuda-12-4`
+  environment intentionally uses NumPy 1.26 and OpenMM 8.1.x for CUDA 12.4
+  compatibility.
 - **Scalar Measurement API removed.**  The obsolete alternate scalar
   measurement abstraction (`MetricSpec`, `CacheIdentity`, `Measurement`,
   `ScalarMeasurement`, and `ScalarMeasurementAnalysis`) was deleted now that
@@ -176,8 +179,9 @@ dropping a module or package in `analyses/` with no modifications to core code.
 - **Scientific dependency stack updated for NumPy 2.**  Runtime metadata now
   requires `numpy>=2,<3` with Python 3.12-compatible lower bounds for SciPy,
   pandas, scikit-learn, matplotlib, seaborn, MDAnalysis, and MDTraj.  Pixi CUDA
-  environments retain separate CUDA 12.4 and CUDA 12.6 targets while using
-  Python 3.12-compatible OpenMM builds.
+  environments retain separate CUDA 12.4 and CUDA 12.6 targets. `sim-cuda-12-6`
+  uses the current NumPy 2/OpenMM stack, while `sim-cuda-12-4` intentionally
+  stays on NumPy 1.26 and OpenMM 8.1.x for CUDA 12.4 compatibility.
 - **Bundled v1.3 analyses are package-organized.**  Active bundled plugins live
   in `analyses/<name>/` with `__init__.py` (plugin class) and optional private
   modules (`_plotters.py`, `_results.py`, `_comparison_results.py`,
@@ -621,8 +625,8 @@ dropping a module or package in `analyses/` with no modifications to core code.
   `pixi shell-hook -e <env> --manifest-path <path>` instead of
   `module load` + `conda activate`. The manifest path is auto-detected
   from the `polyzymd` binary location at submission time.
-- `pixi.toml` trimmed to actual runtime dependencies with three environments:
-  `build` (no CUDA), `cuda-12-4` (CU Boulder Blanca), `cuda-12-6`
+- `pixi.toml` trimmed to actual runtime dependencies with separate environments:
+  `build` (no CUDA), `sim-cuda-12-4` (CU Boulder Blanca), and `sim-cuda-12-6`
   (PSC Bridges2).
 - Added `openbabel` to `pixi.toml` conda dependencies. Required at import
   time by `polymerist.polymers.building.mbconvert`, which `polyzymd build`

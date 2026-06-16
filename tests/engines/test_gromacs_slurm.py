@@ -54,6 +54,13 @@ def test_no_embedded_job_template_remains() -> None:
     assert not hasattr(GromacsSlurmScriptGenerator, "JOB_TEMPLATE")
 
 
+def test_default_pixi_env_is_build() -> None:
+    """GROMACS SLURM generator should default to the build pixi environment."""
+    generator = GromacsSlurmScriptGenerator(slurm_config=SlurmConfig())
+
+    assert generator._pixi_env == "build"
+
+
 def test_script_contains_expected_slurm_and_restart_logic(monkeypatch) -> None:
     """Generated script should include directives and restart features."""
     monkeypatch.setattr(

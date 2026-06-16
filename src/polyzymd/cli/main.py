@@ -154,6 +154,32 @@ def _resolve_engine_name(sim_config: object, override: str | None = None) -> str
     return str(engine).lower()
 
 
+def _resolve_submission_pixi_env(preset: str, engine_name: str, pixi_env: str | None = None) -> str:
+    """Resolve the pixi environment for submit and recover jobs.
+
+    Parameters
+    ----------
+    preset : str
+        SLURM preset name used to choose OpenMM default environments.
+    engine_name : str
+        Resolved simulation engine name.
+    pixi_env : str or None, optional
+        Explicit CLI override from ``--pixi-env``.
+
+    Returns
+    -------
+    str
+        Pixi environment name for generated SLURM jobs.
+    """
+    from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV
+
+    if pixi_env:
+        return pixi_env
+    if engine_name.lower() == "gromacs":
+        return "build"
+    return PRESET_DEFAULT_PIXI_ENV.get(preset, "sim-cuda-12-4")
+
+
 def _generate_system_prefix(sim_config: object) -> str:
     """Generate a system filename prefix from simulation config.
 
@@ -1245,10 +1271,10 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--pixi-env",
     default=None,
-    type=click.Choice(["sim-cuda-12-4", "sim-cuda-12-6"]),
+    type=click.Choice(["build", "sim-cuda-12-4", "sim-cuda-12-6"]),
     help=(
-        "Pixi environment for SLURM jobs. If omitted, inferred from --preset "
-        "(blanca/alpine presets → sim-cuda-12-4, bridges2 → sim-cuda-12-6)."
+        "Pixi environment for SLURM jobs. OpenMM defaults from --preset; GROMACS "
+        "defaults to build. Explicit CUDA envs are allowed for GPU GROMACS."
     ),
 )
 @click.option(
@@ -1297,14 +1323,15 @@ def submit(
         - projects_dir: Where job scripts and SLURM logs are stored (long-term storage)
         - scratch_dir: Where simulation data is written (high-performance storage)
     """
+    from polyzymd.config.schema import SimulationConfig
     from polyzymd.workflow.daisy_chain import submit_daisy_chain
-    from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV
 
     if dry_run and generate_only:
         raise click.UsageError("Cannot use both --dry-run and --generate-only")
 
-    # Resolve pixi environment: explicit flag > preset default
-    resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "sim-cuda-12-4")
+    sim_config = SimulationConfig.from_yaml(config)
+    engine_name = _resolve_engine_name(sim_config, override=engine)
+    resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
 
     _echo_branding()
     colored_echo(f"Loading configuration from: {config}", phase="workflow")
@@ -1331,11 +1358,7 @@ def submit(
         colored_echo("Skip-build mode: using pre-built systems", phase="workflow")
 
     if dry_run:
-        from polyzymd.config.schema import SimulationConfig
-
         replicate_list = _resolve_replicates_option(replicates)
-        sim_config = SimulationConfig.from_yaml(config)
-        engine_name = _resolve_engine_name(sim_config, override=engine)
         if scratch_dir:
             sim_config.output.scratch_directory = Path(scratch_dir)
         if projects_dir:
@@ -1384,11 +1407,6 @@ def submit(
         colored_echo("Dry run complete. No files were written.", phase="workflow")
         colored_echo("=" * 60, phase="workflow")
         return
-
-    from polyzymd.config.schema import SimulationConfig
-
-    sim_config = SimulationConfig.from_yaml(config)
-    engine_name = _resolve_engine_name(sim_config, override=engine)
 
     if scratch_dir:
         sim_config.output.scratch_directory = Path(scratch_dir)
@@ -2611,8 +2629,11 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 @click.option(
     "--pixi-env",
     default=None,
-    type=click.Choice(["sim-cuda-12-4", "sim-cuda-12-6"]),
-    help=("Pixi environment for the recovery SLURM job. If omitted, inferred from --preset."),
+    type=click.Choice(["build", "sim-cuda-12-4", "sim-cuda-12-6"]),
+    help=(
+        "Pixi environment for the recovery SLURM job. OpenMM defaults from --preset; "
+        "GROMACS defaults to build. Explicit CUDA envs are allowed for GPU GROMACS."
+    ),
 )
 @click.option(
     "--force",
@@ -2736,10 +2757,9 @@ def recover(
 
     # Generate and submit a self-resubmitting SLURM job
     from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs, create_job_name
-    from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV, SlurmConfig, SlurmScriptGenerator
+    from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
 
-    # Resolve pixi environment: explicit flag > preset default
-    resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "sim-cuda-12-4")
+    resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
 
     colored_echo(
         f"\nGenerating recovery job (preset: {preset}, engine: {engine_name}, "
