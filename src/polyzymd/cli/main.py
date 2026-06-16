@@ -184,6 +184,49 @@ def _resolve_submission_pixi_env(preset: str, engine_name: str, pixi_env: str | 
     return PRESET_DEFAULT_PIXI_ENV.get(preset, "sim-cuda-12-4")
 
 
+def _warn_for_submission_pixi_env(
+    command: str,
+    engine_name: str,
+    resolved_pixi_env: str,
+    explicit_pixi_env: str | None,
+) -> None:
+    """Warn when a scheduler command starts from an unexpected pixi environment.
+
+    Submission commands generate SLURM scripts rather than executing simulations
+    locally. The build environment is therefore valid for orchestration, while
+    the generated job scripts target the resolved runtime environment.
+
+    Parameters
+    ----------
+    command : str
+        User-facing command name to include in the warning.
+    engine_name : str
+        Resolved simulation engine name.
+    resolved_pixi_env : str
+        Pixi environment written into generated SLURM scripts.
+    explicit_pixi_env : str or None
+        User-provided ``--pixi-env`` override, if any.
+    """
+    engine_key = engine_name.lower()
+    if engine_key == "openmm":
+        warn_if_wrong_pixi_env(
+            command,
+            resolved_pixi_env,
+            accepted=("build", resolved_pixi_env),
+            detail="OpenMM SLURM scripts target the resolved simulation runtime.",
+        )
+        return
+
+    accepted_envs = ("build", resolved_pixi_env)
+    recommended_env = explicit_pixi_env or "build"
+    warn_if_wrong_pixi_env(
+        command,
+        recommended_env,
+        accepted=accepted_envs,
+        detail="GROMACS submission defaults to build; explicit CUDA pixi env overrides are allowed.",
+    )
+
+
 def _generate_system_prefix(sim_config: object) -> str:
     """Generate a system filename prefix from simulation config.
 
@@ -1351,20 +1394,9 @@ def submit(
     sim_config = SimulationConfig.from_yaml(config)
     engine_name = _resolve_engine_name(sim_config, override=engine)
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
-    if engine_name == "openmm":
-        warn_if_wrong_pixi_env(
-            "submit --engine openmm",
-            SIM_PIXI_ENVS,
-            detail="OpenMM SLURM scripts target CUDA simulation runtimes.",
-        )
-    else:
-        accepted_envs = ("build", resolved_pixi_env) if pixi_env else ("build",)
-        warn_if_wrong_pixi_env(
-            "submit --engine gromacs",
-            "build",
-            accepted=accepted_envs,
-            detail="GROMACS submission defaults to build; explicit CUDA pixi env overrides are allowed.",
-        )
+    _warn_for_submission_pixi_env(
+        f"submit --engine {engine_name}", engine_name, resolved_pixi_env, pixi_env
+    )
 
     _echo_branding()
     colored_echo(f"Loading configuration from: {config}", phase="workflow")
@@ -2817,20 +2849,9 @@ def recover(
     from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
 
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
-    if engine_name == "openmm":
-        warn_if_wrong_pixi_env(
-            "recover --submit --engine openmm",
-            SIM_PIXI_ENVS,
-            detail="OpenMM recovery submission targets CUDA simulation runtimes.",
-        )
-    else:
-        accepted_envs = ("build", resolved_pixi_env) if pixi_env else ("build",)
-        warn_if_wrong_pixi_env(
-            "recover --submit --engine gromacs",
-            "build",
-            accepted=accepted_envs,
-            detail="GROMACS recovery defaults to build; explicit CUDA pixi env overrides are allowed.",
-        )
+    _warn_for_submission_pixi_env(
+        f"recover --submit --engine {engine_name}", engine_name, resolved_pixi_env, pixi_env
+    )
 
     colored_echo(
         f"\nGenerating recovery job (preset: {preset}, engine: {engine_name}, "
