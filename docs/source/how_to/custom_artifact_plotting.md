@@ -10,11 +10,11 @@ This workflow is intended for JupyterLab, Jupyter Notebook, VS Code notebooks,
 or an IPython session.
 
 ::::{tip}
-Launch your notebook server from the PolyzyMD pixi environment, or select a
+Launch your notebook server from the PolyzyMD analysis pixi environment, or select a
 kernel created from that environment:
 
 ```bash
-pixi run -e build jupyter lab
+pixi run -e analysis jupyter lab
 ```
 ::::
 
@@ -299,14 +299,14 @@ figure_path
 
 ### `ImportError: No module named polyzymd`
 
-Start the notebook server from the pixi environment:
+Start the notebook server from the analysis pixi environment:
 
 ```bash
-pixi run -e build jupyter lab
+pixi run -e analysis jupyter lab
 ```
 
 If you use VS Code or an existing Jupyter server, select the kernel associated
-with the PolyzyMD `build` environment.
+with the PolyzyMD `analysis` environment.
 
 ### `FileNotFoundError` for `result.json`
 
