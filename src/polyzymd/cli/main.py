@@ -259,6 +259,35 @@ def _generate_system_prefix(sim_config: object) -> str:
     return "_".join(parts) if parts else "system"
 
 
+def _emit_reference_warnings(sim_config: object, *, phase: str = "cli") -> bool:
+    """Print missing referenced-file warnings for a loaded config.
+
+    Parameters
+    ----------
+    sim_config : object
+        Loaded simulation configuration.
+    phase : str, optional
+        Color phase for CLI output, by default ``"cli"``.
+
+    Returns
+    -------
+    bool
+        ``True`` when any warnings were emitted.
+    """
+
+    from polyzymd.config.validation import collect_reference_warnings
+
+    warnings = collect_reference_warnings(sim_config)
+    if not warnings:
+        return False
+
+    colored_echo("Referenced file warnings:", phase=phase, level=logging.WARNING)
+    for warning in warnings:
+        colored_echo(f"  Warning: {warning}", phase=phase, level=logging.WARNING)
+    colored_echo(phase=phase)
+    return True
+
+
 @click.group()
 @click.version_option(prog_name="polyzymd")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
@@ -542,11 +571,19 @@ def build(
                     )
                 colored_echo(phase="build")
 
+            has_reference_warnings = _emit_reference_warnings(sim_config, phase="build")
+
             colored_echo("=" * 60, phase="build")
             if export_format in ("lammps", "amber"):
                 colored_echo(
                     f"Validation passed. {export_format.upper()} export is not yet implemented.",
                     phase="build",
+                )
+            elif has_reference_warnings:
+                colored_echo(
+                    "Validation passed with referenced-file warnings. Ready to build after fixing references.",
+                    phase="build",
+                    level=logging.WARNING,
                 )
             else:
                 colored_echo("Validation passed. Ready to build.", phase="build")
@@ -2405,6 +2442,8 @@ def validate(config: str) -> None:
         sim_config = SimulationConfig.from_yaml(config)
 
         click.echo(click.style("Configuration is valid!", fg="green"))
+        colored_echo()
+        _emit_reference_warnings(sim_config)
         colored_echo()
         colored_echo("Summary:")
         colored_echo(f"  Name: {sim_config.name}")

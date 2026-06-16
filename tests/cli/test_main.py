@@ -66,6 +66,34 @@ def _make_dry_run_config() -> SimpleNamespace:
     )
 
 
+def _minimal_cli_config_data(pdb_path: str | Path) -> dict[str, object]:
+    """Create minimal YAML-serializable config data for CLI tests."""
+
+    return {
+        "name": "cli_reference_validation",
+        "engine": "openmm",
+        "enzyme": {"name": "Enz", "pdb_path": str(pdb_path)},
+        "thermodynamics": {"temperature": 300.0},
+        "simulation_phases": {
+            "equilibration_stages": [
+                {
+                    "name": "eq",
+                    "duration": 0.1,
+                    "temperature": 300.0,
+                    "ensemble": "NVT",
+                }
+            ],
+            "production": {
+                "ensemble": "NPT",
+                "duration": 1.0,
+                "samples": 10,
+                "report_interval": 50000,
+                "checkpoint_interval": 60.0,
+            },
+        },
+    }
+
+
 class TestResolveReplicatesOption:
     """Unit tests for the _resolve_replicates_option() helper."""
 
@@ -192,6 +220,30 @@ class TestResolveSubmissionPixiEnv:
         assert _resolve_submission_pixi_env("bridges2", "openmm") == "sim-cuda-12-6"
 
 
+class TestValidateCommandReferenceWarnings:
+    """Tests for validate command runtime reference warnings."""
+
+    def test_validate_exits_zero_and_warns_for_missing_referenced_files(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Validate should warn about missing PDB files without failing schema validation."""
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(_minimal_cli_config_data("missing.pdb")),
+            encoding="utf-8",
+        )
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code == 0
+        assert "Configuration is valid!" in result.output
+        assert "Referenced file warnings" in result.output
+        assert "Missing enzyme PDB" in result.output
+
+
 class TestBuildCommandReplicateFlags:
     """Test that the build command accepts the new flags via Click invocation."""
 
@@ -252,6 +304,22 @@ class TestBuildCommandReplicateFlags:
         assert result.exit_code == 0
         assert "gromacs" in result.output
         assert "openmm" in result.output
+
+    def test_build_dry_run_warns_for_missing_referenced_files(self, tmp_path: Path) -> None:
+        """Build dry-run should warn when schema-valid referenced files are absent."""
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(_minimal_cli_config_data("missing.pdb")),
+            encoding="utf-8",
+        )
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["build", "-c", str(config_path), "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "Referenced file warnings" in result.output
+        assert "Missing enzyme PDB" in result.output
 
     @pytest.mark.parametrize("option", ["--output-dir", "-o"])
     def test_build_output_dir_alias_is_rejected(self, option: str, tmp_path: Path) -> None:

@@ -128,7 +128,8 @@ polyzymd validate -c <path>
 
 - YAML syntax validity
 - Required fields are present
-- Referenced files (PDB, SDF) exist
+- Referenced files (PDB, SDF, cached polymer SDFs, reaction templates) are reported as
+  warnings when missing
 - Monomer probabilities sum to 1.0
 - Valid enum values (water model, ensemble, etc.)
 - Co-solvent specification (volume_fraction XOR concentration)
