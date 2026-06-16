@@ -210,6 +210,154 @@ class TestCoSolventVolumeValidation:
         assert len(config.co_solvents) == 2
 
 
+class TestRunDirectoryNaming:
+    """Test centralized run-directory naming helpers."""
+
+    def test_output_config_format_directory_name_accepts_solvent_tokens(self):
+        """Output formatter should support solvent template placeholders directly."""
+        from polyzymd.config.schema import OutputConfig
+
+        output = OutputConfig(
+            naming_template=(
+                "{enzyme}_{primary_solvent}_{cosolvent_composition}_{solvent_composition}_"
+                "r{replicate}"
+            ),
+        )
+
+        assert (
+            output.format_directory_name(
+                enzyme="LipA",
+                substrate="apo",
+                polymer_type="none",
+                temperature=310.0,
+                replicate=2,
+                primary_solvent="water_tip3p",
+                cosolvent_composition="dmso_30pctv",
+                solvent_composition="water_tip3p_dmso_30pctv",
+            )
+            == "LipA_water_tip3p_dmso_30pctv_water_tip3p_dmso_30pctv_r2"
+        )
+        assert (
+            output.format_directory_name(
+                enzyme="LipA",
+                substrate="apo",
+                polymer_type="none",
+                temperature=310.0,
+                replicate=2,
+                primary_solvent="water_tip3p",
+                cosolvent_composition="dmso_30pctv",
+            )
+            == "LipA_water_tip3p_dmso_30pctv_water_tip3p_dmso_30pctv_r2"
+        )
+
+    def test_format_run_directory_name_uses_output_formatter(self, minimal_config_data):
+        """Simulation formatter should route centralized values through OutputConfig."""
+        from polyzymd.config.schema import SimulationConfig
+
+        config = SimulationConfig(**minimal_config_data)
+        calls = []
+        original = config.output.format_directory_name
+
+        def spy_format_directory_name(**values):
+            calls.append(values)
+            return original(**values)
+
+        object.__setattr__(config.output, "format_directory_name", spy_format_directory_name)
+
+        assert config.format_run_directory_name(4) == "TestEnzyme_apo_none_1ns_300K_run4"
+        assert calls == [config._run_directory_template_values(4)]
+
+    def test_solvent_token_formatting(self, minimal_config_data):
+        """Solvent placeholders should render safe composition tokens."""
+        minimal_config_data["solvent"] = {
+            "primary": {"type": "water", "model": "tip3p"},
+            "co_solvents": [
+                {"name": "urea", "concentration": 2.5},
+                {
+                    "name": "tert butanol",
+                    "smiles": "CC(C)(C)O",
+                    "density": 0.78,
+                    "volume_fraction": 0.125,
+                },
+                {"name": "dmso", "volume_fraction": 0.30},
+            ],
+        }
+        minimal_config_data["output"] = {
+            "naming_template": "{primary_solvent}_{cosolvent_composition}_{solvent_composition}"
+        }
+
+        config = SimulationConfig(**minimal_config_data)
+
+        assert config.format_run_directory_name() == (
+            "water_tip3p_dmso_30pctv_tert_butanol_12p5pctv_urea_2p5M_"
+            "water_tip3p_dmso_30pctv_tert_butanol_12p5pctv_urea_2p5M"
+        )
+
+    def test_absent_cosolvent_uses_none_and_primary_only_composition(self, minimal_config_data):
+        """No co-solvents should produce none and primary-only solvent composition."""
+        minimal_config_data["output"] = {
+            "naming_template": "{primary_solvent}_{cosolvent_composition}_{solvent_composition}"
+        }
+
+        config = SimulationConfig(**minimal_config_data)
+
+        assert config.format_run_directory_name() == "water_tip3p_none_water_tip3p"
+
+    def test_non_water_primary_solvent_is_sanitized(self, minimal_config_data):
+        """Non-water primary solvent names should normalize unsafe punctuation."""
+        minimal_config_data["solvent"] = {"primary": {"type": "ACN / MeOH"}}
+        minimal_config_data["output"] = {"naming_template": "{primary_solvent}"}
+
+        config = SimulationConfig(**minimal_config_data)
+
+        assert config.format_run_directory_name() == "acn_meoh"
+
+    def test_format_run_directory_name_and_working_directory_match(
+        self, minimal_config_data, tmp_path
+    ):
+        """The public formatter should match get_working_directory().name."""
+        minimal_config_data["output"] = {
+            "scratch_directory": str(tmp_path),
+            "naming_template": "{enzyme}_{temperature}K_run{replicate}_{solvent_composition}",
+        }
+        config = SimulationConfig(**minimal_config_data)
+
+        run_name = config.format_run_directory_name(3)
+
+        assert run_name == "TestEnzyme_300K_run3_water_tip3p"
+        assert config.get_working_directory(3).name == run_name
+
+    def test_discover_replicate_dirs_with_solvent_placeholder_and_middle_replicate(
+        self, minimal_config_data, tmp_path
+    ):
+        """Discovery should work when solvent placeholders are present after replicate."""
+        minimal_config_data["output"] = {
+            "scratch_directory": str(tmp_path),
+            "naming_template": "run{replicate}_{solvent_composition}_{enzyme}",
+        }
+        config = SimulationConfig(**minimal_config_data)
+        first = tmp_path / config.format_run_directory_name(1)
+        third = tmp_path / config.format_run_directory_name(3)
+        first.mkdir()
+        third.mkdir()
+        (tmp_path / "runX_water_tip3p_TestEnzyme").mkdir()
+
+        assert config.discover_replicate_dirs() == [(1, first), (3, third)]
+
+    def test_discover_replicate_dirs_requires_replicate_placeholder(
+        self, minimal_config_data, tmp_path
+    ):
+        """Discovery should fail clearly when the template has no replicate token."""
+        minimal_config_data["output"] = {
+            "scratch_directory": str(tmp_path),
+            "naming_template": "{enzyme}_{solvent_composition}",
+        }
+        config = SimulationConfig(**minimal_config_data)
+
+        with pytest.raises(ValueError, match=r"does not include the \{replicate\} placeholder"):
+            config.discover_replicate_dirs()
+
+
 class TestSimulationPhasesConfig:
     """Test staged equilibration requirements."""
 
