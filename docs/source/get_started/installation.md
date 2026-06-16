@@ -78,7 +78,8 @@ build`, `pixi shell -e build`, and a successful `polyzymd info` output. -->
 PolyzyMD v1.3 uses a split environment workflow on clusters:
 
 - Use `build` on a login/build node to prepare and validate systems.
-- Use `sim-cuda-12-4` or `sim-cuda-12-6` on GPU nodes for simulation execution only.
+- Use `sim-cuda-12-4` or `sim-cuda-12-6` on GPU nodes for OpenMM simulation
+  execution only.
 - Use `analysis` after trajectories are produced to run comparisons and plots.
 
 This is different from the older `cuda-*` workflow where one CUDA environment
@@ -149,8 +150,9 @@ In the `build` environment, these commands should work directly:
 | `polyzymd validate` | Yes | Config validation |
 | `polyzymd clean-pdb` | Yes | Convenience PDB cleanup, not biological-system selection |
 | `polyzymd info` | Yes | Version/dependency summary |
-| `polyzymd submit` | No | Requires a CUDA environment |
-| `polyzymd run-segment` | No | Requires a CUDA environment |
+| `polyzymd submit --engine openmm` | No | OpenMM submission targets a `sim-cuda-*` runtime |
+| `polyzymd submit --engine gromacs` | Yes | GROMACS submission can run from `build`; SLURM runs GROMACS in the external cluster environment |
+| `polyzymd run-segment` | No | OpenMM execution requires a `sim-cuda-*` runtime |
 
 The `analysis` environment is the supported environment for `polyzymd compare`
 commands. It contains MDAnalysis, MDTraj, pandas, SciPy, scikit-learn,
