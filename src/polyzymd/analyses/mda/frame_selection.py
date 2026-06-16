@@ -114,6 +114,40 @@ def _coerce_frames(frames: Any) -> tuple[Any, ...]:
     return frozen_frames
 
 
+def _normalize_frame_selector_values(frames: Any) -> list[int | bool]:
+    """Return explicit frame selectors as Python integer or boolean scalars.
+
+    Parameters
+    ----------
+    frames : Any
+        Explicit frame index sequence or boolean mask.
+
+    Returns
+    -------
+    list of int or bool
+        Frame selector values with NumPy-like scalar values converted to Python
+        ``int`` or ``bool`` instances.
+
+    Raises
+    ------
+    ValueError
+        Raised when a selector entry is neither integer-like nor boolean-like.
+    """
+
+    normalized: list[int | bool] = []
+    for frame in frames:
+        if _is_boolean_frame_value(frame):
+            normalized.append(bool(frame))
+            continue
+        try:
+            normalized.append(index(frame))
+        except TypeError as exc:
+            raise ValueError(
+                "frames must contain only integer frame indices or boolean mask values"
+            ) from exc
+    return normalized
+
+
 def _selected_count_from_frames(frames: tuple[Any, ...], n_frames_total: int | None) -> int:
     """Return the selected frame count for an explicit frame selector.
 
@@ -273,7 +307,7 @@ class FrameSelection:
         """
 
         if self.frames is not None:
-            return MDARunKwargs(frames=list(self.frames))
+            return MDARunKwargs(frames=_normalize_frame_selector_values(self.frames))
 
         kwargs = MDARunKwargs()
         if self.start is not None:
@@ -402,7 +436,7 @@ class FrameSelection:
 
         frozen_frames = _coerce_frames(self.frames)
         n_frames_selected = _selected_count_from_frames(frozen_frames, self.n_frames_total)
-        object.__setattr__(self, "frames", frozen_frames)
+        object.__setattr__(self, "frames", tuple(_normalize_frame_selector_values(frozen_frames)))
         object.__setattr__(self, "n_frames_selected", n_frames_selected)
 
     def _validate_slice_mode(self) -> None:

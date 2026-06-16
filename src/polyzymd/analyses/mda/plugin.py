@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from operator import index as operator_index
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -16,7 +15,7 @@ from polyzymd.analyses.mda.artifacts import (
     ReplicateArtifact,
     raw_mdanalysis_results_path,
 )
-from polyzymd.analyses.mda.frame_selection import FrameSelection, _is_boolean_frame_value
+from polyzymd.analyses.mda.frame_selection import FrameSelection, _normalize_frame_selector_values
 from polyzymd.analyses.mda.job import MDAJobResult, MDAUniversePolicy
 from polyzymd.analyses.mda.store import ArtifactStore
 
@@ -221,19 +220,13 @@ def _frame_selector_payload(frames: Any) -> list[int | bool] | None:
 
     if frames is None:
         return None
-    payload: list[int | bool] = []
-    for frame in frames:
-        if _is_boolean_frame_value(frame):
-            payload.append(bool(frame))
-        else:
-            try:
-                payload.append(operator_index(frame))
-            except TypeError as exc:
-                raise PluginContractError(
-                    "frame_selection.build_mda_jobs() produced non-integer explicit frame "
-                    f"selector {frame!r}; use integer indices or a boolean mask"
-                ) from exc
-    return payload
+    try:
+        return _normalize_frame_selector_values(frames)
+    except ValueError as exc:
+        raise PluginContractError(
+            "frame_selection.build_mda_jobs() produced non-integer explicit frame selector; "
+            "use integer indices or a boolean mask"
+        ) from exc
 
 
 def strict_json_payload(value: Any, *, analysis_name: str) -> Any:

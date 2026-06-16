@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -166,6 +167,32 @@ def test_frame_selection_payload_serializes_numpy_bool_masks() -> None:
 
     assert payload["frames"] == [True, False, True]
     assert all(isinstance(value, bool) for value in payload["frames"])
+
+
+def test_strict_json_collector_serializes_numpy_bool_run_kwargs(tmp_path: Path) -> None:
+    """Default collector should emit JSON-safe run kwargs for NumPy boolean masks."""
+
+    ctx = _collector_context(tmp_path)
+    frame_selection = FrameSelection(
+        frames=np.asarray([True, False, True], dtype=np.bool_),
+        n_frames_total=3,
+    )
+    job = MDAJobResult(
+        name="mask_job",
+        analysis=SimpleNamespace(results={"value": 1.0}),
+        results={"value": 1.0},
+        run_kwargs=frame_selection.run_kwargs(),
+        frame_selection=frame_selection,
+        backend_policy=MDABackendPolicy(),
+        universe_policy=MDAUniversePolicy(condition_label="Cond", replicate=1),
+    )
+
+    artifact = StrictJSONMDAResultCollector()(ctx, [job])
+    run_frames = artifact.payload["jobs"][0]["run_kwargs"]["frames"]
+
+    json.dumps(artifact.model_dump(mode="json"))
+    assert run_frames == [True, False, True]
+    assert all(isinstance(value, bool) for value in run_frames)
 
 
 def test_strict_json_payload_rejects_raw_mdanalysis_results() -> None:
