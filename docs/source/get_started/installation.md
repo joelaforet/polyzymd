@@ -158,6 +158,15 @@ The `analysis` environment is the supported environment for `polyzymd compare`
 commands. It contains MDAnalysis, MDTraj, pandas, SciPy, scikit-learn,
 matplotlib, seaborn, Python 3.12, and NumPy 2 without the CUDA runtime pins.
 
+PolyzyMD also prints advisory CLI warnings when pixi reports an active
+environment that does not match the split workflow. These warnings go to stderr,
+do not change exit codes, and are not emitted when PolyzyMD is imported as a
+library. If a site-specific workflow intentionally differs, suppress them with:
+
+```bash
+export POLYZYMD_DISABLE_ENV_WARNINGS=1
+```
+
 ## Common Installation Checks
 
 If something looks wrong, try these first:

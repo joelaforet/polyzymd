@@ -25,6 +25,7 @@ from polyzymd.cli._compare_utils import (
     validate_and_report,
 )
 from polyzymd.cli.colors import echo_logo
+from polyzymd.cli.env_warnings import warn_if_wrong_pixi_env
 from polyzymd.config.comparison import (
     ComparisonConfig,
     generate_comparison_template,
@@ -38,6 +39,8 @@ from polyzymd.core.experimental import (
 )
 
 LOGGER = logging.getLogger("polyzymd.cli.compare")
+ANALYSIS_PIXI_ENVS = ("analysis",)
+KNOWN_SPLIT_PIXI_ENVS = ("build", "analysis", "sim-cuda-12-4", "sim-cuda-12-6", "test", "docs")
 
 
 def _display_path(path: Path) -> str:
@@ -314,6 +317,8 @@ def init(name: str, eq_time: str, output_dir: Path | None):
         polyzymd compare init -n my_study --eq-time 20ns
         polyzymd compare init -n my_study -o /path/to/projects
     """
+    warn_if_wrong_pixi_env("compare init", "build")
+
     # Determine output location
     if output_dir is None:
         output_dir = Path.cwd()
@@ -549,6 +554,8 @@ def run_comparison(
         polyzymd compare run contacts --format markdown
         polyzymd compare run --list
     """
+    warn_if_wrong_pixi_env("compare run", ANALYSIS_PIXI_ENVS)
+
     from polyzymd.analyses.discovery import get_analysis, list_all_names, list_analyses
     from polyzymd.analyses.orchestrator import run_comparison as _run_pipeline
     from polyzymd.cli.logging_utils import setup_logging
@@ -712,6 +719,8 @@ def plot_all(
         polyzymd compare plot-all -f comparison.yaml -a catalytic_triad
         polyzymd compare plot-all --list-available
     """
+    warn_if_wrong_pixi_env("compare plot-all", ANALYSIS_PIXI_ENVS)
+
     _echo_branding()
 
     # Configure logging
@@ -885,6 +894,8 @@ def run_all(
         polyzymd compare run-all -f comparison.yaml --eq-time 10ns
         polyzymd compare run-all --recompute --plot
     """
+    warn_if_wrong_pixi_env("compare run-all", ANALYSIS_PIXI_ENVS)
+
     from polyzymd.analyses.orchestrator import run_all_comparisons
     from polyzymd.cli.logging_utils import setup_logging
 
@@ -1034,6 +1045,8 @@ def submit_analysis_hpc(
     job_arrays: bool,
 ):
     """Submit replicate-level SLURM analysis DAG for one plugin."""
+    warn_if_wrong_pixi_env("compare submit", ANALYSIS_PIXI_ENVS)
+
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.workflow.analysis_slurm import (
         build_manifest,
@@ -1240,6 +1253,8 @@ def submit_all_analyses_hpc(
     excluded_analyses: tuple[str, ...],
 ):
     """Submit all enabled analyses with dependency-ordered SLURM DAGs."""
+    warn_if_wrong_pixi_env("compare submit-all", ANALYSIS_PIXI_ENVS)
+
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import order_analyses_for_execution
     from polyzymd.workflow.analysis_slurm import (
@@ -1392,6 +1407,9 @@ def submit_all_analyses_hpc(
 @click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON status.")
 def analysis_hpc_status(analysis: str, config_file: Path, reconcile: bool, as_json: bool):
     """Show status for submitted analysis SLURM DAG."""
+    if not as_json:
+        warn_if_wrong_pixi_env("compare status", "analysis", accepted=KNOWN_SPLIT_PIXI_ENVS)
+
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.workflow.analysis_slurm import read_analysis_status, reconcile_status_with_slurm
 
@@ -1485,6 +1503,8 @@ def finalize_analysis_hpc(
     allow_partial: bool,
 ):
     """Run comparison + plotting from aggregated on-disk results."""
+    warn_if_wrong_pixi_env("compare finalize", ANALYSIS_PIXI_ENVS)
+
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import (
         finalize_comparison_from_disk,
@@ -1606,6 +1626,8 @@ def worker_replicate(
     replicate: int,
 ):
     """Internal worker command for one replicate compute task."""
+    warn_if_wrong_pixi_env("compare worker-replicate", ANALYSIS_PIXI_ENVS)
+
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import run_replicate_once
     from polyzymd.analyses.shared.paths import sanitize_label
@@ -1655,6 +1677,8 @@ def worker_replicate(
 @click.option("--condition-index", type=int, required=True)
 def worker_aggregate(manifest_path: Path, condition_index: int):
     """Internal worker command for one condition aggregation task."""
+    warn_if_wrong_pixi_env("compare worker-aggregate", ANALYSIS_PIXI_ENVS)
+
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import aggregate_condition_from_disk
     from polyzymd.analyses.shared.paths import sanitize_label
@@ -1695,6 +1719,8 @@ def worker_aggregate(manifest_path: Path, condition_index: int):
 @click.option("--manifest", "manifest_path", type=click.Path(path_type=Path), required=True)
 def worker_finalize(manifest_path: Path):
     """Internal worker command for comparison finalization."""
+    warn_if_wrong_pixi_env("compare worker-finalize", ANALYSIS_PIXI_ENVS)
+
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import finalize_comparison_from_disk
     from polyzymd.analyses.shared.paths import sanitize_label
