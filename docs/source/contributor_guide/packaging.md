@@ -108,9 +108,11 @@ Current pixi environments are:
 
 | Environment | Use |
 |-------------|-----|
-| `build` | Local contributor environment with docs, tests, packaging tools, and flexible non-CUDA OpenMM. Use this for editing, docs, configuration, system-building checks, and most tests. |
-| `cuda-12-4` | Cluster/GPU workflow for systems whose driver supports CUDA 12.4. |
-| `cuda-12-6` | Cluster/GPU workflow for systems whose driver supports CUDA 12.6. |
+| `build` | Local contributor environment with docs, packaging tools, molecular builders, analysis tools, NumPy 2, and flexible non-CUDA OpenMM. Use this for editing, docs, configuration, system-building checks, and package validation. |
+| `analysis` | User-facing trajectory analysis, comparison, and plotting environment with Python 3.12 and NumPy 2. |
+| `test` | CI/local test environment with Python 3.12, NumPy 2, builders, analysis tools, and lint/docs tools. |
+| `sim-cuda-12-4` | Linux-only CUDA 12.4 simulation runtime with Python 3.12, NumPy 1.x, and OpenMM 8.1.x for clusters such as CU Boulder Blanca. |
+| `sim-cuda-12-6` | Linux-only CUDA 12.6 simulation runtime with Python 3.12, NumPy 2, and current OpenMM for clusters such as PSC Bridges2. |
 
 Install the local contributor environment with:
 
@@ -118,13 +120,21 @@ Install the local contributor environment with:
 pixi install -e build
 ```
 
-For GPU cluster work, choose the CUDA environment that does not exceed the
-cluster driver version:
+For GPU cluster work, prepare systems in `build`, run simulations in the CUDA
+runtime environment that does not exceed the cluster driver version, then run
+analysis in `analysis`:
 
 ```bash
-pixi install -e cuda-12-6
-pixi shell -e cuda-12-6
+pixi install -e sim-cuda-12-6
+pixi shell -e sim-cuda-12-6
 ```
+
+Do not put analysis-only dependencies into `sim-cuda-*` environments. Those
+environments are intentionally lean so CUDA/OpenMM binary constraints do not
+force the package and analysis stack off Python 3.12 + NumPy 2. The package
+metadata allows `numpy>=1.26,<3` so editable installs can work in both the
+NumPy 1.x CUDA 12.4 runtime and the NumPy 2 build/analysis/test environments;
+pixi features enforce the stricter per-workflow NumPy policy.
 
 Full-stack scientific dependencies must remain pixi-managed. Do not add OpenMM,
 OpenFF, AmberTools, PACKMOL, RDKit, CUDA, or full simulation-stack installation
@@ -132,13 +142,10 @@ instructions that ask contributors to install them into a system Python.
 MDAnalysis and MDTraj pip instructions are acceptable only through the
 `.[analysis]` extra and must be labeled best-effort analysis-only.
 
-AmberTools is platform-specific in pixi. Linux environments include AmberTools
-24.8 for legacy AM1-BCC/OpenFF backend compatibility. macOS pixi environments
-omit AmberTools by default because current AmberTools builds conflict with the
-Python 3.12 / NumPy 2 full stack in the cross-platform lock. Document macOS
-charging workflows as NAGL/OpenFF or pre-charged-molecule workflows unless a
-dedicated macOS AmberTools/AM1-BCC environment is designed in response to a user
-issue.
+AmberTools is not part of the default v1.3 NumPy 2 build/analysis/test solve.
+Current AmberTools builds conflict with that stack, so document charging
+workflows as NAGL/OpenFF or pre-charged-molecule workflows unless a dedicated
+AmberTools/AM1-BCC environment is designed in response to a user issue.
 
 ## Lazy imports for heavy dependencies
 

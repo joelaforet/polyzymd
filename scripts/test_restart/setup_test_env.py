@@ -28,7 +28,7 @@ Output structure::
 Usage::
 
     # On the cluster, from the repository root:
-    pixi run -e cuda-12-4 python scripts/test_restart/setup_test_env.py
+    pixi run -e sim-cuda-12-4 python scripts/test_restart/setup_test_env.py
 
     # Or if already activated:
     python setup_test_env.py

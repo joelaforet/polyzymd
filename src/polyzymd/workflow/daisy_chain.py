@@ -282,7 +282,7 @@ class DaisyChainSubmitter:
         self,
         sim_config: SimulationConfig,
         dc_config: DaisyChainConfig,
-        pixi_env: str = "cuda-12-4",
+        pixi_env: str = "sim-cuda-12-4",
         openff_logs: bool = False,
         skip_build: bool = False,
     ) -> None:
@@ -295,7 +295,7 @@ class DaisyChainSubmitter:
         dc_config : DaisyChainConfig
             Submission configuration.
         pixi_env : str
-            Pixi environment name (e.g. ``"cuda-12-4"``, ``"cuda-12-6"``).
+            Pixi environment name (e.g. ``"sim-cuda-12-4"``, ``"sim-cuda-12-6"``).
         openff_logs : bool
             Enable verbose OpenFF logs in generated scripts.
         skip_build : bool
@@ -638,7 +638,7 @@ def submit_daisy_chain(
     dry_run: bool = False,
     generate_only: bool = False,
     force: bool = False,
-    pixi_env: str = "cuda-12-4",
+    pixi_env: str = "sim-cuda-12-4",
     output_dir: str | Path | None = None,
     scratch_dir: str | Path | None = None,
     projects_dir: str | Path | None = None,
@@ -677,7 +677,7 @@ def submit_daisy_chain(
     force : bool
         If True, skip the squeue duplicate-job check.
     pixi_env : str
-        Pixi environment name (e.g. ``"cuda-12-4"``, ``"cuda-12-6"``).
+        Pixi environment name (e.g. ``"sim-cuda-12-4"``, ``"sim-cuda-12-6"``).
     output_dir : str or Path or None
         Directory for job scripts.
     scratch_dir : str or Path or None

@@ -1245,10 +1245,10 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--pixi-env",
     default=None,
-    type=click.Choice(["cuda-12-4", "cuda-12-6"]),
+    type=click.Choice(["sim-cuda-12-4", "sim-cuda-12-6"]),
     help=(
         "Pixi environment for SLURM jobs. If omitted, inferred from --preset "
-        "(blanca/alpine presets → cuda-12-4, bridges2 → cuda-12-6)."
+        "(blanca/alpine presets → sim-cuda-12-4, bridges2 → sim-cuda-12-6)."
     ),
 )
 @click.option(
@@ -1304,7 +1304,7 @@ def submit(
         raise click.UsageError("Cannot use both --dry-run and --generate-only")
 
     # Resolve pixi environment: explicit flag > preset default
-    resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
+    resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "sim-cuda-12-4")
 
     _echo_branding()
     colored_echo(f"Loading configuration from: {config}", phase="workflow")
@@ -2611,7 +2611,7 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 @click.option(
     "--pixi-env",
     default=None,
-    type=click.Choice(["cuda-12-4", "cuda-12-6"]),
+    type=click.Choice(["sim-cuda-12-4", "sim-cuda-12-6"]),
     help=("Pixi environment for the recovery SLURM job. If omitted, inferred from --preset."),
 )
 @click.option(
@@ -2739,7 +2739,7 @@ def recover(
     from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV, SlurmConfig, SlurmScriptGenerator
 
     # Resolve pixi environment: explicit flag > preset default
-    resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
+    resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "sim-cuda-12-4")
 
     colored_echo(
         f"\nGenerating recovery job (preset: {preset}, engine: {engine_name}, "

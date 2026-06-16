@@ -37,7 +37,7 @@ runs out of memory, request more resources or use `polyzymd compare submit`.
 From the directory where you keep your simulation projects, run:
 
 ```bash
-pixi run -e build polyzymd compare init -n my_first_analysis
+pixi run -e analysis polyzymd compare init -n my_first_analysis
 cd my_first_analysis
 ```
 
@@ -106,7 +106,7 @@ For the full list of configuration fields, see
 Run the analysis with:
 
 ```bash
-pixi run -e build polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
+pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
 ```
 
 ```{note}
@@ -202,13 +202,13 @@ To generate figures alongside the analysis, re-run with the `--plot` flag on
 the `run-all` command:
 
 ```bash
-pixi run -e build polyzymd compare run-all -f comparison.yaml --eq-time 10ns --plot
+pixi run -e analysis polyzymd compare run-all -f comparison.yaml --eq-time 10ns --plot
 ```
 
 Or generate plots separately after the analysis has already been cached:
 
 ```bash
-pixi run -e build polyzymd compare plot-all -f comparison.yaml
+pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
 ```
 
 Figures are saved to the `figures/` directory:

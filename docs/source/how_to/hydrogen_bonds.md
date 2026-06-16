@@ -63,7 +63,7 @@ plugins:
 Run the analysis:
 
 ```bash
-pixi run -e build polyzymd compare run hydrogen_bonds
+pixi run -e analysis polyzymd compare run hydrogen_bonds
 ```
 
 That is all you need for a minimal protein–polymer H-bond comparison. The
@@ -338,7 +338,7 @@ plugins:
 ### Local execution
 
 ```bash
-pixi run -e build polyzymd compare run hydrogen_bonds
+pixi run -e analysis polyzymd compare run hydrogen_bonds
 ```
 
 This runs the full pipeline: the per-replicate compute stage for every
@@ -349,7 +349,7 @@ replicate, `aggregate` for every condition, then `compare` and `plot`.
 For long trajectories or many replicates, submit as a SLURM job:
 
 ```bash
-pixi run -e build polyzymd compare submit hydrogen_bonds \
+pixi run -e analysis polyzymd compare submit hydrogen_bonds \
     -f comparison.yaml \
     --partition aa100 \
     --mem 8G \

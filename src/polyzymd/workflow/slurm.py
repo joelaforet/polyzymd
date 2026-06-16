@@ -37,11 +37,11 @@ BRIDGES2_GPU_TYPES: List[str] = ["v100-16", "v100-32", "l40s-48", "h100-80"]
 # Used by the CLI to pick the right environment automatically when
 # the user doesn't pass ``--pixi-env`` explicitly.
 PRESET_DEFAULT_PIXI_ENV: Dict[str, str] = {
-    "aa100": "cuda-12-4",
-    "al40": "cuda-12-4",
-    "blanca-shirts": "cuda-12-4",
-    "bridges2": "cuda-12-6",
-    "testing": "cuda-12-4",
+    "aa100": "sim-cuda-12-4",
+    "al40": "sim-cuda-12-4",
+    "blanca-shirts": "sim-cuda-12-4",
+    "bridges2": "sim-cuda-12-6",
+    "testing": "sim-cuda-12-4",
 }
 
 # Pattern allowing alphanumerics, common path chars, and SLURM-safe punctuation
@@ -430,7 +430,7 @@ class SlurmScriptGenerator:
     def __init__(
         self,
         config: SlurmConfig,
-        pixi_env: str = "cuda-12-4",
+        pixi_env: str = "sim-cuda-12-4",
         openff_logs: bool = False,
         skip_build: bool = False,
     ) -> None:
@@ -438,7 +438,8 @@ class SlurmScriptGenerator:
 
         Args:
             config: SLURM configuration.
-            pixi_env: Pixi environment name (e.g. ``"cuda-12-4"``, ``"cuda-12-6"``).
+            pixi_env: Pixi environment name (e.g. ``"sim-cuda-12-4"``,
+                ``"sim-cuda-12-6"``).
             openff_logs: Enable verbose OpenFF logs in generated scripts.
             skip_build: Skip system building in generated scripts (use pre-built system).
         """

@@ -150,7 +150,7 @@ class GromacsEngine(SimulationEngine):
         if request.slurm_config is None:
             raise ValueError("GROMACS submission requires slurm_config")
 
-        pixi_env = str(request.extra.get("pixi_env", "cuda-12-4"))
+        pixi_env = str(request.extra.get("pixi_env", "sim-cuda-12-4"))
         skip_build = bool(request.extra.get("skip_build", False))
 
         request.working_dir.mkdir(parents=True, exist_ok=True)

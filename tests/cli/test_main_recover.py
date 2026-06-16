@@ -344,7 +344,7 @@ class TestSelfResubmittingModel:
 
         from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
 
-        gen = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="cuda-12-4")
+        gen = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="sim-cuda-12-4")
         with patch(
             "polyzymd.workflow.slurm._discover_manifest_path",
             return_value="/fake/pixi.toml",

@@ -42,7 +42,7 @@ inside the correct pixi shell:
 
 ```bash
 pixi shell -e build        # local use (no CUDA)
-pixi shell -e cuda-12-6    # HPC (e.g. Bridges2)
+pixi shell -e sim-cuda-12-6    # HPC (e.g. Bridges2)
 python -c "import openmm; print(openmm.__version__)"
 ```
 
@@ -337,7 +337,7 @@ manually:
 1. Edit generated script in `job_scripts/`
 2. Add the pixi activation:
    ```bash
-   eval "$(pixi shell-hook -e cuda-12-4 --manifest-path /path/to/polyzymd/pixi.toml)"
+   eval "$(pixi shell-hook -e sim-cuda-12-4 --manifest-path /path/to/polyzymd/pixi.toml)"
    ```
 
 ### "Permission denied on scratch"

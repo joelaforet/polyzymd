@@ -71,7 +71,7 @@ Use `compare submit-all` to submit every enabled plugin from `comparison.yaml`
 in dependency order:
 
 ```bash
-pixi run -e build polyzymd compare submit-all \
+pixi run -e analysis polyzymd compare submit-all \
     -f comparison.yaml \
     --partition aa100 \
     --qos normal
@@ -86,7 +86,7 @@ This command:
 Exclude one or more analyses with repeatable `--exclude`:
 
 ```bash
-pixi run -e build polyzymd compare submit-all \
+pixi run -e analysis polyzymd compare submit-all \
     -f comparison.yaml \
     --exclude sasa \
     --partition aa100
@@ -183,7 +183,7 @@ scheduler. This lets you inspect the generated SLURM scripts and verify
 that paths, partition names, and resource requests are correct.
 
 ```bash
-pixi run -e build polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit sasa \
     -f comparison.yaml \
     --partition aa100 \
     --mem 8G \
@@ -232,7 +232,7 @@ Open one of the generated `.sh` scripts and check that:
 Once you are satisfied with the dry run, submit for real:
 
 ```bash
-pixi run -e build polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit sasa \
     -f comparison.yaml \
     --partition aa100 \
     --mem 8G \
@@ -261,7 +261,7 @@ execution instead.
 Check the status of your submitted DAG at any time:
 
 ```bash
-pixi run -e build polyzymd compare status sasa \
+pixi run -e analysis polyzymd compare status sasa \
     -f comparison.yaml
 ```
 
@@ -288,7 +288,7 @@ are:
 For machine-readable output (useful in scripts), add `--json`:
 
 ```bash
-pixi run -e build polyzymd compare status sasa \
+pixi run -e analysis polyzymd compare status sasa \
     -f comparison.yaml --json
 ```
 
@@ -299,7 +299,7 @@ be stale. Use `--reconcile` to query `sacct` and update status files
 atomically:
 
 ```bash
-pixi run -e build polyzymd compare status sasa \
+pixi run -e analysis polyzymd compare status sasa \
     -f comparison.yaml --reconcile
 ```
 
@@ -326,7 +326,7 @@ finalize manually:
 Run finalize manually:
 
 ```bash
-pixi run -e build polyzymd compare finalize sasa \
+pixi run -e analysis polyzymd compare finalize sasa \
     -f comparison.yaml
 ```
 
@@ -345,7 +345,7 @@ If some conditions failed but you still want partial results, pass
 `--allow-partial`:
 
 ```bash
-pixi run -e build polyzymd compare finalize sasa \
+pixi run -e analysis polyzymd compare finalize sasa \
     -f comparison.yaml --allow-partial
 ```
 
@@ -361,7 +361,7 @@ SLURM jobs run in a non-interactive shell that may not have your login-time
 PATH. Use `--pixi-path` to provide the absolute path:
 
 ```bash
-pixi run -e build polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit sasa \
     -f comparison.yaml \
     --pixi-path /home/youruser/.pixi/bin/pixi \
     --partition aa100
@@ -377,7 +377,7 @@ SASA computation on large systems can be memory-intensive. Increase the
 memory allocation:
 
 ```bash
-pixi run -e build polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit sasa \
     -f comparison.yaml \
     --mem 16G \
     --partition aa100
@@ -394,7 +394,7 @@ is already conservative for most systems.
 Increase the wall-time limit:
 
 ```bash
-pixi run -e build polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit sasa \
     -f comparison.yaml \
     --time 04:00:00 \
     --partition aa100
@@ -538,7 +538,7 @@ of `sbatch` calls and make the SLURM queue easier to manage. Pass
 replicate jobs:
 
 ```bash
-pixi run -e build polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit sasa \
     -f comparison.yaml \
     --partition aa100 \
     --mem 8G \
@@ -607,7 +607,7 @@ Alpine. Add `--partition=blanca-<group>` and resubmit.
 ```bash
 module load slurm/alpine
 
-pixi run -e build polyzymd compare submit-all \
+pixi run -e analysis polyzymd compare submit-all \
     -f comparison.yaml \
     --partition amilan \
     --account ucb625_asc1 \
@@ -622,7 +622,7 @@ your PI's condo allocation name:
 ```bash
 module load slurm/blanca
 
-pixi run -e build polyzymd compare submit-all \
+pixi run -e analysis polyzymd compare submit-all \
     -f comparison.yaml \
     --partition blanca-shirts \
     --account blanca-shirts \
@@ -634,7 +634,7 @@ pixi run -e build polyzymd compare submit-all \
 The same flags work with `compare submit` for individual plugins:
 
 ```bash
-pixi run -e build polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit sasa \
     -f comparison.yaml \
     --partition blanca-shirts \
     --account blanca-shirts \

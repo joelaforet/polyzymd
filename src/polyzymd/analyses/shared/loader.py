@@ -66,7 +66,7 @@ def _require_mdanalysis(feature_name: str = "trajectory analysis") -> None:
         raise ImportError(
             f"MDAnalysis is required for {feature_name}.\n"
             "Ensure MDAnalysis is available in the PolyzyMD pixi environment "
-            '(for example: pixi run -e build python -c "import MDAnalysis")'
+            '(for example: pixi run -e analysis python -c "import MDAnalysis")'
         ) from None
 
 
@@ -78,7 +78,7 @@ def _require_matplotlib(feature_name: str = "plotting") -> None:
         raise ImportError(
             f"matplotlib is required for {feature_name}.\n"
             "Ensure matplotlib is available in the PolyzyMD pixi environment "
-            '(for example: pixi run -e build python -c "import matplotlib")'
+            '(for example: pixi run -e analysis python -c "import matplotlib")'
         ) from None
 
 

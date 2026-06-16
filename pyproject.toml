@@ -43,8 +43,9 @@ requires-python = ">=3.12"
 #
 # Recommended installation:
 #   git clone <repo> && cd polyzymd
-#   pixi install -e cuda-12-4   # (or cuda-12-6, or build)
-#   pixi shell -e cuda-12-4
+#   pixi install -e build          # system preparation and package work
+#   pixi install -e analysis       # trajectory analysis and plotting
+#   pixi install -e sim-cuda-12-4  # CUDA 12.4 simulation runtime
 # =============================================================================
 dependencies = [
     # Configuration and CLI (these install cleanly via pip)
@@ -55,7 +56,7 @@ dependencies = [
     "jinja2>=3.1",
     
     # Utilities (these install cleanly via pip)
-    "numpy>=2.0,<3",
+    "numpy>=1.26,<3",
     "tqdm>=4.60.0",
     
     # Analysis

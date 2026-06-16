@@ -135,7 +135,7 @@ reported as not testable rather than significant.
 ## Common Stable Commands
 
 All commands below assume you are inside the pixi environment
-(`pixi shell -e build`) or are prefixed with `pixi run -e build`.
+(`pixi shell -e analysis`) or are prefixed with `pixi run -e analysis`.
 
 ```bash
 polyzymd compare run rmsd

@@ -57,7 +57,7 @@ git clone https://github.com/joelaforet/polyzymd.git
 cd polyzymd
 ```
 
-**For local use (building systems, validation, no GPU):**
+**For local use (building systems, validation, package work):**
 
 ```bash
 pixi install -e build
@@ -66,24 +66,31 @@ pixi shell -e build
 
 **For HPC clusters (GPU simulations):**
 
-Pick the environment that matches your cluster's CUDA version:
+Pick the simulation runtime environment that matches your cluster's CUDA version:
 
 | Cluster | CUDA | Environment |
 |---------|------|-------------|
-| CU Boulder Blanca | 12.4 | `cuda-12-4` |
-| PSC Bridges2 | 12.6 | `cuda-12-6` |
+| CU Boulder Blanca | 12.4 | `sim-cuda-12-4` |
+| PSC Bridges2 | 12.6 | `sim-cuda-12-6` |
 
 ```bash
 # Example for Blanca:
-pixi install -e cuda-12-4
-pixi shell -e cuda-12-4
+pixi install -e sim-cuda-12-4
+pixi shell -e sim-cuda-12-4
 
 # Example for Bridges2:
-pixi install -e cuda-12-6
-pixi shell -e cuda-12-6
+pixi install -e sim-cuda-12-6
+pixi shell -e sim-cuda-12-6
 ```
 
 After `pixi shell`, the `polyzymd` command is on PATH and works normally.
+
+PolyzyMD v1.3 intentionally splits environments by workflow. Use `build` to
+prepare systems, use `sim-cuda-*` only on GPU nodes to execute simulations, and
+use `analysis` to compare trajectories and make plots. The same project files,
+prepared systems, checkpoints, and trajectories move between these environments.
+This split preserves CUDA 12.4 cluster support while keeping package and
+analysis work on Python 3.12 with NumPy 2.
 
 ### How to find your CUDA version
 
@@ -123,11 +130,11 @@ polyzymd submit -c config.yaml --replicates 1-5 --preset blanca-shirts
 ```
 
 The `--preset` flag selects SLURM configuration and automatically picks the
-correct pixi environment (`cuda-12-4` for Blanca, `cuda-12-6` for Bridges2).
+correct pixi environment (`sim-cuda-12-4` for Blanca, `sim-cuda-12-6` for Bridges2).
 You can override with `--pixi-env`:
 
 ```bash
-polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2 --pixi-env cuda-12-6
+polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2 --pixi-env sim-cuda-12-6
 ```
 
 See the [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/tutorials/quickstart.html) for a complete walkthrough.
@@ -155,23 +162,23 @@ PolyzyMD uses [pixi](https://pixi.sh) instead of conda/mamba. Key differences:
 - **Reproducible** — the lockfile pins every package to exact versions
 - **CUDA-aware** — each environment pins the correct CUDA version
 
-| Environment | Use case | Requires GPU? |
-|-------------|----------|---------------|
-| `build` | System building, PDB prep, validation | No |
-| `cuda-12-4` | Simulations on CUDA 12.4 clusters (Blanca) | Yes |
-| `cuda-12-6` | Simulations on CUDA 12.6 clusters (Bridges2) | Yes |
+| Environment | Use case | Stack policy | Requires GPU? |
+|-------------|----------|--------------|---------------|
+| `build` | System building, PDB prep, validation, package work | Python 3.12 + NumPy 2 | No |
+| `analysis` | Trajectory analysis, comparison, and plotting | Python 3.12 + NumPy 2 | No |
+| `test` | CI/local tests and lint/docs tooling | Python 3.12 + NumPy 2 | No |
+| `sim-cuda-12-4` | Simulation execution on CUDA 12.4 clusters (Blanca) | Python 3.12 + NumPy 1.x + OpenMM 8.1.x | Yes |
+| `sim-cuda-12-6` | Simulation execution on CUDA 12.6 clusters (Bridges2) | Python 3.12 + current OpenMM | Yes |
 
-Linux pixi environments include AmberTools 24.8 for legacy AM1-BCC/OpenFF
-backend compatibility. macOS pixi environments omit AmberTools by default
-because current AmberTools builds conflict with the Python 3.12 / NumPy 2 full
-stack in the cross-platform lock. On macOS, use NAGL/OpenFF charging or provide
-pre-charged molecules; open an issue if you need a dedicated macOS
-AmberTools/AM1-BCC environment.
+AmberTools is not part of the default v1.3 NumPy 2 build/analysis/test solve
+because current AmberTools builds conflict with that stack. Use NAGL/OpenFF
+charging or provide pre-charged molecules; open an issue if you need a
+dedicated AmberTools/AM1-BCC environment for a specific platform.
 
 ### Adding support for a new cluster
 
 1. Determine the CUDA version (`nvidia-smi` on a GPU node)
-2. Add a new `[feature.cuda-X-Y]` block in `pixi.toml` following the existing pattern
+2. Add a new `[feature.sim-cuda-X-Y]` block in `pixi.toml` following the existing pattern
 3. Add the corresponding environment in `[environments]`
 4. Add the preset mapping in `PRESET_DEFAULT_PIXI_ENV` in `slurm.py`
 5. File a PR

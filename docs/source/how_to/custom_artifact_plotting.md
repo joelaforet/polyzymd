@@ -314,7 +314,7 @@ Check that the hydrogen-bond analysis has been run and that `project_dir` points
 to the directory containing `analysis/`:
 
 ```bash
-pixi run -e build polyzymd compare run hydrogen_bonds -f comparison.yaml
+pixi run -e analysis polyzymd compare run hydrogen_bonds -f comparison.yaml
 ```
 
 Also list the directories under `analysis/` and compare them with

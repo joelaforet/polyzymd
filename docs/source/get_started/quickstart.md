@@ -219,7 +219,7 @@ pixi run -e build polyzymd build -c config.yaml --format gromacs --replicates 1-
 For a local smoke test on a GPU-enabled workstation, you can run one segment:
 
 ```bash
-pixi run -e cuda-12-4 polyzymd run-segment -c config.yaml -r 1
+pixi run -e sim-cuda-12-4 polyzymd run-segment -c config.yaml -r 1
 ```
 ````
 
@@ -227,7 +227,7 @@ pixi run -e cuda-12-4 polyzymd run-segment -c config.yaml -r 1
 For an HPC workflow, generate job scripts first:
 
 ```bash
-pixi run -e cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates 1 --generate-only
+pixi run -e sim-cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates 1 --generate-only
 ```
 
 Use `--dry-run` instead if you only want a preview without creating files.

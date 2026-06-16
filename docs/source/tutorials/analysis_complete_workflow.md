@@ -76,7 +76,7 @@ From the study root, initialize a comparison project and move into it:
 
 ```bash
 cd my_enzyme_study
-pixi run -e build polyzymd compare init -n polymer_stabilization_study
+pixi run -e analysis polyzymd compare init -n polymer_stabilization_study
 cd polymer_stabilization_study
 ```
 
@@ -136,7 +136,7 @@ plugins:
 ## Step 2: Validate the Comparison Config
 
 ```bash
-pixi run -e build polyzymd compare validate
+pixi run -e analysis polyzymd compare validate
 ```
 
 You should see a passing summary that lists the three conditions and the
@@ -147,7 +147,7 @@ enabled analyses.
 For the tutorial, use the batch runner:
 
 ```bash
-pixi run -e build polyzymd compare run-all
+pixi run -e analysis polyzymd compare run-all
 ```
 
 This runs each enabled analysis through its replicate, aggregate, and
@@ -160,7 +160,7 @@ outputs under `comparison/<analysis>/result.json`.
 **On an HPC cluster?** For large studies, submit each analysis as a SLURM
 job DAG instead of running interactively:
 
-    pixi run -e build polyzymd compare submit sasa --partition <part> --mem 8G
+    pixi run -e analysis polyzymd compare submit sasa --partition <part> --mem 8G
 
 This parallelizes across replicates and conditions. See
 {doc}`../how_to/hpc_execution` for the complete HPC workflow.
@@ -169,7 +169,7 @@ This parallelizes across replicates and conditions. See
 If you prefer to inspect one comparison first, a good sanity check is:
 
 ```bash
-pixi run -e build polyzymd compare run rmsf
+pixi run -e analysis polyzymd compare run rmsf
 ```
 
 ## Step 4: Generate the Figures
@@ -177,8 +177,8 @@ pixi run -e build polyzymd compare run rmsf
 Now run the plotting smoke test:
 
 ```bash
-pixi run -e build polyzymd compare plot-all --list-available
-pixi run -e build polyzymd compare plot-all
+pixi run -e analysis polyzymd compare plot-all --list-available
+pixi run -e analysis polyzymd compare plot-all
 ```
 
 If those commands succeed, your comparison workspace is in good shape.

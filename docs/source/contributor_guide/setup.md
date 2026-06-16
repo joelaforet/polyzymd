@@ -61,8 +61,8 @@ If you are debugging or developing on GPU clusters, install the CUDA-specific
 pixi environment that matches the target cluster driver version:
 
 ```bash
-pixi install -e cuda-12-6
-pixi shell -e cuda-12-6
+pixi install -e sim-cuda-12-6
+pixi shell -e sim-cuda-12-6
 ```
 
 ## 5. Keep Your Environment Updated
