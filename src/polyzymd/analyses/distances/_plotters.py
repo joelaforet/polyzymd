@@ -240,7 +240,9 @@ def _plot_distance_kde(
                     ax.plot(x, kde(x), color=color, linewidth=2.0, label=cond_label)
                 except (ImportError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
                     if not isinstance(exc, ImportError):
-                        logger.warning("Skipping scipy KDE for %s/%s: %s", pair_label, cond_label, exc)
+                        logger.warning(
+                            "Skipping scipy KDE for %s/%s: %s", pair_label, cond_label, exc
+                        )
                     _plot_distance_histogram(ax, distances, color, cond_label)
 
             if threshold is None and "threshold" in dist_data:

@@ -129,5 +129,7 @@ def test_collect_reference_warnings_reports_missing_reaction_templates(tmp_path:
     warnings = collect_reference_warnings(config)
 
     assert any("Missing polymer initiation reaction template" in warning for warning in warnings)
-    assert any("Missing polymer polymerization reaction template" in warning for warning in warnings)
+    assert any(
+        "Missing polymer polymerization reaction template" in warning for warning in warnings
+    )
     assert any("Missing polymer termination reaction template" in warning for warning in warnings)

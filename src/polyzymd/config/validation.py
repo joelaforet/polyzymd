@@ -95,6 +95,5 @@ def _check_cached_polymer_sdfs(warnings: list[str], polymers: Any, sdf_directory
     pattern = f"{type_prefix}_seq=*_{length}-mer_charged.sdf"
     if not any(sdf_directory.glob(pattern)):
         warnings.append(
-            "Missing cached polymer SDF files: "
-            f"no files matching {sdf_directory / pattern}"
+            "Missing cached polymer SDF files: " f"no files matching {sdf_directory / pattern}"
         )
