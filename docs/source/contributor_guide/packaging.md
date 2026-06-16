@@ -185,11 +185,11 @@ The main CI workflow runs on pushes and pull requests to `main` and `dev`.
 ### `full-test.yml`
 
 The full test workflow runs on pushes and pull requests to `main` and `dev`, on a
-weekly schedule, and by manual dispatch. It uses the pixi `build` environment on
+weekly schedule, and by manual dispatch. It uses the pixi `test` environment on
 Ubuntu and macOS with Python 3.12, then runs:
 
 ```bash
-pixi run -e build pytest -v --cov=polyzymd --cov-report=xml --color=yes tests/
+pixi run -e test pytest -v --cov=polyzymd --cov-report=xml --color=yes tests/
 ```
 
 Coverage upload is attempted with Codecov but does not fail the workflow if the
