@@ -33,6 +33,9 @@ from polyzymd.workflow.slurm import (
 
 LOGGER = logging.getLogger(__name__)
 
+_SLURM_JOB_NAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+_SLURM_JOB_NAME_UNDERSCORES = re.compile(r"_+")
+
 
 # ---------------------------------------------------------------------------
 # squeue-based duplicate detection
@@ -96,11 +99,65 @@ def check_existing_slurm_jobs(job_name: str) -> List[str]:
     return job_ids
 
 
-def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
-    """Create a descriptive SLURM job name for a replicate.
+def _sanitize_slurm_job_name(job_name: object, replicate: int) -> str:
+    """Sanitize a job name for SLURM and log-file use.
 
-    Produces names like ``r1_310K_Fibronectin_SBMA-OEGMA_A75_B25``
-    matching the directory naming convention.
+    Parameters
+    ----------
+    job_name : object
+        Candidate job name.
+    replicate : int
+        Replicate number used for the fallback name.
+
+    Returns
+    -------
+    str
+        Sanitized job name.
+    """
+    sanitized = _SLURM_JOB_NAME_UNSAFE.sub("_", str(job_name).strip())
+    sanitized = _SLURM_JOB_NAME_UNDERSCORES.sub("_", sanitized).strip("_")
+    if not sanitized:
+        sanitized = f"pzmd_r{replicate}"
+    return sanitized
+
+
+def _legacy_job_name(sim_config: SimulationConfig, replicate: int) -> str:
+    """Create a legacy synthesized job name for config-like test objects.
+
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Simulation configuration or legacy config-like object.
+    replicate : int
+        Replicate number.
+
+    Returns
+    -------
+    str
+        Legacy formatted job name.
+    """
+
+    enzyme = sim_config.enzyme.name
+    temp = int(sim_config.thermodynamics.temperature)
+
+    polymer_info = ""
+    polymers = getattr(sim_config, "polymers", None)
+    if polymers is not None and getattr(polymers, "enabled", False) is True:
+        prefix = polymers.type_prefix
+        probs = {m.label: m.probability for m in polymers.monomers}
+        composition = "_".join(f"{lbl}{int(round(probs[lbl] * 100))}" for lbl in sorted(probs))
+        polymer_info = f"_{prefix}_{composition}"
+
+    return f"r{replicate}_{temp}K_{enzyme}{polymer_info}"
+
+
+def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
+    """Create a sanitized SLURM job name for a replicate.
+
+    Real ``SimulationConfig`` objects use ``output.naming_template`` via
+    :meth:`SimulationConfig.format_run_directory_name`, so SLURM job names match
+    run directory names. Legacy config-like objects fall back to the historical
+    synthesized format.
 
     Parameters
     ----------
@@ -114,17 +171,13 @@ def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
     str
         Formatted job name.
     """
-    enzyme = sim_config.enzyme.name
-    temp = int(sim_config.thermodynamics.temperature)
+    formatter = getattr(sim_config, "format_run_directory_name", None)
+    if callable(formatter):
+        formatted = formatter(replicate)
+        if isinstance(formatted, str):
+            return _sanitize_slurm_job_name(formatted, replicate)
 
-    polymer_info = ""
-    if sim_config.polymers and sim_config.polymers.enabled:
-        prefix = sim_config.polymers.type_prefix
-        probs = {m.label: m.probability for m in sim_config.polymers.monomers}
-        composition = "_".join(f"{lbl}{int(round(probs[lbl] * 100))}" for lbl in sorted(probs))
-        polymer_info = f"_{prefix}_{composition}"
-
-    return f"r{replicate}_{temp}K_{enzyme}{polymer_info}"
+    return _sanitize_slurm_job_name(_legacy_job_name(sim_config, replicate), replicate)
 
 
 @dataclass
@@ -360,6 +413,32 @@ class DaisyChainSubmitter:
         scratch_dir = self._sim_config.get_working_directory(replicate)
         return str(scratch_dir.resolve())
 
+    def _generate_job_script(self, replicate: int, job_name: str) -> str:
+        """Generate a self-resubmitting job script with a precomputed job name.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
+        job_name : str
+            Sanitized SLURM job name shared with duplicate detection and log paths.
+
+        Returns
+        -------
+        str
+            Complete SLURM batch script content.
+        """
+        logs_subdir = self._sim_config.output.slurm_logs_subdir
+        output_file = f"{logs_subdir}/{job_name}.%j.out"
+
+        return self._generator.generate_job_script(
+            config_path=self._dc_config.config_path,
+            replicate=replicate,
+            working_dir=self._get_scratch_dir(replicate),
+            job_name=job_name,
+            output_file=output_file,
+        )
+
     def generate_job_script(self, replicate: int) -> str:
         """Generate a self-resubmitting job script for a replicate.
 
@@ -373,17 +452,7 @@ class DaisyChainSubmitter:
         str
             Complete SLURM batch script content.
         """
-        job_name = self._create_job_name(replicate)
-        logs_subdir = self._sim_config.output.slurm_logs_subdir
-        output_file = f"{logs_subdir}/{job_name}.%j.out"
-
-        return self._generator.generate_job_script(
-            config_path=self._dc_config.config_path,
-            replicate=replicate,
-            working_dir=self._get_scratch_dir(replicate),
-            job_name=job_name,
-            output_file=output_file,
-        )
+        return self._generate_job_script(replicate, self._create_job_name(replicate))
 
     def _save_script(self, content: str, filename: str) -> Path:
         """Save a script to the output directory.
@@ -543,7 +612,7 @@ class DaisyChainSubmitter:
             LOGGER.info(f"[DRY RUN] Would submit replicate {replicate} with sbatch")
             return result
 
-        script_content = self.generate_job_script(replicate)
+        script_content = self._generate_job_script(replicate, job_name)
         filename = f"run_rep{replicate}.sh"
         script_path = self._save_script(script_content, filename)
 

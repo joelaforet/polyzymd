@@ -5,6 +5,38 @@ from pathlib import Path
 import pytest
 
 
+def _simulation_config_data(tmp_path: Path) -> dict:
+    """Create minimal simulation configuration data for job-name tests."""
+    return {
+        "name": "test_simulation",
+        "engine": "openmm",
+        "enzyme": {"name": "LipA", "pdb_path": "enzyme.pdb"},
+        "substrate": {"name": "Sub-A", "sdf_path": "substrate.sdf"},
+        "thermodynamics": {"temperature": 310.0},
+        "solvent": {
+            "primary": {"type": "water", "model": "tip3p"},
+            "co_solvents": [{"name": "dmso", "volume_fraction": 0.3}],
+        },
+        "simulation_phases": {
+            "equilibration_stages": [
+                {"name": "eq", "duration": 0.1, "temperature": 310.0, "ensemble": "NVT"}
+            ],
+            "production": {
+                "ensemble": "NPT",
+                "duration": 100.0,
+                "samples": 10,
+                "report_interval": 50000,
+                "checkpoint_interval": 60.0,
+            },
+        },
+        "output": {
+            "projects_directory": str(tmp_path / "projects"),
+            "scratch_directory": str(tmp_path / "scratch"),
+            "naming_template": "{enzyme}_{solvent_composition}_run{replicate}",
+        },
+    }
+
+
 class TestSbatchOutputParsing:
     """C8-M1: sbatch job ID parsing should use regex."""
 
@@ -95,6 +127,113 @@ class TestJobNameGeneration:
         name = submitter._create_job_name(1)
         assert "A33" in name
         assert "B67" in name
+
+    def test_template_derived_job_name_matches_run_directory(self, tmp_path):
+        """Real configs should derive job names from naming_template."""
+        from polyzymd.config.schema import SimulationConfig
+        from polyzymd.workflow.daisy_chain import create_job_name
+
+        sim_config = SimulationConfig(**_simulation_config_data(tmp_path))
+
+        assert create_job_name(sim_config, 2) == sim_config.format_run_directory_name(2)
+
+    def test_changing_template_changes_job_name(self, tmp_path):
+        """Changing output.naming_template should change the SLURM job name."""
+        from polyzymd.config.schema import SimulationConfig
+        from polyzymd.workflow.daisy_chain import create_job_name
+
+        first = _simulation_config_data(tmp_path)
+        second = _simulation_config_data(tmp_path)
+        second["output"]["naming_template"] = "job_{replicate}_{enzyme}_{temperature}K"
+
+        assert create_job_name(SimulationConfig(**first), 1) != create_job_name(
+            SimulationConfig(**second), 1
+        )
+        assert create_job_name(SimulationConfig(**second), 1) == "job_1_LipA_310K"
+
+    def test_solvent_placeholders_appear_in_job_name(self, tmp_path):
+        """Solvent template placeholders should flow into SLURM job names."""
+        from polyzymd.config.schema import SimulationConfig
+        from polyzymd.workflow.daisy_chain import create_job_name
+
+        data = _simulation_config_data(tmp_path)
+        data["output"]["naming_template"] = "{primary_solvent}_{cosolvent_composition}_r{replicate}"
+        sim_config = SimulationConfig(**data)
+
+        assert create_job_name(sim_config, 1) == "water_tip3p_dmso_30pctv_r1"
+
+    def test_job_name_sanitizer_removes_unsafe_characters(self, tmp_path):
+        """Generated SLURM job names should be safe for headers and log paths."""
+        from polyzymd.config.schema import SimulationConfig
+        from polyzymd.workflow.daisy_chain import create_job_name
+
+        data = _simulation_config_data(tmp_path)
+        data["enzyme"]["name"] = "LipA/(variant)"
+        data["output"]["naming_template"] = "{enzyme} / run {replicate}"
+        sim_config = SimulationConfig(**data)
+
+        assert create_job_name(sim_config, 1) == "LipA_variant_run_1"
+
+    def test_magicmock_fallback_uses_legacy_name(self):
+        """Legacy config-like mocks should still use the historical fallback."""
+        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, None)
+        assert submitter._create_job_name(1) == "r1_310K_Fibronectin_8_to_10"
+
+    def test_duplicate_guard_header_and_log_use_same_sanitized_name(self, tmp_path, monkeypatch):
+        """Duplicate checks, SBATCH headers, and logs should share one job name."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.config.schema import SimulationConfig
+        from polyzymd.workflow.daisy_chain import (
+            DaisyChainConfig,
+            DaisyChainSubmitter,
+            SubmissionResult,
+        )
+        from polyzymd.workflow.slurm import SlurmConfig
+
+        data = _simulation_config_data(tmp_path)
+        data["output"]["naming_template"] = "{enzyme} run/{replicate}"
+        sim_config = SimulationConfig(**data)
+
+        checked_names = []
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.check_existing_slurm_jobs",
+            lambda job_name: checked_names.append(job_name) or [],
+        )
+
+        dc_config = MagicMock(spec=DaisyChainConfig)
+        dc_config.dry_run = False
+        dc_config.generate_only = False
+        dc_config.force = False
+        dc_config.slurm_config = SlurmConfig.from_preset("testing")
+        dc_config.output_script_dir = tmp_path
+        dc_config.config_path = "/fake/config.yaml"
+
+        submitter = DaisyChainSubmitter(sim_config=sim_config, dc_config=dc_config)
+        generated_names = []
+        original_generate_job_script = submitter._generator.generate_job_script
+
+        def spy_generate_job_script(**kwargs):
+            generated_names.append(kwargs["job_name"])
+            return original_generate_job_script(**kwargs)
+
+        monkeypatch.setattr(submitter._generator, "generate_job_script", spy_generate_job_script)
+        monkeypatch.setattr(
+            submitter,
+            "_submit_job",
+            lambda script_path, replicate: SubmissionResult(
+                job_id="12345", script_path=script_path, segment_index=0, replicate=replicate
+            ),
+        )
+        result = submitter.submit_replicate(1)
+
+        job_name = "LipA_run_1"
+        assert checked_names == [job_name]
+        assert generated_names == [job_name]
+        assert result.script_path == tmp_path / "run_rep1.sh"
+        script = result.script_path.read_text()
+        assert f"#SBATCH --job-name={job_name}" in script
+        assert f"#SBATCH --output=slurm_logs/{job_name}.%j.out" in script
 
 
 class TestSubmissionResultStateSemantics:

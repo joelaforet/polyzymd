@@ -42,6 +42,17 @@ def _make_mock_config(scratch_dir: Path, template: str | None = None):
         template = "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}"
     mock.output.naming_template = template
     mock.output.effective_scratch_directory = scratch_dir
+    mock.format_run_directory_name.side_effect = lambda replicate=1: template.format(
+        enzyme="fnIII",
+        substrate="apo",
+        polymer_type="OEGMA-SBMA_A50_B50",
+        duration=100,
+        temperature=310,
+        replicate=replicate,
+        primary_solvent="water_tip3p",
+        cosolvent_composition="none",
+        solvent_composition="water_tip3p",
+    )
 
     return mock
 
