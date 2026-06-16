@@ -28,11 +28,11 @@
 #   2. A PolyzyMD pixi environment exists
 #   3. PolyzyMD is installed via `pixi install -e <env>`
 #   4. setup_test_env.py has already been run:
-#        pixi run -e cuda-12-4 python scripts/test_restart/setup_test_env.py
+#        pixi run -e sim-cuda-12-4 python scripts/test_restart/setup_test_env.py
 #
 # Usage:
 #   cd /path/to/scripts/test_restart/
-#   pixi run -e cuda-12-4 python scripts/test_restart/setup_test_env.py   # if not already done
+#   pixi run -e sim-cuda-12-4 python scripts/test_restart/setup_test_env.py   # if not already done
 #   bash submit_test.sh
 #
 # Output:
@@ -54,7 +54,7 @@ QOS="preemptable"
 EXCLUDE="bgpu-bortz1"
 WALL_TIME="00:05:00"          # 5 minutes per job invocation
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PIXI_ENV="${PIXI_ENV:-cuda-12-4}"
+PIXI_ENV="${PIXI_ENV:-sim-cuda-12-4}"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PIXIMANIFEST="${REPO_ROOT}/pixi.toml"
 

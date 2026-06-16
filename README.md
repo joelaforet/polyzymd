@@ -92,6 +92,12 @@ prepared systems, checkpoints, and trajectories move between these environments.
 This split preserves CUDA 12.4 cluster support while keeping package and
 analysis work on Python 3.12 with NumPy 2.
 
+macOS is supported for non-CUDA setup, development, and trajectory analysis
+where dependencies solve. The CUDA simulation environments are Linux-only and
+intended for GPU clusters. AmberTools/AM1-BCC support is Linux-focused in the
+pixi workflow; macOS users should use NAGL/OpenFF charging or pre-charged
+molecules and open an issue if they need AmberTools support.
+
 ### How to find your CUDA version
 
 Run on a GPU node:
@@ -126,18 +132,30 @@ cp /path/to/substrate.sdf structures/  # optional
 ```bash
 # Edit config.yaml with your settings, then:
 polyzymd validate -c config.yaml
+```
+
+Switch to the CUDA simulation environment that matches your cluster before
+running OpenMM simulation commands such as `polyzymd submit`:
+
+```bash
+# Blanca / CUDA 12.4
+pixi shell -e sim-cuda-12-4
 polyzymd submit -c config.yaml --replicates 1-5 --preset blanca-shirts
+
+# Bridges2 / CUDA 12.6
+pixi shell -e sim-cuda-12-6
+polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2
 ```
 
 The `--preset` flag selects SLURM configuration and automatically picks the
-correct pixi environment (`sim-cuda-12-4` for Blanca, `sim-cuda-12-6` for Bridges2).
-You can override with `--pixi-env`:
+correct pixi environment for generated job scripts (`sim-cuda-12-4` for Blanca,
+`sim-cuda-12-6` for Bridges2). You can override with `--pixi-env`:
 
 ```bash
 polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2 --pixi-env sim-cuda-12-6
 ```
 
-See the [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/tutorials/quickstart.html) for a complete walkthrough.
+See the [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/get_started/quickstart.html) for a complete walkthrough.
 
 ## CLI Commands
 
@@ -170,8 +188,8 @@ PolyzyMD uses [pixi](https://pixi.sh) instead of conda/mamba. Key differences:
 | `sim-cuda-12-4` | Simulation execution on CUDA 12.4 clusters (Blanca) | Python 3.12 + NumPy 1.x + OpenMM 8.1.x | Yes |
 | `sim-cuda-12-6` | Simulation execution on CUDA 12.6 clusters (Bridges2) | Python 3.12 + current OpenMM | Yes |
 
-AmberTools is not part of the default v1.3 NumPy 2 build/analysis/test solve
-because current AmberTools builds conflict with that stack. Use NAGL/OpenFF
+AmberTools/AM1-BCC support is Linux-focused in PolyzyMD's pixi workflow and is
+not part of the default v1.3 NumPy 2 build/analysis/test solve. Use NAGL/OpenFF
 charging or provide pre-charged molecules; open an issue if you need a
 dedicated AmberTools/AM1-BCC environment for a specific platform.
 
@@ -187,9 +205,10 @@ dedicated AmberTools/AM1-BCC environment for a specific platform.
 
 Full documentation is available at **[polyzymd.readthedocs.io](https://polyzymd.readthedocs.io)**.
 
-- [Installation Guide](https://polyzymd.readthedocs.io/en/latest/tutorials/installation.html)
-- [Configuration Reference](https://polyzymd.readthedocs.io/en/latest/tutorials/configuration.html)
-- [HPC & SLURM Guide](https://polyzymd.readthedocs.io/en/latest/tutorials/hpc_slurm.html)
+- [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/get_started/quickstart.html)
+- [Installation Guide](https://polyzymd.readthedocs.io/en/latest/get_started/installation.html)
+- [Configuration Reference](https://polyzymd.readthedocs.io/en/latest/reference/configuration.html)
+- [HPC & SLURM Guide](https://polyzymd.readthedocs.io/en/latest/how_to/hpc_slurm.html)
 - [API Reference](https://polyzymd.readthedocs.io/en/latest/api/overview.html)
 
 ## License

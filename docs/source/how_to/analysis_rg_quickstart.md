@@ -16,13 +16,14 @@ output schema details, plot variants, and troubleshooting lookup, see
 :::{admonition} Environment Setup
 :class: tip
 
-All commands below assume you have activated the PolyzyMD pixi environment:
+All analysis commands below assume you have activated the PolyzyMD analysis
+pixi environment:
 
 ```bash
-pixi shell -e build
+pixi shell -e analysis
 ```
 
-Alternatively, prefix each command with `pixi run -e build`.
+Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
 ## TL;DR

@@ -8,13 +8,14 @@ and publication-ready figures.
 :::{admonition} Environment Setup
 :class: tip
 
-All commands below assume you have activated the PolyzyMD pixi environment:
+All analysis commands below assume you have activated the PolyzyMD analysis
+pixi environment:
 
 ```bash
-pixi shell -e build
+pixi shell -e analysis
 ```
 
-Alternatively, prefix each command with `pixi run -e build`.
+Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
 ## When to Use This Plugin
@@ -37,7 +38,7 @@ questions in a single analysis run.
 
 You need:
 
-- A working pixi environment (`pixi install -e build`)
+- A working analysis pixi environment (`pixi install -e analysis`)
 - Completed simulation trajectories for at least two conditions
 - A `comparison.yaml` defining your conditions (see
   {doc}`analysis_compare_conditions`)

@@ -13,13 +13,21 @@ do not need conda or mamba installed separately.
 
 ## Before You Start
 
-- Linux x86-64
+- Linux x86-64 for CUDA simulation environments
 - Git
 - a shell where you can install `pixi`
 
 ```{note}
-AmberTools is not part of the default v1.3 NumPy 2 build/analysis/test solve
-because current AmberTools builds conflict with that stack. Use the recommended
+macOS is supported for non-CUDA setup, development, and trajectory analysis
+where the required dependencies solve. The CUDA simulation environments
+(`sim-cuda-12-4` and `sim-cuda-12-6`) are Linux-only and intended for GPU
+clusters.
+```
+
+```{note}
+AmberTools/AM1-BCC support in PolyzyMD's pixi workflow is Linux-focused.
+AmberTools is not part of the default v1.3 NumPy 2 build/analysis/test solve,
+and it is not expected to be available in all macOS solves. Use the recommended
 NAGL/OpenFF charging path or provide pre-charged molecules. If you need
 AmberTools/AM1-BCC, please open an issue so a dedicated environment can be
 designed for that platform.

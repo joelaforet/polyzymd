@@ -16,7 +16,7 @@ For submitting **simulation** jobs, see {doc}`hpc_slurm`.
 You need:
 
 - access to a SLURM cluster with `sbatch` available on PATH
-- a working pixi environment on the cluster (`pixi install -e build`)
+- a working analysis pixi environment on the cluster (`pixi install -e analysis`)
 - completed simulation trajectories for at least two conditions
 - a `comparison.yaml` that defines your conditions and analysis settings
 
