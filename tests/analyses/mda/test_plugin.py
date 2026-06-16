@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from pydantic import BaseModel
 
@@ -151,6 +152,20 @@ def test_frame_selection_payload_is_json_safe(tmp_path: Path) -> None:
     assert payload["first_frame_time_ps"] == 198_400.0
     assert payload["selected_start_time_ps"] == 198_800.0
     assert payload["equilibration_time_reference"] == "trajectory_timestamp"
+
+
+def test_frame_selection_payload_serializes_numpy_bool_masks() -> None:
+    """Frame-selection payload should serialize NumPy boolean masks as booleans."""
+
+    selection = FrameSelection(
+        frames=np.asarray([True, False, True], dtype=np.bool_),
+        n_frames_total=3,
+    )
+
+    payload = frame_selection_payload(selection)
+
+    assert payload["frames"] == [True, False, True]
+    assert all(isinstance(value, bool) for value in payload["frames"])
 
 
 def test_strict_json_payload_rejects_raw_mdanalysis_results() -> None:

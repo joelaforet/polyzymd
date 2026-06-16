@@ -16,7 +16,7 @@ from polyzymd.analyses.mda.artifacts import (
     ReplicateArtifact,
     raw_mdanalysis_results_path,
 )
-from polyzymd.analyses.mda.frame_selection import FrameSelection
+from polyzymd.analyses.mda.frame_selection import FrameSelection, _is_boolean_frame_value
 from polyzymd.analyses.mda.job import MDAJobResult, MDAUniversePolicy
 from polyzymd.analyses.mda.store import ArtifactStore
 
@@ -234,18 +234,6 @@ def _frame_selector_payload(frames: Any) -> list[int | bool] | None:
                     f"selector {frame!r}; use integer indices or a boolean mask"
                 ) from exc
     return payload
-
-
-def _is_boolean_frame_value(frame: Any) -> bool:
-    """Return whether a frame selector value is boolean-like."""
-
-    if isinstance(frame, bool):
-        return True
-    frame_type = type(frame)
-    return (
-        frame_type.__name__ == "bool_"
-        and frame_type.__module__.split(".", maxsplit=1)[0] == "numpy"
-    )
 
 
 def strict_json_payload(value: Any, *, analysis_name: str) -> Any:

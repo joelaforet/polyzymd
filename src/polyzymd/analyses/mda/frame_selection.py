@@ -48,11 +48,11 @@ def _is_boolean_frame_value(frame: Any) -> bool:
 
     if isinstance(frame, bool):
         return True
-    frame_type = type(frame)
-    return (
-        frame_type.__name__ == "bool_"
-        and frame_type.__module__.split(".", maxsplit=1)[0] == "numpy"
-    )
+    try:
+        import numpy as np
+    except ImportError:
+        return False
+    return isinstance(frame, np.bool_)
 
 
 def _is_integer_frame_value(frame: Any) -> bool:
