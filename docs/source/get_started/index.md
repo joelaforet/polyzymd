@@ -32,6 +32,21 @@ If both commands print output without errors, you are ready to go.
 For the full installation guide (including GPU cluster setup and
 troubleshooting), see {doc}`installation`.
 
+## Which pixi environment should I use?
+
+PolyzyMD v1.3 splits environments by workflow so CUDA simulation constraints do
+not make setup, analysis, or development harder than necessary.
+
+| Task | Environment | Typical command |
+|------|-------------|-----------------|
+| Set up projects, validate configs, prepare systems | `build` | `pixi run -e build polyzymd build -c config.yaml` |
+| Run OpenMM simulations on a CUDA 12.4 cluster | `sim-cuda-12-4` | `pixi run -e sim-cuda-12-4 polyzymd submit -c config.yaml --preset aa100` |
+| Run OpenMM simulations on a CUDA 12.6 cluster | `sim-cuda-12-6` | `pixi run -e sim-cuda-12-6 polyzymd submit -c config.yaml --preset bridges2` |
+| Compare trajectories and make analysis plots | `analysis` | `pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml` |
+
+Use `pixi shell -e <env>` if you prefer activating an environment once instead
+of prefixing each command.
+
 ## Create Your First Project
 
 PolyzyMD organizes simulations into project directories. Create one with:

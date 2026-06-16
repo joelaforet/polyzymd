@@ -32,7 +32,7 @@ From the repository root or a subdirectory under it:
 
 ```bash
 pixi run -e build polyzymd validate -c config.yaml
-pixi run -e cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates 1 --generate-only
+pixi run -e sim-cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates 1 --generate-only
 ```
 
 The `--generate-only` flag creates a script in `job_scripts/` without submitting it,
@@ -64,7 +64,7 @@ Use `testing` first when you are verifying a new system or workflow.
 Run a short job before launching many replicates:
 
 ```bash
-pixi run -e cuda-12-4 polyzymd submit \
+pixi run -e sim-cuda-12-4 polyzymd submit \
     -c config.yaml \
     --preset testing \
     --time-limit 0:05:00 \
@@ -79,7 +79,7 @@ problems.
 Once the short test succeeds, submit production jobs:
 
 ```bash
-pixi run -e cuda-12-4 polyzymd submit \
+pixi run -e sim-cuda-12-4 polyzymd submit \
     -c config.yaml \
     --preset aa100 \
     --replicates 1-5 \
@@ -90,14 +90,14 @@ Useful variants:
 
 ```bash
 # Override storage locations
-pixi run -e cuda-12-4 polyzymd submit \
+pixi run -e sim-cuda-12-4 polyzymd submit \
     -c config.yaml \
     --preset aa100 \
     --projects-dir /projects/$USER/polyzymd \
     --scratch-dir /scratch/alpine/$USER/polyzymd_sims
 
 # Give a larger system more RAM
-pixi run -e cuda-12-4 polyzymd submit \
+pixi run -e sim-cuda-12-4 polyzymd submit \
     -c config.yaml \
     --preset aa100 \
     --memory 8G
@@ -116,8 +116,8 @@ tail -f slurm_logs/*.out
 Use PolyzyMD for simulation progress:
 
 ```bash
-pixi run -e cuda-12-4 polyzymd status -c config.yaml
-pixi run -e cuda-12-4 polyzymd check-progress -c config.yaml -r 1
+pixi run -e sim-cuda-12-4 polyzymd status -c config.yaml
+pixi run -e sim-cuda-12-4 polyzymd check-progress -c config.yaml -r 1
 ```
 
 ## Recover a stalled replicate
@@ -125,13 +125,13 @@ pixi run -e cuda-12-4 polyzymd check-progress -c config.yaml -r 1
 If a replicate stops progressing, inspect it first:
 
 ```bash
-pixi run -e cuda-12-4 polyzymd recover -c config.yaml -r 1
+pixi run -e sim-cuda-12-4 polyzymd recover -c config.yaml -r 1
 ```
 
 If the report shows unfinished work, resubmit a recovery job:
 
 ```bash
-pixi run -e cuda-12-4 polyzymd recover -c config.yaml -r 1 --submit --preset aa100
+pixi run -e sim-cuda-12-4 polyzymd recover -c config.yaml -r 1 --submit --preset aa100
 ```
 
 ## Cluster-specific note for Bridges2
@@ -139,7 +139,7 @@ pixi run -e cuda-12-4 polyzymd recover -c config.yaml -r 1 --submit --preset aa1
 Use the `bridges2` preset when running on PSC Bridges2:
 
 ```bash
-pixi run -e cuda-12-6 polyzymd submit \
+pixi run -e sim-cuda-12-6 polyzymd submit \
     -c config.yaml \
     --preset bridges2 \
     --account abc123_gpu \
@@ -148,7 +148,7 @@ pixi run -e cuda-12-6 polyzymd submit \
 
 Common Bridges2 differences:
 
-- it uses the `cuda-12-6` environment
+- it uses the `sim-cuda-12-6` environment
 - you may need `--account` if you want to charge a specific allocation
 - GPU selection can be adjusted with `--gpu-type`
 
@@ -172,7 +172,7 @@ Both clusters require `--partition`, `--account`, and `--qos` explicitly.
 Alpine example:
 
 ```bash
-pixi run -e cuda-12-4 polyzymd submit \
+pixi run -e sim-cuda-12-4 polyzymd submit \
     -c config.yaml \
     --preset aa100 \
     --account ucb625_asc1 \
@@ -182,7 +182,7 @@ pixi run -e cuda-12-4 polyzymd submit \
 Blanca example (partition, account, and QoS are typically the same value):
 
 ```bash
-pixi run -e cuda-12-4 polyzymd submit \
+pixi run -e sim-cuda-12-4 polyzymd submit \
     -c config.yaml \
     --preset blanca-shirts \
     --replicates 1-5
@@ -245,7 +245,7 @@ pixi run -e build polyzymd submit \
 ```
 
 :::{note}
-GROMACS CPU jobs use `pixi run -e build` (not `cuda-12-4`) because the
+GROMACS CPU jobs use `pixi run -e build` (not `sim-cuda-12-4`) because the
 GROMACS binary comes from `module load`, not from the pixi environment.
 :::
 

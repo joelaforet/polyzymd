@@ -8,8 +8,8 @@ project is pixi-first, and what release automation expects from contributors.
 PolyzyMD uses standard Python packaging for metadata and distributions, but the
 full molecular-simulation stack is managed by pixi. A wheel can be built with
 `pyproject.toml`, but pip alone is not the recommended full install path because
-OpenMM, OpenFF, MDAnalysis, AmberTools, RDKit, PACKMOL, and related scientific
-packages are resolved most reliably from conda-forge.
+OpenMM, OpenFF, AmberTools, RDKit, PACKMOL, CUDA, and full simulation workflows
+are supported through conda-forge environments.
 
 For contributor and user workflows, prefer:
 
@@ -18,9 +18,17 @@ pixi install -e build
 pixi run -e build polyzymd --help
 ```
 
-Use pip-only installs only for package metadata checks, lightweight import
-checks, or release validation jobs that intentionally avoid the simulation
-stack.
+Use pip-only installs for package metadata checks, lightweight import checks,
+release validation jobs that intentionally avoid the simulation stack, and
+best-effort analysis-only workflows through the analysis extra:
+
+```bash
+pip install ".[analysis]"
+```
+
+The `analysis` extra may install MDAnalysis and MDTraj for trajectory-analysis
+workflows. Label those instructions as best-effort and analysis-only; use pixi
+for supported full-stack science and simulation workflows.
 
 ## Repository layout
 
@@ -79,7 +87,7 @@ build-backend = "hatchling.build"
 [project]
 name = "polyzymd"
 version = "1.3.0"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 
 [project.scripts]
 polyzymd = "polyzymd.cli.main:main"
@@ -100,9 +108,11 @@ Current pixi environments are:
 
 | Environment | Use |
 |-------------|-----|
-| `build` | Local contributor environment with docs, tests, packaging tools, and flexible non-CUDA OpenMM. Use this for editing, docs, configuration, system-building checks, and most tests. |
-| `cuda-12-4` | Cluster/GPU workflow for systems whose driver supports CUDA 12.4, including OpenMM pinned for that stack. |
-| `cuda-12-6` | Cluster/GPU workflow for systems whose driver supports CUDA 12.6, including OpenMM pinned for that stack. |
+| `build` | Local contributor environment with docs, packaging tools, molecular builders, analysis tools, NumPy 2, and flexible non-CUDA OpenMM. Use this for editing, docs, configuration, system-building checks, and package validation. |
+| `analysis` | User-facing trajectory analysis, comparison, and plotting environment with Python 3.12 and NumPy 2. |
+| `test` | CI/local test environment with Python 3.12, NumPy 2, builders, analysis tools, and lint/docs tools. |
+| `sim-cuda-12-4` | Linux-only CUDA 12.4 simulation runtime with Python 3.12, NumPy 1.x, and OpenMM 8.1.x for clusters such as CU Boulder Blanca. |
+| `sim-cuda-12-6` | Linux-only CUDA 12.6 simulation runtime with Python 3.12, NumPy 2, and current OpenMM for clusters such as PSC Bridges2. |
 
 Install the local contributor environment with:
 
@@ -110,17 +120,32 @@ Install the local contributor environment with:
 pixi install -e build
 ```
 
-For GPU cluster work, choose the CUDA environment that does not exceed the
-cluster driver version:
+For GPU cluster work, prepare systems in `build`, run simulations in the CUDA
+runtime environment that does not exceed the cluster driver version, then run
+analysis in `analysis`:
 
 ```bash
-pixi install -e cuda-12-6
-pixi shell -e cuda-12-6
+pixi install -e sim-cuda-12-6
+pixi shell -e sim-cuda-12-6
 ```
 
-Heavy scientific dependencies must remain pixi-managed. Do not add OpenMM,
-OpenFF, MDAnalysis, AmberTools, PACKMOL, or RDKit installation instructions that
-ask contributors to install them into a system Python.
+Do not put analysis-only dependencies into `sim-cuda-*` environments. Those
+environments are intentionally lean so CUDA/OpenMM binary constraints do not
+force the package and analysis stack off Python 3.12 + NumPy 2. The package
+metadata allows `numpy>=1.26,<3` so editable installs can work in both the
+NumPy 1.x CUDA 12.4 runtime and the NumPy 2 build/analysis/test environments;
+pixi features enforce the stricter per-workflow NumPy policy.
+
+Full-stack scientific dependencies must remain pixi-managed. Do not add OpenMM,
+OpenFF, AmberTools, PACKMOL, RDKit, CUDA, or full simulation-stack installation
+instructions that ask contributors to install them into a system Python.
+MDAnalysis and MDTraj pip instructions are acceptable only through the
+`.[analysis]` extra and must be labeled best-effort analysis-only.
+
+AmberTools is not part of the default v1.3 NumPy 2 build/analysis/test solve.
+Current AmberTools builds conflict with that stack, so document charging
+workflows as NAGL/OpenFF or pre-charged-molecule workflows unless a dedicated
+AmberTools/AM1-BCC environment is designed in response to a user issue.
 
 ## Lazy imports for heavy dependencies
 
@@ -160,11 +185,11 @@ The main CI workflow runs on pushes and pull requests to `main` and `dev`.
 ### `full-test.yml`
 
 The full test workflow runs on pushes and pull requests to `main` and `dev`, on a
-weekly schedule, and by manual dispatch. It uses the pixi `build` environment on
-Ubuntu and macOS with Python 3.11, then runs:
+weekly schedule, and by manual dispatch. It uses the pixi `test` environment on
+Ubuntu and macOS with Python 3.12, then runs:
 
 ```bash
-pixi run -e build pytest -v --cov=polyzymd --cov-report=xml --color=yes tests/
+pixi run -e test pytest -v --cov=polyzymd --cov-report=xml --color=yes tests/
 ```
 
 Coverage upload is attempted with Codecov but does not fail the workflow if the
@@ -200,6 +225,8 @@ For a normal version bump:
 
 - Keep `__init__.py` lightweight and preserve lazy imports.
 - Keep the full simulation stack in pixi environments.
+- Keep pip analysis-extra instructions clearly labeled as best-effort
+  analysis-only workflows.
 - Use `src/` layout conventions for new package modules.
 - Update docs, tests, CLI help, and configuration reference pages when behavior
   changes.

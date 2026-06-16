@@ -27,6 +27,43 @@ def test_slice_selection_omits_none_run_kwargs() -> None:
     assert selection.n_frames_selected == 5
 
 
+def test_numpy_slice_scalars_return_python_run_kwargs() -> None:
+    """NumPy slice scalars should normalize before MDAnalysis receives them."""
+
+    selection = FrameSelection(
+        start=np.int64(1),
+        stop=np.int64(6),
+        step=np.int64(2),
+        equilibration_start=np.int64(1),
+        equilibration_ps=np.float32(100.0),
+        timestep_ps=np.float64(2.0),
+        first_frame_time_ps=np.float64(10.0),
+        selected_start_time_ps=np.float32(12.0),
+        n_frames_total=np.int64(8),
+    )
+
+    run_kwargs = selection.run_kwargs()
+
+    assert run_kwargs == {"start": 1, "stop": 6, "step": 2}
+    assert all(
+        isinstance(value, int) and not hasattr(value, "item") for value in run_kwargs.values()
+    )
+    assert isinstance(selection.equilibration_start, int)
+    assert isinstance(selection.equilibration_ps, float)
+    assert isinstance(selection.timestep_ps, float)
+    assert isinstance(selection.first_frame_time_ps, float)
+    assert isinstance(selection.selected_start_time_ps, float)
+    assert isinstance(selection.n_frames_total, int)
+    assert isinstance(selection.n_frames_selected, int)
+    assert not hasattr(selection.equilibration_start, "item")
+    assert not hasattr(selection.equilibration_ps, "item")
+    assert not hasattr(selection.timestep_ps, "item")
+    assert not hasattr(selection.first_frame_time_ps, "item")
+    assert not hasattr(selection.selected_start_time_ps, "item")
+    assert not hasattr(selection.n_frames_total, "item")
+    assert not hasattr(selection.n_frames_selected, "item")
+
+
 def test_frames_selection_returns_only_frames() -> None:
     """Explicit frames should be forwarded without slice arguments."""
 
@@ -35,6 +72,22 @@ def test_frames_selection_returns_only_frames() -> None:
     assert selection.run_kwargs() == {"frames": [0, 3, 8]}
     assert selection.frames == (0, 3, 8)
     assert selection.n_frames_selected == 3
+
+
+@pytest.mark.parametrize("frames", [[-1], [0, -1], np.array([-1])])
+def test_integer_frames_reject_negative_indices_when_length_known(frames: object) -> None:
+    """Explicit negative frame indices should fail when trajectory length is known."""
+
+    with pytest.raises(ValueError, match="outside the trajectory range"):
+        FrameSelection(frames=frames, n_frames_total=10)
+
+
+@pytest.mark.parametrize("frames", [[10], [0, 10], np.array([10])])
+def test_integer_frames_reject_out_of_range_indices_when_length_known(frames: object) -> None:
+    """Explicit frame indices beyond trajectory length should fail when known."""
+
+    with pytest.raises(ValueError, match="outside the trajectory range"):
+        FrameSelection(frames=frames, n_frames_total=10)
 
 
 @pytest.mark.parametrize("field", ["start", "stop", "step"])
@@ -97,7 +150,10 @@ def test_numpy_integer_frame_indices_are_valid() -> None:
 
     selection = FrameSelection(frames=np.array([0, 3, 8]), n_frames_total=10)
 
-    assert selection.run_kwargs() == {"frames": [np.int64(0), np.int64(3), np.int64(8)]}
+    run_frames = selection.run_kwargs()["frames"]
+
+    assert run_frames == [0, 3, 8]
+    assert all(isinstance(frame, int) and not isinstance(frame, bool) for frame in run_frames)
     assert selection.n_frames_selected == 3
 
 
@@ -115,9 +171,10 @@ def test_numpy_boolean_frame_mask_counts_selected_frames() -> None:
 
     selection = FrameSelection(frames=np.array([True, False, True, False]), n_frames_total=4)
 
-    assert selection.run_kwargs() == {
-        "frames": [np.bool_(True), np.bool_(False), np.bool_(True), np.bool_(False)]
-    }
+    run_frames = selection.run_kwargs()["frames"]
+
+    assert run_frames == [True, False, True, False]
+    assert all(isinstance(frame, bool) for frame in run_frames)
     assert selection.n_frames_selected == 2
 
 

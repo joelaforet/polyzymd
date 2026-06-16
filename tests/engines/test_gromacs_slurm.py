@@ -31,7 +31,7 @@ def _generator() -> GromacsSlurmScriptGenerator:
             memory="3G",
             gpus=1,
         ),
-        pixi_env="cuda-12-4",
+        pixi_env="sim-cuda-12-4",
         gmx_binary="gmx",
         grompp_flags="-maxwarn 1",
         mdrun_flags="-nb gpu",
@@ -52,6 +52,13 @@ def test_gromacs_slurm_template_resource_exists() -> None:
 def test_no_embedded_job_template_remains() -> None:
     """Generator should use the package Jinja template as the script source."""
     assert not hasattr(GromacsSlurmScriptGenerator, "JOB_TEMPLATE")
+
+
+def test_default_pixi_env_is_build() -> None:
+    """GROMACS SLURM generator should default to the build pixi environment."""
+    generator = GromacsSlurmScriptGenerator(slurm_config=SlurmConfig())
+
+    assert generator._pixi_env == "build"
 
 
 def test_script_contains_expected_slurm_and_restart_logic(monkeypatch) -> None:
@@ -192,7 +199,7 @@ def test_cpu_only_omits_gpu_directive(monkeypatch) -> None:
             memory="3G",
             gpus=0,
         ),
-        pixi_env="cuda-12-4",
+        pixi_env="sim-cuda-12-4",
         gmx_binary="gmx",
     )
 
@@ -228,7 +235,7 @@ def test_cpus_per_task_in_script(monkeypatch) -> None:
             memory="3G",
             gpus=0,
         ),
-        pixi_env="cuda-12-4",
+        pixi_env="sim-cuda-12-4",
         gmx_binary="gmx",
     )
 
@@ -306,7 +313,7 @@ def test_stage_specific_mdrun_flags_override(monkeypatch) -> None:
             memory="3G",
             gpus=1,
         ),
-        pixi_env="cuda-12-4",
+        pixi_env="sim-cuda-12-4",
         gmx_binary="gmx",
         mdrun_flags="-ntomp 8",
         mdrun_flags_eq="-ntomp 4",
@@ -344,7 +351,7 @@ def test_mdrun_variable_uses_mpirun_for_mpi_binary(monkeypatch) -> None:
             memory="3G",
             gpus=1,
         ),
-        pixi_env="cuda-12-4",
+        pixi_env="sim-cuda-12-4",
         gmx_binary="gmx_mpi",
         grompp_flags="-maxwarn 1",
         mdrun_flags="-nb gpu",
@@ -384,7 +391,7 @@ def test_mpirun_uses_launcher_flags_when_configured(monkeypatch) -> None:
             memory="3G",
             gpus=1,
         ),
-        pixi_env="cuda-12-4",
+        pixi_env="sim-cuda-12-4",
         gmx_binary="gmx_mpi",
         mpi_launcher_flags="-genv I_MPI_FABRICS shm:tcp",
     )
@@ -437,7 +444,7 @@ def test_command_prefix_wraps_gmx_commands(monkeypatch) -> None:
             memory="3G",
             gpus=1,
         ),
-        pixi_env="cuda-12-4",
+        pixi_env="sim-cuda-12-4",
         gmx_binary="gmx",
         command_prefix="singularity exec --rocm --bind /scratch /path/to/gromacs.sif",
     )
@@ -528,7 +535,7 @@ def test_nodelist_and_typed_gres_render(monkeypatch) -> None:
             gpu_directive_style="gres",
             nodelist="nodeA40-01",
         ),
-        pixi_env="cuda-12-4",
+        pixi_env="sim-cuda-12-4",
         gmx_binary="gmx",
     )
     script = generator.generate_job_script(
@@ -583,7 +590,7 @@ def test_mail_line_uses_fail_end(monkeypatch) -> None:
             memory="3G",
             gpus=1,
         ),
-        pixi_env="cuda-12-4",
+        pixi_env="sim-cuda-12-4",
         gmx_binary="gmx",
     )
     script = generator.generate_job_script(
@@ -617,7 +624,7 @@ def test_grompp_calls_never_use_mpirun(monkeypatch) -> None:
             memory="3G",
             gpus=1,
         ),
-        pixi_env="cuda-12-4",
+        pixi_env="sim-cuda-12-4",
         gmx_binary="gmx_mpi",
         grompp_flags="-maxwarn 1",
         mdrun_flags="-nb gpu",
@@ -654,7 +661,7 @@ def test_env_exports_and_setup_commands_rendered_in_order(monkeypatch) -> None:
             memory="3G",
             gpus=1,
         ),
-        pixi_env="cuda-12-4",
+        pixi_env="sim-cuda-12-4",
         gmx_binary="gmx",
         module_load="module load gromacs/2024",
         env_exports={
@@ -976,7 +983,7 @@ class TestSignalInfrastructure:
                 gpus=1,
                 constraint="A40|A100",
             ),
-            pixi_env="cuda-12-4",
+            pixi_env="sim-cuda-12-4",
             gmx_binary="gmx",
             mdrun_flags="-nb gpu",
         )
@@ -1124,7 +1131,7 @@ class TestGPUSlurmScripts:
                 memory="64G",
                 gpus=1,
             ),
-            pixi_env="cuda-12-4",
+            pixi_env="sim-cuda-12-4",
             gmx_binary="gmx",
             grompp_flags="-maxwarn 1",
             mdrun_flags="-ntmpi 1 -ntomp 12 -nb gpu -pme gpu -bonded gpu -update gpu",
@@ -1160,7 +1167,7 @@ class TestGPUSlurmScripts:
                 memory="128G",
                 gpus=4,
             ),
-            pixi_env="cuda-12-4",
+            pixi_env="sim-cuda-12-4",
             gmx_binary="gmx",
             mdrun_flags="-ntmpi 4 -ntomp 12 -nb gpu -pme gpu -bonded gpu -update gpu",
         )
@@ -1194,7 +1201,7 @@ class TestGPUSlurmScripts:
                 memory="64G",
                 gpus=1,
             ),
-            pixi_env="cuda-12-4",
+            pixi_env="sim-cuda-12-4",
             gmx_binary="gmx",
             mdrun_flags="-ntmpi 1 -ntomp 12 -nb gpu -pme gpu -bonded gpu -update gpu",
             module_load="module load gromacs/2024.2",
@@ -1230,7 +1237,7 @@ class TestGPUSlurmScripts:
                 memory="128G",
                 gpus=4,
             ),
-            pixi_env="cuda-12-4",
+            pixi_env="sim-cuda-12-4",
             gmx_binary="gmx_mpi",
             mdrun_flags="-ntomp 12 -nb gpu -pme gpu",
             module_load="module load gromacs/2024.2",
@@ -1267,7 +1274,7 @@ class TestGPUSlurmScripts:
                 gpu_type="a100",
                 gpu_directive_style="gpus",
             ),
-            pixi_env="cuda-12-4",
+            pixi_env="sim-cuda-12-4",
             gmx_binary="gmx",
             mdrun_flags="-nb gpu",
         )
@@ -1302,7 +1309,7 @@ class TestGPUSlurmScripts:
                 memory="64G",
                 gpus=1,
             ),
-            pixi_env="cuda-12-4",
+            pixi_env="sim-cuda-12-4",
             gmx_binary="gmx",
             mdrun_flags="-ntmpi 1 -ntomp 12 -nb gpu -pme gpu -bonded gpu -update gpu",
             module_load="module load gromacs/2024.2",
@@ -1338,7 +1345,7 @@ class TestGPUSlurmScripts:
                 memory="64G",
                 gpus=1,
             ),
-            pixi_env="cuda-12-4",
+            pixi_env="sim-cuda-12-4",
             gmx_binary="gmx",
             mdrun_flags=mdrun_flags,
             module_load="module load gromacs/2024.2",
@@ -1374,7 +1381,7 @@ class TestGPUSlurmScripts:
                 memory="64G",
                 gpus=1,
             ),
-            pixi_env="cuda-12-4",
+            pixi_env="sim-cuda-12-4",
             gmx_binary="gmx",
             mdrun_flags=mdrun_flags,
             module_load="module load gromacs/2024.2",
@@ -1415,7 +1422,7 @@ class TestGPUSlurmScripts:
                 memory="3G",
                 gpus=0,
             ),
-            pixi_env="cuda-12-4",
+            pixi_env="sim-cuda-12-4",
             gmx_binary="gmx_mpi",
             mdrun_flags="-ntomp 16",
         )

@@ -23,6 +23,7 @@ import yaml
 from pydantic import ValidationError
 
 from polyzymd.cli.colors import colored_echo, echo_logo, setup_colored_logging
+from polyzymd.cli.env_warnings import warn_if_wrong_pixi_env
 from polyzymd.core.branding import prepend_file_header
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
@@ -32,6 +33,9 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 LOGGER = logging.getLogger("polyzymd")
+BUILD_PIXI_ENVS = ("build",)
+SIM_PIXI_ENVS = ("sim-cuda-12-4", "sim-cuda-12-6")
+KNOWN_SPLIT_PIXI_ENVS = (*BUILD_PIXI_ENVS, *SIM_PIXI_ENVS, "analysis", "test", "docs")
 
 
 def _echo_branding() -> None:
@@ -154,6 +158,75 @@ def _resolve_engine_name(sim_config: object, override: str | None = None) -> str
     return str(engine).lower()
 
 
+def _resolve_submission_pixi_env(preset: str, engine_name: str, pixi_env: str | None = None) -> str:
+    """Resolve the pixi environment for submit and recover jobs.
+
+    Parameters
+    ----------
+    preset : str
+        SLURM preset name used to choose OpenMM default environments.
+    engine_name : str
+        Resolved simulation engine name.
+    pixi_env : str or None, optional
+        Explicit CLI override from ``--pixi-env``.
+
+    Returns
+    -------
+    str
+        Pixi environment name for generated SLURM jobs.
+    """
+    from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV
+
+    if pixi_env:
+        return pixi_env
+    if engine_name.lower() == "gromacs":
+        return "build"
+    return PRESET_DEFAULT_PIXI_ENV.get(preset, "sim-cuda-12-4")
+
+
+def _warn_for_submission_pixi_env(
+    command: str,
+    engine_name: str,
+    resolved_pixi_env: str,
+    explicit_pixi_env: str | None,
+) -> None:
+    """Warn when a scheduler command starts from an unexpected pixi environment.
+
+    Submission commands generate SLURM scripts rather than executing simulations
+    locally. The build environment is therefore valid for orchestration, while
+    the generated job scripts target the resolved runtime environment.
+
+    Parameters
+    ----------
+    command : str
+        User-facing command name to include in the warning.
+    engine_name : str
+        Resolved simulation engine name.
+    resolved_pixi_env : str
+        Pixi environment written into generated SLURM scripts.
+    explicit_pixi_env : str or None
+        User-provided ``--pixi-env`` override, if any.
+    """
+    engine_key = engine_name.lower()
+    if engine_key == "openmm":
+        warn_if_wrong_pixi_env(
+            command,
+            resolved_pixi_env,
+            accepted=("build", resolved_pixi_env),
+            detail="OpenMM SLURM scripts target the resolved simulation runtime.",
+        )
+        return
+
+    accepted_envs = ("build", resolved_pixi_env)
+    recommended_env = explicit_pixi_env or "build"
+    warn_if_wrong_pixi_env(
+        command,
+        recommended_env,
+        accepted=accepted_envs,
+        detail="GROMACS submission defaults to build; explicit CUDA pixi env overrides are allowed.",
+    )
+
+
 def _generate_system_prefix(sim_config: object) -> str:
     """Generate a system filename prefix from simulation config.
 
@@ -184,6 +257,35 @@ def _generate_system_prefix(sim_config: object) -> str:
         parts.append(polymer_prefix)
 
     return "_".join(parts) if parts else "system"
+
+
+def _emit_reference_warnings(sim_config: object, *, phase: str = "cli") -> bool:
+    """Print missing referenced-file warnings for a loaded config.
+
+    Parameters
+    ----------
+    sim_config : object
+        Loaded simulation configuration.
+    phase : str, optional
+        Color phase for CLI output, by default ``"cli"``.
+
+    Returns
+    -------
+    bool
+        ``True`` when any warnings were emitted.
+    """
+
+    from polyzymd.config.validation import collect_reference_warnings
+
+    warnings = collect_reference_warnings(sim_config)
+    if not warnings:
+        return False
+
+    colored_echo("Referenced file warnings:", phase=phase, level=logging.WARNING)
+    for warning in warnings:
+        colored_echo(f"  Warning: {warning}", phase=phase, level=logging.WARNING)
+    colored_echo(phase=phase)
+    return True
 
 
 @click.group()
@@ -303,6 +405,8 @@ def build(
         - MDP files and run scripts are convenience defaults when generated
         - Topology is split into .itp files for cleaner multi-component systems
     """
+    warn_if_wrong_pixi_env("build", "build")
+
     from pydantic import ValidationError as PydanticValidationError
 
     from polyzymd.builders.system_builder import SystemBuilder
@@ -467,11 +571,19 @@ def build(
                     )
                 colored_echo(phase="build")
 
+            has_reference_warnings = _emit_reference_warnings(sim_config, phase="build")
+
             colored_echo("=" * 60, phase="build")
             if export_format in ("lammps", "amber"):
                 colored_echo(
                     f"Validation passed. {export_format.upper()} export is not yet implemented.",
                     phase="build",
+                )
+            elif has_reference_warnings:
+                colored_echo(
+                    "Validation passed with referenced-file warnings. Ready to build after fixing references.",
+                    phase="build",
+                    level=logging.WARNING,
                 )
             else:
                 colored_echo("Validation passed. Ready to build.", phase="build")
@@ -794,11 +906,24 @@ def run(
         - ``--gmx-path`` is valid only with ``--engine gromacs``
         - ``--dry-run`` validates and previews without writing files
     """
+    engine = engine.lower()
+    if engine == "openmm":
+        warn_if_wrong_pixi_env(
+            "run --engine openmm",
+            SIM_PIXI_ENVS,
+            detail="OpenMM execution uses the split CUDA simulation environments.",
+        )
+    else:
+        warn_if_wrong_pixi_env(
+            "run --engine gromacs",
+            "build",
+            detail="Local GROMACS orchestration should start from the build environment.",
+        )
+
     from pydantic import ValidationError as PydanticValidationError
 
     from polyzymd.config.schema import SimulationConfig
 
-    engine = engine.lower()
     if engine == "openmm" and gmx_path is not None:
         raise click.UsageError("--gmx-path can only be used with --engine gromacs")
 
@@ -1245,10 +1370,10 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--pixi-env",
     default=None,
-    type=click.Choice(["cuda-12-4", "cuda-12-6"]),
+    type=click.Choice(["build", "sim-cuda-12-4", "sim-cuda-12-6"]),
     help=(
-        "Pixi environment for SLURM jobs. If omitted, inferred from --preset "
-        "(blanca/alpine presets → cuda-12-4, bridges2 → cuda-12-6)."
+        "Pixi environment for SLURM jobs. OpenMM defaults from --preset; GROMACS "
+        "defaults to build. Explicit CUDA envs are allowed for GPU GROMACS."
     ),
 )
 @click.option(
@@ -1297,14 +1422,18 @@ def submit(
         - projects_dir: Where job scripts and SLURM logs are stored (long-term storage)
         - scratch_dir: Where simulation data is written (high-performance storage)
     """
+    from polyzymd.config.schema import SimulationConfig
     from polyzymd.workflow.daisy_chain import submit_daisy_chain
-    from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV
 
     if dry_run and generate_only:
         raise click.UsageError("Cannot use both --dry-run and --generate-only")
 
-    # Resolve pixi environment: explicit flag > preset default
-    resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
+    sim_config = SimulationConfig.from_yaml(config)
+    engine_name = _resolve_engine_name(sim_config, override=engine)
+    resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
+    _warn_for_submission_pixi_env(
+        f"submit --engine {engine_name}", engine_name, resolved_pixi_env, pixi_env
+    )
 
     _echo_branding()
     colored_echo(f"Loading configuration from: {config}", phase="workflow")
@@ -1331,11 +1460,7 @@ def submit(
         colored_echo("Skip-build mode: using pre-built systems", phase="workflow")
 
     if dry_run:
-        from polyzymd.config.schema import SimulationConfig
-
         replicate_list = _resolve_replicates_option(replicates)
-        sim_config = SimulationConfig.from_yaml(config)
-        engine_name = _resolve_engine_name(sim_config, override=engine)
         if scratch_dir:
             sim_config.output.scratch_directory = Path(scratch_dir)
         if projects_dir:
@@ -1384,11 +1509,6 @@ def submit(
         colored_echo("Dry run complete. No files were written.", phase="workflow")
         colored_echo("=" * 60, phase="workflow")
         return
-
-    from polyzymd.config.schema import SimulationConfig
-
-    sim_config = SimulationConfig.from_yaml(config)
-    engine_name = _resolve_engine_name(sim_config, override=engine)
 
     if scratch_dir:
         sim_config.output.scratch_directory = Path(scratch_dir)
@@ -1592,6 +1712,19 @@ def run_segment(
     except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
+    engine_name = str(getattr(sim_config, "engine", "openmm") or "openmm").lower()
+    if engine_name == "gromacs":
+        warn_if_wrong_pixi_env(
+            "run-segment",
+            "build",
+            detail="This run segment appears to use GROMACS orchestration.",
+        )
+    else:
+        warn_if_wrong_pixi_env(
+            "run-segment",
+            SIM_PIXI_ENVS,
+            detail="OpenMM segment execution uses the split CUDA simulation environments.",
+        )
 
     # Determine working directory
     if scratch_dir:
@@ -2161,6 +2294,8 @@ def status(config: str) -> None:
     from polyzymd.engines import create_engine
     from polyzymd.simulation.progress import SimulationStatus, save_progress
 
+    warn_if_wrong_pixi_env("status", "build", accepted=KNOWN_SPLIT_PIXI_ENVS)
+
     logging.getLogger("polyzymd.simulation.progress").setLevel(logging.ERROR)
 
     try:
@@ -2299,12 +2434,16 @@ def validate(config: str) -> None:
     """
     from polyzymd.config.schema import SimulationConfig
 
+    warn_if_wrong_pixi_env("validate", "build")
+
     colored_echo(f"Validating configuration: {config}")
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
 
         click.echo(click.style("Configuration is valid!", fg="green"))
+        colored_echo()
+        _emit_reference_warnings(sim_config)
         colored_echo()
         colored_echo("Summary:")
         colored_echo(f"  Name: {sim_config.name}")
@@ -2385,6 +2524,8 @@ def init(name: str) -> None:
     import shutil
 
     from polyzymd.utils.templates import render_package_template
+
+    warn_if_wrong_pixi_env("init", "build")
 
     project_dir = Path(name)
 
@@ -2503,6 +2644,8 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
         polyzymd clean-pdb -i structures/my_protein.pdb
         polyzymd clean-pdb -i raw.pdb -o cleaned.pdb --ph 7.0
     """
+    warn_if_wrong_pixi_env("clean-pdb", "build")
+
     from openmm.app import PDBFile
     from pdbfixer import PDBFixer
 
@@ -2611,8 +2754,11 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 @click.option(
     "--pixi-env",
     default=None,
-    type=click.Choice(["cuda-12-4", "cuda-12-6"]),
-    help=("Pixi environment for the recovery SLURM job. If omitted, inferred from --preset."),
+    type=click.Choice(["build", "sim-cuda-12-4", "sim-cuda-12-6"]),
+    help=(
+        "Pixi environment for the recovery SLURM job. OpenMM defaults from --preset; "
+        "GROMACS defaults to build. Explicit CUDA envs are allowed for GPU GROMACS."
+    ),
 )
 @click.option(
     "--force",
@@ -2673,6 +2819,9 @@ def recover(
 
     engine_name = _resolve_engine_name(sim_config, override=engine)
     engine_impl = create_engine(sim_config, override=engine_name, defer_binary=True)
+
+    if not submit:
+        warn_if_wrong_pixi_env("recover", "build", accepted=KNOWN_SPLIT_PIXI_ENVS)
 
     if scratch_dir:
         working_dir = Path(scratch_dir)
@@ -2736,10 +2885,12 @@ def recover(
 
     # Generate and submit a self-resubmitting SLURM job
     from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs, create_job_name
-    from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV, SlurmConfig, SlurmScriptGenerator
+    from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
 
-    # Resolve pixi environment: explicit flag > preset default
-    resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
+    resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
+    _warn_for_submission_pixi_env(
+        f"recover --submit --engine {engine_name}", engine_name, resolved_pixi_env, pixi_env
+    )
 
     colored_echo(
         f"\nGenerating recovery job (preset: {preset}, engine: {engine_name}, "

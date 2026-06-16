@@ -32,6 +32,41 @@ def _is_scalar_frame_selector(frames: Any) -> bool:
     return isinstance(frames, (bool, int, float, complex))
 
 
+def _normalize_scalar_value(value: Any) -> Any:
+    """Return NumPy-like scalar values as Python scalars.
+
+    The helper intentionally avoids importing NumPy so lightweight analysis
+    modules can normalize scalar provenance in environments without the full
+    simulation stack.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate value to normalize.
+
+    Returns
+    -------
+    Any
+        Python ``bool``, ``int``, or ``float`` when ``value`` is a NumPy-like
+        scalar value, otherwise the original value.
+    """
+
+    shape = getattr(value, "shape", None)
+    if shape not in (None, ()):  # Avoid turning array selectors into scalar selectors
+        return value
+
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            native_value = item()
+        except (TypeError, ValueError):
+            native_value = value
+        if isinstance(native_value, (bool, int, float)):
+            return native_value
+
+    return value
+
+
 def _is_boolean_frame_value(frame: Any) -> bool:
     """Return whether a frame selector value is a boolean mask entry.
 
@@ -48,11 +83,11 @@ def _is_boolean_frame_value(frame: Any) -> bool:
 
     if isinstance(frame, bool):
         return True
-    frame_type = type(frame)
-    return (
-        frame_type.__name__ == "bool_"
-        and frame_type.__module__.split(".", maxsplit=1)[0] == "numpy"
-    )
+    try:
+        import numpy as np
+    except ImportError:
+        return False
+    return isinstance(frame, np.bool_)
 
 
 def _is_integer_frame_value(frame: Any) -> bool:
@@ -114,6 +149,40 @@ def _coerce_frames(frames: Any) -> tuple[Any, ...]:
     return frozen_frames
 
 
+def _normalize_frame_selector_values(frames: Any) -> list[int | bool]:
+    """Return explicit frame selectors as Python integer or boolean scalars.
+
+    Parameters
+    ----------
+    frames : Any
+        Explicit frame index sequence or boolean mask.
+
+    Returns
+    -------
+    list of int or bool
+        Frame selector values with NumPy-like scalar values converted to Python
+        ``int`` or ``bool`` instances.
+
+    Raises
+    ------
+    ValueError
+        Raised when a selector entry is neither integer-like nor boolean-like.
+    """
+
+    normalized: list[int | bool] = []
+    for frame in frames:
+        if _is_boolean_frame_value(frame):
+            normalized.append(bool(frame))
+            continue
+        try:
+            normalized.append(index(frame))
+        except TypeError as exc:
+            raise ValueError(
+                "frames must contain only integer frame indices or boolean mask values"
+            ) from exc
+    return normalized
+
+
 def _selected_count_from_frames(frames: tuple[Any, ...], n_frames_total: int | None) -> int:
     """Return the selected frame count for an explicit frame selector.
 
@@ -132,7 +201,8 @@ def _selected_count_from_frames(frames: tuple[Any, ...], n_frames_total: int | N
     Raises
     ------
     ValueError
-        Raised when a boolean mask has the wrong length or selects no frames.
+        Raised when explicit integer indices are outside a known trajectory range,
+        or when a boolean mask has the wrong length or selects no frames.
     """
 
     is_bool_mask = all(_is_boolean_frame_value(frame) for frame in frames)
@@ -140,6 +210,14 @@ def _selected_count_from_frames(frames: tuple[Any, ...], n_frames_total: int | N
     if not is_bool_mask and not is_integer_indices:
         raise ValueError("frames must contain only integer frame indices or boolean mask values")
     if is_integer_indices:
+        if n_frames_total is not None:
+            for frame in frames:
+                frame_index = index(frame)
+                if frame_index < 0 or frame_index >= n_frames_total:
+                    raise ValueError(
+                        f"Explicit frame index {frame_index} is outside the trajectory range "
+                        f"[0, {n_frames_total})"
+                    )
         return len(frames)
 
     if n_frames_total is not None and len(frames) != n_frames_total:
@@ -254,6 +332,7 @@ class FrameSelection:
             keyword arguments or an empty known frame selection.
         """
 
+        self._normalize_scalar_fields()
         self._validate_total_frame_count()
 
         if self.frames is not None:
@@ -273,15 +352,15 @@ class FrameSelection:
         """
 
         if self.frames is not None:
-            return MDARunKwargs(frames=list(self.frames))
+            return MDARunKwargs(frames=_normalize_frame_selector_values(self.frames))
 
         kwargs = MDARunKwargs()
         if self.start is not None:
-            kwargs["start"] = self.start
+            kwargs["start"] = _normalize_scalar_value(self.start)
         if self.stop is not None:
-            kwargs["stop"] = self.stop
+            kwargs["stop"] = _normalize_scalar_value(self.stop)
         if self.step is not None:
-            kwargs["step"] = self.step
+            kwargs["step"] = _normalize_scalar_value(self.step)
         return kwargs
 
     @classmethod
@@ -375,6 +454,33 @@ class FrameSelection:
         object.__setattr__(selection, "equilibration", equilibration)
         return selection
 
+    def _normalize_scalar_fields(self) -> None:
+        """Normalize NumPy-like scalar selector and provenance fields.
+
+        Returns
+        -------
+        None
+            The dataclass fields are updated in place through frozen dataclass
+            attribute assignment.
+        """
+
+        for field_name in (
+            "start",
+            "stop",
+            "step",
+            "equilibration_start",
+            "equilibration_ps",
+            "timestep_ps",
+            "first_frame_time_ps",
+            "selected_start_time_ps",
+            "n_frames_total",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _normalize_scalar_value(getattr(self, field_name)),
+            )
+
     def _validate_total_frame_count(self) -> None:
         """Validate the optional total frame count.
 
@@ -402,7 +508,7 @@ class FrameSelection:
 
         frozen_frames = _coerce_frames(self.frames)
         n_frames_selected = _selected_count_from_frames(frozen_frames, self.n_frames_total)
-        object.__setattr__(self, "frames", frozen_frames)
+        object.__setattr__(self, "frames", tuple(_normalize_frame_selector_values(frozen_frames)))
         object.__setattr__(self, "n_frames_selected", n_frames_selected)
 
     def _validate_slice_mode(self) -> None:

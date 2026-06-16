@@ -67,6 +67,15 @@ substrate:
 | `espaloma` | Machine learning charges | Medium |
 | `am1bcc` | Semi-empirical QM charges | Slow |
 
+```{note}
+`nagl`/OpenFF charging is the recommended default for routine PolyzyMD v1.3
+workflows. `am1bcc` depends on AmberTools availability, which is
+platform- and environment-specific and is not available in all default pixi
+environments, especially macOS NumPy 2 environments. If you need AM1-BCC, use
+pre-charged molecules or request/construct a dedicated AmberTools environment
+for your platform.
+```
+
 ### No Substrate (Apo Simulation)
 
 ```yaml
@@ -173,6 +182,15 @@ polymers:
 | `nagl` | Graph neural network charges | Fast | Good |
 | `espaloma` | Machine learning charges | Medium | Good |
 | `am1bcc` | Semi-empirical QM charges | Slow | Best |
+
+```{note}
+`nagl`/OpenFF charging is the recommended default for dynamic polymer generation.
+`am1bcc` depends on AmberTools availability, which is platform- and
+environment-specific and is not available in all default pixi environments,
+especially macOS NumPy 2 environments. If you need AM1-BCC, use pre-charged
+molecules or request/construct a dedicated AmberTools environment for your
+platform.
+```
 
 ### No Polymers
 

@@ -1678,6 +1678,86 @@ class TestPlot:
         assert grouped.call_args_list[1].args[2][0][0].startswith("Below")
         assert grouped.call_args_list[1].args[3] != ["#111111", "#ff7f0e"]
 
+    def test_plotters_tolerate_singleton_uncertainty_none_values(self, tmp_path):
+        """Distance plots should handle singleton replicate aggregate fields."""
+
+        from polyzymd.analyses.distances._plotters import (
+            DistancePlotData,
+            _plot_distance_state_bars,
+            _plot_distance_threshold_bars,
+        )
+        from polyzymd.config.comparison import PlotSettings
+
+        plot_settings = PlotSettings()
+        plot_data = DistancePlotData(
+            pooled_distances={},
+            aggregated_results={
+                "Singleton": {
+                    "pair_results": [
+                        {
+                            "pair_label": "Pair 1",
+                            "overall_fraction_below": 0.25,
+                            "sem_fraction_below": None,
+                            "per_replicate_fractions_below": None,
+                            "threshold": 3.5,
+                        }
+                    ]
+                }
+            },
+        )
+
+        with patch(
+            "polyzymd.analyses.distances._plotters.save_figure",
+            side_effect=lambda fig, path, _: path,
+        ):
+            threshold_paths = _plot_distance_threshold_bars(
+                plot_data,
+                ["Singleton"],
+                tmp_path,
+                plot_settings,
+            )
+            state_paths = _plot_distance_state_bars(
+                plot_data,
+                ["Singleton"],
+                tmp_path,
+                plot_settings,
+            )
+
+        assert threshold_paths == [tmp_path / "distance_threshold_bars.png"]
+        assert state_paths == [tmp_path / "distance_state_pair_1.png"]
+
+    def test_kde_plot_tolerates_singleton_and_constant_distance_inputs(self, tmp_path):
+        """KDE plotting should degrade for samples that cannot fit a KDE."""
+
+        import numpy as np
+
+        from polyzymd.analyses.distances._plotters import DistancePlotData, _plot_distance_kde
+        from polyzymd.config.comparison import PlotSettings
+
+        plot_settings = PlotSettings()
+        plot_data = DistancePlotData(
+            pooled_distances={
+                "Pair 1": {
+                    "Singleton": {"distances": np.asarray([3.0]), "threshold": 3.5},
+                    "Constant": {"distances": np.asarray([3.2, 3.2, 3.2]), "threshold": 3.5},
+                }
+            },
+            aggregated_results={},
+        )
+
+        with patch(
+            "polyzymd.analyses.distances._plotters.save_figure",
+            side_effect=lambda fig, path, _: path,
+        ):
+            paths = _plot_distance_kde(
+                plot_data,
+                ["Singleton", "Constant"],
+                tmp_path,
+                plot_settings,
+            )
+
+        assert paths == [tmp_path / "distance_kde_pair_1.png"]
+
 
 # ---------------------------------------------------------------------------
 # Plot loader cache filtering

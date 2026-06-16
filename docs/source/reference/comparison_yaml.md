@@ -28,19 +28,19 @@ expectations, see {doc}`data_requirements`.
 Typical local workflow:
 
 ```bash
-pixi run -e build polyzymd compare validate -f comparison.yaml
-pixi run -e build polyzymd compare run rmsf -f comparison.yaml
-pixi run -e build polyzymd compare plot-all -f comparison.yaml
+pixi run -e analysis polyzymd compare validate -f comparison.yaml
+pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml
+pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
 ```
 
 Typical SLURM workflow:
 
 ```bash
-pixi run -e build polyzymd compare submit sasa -f comparison.yaml --dry-run
-pixi run -e build polyzymd compare submit sasa -f comparison.yaml --partition <part>
-pixi run -e build polyzymd compare status sasa -f comparison.yaml
-pixi run -e build polyzymd compare finalize sasa -f comparison.yaml
-pixi run -e build polyzymd compare plot-all -f comparison.yaml
+pixi run -e analysis polyzymd compare submit sasa -f comparison.yaml --dry-run
+pixi run -e analysis polyzymd compare submit sasa -f comparison.yaml --partition <part>
+pixi run -e analysis polyzymd compare status sasa -f comparison.yaml
+pixi run -e analysis polyzymd compare finalize sasa -f comparison.yaml
+pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
 ```
 
 ---

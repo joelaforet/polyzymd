@@ -66,6 +66,87 @@ def build_distance_plot_data(data: dict[str, Any], labels: Sequence[str]) -> Dis
     )
 
 
+def _optional_float(value: Any, default: float = 0.0) -> float:
+    """Return a finite float or a default value for optional plot inputs."""
+
+    if value is None:
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(number):
+        return default
+    return number
+
+
+def _fraction_sequence(values: Any) -> list[float]:
+    """Return finite replicate fractions from an optional sequence."""
+
+    if values is None:
+        return []
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return []
+    fractions: list[float] = []
+    for value in iterator:
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(number):
+            fractions.append(number)
+    return fractions
+
+
+def _finite_distance_values(values: Any) -> NDArray[np.float64]:
+    """Return finite distance values for plotting."""
+
+    if values is None:
+        return np.asarray([], dtype=np.float64)
+    distances = np.asarray(values, dtype=np.float64).reshape(-1)
+    return distances[np.isfinite(distances)]
+
+
+def _is_degenerate_distance_sample(distances: NDArray[np.float64]) -> bool:
+    """Return whether a distance sample cannot support a KDE estimate."""
+
+    return distances.size < 2 or bool(np.allclose(distances, distances[0]))
+
+
+def _plot_degenerate_distance_distribution(
+    ax: Any,
+    distances: NDArray[np.float64],
+    color: str,
+    label: str,
+) -> None:
+    """Plot singleton or constant distance data without KDE fitting."""
+
+    center = float(distances[0])
+    ax.axvline(center, color=color, linewidth=2.0, alpha=0.8, label=label)
+
+
+def _plot_distance_histogram(
+    ax: Any,
+    distances: NDArray[np.float64],
+    color: str,
+    label: str,
+) -> None:
+    """Plot a histogram fallback for distance distributions."""
+
+    ax.hist(
+        distances,
+        bins=min(50, max(1, distances.size)),
+        density=True,
+        alpha=0.5,
+        color=color,
+        label=label,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public entry points (called from DistanceAnalysis.plot)
 # ---------------------------------------------------------------------------
@@ -129,21 +210,27 @@ def _plot_distance_kde(
 
         for idx, cond_label in enumerate(condition_labels):
             dist_data = condition_distances[cond_label]
-            distances = dist_data.get("distances")
-            if distances is None:
+            distances = _finite_distance_values(dist_data.get("distances"))
+            if distances.size == 0:
                 continue
 
             color = colors[idx] if idx < len(colors) else f"C{idx}"
 
-            if has_seaborn:
-                sns.kdeplot(
-                    distances,
-                    ax=ax,
-                    color=color,
-                    fill=False,
-                    label=cond_label,
-                    linewidth=2.0,
-                )
+            if _is_degenerate_distance_sample(distances):
+                _plot_degenerate_distance_distribution(ax, distances, color, cond_label)
+            elif has_seaborn:
+                try:
+                    sns.kdeplot(
+                        distances,
+                        ax=ax,
+                        color=color,
+                        fill=False,
+                        label=cond_label,
+                        linewidth=2.0,
+                    )
+                except (TypeError, ValueError, np.linalg.LinAlgError) as exc:
+                    logger.warning("Skipping KDE for %s/%s: %s", pair_label, cond_label, exc)
+                    _plot_distance_histogram(ax, distances, color, cond_label)
             else:
                 try:
                     from scipy import stats
@@ -151,15 +238,12 @@ def _plot_distance_kde(
                     kde = stats.gaussian_kde(distances)
                     x = np.linspace(min(distances), max(distances), 200)
                     ax.plot(x, kde(x), color=color, linewidth=2.0, label=cond_label)
-                except ImportError:
-                    ax.hist(
-                        distances,
-                        bins=50,
-                        density=True,
-                        alpha=0.5,
-                        color=color,
-                        label=cond_label,
-                    )
+                except (ImportError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
+                    if not isinstance(exc, ImportError):
+                        logger.warning(
+                            "Skipping scipy KDE for %s/%s: %s", pair_label, cond_label, exc
+                        )
+                    _plot_distance_histogram(ax, distances, color, cond_label)
 
             if threshold is None and "threshold" in dist_data:
                 threshold = dist_data["threshold"]
@@ -246,13 +330,13 @@ def _plot_distance_threshold_bars(
         row_err = []
         row_reps: list[list[float]] = []
         for pair_result in pair_results[:n_pairs]:
-            frac = pair_result.get("overall_fraction_below") or pair_result.get(
-                "fraction_below_threshold", 0
-            )
-            sem = pair_result.get("sem_fraction_below", 0)
-            row_frac.append(frac * 100)
-            row_err.append(sem * 100)
-            per_replicate = pair_result.get("per_replicate_fractions_below") or []
+            frac = pair_result.get("overall_fraction_below")
+            if frac is None:
+                frac = pair_result.get("fraction_below_threshold")
+            sem = pair_result.get("sem_fraction_below")
+            row_frac.append(_optional_float(frac) * 100.0)
+            row_err.append(_optional_float(sem) * 100.0)
+            per_replicate = _fraction_sequence(pair_result.get("per_replicate_fractions_below"))
             row_reps.append([value * 100 for value in per_replicate])
         # Pad if fewer pair results than expected
         while len(row_frac) < n_pairs:
@@ -582,9 +666,9 @@ def _plot_distance_state_single_pair(
             continue
 
         pair_result = pair_results[pair_idx]
-        frac_below = pair_result.get("overall_fraction_below", 0.0) or 0.0
+        frac_below = _optional_float(pair_result.get("overall_fraction_below"))
         frac_above = 1.0 - frac_below
-        sem_b = pair_result.get("sem_fraction_below", 0.0) or 0.0
+        sem_b = _optional_float(pair_result.get("sem_fraction_below"))
 
         valid_labels.append(label)
         fractions_below.append(frac_below * 100.0)
@@ -592,7 +676,7 @@ def _plot_distance_state_single_pair(
         sem_below.append(sem_b * 100.0)
         sem_above.append(sem_b * 100.0)
 
-        per_rep = pair_result.get("per_replicate_fractions_below", [])
+        per_rep = _fraction_sequence(pair_result.get("per_replicate_fractions_below"))
         rep_values_below.append([v * 100.0 for v in per_rep])
         rep_values_above.append([(1.0 - v) * 100.0 for v in per_rep])
 

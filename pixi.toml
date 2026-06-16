@@ -4,41 +4,37 @@
 #
 # ENVIRONMENTS
 # ------------
-#   build       — structure building, PDB prep, local use (no CUDA required)
-#   cuda-12-4   — CUDA 12.4 driver (e.g. CU Boulder Blanca): OpenMM 8.1
-#   cuda-12-6   — CUDA 12.6 driver (e.g. PSC Bridges2):      OpenMM 8.4
+#   build           — system preparation, package development, docs, local checks
+#   analysis        — trajectory analysis, comparison, and plotting
+#   test            — local and CI test environment
+#   sim-cuda-12-4   — CUDA 12.4 simulation runtime, legacy OpenMM/NumPy stack
+#   sim-cuda-12-6   — CUDA 12.6 simulation runtime, current OpenMM stack
+#
+# WORKFLOW SPLIT
+# --------------
+# PolyzyMD intentionally separates system preparation, GPU simulation, and
+# analysis environments. CUDA 12.4 cluster nodes need an OpenMM build that is
+# not compatible with the Python 3.12 / NumPy 2 analysis stack, so simulation
+# environments are lean runtime environments and do not inherit analysis tools.
 #
 # HOW TO FIND YOUR CUDA VERSION
 # ------------------------------
 # Run on a GPU node:  nvidia-smi | head -1
 # The driver version in the top-right maps to a maximum CUDA version.
-# Use the environment whose cuda-version does not exceed your driver.
+# Use the simulation environment whose cuda-version does not exceed your driver.
 #
 # Known clusters:
-#   PSC Bridges2       → cuda-12-6
-#   CU Boulder Blanca  → cuda-12-4
-#
-# Adding support for a new cluster: file a PR adding a new feature block
-# following the pattern of [feature.cuda-12-4] below, and add the
-# corresponding environment and tasks.
+#   PSC Bridges2       → sim-cuda-12-6
+#   CU Boulder Blanca  → sim-cuda-12-4
 #
 # FIRST-TIME CLUSTER SETUP
 # ------------------------
-# 1. Install pixi:  curl -fsSL https://pixi.sh/install.sh | sh
-# 2. Clone the repo and cd into it
-# 3. Run: pixi install -e cuda-12-6   (or whichever matches your cluster)
-# 4. Run: pixi shell -e cuda-12-6
+# - Install pixi:  curl -fsSL https://pixi.sh/install.sh | sh
+# - Clone the repo and cd into it
+# - Run: pixi install -e sim-cuda-12-4   (or whichever matches your cluster)
+# - Run: pixi shell -e sim-cuda-12-4
 #
-# After `pixi shell`, the `polyzymd` binary is on PATH and works exactly
-# as before — no `pixi run` prefix needed.
-#
-# LOCAL (no cluster) — use the "build" environment:
-#   pixi install -e build
-#   pixi shell -e build
-#   polyzymd build ...     ✓
-#   polyzymd validate ...  ✓
-#   polyzymd clean-pdb ... ✓
-#   polyzymd submit ...    ✗  (requires a cuda-* environment)
+# Local setup and analysis should use `build` or `analysis`, not a sim-cuda env.
 # =============================================================================
 
 [workspace]
@@ -50,82 +46,114 @@ platforms   = ["linux-64", "osx-64", "osx-arm64"]
 
 
 # =============================================================================
-# FEATURE: base
-# Packages shared by ALL environments. Only packages that polyzymd actually
-# imports (directly or transitively).
+# FEATURE: core
+# Lightweight package runtime shared by all environments. Keep this free of
+# NumPy pins so each solve group can select the stack it needs.
 # =============================================================================
-[feature.base.dependencies]
-python              = "3.11.*"
-numpy               = "1.26.*"       # pinned: OpenMM ABI-sensitive
-pydantic            = ">=2.5"
-pyyaml              = ">=6.0"
-click               = ">=8.1"
-jinja2              = ">=3.1"
-packaging           = ">=23.0"       # conditional import in polyzymd
+[feature.core.dependencies]
+python             = "3.12.*"
+pydantic           = ">=2.5"
+pyyaml             = ">=6.0"
+click              = ">=8.1"
+click-option-group = ">=0.5"
+jinja2             = ">=3.1"
+packaging          = ">=23.0"
+tqdm               = ">=4.60"
+biopandas          = ">=0.4"
 
-# OpenFF stack — solver resolves compatible set
-openff-toolkit      = ">=0.16"
-openff-interchange  = ">=0.5"
-openff-packmol      = ">=0.1"        # new home of Interchange's Packmol wrapper
-openff-units        = ">=0.2"
-openff-forcefields  = ">=2024.0"     # data package for ForceField()
-smirnoff99frosst    = ">=1.1"        # data package for ForceField()
-openff-amber-ff-ports = ">=2024.0"   # data package for ForceField()
+[feature.core.pypi-dependencies]
+polyzymd = { path = ".", editable = true }
 
-# Charge assignment (lazy import in polyzymd)
-openff-nagl         = ">=0.4"
-openff-nagl-models  = ">=2024.0"
 
-# Molecular building
-mbuild              = ">=1.2"        # required by polymerist
-openbabel           = ">=3.1"        # required at import time by polymerist.polymers.building
-rdkit               = ">=2023.09"
-pdbfixer            = ">=1.9"        # conditional import in polyzymd
-packmol             = ">=20.0"       # called as subprocess by mbuild/polymerist
-ambertools          = ">=23.3"        # relaxed: 23.3 lacks py311 on osx-arm64
+# =============================================================================
+# FEATURE: numpy2
+# Current analysis/package stack for Python 3.12 work.
+# =============================================================================
+[feature.numpy2.dependencies]
+numpy = ">=2.0,<3"
+scipy = ">=1.13"
 
-# PyTorch (required by openff-nagl)
-pytorch             = "2.6.*"
-pytest = ">=9.0.2,<10"
-pytest-cov = ">=4.0"
-black = ">=23.0"
-ruff = ">=0.1"
 
-# Analysis stack (MDAnalysis, plotting, stats)
-mdanalysis          = ">=2.4"
-mdtraj              = ">=1.9"
-scikit-learn        = ">=1.0"
-pandas              = ">=2.0"
-matplotlib          = ">=3.5"
-seaborn             = ">=0.12"
+# =============================================================================
+# FEATURE: numpy1-sim
+# CUDA 12.4 simulation runtime stack. OpenMM 8.1.x CUDA 12.4 builds require a
+# NumPy 1.x ABI, so this feature must never be mixed with numpy2.
+# =============================================================================
+[feature.numpy1-sim.dependencies]
+numpy = ">=1.26,<2"
+scipy = ">=1.13,<1.14"
 
-# Documentation toolchain
-sphinx              = ">=6.0"
-sphinx-rtd-theme    = ">=1.0"
-myst-parser         = ">=1.0"
-sphinx-copybutton   = ">=0.5"
-sphinx-design       = ">=0.5"
-sphinx-click        = ">=4.0"
-autodoc-pydantic    = ">=2.1"
 
-[feature.base.pypi-dependencies]
-polyzymd            = { path = ".", editable = true }
-polymerist          = ">=1.0.1"
+# =============================================================================
+# FEATURE: analysis
+# Trajectory analysis, plotting, and statistics. Use with numpy2 solve groups.
+# =============================================================================
+[feature.analysis.dependencies]
+mdanalysis   = ">=2.8"
+mdtraj       = ">=1.10"
+scikit-learn = ">=1.4"
+pandas       = ">=2.2"
+matplotlib   = ">=3.8"
+seaborn      = ">=0.13"
+
+
+# =============================================================================
+# FEATURE: builder
+# Molecular preparation stack used for PDB/OpenFF/polymer system construction.
+# =============================================================================
+[feature.builder.dependencies]
+openff-toolkit        = ">=0.16"
+openff-interchange    = ">=0.5"
+openff-packmol        = ">=0.1"
+openff-units          = ">=0.2"
+openff-forcefields    = ">=2024.0"
+smirnoff99frosst      = ">=1.1"
+openff-amber-ff-ports = ">=2024.0"
+openff-nagl           = ">=0.4"
+openff-nagl-models    = ">=2024.0"
+mbuild                = ">=1.2"
+openbabel             = ">=3.1"
+rdkit                 = ">=2023.09"
+pdbfixer              = ">=1.9"
+packmol               = ">=20.0"
+pytorch               = "2.6.*"
+
+[feature.builder.pypi-dependencies]
+polymerist = ">=1.1.0"
 # NOTE: espaloma-charge is intentionally excluded. polymerist eagerly imports
 # it at module level (_toolkits.py), which triggers a broken dgl -> graphbolt
 # import chain that crashes when dgl and PyTorch versions are mismatched.
-# polyzymd uses NAGL (not espaloma) for charge assignment; NAGL >=0.2 has a
+# PolyzyMD uses NAGL (not espaloma) for charge assignment; NAGL >=0.2 has a
 # pure-PyTorch fallback that works without dgl. Users who need espaloma can
 # install it manually: pip install espaloma-charge
 
 
 # =============================================================================
 # FEATURE: openmm-any
-# For the "build" environment — flexible OpenMM, no CUDA pin.
-# Suitable for local use: PDB writing, system building, validation.
+# Flexible non-CUDA OpenMM for local build/test workflows.
 # =============================================================================
 [feature.openmm-any.dependencies]
-openmm = ">=8.1,<8.5"
+openmm = ">=8.4,<8.5"
+
+
+# =============================================================================
+# FEATURE: dev-tools
+# Test, lint, type-check, and documentation toolchains.
+# =============================================================================
+[feature.dev-tools.dependencies]
+pytest           = ">=9.0.2,<10"
+pytest-cov       = ">=4.0"
+black            = ">=23.0"
+ruff             = ">=0.1"
+mypy             = ">=1.0"
+pre-commit       = ">=3.0"
+sphinx           = ">=6.0"
+sphinx-rtd-theme = ">=1.0"
+myst-parser      = ">=1.0"
+sphinx-copybutton = ">=0.5"
+sphinx-design    = ">=0.5"
+sphinx-click     = ">=4.0"
+autodoc-pydantic = ">=2.1"
 
 
 # =============================================================================
@@ -138,69 +166,82 @@ twine        = ">=5.0"
 
 
 # =============================================================================
-# FEATURE: cuda-12-6
-# CUDA 12.6 driver — e.g. PSC Bridges2 (V100, sm_70)
-# OpenMM 8.4 is the tested version for this CUDA/GPU combination.
+# FEATURE: sim-cuda-12-6
+# CUDA 12.6 simulation runtime — e.g. PSC Bridges2.
 # =============================================================================
-[feature.cuda-12-6.target.linux-64.dependencies]
-openmm       = "=8.4.0"
+[feature.sim-cuda-12-6]
+platforms = ["linux-64"]
+
+[feature.sim-cuda-12-6.target.linux-64.dependencies]
+numpy        = ">=2.0,<3"
+scipy        = ">=1.13"
+openmm       = ">=8.4,<8.5"
 cuda-version = "=12.6"
 
-[feature.cuda-12-6.system-requirements]
+[feature.sim-cuda-12-6.system-requirements]
 cuda = "12.6"
 
 
 # =============================================================================
-# FEATURE: cuda-12-4
-# CUDA 12.4 driver — e.g. CU Boulder Blanca
-# OpenMM 8.1 is the tested version for this CUDA/GPU combination.
+# FEATURE: sim-cuda-12-4
+# CUDA 12.4 simulation runtime — e.g. CU Boulder Blanca. This environment uses
+# an older OpenMM/NumPy stack because CUDA 12.4 cluster GPUs cannot solve with
+# the current NumPy 2 analysis stack.
 # =============================================================================
-[feature.cuda-12-4.target.linux-64.dependencies]
-openmm       = "=8.1.2"
+[feature.sim-cuda-12-4]
+platforms = ["linux-64"]
+
+[feature.sim-cuda-12-4.target.linux-64.dependencies]
+openmm       = ">=8.1.2,<8.2"
 cuda-version = "=12.4"
 
-[feature.cuda-12-4.system-requirements]
+[feature.sim-cuda-12-4.system-requirements]
 cuda = "12.4"
 
 
 # =============================================================================
 # ENVIRONMENTS
-# Each environment = base feature + one OpenMM/CUDA feature.
-# no-default-feature = true  prevents the default feature from polluting
-# GPU environments with unrelated deps.
+# Separate solve groups keep the NumPy 2 analysis/package stack isolated from
+# the legacy CUDA 12.4 simulation stack.
 # =============================================================================
 [environments]
-build     = { features = ["base", "openmm-any", "package-build"], no-default-feature = true, solve-group = "build" }
-cuda-12-6 = { features = ["base", "cuda-12-6"], no-default-feature = true, solve-group = "cuda-12-6" }
-cuda-12-4 = { features = ["base", "cuda-12-4"], no-default-feature = true, solve-group = "cuda-12-4" }
+build = { features = ["core", "numpy2", "builder", "analysis", "openmm-any", "dev-tools", "package-build"], no-default-feature = true, solve-group = "numpy2" }
+analysis = { features = ["core", "numpy2", "analysis"], no-default-feature = true, solve-group = "numpy2" }
+test = { features = ["core", "numpy2", "builder", "analysis", "openmm-any", "dev-tools"], no-default-feature = true, solve-group = "numpy2" }
+sim-cuda-12-4 = { features = ["core", "numpy1-sim", "sim-cuda-12-4"], no-default-feature = true, solve-group = "sim-cuda-12-4" }
+sim-cuda-12-6 = { features = ["core", "sim-cuda-12-6"], no-default-feature = true, solve-group = "sim-cuda-12-6" }
 
 
 # =============================================================================
 # TASKS
-# `pixi run <task>` — environment is selected automatically.
-# After `pixi shell`, these are also available as bare `polyzymd` commands.
 # =============================================================================
 
-# --- build environment tasks (no CUDA needed) ---
+# --- Build environment tasks (no CUDA needed) ---
 [feature.openmm-any.tasks]
-build         = { cmd = "polyzymd build" }
-validate      = { cmd = "polyzymd validate" }
-init          = { cmd = "polyzymd init" }
-info          = { cmd = "polyzymd info" }
-clean-pdb     = { cmd = "polyzymd clean-pdb" }
+build     = { cmd = "polyzymd build" }
+validate  = { cmd = "polyzymd validate" }
+init      = { cmd = "polyzymd init" }
+info      = { cmd = "polyzymd info" }
+clean-pdb = { cmd = "polyzymd clean-pdb" }
+
+# --- Analysis environment tasks ---
+[feature.analysis.tasks]
+compare-validate = { cmd = "polyzymd compare validate" }
+compare-run      = { cmd = "polyzymd compare run" }
+compare-plot-all = { cmd = "polyzymd compare plot-all" }
 
 # --- CUDA 12.6 simulation tasks (e.g. PSC Bridges2) ---
-[feature.cuda-12-6.tasks]
-submit         = { cmd = "polyzymd submit",         description = "Submit SLURM jobs (OpenMM 8.4, CUDA 12.6)" }
-run-segment    = { cmd = "polyzymd run-segment",    description = "Run next simulation segment" }
-run            = { cmd = "polyzymd run --engine gromacs", description = "Run local simulation (select engine)" }
-recover        = { cmd = "polyzymd recover",         description = "Resume stalled simulation" }
+[feature.sim-cuda-12-6.tasks]
+submit         = { cmd = "polyzymd submit", description = "Submit SLURM jobs (CUDA 12.6)" }
+run-segment    = { cmd = "polyzymd run-segment", description = "Run next simulation segment" }
+run-openmm     = { cmd = "polyzymd run --engine openmm", description = "Run local OpenMM simulation" }
+recover        = { cmd = "polyzymd recover", description = "Resume stalled simulation" }
 check-progress = { cmd = "polyzymd check-progress", description = "Check simulation progress" }
 
 # --- CUDA 12.4 simulation tasks (e.g. CU Boulder Blanca) ---
-[feature.cuda-12-4.tasks]
-submit         = { cmd = "polyzymd submit",         description = "Submit SLURM jobs (OpenMM 8.1, CUDA 12.4)" }
-run-segment    = { cmd = "polyzymd run-segment",    description = "Run next simulation segment" }
-run            = { cmd = "polyzymd run --engine gromacs", description = "Run local simulation (select engine)" }
-recover        = { cmd = "polyzymd recover",         description = "Resume stalled simulation" }
+[feature.sim-cuda-12-4.tasks]
+submit         = { cmd = "polyzymd submit", description = "Submit SLURM jobs (CUDA 12.4)" }
+run-segment    = { cmd = "polyzymd run-segment", description = "Run next simulation segment" }
+run-openmm     = { cmd = "polyzymd run --engine openmm", description = "Run local OpenMM simulation" }
+recover        = { cmd = "polyzymd recover", description = "Resume stalled simulation" }
 check-progress = { cmd = "polyzymd check-progress", description = "Check simulation progress" }

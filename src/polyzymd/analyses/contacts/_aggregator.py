@@ -48,7 +48,8 @@ CONTACTS_LEGACY_RECOMPUTE_GUIDANCE = (
     "with recompute enabled or clear stale contacts caches."
 )
 _ABSOLUTE_TIMESTAMP_REFERENCES = frozenset({"trajectory_timestamp"})
-_FRAME_TIME_ABS_TOL_PS = 1e-6
+_FRAME_TIME_ABS_TOL_PS = 1e-5
+_FRAME_TIME_REL_TOL = 1e-7
 
 
 def _compute_sem(values: Sequence[float]) -> tuple[float, float]:
@@ -1017,6 +1018,64 @@ def _ceil_frame_position(offset_ps: float, timestep_ps: float) -> int:
     return int(math.floor(frame_position)) + 1
 
 
+def _validated_sidecar_frame_indices(frame_indices: Any, *, replicate: str) -> np.ndarray:
+    """Return sidecar frame indices after validating integer-like values.
+
+    Parameters
+    ----------
+    frame_indices : Any
+        Raw frame-index array loaded from the contact event sidecar.
+    replicate : str
+        Replicate label used in error messages.
+
+    Returns
+    -------
+    numpy.ndarray
+        Frame indices as ``int64`` values.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when frame indices are not finite numeric integer-like values.
+    """
+
+    frame_indices_array = np.asarray(frame_indices)
+    dtype_kind = frame_indices_array.dtype.kind
+    if dtype_kind in {"i", "u"}:
+        if dtype_kind == "u" and np.any(frame_indices_array > np.iinfo(np.int64).max):
+            raise MDAAggregationError(
+                f"contacts: replicate {replicate} sidecar frame_indices exceed int64 range. "
+                "Recompute contacts."
+            )
+        return frame_indices_array.astype(np.int64, copy=False)
+
+    if dtype_kind != "f":
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar frame_indices must be numeric integers. "
+            "Recompute contacts."
+        )
+
+    numeric_indices = frame_indices_array.astype(np.float64, copy=False)
+    if not np.all(np.isfinite(numeric_indices)):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar frame_indices contain non-finite values. "
+            "Recompute contacts."
+        )
+    if not np.all(numeric_indices == np.trunc(numeric_indices)):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar frame_indices contain fractional values. "
+            "Recompute contacts."
+        )
+
+    int64_limits = np.iinfo(np.int64)
+    if np.any((numeric_indices < int64_limits.min) | (numeric_indices > int64_limits.max)):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar frame_indices exceed int64 range. "
+            "Recompute contacts."
+        )
+    return numeric_indices.astype(np.int64, copy=False)
+
+
 def _validate_timestamp_sidecar_window(
     item: _LoadedContactArtifact,
     frame_selection: Mapping[str, Any],
@@ -1054,7 +1113,9 @@ def _validate_timestamp_sidecar_window(
         frame_selection, "selected_start_time_ps", replicate=str(replicate)
     )
 
-    frame_indices = np.asarray(item.data["frame_indices"])
+    frame_indices = _validated_sidecar_frame_indices(
+        item.data["frame_indices"], replicate=str(replicate)
+    )
     if frame_indices.size != expected_count:
         raise MDAAggregationError(
             f"contacts: replicate {replicate} sidecar frame count mismatch: "
@@ -1062,7 +1123,7 @@ def _validate_timestamp_sidecar_window(
             "Recompute contacts."
         )
     expected_frame_indices = np.asarray(list(range(start, stop, step)), dtype=np.int64)
-    if not np.array_equal(frame_indices.astype(np.int64, copy=False), expected_frame_indices):
+    if not np.array_equal(frame_indices, expected_frame_indices):
         raise MDAAggregationError(
             f"contacts: replicate {replicate} sidecar frame_indices mismatch: "
             "sidecar does not match frame-selection window. Recompute contacts."
@@ -1083,11 +1144,12 @@ def _validate_timestamp_sidecar_window(
             "Recompute contacts."
         )
     expected_time_ps = first_frame_time_ps + expected_frame_indices.astype(np.float64) * timestep_ps
+    time_abs_tol = _time_axis_abs_tolerance(timestep_ps)
     if time_ps.size and not math.isclose(
         float(time_ps[0]),
         selected_start_time_ps,
-        rel_tol=1e-12,
-        abs_tol=_FRAME_TIME_ABS_TOL_PS,
+        rel_tol=_FRAME_TIME_REL_TOL,
+        abs_tol=time_abs_tol,
     ):
         raise MDAAggregationError(
             f"contacts: replicate {replicate} sidecar first time mismatch: "
@@ -1097,13 +1159,24 @@ def _validate_timestamp_sidecar_window(
     if not np.allclose(
         time_ps,
         expected_time_ps,
-        rtol=1e-12,
-        atol=_FRAME_TIME_ABS_TOL_PS,
+        rtol=_FRAME_TIME_REL_TOL,
+        atol=time_abs_tol,
     ):
         raise MDAAggregationError(
             f"contacts: replicate {replicate} sidecar time_ps mismatch: "
             "sidecar times do not align with frame indices and timestep. Recompute contacts."
         )
+
+
+def _time_axis_abs_tolerance(timestep_ps: float) -> float:
+    """Return absolute tolerance for timestamp sidecar comparisons.
+
+    Timestamp sidecars may store values rounded differently from the raw
+    trajectory timestep. The tolerance allows sub-femtosecond per-step drift but
+    still rejects shifted or stale time axes.
+    """
+
+    return max(_FRAME_TIME_ABS_TOL_PS, abs(timestep_ps) * _FRAME_TIME_REL_TOL)
 
 
 def _protein_identity(data: Mapping[str, Any]) -> tuple[tuple[int, str, str, str], ...]:

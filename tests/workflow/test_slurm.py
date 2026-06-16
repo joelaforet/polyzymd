@@ -25,7 +25,7 @@ from polyzymd.workflow.slurm import (
 
 
 def _make_generator(config: SlurmConfig) -> SlurmScriptGenerator:
-    return SlurmScriptGenerator(config, pixi_env="cuda-12-4")
+    return SlurmScriptGenerator(config, pixi_env="sim-cuda-12-4")
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +407,7 @@ class TestGeneratedOpenMMScript:
             "_discover_manifest_path",
             lambda: "/projects/user/polyzymd/pixi.toml",
         )
-        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="cuda-12-4")
+        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="sim-cuda-12-4")
         return generator.generate_job_script(
             config_path="/projects/user/run/config.yaml",
             replicate=3,
@@ -431,7 +431,7 @@ class TestGeneratedOpenMMScript:
         assert "#SBATCH --job-name=r3_test" in script
         assert "#SBATCH --output=slurm_logs/r3_test.%j.out" in script
         assert (
-            'eval "$(pixi shell-hook -e cuda-12-4 '
+            'eval "$(pixi shell-hook -e sim-cuda-12-4 '
             '--manifest-path /projects/user/polyzymd/pixi.toml)"' in script
         )
         assert "export INTERCHANGE_EXPERIMENTAL=1" in script
@@ -455,7 +455,7 @@ class TestGeneratedOpenMMScript:
         )
         generator = SlurmScriptGenerator(
             SlurmConfig.from_preset("aa100"),
-            pixi_env="cuda-12-4 --manifest-path /tmp/evil",
+            pixi_env="sim-cuda-12-4 --manifest-path /tmp/evil",
         )
 
         script = generator.generate_job_script(
@@ -467,7 +467,7 @@ class TestGeneratedOpenMMScript:
         )
 
         assert (
-            "pixi shell-hook -e 'cuda-12-4 --manifest-path /tmp/evil' "
+            "pixi shell-hook -e 'sim-cuda-12-4 --manifest-path /tmp/evil' "
             "--manifest-path '/projects/user/PolyzyMD Run/pixi.toml'"
         ) in script
 

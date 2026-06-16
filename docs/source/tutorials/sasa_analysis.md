@@ -120,7 +120,7 @@ plot_settings:
 Run the plugin from the directory containing `comparison.yaml`:
 
 ```bash
-pixi run -e build polyzymd compare run sasa -f comparison.yaml
+pixi run -e analysis polyzymd compare run sasa -f comparison.yaml
 ```
 
 PolyzyMD computes each replicate, aggregates results by condition, compares the

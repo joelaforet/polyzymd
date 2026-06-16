@@ -21,7 +21,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macOS-latest]
-        python-version: ["3.11"]
+        python-version: ["3.12"]
       fail-fast: false
 
     steps:
@@ -36,15 +36,15 @@ jobs:
 
       - uses: prefix-dev/setup-pixi@v0
         with:
-          environments: build
+          environments: test
 
       - name: Install package
         run: |
-          pixi install -e build
+          pixi install -e test
 
       - name: Run tests
         run: |
-          pixi run -e build pytest -v --cov=polyzymd --cov-report=xml --color=yes tests/
+          pixi run -e test pytest -v --cov=polyzymd --cov-report=xml --color=yes tests/
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

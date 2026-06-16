@@ -13,7 +13,7 @@ symlinks for the (multi-GB) trajectory data, so no data duplication occurs.
 
 Dependencies
 ------------
-- Python 3.10+
+- Python 3.12+
 - MDAnalysis
 - PyYAML
 - biopandas (for protein atom name fixing)

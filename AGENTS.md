@@ -1,7 +1,7 @@
 # PolyzyMD — Agent Instructions
 
 > Computational toolkit for enzyme-polymer conjugate MD simulations.
-> Python >=3.10 | MIT License | hatchling build | src layout
+> Python >=3.12 | MIT License | hatchling build | src layout
 
 ## Environment
 

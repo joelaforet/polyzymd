@@ -344,7 +344,7 @@ class TestSelfResubmittingModel:
 
         from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
 
-        gen = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="cuda-12-4")
+        gen = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="sim-cuda-12-4")
         with patch(
             "polyzymd.workflow.slurm._discover_manifest_path",
             return_value="/fake/pixi.toml",
@@ -974,6 +974,17 @@ class TestRecoverEngineAware:
 class TestRecoverGromacsSubmit:
     """recover --submit supports GROMACS engine submission flow."""
 
+    def test_recover_help_includes_build_pixi_env_choice(self):
+        """recover --help should list build as an allowed pixi environment."""
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["recover", "--help"])
+
+        assert result.exit_code == 0
+        assert "build" in result.output
+        assert "sim-cuda-12-4" in result.output
+        assert "sim-cuda-12-6" in result.output
+
     @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
     @patch("polyzymd.engines.create_engine")
     @patch("polyzymd.simulation.progress.save_progress")
@@ -1032,6 +1043,68 @@ class TestRecoverGromacsSubmit:
 
         assert result.exit_code == 0, result.output
         assert (working_dir / "recovery_scripts" / "recover_rep1.sh").exists()
+        request = engine_mock.prepare_submission.call_args.args[0]
+        assert request.extra["pixi_env"] == "build"
+
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_gromacs_recover_allows_explicit_cuda_pixi_env(
+        self,
+        mock_from_yaml,
+        mock_save,
+        mock_create_engine,
+        mock_squeue,
+        tmp_path,
+    ):
+        """GROMACS recover should preserve explicit CUDA pixi env overrides."""
+        _ = mock_save, mock_squeue
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config_gromacs(working_dir)
+        mock_from_yaml.return_value = sim_config
+
+        engine_mock = MagicMock()
+        engine_mock.get_engine_working_directory.return_value = working_dir
+        engine_mock.load_or_scan_progress.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        def _prepare_submission_side_effect(request):
+            daisy_dir = request.working_dir / "daisy_chain_scripts"
+            daisy_dir.mkdir(parents=True, exist_ok=True)
+            script = daisy_dir / f"run_rep{request.replicate}.sh"
+            script.write_text("#!/bin/bash\n")
+            return script
+
+        engine_mock.prepare_submission.side_effect = _prepare_submission_side_effect
+        mock_create_engine.return_value = engine_mock
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "recover",
+                "-c",
+                str(config_file),
+                "-r",
+                "1",
+                "--engine",
+                "gromacs",
+                "--submit",
+                "--dry-run",
+                "--pixi-env",
+                "sim-cuda-12-4",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        request = engine_mock.prepare_submission.call_args.args[0]
+        assert request.extra["pixi_env"] == "sim-cuda-12-4"
 
     @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
     @patch("polyzymd.engines.create_engine")

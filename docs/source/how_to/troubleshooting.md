@@ -5,13 +5,17 @@ Common issues and solutions for PolyzyMD.
 :::{admonition} Environment Setup
 :class: tip
 
-All commands below assume you have activated the PolyzyMD pixi environment:
+PolyzyMD v1.3 uses split pixi environments. Pick the environment that matches
+the command you are troubleshooting:
 
-```bash
-pixi shell -e build
-```
+| Task | Pixi environment |
+|------|------------------|
+| Project setup, PDB preparation, `polyzymd validate`, `polyzymd build` | `build` |
+| OpenMM GPU simulation, `polyzymd submit`, `polyzymd run-segment` | `sim-cuda-12-4` or `sim-cuda-12-6` |
+| Trajectory comparison, plotting, `polyzymd compare ...` | `analysis` |
 
-Alternatively, prefix each command with `pixi run -e build`.
+Use `pixi shell -e <env>` to activate an environment, or prefix a command with
+`pixi run -e <env>`.
 :::
 
 ## Installation Issues
@@ -37,12 +41,12 @@ pip install -e .
 ModuleNotFoundError: No module named 'openmm'
 ```
 
-**Solution:** OpenMM is provided by the pixi environment. Make sure you are
-inside the correct pixi shell:
+**Solution:** OpenMM is provided by pixi environments. Make sure you are inside
+the environment for the task you are running:
 
 ```bash
-pixi shell -e build        # local use (no CUDA)
-pixi shell -e cuda-12-6    # HPC (e.g. Bridges2)
+pixi shell -e build            # setup, validation, system building
+pixi shell -e sim-cuda-12-6    # CUDA simulation on a matching GPU cluster
 python -c "import openmm; print(openmm.__version__)"
 ```
 
@@ -337,7 +341,7 @@ manually:
 1. Edit generated script in `job_scripts/`
 2. Add the pixi activation:
    ```bash
-   eval "$(pixi shell-hook -e cuda-12-4 --manifest-path /path/to/polyzymd/pixi.toml)"
+   eval "$(pixi shell-hook -e sim-cuda-12-4 --manifest-path /path/to/polyzymd/pixi.toml)"
    ```
 
 ### "Permission denied on scratch"

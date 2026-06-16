@@ -49,7 +49,7 @@ class GromacsSlurmScriptGenerator:
     def __init__(
         self,
         slurm_config: SlurmConfig,
-        pixi_env: str = "cuda-12-4",
+        pixi_env: str = "build",
         gmx_binary: str = "gmx",
         grompp_flags: str = "-maxwarn 1",
         mdrun_flags: str = "",
