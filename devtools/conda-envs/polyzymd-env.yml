@@ -17,6 +17,9 @@ dependencies:
   - openff-nagl-models
   - openff-forcefields
   - openff-units
+  # AmberTools 24.8 is Linux-focused/default tested for legacy AM1-BCC workflows.
+  # macOS users should prefer pixi build without AmberTools unless a dedicated
+  # macOS AM1-BCC environment is designed.
   - ambertools=24.8
   - rdkit>=2023.09
 

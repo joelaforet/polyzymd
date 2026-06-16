@@ -132,6 +132,14 @@ instructions that ask contributors to install them into a system Python.
 MDAnalysis and MDTraj pip instructions are acceptable only through the
 `.[analysis]` extra and must be labeled best-effort analysis-only.
 
+AmberTools is platform-specific in pixi. Linux environments include AmberTools
+24.8 for legacy AM1-BCC/OpenFF backend compatibility. macOS pixi environments
+omit AmberTools by default because current AmberTools builds conflict with the
+Python 3.12 / NumPy 2 full stack in the cross-platform lock. Document macOS
+charging workflows as NAGL/OpenFF or pre-charged-molecule workflows unless a
+dedicated macOS AmberTools/AM1-BCC environment is designed in response to a user
+issue.
+
 ## Lazy imports for heavy dependencies
 
 PolyzyMD keeps package imports lightweight by importing heavy dependencies only

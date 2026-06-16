@@ -161,6 +161,13 @@ PolyzyMD uses [pixi](https://pixi.sh) instead of conda/mamba. Key differences:
 | `cuda-12-4` | Simulations on CUDA 12.4 clusters (Blanca) | Yes |
 | `cuda-12-6` | Simulations on CUDA 12.6 clusters (Bridges2) | Yes |
 
+Linux pixi environments include AmberTools 24.8 for legacy AM1-BCC/OpenFF
+backend compatibility. macOS pixi environments omit AmberTools by default
+because current AmberTools builds conflict with the Python 3.12 / NumPy 2 full
+stack in the cross-platform lock. On macOS, use NAGL/OpenFF charging or provide
+pre-charged molecules; open an issue if you need a dedicated macOS
+AmberTools/AM1-BCC environment.
+
 ### Adding support for a new cluster
 
 1. Determine the CUDA version (`nvidia-smi` on a GPU node)

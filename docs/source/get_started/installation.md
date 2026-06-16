@@ -17,6 +17,15 @@ do not need conda or mamba installed separately.
 - Git
 - a shell where you can install `pixi`
 
+```{note}
+Linux pixi environments include AmberTools 24.8 for legacy AM1-BCC/OpenFF
+backend compatibility. macOS pixi environments omit AmberTools by default
+because current AmberTools builds conflict with the Python 3.12 / NumPy 2 full
+stack in the cross-platform lock. On macOS, use the recommended NAGL/OpenFF
+charging path or provide pre-charged molecules. If you need AmberTools/AM1-BCC
+on macOS, please open an issue so a dedicated environment can be designed.
+```
+
 If you are setting up PolyzyMD on a GPU cluster, read this page first and then
 use the short HPC section below.
 
