@@ -201,7 +201,8 @@ def _selected_count_from_frames(frames: tuple[Any, ...], n_frames_total: int | N
     Raises
     ------
     ValueError
-        Raised when a boolean mask has the wrong length or selects no frames.
+        Raised when explicit integer indices are outside a known trajectory range,
+        or when a boolean mask has the wrong length or selects no frames.
     """
 
     is_bool_mask = all(_is_boolean_frame_value(frame) for frame in frames)
@@ -209,6 +210,14 @@ def _selected_count_from_frames(frames: tuple[Any, ...], n_frames_total: int | N
     if not is_bool_mask and not is_integer_indices:
         raise ValueError("frames must contain only integer frame indices or boolean mask values")
     if is_integer_indices:
+        if n_frames_total is not None:
+            for frame in frames:
+                frame_index = index(frame)
+                if frame_index < 0 or frame_index >= n_frames_total:
+                    raise ValueError(
+                        f"Explicit frame index {frame_index} is outside the trajectory range "
+                        f"[0, {n_frames_total})"
+                    )
         return len(frames)
 
     if n_frames_total is not None and len(frames) != n_frames_total:

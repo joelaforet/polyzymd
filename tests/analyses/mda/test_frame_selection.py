@@ -74,6 +74,22 @@ def test_frames_selection_returns_only_frames() -> None:
     assert selection.n_frames_selected == 3
 
 
+@pytest.mark.parametrize("frames", [[-1], [0, -1], np.array([-1])])
+def test_integer_frames_reject_negative_indices_when_length_known(frames: object) -> None:
+    """Explicit negative frame indices should fail when trajectory length is known."""
+
+    with pytest.raises(ValueError, match="outside the trajectory range"):
+        FrameSelection(frames=frames, n_frames_total=10)
+
+
+@pytest.mark.parametrize("frames", [[10], [0, 10], np.array([10])])
+def test_integer_frames_reject_out_of_range_indices_when_length_known(frames: object) -> None:
+    """Explicit frame indices beyond trajectory length should fail when known."""
+
+    with pytest.raises(ValueError, match="outside the trajectory range"):
+        FrameSelection(frames=frames, n_frames_total=10)
+
+
 @pytest.mark.parametrize("field", ["start", "stop", "step"])
 def test_frames_rejects_combined_slice_arguments(field: str) -> None:
     """MDAnalysis does not allow frames with start, stop, or step."""

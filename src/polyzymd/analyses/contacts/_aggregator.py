@@ -1018,6 +1018,64 @@ def _ceil_frame_position(offset_ps: float, timestep_ps: float) -> int:
     return int(math.floor(frame_position)) + 1
 
 
+def _validated_sidecar_frame_indices(frame_indices: Any, *, replicate: str) -> np.ndarray:
+    """Return sidecar frame indices after validating integer-like values.
+
+    Parameters
+    ----------
+    frame_indices : Any
+        Raw frame-index array loaded from the contact event sidecar.
+    replicate : str
+        Replicate label used in error messages.
+
+    Returns
+    -------
+    numpy.ndarray
+        Frame indices as ``int64`` values.
+
+    Raises
+    ------
+    MDAAggregationError
+        Raised when frame indices are not finite numeric integer-like values.
+    """
+
+    frame_indices_array = np.asarray(frame_indices)
+    dtype_kind = frame_indices_array.dtype.kind
+    if dtype_kind in {"i", "u"}:
+        if dtype_kind == "u" and np.any(frame_indices_array > np.iinfo(np.int64).max):
+            raise MDAAggregationError(
+                f"contacts: replicate {replicate} sidecar frame_indices exceed int64 range. "
+                "Recompute contacts."
+            )
+        return frame_indices_array.astype(np.int64, copy=False)
+
+    if dtype_kind != "f":
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar frame_indices must be numeric integers. "
+            "Recompute contacts."
+        )
+
+    numeric_indices = frame_indices_array.astype(np.float64, copy=False)
+    if not np.all(np.isfinite(numeric_indices)):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar frame_indices contain non-finite values. "
+            "Recompute contacts."
+        )
+    if not np.all(numeric_indices == np.trunc(numeric_indices)):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar frame_indices contain fractional values. "
+            "Recompute contacts."
+        )
+
+    int64_limits = np.iinfo(np.int64)
+    if np.any((numeric_indices < int64_limits.min) | (numeric_indices > int64_limits.max)):
+        raise MDAAggregationError(
+            f"contacts: replicate {replicate} sidecar frame_indices exceed int64 range. "
+            "Recompute contacts."
+        )
+    return numeric_indices.astype(np.int64, copy=False)
+
+
 def _validate_timestamp_sidecar_window(
     item: _LoadedContactArtifact,
     frame_selection: Mapping[str, Any],
@@ -1055,7 +1113,9 @@ def _validate_timestamp_sidecar_window(
         frame_selection, "selected_start_time_ps", replicate=str(replicate)
     )
 
-    frame_indices = np.asarray(item.data["frame_indices"])
+    frame_indices = _validated_sidecar_frame_indices(
+        item.data["frame_indices"], replicate=str(replicate)
+    )
     if frame_indices.size != expected_count:
         raise MDAAggregationError(
             f"contacts: replicate {replicate} sidecar frame count mismatch: "
@@ -1063,7 +1123,7 @@ def _validate_timestamp_sidecar_window(
             "Recompute contacts."
         )
     expected_frame_indices = np.asarray(list(range(start, stop, step)), dtype=np.int64)
-    if not np.array_equal(frame_indices.astype(np.int64, copy=False), expected_frame_indices):
+    if not np.array_equal(frame_indices, expected_frame_indices):
         raise MDAAggregationError(
             f"contacts: replicate {replicate} sidecar frame_indices mismatch: "
             "sidecar does not match frame-selection window. Recompute contacts."
