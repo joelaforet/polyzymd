@@ -102,7 +102,7 @@ seaborn      = ">=0.13"
 # Molecular preparation stack used for PDB/OpenFF/polymer system construction.
 # =============================================================================
 [feature.builder.dependencies]
-openff-toolkit        = ">=0.16"
+openff-toolkit        = ">=0.17.1"
 openff-interchange    = ">=0.5"
 openff-packmol        = ">=0.1"
 openff-units          = ">=0.2"
@@ -114,12 +114,16 @@ openff-nagl-models    = ">=2024.0"
 mbuild                = ">=1.2"
 openbabel             = ">=3.1"
 rdkit                 = ">=2023.09"
+rustworkx             = ">=0.15"
+pyxdg                 = ">=0.28"
+gemmi                 = ">=0.6"
 pdbfixer              = ">=1.9"
 packmol               = ">=20.0"
 pytorch               = "2.6.*"
 
 [feature.builder.pypi-dependencies]
-polymerist = ">=1.1.0"
+polymerist   = ">=1.1.0"
+openff-pablo = { git = "https://github.com/openforcefield/openff-pablo.git", tag = "v0.2.2" }
 # NOTE: espaloma-charge is intentionally excluded. polymerist eagerly imports
 # it at module level (_toolkits.py), which triggers a broken dgl -> graphbolt
 # import chain that crashes when dgl and PyTorch versions are mismatched.
@@ -154,6 +158,7 @@ sphinx-copybutton = ">=0.5"
 sphinx-design    = ">=0.5"
 sphinx-click     = ">=4.0"
 autodoc-pydantic = ">=2.1"
+ipykernel = ">=7.3.0,<8"
 
 
 # =============================================================================
