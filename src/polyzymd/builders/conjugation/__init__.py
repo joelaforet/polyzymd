@@ -1,4 +1,12 @@
-"""Covalent modification builders for PolyzyMD."""
+"""Covalent modification builders for PolyzyMD.
+
+The known-working NHS-Lys polymer POC notebook remains under
+``polyzymd.builders.conjugation.poc`` as a reference while the refactored engine
+path matures. New construction callers should prefer
+``build_conjugate_from_config`` or ``ConjugationEngine``. Older workflow modules
+such as ``system_workflow``, ``protein_preparation``, ``local_minimization``,
+and ``product_pablo`` remain compatibility import paths during migration.
+"""
 
 from polyzymd.builders.conjugation.api import build_conjugate, build_conjugate_from_config
 from polyzymd.builders.conjugation.builder import CovalentModificationBuilder

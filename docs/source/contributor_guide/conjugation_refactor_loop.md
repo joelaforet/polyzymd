@@ -130,6 +130,26 @@ The public facade should export only stable request/result models, reaction
 discovery helpers, and the high-level build functions. Keep exploratory helpers
 private or under `_legacy`.
 
+### Current public API direction
+
+As of Phase 6, the public construction path is:
+
+```python
+from polyzymd.builders.conjugation import ConjugationEngine, build_conjugate_from_config
+```
+
+`build_conjugate_from_config()` and `ConjugationEngine.build_from_config()` are
+the preferred entry points for executable NHS-lysine polymer builds. They
+delegate to the known-working config-driven workflow while keeping orchestration
+behind the engine boundary. `build_conjugate()` is retained as a higher-level
+facade for request/config inputs, but direct molecule/topology construction is
+still explicitly pending.
+
+The older workflow/helper imports remain compatibility paths during migration,
+including `system_workflow`, `protein_preparation`, `local_minimization`,
+`product_pablo`, `pablo_adapter`, and `parameterization`. Do not remove these
+paths until callers and tests have moved to the engine-facing API.
+
 ## Core data model
 
 Use one central workflow object rather than many unrelated result types:
@@ -178,6 +198,18 @@ selection, leaving-group detection, formal-charge fixes, and geometry checks
 belong in `reactions/nhs_lys.py`.
 
 ## Migration phases
+
+### Phase status snapshot
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 0 | Complete | Current import behavior and POC-adjacent behavior are covered by focused conjugation tests. |
+| 1 | Complete | `api.py`, `engine.py`, public models, and the reaction package skeleton exist. |
+| 2 | Complete, transitional | `workflow.preparation` and `workflow.minimization` expose the working legacy implementations without changing behavior. |
+| 3 | Complete, transitional | `workflow.pablo`, `workflow.parameterization`, and `io.openff` provide the new namespace boundaries while keeping legacy modules import-compatible. |
+| 4 | Complete, adapter-first | `NhsLysReaction` owns NHS-Lys defaults and reaction metadata, delegating to the proven implementation. |
+| 5 | Complete, conservative | `ConjugationEngine` centralizes public orchestration and delegates executable config builds to the existing system workflow. Direct OpenFF fallback is not silently enabled. |
+| 6 | Current | Preserve the known-working POC notebook, document migration boundaries, and avoid broad cleanup. |
 
 ### Phase 0 — freeze current behavior
 
@@ -258,6 +290,11 @@ Keep `src/polyzymd/builders/conjugation/poc/conjugation_poc_walkthrough.ipynb`
 available as the known-working reference POC until the refactored public API can
 reproduce the same product-state Pablo/OpenMM minimization result. Do not delete
 or overwrite this notebook during early refactor phases.
+
+During Phase 6, prefer documentation and compatibility notes over deleting POC
+outputs or reshaping the package tree. The notebook remains the reference for
+the proven path; new user-facing code should point toward
+`build_conjugate_from_config()` or `ConjugationEngine`.
 
 Once the clean API fully reproduces the notebook workflow, copy or move the
 walkthrough into docs/tutorial space and leave a short pointer from the old
