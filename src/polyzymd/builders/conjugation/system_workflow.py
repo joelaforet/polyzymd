@@ -50,6 +50,7 @@ from polyzymd.builders.conjugation.reaction_roles import (
     atom_mapped_reaction_from_mechanism_config,
     resolve_reaction_roles_from_identity_map,
 )
+from polyzymd.builders.conjugation.reactions.library import get_reaction
 from polyzymd.builders.conjugation.smoke import VacuumSmokeSettings, run_restrained_vacuum_smoke
 from polyzymd.builders.system_builder import SystemBuilder
 from polyzymd.config.schema import (
@@ -60,7 +61,7 @@ from polyzymd.config.schema import (
 )
 
 _ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
-_NHS_LYS_COORDINATE_BACKEND_MECHANISM = "nhs_lys_amide"
+_NHS_LYS_COORDINATE_BACKEND_MECHANISM = get_reaction("nhs_lys").coordinate_backend_mechanism
 
 
 class ConjugatedPolymerSystemSettings(BaseModel):
@@ -414,17 +415,8 @@ def _unique_pdb_residues(path: Path) -> tuple[tuple[str, int, str, str], ...]:
 
 
 def _nhs_lys_linker_from_attachment(attachment: Any) -> NhsLysModifierLinker:
-    site = attachment.site
-    product_residues = attachment.mechanism.product_residues
-    return NhsLysModifierLinker(
-        target_chain=site.chain_id,
-        target_residue_name=site.residue_name or "LYS",
-        target_residue_number=_required_int(site.residue_number, "site.residue_number"),
-        target_insertion_code=site.insertion_code,
-        target_atom_name=site.atom_name or "NZ",
-        lysine_target_resname=product_residues.site or "LYX",
-        modifier_target_resname=product_residues.moiety or "NHX",
-    )
+    reaction_template: Any = get_reaction("nhs_lys")
+    return reaction_template.create_linker_from_attachment(attachment)
 
 
 def _policy_with_resolved_crosslink(

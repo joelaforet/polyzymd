@@ -6,10 +6,11 @@ from polyzymd.builders.conjugation.reactions.base import (
     ReactionTemplate,
 )
 from polyzymd.builders.conjugation.reactions.library import get_reaction, list_reactions
-from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction
+from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction, NhsLysReactionSettings
 
 __all__ = [
     "NhsLysReaction",
+    "NhsLysReactionSettings",
     "ReactionContext",
     "ReactionResult",
     "ReactionTemplate",
