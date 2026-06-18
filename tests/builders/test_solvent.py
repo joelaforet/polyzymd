@@ -1,5 +1,7 @@
 """Tests for solvent composition counting helpers."""
 
+import pytest
+
 from polyzymd.builders.solvent import AVOGADRO_CONSTANT, SolventBuilder
 from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
@@ -55,3 +57,60 @@ def test_config_translation_uses_mole_fraction(monkeypatch) -> None:
     assert co_solvents[0].concentration is None
     assert co_solvents[1].mole_fraction is None
     assert co_solvents[1].concentration == 2.0
+
+
+def test_neutralizing_ion_counts_break_parity_ties_toward_more_ions() -> None:
+    """Neutralization should prefer the larger feasible ion total on parity ties."""
+    na_count, cl_count = SolventBuilder._calculate_ion_counts(
+        nacl_to_add=43,
+        solute_charge=-15,
+        neutralize=True,
+    )
+
+    assert (na_count, cl_count) == (51, 36)
+    assert -15 + na_count - cl_count == 0
+
+
+@pytest.mark.parametrize(
+    ("solute_charge", "expected_counts"),
+    [
+        (-4, (12, 8)),
+        (5, (8, 13)),
+        (0, (10, 10)),
+    ],
+)
+def test_neutralizing_ion_counts_produce_zero_net_charge(
+    solute_charge: int,
+    expected_counts: tuple[int, int],
+) -> None:
+    """Neutralizing ion counts should exactly cancel integer solute charge."""
+    na_count, cl_count = SolventBuilder._calculate_ion_counts(
+        nacl_to_add=10,
+        solute_charge=solute_charge,
+        neutralize=True,
+    )
+
+    assert (na_count, cl_count) == expected_counts
+    assert solute_charge + na_count - cl_count == 0
+
+
+def test_non_neutralizing_ion_counts_preserve_equal_salt_pairs() -> None:
+    """Non-neutralizing ion counts should preserve equal NaCl pairs."""
+    na_count, cl_count = SolventBuilder._calculate_ion_counts(
+        nacl_to_add=43,
+        solute_charge=-15,
+        neutralize=False,
+    )
+
+    assert (na_count, cl_count) == (43, 43)
+
+
+def test_charge_to_integer_tolerates_tiny_floating_noise() -> None:
+    """Integer charge conversion should tolerate tiny floating-point noise."""
+    assert SolventBuilder._charge_to_integer(-15.00000024) == -15
+
+
+def test_charge_to_integer_rejects_true_fractional_charge() -> None:
+    """Integer charge conversion should reject fractional net charge."""
+    with pytest.raises(ValueError, match="must be an integer"):
+        SolventBuilder._charge_to_integer(-15.25)

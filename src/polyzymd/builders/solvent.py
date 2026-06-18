@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 AVOGADRO_CONSTANT = 6.02214076e23
+ION_CHARGE_TOLERANCE = 1.0e-5
 
 # Water model type
 WaterModelType = Literal["tip3p", "spce", "tip4p", "tip4pew", "opc"]
@@ -305,16 +306,15 @@ class SolventBuilder:
         nacl_conc = Quantity(composition.nacl_concentration, "mole / liter")
         nacl_mass_fraction = (nacl_conc * nacl_mass) / (molarity_pure_water * water_mass)
         nacl_mass_to_add = solvent_mass * nacl_mass_fraction
-        nacl_to_add = (nacl_mass_to_add / nacl_mass).m_as("dimensionless").round()
+        nacl_to_add = self._round_dimensionless_to_int(nacl_mass_to_add / nacl_mass)
 
         # Neutralize system
         solute_charge = sum(mol.total_charge for mol in topology.molecules)
-        if composition.neutralize:
-            na_to_add = int(np.ceil(nacl_to_add - solute_charge.m / 2.0))
-            cl_to_add = int(np.floor(nacl_to_add + solute_charge.m / 2.0))
-        else:
-            na_to_add = int(nacl_to_add)
-            cl_to_add = int(nacl_to_add)
+        na_to_add, cl_to_add = self._calculate_ion_counts(
+            nacl_to_add=nacl_to_add,
+            solute_charge=solute_charge,
+            neutralize=composition.neutralize,
+        )
 
         # Load co-solvents before count calculations so molar masses are known
         cosolvent_masses: list[tuple[str, float, Any]] = []
@@ -532,6 +532,103 @@ class SolventBuilder:
             Number of co-solvent molecules to add.
         """
         return int(round(concentration_molar * box_volume_liters * AVOGADRO_CONSTANT))
+
+    @classmethod
+    def _calculate_ion_counts(
+        cls,
+        nacl_to_add: Any,
+        solute_charge: Any,
+        neutralize: bool,
+    ) -> tuple[int, int]:
+        """Calculate Na+ and Cl- counts from target NaCl pairs.
+
+        When neutralization is enabled, counts are chosen so that the final
+        solute plus ion charge is exactly zero while keeping the total ion
+        count as close as possible to the requested salt-pair total. If parity
+        makes the target total impossible, the tie is resolved by adding the
+        larger feasible ion count.
+
+        Parameters
+        ----------
+        nacl_to_add : Any
+            Target number of NaCl pairs as a scalar or dimensionless quantity.
+        solute_charge : Any
+            Solute net charge in elementary-charge units.
+        neutralize : bool
+            Whether ion counts should neutralize the solute charge.
+
+        Returns
+        -------
+        tuple[int, int]
+            Number of Na+ and Cl- ions to add.
+        """
+        nacl_count = cls._round_dimensionless_to_int(nacl_to_add)
+        if not neutralize:
+            return nacl_count, nacl_count
+
+        solute_charge_int = cls._charge_to_integer(solute_charge)
+        charge_difference = -solute_charge_int
+        minimum_total_ions = abs(charge_difference)
+        target_total_ions = 2 * nacl_count
+
+        lower_total = target_total_ions
+        while lower_total >= minimum_total_ions and (lower_total - charge_difference) % 2 != 0:
+            lower_total -= 1
+
+        upper_total = max(target_total_ions, minimum_total_ions)
+        while (upper_total - charge_difference) % 2 != 0:
+            upper_total += 1
+
+        if lower_total < minimum_total_ions:
+            total_ions = upper_total
+        elif abs(upper_total - target_total_ions) <= abs(target_total_ions - lower_total):
+            total_ions = upper_total
+        else:
+            total_ions = lower_total
+
+        na_count = (total_ions + charge_difference) // 2
+        cl_count = (total_ions - charge_difference) // 2
+        return na_count, cl_count
+
+    @staticmethod
+    def _charge_to_integer(charge: Any, tolerance: float = ION_CHARGE_TOLERANCE) -> int:
+        """Convert a net charge to integer elementary-charge units.
+
+        Tiny floating-point noise from charge assignment is tolerated, but true
+        fractional net charges are rejected because integer ions cannot exactly
+        neutralize them.
+
+        Parameters
+        ----------
+        charge : Any
+            Charge scalar or quantity-like object.
+        tolerance : float, optional
+            Absolute tolerance for floating-point noise, by default
+            ``ION_CHARGE_TOLERANCE``.
+
+        Returns
+        -------
+        int
+            Integer charge in elementary-charge units.
+
+        Raises
+        ------
+        ValueError
+            If the charge is farther than ``tolerance`` from an integer.
+        """
+        if hasattr(charge, "m_as"):
+            charge = charge.m_as("elementary_charge")
+        elif hasattr(charge, "m"):
+            charge = charge.m
+
+        charge_value = float(charge)
+        rounded_charge = round(charge_value)
+        if abs(charge_value - rounded_charge) > tolerance:
+            raise ValueError(
+                "Solute net charge must be an integer when neutralization is enabled; "
+                f"got {charge_value:g} e"
+            )
+        return int(rounded_charge)
 
     @classmethod
     def _calculate_mole_fraction_counts(
