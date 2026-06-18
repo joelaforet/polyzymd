@@ -21,6 +21,7 @@ from polyzymd.builders.conjugation.nhs_lys import (
     plan_nhs_lys_amide,
 )
 from polyzymd.builders.conjugation.polymer_fragment import PolymerFragmentAtom
+from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction
 from polyzymd.builders.conjugation.sites import AttachmentSite
 from polyzymd.config.schema import ConjugationConfig
 
@@ -329,6 +330,20 @@ def test_nhs_lys_linker_resolves_poc_like_hydrogen_names_by_rdkit(tmp_path):
     assert attachment.nz_hydrogen_atom_names_to_remove == ("H11", "H13")
     assert attachment.nz_hydrogen_atom_serials_to_remove == (7, 8)
     assert any("Protonated lysine" in warning for warning in site.warnings)
+
+
+def test_nhs_lys_reaction_template_creates_current_linker_defaults():
+    """The reaction template should produce current NHS-Lys linker defaults."""
+    linker = NhsLysReaction.create_linker(target_residue_number=23)
+
+    assert isinstance(linker, NhsLysModifierLinker)
+    assert linker.target_chain == "A"
+    assert linker.target_residue_name == "LYS"
+    assert linker.target_residue_number == 23
+    assert linker.target_atom_name == "NZ"
+    assert linker.lysine_target_resname == "LYX"
+    assert linker.modifier_target_resname == "NHX"
+    assert linker.max_nz_hydrogens_to_remove == 2
 
 
 def test_nhs_lys_linker_resolves_canonical_hz_names_by_rdkit(tmp_path):

@@ -8,8 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from polyzymd.builders.conjugation.contracts import PabloCrosslinkRequirement
+from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction
 from polyzymd.builders.conjugation.system_workflow import (
     _apply_pdb_atom_names_to_topology,
+    _nhs_lys_linker_from_attachment,
     _policy_with_resolved_crosslink,
     _require_supported_coordinate_backend,
     _restore_pdb_atom_name_fields,
@@ -109,6 +111,31 @@ def test_coordinate_backend_gate_allows_explicit_nhs_lys_mechanism():
     )
 
     _require_supported_coordinate_backend(attachment)
+
+
+def test_nhs_lys_workflow_linker_uses_reaction_template_defaults():
+    """Workflow linker defaults should come from the NHS-Lys reaction template."""
+    attachment = SimpleNamespace(
+        site=SimpleNamespace(
+            chain_id="A",
+            residue_name=None,
+            residue_number=23,
+            insertion_code="",
+            atom_name=None,
+        ),
+        mechanism=SimpleNamespace(
+            product_residues=SimpleNamespace(site=None, moiety=None),
+            bond=SimpleNamespace(site_atom=None, order=1, target_bond_length_angstrom=1.33),
+        ),
+    )
+
+    linker = _nhs_lys_linker_from_attachment(attachment)
+    defaults = NhsLysReaction.Settings()
+
+    assert linker.target_residue_name == defaults.source_site_residue_name
+    assert linker.target_atom_name == defaults.target_atom_name
+    assert linker.lysine_target_resname == defaults.product_site_residue_name
+    assert linker.modifier_target_resname == defaults.product_moiety_residue_name
 
 
 def test_coordinate_backend_gate_preflights_generic_smarts_then_blocks():

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,8 @@ def test_new_conjugation_modules_import():
 
 def test_reaction_library_exposes_nhs_lys_template():
     """The initial built-in reaction registry should expose NHS-Lys."""
+    import polyzymd.builders.conjugation.reactions.library as library
+
     reactions = list_reactions()
 
     assert "nhs_lys" in reactions
@@ -37,6 +40,29 @@ def test_reaction_library_exposes_nhs_lys_template():
     assert get_reaction("nhs_lys_amide") is NhsLysReaction
     assert issubclass(get_reaction("nhs_lys"), ReactionTemplate)
     assert NhsLysReaction.legacy_module_path == "polyzymd.builders.conjugation.nhs_lys"
+    assert NhsLysReaction.identifiers() == ("nhs_lys", "nhs_lys_amide")
+
+    registry_source = inspect.getsource(library)
+    for forbidden in ("LYX", "NHX", "NZ", "C047", "O020", "H11", "H13"):
+        assert forbidden not in registry_source
+
+
+def test_nhs_lys_reaction_template_settings_and_metadata_defaults():
+    """NHS-Lys-specific defaults should live on the reaction template."""
+    settings = NhsLysReaction.Settings()
+
+    assert settings.product_residue_names == ("LYX", "NHX")
+    assert settings.target_atom_name == "NZ"
+    assert settings.bond_order == 1
+    assert settings.target_bond_length_angstrom == pytest.approx(1.33)
+    assert settings.max_nz_hydrogens_to_remove == 2
+    assert NhsLysReaction.product_residue_names(settings) == ("LYX", "NHX")
+    assert "[N:1]" in NhsLysReaction.reaction_smarts()
+
+    role_model = NhsLysReaction.build_role_model()
+    assert role_model.name == "nhs_lys_amide"
+    assert [role.map_number for role in role_model.atom_roles] == [1, 2, 3, 4, 5]
+    assert [participant.role for participant in role_model.participants] == ["site", "moiety"]
 
 
 def test_direct_build_conjugate_is_explicitly_pending():

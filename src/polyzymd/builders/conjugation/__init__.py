@@ -183,6 +183,7 @@ from polyzymd.builders.conjugation.reaction_roles import (
 )
 from polyzymd.builders.conjugation.reactions import (
     NhsLysReaction,
+    NhsLysReactionSettings,
     ReactionContext,
     ReactionResult,
     ReactionTemplate,
@@ -268,6 +269,7 @@ __all__ = [
     "NhsLysModifierLinker",
     "NhsLysPdbAttachment",
     "NhsLysReaction",
+    "NhsLysReactionSettings",
     "NhsReactiveGroup",
     "PackmolModifierPlacementResult",
     "PackmolModifierPlacementSettings",
