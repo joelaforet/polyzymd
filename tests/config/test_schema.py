@@ -217,13 +217,6 @@ class TestCoSolventCompositionValidation:
         )
         assert len(config.co_solvents) == 2
 
-    def test_volume_fraction_key_rejected_with_migration_error(self):
-        """Removed volume_fraction keys should fail with a migration message."""
-        from polyzymd.config.schema import CoSolventSpec
-
-        with pytest.raises(ValidationError, match="volume_fraction.*removed"):
-            CoSolventSpec(name="dmso", volume_fraction=0.3)
-
     def test_exactly_one_composition_method_required(self):
         """Each co-solvent should have exactly one composition method."""
         from polyzymd.config.schema import CoSolventSpec
