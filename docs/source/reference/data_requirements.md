@@ -80,8 +80,8 @@ how per-replicate directories are named.
 | `{replicate}` | Replicate number (1-indexed) | `1` |
 | `{duration}` | `simulation_phases.production.duration` (integer ns) | `100` |
 | `{primary_solvent}` | Primary solvent token | `water_tip3p` |
-| `{cosolvent_composition}` | Co-solvents sorted by normalized name, or `none` | `dmso_30pctv_urea_2p5M` |
-| `{solvent_composition}` | Primary solvent plus co-solvents when present | `water_tip3p_dmso_30pctv` |
+| `{cosolvent_composition}` | Co-solvents sorted by normalized name, or `none` | `dmso_30molpct_urea_2p5M` |
+| `{solvent_composition}` | Primary solvent plus co-solvents when present | `water_tip3p_dmso_30molpct` |
 
 PolyzyMD uses the same resolved template for daisy-chain SLURM job names, so
 job names match the per-replicate run directories after SLURM-safe
@@ -90,7 +90,9 @@ sanitization.
 Solvent tokens are normalized for directory and SLURM job-name safety. Spaces,
 slashes, parentheses, percent signs, and raw decimal points are replaced or
 removed; concentration decimals use `p` (for example, `2.5 M` becomes
-`urea_2p5M`). Ions are not included in solvent naming placeholders.
+`urea_2p5M`). Mole-fraction co-solvents are rendered as mol-percent tokens
+with the `molpct` suffix (for example, `mole_fraction: 0.30` becomes
+`dmso_30molpct`). Ions are not included in solvent naming placeholders.
 
 **Example resolved name:**
 
