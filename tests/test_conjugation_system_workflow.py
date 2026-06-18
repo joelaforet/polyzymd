@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+from polyzymd.builders.conjugation.contracts import PabloCrosslinkRequirement
 from polyzymd.builders.conjugation.system_workflow import (
     _apply_pdb_atom_names_to_topology,
+    _policy_with_resolved_crosslink,
+    _require_supported_coordinate_backend,
     _restore_pdb_atom_name_fields,
 )
+from polyzymd.config.schema import ConjugationCcdPabloPolicyConfig
 
 
 class _AtomDouble:
@@ -75,6 +82,64 @@ def test_apply_pdb_atom_names_to_topology_uses_same_order_template(tmp_path: Pat
 
     assert [atom.name for atom in atoms] == ["N", "CA"]
     assert [atom.metadata["atom_name"] for atom in atoms] == ["N", "CA"]
+
+
+def test_policy_with_resolved_crosslink_uses_product_state_leaving_atoms():
+    """Generated Pablo policies should not remove atoms from product-state PDBs."""
+    requirement = PabloCrosslinkRequirement(
+        residues=("LYX", "NHX"),
+        linking_atoms=("NZ", "C047"),
+        leaving_atoms=(("H11", "H13"), ("O020",)),
+        bond_order=1,
+    )
+    policy = ConjugationCcdPabloPolicyConfig(crosslinks=[])
+
+    generated = _policy_with_resolved_crosslink(
+        policy,
+        SimpleNamespace(pablo_crosslink_requirement=requirement),
+    )
+
+    assert generated.crosslinks[0].leaving_atoms == ((), ())
+
+
+def test_coordinate_backend_gate_allows_explicit_nhs_lys_mechanism():
+    """The system workflow should only route the named implemented backend to NHS-Lys."""
+    attachment = SimpleNamespace(
+        mechanism=SimpleNamespace(name="nhs_lys_amide", reaction_smarts=None)
+    )
+
+    _require_supported_coordinate_backend(attachment)
+
+
+def test_coordinate_backend_gate_preflights_generic_smarts_then_blocks():
+    """Generic reaction SMARTS should not silently enter the NHS-Lys coordinate path."""
+    attachment = SimpleNamespace(
+        mechanism=SimpleNamespace(
+            name="generic_amide",
+            reaction_smarts="[N:1]([H:2]).[C:3](=[O:4])[O:5]>>[N:1][C:3](=[O:4])",
+            atom_roles=[
+                {"map_number": 1, "participant": "site", "role": "linking"},
+                {"map_number": 2, "participant": "site", "role": "leaving"},
+                {"map_number": 3, "participant": "moiety", "role": "linking"},
+                {"map_number": 5, "participant": "moiety", "role": "leaving"},
+            ],
+        )
+    )
+
+    with pytest.raises(NotImplementedError, match="generic SMARTS preflight") as excinfo:
+        _require_supported_coordinate_backend(attachment)
+
+    message = str(excinfo.value)
+    assert "1 added" in message
+    assert "coordinate surgery only for mechanism 'nhs_lys_amide'" in message
+
+
+def test_coordinate_backend_gate_blocks_unspecified_mechanisms_without_smarts():
+    """Unsupported mechanisms without SMARTS should fail before polymer generation."""
+    attachment = SimpleNamespace(mechanism=SimpleNamespace(name="custom", reaction_smarts=None))
+
+    with pytest.raises(NotImplementedError, match="currently implements coordinate surgery only"):
+        _require_supported_coordinate_backend(attachment)
 
 
 def _pdb_line(

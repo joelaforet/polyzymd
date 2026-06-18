@@ -11,7 +11,6 @@ from polyzymd.builders.conjugation.polymer_recipe import (
     generate_polymerist_smoke_polymer,
     sbma_egpma_nhs_recipe,
 )
-from polyzymd.builders.conjugation.polymerist_compat import import_polymerist_building
 from polyzymd.builders.conjugation.polymerist_pdb import generated_fragment_from_polymerist_pdb
 
 
@@ -196,10 +195,7 @@ def test_generated_fragment_feeds_crosslinked_pdb_writer(tmp_path):
 
 def test_real_polymerist_generation_pdb_converts_to_generated_fragment(tmp_path):
     """Real Polymerist PDB generation should feed the generated-fragment adapter."""
-    try:
-        import_polymerist_building()
-    except ImportError as exc:
-        pytest.skip(f"Polymerist generation stack unavailable in this environment: {exc}")
+    pytest.importorskip("polymerist", exc_type=ImportError)
 
     recipe = sbma_egpma_nhs_recipe(length=3, seed=5, reactive_monomer_index=1)
     result = generate_polymerist_smoke_polymer(recipe, tmp_path / "polymerist", max_retries=1)

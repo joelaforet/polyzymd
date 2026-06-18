@@ -33,6 +33,39 @@ An enzyme PDB can satisfy PolyzyMD chain conventions and still fail OpenFF
 ingestion if the residue graph, hydrogens, termini, or disulfide connectivity do
 not match supported chemistry.
 
+## Source-protein hydrogen canonicalization
+
+Conjugation workflows that ingest a protein through Pablo should canonicalize
+source-protein hydrogens before product assembly. PolyzyMD provides
+`canonicalize_protein_hydrogens()` for this purpose. The helper runs PDBFixer,
+then uses OpenMM `Modeller.delete()` to remove existing hydrogens and
+`Modeller.addHydrogens()` to regenerate canonical protein hydrogens at a
+user-configurable pH.
+
+The pH defaults to `7.0` and is surfaced in the conjugation POC walkthrough as
+`PROTEIN_CANONICALIZATION_PH`. Chain IDs and residue numbers are written with
+`keepIds=True` when OpenMM can preserve them.
+
+## Product-state conjugation PDBs with Pablo
+
+For post-crosslink conjugation products, PolyzyMD may have already removed
+reactant leaving atoms and written the crosslink connectivity before Pablo reads
+the PDB. In that product-state workflow, `ccd_pablo.crosslinks` should describe
+the atoms that remain in the emitted PDB, not the reactant atoms that were
+removed during assembly.
+
+| Field | Product-state expectation | Example |
+|---|---|---|
+| Modified lysine residue | Acylated lysine product residue name | `LYX` |
+| Reacted NHS-derived monomer | Product monomer residue name, preserving per-monomer residue identity | `NHX` |
+| Linking atoms | Exact PDB atom names present in the product file | `LYX:NZ` to `NHX:C047` |
+| Leaving atoms | Empty groups when PolyzyMD already removed them | `leaving_atoms: [[], []]` |
+| Atom naming | Match emitted PDB names exactly; do not canonicalize unless the residue definition supports it | `C047`, not a guessed `C` |
+
+Do not collapse the whole polymer chain into one residue to make ingestion easier.
+Each monomer residue identity should remain explicit so custom residue definitions
+and OpenFF parameterization can reason about the actual product graph.
+
 ## OpenFF disulfide behavior
 
 - `CYX` may be accepted as a cysteine-like residue alias during parsing, but it is
@@ -90,6 +123,8 @@ narrow custom-substructure proof of concept. Do not suppress the error.
 | Error dump names `CYS#0001`, terminal `H`, or N-terminal cysteine/cystine | N-terminal cysteine has terminal hydrogens plus disulfide chemistry that does not match OpenFF's template | Check SG-HG absence, SG-SG bond, N-terminal hydrogens, and residue naming | Curate the cystine or test a structure-specific `NCYX` custom substructure | Seen in 4CHA proof of concept; not universal |
 | Renaming disulfide cysteine to `CYX` does not resolve ingestion | `CYX` aliasing is not equivalent to a complete public template for all contexts | Validate direct OpenFF ingestion and inspect charge mismatch | Fix connectivity/hydrogens or prepare an upstream OpenFF issue/PR | Avoid relying on residue rename alone |
 | Failure adjacent to residues listed in `REMARK 465` | Missing-coordinate residues or missing heavy atoms alter termini or local chemistry | Read PDB header and visualize gaps | Model missing regions externally if required for the study | Automatic filling is a modeling decision |
+| `declared leaving atoms {'HZ3', 'HZ2'} not found in any LYX residue` | Pablo was configured with reactant-state leaving atom names for an already modified product PDB | Inspect the emitted product PDB and the resolved crosslink requirement; confirm the linked residues contain `LYX:NZ` and `NHX:<acyl carbon>` and no leaving atoms | Generate the Pablo crosslink from the resolved product-state plan and use `leaving_atoms: [[], []]` after PolyzyMD has already removed leaving atoms | Do not hardcode `HZ2`/`HZ3`; actual source hydrogens may have different names such as `H11`/`H13`, and product-state ingestion should not remove them again |
+| `Atom A:LYX23.NZ ... has 1 radical electrons, formal charge +1, and 3 bonds` | Product-state `LYX` definition kept protonated lysine `NZ+` charge after extra NZ hydrogens were removed and the amide crosslink was added | Inspect the generated `LYX` atom definition and OpenFF atom-level radical diagnostic | Neutralize product-state `LYX:NZ` in the generated Pablo definition when leaving hydrogens are absent | The molecule-level error may mention S/P-block radical support even when the atom-level dump identifies nitrogen |
 
 ## Catalog maintenance rule
 

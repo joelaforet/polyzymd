@@ -361,8 +361,9 @@ def write_crosslinked_pdb(
         serial_by_input_serial=protein_serial_by_input_serial,
     )
 
-    if writer_options.append_ter_records and atom_lines:
-        atom_lines.append("TER\n")
+    if writer_options.append_ter_records and output_atoms:
+        atom_lines.append(_format_ter_line(output_atoms[-1], next_serial))
+        next_serial += 1
 
     next_polymer_residue_number = 1
     for fragment_index, fragment in enumerate(fragments, start=1):
@@ -388,8 +389,9 @@ def write_crosslinked_pdb(
         conect_map.setdefault(fragment_result.reactive_serial, set()).add(nz_serial)
         crosslink_pair = (nz_serial, fragment_result.reactive_serial)
 
-        if writer_options.append_ter_records:
-            atom_lines.append("TER\n")
+        if writer_options.append_ter_records and fragment_result.atoms:
+            atom_lines.append(_format_ter_line(fragment_result.atoms[-1], next_serial))
+            next_serial += 1
 
     if crosslink_pair is None:
         raise ValueError("No polymer fragment was available for crosslinked PDB assembly")
@@ -900,6 +902,14 @@ def _format_pdb_atom_line(atom: PdbAtomRecord) -> str:
         f"{atom.occupancy:6.2f}{atom.temp_factor:6.2f}          "
         f"{_format_element(atom.element, atom.atom_name):>2}{charge:>2}\n"
     )
+
+
+def _format_ter_line(atom: PdbAtomRecord, serial: int) -> str:
+    """Format a PDB TER line with residue identity preserved."""
+    residue_name = _pdb_safe_residue_name(atom.residue_name)
+    chain_id = (atom.chain_id or " ")[:1]
+    insertion_code = (atom.insertion_code or " ")[:1]
+    return f"TER   {serial:5d}      {residue_name:>3} {chain_id}{atom.residue_number:4d}{insertion_code}\n"
 
 
 def _format_atom_name(atom_name: str) -> str:

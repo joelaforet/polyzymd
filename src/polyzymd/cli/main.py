@@ -2696,9 +2696,11 @@ def clean_pdb(
         _write_clean_pdb_report(
             report_path,
             plan,
-            _skipped_pablo_validation("Clean-PDB structural validation failed")
-            if check_pablo
-            else None,
+            (
+                _skipped_pablo_validation("Clean-PDB structural validation failed")
+                if check_pablo
+                else None
+            ),
         )
         raise click.ClickException(
             "Clean-PDB validation failed; strip waters, ions, solvents, and unsupported free "
