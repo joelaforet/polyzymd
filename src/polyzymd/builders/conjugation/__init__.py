@@ -84,6 +84,7 @@ from polyzymd.builders.conjugation.models import (
     ConjugateBuildRequest,
     ConjugateBuildResult,
     ConjugationBuildResult,
+    ConjugationResult,
 )
 from polyzymd.builders.conjugation.modifier import GeneratedModifierFragment, PlacedModifierFragment
 from polyzymd.builders.conjugation.moieties import MoietyDescriptor, normalize_moiety_descriptor
@@ -239,6 +240,7 @@ __all__ = [
     "ConjugationError",
     "ConjugationMetadata",
     "ConjugationNotImplementedError",
+    "ConjugationResult",
     "ConjugatedPolymerSystemResult",
     "ConjugatedPolymerSystemSettings",
     "CrosslinkedPdbAssemblyOptions",
