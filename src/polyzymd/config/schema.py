@@ -1445,9 +1445,9 @@ class SimulationConfig(BaseModel):
         tokens: list[tuple[str, str]] = []
         for cosolvent in self.solvent.co_solvents:
             name = _format_safe_token(cosolvent.name)
-            if cosolvent.volume_fraction is not None:
-                percent = _format_decimal_token(cosolvent.volume_fraction * 100)
-                token = f"{name}_{percent}pctv"
+            if cosolvent.mole_fraction is not None:
+                percent = _format_decimal_token(cosolvent.mole_fraction * 100)
+                token = f"{name}_{percent}molpct"
             elif cosolvent.concentration is not None:
                 concentration = _format_decimal_token(cosolvent.concentration)
                 token = f"{name}_{concentration}M"

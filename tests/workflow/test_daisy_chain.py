@@ -15,7 +15,7 @@ def _simulation_config_data(tmp_path: Path) -> dict:
         "thermodynamics": {"temperature": 310.0},
         "solvent": {
             "primary": {"type": "water", "model": "tip3p"},
-            "co_solvents": [{"name": "dmso", "volume_fraction": 0.3}],
+            "co_solvents": [{"name": "dmso", "mole_fraction": 0.3}],
         },
         "simulation_phases": {
             "equilibration_stages": [
@@ -160,7 +160,7 @@ class TestJobNameGeneration:
         data["output"]["naming_template"] = "{primary_solvent}_{cosolvent_composition}_r{replicate}"
         sim_config = SimulationConfig(**data)
 
-        assert create_job_name(sim_config, 1) == "water_tip3p_dmso_30pctv_r1"
+        assert create_job_name(sim_config, 1) == "water_tip3p_dmso_30molpct_r1"
 
     def test_job_name_sanitizer_removes_unsafe_characters(self, tmp_path):
         """Generated SLURM job names should be safe for headers and log paths."""
