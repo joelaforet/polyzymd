@@ -98,7 +98,7 @@ solvent:
   co_solvents: []
   ions:
     neutralize: true
-    nacl_concentration: 0.15
+    nacl_concentration: 0.15  # NaCl-equivalent final ion pool (M)
   box:
     padding: 1.2
     shape: "rhombic_dodecahedron"

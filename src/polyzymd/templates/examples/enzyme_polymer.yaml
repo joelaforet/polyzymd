@@ -77,7 +77,7 @@ solvent:
   
   ions:
     neutralize: true
-    nacl_concentration: 0.1  # 100 mM NaCl
+    nacl_concentration: 0.1  # 100 mM NaCl-equivalent final ion pool
   
   box:
     padding: 2.0  # nm padding (2.0 recommended for PACKMOL convergence)

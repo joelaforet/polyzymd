@@ -28,6 +28,20 @@ def test_mole_fraction_counts_replace_water_from_mass_budget() -> None:
     assert water_count == 90
 
 
+def test_neutral_solvent_mass_subtracts_actual_final_ion_pool() -> None:
+    """Mass budgeting should reserve the actual final neutralized ion pool."""
+    neutral_solvent_mass = SolventBuilder._calculate_neutral_solvent_mass(
+        solvent_mass=5000.0,
+        na_count=51,
+        cl_count=36,
+        na_mass=23.0,
+        cl_mass=35.5,
+    )
+
+    assert neutral_solvent_mass == 5000.0 - (51 * 23.0 + 36 * 35.5)
+    assert neutral_solvent_mass != 5000.0 - (43 * (23.0 + 35.5))
+
+
 def test_config_translation_uses_mole_fraction(monkeypatch) -> None:
     """solvate_from_config should pass mole_fraction into builder composition."""
     captured = {}
@@ -59,8 +73,8 @@ def test_config_translation_uses_mole_fraction(monkeypatch) -> None:
     assert co_solvents[1].concentration == 2.0
 
 
-def test_neutralizing_ion_counts_break_parity_ties_toward_more_ions() -> None:
-    """Neutralization should prefer the larger feasible ion total on parity ties."""
+def test_neutralizing_ion_counts_use_final_pool_and_tie_toward_more_ions() -> None:
+    """Neutralization should target a final ion pool and prefer more ions on ties."""
     na_count, cl_count = SolventBuilder._calculate_ion_counts(
         nacl_to_add=43,
         solute_charge=-15,
@@ -83,7 +97,7 @@ def test_neutralizing_ion_counts_produce_zero_net_charge(
     solute_charge: int,
     expected_counts: tuple[int, int],
 ) -> None:
-    """Neutralizing ion counts should exactly cancel integer solute charge."""
+    """Neutralizing final ion counts should exactly cancel integer solute charge."""
     na_count, cl_count = SolventBuilder._calculate_ion_counts(
         nacl_to_add=10,
         solute_charge=solute_charge,
