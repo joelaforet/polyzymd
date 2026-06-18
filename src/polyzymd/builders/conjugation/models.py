@@ -38,17 +38,70 @@ class ConjugateBuildRequest(BaseModel):
     )
 
 
-class ConjugateBuildResult(BaseModel):
-    """Lightweight public result shell for future engine outputs."""
+class ConjugationResult(BaseModel):
+    """Public conjugation orchestration result.
+
+    The current engine delegates to the config-driven system workflow and keeps
+    the legacy result in memory while exposing a stable, lightweight summary for
+    facade callers.
+    """
 
     model_config = {"arbitrary_types_allowed": True}
 
+    status: str = "completed"
     output_dir: Path | None = None
+    config_path: Path | None = None
+    relaxed_conjugate_pdb_path: Path | None = None
+    solvated_pdb_path: Path | None = None
+    workflow_json_path: Path | None = None
+    final_interchange_created: bool | None = None
+    artifact_paths: dict[str, Path] = Field(default_factory=dict)
     legacy_result: Any | None = Field(
         default=None,
         exclude=True,
-        description="Delegated legacy result retained in memory during Phase 1.",
+        description="Delegated legacy result retained in memory during the refactor.",
     )
+
+    @classmethod
+    def from_legacy_result(
+        cls,
+        legacy_result: Any,
+        *,
+        config_path: Path | str | None = None,
+    ) -> "ConjugationResult":
+        """Create a public result summary from the config workflow result."""
+        relaxed_path = _optional_path(getattr(legacy_result, "relaxed_conjugate_pdb_path", None))
+        solvated_path = _optional_path(getattr(legacy_result, "solvated_pdb_path", None))
+        workflow_path = _optional_path(getattr(legacy_result, "workflow_json_path", None))
+        artifact_paths = {
+            name: path
+            for name, path in {
+                "relaxed_conjugate_pdb": relaxed_path,
+                "solvated_pdb": solvated_path,
+                "workflow_json": workflow_path,
+            }.items()
+            if path is not None
+        }
+        return cls(
+            status="completed",
+            output_dir=_optional_path(getattr(legacy_result, "output_dir", None)),
+            config_path=_optional_path(config_path),
+            relaxed_conjugate_pdb_path=relaxed_path,
+            solvated_pdb_path=solvated_path,
+            workflow_json_path=workflow_path,
+            final_interchange_created=getattr(legacy_result, "final_interchange_created", None),
+            artifact_paths=artifact_paths,
+            legacy_result=legacy_result,
+        )
+
+
+ConjugateBuildResult = ConjugationResult
+
+
+def _optional_path(value: Any) -> Path | None:
+    if value is None:
+        return None
+    return Path(value)
 
 
 class ConjugationBuildResult(BaseModel):

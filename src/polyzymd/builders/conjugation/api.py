@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from polyzymd.builders.conjugation.engine import ConjugationEngine
-from polyzymd.builders.conjugation.system_workflow import (
-    ConjugatedPolymerSystemResult,
-    ConjugatedPolymerSystemSettings,
-)
+from polyzymd.builders.conjugation.models import ConjugateBuildRequest, ConjugationResult
+
+if TYPE_CHECKING:
+    from polyzymd.builders.conjugation.system_workflow import ConjugatedPolymerSystemSettings
 
 
 def build_conjugate_from_config(
@@ -18,12 +18,12 @@ def build_conjugate_from_config(
     output_dir: Path | str | None = None,
     settings: ConjugatedPolymerSystemSettings | None = None,
     free_polymer_seed: int | None = None,
-) -> ConjugatedPolymerSystemResult:
+) -> ConjugationResult:
     """Build a conjugate using the existing config-driven workflow.
 
     ``config`` may be an in-memory ``SimulationConfig`` or a path to a YAML
-    config. Phase 1 intentionally delegates to the legacy workflow entry
-    points while establishing a stable public facade.
+    config. This facade delegates through :class:`ConjugationEngine` so public
+    orchestration stays centralized while preserving the working workflow.
     """
     engine = ConjugationEngine(settings=settings)
     return engine.build_from_config(
@@ -33,15 +33,16 @@ def build_conjugate_from_config(
     )
 
 
-def build_conjugate(*_args: Any, **_kwargs: Any) -> ConjugatedPolymerSystemResult:
-    """Build a conjugate from direct construction inputs.
+def build_conjugate(
+    request: ConjugateBuildRequest | Any | Path | str | None = None,
+    **kwargs: Any,
+) -> ConjugationResult:
+    """Build a conjugate through the public engine wrapper.
 
-    Direct, non-config conjugate construction is the future engine API. The
-    underlying behavior has not been migrated yet, so callers should use
-    :func:`build_conjugate_from_config` for Phase 1.
+    Supported Phase 5 inputs are a ``ConjugateBuildRequest``, a config object,
+    or a config path. Direct molecule/topology construction fails explicitly in
+    the engine instead of silently falling back to a direct OpenFF path.
     """
-    raise NotImplementedError(
-        "Direct build_conjugate(...) inputs are not implemented in the Phase 1 "
-        "conjugation facade. Use build_conjugate_from_config(...) to delegate "
-        "to the existing config-driven workflow."
-    )
+    settings = kwargs.pop("settings", None)
+    engine = ConjugationEngine(settings=settings)
+    return engine.build(request, **kwargs)
