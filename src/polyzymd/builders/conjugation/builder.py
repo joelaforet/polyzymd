@@ -41,7 +41,6 @@ from polyzymd.builders.conjugation.nhs_lys import (
     plan_nhs_lys_amide,
 )
 from polyzymd.builders.conjugation.pablo_adapter import PabloIngestionResult, PabloIngestor
-from polyzymd.builders.conjugation.polymerist_compat import polymerist_py312_compat_status
 from polyzymd.builders.conjugation.sites import (
     AttachmentSite,
     match_site_rule,
@@ -662,18 +661,6 @@ class CovalentModificationBuilder:
                 "preserve_total_charge": self.config.charge.preserve_total_charge,
             },
         )
-        shim_status = polymerist_py312_compat_status()
-        if shim_status["relevant"]:
-            report.add(
-                DiagnosticCode.POLYMERIST_COMPAT,
-                "Polymerist Python 3.12 compatibility shim is available for lazy imports",
-                severity=(
-                    DiagnosticSeverity.WARNING
-                    if shim_status["shim_required"]
-                    else DiagnosticSeverity.INFO
-                ),
-                details=shim_status,
-            )
         return report
 
     def _build_enabled_metadata(self) -> ConjugationMetadata:

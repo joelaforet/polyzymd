@@ -243,6 +243,8 @@ class PabloIngestor:
         *,
         chain_policy: Any | None = None,
         output_dir: Path | str | None = None,
+        residue_library: Any | None = None,
+        additional_definitions: Any | None = None,
     ) -> PabloIngestionResult:
         """Attempt real Pablo/CCD ingestion for an existing structure.
 
@@ -254,6 +256,12 @@ class PabloIngestor:
             Chain role policy from the conjugation config, by default ``None``.
         output_dir : Path, str, or None, optional
             Optional directory for a Pablo ingestion sidecar, by default ``None``.
+        residue_library : Any or None, optional
+            Prebuilt Pablo residue library/cache. When supplied, policy-based
+            residue-library construction and crosslink patching are skipped.
+        additional_definitions : Any or None, optional
+            Optional definitions passed through Pablo's ``additional_definitions``
+            argument, by default ``None``.
 
         Returns
         -------
@@ -296,7 +304,7 @@ class PabloIngestor:
                     severity=DiagnosticSeverity.ERROR,
                     message="OpenFF Pablo is unavailable; structure parsing was not attempted",
                     details={
-                        "action": "Run ingestion in the conjugation-py312 pixi environment",
+                        "action": "Run ingestion in a pixi environment with OpenFF Pablo available",
                         "import_error": availability.error,
                     },
                 )
@@ -318,18 +326,37 @@ class PabloIngestor:
 
         try:
             pablo_module = importlib.import_module("openff.pablo")
-            residue_library_result = build_pablo_residue_library(
-                self._policy,
-                pablo_module=pablo_module,
-            )
-            diagnostics.extend(
-                _diagnostics_from_residue_library(residue_library_result.diagnostics)
-            )
+            if residue_library is None:
+                residue_library_result = build_pablo_residue_library(
+                    self._policy,
+                    pablo_module=pablo_module,
+                )
+                residue_library = residue_library_result.residue_library
+                diagnostics.extend(
+                    _diagnostics_from_residue_library(residue_library_result.diagnostics)
+                )
+            else:
+                diagnostics.append(
+                    ConjugationDiagnostic(
+                        code=DiagnosticCode.CCD_POLICY,
+                        severity=DiagnosticSeverity.INFO,
+                        message="Using a prebuilt Pablo residue library for ingestion",
+                        details={
+                            "policy_crosslinks_applied": False,
+                            "reason": "product-state definitions were supplied by the caller",
+                        },
+                    )
+                )
+            topology_kwargs = {
+                "residue_library": residue_library,
+                "format": _infer_pablo_format(structure_path),
+                "use_canonical_names": self._policy_attr("use_canonical_atom_names", False),
+            }
+            if additional_definitions is not None:
+                topology_kwargs["additional_definitions"] = additional_definitions
             topology = pablo_module.topology_from_pdb(
                 structure_path,
-                residue_library=residue_library_result.residue_library,
-                format=_infer_pablo_format(structure_path),
-                use_canonical_names=self._policy_attr("use_canonical_atom_names", False),
+                **topology_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 - third-party errors are normalized to diagnostics
             diagnostics.append(_diagnostic_from_parse_error(exc, structure_path))
@@ -430,8 +457,8 @@ class PabloIngestor:
         availability = self.probe_available()
         if not availability.available:
             raise PabloIngestionError(
-                "OpenFF Pablo is not importable in this environment. Use the "
-                "'conjugation-py312' pixi environment for conjugation ingestion preflight. "
+                "OpenFF Pablo is not importable in this environment. Use a pixi environment "
+                "with OpenFF Pablo available for conjugation ingestion preflight. "
                 f"Original import error: {availability.error}"
             )
         return availability
@@ -451,8 +478,8 @@ class PabloIngestor:
                 available=False,
                 error=str(exc),
                 warnings=[
-                    "OpenFF Pablo is unavailable; install/use the conjugation-py312 pixi "
-                    "environment before production ingestion"
+                    "OpenFF Pablo is unavailable; use a pixi environment with OpenFF Pablo "
+                    "available before production ingestion"
                 ],
             )
 
@@ -978,9 +1005,9 @@ def _build_result_from_records(
         chain_count=len(chain_ids) if atom_records else None,
         chain_ids=chain_ids,
         blank_chain_atom_count=sum(1 for record in atom_records if not record.get("chain_id")),
-        blank_chain_residue_count=inspection.blank_chain_residue_count
-        if inspection is not None
-        else 0,
+        blank_chain_residue_count=(
+            inspection.blank_chain_residue_count if inspection is not None else 0
+        ),
         bond_count=bond_count,
         link_candidate_count=len(link_candidates),
     )

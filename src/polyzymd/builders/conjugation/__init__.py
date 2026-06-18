@@ -55,6 +55,9 @@ from polyzymd.builders.conjugation.linkers import (
     resolve_modifier_nhs_atoms,
     resolve_modifier_reactive_atom,
 )
+from polyzymd.builders.conjugation.local_minimization import (
+    product_state_pablo_crosslink_requirement,
+)
 from polyzymd.builders.conjugation.mechanism_library import (
     get_builtin_mechanism,
     list_builtin_mechanisms,
@@ -96,6 +99,12 @@ from polyzymd.builders.conjugation.pablo_adapter import (
     PabloStructureCounts,
     PabloStructurePreflight,
 )
+from polyzymd.builders.conjugation.pablo_reaction import (
+    PabloProductDefinitionDiagnostic,
+    PabloReactionDiagnostic,
+    PabloReactionRequest,
+    explore_pablo_residue_reaction,
+)
 from polyzymd.builders.conjugation.parameterization import (
     InterchangeParameterizationResult,
     InterchangeParameterizationSettings,
@@ -132,15 +141,39 @@ from polyzymd.builders.conjugation.polymer_recipe import (
     generate_polymerist_smoke_polymer,
     sbma_egpma_nhs_recipe,
 )
-from polyzymd.builders.conjugation.polymerist_compat import (
-    ensure_polymerist_py312_compat,
-    import_polymerist_building,
-)
 from polyzymd.builders.conjugation.polymerist_pdb import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.product_pablo import (
+    ProductStatePabloDefinitionSummary,
+    ProductStatePabloLibrary,
+    build_product_state_pablo_library,
+)
+from polyzymd.builders.conjugation.protein_preparation import (
+    ProteinCanonicalizationResult,
+    ProteinCanonicalizationSettings,
+    canonicalize_protein_hydrogens,
+)
 from polyzymd.builders.conjugation.rdkit_inputs import (
     AtomIdentity,
     RdkitInputBundle,
     load_pdb_as_rdkit_input,
+)
+from polyzymd.builders.conjugation.reaction_roles import (
+    STRUCTURE_MATCHING_BLOCKER_MESSAGE,
+    AtomMappedReaction,
+    AtomRoleSpec,
+    BondChange,
+    BondChangeSet,
+    GenericResolvedReactionPlan,
+    MappedBond,
+    MappedSmartsValidation,
+    PdbAtomIdentity,
+    ReactionParticipant,
+    ResolvedAtomRole,
+    ResolvedBondChange,
+    atom_mapped_reaction_from_mechanism_config,
+    derive_bond_changes,
+    resolve_reaction_roles_from_identity_map,
+    validate_mapped_smarts,
 )
 from polyzymd.builders.conjugation.sites import (
     AttachmentSite,
@@ -154,13 +187,6 @@ from polyzymd.builders.conjugation.smoke import (
     validate_finite_energy,
     validate_finite_positions,
 )
-from polyzymd.builders.conjugation.system_workflow import (
-    ConjugatedPolymerSystemResult,
-    ConjugatedPolymerSystemSettings,
-    build_conjugated_polymer_system_from_config,
-    build_conjugated_polymer_system_from_config_path,
-    topology_with_pdb_positions,
-)
 from polyzymd.builders.conjugation.structure_normalization import (
     PDBChainNormalizationAction,
     PDBCleanlinessIssue,
@@ -168,12 +194,23 @@ from polyzymd.builders.conjugation.structure_normalization import (
     plan_pdb_chain_normalization,
     write_normalized_pdb,
 )
+from polyzymd.builders.conjugation.system_workflow import (
+    ConjugatedPolymerSystemResult,
+    ConjugatedPolymerSystemSettings,
+    build_conjugated_polymer_system_from_config,
+    build_conjugated_polymer_system_from_config_path,
+    topology_with_pdb_positions,
+)
 
 __all__ = [
     "AddedBond",
+    "AtomMappedReaction",
     "AtomIdentity",
+    "AtomRoleSpec",
     "AttachmentSite",
     "BondSpec",
+    "BondChange",
+    "BondChangeSet",
     "ChainPolicyMetadata",
     "ChargePatchHint",
     "ComponentMetadata",
@@ -197,6 +234,7 @@ __all__ = [
     "ExplicitNhsReactiveGroup",
     "GeneratedModifierFragment",
     "GeneratedPolymerFragment",
+    "GenericResolvedReactionPlan",
     "GraphEditPlan",
     "InterchangeParameterizationResult",
     "InterchangeParameterizationSettings",
@@ -217,6 +255,9 @@ __all__ = [
     "PackmolModifierPlacementSettings",
     "PabloCrosslinkRequirement",
     "PabloAvailability",
+    "PabloProductDefinitionDiagnostic",
+    "PabloReactionDiagnostic",
+    "PabloReactionRequest",
     "PDBChainNormalizationAction",
     "PDBCleanlinessIssue",
     "PDBNormalizationPlan",
@@ -228,6 +269,7 @@ __all__ = [
     "PabloStructureCounts",
     "PabloStructurePreflight",
     "PdbAtomRecord",
+    "PdbAtomIdentity",
     "PdbAtomSelector",
     "PdbLinkageAttachment",
     "PlacedModifierFragment",
@@ -240,27 +282,41 @@ __all__ = [
     "PolymeristGenerationSmokeResult",
     "PolymerMonomerRecipe",
     "PolymerRecipe",
+    "ProductStatePabloDefinitionSummary",
+    "ProductStatePabloLibrary",
+    "ProteinCanonicalizationResult",
+    "ProteinCanonicalizationSettings",
     "ReactionMechanism",
+    "ReactionParticipant",
     "ReactiveEndpoint",
     "ResolvedAttachmentPlan",
+    "ResolvedAtomRole",
+    "ResolvedBondChange",
     "RdkitInputBundle",
     "RdkitGraphEditResult",
     "RdkitGraphEditExecutionRequest",
     "RdkitGraphEditExecutionResult",
     "RdkitGraphEditExecutionSummary",
+    "MappedBond",
+    "MappedSmartsValidation",
+    "STRUCTURE_MATCHING_BLOCKER_MESSAGE",
     "SiteAtomRule",
     "ProteinLinkSite",
     "VacuumSmokeResult",
     "VacuumSmokeSettings",
     "save_metadata",
+    "canonicalize_protein_hydrogens",
     "canonicalize_poc_residue_name",
     "build_conjugated_polymer_system_from_config",
     "build_conjugated_polymer_system_from_config_path",
+    "build_product_state_pablo_library",
     "construct_modifier_linked_protein",
     "construct_explicit_pdb_linkage",
     "create_interchange_from_pablo_topology",
-    "ensure_polymerist_py312_compat",
+    "atom_mapped_reaction_from_mechanism_config",
+    "derive_bond_changes",
     "detect_nhs_reactive_group",
+    "explore_pablo_residue_reaction",
     "execute_nhs_lys_amide_rdkit_graph_edit",
     "extract_explicit_rdkit_execution_request",
     "explicit_linkage_contract_from_config",
@@ -268,7 +324,6 @@ __all__ = [
     "generate_polymerist_smoke_polymer",
     "generated_fragment_from_polymerist_pdb",
     "get_builtin_mechanism",
-    "import_polymerist_building",
     "list_builtin_mechanisms",
     "load_pdb_as_rdkit_input",
     "load_builtin_mechanisms",
@@ -281,15 +336,18 @@ __all__ = [
     "placed_fragment_from_resolved_plan",
     "plan_pdb_chain_normalization",
     "plan_nhs_lys_amide",
+    "product_state_pablo_crosslink_requirement",
     "require_explicit_pablo_crosslink",
     "require_pablo_crosslink_requirement",
     "resolve_explicit_linkage_contract",
+    "resolve_reaction_roles_from_identity_map",
     "resolve_modifier_leaving_atoms",
     "resolve_modifier_nhs_atoms",
     "resolve_modifier_reactive_atom",
     "run_restrained_vacuum_smoke",
     "sbma_egpma_nhs_recipe",
     "topology_with_pdb_positions",
+    "validate_mapped_smarts",
     "validate_finite_energy",
     "validate_finite_positions",
     "write_normalized_pdb",

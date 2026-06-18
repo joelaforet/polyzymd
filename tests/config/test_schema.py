@@ -189,6 +189,72 @@ class TestConfigValidation:
         assert "Additional" not in description
 
 
+class TestConjugationReactionSmartsConfig:
+    """Tests for generic atom-mapped reaction metadata in conjugation config."""
+
+    def test_mechanism_accepts_reaction_smarts_with_atom_roles(self):
+        """Mechanism config should validate generic atom-map role metadata."""
+        from polyzymd.config.schema import ConjugationMechanismConfig
+
+        mechanism = ConjugationMechanismConfig(
+            name="generic_amide",
+            reaction_smarts="[N:1].[C:2]>>[N:1]-[C:2]",
+            atom_roles=[
+                {"map_number": 1, "participant": "site", "role": "linking", "label": "donor"},
+                {"map_number": 2, "participant": "moiety", "role": "linking"},
+            ],
+        )
+
+        assert mechanism.reaction_smarts == "[N:1].[C:2]>>[N:1]-[C:2]"
+        assert mechanism.atom_roles[0].map_number == 1
+        assert mechanism.atom_roles[0].participant == "site"
+
+    def test_reaction_smarts_requires_reaction_separator(self):
+        """Invalid reaction SMARTS should fail before workflow execution."""
+        from polyzymd.config.schema import ConjugationMechanismConfig
+
+        with pytest.raises(ValidationError, match="reaction_smarts must contain"):
+            ConjugationMechanismConfig(reaction_smarts="[N:1].[C:2]")
+
+    def test_explicit_linkage_accepts_reaction_smarts_as_metadata(self):
+        """PDB explicit linkage config may carry mapped SMARTS for generic preflights."""
+        from polyzymd.config.schema import ConjugationAttachmentConfig
+
+        attachment = ConjugationAttachmentConfig.model_validate(
+            {
+                "name": "mapped-explicit-linkage",
+                "site": {
+                    "chain_id": "A",
+                    "residue_name": "AAA",
+                    "residue_number": 10,
+                    "atom_name": "N1",
+                },
+                "moiety": {
+                    "name": "modifier",
+                    "input_path": "modifier.pdb",
+                    "link_site": {
+                        "chain_id": "C",
+                        "residue_name": "BBB",
+                        "residue_number": 1,
+                        "atom_name": "C1",
+                    },
+                },
+                "mechanism": {
+                    "name": "explicit_linkage",
+                    "reaction_smarts": "[N:1].[C:2]>>[N:1]-[C:2]",
+                    "atom_roles": [
+                        {"map_number": 1, "participant": "site", "role": "linking"},
+                        {"map_number": 2, "participant": "moiety", "role": "linking"},
+                    ],
+                    "product_residues": {"site": "AAA", "moiety": "BBB"},
+                },
+            }
+        )
+
+        assert attachment.mechanism.reaction_smarts == "[N:1].[C:2]>>[N:1]-[C:2]"
+        assert len(attachment.mechanism.atom_roles) == 2
+
+
 class TestCoSolventCompositionValidation:
     """Test co-solvent mole fraction and concentration validation."""
 
@@ -322,9 +388,9 @@ class TestRunDirectoryNaming:
                     "name": "tert butanol",
                     "smiles": "CC(C)(C)O",
                     "density": 0.78,
-                    "volume_fraction": 0.125,
+                    "mole_fraction": 0.125,
                 },
-                {"name": "dmso", "volume_fraction": 0.30},
+                {"name": "dmso", "mole_fraction": 0.30},
             ],
         }
         minimal_config_data["output"] = {

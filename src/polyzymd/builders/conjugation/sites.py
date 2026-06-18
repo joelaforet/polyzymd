@@ -112,9 +112,7 @@ def match_site_rule(site: AttachmentSite, mechanism: ReactionMechanism) -> SiteA
         if residue_matches and rule.atom_name == site.atom_name:
             return rule
 
-    allowed = ", ".join(
-        f"{rule.residue_name}:{rule.atom_name}" for rule in mechanism.allowed_sites
-    )
+    allowed = ", ".join(f"{rule.residue_name}:{rule.atom_name}" for rule in mechanism.allowed_sites)
     raise ValueError(
         f"Site {site.chain_id}:{site.residue_name}{site.residue_number}:{site.atom_name} is not "
         f"allowed for mechanism '{mechanism.identifier}'. Allowed rules: {allowed}"

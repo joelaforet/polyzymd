@@ -122,6 +122,25 @@ consistent model and validate it again.
 | Failure around `CYS#0001`, terminal `H`, or N-terminal cysteine | N-terminal cysteine/cystine has terminal hydrogens and disulfide state OpenFF does not match cleanly | Check N-terminal atom names, SG-HG absence, and SG-SG bond | Curate the terminal cystine or use a narrow `NCYX` custom substructure proof of concept | Private OpenFF API; not universal |
 | Residue names include `CYX`, but OpenFF still fails | `CYX` may be treated as a cysteine alias, not a complete public template solution | Compare residue atoms and SG-SG connectivity | Add/verify disulfide connectivity and hydrogens; consider upstream issue/PR | Do not assume renaming to CYX is sufficient |
 | Failure near residues reported in `REMARK 465` | Missing-coordinate residues or missing heavy atoms affect chemistry or termini | Read PDB header and visualize gaps | Model missing regions with an external tool when scientifically appropriate | PolyzyMD should receive a curated result |
+| `declared leaving atoms {'HZ3', 'HZ2'} not found in any LYX residue` or similar Pablo crosslink leaving-atom error | A product-state modified PDB was passed to Pablo with reactant-state leaving atom names after PolyzyMD had already removed those atoms | Inspect the emitted product PDB for exact product residue and atom names, for example `LYX:NZ` to `NHX:C047`, and confirm the leaving atoms are absent from the linked residue | Use a product-state `ccd_pablo.crosslinks` entry with exact emitted residue and atom names and `leaving_atoms: [[], []]` when PolyzyMD has already removed the leaving atoms | Do not hardcode canonical lysine names such as `HZ2`/`HZ3`; generated hydrogens may be named `H11`/`H13`, and product PDBs should not ask Pablo to remove them again |
+| `Atom A:LYX23.NZ ... has 1 radical electrons, formal charge +1, and 3 bonds` followed by `does not currently support parsing molecules with S- and P-block radicals` | Product-state residue definitions carried protonated lysine `NZ+` charge into an acylated lysine with only `CE`, one `HZ`, and the amide carbon bonded | Inspect the Pablo product definition for `LYX:NZ` charge and bonds; confirm product PDB has removed the extra lysine hydrogens and contains the `LYX:NZ` to `NHX:C047` bond | Generate the product-state `LYX` definition with neutral `NZ` when the crosslinked nitrogen has been deprotonated by leaving-hydrogen removal | Do not treat this as an SBMA sulfonate radical until the atom-level OpenFF diagnostic identifies sulfur or oxygen |
+
+## Product-state modified residues
+
+For already modified conjugation PDBs, PolyzyMD has performed the graph surgery
+before Pablo ingestion. The emitted product PDB should contain product residue
+names such as `LYX` for the acylated lysine and `NHX` for the reacted
+NHS-derived polymer monomer, plus the actual crosslink bond in `CONECT` or
+equivalent metadata. Pablo crosslink settings must describe that product state.
+
+Use the exact atom names present in the PDB. For the current NHS-Lys product POC,
+the crosslink is `LYX:NZ` to `NHX:C047`. Because the PDB no longer contains the
+reactant-side leaving atoms on the linked residues, the Pablo crosslink should use
+empty leaving atom groups: `leaving_atoms: [[], []]`.
+
+Do not reuse reactant-state leaving names such as `HZ2`/`HZ3` as a default. The
+source protein may have used different hydrogen names, and those atoms should
+already be absent from the product PDB.
 
 ## Disulfides
 

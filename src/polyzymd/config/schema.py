@@ -759,12 +759,48 @@ class ConjugationLeavingAtomsConfig(BaseModel):
         return [str(item).strip().upper() for item in value]
 
 
+class ConjugationAtomRoleConfig(BaseModel):
+    """Atom-map role metadata for generic atom-mapped reaction preflights."""
+
+    map_number: int = Field(..., ge=1, description="Atom-map number in reaction SMARTS")
+    participant: Literal["site", "moiety"] = Field(
+        ...,
+        description="Reaction participant that owns this mapped atom",
+    )
+    role: Literal["linking", "leaving", "retained", "geometry_anchor"] = Field(
+        ...,
+        description="Mechanism-local role of this mapped atom",
+    )
+    label: str | None = Field(None, description="Optional human-readable role label")
+    required: bool = Field(True, description="Whether a later structure match must resolve this atom")
+
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        """Normalize optional role labels."""
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("atom role labels must be non-empty when provided")
+        return normalized
+
+
 class ConjugationMechanismConfig(BaseModel):
     """Placeholder for covalent attachment chemistry."""
 
     name: str = Field("unspecified", description="Mechanism identifier")
     reaction_smarts: str | None = Field(
-        None, description="Future reaction SMARTS for graph surgery"
+        None,
+        description=(
+            "Atom-mapped reaction SMARTS for generic role/bond-change preflights. "
+            "Generic coordinate surgery is not wired unless an implementation explicitly "
+            "supports the mechanism."
+        ),
+    )
+    atom_roles: list[ConjugationAtomRoleConfig] = Field(
+        default_factory=list,
+        description="Optional role metadata keyed by atom-map number in reaction_smarts",
     )
     site_atom: str | None = Field(None, description="Reactive atom on the biomolecule")
     moiety_atom: str | None = Field(None, description="Reactive atom on the moiety")
@@ -786,6 +822,19 @@ class ConjugationMechanismConfig(BaseModel):
     def normalize_legacy_atom_name(cls, value: str | None) -> str | None:
         """Normalize legacy top-level atom-name fields."""
         return value.strip().upper() if value is not None else None
+
+    @field_validator("reaction_smarts")
+    @classmethod
+    def validate_reaction_smarts(cls, value: str | None) -> str | None:
+        """Validate the minimal reaction SMARTS contract without importing chemistry stacks."""
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("reaction_smarts must be non-empty when provided")
+        if ">>" not in normalized:
+            raise ValueError("reaction_smarts must contain '>>'")
+        return normalized
 
     @field_validator("leaving_atoms", mode="before")
     @classmethod
@@ -853,8 +902,6 @@ class ConjugationAttachmentConfig(BaseModel):
             errors.append("explicit_linkage requires mechanism.product_residues.site")
         if not self.mechanism.product_residues.moiety:
             errors.append("explicit_linkage requires mechanism.product_residues.moiety")
-        if self.mechanism.reaction_smarts is not None:
-            errors.append("explicit_linkage does not support mechanism.reaction_smarts")
 
         if errors:
             raise ValueError("; ".join(errors))
@@ -1975,8 +2022,8 @@ class SimulationConfig(BaseModel):
         tokens: list[tuple[str, str]] = []
         for cosolvent in self.solvent.co_solvents:
             name = _format_safe_token(cosolvent.name)
-            if cosolvent.volume_fraction is not None:
-                percent = _format_decimal_token(cosolvent.volume_fraction * 100)
+            if cosolvent.mole_fraction is not None:
+                percent = _format_decimal_token(cosolvent.mole_fraction * 100)
                 token = f"{name}_{percent}pctv"
             elif cosolvent.concentration is not None:
                 concentration = _format_decimal_token(cosolvent.concentration)

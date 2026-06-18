@@ -210,7 +210,6 @@ def test_moiety_link_site_requires_residue_disambiguation():
             "polymer_recipe",
         ),
         ({"moiety": {"input_path": "modifier.sdf"}}, ".pdb"),
-        ({"mechanism": {"reaction_smarts": "[N:1].[C:2]>>[N:1]-[C:2]"}}, "reaction_smarts"),
         (
             {"mechanism": {"product_residues": {"site": None, "moiety": "NHX"}}},
             "product_residues.site",

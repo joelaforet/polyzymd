@@ -10,7 +10,7 @@ Run on Blanca GPU resources with a command similar to::
     module load slurm/blanca
     salloc ...
     PYTHONNOUSERSITE=1 POLYZYMD_RUN_CONJUGATION_PABLO_SMOKE=1 \
-      pixi run -e conjugation-cuda-12-4 pytest \
+      pixi run -e sim-cuda-12-4 pytest \
       tests/test_conjugation_integrated_smoke.py -v
 
 When the opt-in environment variable is set, scientific or software blockers
@@ -30,7 +30,8 @@ from typing import TypeVar
 
 import pytest
 
-from polyzymd.builders.conjugation.crosslinks import require_explicit_pablo_crosslink
+from polyzymd.builders.conjugation.contracts import PabloCrosslinkRequirement
+from polyzymd.builders.conjugation.crosslinks import require_pablo_crosslink_requirement
 from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
 from polyzymd.builders.conjugation.pablo_adapter import PabloIngestionResult, PabloIngestor
 from polyzymd.builders.conjugation.parameterization import create_interchange_from_pablo_topology
@@ -43,7 +44,6 @@ from polyzymd.builders.conjugation.placement import (
     PackmolModifierPlacementSettings,
     place_modifier_with_packmol,
 )
-from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.polymer_recipe import (
     generate_polymerist_smoke_polymer,
     sbma_egpma_nhs_recipe,
@@ -112,12 +112,16 @@ def test_opt_in_integrated_conjugation_physics_smoke(tmp_path: Path):
         ),
     )
     linker = NhsLysModifierLinker(target_residue_number=TARGET_LYSINE_RESIDUE)
-    pablo_policy = _explicit_lyx_nhx_policy(linker, modifier)
+    resolved_plan = linker.resolve_plan(POC_PROTEIN_PATH, modifier)
+    pablo_policy = _explicit_lyx_nhx_policy(resolved_plan.pablo_crosslink_requirement)
 
     crosslink_validation = _run_stage(
         "Explicit LYX/NHX Pablo crosslink validation",
         artifact_dir,
-        lambda: require_explicit_pablo_crosslink(pablo_policy, linker, modifier),
+        lambda: require_pablo_crosslink_requirement(
+            pablo_policy,
+            resolved_plan.pablo_crosslink_requirement,
+        ),
     )
     assert crosslink_validation.residues == ("LYX", "NHX")
 
@@ -212,11 +216,6 @@ def _require_conjugation_stack_or_skip() -> str:
     if shutil.which("packmol") is None:
         pytest.skip("Packmol binary is not available on PATH")
 
-    from polyzymd.builders.conjugation.polymerist_compat import (
-        ensure_polymerist_py312_compat,
-    )
-
-    ensure_polymerist_py312_compat()
     pytest.importorskip("polymerist", exc_type=ImportError)
     pytest.importorskip("openff.pablo")
     pytest.importorskip("openff.toolkit")
@@ -265,12 +264,8 @@ def _validate_openmm_platform_context(openmm: object, unit: object, platform_nam
     del integrator
 
 
-def _explicit_lyx_nhx_policy(
-    linker: NhsLysModifierLinker,
-    modifier: GeneratedPolymerFragment,
-) -> SimpleNamespace:
+def _explicit_lyx_nhx_policy(requirement: PabloCrosslinkRequirement) -> SimpleNamespace:
     """Build an explicit Pablo policy for the realized LYX/NHX linkage."""
-    spec = linker.linkage_spec(modifier)
     return SimpleNamespace(
         lookup_policy="auto_download",
         ccd_cache_directory=None,
@@ -278,10 +273,10 @@ def _explicit_lyx_nhx_policy(
         use_canonical_atom_names=False,
         crosslinks=[
             SimpleNamespace(
-                residues=(spec.protein_residue_name, spec.modifier_residue_name),
-                linking_atoms=(spec.protein_atom_name, spec.modifier_atom_name),
-                leaving_atoms=(spec.protein_leaving_atom_names, spec.modifier_leaving_atom_names),
-                bond_order=spec.bond_order,
+                residues=requirement.residues,
+                linking_atoms=requirement.linking_atoms,
+                leaving_atoms=requirement.leaving_atoms,
+                bond_order=requirement.bond_order,
             )
         ],
     )

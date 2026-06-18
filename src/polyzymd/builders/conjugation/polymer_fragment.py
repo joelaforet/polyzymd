@@ -354,9 +354,11 @@ def _infer_residues(
         residues.append(
             PolymerFragmentResidue(
                 sequence_index=sequence_index,
-                label=sequence[sequence_index]
-                if sequence and sequence_index < len(sequence)
-                else None,
+                label=(
+                    sequence[sequence_index]
+                    if sequence and sequence_index < len(sequence)
+                    else None
+                ),
                 residue_name=atom.residue_name,
                 residue_number=atom.residue_number,
                 insertion_code=atom.insertion_code,

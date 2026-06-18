@@ -102,17 +102,14 @@ def build_pablo_residue_library(
                 },
             )
         )
-    if _policy_attr(policy, "residue_definition_files", ()):  # pragma: no cover - future hook
-        diagnostics.append(
-            PabloResidueLibraryDiagnostic(
-                severity="warning",
-                message="Custom residue definition files are recorded but not yet applied",
-                details={
-                    "residue_definition_files": [
-                        str(path) for path in _policy_attr(policy, "residue_definition_files", ())
-                    ]
-                },
-            )
+    residue_definition_files = tuple(_policy_attr(policy, "residue_definition_files", ()))
+    if residue_definition_files:
+        files = [str(path) for path in residue_definition_files]
+        raise PabloResidueLibraryError(
+            "Custom residue definition files were requested, but PolyzyMD does not yet "
+            "apply them before Pablo ingestion. Product-state workflows that require "
+            "custom residue definitions must stop before ingestion instead of silently "
+            f"continuing with the standard CCD cache. Requested files: {files}"
         )
 
     return PabloResidueLibraryResult(

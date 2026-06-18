@@ -185,14 +185,19 @@ class NhsLysModifierLinker(ModifierLinker):
         )
 
     def linkage_spec(self, modifier: GeneratedPolymerFragment) -> ModifierLinkageSpec:
-        """Return canonical LYX-NHX Pablo crosslink names."""
+        """Return legacy LYX-NHX linkage names without protein leaving atoms.
+
+        This helper has no protein PDB context and therefore cannot know the
+        actual lysine hydrogens present in a source structure. Pablo/product
+        workflows must use :meth:`resolve_plan` and its resolved crosslink
+        requirement instead.
+        """
         contract = self.generic_contract(modifier)
         return ModifierLinkageSpec(
             protein_residue_name=contract.protein_endpoint.product_residue_name,
             modifier_residue_name=contract.modifier_endpoint.product_residue_name,
             protein_atom_name=contract.protein_endpoint.selector.atom_name,
             modifier_atom_name=contract.modifier_endpoint.selector.atom_name,
-            protein_leaving_atom_names=("HZ2", "HZ3"),
             modifier_leaving_atom_names=contract.modifier_endpoint.leaving_atom_names,
             bond_order=contract.bond.bond_order,
         )

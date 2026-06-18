@@ -154,14 +154,14 @@ def run_conjugation_notebook():
     )
     assert len(conjugated_sequences) == n_conjugated
     assert all(len(s) == conjugated_length for s in conjugated_sequences)
-    assert len(free_polymer_templates) == n_free_polymers, (
-        f"Expected {n_free_polymers} free polymer templates, got {len(free_polymer_templates)}"
-    )
+    assert (
+        len(free_polymer_templates) == n_free_polymers
+    ), f"Expected {n_free_polymers} free polymer templates, got {len(free_polymer_templates)}"
     assert len(free_sequences) == n_free_polymers
     assert all(len(s) == free_polymer_length for s in free_sequences)
-    assert "free_polymer_heavy" not in component_metadata.get("restraint_groups", {}), (
-        "Notebook metadata should not contain free polymer indices"
-    )
+    assert "free_polymer_heavy" not in component_metadata.get(
+        "restraint_groups", {}
+    ), "Notebook metadata should not contain free polymer indices"
 
     dt = time.perf_counter() - t0
     logger.info(
@@ -377,9 +377,9 @@ def run_openmm_simulation(
     conjugate_heavy_indices = groups["conjugate_heavy"]
     free_polymer_heavy_indices = groups["free_polymer_heavy"]
 
-    assert not (set(free_polymer_heavy_indices) & set(conjugate_heavy_indices)), (
-        "Free polymer indices overlap with conjugate indices!"
-    )
+    assert not (
+        set(free_polymer_heavy_indices) & set(conjugate_heavy_indices)
+    ), "Free polymer indices overlap with conjugate indices!"
 
     logger.info(
         "Atom groups (from metadata): %d protein heavy, %d backbone heavy, "

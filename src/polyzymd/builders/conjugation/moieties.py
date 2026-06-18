@@ -19,7 +19,9 @@ class MoietyDescriptor(BaseModel):
     residue_name: str | None = Field(None, description="Optional moiety residue name")
     input_path: Path | None = Field(None, description="Optional structure or template input path")
     smiles: str | None = Field(None, description="Optional declarative SMILES string")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Serializable descriptor notes")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Serializable descriptor notes"
+    )
 
     @field_validator("name")
     @classmethod

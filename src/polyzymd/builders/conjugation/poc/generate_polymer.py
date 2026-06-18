@@ -38,9 +38,7 @@ logger = logging.getLogger("generate_polymer")
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate polymer 3D structure")
     parser.add_argument("--cache-dir", required=True, help="Cache directory for output")
-    parser.add_argument(
-        "--monogrp-json", required=True, help="Path to MonomerGroup JSON"
-    )
+    parser.add_argument("--monogrp-json", required=True, help="Path to MonomerGroup JSON")
     parser.add_argument("--sequence", required=True, help="Full sequence string e.g. BAB")
     parser.add_argument(
         "--monomer-names",
@@ -133,8 +131,8 @@ def main() -> None:
         logger.info("No middle sequence; only terminals will be built")
 
     # Import build_linear_polymer and utilities (all from polymerist)
-    from polymerist.polymers.building.linear import build_linear_polymer
     from polymerist.polymers.building import mbmol_to_rdmol
+    from polymerist.polymers.building.linear import build_linear_polymer
     from polymerist.rdutils.rdcoords.piercing import summarize_ring_piercing
 
     # Build with retries
@@ -204,11 +202,10 @@ def main() -> None:
     # Save uncharged SDF via OpenFF topology
     try:
         from openff.toolkit import Topology as OFFTopology
+
         from polyzymd.utils.topology import topology_to_sdf
 
-        off_top = OFFTopology.from_pdb(
-            str(pdb_path), _custom_substructures=monogrp.monomers
-        )
+        off_top = OFFTopology.from_pdb(str(pdb_path), _custom_substructures=monogrp.monomers)
         # Partition into residues
         from polymerist.mdtools.openfftools.partition import partition
 

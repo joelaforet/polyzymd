@@ -14,18 +14,21 @@ from polyzymd.builders.conjugation.construction import (
     ModifierConstructionResult,
     ModifierConstructionSettings,
 )
-from polyzymd.builders.conjugation.contracts import placed_fragment_from_resolved_plan
+from polyzymd.builders.conjugation.contracts import (
+    ResolvedAttachmentPlan,
+    placed_fragment_from_resolved_plan,
+)
 from polyzymd.builders.conjugation.crosslinks import (
-    require_explicit_pablo_crosslink,
+    require_pablo_crosslink_requirement,
 )
 from polyzymd.builders.conjugation.direct_openff import build_direct_openff_linkage
 from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
+from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
 from polyzymd.builders.conjugation.parameterization import (
     InterchangeParameterizationSettings,
     create_interchange_from_openff_topology,
     create_interchange_from_pablo_topology,
 )
-from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
 from polyzymd.builders.conjugation.pdb_assembly import (
     CrosslinkedPdbAssemblyOptions,
     PdbAtomRecord,
@@ -37,11 +40,16 @@ from polyzymd.builders.conjugation.placement import (
 )
 from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.polymer_recipe import (
-    PolymerRecipe,
     PolymeristGenerationSmokeResult,
+    PolymerRecipe,
     generate_polymerist_smoke_polymer,
 )
 from polyzymd.builders.conjugation.polymerist_pdb import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.reaction_roles import (
+    STRUCTURE_MATCHING_BLOCKER_MESSAGE,
+    atom_mapped_reaction_from_mechanism_config,
+    resolve_reaction_roles_from_identity_map,
+)
 from polyzymd.builders.conjugation.smoke import VacuumSmokeSettings, run_restrained_vacuum_smoke
 from polyzymd.builders.system_builder import SystemBuilder
 from polyzymd.config.schema import (
@@ -52,6 +60,7 @@ from polyzymd.config.schema import (
 )
 
 _ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
+_NHS_LYS_COORDINATE_BACKEND_MECHANISM = "nhs_lys_amide"
 
 
 class ConjugatedPolymerSystemSettings(BaseModel):
@@ -67,7 +76,7 @@ class ConjugatedPolymerSystemSettings(BaseModel):
     solvated_pdb_name: str = "solvated_conjugate_free_polymers.pdb"
     workflow_json_name: str = "conjugated_polymer_system_workflow.json"
     create_final_interchange: bool = False
-    allow_direct_openff_fallback: bool = True
+    allow_direct_openff_fallback: bool = False
     preserve_reference_atom_names: bool = True
     placement: PackmolModifierPlacementSettings = Field(
         default_factory=PackmolModifierPlacementSettings
@@ -147,6 +156,7 @@ def build_conjugated_polymer_system_from_config(
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     attachment = _single_enabled_attachment(config.conjugation)
+    _require_supported_coordinate_backend(attachment)
     recipe = _polymer_recipe_from_attachment(attachment)
     reactive_sequence_index = _reactive_sequence_index(recipe)
 
@@ -175,10 +185,10 @@ def build_conjugated_polymer_system_from_config(
         reactive_residue_number=int(reactive_selector["residue_number"]),
     )
     linker = _nhs_lys_linker_from_attachment(attachment)
-    ccd_pablo_policy = _policy_with_linker_crosslink(
+    resolved_plan = linker.resolve_plan(config.enzyme.pdb_path, modifier)
+    ccd_pablo_policy = _policy_with_resolved_crosslink(
         config.conjugation.ccd_pablo,
-        linker,
-        modifier,
+        resolved_plan,
     )
 
     construction_settings = ModifierConstructionSettings(
@@ -191,6 +201,7 @@ def build_conjugated_polymer_system_from_config(
         protein_pdb_path=config.enzyme.pdb_path,
         modifier=modifier,
         linker=linker,
+        resolved_plan=resolved_plan,
         ccd_pablo_policy=ccd_pablo_policy,
         chain_policy=config.conjugation.chain_policy,
         output_dir=artifact_dir / workflow_settings.conjugate_artifact_dir_name,
@@ -204,9 +215,11 @@ def build_conjugated_polymer_system_from_config(
     relaxed_topology = topology_with_pdb_positions(
         construction_topology,
         relaxed_pdb,
-        atom_name_template_pdb=construction.crosslinked_pdb_path
-        if workflow_settings.preserve_reference_atom_names
-        else None,
+        atom_name_template_pdb=(
+            construction.crosslinked_pdb_path
+            if workflow_settings.preserve_reference_atom_names
+            else None
+        ),
     )
 
     builder = _build_solvated_system(
@@ -346,6 +359,42 @@ def _polymerist_pdb_order_index(sequence_index: int, *, sequence_length: int) ->
     return sequence_index - 1
 
 
+def _require_supported_coordinate_backend(attachment: Any) -> None:
+    """Gate config-driven coordinate construction to implemented backends."""
+    mechanism = attachment.mechanism
+    mechanism_name = mechanism.name.strip().lower()
+    if (
+        mechanism_name == _NHS_LYS_COORDINATE_BACKEND_MECHANISM
+        and mechanism.reaction_smarts is None
+    ):
+        return
+
+    if mechanism.reaction_smarts is not None:
+        reaction = atom_mapped_reaction_from_mechanism_config(mechanism)
+        preflight = resolve_reaction_roles_from_identity_map(
+            reaction,
+            {},
+            require_required_identities=False,
+        )
+        added = len(preflight.bond_changes.added_bonds)
+        removed = len(preflight.bond_changes.removed_bonds)
+        order_changed = len(preflight.bond_changes.order_changes)
+        raise NotImplementedError(
+            f"{STRUCTURE_MATCHING_BLOCKER_MESSAGE} Mechanism '{mechanism.name}' passed "
+            f"generic SMARTS preflight with {added} added, {removed} removed, and "
+            f"{order_changed} order-changed mapped bonds, but the config-driven system "
+            "workflow currently has coordinate surgery only for mechanism "
+            f"'{_NHS_LYS_COORDINATE_BACKEND_MECHANISM}' without reaction_smarts."
+        )
+
+    raise NotImplementedError(
+        "Config-driven conjugated polymer system construction currently implements coordinate "
+        f"surgery only for mechanism '{_NHS_LYS_COORDINATE_BACKEND_MECHANISM}'. "
+        f"Received mechanism '{mechanism.name}'. Provide reaction_smarts for a generic preflight "
+        "or use the supported NHS-Lys mechanism."
+    )
+
+
 def _unique_pdb_residues(path: Path) -> tuple[tuple[str, int, str, str], ...]:
     residues: list[tuple[str, int, str, str]] = []
     seen: set[tuple[str, int, str, str]] = set()
@@ -378,23 +427,22 @@ def _nhs_lys_linker_from_attachment(attachment: Any) -> NhsLysModifierLinker:
     )
 
 
-def _policy_with_linker_crosslink(
+def _policy_with_resolved_crosslink(
     policy: Any,
-    linker: NhsLysModifierLinker,
-    modifier: GeneratedPolymerFragment,
+    resolved_plan: ResolvedAttachmentPlan,
 ) -> Any:
+    requirement = _product_state_crosslink_requirement(resolved_plan)
     try:
-        require_explicit_pablo_crosslink(policy, linker, modifier)
+        require_pablo_crosslink_requirement(policy, requirement)
         return policy
     except ValueError:
         pass
 
-    spec = linker.linkage_spec(modifier)
     crosslink = ConjugationCcdCrosslinkConfig(
-        residues=(spec.protein_residue_name, spec.modifier_residue_name),
-        linking_atoms=(spec.protein_atom_name, spec.modifier_atom_name),
-        leaving_atoms=(spec.protein_leaving_atom_names, spec.modifier_leaving_atom_names),
-        bond_order=spec.bond_order,
+        residues=requirement.residues,
+        linking_atoms=requirement.linking_atoms,
+        leaving_atoms=requirement.leaving_atoms,
+        bond_order=requirement.bond_order,
     )
     existing = list(getattr(policy, "crosslinks", ()))
     if hasattr(policy, "model_copy"):
@@ -407,11 +455,24 @@ def _policy_with_linker_crosslink(
     return SimpleNamespace(**data)
 
 
+def _product_state_crosslink_requirement(resolved_plan: ResolvedAttachmentPlan):
+    """Return the Pablo crosslink requirement for an already-modified product PDB.
+
+    The resolved attachment plan records reactant-state leaving atoms for graph
+    surgery. By the time Pablo ingests the emitted crosslinked PDB, PolyzyMD has
+    already removed those atoms and written the product-state ``CONECT`` bond, so
+    the Pablo policy must not ask Pablo to remove them a second time.
+    """
+    requirement = resolved_plan.pablo_crosslink_requirement
+    return requirement.model_copy(update={"leaving_atoms": ((), ())})
+
+
 def _construct_nhs_lys_modifier_linked_protein(
     *,
     protein_pdb_path: Path | str,
     modifier: GeneratedPolymerFragment,
     linker: NhsLysModifierLinker,
+    resolved_plan: ResolvedAttachmentPlan,
     ccd_pablo_policy: Any,
     output_dir: Path | str,
     chain_policy: Any | None,
@@ -422,8 +483,11 @@ def _construct_nhs_lys_modifier_linked_protein(
     artifact_dir = Path(output_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    resolved_plan = linker.resolve_plan(protein_pdb_path, modifier)
-    crosslink_validation = require_explicit_pablo_crosslink(ccd_pablo_policy, linker, modifier)
+    product_state_requirement = _product_state_crosslink_requirement(resolved_plan)
+    crosslink_validation = require_pablo_crosslink_requirement(
+        ccd_pablo_policy,
+        product_state_requirement,
+    )
 
     placement_result = place_modifier_with_packmol(
         protein_pdb_path,
@@ -482,18 +546,21 @@ def _construct_nhs_lys_modifier_linked_protein(
         if not smoke_result.success:
             raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
 
-    return ModifierConstructionResult(
-        output_dir=artifact_dir,
-        resolved_plan=resolved_plan,
-        crosslink_validation=crosslink_validation,
-        placement=placement_result,
-        assembly=assembly_result,
-        pablo=pablo_result,
-        parameterization=parameterization_result,
-        smoke=smoke_result,
-        crosslinked_pdb_path=crosslinked_pdb_path,
-        diagnostics=("NHS-Lys modifier-linked protein construction completed",),
-    ), pablo_result.topology
+    return (
+        ModifierConstructionResult(
+            output_dir=artifact_dir,
+            resolved_plan=resolved_plan,
+            crosslink_validation=crosslink_validation,
+            placement=placement_result,
+            assembly=assembly_result,
+            pablo=pablo_result,
+            parameterization=parameterization_result,
+            smoke=smoke_result,
+            crosslinked_pdb_path=crosslinked_pdb_path,
+            diagnostics=("NHS-Lys modifier-linked protein construction completed",),
+        ),
+        pablo_result.topology,
+    )
 
 
 def _construct_with_direct_openff_fallback(
@@ -543,21 +610,24 @@ def _construct_with_direct_openff_fallback(
         if not smoke_result.success:
             raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
 
-    return ModifierConstructionResult(
-        output_dir=output_dir,
-        resolved_plan=resolved_plan,
-        crosslink_validation=crosslink_validation,
-        placement=placement_result,
-        assembly=assembly_result,
-        pablo=pablo_result,
-        parameterization=parameterization_result,
-        smoke=smoke_result,
-        crosslinked_pdb_path=direct_result.linked_pdb_path,
-        diagnostics=(
-            "Pablo ingestion failed; direct OpenFF fallback produced the relaxed conjugate",
-            *direct_result.limitations,
+    return (
+        ModifierConstructionResult(
+            output_dir=output_dir,
+            resolved_plan=resolved_plan,
+            crosslink_validation=crosslink_validation,
+            placement=placement_result,
+            assembly=assembly_result,
+            pablo=pablo_result,
+            parameterization=parameterization_result,
+            smoke=smoke_result,
+            crosslinked_pdb_path=direct_result.linked_pdb_path,
+            diagnostics=(
+                "Pablo ingestion failed; direct OpenFF fallback produced the relaxed conjugate",
+                *direct_result.limitations,
+            ),
         ),
-    ), direct_result.topology
+        direct_result.topology,
+    )
 
 
 def _pablo_failure_message(result: Any) -> str:
