@@ -36,6 +36,17 @@ CURRENT_HELPER_MODULE_EXPORTS = {
         "product_state_pablo_crosslink_requirement",
         "run_post_crosslink_local_minimization",
     ),
+    "polyzymd.builders.conjugation.workflow.preparation": (
+        "ProteinCanonicalizationResult",
+        "ProteinCanonicalizationSettings",
+        "canonicalize_protein_hydrogens",
+    ),
+    "polyzymd.builders.conjugation.workflow.minimization": (
+        "LocalMinimizationResult",
+        "LocalMinimizationSettings",
+        "product_state_pablo_crosslink_requirement",
+        "run_post_crosslink_local_minimization",
+    ),
     "polyzymd.builders.conjugation.reaction_roles": (
         "AtomMappedReaction",
         "GenericResolvedReactionPlan",
@@ -79,6 +90,24 @@ def test_current_conjugation_helper_modules_import(module_name, expected_exports
     assert module.__name__ == module_name
     for name in expected_exports:
         assert hasattr(module, name), f"{module_name} missing {name}"
+
+
+def test_workflow_preparation_imports_match_legacy_path():
+    """The new workflow preparation path should expose the legacy objects."""
+    legacy = _import_current_module("polyzymd.builders.conjugation.protein_preparation")
+    workflow = _import_current_module("polyzymd.builders.conjugation.workflow.preparation")
+
+    for name in CURRENT_HELPER_MODULE_EXPORTS["polyzymd.builders.conjugation.protein_preparation"]:
+        assert getattr(workflow, name) is getattr(legacy, name)
+
+
+def test_workflow_minimization_imports_match_legacy_path():
+    """The new workflow minimization path should expose the legacy objects."""
+    legacy = _import_current_module("polyzymd.builders.conjugation.local_minimization")
+    workflow = _import_current_module("polyzymd.builders.conjugation.workflow.minimization")
+
+    for name in CURRENT_HELPER_MODULE_EXPORTS["polyzymd.builders.conjugation.local_minimization"]:
+        assert getattr(workflow, name) is getattr(legacy, name)
 
 
 def test_legacy_conjugated_system_workflow_exports_import():
