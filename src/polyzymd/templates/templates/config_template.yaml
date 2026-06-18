@@ -211,7 +211,7 @@ description: "Description of your simulation system"
 #   
 #   ions:
 #     neutralize: true                    # Add counter-ions to neutralize
-#     nacl_concentration: 0.15            # Molar (0.15 = 150 mM)
+#     nacl_concentration: 0.15            # NaCl-equivalent final ion concentration (M)
 #   
 #   box:
 #     padding: 1.2                        # nm from solute to box edge

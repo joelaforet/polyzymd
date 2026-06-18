@@ -566,15 +566,19 @@ class PrimarySolventConfig(BaseModel):
 class IonConfig(BaseModel):
     """Configuration for ions in the solvent.
 
-    Attributes:
-        neutralize: Whether to add ions for charge neutralization
-        nacl_concentration: Additional NaCl concentration in mol/L
-        kcl_concentration: Additional KCl concentration in mol/L
-        mgcl2_concentration: Additional MgCl2 concentration in mol/L
+    ``nacl_concentration`` is a NaCl-equivalent target for the final ion
+    concentration. When ``neutralize`` is true, PolyzyMD adjusts Na+ and Cl-
+    counts to cancel solute charge while keeping the achieved concentration
+    near this target; it is not additional salt layered on top of neutralizing
+    ions.
     """
 
     neutralize: bool = Field(True, description="Neutralize system charge")
-    nacl_concentration: float = Field(0.0, ge=0.0, description="NaCl conc. (mol/L)")
+    nacl_concentration: float = Field(
+        0.0,
+        ge=0.0,
+        description="NaCl-equivalent target concentration (mol/L)",
+    )
     kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L)")
     mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L)")
 

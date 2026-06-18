@@ -156,6 +156,18 @@ class TestConfigValidation:
         assert config.neutralize is True
         assert config.nacl_concentration == 0.0
 
+    def test_ion_config_nacl_description_documents_target_concentration(self):
+        """IonConfig should document NaCl-equivalent target concentration."""
+        from polyzymd.config.schema import IonConfig
+
+        description = IonConfig.model_fields["nacl_concentration"].description
+
+        assert description is not None
+        assert "NaCl-equivalent" in description
+        assert "target concentration" in description
+        assert "pool" not in description
+        assert "Additional" not in description
+
 
 class TestCoSolventCompositionValidation:
     """Test co-solvent mole fraction and concentration validation."""
