@@ -47,6 +47,18 @@ CURRENT_HELPER_MODULE_EXPORTS = {
         "product_state_pablo_crosslink_requirement",
         "run_post_crosslink_local_minimization",
     ),
+    "polyzymd.builders.conjugation.workflow.pablo": (
+        "ProductStatePabloDefinitionSummary",
+        "ProductStatePabloLibrary",
+        "PabloIngestionResult",
+        "PabloIngestor",
+        "build_product_state_pablo_library",
+    ),
+    "polyzymd.builders.conjugation.workflow.parameterization": (
+        "InterchangeParameterizationResult",
+        "InterchangeParameterizationSettings",
+        "create_interchange_from_pablo_topology",
+    ),
     "polyzymd.builders.conjugation.reaction_roles": (
         "AtomMappedReaction",
         "GenericResolvedReactionPlan",
@@ -107,6 +119,29 @@ def test_workflow_minimization_imports_match_legacy_path():
     workflow = _import_current_module("polyzymd.builders.conjugation.workflow.minimization")
 
     for name in CURRENT_HELPER_MODULE_EXPORTS["polyzymd.builders.conjugation.local_minimization"]:
+        assert getattr(workflow, name) is getattr(legacy, name)
+
+
+def test_workflow_pablo_imports_match_legacy_paths():
+    """The workflow Pablo path should expose product library and ingestion helpers."""
+    product_pablo = _import_current_module("polyzymd.builders.conjugation.product_pablo")
+    pablo_adapter = _import_current_module("polyzymd.builders.conjugation.pablo_adapter")
+    workflow = _import_current_module("polyzymd.builders.conjugation.workflow.pablo")
+
+    for name in CURRENT_HELPER_MODULE_EXPORTS["polyzymd.builders.conjugation.product_pablo"]:
+        assert getattr(workflow, name) is getattr(product_pablo, name)
+    assert workflow.PabloIngestor is pablo_adapter.PabloIngestor
+    assert workflow.PabloIngestionResult is pablo_adapter.PabloIngestionResult
+
+
+def test_workflow_parameterization_imports_match_legacy_path():
+    """The workflow parameterization path should expose Interchange helpers."""
+    legacy = _import_current_module("polyzymd.builders.conjugation.parameterization")
+    workflow = _import_current_module("polyzymd.builders.conjugation.workflow.parameterization")
+
+    for name in CURRENT_HELPER_MODULE_EXPORTS[
+        "polyzymd.builders.conjugation.workflow.parameterization"
+    ]:
         assert getattr(workflow, name) is getattr(legacy, name)
 
 
