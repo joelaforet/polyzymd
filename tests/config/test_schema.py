@@ -156,15 +156,16 @@ class TestConfigValidation:
         assert config.neutralize is True
         assert config.nacl_concentration == 0.0
 
-    def test_ion_config_nacl_description_documents_final_pool_semantics(self):
-        """IonConfig should document NaCl-equivalent final-pool semantics."""
+    def test_ion_config_nacl_description_documents_target_concentration(self):
+        """IonConfig should document NaCl-equivalent target concentration."""
         from polyzymd.config.schema import IonConfig
 
         description = IonConfig.model_fields["nacl_concentration"].description
 
         assert description is not None
         assert "NaCl-equivalent" in description
-        assert "final ion pool" in description
+        assert "target concentration" in description
+        assert "pool" not in description
         assert "Additional" not in description
 
 

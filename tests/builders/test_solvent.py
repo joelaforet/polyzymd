@@ -28,8 +28,8 @@ def test_mole_fraction_counts_replace_water_from_mass_budget() -> None:
     assert water_count == 90
 
 
-def test_neutral_solvent_mass_subtracts_actual_final_ion_pool() -> None:
-    """Mass budgeting should reserve the actual final neutralized ion pool."""
+def test_neutral_solvent_mass_subtracts_actual_final_ions() -> None:
+    """Mass budgeting should reserve the actual final neutralized ion counts."""
     neutral_solvent_mass = SolventBuilder._calculate_neutral_solvent_mass(
         solvent_mass=5000.0,
         na_count=51,
@@ -73,8 +73,8 @@ def test_config_translation_uses_mole_fraction(monkeypatch) -> None:
     assert co_solvents[1].concentration == 2.0
 
 
-def test_neutralizing_ion_counts_use_final_pool_and_tie_toward_more_ions() -> None:
-    """Neutralization should target a final ion pool and prefer more ions on ties."""
+def test_neutralizing_ion_counts_use_target_and_tie_toward_more_ions() -> None:
+    """Neutralization should target a concentration and prefer more ions on ties."""
     na_count, cl_count = SolventBuilder._calculate_ion_counts(
         nacl_to_add=43,
         solute_charge=-15,

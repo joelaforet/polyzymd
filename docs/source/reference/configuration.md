@@ -215,7 +215,7 @@ solvent:
   
   ions:
     neutralize: true                     # Add counter-ions
-    nacl_concentration: 0.15             # NaCl-equivalent final ion pool (M)
+    nacl_concentration: 0.15             # NaCl-equivalent final ion concentration (M)
   
   box:
     padding: 1.2                         # nm from solute to box edge
@@ -225,7 +225,7 @@ solvent:
 ```
 
 With `neutralize: true`, `nacl_concentration` targets the final neutralized
-Na+/Cl- ion pool, not extra salt added after counter-ions.
+Na+/Cl- ion concentration, not extra salt added after counter-ions.
 
 ### Water Models
 

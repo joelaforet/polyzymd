@@ -143,7 +143,7 @@ class SolventComposition:
     Attributes:
         water_model: Water model to use.
         co_solvents: List of co-solvent specifications.
-        nacl_concentration: NaCl-equivalent target for the final ion pool in mol/L.
+        nacl_concentration: NaCl-equivalent target for the final ion concentration in mol/L.
         kcl_concentration: KCl concentration in mol/L.
         mgcl2_concentration: MgCl2 concentration in mol/L.
         neutralize: Whether to neutralize system charge.
@@ -151,7 +151,7 @@ class SolventComposition:
 
     water_model: WaterModelType = "tip3p"
     co_solvents: List[CoSolvent] = field(default_factory=list)
-    nacl_concentration: float = 0.0  # NaCl-equivalent final ion pool, mol/L
+    nacl_concentration: float = 0.0  # NaCl-equivalent target concentration, mol/L
     kcl_concentration: float = 0.0
     mgcl2_concentration: float = 0.0
     neutralize: bool = True
@@ -182,7 +182,7 @@ class SolventBuilder:
 
     This class handles:
     - Water solvation with different water models
-    - Ion addition using final-ion-pool neutralization semantics
+    - Ion addition using neutralized concentration semantics
     - Co-solvent addition with specified mole fractions or concentrations
     - Box shape and padding configuration
 
@@ -298,7 +298,7 @@ class SolventBuilder:
         water_mass = sum(atom.mass for atom in water.atoms)
         molarity_pure_water = Quantity(55.5, "mole / liter")
 
-        # Calculate NaCl-equivalent target for the final ion pool
+        # Calculate NaCl-equivalent target concentration
         na = Molecule.from_smiles("[Na+]")
         cl = Molecule.from_smiles("[Cl-]")
         na_mass = sum(atom.mass for atom in na.atoms)
@@ -310,7 +310,7 @@ class SolventBuilder:
         nacl_mass_to_add = solvent_mass * nacl_mass_fraction
         nacl_to_add = self._round_dimensionless_to_int(nacl_mass_to_add / nacl_mass)
 
-        # Resolve the final ion pool, including any neutralizing imbalance
+        # Resolve ion counts, including any neutralizing imbalance
         solute_charge = sum(mol.total_charge for mol in topology.molecules)
         na_to_add, cl_to_add = self._calculate_ion_counts(
             nacl_to_add=nacl_to_add,
@@ -582,8 +582,11 @@ class SolventBuilder:
         """Calculate final Na+ and Cl- counts from a NaCl-equivalent target.
 
         When neutralization is enabled, counts are chosen so that the final
-        solute plus ion charge is exactly zero while keeping the final ion pool
-        as close as possible to the requested NaCl-equivalent total. If parity
+        solute plus ion charge is exactly zero while keeping the final ion
+        concentration as close as possible to the requested NaCl-equivalent
+        target. Exact counts may differ by one ion from the concentration
+        target to satisfy integer charge neutrality; neutrality is prioritized
+        because this difference is negligible for realistic systems. If parity
         makes the target total impossible, the tie is resolved by adding the
         larger feasible ion count.
 
