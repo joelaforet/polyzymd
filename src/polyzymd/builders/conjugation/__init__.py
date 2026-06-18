@@ -1,5 +1,6 @@
 """Covalent modification builders for PolyzyMD."""
 
+from polyzymd.builders.conjugation.api import build_conjugate, build_conjugate_from_config
 from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
 from polyzymd.builders.conjugation.construction import (
     ModifierConstructionResult,
@@ -33,6 +34,7 @@ from polyzymd.builders.conjugation.diagnostics import (
     DiagnosticSeverity,
     write_diagnostics_report,
 )
+from polyzymd.builders.conjugation.engine import ConjugationEngine
 from polyzymd.builders.conjugation.exceptions import (
     ConjugationError,
     ConjugationNotImplementedError,
@@ -78,7 +80,11 @@ from polyzymd.builders.conjugation.metadata import (
     ConjugationMetadata,
     save_metadata,
 )
-from polyzymd.builders.conjugation.models import ConjugationBuildResult
+from polyzymd.builders.conjugation.models import (
+    ConjugateBuildRequest,
+    ConjugateBuildResult,
+    ConjugationBuildResult,
+)
 from polyzymd.builders.conjugation.modifier import GeneratedModifierFragment, PlacedModifierFragment
 from polyzymd.builders.conjugation.moieties import MoietyDescriptor, normalize_moiety_descriptor
 from polyzymd.builders.conjugation.nhs_lys import (
@@ -175,6 +181,14 @@ from polyzymd.builders.conjugation.reaction_roles import (
     resolve_reaction_roles_from_identity_map,
     validate_mapped_smarts,
 )
+from polyzymd.builders.conjugation.reactions import (
+    NhsLysReaction,
+    ReactionContext,
+    ReactionResult,
+    ReactionTemplate,
+    get_reaction,
+    list_reactions,
+)
 from polyzymd.builders.conjugation.sites import (
     AttachmentSite,
     match_site_rule,
@@ -215,6 +229,9 @@ __all__ = [
     "ChargePatchHint",
     "ComponentMetadata",
     "ComponentRole",
+    "ConjugateBuildRequest",
+    "ConjugateBuildResult",
+    "ConjugationEngine",
     "ConjugationBuildResult",
     "ConjugationDiagnostic",
     "ConjugationDiagnosticsReport",
@@ -250,6 +267,7 @@ __all__ = [
     "NhsLysGraphEditPlan",
     "NhsLysModifierLinker",
     "NhsLysPdbAttachment",
+    "NhsLysReaction",
     "NhsReactiveGroup",
     "PackmolModifierPlacementResult",
     "PackmolModifierPlacementSettings",
@@ -287,7 +305,10 @@ __all__ = [
     "ProteinCanonicalizationResult",
     "ProteinCanonicalizationSettings",
     "ReactionMechanism",
+    "ReactionContext",
+    "ReactionResult",
     "ReactionParticipant",
+    "ReactionTemplate",
     "ReactiveEndpoint",
     "ResolvedAttachmentPlan",
     "ResolvedAtomRole",
@@ -305,6 +326,8 @@ __all__ = [
     "VacuumSmokeResult",
     "VacuumSmokeSettings",
     "save_metadata",
+    "build_conjugate",
+    "build_conjugate_from_config",
     "canonicalize_protein_hydrogens",
     "canonicalize_poc_residue_name",
     "build_conjugated_polymer_system_from_config",
@@ -323,9 +346,11 @@ __all__ = [
     "extract_lysine_reactive_site",
     "generate_polymerist_smoke_polymer",
     "generated_fragment_from_polymerist_pdb",
+    "get_reaction",
     "get_builtin_mechanism",
     "list_builtin_mechanisms",
     "load_pdb_as_rdkit_input",
+    "list_reactions",
     "load_builtin_mechanisms",
     "match_site_rule",
     "normalize_attachment_site",
