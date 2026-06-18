@@ -115,7 +115,7 @@ def load_combined_smirnoff_force_field(
         except ImportError as exc:
             raise RuntimeError(
                 "OpenFF Toolkit is required for conjugation parameterization. Run this helper in "
-                "the conjugation-py312 or cuda-12-4 pixi environment."
+                "the build or a simulation pixi environment."
             ) from exc
         force_field_cls = ForceField
 

@@ -29,7 +29,6 @@ class DiagnosticCode(str, Enum):
     PABLO_INGESTION = "pablo_ingestion"
     COMPONENT_METADATA = "component_metadata"
     LINK_DISCOVERY = "link_discovery"
-    POLYMERIST_COMPAT = "polymerist_compat"
     MECHANISM_VALIDATION = "mechanism_validation"
     SITE_SELECTION = "site_selection"
     MOIETY_NORMALIZATION = "moiety_normalization"

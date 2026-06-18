@@ -122,7 +122,9 @@ def load_builtin_mechanisms() -> dict[str, ReactionMechanism]:
     dict[str, ReactionMechanism]
         Built-in mechanisms keyed by normalized identifier.
     """
-    mechanisms = [ReactionMechanism.model_validate(definition) for definition in BUILTIN_MECHANISM_DEFINITIONS]
+    mechanisms = [
+        ReactionMechanism.model_validate(definition) for definition in BUILTIN_MECHANISM_DEFINITIONS
+    ]
     return {mechanism.identifier: mechanism for mechanism in mechanisms}
 
 

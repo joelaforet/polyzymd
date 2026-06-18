@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
+from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -240,13 +241,17 @@ class PolymerRecipe(BaseModel):
 class PolymeristGenerationSmokeResult(BaseModel):
     """Summary from the optional Polymerist recipe-generation boundary."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     recipe_name: str
     sequence: str
     cache_directory: Path
     monomer_group_path: Path
     pdb_path: Path | None = None
+    sdf_path: Path | None = None
     object_type: str
     atom_count: int | None = None
+    rdkit_mol: Any | None = Field(default=None, exclude=True)
 
 
 def sbma_egpma_nhs_recipe(
@@ -358,13 +363,9 @@ def generate_polymerist_smoke_polymer(
     PolymeristGenerationSmokeResult
         Summary with generated sequence, cache paths, and object metadata.
     """
-    from polyzymd.builders.conjugation.polymerist_compat import ensure_polymerist_py312_compat
-    from polyzymd.data.reactions import get_atrp_reaction_paths
-
-    ensure_polymerist_py312_compat()
-
     from polyzymd.builders.fragment_generator import FragmentGenerator
     from polyzymd.builders.polymer_generator import PolymerGenerator
+    from polyzymd.data.reactions import get_atrp_reaction_paths
 
     cache_path = Path(cache_directory)
     cache_path.mkdir(parents=True, exist_ok=True)
@@ -394,9 +395,16 @@ def generate_polymerist_smoke_polymer(
         residue_names=recipe.to_polymerist_residue_names(),
         energy_minimize=energy_minimize,
     )
-    if pdb_path is not None:
-        _write_rdkit_sdf_sidecar(polymer_object, pdb_path.with_suffix(".sdf"))
-    atom_count = _get_polymerist_atom_count(polymer_object)
+    rdkit_mol = None
+    sdf_path = None
+    pdb_file = Path(pdb_path) if pdb_path is not None else None
+    if pdb_file is not None and pdb_file.exists():
+        sdf_path = pdb_file.with_suffix(".sdf")
+        rdkit_mol = _polymerist_to_explicit_h_rdkit_mol(polymer_object)
+        _write_rdkit_sdf_sidecar(rdkit_mol, sdf_path)
+    atom_count = _get_rdkit_atom_count(rdkit_mol)
+    if atom_count is None:
+        atom_count = _get_polymerist_atom_count(polymer_object)
 
     return PolymeristGenerationSmokeResult(
         recipe_name=recipe.name,
@@ -404,8 +412,10 @@ def generate_polymerist_smoke_polymer(
         cache_directory=cache_path,
         monomer_group_path=fragment_generator.get_cache_path(recipe.name),
         pdb_path=pdb_path,
+        sdf_path=sdf_path,
         object_type=type(polymer_object).__name__,
         atom_count=atom_count,
+        rdkit_mol=rdkit_mol,
     )
 
 
@@ -424,8 +434,92 @@ def _get_polymerist_atom_count(polymer_object: object) -> int | None:
     return None
 
 
-def _write_rdkit_sdf_sidecar(
+def _get_rdkit_atom_count(rdkit_mol: object | None) -> int | None:
+    """Return a best-effort atom count from an RDKit-like molecule."""
+    if rdkit_mol is None:
+        return None
+    get_num_atoms = getattr(rdkit_mol, "GetNumAtoms", None)
+    if not callable(get_num_atoms):
+        return None
+    try:
+        atom_count = get_num_atoms()
+    except (RuntimeError, TypeError, ValueError):
+        return None
+    if isinstance(atom_count, int):
+        return atom_count
+    return None
+
+
+def _polymerist_to_explicit_h_rdkit_mol(
     polymer_object: object,
+    *,
+    required: bool = True,
+) -> Any | None:
+    """Convert a Polymerist object to an explicit-hydrogen RDKit molecule.
+
+    Parameters
+    ----------
+    polymer_object : object
+        Polymerist or mBuild object that can provide an RDKit molecule.
+    required : bool, optional
+        Raise on conversion failures when ``True``. When ``False``, failures are
+        surfaced as warnings, by default ``True``.
+
+    Returns
+    -------
+    Any or None
+        RDKit molecule with explicit hydrogens, or ``None`` when optional
+        conversion fails.
+
+    Raises
+    ------
+    RuntimeError
+        If required conversion fails.
+    """
+    to_rdkit = getattr(polymer_object, "to_rdkit", None)
+    if not callable(to_rdkit):
+        _handle_sdf_sidecar_failure(
+            "Required RDKit SDF sidecar cannot be written because the polymer object does "
+            "not expose to_rdkit()",
+            required=required,
+        )
+        return None
+
+    try:
+        from rdkit import Chem
+    except ImportError as exc:
+        _handle_sdf_sidecar_failure(
+            "RDKit is required to write the polymer SDF sidecar", required=required, cause=exc
+        )
+        return None
+
+    try:
+        source_mol = to_rdkit()
+        mol = Chem.Mol(source_mol)
+        _fix_tetravalent_neutral_nitrogens(mol)
+        mol.UpdatePropertyCache(strict=False)
+        explicit_h_mol = Chem.AddHs(mol, addCoords=mol.GetNumConformers() > 0)
+        explicit_h_mol.UpdatePropertyCache(strict=False)
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        _handle_sdf_sidecar_failure(
+            "Failed to convert Polymerist polymer to an explicit-hydrogen RDKit molecule",
+            required=required,
+            cause=exc,
+        )
+        return None
+
+    return explicit_h_mol
+
+
+def _fix_tetravalent_neutral_nitrogens(rdkit_mol: object) -> None:
+    """Assign formal charge to tetravalent neutral nitrogen atoms in-place."""
+    for atom in rdkit_mol.GetAtoms():
+        if atom.GetSymbol() == "N" and atom.GetDegree() == 4 and atom.GetFormalCharge() == 0:
+            atom.SetFormalCharge(1)
+
+
+def _write_rdkit_sdf_sidecar(
+    rdkit_mol: object,
     sdf_path: Path,
     *,
     required: bool = True,
@@ -434,8 +528,8 @@ def _write_rdkit_sdf_sidecar(
 
     Parameters
     ----------
-    polymer_object : object
-        Polymerist or mBuild object that can provide an RDKit molecule.
+    rdkit_mol : object
+        Explicit-hydrogen RDKit molecule to serialize.
     sdf_path : pathlib.Path
         Destination SDF path.
     required : bool, optional
@@ -447,15 +541,6 @@ def _write_rdkit_sdf_sidecar(
     RuntimeError
         If the required sidecar cannot be generated or written.
     """
-    to_rdkit = getattr(polymer_object, "to_rdkit", None)
-    if not callable(to_rdkit):
-        _handle_sdf_sidecar_failure(
-            "Required RDKit SDF sidecar cannot be written because the polymer object does "
-            "not expose to_rdkit()",
-            required=required,
-        )
-        return
-
     try:
         from rdkit import Chem
     except ImportError as exc:
@@ -465,11 +550,7 @@ def _write_rdkit_sdf_sidecar(
         return
 
     try:
-        mol = to_rdkit()
-        for atom in mol.GetAtoms():
-            if atom.GetSymbol() == "N" and atom.GetDegree() == 4 and atom.GetFormalCharge() == 0:
-                atom.SetFormalCharge(1)
-        Chem.MolToMolFile(mol, str(sdf_path))
+        Chem.MolToMolFile(rdkit_mol, str(sdf_path))
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
         _handle_sdf_sidecar_failure(
             f"Failed to write required RDKit SDF sidecar to {sdf_path}",

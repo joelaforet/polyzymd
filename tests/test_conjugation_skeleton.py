@@ -34,6 +34,7 @@ def _minimal_simulation_config_data() -> dict:
     """
     return {
         "name": "conjugation-skeleton",
+        "engine": "openmm",
         "enzyme": {"name": "enzyme", "pdb_path": "enzyme.pdb"},
         "thermodynamics": {"temperature": 300.0},
         "simulation_phases": {
@@ -51,6 +52,8 @@ def _minimal_simulation_config_data() -> dict:
                 "duration": 1.0,
                 "samples": 10,
                 "time_step": 2.0,
+                "report_interval": 1000,
+                "checkpoint_interval": 5000,
             },
         },
     }

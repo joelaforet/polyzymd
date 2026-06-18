@@ -338,6 +338,37 @@ def test_ingest_structure_reports_crosslink_library_errors(monkeypatch, tmp_path
     assert "with_crosslink" in errors[0].details["error"]
 
 
+def test_ingest_structure_blocks_unapplied_residue_definition_files(monkeypatch, tmp_path):
+    """Requested custom residue definitions should block before Pablo ingestion."""
+    import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
+
+    structure = tmp_path / "structure.pdb"
+    structure.write_text("HEADER    TEST\nEND\n")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("Pablo ingestion should not run without custom definitions")
+
+    fake_module = SimpleNamespace(
+        __file__="/tmp/openff/pablo/__init__.py",
+        __version__="0.2.2",
+        STD_CCD_CACHE=object(),
+        topology_from_pdb=fail_if_called,
+    )
+    monkeypatch.setattr(pablo_adapter.importlib, "import_module", lambda name: fake_module)
+    monkeypatch.setattr(pablo_adapter.importlib.metadata, "version", lambda name: "0.2.2")
+    policy = ConjugationCcdPabloPolicyConfig(
+        lookup_policy="offline_cached",
+        residue_definition_files=[tmp_path / "custom_residue.json"],
+    )
+
+    result = PabloIngestor(policy=policy).ingest_structure(structure)
+
+    assert result.success is False
+    errors = [diag for diag in result.diagnostics if diag.code == DiagnosticCode.PABLO_INGESTION]
+    assert errors
+    assert "Custom residue definition files were requested" in errors[0].details["error"]
+
+
 def test_ingest_structure_failure_returns_actionable_diagnostics(monkeypatch, tmp_path):
     """Pablo parser failures should become structured diagnostics."""
     import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
@@ -444,32 +475,6 @@ def test_structure_inspection_dirty_pdb_keeps_free_ligand_non_covalent(tmp_path)
         "CIT"
     ]
     assert inspection.covalent_attachment_candidates == []
-
-
-def test_builder_diagnostics_include_polymerist_shim_warning(monkeypatch):
-    """Enabled builder diagnostics should include shim details when relevant."""
-    import polyzymd.builders.conjugation.builder as builder_module
-
-    monkeypatch.setattr(
-        builder_module,
-        "polymerist_py312_compat_status",
-        lambda: {
-            "relevant": True,
-            "python_version": "3.12.0",
-            "get_package_present": False,
-            "shim_required": True,
-            "rationale": "test rationale",
-        },
-    )
-
-    builder = CovalentModificationBuilder(ConjugationConfig(enabled=True, mode="construct"))
-
-    report = builder._build_enabled_report()
-
-    diagnostic = next(
-        event for event in report.diagnostics if event.code == DiagnosticCode.POLYMERIST_COMPAT
-    )
-    assert diagnostic.details["shim_required"] is True
 
 
 def test_builder_diagnostics_include_pablo_availability(monkeypatch, tmp_path):

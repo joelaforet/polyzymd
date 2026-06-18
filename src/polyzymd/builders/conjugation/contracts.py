@@ -329,11 +329,9 @@ def explicit_linkage_contract_from_config(attachment: Any) -> ExplicitLinkageCon
 
 def resolve_explicit_linkage_contract(
     protein_pdb_path: Path | str,
-    modifier: Path
-    | str
-    | GeneratedPolymerFragment
-    | PlacedPolymerFragment
-    | Sequence[PdbAtomRecord],
+    modifier: (
+        Path | str | GeneratedPolymerFragment | PlacedPolymerFragment | Sequence[PdbAtomRecord]
+    ),
     contract: ExplicitLinkageContract,
 ) -> ResolvedAttachmentPlan:
     """Resolve an explicit PDB linkage contract against protein and modifier atoms.
@@ -464,11 +462,9 @@ def placed_fragment_from_resolved_plan(
 
 
 def _modifier_atom_records(
-    modifier: Path
-    | str
-    | GeneratedPolymerFragment
-    | PlacedPolymerFragment
-    | Sequence[PdbAtomRecord],
+    modifier: (
+        Path | str | GeneratedPolymerFragment | PlacedPolymerFragment | Sequence[PdbAtomRecord]
+    ),
 ) -> tuple[PdbAtomRecord, ...]:
     """Normalize supported modifier atom sources to PDB atom records."""
     if isinstance(modifier, (str, Path)):
