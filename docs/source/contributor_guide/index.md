@@ -9,6 +9,7 @@ PolyzyMD, understand the codebase, or add new capabilities.
 - [Contributing to PolyzyMD](contributing.md)
 - [Packaging and Distribution Notes](packaging.md)
 - [Architecture](../explanation/architecture.md)
+- [Conjugation Refactor Loop Plan](conjugation_refactor_loop.md)
 
 ## New Analysis Contributor Path
 
@@ -31,6 +32,9 @@ comparison, and artifact-only plotting.
 - **[Store large analysis outputs with artifact sidecars](analysis_plugins/sidecars.md)** —
   how to persist arrays, tables, and plotting inputs through registered
   `ArtifactStore` sidecars instead of plugin-specific cache files
+- **[Conjugation Refactor Loop Plan](conjugation_refactor_loop.md)** —
+  agent handoff plan for turning the NHS-Lys conjugation POC into the clean
+  `polyzymd.builders.conjugation` engine and reaction-template library
 
 ## Contributor Mindset
 
@@ -50,4 +54,5 @@ Set Up a Contributor Environment <setup>
 Packaging and Distribution Notes <packaging>
 New Analysis Contributor Path <analysis_plugins/index>
 Extend the Analysis Framework <extending_analyses>
+Conjugation Refactor Loop Plan <conjugation_refactor_loop>
 ```
