@@ -15,7 +15,6 @@ from polyzymd.builders.conjugation._assembly import (
     ModifierConstructionResult,
     ModifierConstructionSettings,
     PackmolModifierPlacementSettings,
-    place_modifier_with_packmol,
     place_modifiers_with_resolved_plans,
 )
 from polyzymd.builders.conjugation._linkage import (
@@ -120,13 +119,21 @@ class ConjugatedPolymerSystemResult(BaseModel):
     reactive_sequence_index: int
     reactive_residue_selector: dict[str, int | str]
     conjugate_generation: PolymeristGenerationSmokeResult
-    construction: ModifierConstructionResult
+    construction: Any
+    attachment_specs: tuple[AttachmentBuildSpec, ...] = Field(default_factory=tuple, exclude=True)
+    generated_sequences: tuple[str, ...] = Field(default_factory=tuple)
+    reactive_sequence_indices: tuple[int, ...] = Field(default_factory=tuple)
+    reactive_residue_selectors: tuple[dict[str, int | str], ...] = Field(default_factory=tuple)
+    conjugate_generations: tuple[PolymeristGenerationSmokeResult, ...] = Field(
+        default_factory=tuple
+    )
     protein_canonicalization: ProteinCanonicalizationResult | None = None
     relaxed_conjugate_pdb_path: Path | None = None
     solvated_pdb_path: Path | None = None
     workflow_json_path: Path | None = None
     final_interchange_created: bool = False
     modifier: GeneratedPolymerFragment = Field(exclude=True)
+    modifiers: tuple[GeneratedPolymerFragment, ...] = Field(default_factory=tuple, exclude=True)
     relaxed_conjugate_topology: Any = Field(default=None, exclude=True)
     solvated_topology: Any = Field(default=None, exclude=True)
     final_interchange: Any | None = Field(default=None, exclude=True)
@@ -138,6 +145,29 @@ class ConjugatedPolymerSystemResult(BaseModel):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(self.model_dump(mode="json"), indent=2) + "\n")
         return output_path
+
+
+class ConjugateConstructionResult(BaseModel):
+    """Specs-first construction result with singular compatibility fields."""
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    output_dir: Path
+    resolved_plan: ResolvedAttachmentPlan
+    resolved_plans: tuple[ResolvedAttachmentPlan, ...]
+    attachment_specs: tuple[Any, ...] = Field(default_factory=tuple, exclude=True)
+    crosslink_validation: Any
+    crosslink_validations: tuple[Any, ...]
+    placement: Any
+    placements: tuple[Any, ...]
+    assembly: Any
+    pablo: Any
+    parameterization: Any
+    smoke: Any | None = None
+    local_minimization: Any | None = None
+    product_state_pablo_library: Any | None = Field(default=None, exclude=True)
+    crosslinked_pdb_path: Path
+    diagnostics: tuple[str, ...] = Field(default_factory=tuple)
 
 
 def build_conjugated_polymer_system_from_config_path(
@@ -180,25 +210,31 @@ def build_conjugated_polymer_system_from_config(
     artifact_dir.mkdir(parents=True, exist_ok=True)
     construction_dir = artifact_dir / workflow_settings.conjugate_artifact_dir_name
 
-    attachment = _single_enabled_attachment(config.conjugation)
+    attachments = _enabled_supported_nhs_lys_attachments(config.conjugation)
     protein_pdb_path, protein_canonicalization = _prepared_protein_pdb_path(
         config.enzyme.pdb_path,
         output_dir=construction_dir,
         settings=workflow_settings,
     )
-    spec, generation, reactive_sequence_index, reactive_selector, linker = (
+    spec_payloads = tuple(
         _build_nhs_lys_attachment_spec(
             attachment,
+            attachment_index=index,
             protein_pdb_path=protein_pdb_path,
             artifact_dir=artifact_dir,
             workflow_settings=workflow_settings,
         )
+        for index, attachment in enumerate(attachments, start=1)
     )
-    modifier = spec.generated_fragment
-    resolved_plan = spec.resolved_plan
-    ccd_pablo_policy = _policy_with_resolved_crosslink(
+    specs = tuple(payload[0] for payload in spec_payloads)
+    generations = tuple(payload[1] for payload in spec_payloads)
+    reactive_sequence_indices = tuple(payload[2] for payload in spec_payloads)
+    reactive_selectors = tuple(payload[3] for payload in spec_payloads)
+    modifiers = tuple(spec.generated_fragment for spec in specs)
+    resolved_plans = tuple(spec.resolved_plan for spec in specs)
+    ccd_pablo_policy = _policy_with_resolved_crosslinks(
         config.conjugation.ccd_pablo,
-        resolved_plan,
+        resolved_plans,
     )
 
     construction_settings = ModifierConstructionSettings(
@@ -207,22 +243,14 @@ def build_conjugated_polymer_system_from_config(
         smoke=workflow_settings.vacuum_smoke,
         run_smoke=True,
     )
-    construction, construction_topology = _construct_nhs_lys_modifier_linked_protein(
-        protein_pdb_path=config.enzyme.pdb_path,
-        prepared_protein_pdb_path=protein_pdb_path,
-        modifier=modifier,
-        polymer_sdf_path=generation.sdf_path,
-        linker=linker,
-        resolved_plan=resolved_plan,
+    construction, construction_topology = _construct_conjugate_from_specs(
+        protein_pdb_path=protein_pdb_path,
+        specs=specs,
         ccd_pablo_policy=ccd_pablo_policy,
-        chain_policy=config.conjugation.chain_policy,
         output_dir=construction_dir,
+        chain_policy=config.conjugation.chain_policy,
         settings=construction_settings,
         use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
-        run_product_state_local_minimization=(
-            workflow_settings.run_product_state_local_minimization
-        ),
-        local_minimization_settings=workflow_settings.local_minimization,
     )
     if workflow_settings.preserve_reference_atom_names:
         _restore_smoke_pdb_atom_names(construction, construction.crosslinked_pdb_path)
@@ -252,16 +280,22 @@ def build_conjugated_polymer_system_from_config(
 
     result = ConjugatedPolymerSystemResult(
         output_dir=artifact_dir,
-        generated_sequence=generation.sequence,
-        reactive_sequence_index=reactive_sequence_index,
-        reactive_residue_selector=reactive_selector,
-        conjugate_generation=generation,
+        generated_sequence=generations[0].sequence,
+        reactive_sequence_index=reactive_sequence_indices[0],
+        reactive_residue_selector=reactive_selectors[0],
+        conjugate_generation=generations[0],
         construction=construction,
+        attachment_specs=specs,
+        generated_sequences=tuple(generation.sequence for generation in generations),
+        reactive_sequence_indices=reactive_sequence_indices,
+        reactive_residue_selectors=reactive_selectors,
+        conjugate_generations=generations,
         protein_canonicalization=protein_canonicalization,
         relaxed_conjugate_pdb_path=relaxed_pdb,
         solvated_pdb_path=solvated_pdb_path,
         final_interchange_created=builder.interchange is not None,
-        modifier=modifier,
+        modifier=modifiers[0],
+        modifiers=modifiers,
         relaxed_conjugate_topology=relaxed_topology,
         solvated_topology=builder.solvated_topology,
         final_interchange=builder.interchange,
@@ -313,7 +347,6 @@ def build_direct_smiles_moiety_conjugate(
                 random_seed=random_seed,
             )
         )
-    built_fragments = tuple(spec.generated_fragment for spec in specs)
     resolved_plans = tuple(spec.resolved_plan for spec in specs)
 
     policy = _policy_with_resolved_crosslinks(
@@ -328,11 +361,9 @@ def build_direct_smiles_moiety_conjugate(
         run_smoke=True,
     )
 
-    construction, construction_topology = _construct_multi_modifier_linked_protein(
+    construction, construction_topology = _construct_conjugate_from_specs(
         protein_pdb_path=protein_path,
-        modifiers=built_fragments,
-        attachment_specs=tuple(specs),
-        resolved_plans=resolved_plans,
+        specs=tuple(specs),
         ccd_pablo_policy=policy,
         output_dir=construction_dir,
         chain_policy=chain_assignment,
@@ -361,7 +392,7 @@ def build_direct_smiles_moiety_conjugate(
         solvated_pdb_path=solvated_pdb_path,
         workflow_json_path=workflow_path,
         final_interchange_created=builder.interchange is not None,
-        modifier=built_fragments,
+        modifier=tuple(spec.generated_fragment for spec in specs),
         relaxed_conjugate_topology=relaxed_topology,
         solvated_topology=builder.solvated_topology,
         final_interchange=builder.interchange,
@@ -438,6 +469,7 @@ def _prepared_protein_pdb_path(
 def _build_nhs_lys_attachment_spec(
     attachment: Any,
     *,
+    attachment_index: int,
     protein_pdb_path: Path | str,
     artifact_dir: Path,
     workflow_settings: ConjugatedPolymerSystemSettings,
@@ -448,7 +480,9 @@ def _build_nhs_lys_attachment_spec(
     reactive_sequence_index = _reactive_sequence_index(recipe)
     generation = generate_polymerist_smoke_polymer(
         recipe,
-        artifact_dir / workflow_settings.conjugate_cache_dir_name,
+        artifact_dir
+        / workflow_settings.conjugate_cache_dir_name
+        / f"{attachment_index:02d}_{_safe_attachment_token(attachment.name)}",
         force_regenerate=workflow_settings.force_regenerate_conjugate_polymer,
         max_retries=workflow_settings.conjugate_polymerist_max_retries,
         energy_minimize=workflow_settings.conjugate_polymerist_energy_minimize,
@@ -478,7 +512,7 @@ def _build_nhs_lys_attachment_spec(
             generation.sdf_path,
             resolved_plan,
             attachment_config=attachment,
-            attachment_index=1,
+            attachment_index=attachment_index,
             reaction_name=attachment.mechanism.name,
         ),
         generation,
@@ -539,6 +573,23 @@ def _single_enabled_attachment(conjugation: ConjugationConfig | None) -> Any:
     if len(attachments) != 1:
         raise ValueError("v1 conjugated polymer workflow requires exactly one enabled attachment")
     return attachments[0]
+
+
+def _enabled_supported_nhs_lys_attachments(
+    conjugation: ConjugationConfig | None,
+) -> tuple[Any, ...]:
+    """Return all enabled attachments supported by the config NHS-Lys path."""
+    if conjugation is None or not conjugation.enabled:
+        raise ValueError("conjugation.enabled must be true for this workflow")
+    if conjugation.mode != ConjugationMode.CONSTRUCT:
+        raise ValueError("this workflow requires conjugation.mode: construct")
+    attachments = tuple(attachment for attachment in conjugation.attachments if attachment.enabled)
+    if not attachments:
+        raise ValueError("conjugated polymer workflow requires at least one enabled attachment")
+    for attachment in attachments:
+        _require_supported_coordinate_backend(attachment)
+        _polymer_recipe_from_attachment(attachment)
+    return attachments
 
 
 def _polymer_recipe_from_attachment(attachment: Any) -> PolymerRecipe:
@@ -718,139 +769,50 @@ def _construct_nhs_lys_modifier_linked_protein(
     run_product_state_local_minimization: bool,
     local_minimization_settings: Any,
 ) -> tuple[ModifierConstructionResult, Any]:
-    """Run the NHS-Lys construction path using Pablo product-residue crosslinks."""
-    artifact_dir = Path(output_dir)
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-
-    product_state_requirement = _product_state_crosslink_requirement(resolved_plan)
-    crosslink_validation = require_pablo_crosslink_requirement(
-        ccd_pablo_policy,
-        product_state_requirement,
-    )
-
-    placement_result = place_modifier_with_packmol(
-        prepared_protein_pdb_path,
-        modifier,
+    """Compatibility shim for the single-site NHS-Lys private constructor."""
+    _ = (
+        protein_pdb_path,
         linker,
-        artifact_dir,
-        settings=settings.placement,
+        run_product_state_local_minimization,
+        local_minimization_settings,
     )
-    placed_modifier = placed_fragment_from_resolved_plan(
-        placement_result.placed_modifier,
-        resolved_plan,
+    spec = SimpleNamespace(
+        attachment_id="nhs_lys_attachment_01",
+        attachment_index=1,
+        generated_fragment=modifier,
+        resolved_plan=resolved_plan,
+        source_sidecars={"sdf": Path(polymer_sdf_path)} if polymer_sdf_path is not None else {},
+        fragment=SimpleNamespace(source_kind="polymer"),
     )
-    crosslinked_pdb_path = artifact_dir / settings.crosslinked_pdb_name
-    assembly_result = write_crosslinked_pdb(
-        prepared_protein_pdb_path,
-        placed_modifier,
-        resolved_plan.to_nhs_lys_pdb_attachment(),
-        crosslinked_pdb_path,
-        CrosslinkedPdbAssemblyOptions(),
-    )
-
-    product_state_pablo_library = None
-    product_state_residue_library = None
-    if use_product_state_pablo_library:
-        from polyzymd.builders.conjugation.pablo.product import build_product_state_pablo_library
-
-        product_state_pablo_library = build_product_state_pablo_library(
-            product_pdb=crosslinked_pdb_path,
-            source_protein_pdb=prepared_protein_pdb_path,
-            polymer_sdf=polymer_sdf_path,
-            generated_fragment=modifier,
-            resolved_plan=resolved_plan,
-        )
-        product_state_residue_library = product_state_pablo_library.residue_library
-
-    pablo_result = PabloIngestor(policy=ccd_pablo_policy).ingest_structure(
-        crosslinked_pdb_path,
+    return _construct_conjugate_from_specs(
+        protein_pdb_path=prepared_protein_pdb_path,
+        specs=(spec,),
+        ccd_pablo_policy=ccd_pablo_policy,
+        output_dir=output_dir,
         chain_policy=chain_policy,
-        output_dir=artifact_dir,
-        residue_library=product_state_residue_library,
-    )
-    if not pablo_result.success or pablo_result.topology is None:
-        raise RuntimeError(_pablo_failure_message(pablo_result))
-
-    parameterization_result = create_interchange_from_pablo_topology(
-        pablo_result.topology,
-        settings=settings.parameterization,
-        charge_from_molecules=_formal_charge_templates_from_topology(pablo_result.topology),
-    )
-    if not parameterization_result.success or parameterization_result.interchange is None:
-        raise RuntimeError("OpenFF Interchange parameterization did not produce an interchange")
-
-    smoke_result = None
-    local_minimization_result = None
-    if run_product_state_local_minimization:
-        from polyzymd.builders.conjugation._relaxation import (
-            run_post_crosslink_local_minimization,
-        )
-
-        local_settings = _local_minimization_settings_for_product(
-            crosslinked_pdb_path,
-            base_settings=local_minimization_settings,
-            requirement=resolved_plan.pablo_crosslink_requirement,
-            product_state_pablo_library=product_state_pablo_library,
-        )
-        local_minimization_result = run_post_crosslink_local_minimization(
-            crosslinked_pdb_path,
-            artifact_dir,
-            settings=local_settings,
-            pablo_crosslink_requirement=product_state_requirement,
-            product_state_pablo_library=product_state_pablo_library,
-            resolved_plan=resolved_plan,
-        )
-        if not local_minimization_result.success:
-            blocker = local_minimization_result.blocker or "unknown blocker"
-            raise RuntimeError(f"Product-state local minimization failed: {blocker}")
-    elif settings.run_smoke:
-        smoke_result = run_restrained_vacuum_smoke(
-            parameterization_result.interchange,
-            artifact_dir,
-            settings=settings.smoke,
-        )
-        if not smoke_result.success:
-            raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
-
-    return (
-        ModifierConstructionResult(
-            output_dir=artifact_dir,
-            resolved_plan=resolved_plan,
-            crosslink_validation=crosslink_validation,
-            placement=placement_result,
-            assembly=assembly_result,
-            pablo=pablo_result,
-            parameterization=parameterization_result,
-            smoke=smoke_result,
-            local_minimization=local_minimization_result,
-            product_state_pablo_library=product_state_pablo_library,
-            crosslinked_pdb_path=crosslinked_pdb_path,
-            diagnostics=("NHS-Lys modifier-linked protein construction completed",),
-        ),
-        pablo_result.topology,
+        settings=settings,
+        use_product_state_pablo_library=use_product_state_pablo_library,
     )
 
 
-def _construct_multi_modifier_linked_protein(
+def _construct_conjugate_from_specs(
     *,
     protein_pdb_path: Path | str,
-    modifiers: tuple[GeneratedPolymerFragment, ...],
-    resolved_plans: tuple[ResolvedAttachmentPlan, ...],
+    specs: tuple[AttachmentBuildSpec, ...],
     ccd_pablo_policy: Any,
     output_dir: Path | str,
     chain_policy: Any | None,
     settings: ModifierConstructionSettings,
     use_product_state_pablo_library: bool,
-    attachment_specs: tuple[AttachmentBuildSpec, ...] | None = None,
-    source_moieties: tuple[GeneratedMoietyFragment, ...] | None = None,
 ) -> tuple[Any, Any]:
-    """Construct a product PDB from multiple independent resolved attachments."""
-    if not modifiers or len(modifiers) != len(resolved_plans):
-        raise ValueError("Multi-attachment construction requires aligned modifiers and plans")
-    if attachment_specs is not None and len(attachment_specs) != len(resolved_plans):
-        raise ValueError("Multi-attachment construction requires aligned specs and plans")
-    if source_moieties is not None and len(source_moieties) != len(resolved_plans):
-        raise ValueError("Multi-attachment construction requires aligned source moieties and plans")
+    """Construct, parameterize, and relax a conjugate from resolved attachment specs."""
+    if not specs:
+        raise ValueError("Conjugate construction requires at least one attachment spec")
+
+    modifiers = tuple(spec.generated_fragment for spec in specs)
+    resolved_plans = tuple(spec.resolved_plan for spec in specs)
+    if len(modifiers) != len(resolved_plans):
+        raise ValueError("Conjugate construction requires aligned attachment specs")
 
     artifact_dir = Path(output_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -890,10 +852,9 @@ def _construct_multi_modifier_linked_protein(
     product_state_pablo_library = None
     product_state_residue_library = None
     if use_product_state_pablo_library:
-        product_state_specs = _product_state_specs_for_inputs(
-            attachment_specs=attachment_specs,
-            source_moieties=source_moieties,
-            resolved_plans=resolved_plans,
+        product_state_specs = _product_state_specs_with_assembly_mappings(
+            specs,
+            assembly_result=assembly_result,
         )
         product_state_pablo_library = _product_state_pablo_library_for_specs(
             product_pdb=crosslinked_pdb_path,
@@ -919,19 +880,22 @@ def _construct_multi_modifier_linked_protein(
     if not parameterization_result.success or parameterization_result.interchange is None:
         raise RuntimeError("OpenFF Interchange parameterization did not produce an interchange")
 
-    smoke_result = run_restrained_vacuum_smoke(
-        parameterization_result.interchange,
-        artifact_dir,
-        settings=settings.smoke,
-    )
-    if not smoke_result.success:
-        raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
+    smoke_result = None
+    if settings.run_smoke:
+        smoke_result = run_restrained_vacuum_smoke(
+            parameterization_result.interchange,
+            artifact_dir,
+            settings=settings.smoke,
+        )
+        if not smoke_result.success:
+            raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
 
     return (
-        SimpleNamespace(
+        ConjugateConstructionResult(
             output_dir=artifact_dir,
             resolved_plan=resolved_plans[0],
             resolved_plans=resolved_plans,
+            attachment_specs=specs,
             crosslink_validation=crosslink_validations[0],
             crosslink_validations=crosslink_validations,
             placement=placements[0],
@@ -944,11 +908,114 @@ def _construct_multi_modifier_linked_protein(
             product_state_pablo_library=product_state_pablo_library,
             crosslinked_pdb_path=crosslinked_pdb_path,
             diagnostics=(
-                f"Multi-attachment SMILES-moiety construction completed ({len(resolved_plans)} sites)",
+                f"Multi-attachment conjugate construction completed ({len(resolved_plans)} sites)",
             ),
         ),
         pablo_result.topology,
     )
+
+
+def _construct_multi_modifier_linked_protein(
+    *,
+    protein_pdb_path: Path | str,
+    modifiers: tuple[GeneratedPolymerFragment, ...],
+    resolved_plans: tuple[ResolvedAttachmentPlan, ...],
+    ccd_pablo_policy: Any,
+    output_dir: Path | str,
+    chain_policy: Any | None,
+    settings: ModifierConstructionSettings,
+    use_product_state_pablo_library: bool,
+    attachment_specs: tuple[AttachmentBuildSpec, ...] | None = None,
+    source_moieties: tuple[GeneratedMoietyFragment, ...] | None = None,
+) -> tuple[Any, Any]:
+    """Compatibility shim for legacy multi-modifier private callers."""
+    if not modifiers or len(modifiers) != len(resolved_plans):
+        raise ValueError("Multi-attachment construction requires aligned modifiers and plans")
+    if attachment_specs is not None and len(attachment_specs) != len(resolved_plans):
+        raise ValueError("Multi-attachment construction requires aligned specs and plans")
+    if source_moieties is not None and len(source_moieties) != len(resolved_plans):
+        raise ValueError("Multi-attachment construction requires aligned source moieties and plans")
+
+    if attachment_specs is not None:
+        specs = attachment_specs
+    elif source_moieties is not None:
+        specs = _product_state_specs_for_inputs(
+            attachment_specs=None,
+            source_moieties=source_moieties,
+            resolved_plans=resolved_plans,
+        )
+        specs = tuple(
+            spec.model_copy(update={"generated_fragment": modifier})
+            for spec, modifier in zip(specs, modifiers, strict=True)
+        )
+    else:
+        specs = tuple(
+            SimpleNamespace(
+                attachment_id=f"attachment_{index:02d}",
+                attachment_index=index,
+                generated_fragment=modifier,
+                resolved_plan=plan,
+                source_sidecars={},
+                fragment=SimpleNamespace(source_kind="polymer"),
+            )
+            for index, (modifier, plan) in enumerate(
+                zip(modifiers, resolved_plans, strict=True), start=1
+            )
+        )
+
+    return _construct_conjugate_from_specs(
+        protein_pdb_path=protein_pdb_path,
+        specs=specs,
+        ccd_pablo_policy=ccd_pablo_policy,
+        output_dir=output_dir,
+        chain_policy=chain_policy,
+        settings=settings,
+        use_product_state_pablo_library=use_product_state_pablo_library,
+    )
+
+
+def _product_state_specs_with_assembly_mappings(
+    specs: tuple[Any, ...],
+    *,
+    assembly_result: Any,
+) -> tuple[Any, ...]:
+    """Return specs whose plans point at concrete product-PDB modifier residues."""
+    mappings = getattr(assembly_result, "residue_mappings", {}) or {}
+    updated_specs = []
+    for fragment_index, spec in enumerate(specs, start=1):
+        plan = spec.resolved_plan
+        source_key = _modifier_source_residue_key(plan.modifier_link_atom)
+        mapping = mappings.get(f"fragment_{fragment_index}:{source_key}")
+        if mapping is None:
+            updated_specs.append(spec)
+            continue
+
+        modifier_link_atom = plan.modifier_link_atom.model_copy(
+            update={
+                "chain_id": str(mapping.get("target_chain", "C")),
+                "residue_number": int(mapping["target_residue_number"]),
+                "residue_name": plan.modifier_product_residue_name,
+            }
+        )
+        updated_plan = plan.model_copy(update={"modifier_link_atom": modifier_link_atom})
+        copier = getattr(spec, "model_copy", None)
+        if callable(copier):
+            updated_specs.append(copier(update={"resolved_plan": updated_plan}))
+        else:
+            updated_specs.append(_namespace_copy(spec, resolved_plan=updated_plan))
+    return tuple(updated_specs)
+
+
+def _modifier_source_residue_key(atom: PdbAtomRecord) -> str:
+    """Return the residue-mapping key suffix used by the PDB assembly writer."""
+    return f"{atom.residue_number}{atom.insertion_code or ''}"
+
+
+def _namespace_copy(obj: Any, **updates: Any) -> Any:
+    """Copy a simple object namespace while replacing selected attributes."""
+    data = getattr(obj, "__dict__", {}).copy()
+    data.update(updates)
+    return SimpleNamespace(**data)
 
 
 def _policy_with_resolved_crosslinks(

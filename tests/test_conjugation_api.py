@@ -314,8 +314,8 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
 
     def fake_construct(**kwargs):
         calls["construct"] += 1
-        assert len(kwargs["modifiers"]) == 2
-        assert len(kwargs["resolved_plans"]) == 2
+        assert len(kwargs["specs"]) == 2
+        assert len([spec.resolved_plan for spec in kwargs["specs"]]) == 2
         crosslinked = Path(kwargs["output_dir"]) / "assembled_crosslinked.pdb"
         minimized = Path(kwargs["output_dir"]) / "minimized.pdb"
         crosslinked.write_text("END\n", encoding="utf-8")
@@ -347,7 +347,7 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
         "_prepared_protein_pdb_path",
         lambda path, *, output_dir, settings: (Path(path), None),
     )
-    monkeypatch.setattr(workflow_module, "_construct_multi_modifier_linked_protein", fake_construct)
+    monkeypatch.setattr(workflow_module, "_construct_conjugate_from_specs", fake_construct)
     monkeypatch.setattr(
         workflow_module, "topology_with_pdb_positions", lambda topology, path: topology
     )
