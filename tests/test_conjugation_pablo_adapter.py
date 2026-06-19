@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
-from polyzymd.builders.conjugation.diagnostics import DiagnosticCode
+from polyzymd.builders.conjugation._artifacts import DiagnosticCode
 from polyzymd.builders.conjugation.exceptions import (
     ConjugationNotImplementedError,
     PabloIngestionError,

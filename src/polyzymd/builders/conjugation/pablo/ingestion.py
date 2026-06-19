@@ -11,21 +11,19 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from polyzymd.builders.conjugation.diagnostics import (
+from polyzymd.builders.conjugation._artifacts import (
+    ChainPolicyMetadata,
+    ComponentMetadata,
+    ComponentRole,
     ConjugationDiagnostic,
+    ConjugationMetadata,
     DiagnosticCode,
     DiagnosticSeverity,
+    chain_policy_from_config,
 )
 from polyzymd.builders.conjugation.exceptions import (
     ConjugationNotImplementedError,
     PabloIngestionError,
-)
-from polyzymd.builders.conjugation.metadata import (
-    ChainPolicyMetadata,
-    ComponentMetadata,
-    ComponentRole,
-    ConjugationMetadata,
-    chain_policy_from_config,
 )
 from polyzymd.builders.conjugation.pablo.residue_library import build_pablo_residue_library
 from polyzymd.builders.conjugation.structure.inspection import (

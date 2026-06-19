@@ -310,7 +310,7 @@ pixi run -e build make -C docs clean html
 Maintain these import paths temporarily with wrappers/deprecation notes:
 
 - `polyzymd.builders.conjugation.system_workflow`
-- `polyzymd.builders.conjugation.local_minimization`
+- `polyzymd.builders.conjugation._relaxation`
 
 Do not delete existing config fields in the first refactor pass. Add new fields
 only when the clean engine consumes them.

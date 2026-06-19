@@ -7,8 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from polyzymd.builders.conjugation.construction import ModifierConstructionSettings
-from polyzymd.builders.conjugation.contracts import (
+from polyzymd.builders.conjugation._assembly import (
+    ModifierConstructionSettings,
+    PackmolModifierPlacementResult,
+)
+from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
     LinkageBond,
     PabloCrosslinkRequirement,
@@ -18,7 +21,6 @@ from polyzymd.builders.conjugation.contracts import (
 )
 from polyzymd.builders.conjugation.pablo.ingestion import PabloAvailability, PabloIngestionResult
 from polyzymd.builders.conjugation.pablo.parameterization import InterchangeParameterizationResult
-from polyzymd.builders.conjugation.placement import PackmolModifierPlacementResult
 from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction
 from polyzymd.builders.conjugation.structure.pdb import (
     CrosslinkedPdbAssemblyResult,
@@ -181,7 +183,7 @@ def test_prepared_protein_path_canonicalizes_to_construction_dir(monkeypatch, tm
 
 def test_local_minimization_settings_use_product_atom_identities(tmp_path: Path):
     """Local minimization selectors should use product atoms, not leaving atoms."""
-    from polyzymd.builders.conjugation.local_minimization import LocalMinimizationSettings
+    from polyzymd.builders.conjugation._relaxation import LocalMinimizationSettings
 
     product = tmp_path / "product.pdb"
     product.write_text(
@@ -224,7 +226,7 @@ def test_local_minimization_settings_use_product_atom_identities(tmp_path: Path)
 
 def test_local_minimization_settings_preserve_explicit_selectors(tmp_path: Path):
     """Explicit local minimization selectors should override product-state inference."""
-    from polyzymd.builders.conjugation.local_minimization import (
+    from polyzymd.builders.conjugation._relaxation import (
         CrosslinkAtomSelector,
         LocalMinimizationSettings,
     )
@@ -268,7 +270,7 @@ def test_local_minimization_settings_preserve_explicit_selectors(tmp_path: Path)
 
 def test_local_minimization_settings_can_use_product_residue_definition(tmp_path: Path):
     """Product residue definitions can identify the carbonyl oxygen when CONECT is absent."""
-    from polyzymd.builders.conjugation.local_minimization import LocalMinimizationSettings
+    from polyzymd.builders.conjugation._relaxation import LocalMinimizationSettings
 
     product = tmp_path / "product.pdb"
     product.write_text(
@@ -315,7 +317,7 @@ def test_construct_uses_product_state_library_and_local_minimization(
     tmp_path: Path,
 ):
     """NHS-Lys public construction should pass product-state definitions to Pablo."""
-    import polyzymd.builders.conjugation.local_minimization as local_min_module
+    import polyzymd.builders.conjugation._relaxation as local_min_module
     import polyzymd.builders.conjugation.pablo.product as product_pablo_module
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 

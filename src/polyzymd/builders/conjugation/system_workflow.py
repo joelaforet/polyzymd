@@ -10,29 +10,29 @@ from typing import Any
 import numpy as np
 from pydantic import BaseModel, Field
 
-from polyzymd.builders.conjugation.construction import (
+from polyzymd.builders.conjugation._assembly import (
     ModifierConstructionResult,
     ModifierConstructionSettings,
+    PackmolModifierPlacementSettings,
+    place_modifier_with_packmol,
 )
-from polyzymd.builders.conjugation.contracts import (
+from polyzymd.builders.conjugation._linkage import (
+    NhsLysModifierLinker,
     PabloCrosslinkRequirement,
     ResolvedAttachmentPlan,
     parse_pdb_atom_records,
     placed_fragment_from_resolved_plan,
-)
-from polyzymd.builders.conjugation.crosslinks import (
     require_pablo_crosslink_requirement,
 )
-from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
+from polyzymd.builders.conjugation._relaxation import (
+    VacuumSmokeSettings,
+    run_restrained_vacuum_smoke,
+)
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
 from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationSettings,
     build_formal_charge_smoke_template,
     create_interchange_from_pablo_topology,
-)
-from polyzymd.builders.conjugation.placement import (
-    PackmolModifierPlacementSettings,
-    place_modifier_with_packmol,
 )
 from polyzymd.builders.conjugation.polymer import (
     GeneratedPolymerFragment,
@@ -47,7 +47,6 @@ from polyzymd.builders.conjugation.reaction_roles import (
     resolve_reaction_roles_from_identity_map,
 )
 from polyzymd.builders.conjugation.reactions.library import get_reaction
-from polyzymd.builders.conjugation.smoke import VacuumSmokeSettings, run_restrained_vacuum_smoke
 from polyzymd.builders.conjugation.structure.pdb import (
     CrosslinkedPdbAssemblyOptions,
     PdbAtomRecord,
@@ -315,7 +314,7 @@ def _protein_restrained_smoke() -> VacuumSmokeSettings:
 
 def _default_local_minimization_settings() -> Any:
     """Build default post-crosslink local minimization settings lazily."""
-    from polyzymd.builders.conjugation.local_minimization import LocalMinimizationSettings
+    from polyzymd.builders.conjugation._relaxation import LocalMinimizationSettings
 
     return LocalMinimizationSettings()
 
@@ -597,7 +596,7 @@ def _construct_nhs_lys_modifier_linked_protein(
     smoke_result = None
     local_minimization_result = None
     if run_product_state_local_minimization:
-        from polyzymd.builders.conjugation.local_minimization import (
+        from polyzymd.builders.conjugation._relaxation import (
             run_post_crosslink_local_minimization,
         )
 
@@ -681,7 +680,7 @@ def _local_minimization_settings_for_product(
     product_state_pablo_library: Any | None = None,
 ) -> Any:
     """Build local minimization selectors from emitted product atom identities."""
-    from polyzymd.builders.conjugation.local_minimization import CrosslinkAtomSelector
+    from polyzymd.builders.conjugation._relaxation import CrosslinkAtomSelector
 
     explicit_fields = set(getattr(base_settings, "model_fields_set", set()))
     if {"nz_selector", "c047_selector", "o020_selector"}.issubset(explicit_fields):

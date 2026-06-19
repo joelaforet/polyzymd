@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from polyzymd.builders.conjugation.contracts import PabloCrosslinkRequirement
+from polyzymd.builders.conjugation._linkage import PabloCrosslinkRequirement
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
 from polyzymd.builders.conjugation.pablo.product import build_product_state_pablo_library
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord

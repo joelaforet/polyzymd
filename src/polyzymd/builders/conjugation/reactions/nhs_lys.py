@@ -198,7 +198,7 @@ class NhsLysReaction(ReactionTemplate):
         settings: NhsLysReactionSettings | None = None,
     ) -> Any:
         """Create the current NHS-Lys linker implementation from template settings."""
-        from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
+        from polyzymd.builders.conjugation._linkage import NhsLysModifierLinker
 
         resolved = settings or cls.default_settings()
         return NhsLysModifierLinker(

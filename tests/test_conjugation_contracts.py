@@ -7,17 +7,17 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from polyzymd.builders.conjugation.contracts import (
+from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
     LinkageBond,
+    NhsLysModifierLinker,
     PdbAtomSelector,
     ReactiveEndpoint,
     explicit_linkage_contract_from_config,
     resolve_explicit_linkage_contract,
 )
-from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
-from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.config.schema import ConjugationAttachmentConfig
 
 

@@ -10,7 +10,7 @@ from typing import Any, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from polyzymd.builders.conjugation.contracts import (
+from polyzymd.builders.conjugation._linkage import (
     PabloCrosslinkRequirement,
     parse_pdb_atom_records,
 )

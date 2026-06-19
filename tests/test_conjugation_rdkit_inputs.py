@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from polyzymd.builders.conjugation.contracts import parse_pdb_atom_records
+from polyzymd.builders.conjugation._linkage import parse_pdb_atom_records
 from polyzymd.builders.conjugation.rdkit_inputs import (
     AtomIdentity,
     build_rdkit_input_bundle,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from polyzymd.builders.conjugation.contracts import PabloCrosslinkRequirement
-from polyzymd.builders.conjugation.local_minimization import (
+from polyzymd.builders.conjugation._linkage import PabloCrosslinkRequirement
+from polyzymd.builders.conjugation._relaxation import (
     LocalMinimizationSettings,
     _build_simulation_with_platform_fallback,
     analyze_crosslink_geometry,
