@@ -9,6 +9,9 @@ want a worked example with a clear beginning, middle, and end.
   Go from finished trajectories to RMSF results in five steps.
 - [Prepare a PDB for OpenFF and PolyzyMD](prepare_pdb_for_openff.md)
   Inspect and clean a raw 4CHA crystal structure before simulation setup.
+- [Build a Protein Conjugate](conjugation_workflow.md)
+  Learn the current public conjugation workflow with built-in mechanisms and
+  SMARTS role guidance.
 - [Analyze a Multi-Condition Study](analysis_complete_workflow.md)
   Follow the full path from finished trajectories to comparison figures.
 - [Measure Surface Accessibility with SASA](sasa_analysis.md)
@@ -38,6 +41,7 @@ comparison results, and figures. -->
 
 Run Your First Analysis <first_analysis>
 Prepare a PDB for OpenFF and PolyzyMD <prepare_pdb_for_openff>
+Build a Protein Conjugate <conjugation_workflow>
 Analyze a Multi-Condition Study <analysis_complete_workflow>
 Measure Surface Accessibility with SASA <sasa_analysis>
 Build a Protein With Multiple Modifications <protein_modification_workflow>
