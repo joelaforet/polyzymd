@@ -44,7 +44,6 @@ def test_reaction_library_exposes_nhs_lys_template():
     assert get_reaction("nhs_lys") is NhsLysReaction
     assert get_reaction("nhs_lys_amide") is NhsLysReaction
     assert issubclass(get_reaction("nhs_lys"), ReactionTemplate)
-    assert NhsLysReaction.legacy_module_path == "polyzymd.builders.conjugation.nhs_lys"
     assert NhsLysReaction.identifiers() == ("nhs_lys", "nhs_lys_amide")
 
     registry_source = inspect.getsource(library)

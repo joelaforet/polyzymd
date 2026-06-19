@@ -93,7 +93,7 @@ config.yaml
   -> attachment list
   -> protein modification recipe registry
   -> moiety builder
-  -> mechanism registry
+  -> reaction template
   -> atom-level attachment plan
   -> placement
   -> graph or PDB assembly
@@ -139,10 +139,10 @@ polymer work uses Polymerist to generate polymer fragments. Future builders may
 load glycans from curated PDB/SDF files, create PEG chains, or replace one amino
 acid residue with a modified residue template.
 
-### Mechanism Registry
+### Reaction Templates
 
-The mechanism registry defines how a class of chemistry works. A mechanism
-should declare:
+Reaction templates define how a class of chemistry works. A template should
+declare:
 
 | Field | Purpose |
 |-------|---------|

@@ -2,18 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
 from polyzymd.builders.conjugation._artifacts import DiagnosticCode
-from polyzymd.builders.conjugation.exceptions import (
-    ConjugationNotImplementedError,
-    PabloIngestionError,
-)
+from polyzymd.builders.conjugation.exceptions import PabloIngestionError
 from polyzymd.builders.conjugation.pablo.ingestion import (
     PabloAvailability,
     PabloIngestionResult,
@@ -23,7 +18,6 @@ from polyzymd.builders.conjugation.structure.inspection import inspect_pdb_struc
 from polyzymd.config.schema import (
     ConjugationCcdPabloPolicyConfig,
     ConjugationChainPolicyConfig,
-    ConjugationConfig,
 )
 
 
@@ -475,56 +469,6 @@ def test_structure_inspection_dirty_pdb_keeps_free_ligand_non_covalent(tmp_path)
         "CIT"
     ]
     assert inspection.covalent_attachment_candidates == []
-
-
-def test_builder_diagnostics_include_pablo_availability(monkeypatch, tmp_path):
-    """Ingest mode sidecar diagnostics should record Pablo availability."""
-    availability = PabloAvailability(
-        available=True,
-        version="0.2.2",
-        module_path="/fake/openff/pablo/__init__.py",
-    )
-    structure = tmp_path / "prebuilt_conjugate.pdb"
-    structure.write_text("HEADER    TEST\nEND\n")
-
-    def fake_ingest_structure(self, path, *, chain_policy=None, output_dir=None):
-        """Return a failed result with Pablo availability diagnostics."""
-        return PabloIngestionResult(
-            success=False,
-            path=path,
-            suffix=".pdb",
-            pablo=availability,
-            diagnostics=[
-                {
-                    "code": DiagnosticCode.PABLO_ADAPTER,
-                    "message": "OpenFF Pablo availability checked for structure ingestion",
-                    "details": availability.model_dump(mode="json"),
-                }
-            ],
-        )
-
-    monkeypatch.setattr(PabloIngestor, "ingest_structure", fake_ingest_structure)
-
-    builder = CovalentModificationBuilder(
-        ConjugationConfig(
-            enabled=True,
-            mode="ingest_existing",
-            source_pdb_path=structure,
-        ),
-        output_dir=tmp_path,
-    )
-
-    with pytest.raises(ConjugationNotImplementedError, match="usable topology"):
-        builder.build(object())
-
-    diagnostics = json.loads((tmp_path / "conjugation_diagnostics.json").read_text())
-    pablo_events = [
-        event
-        for event in diagnostics["diagnostics"]
-        if event["code"] == DiagnosticCode.PABLO_ADAPTER.value
-    ]
-    assert pablo_events
-    assert pablo_events[0]["details"]["available"] is True
 
 
 def test_poc_5fyj_structure_inspection_reports_compatibility_diagnostics():

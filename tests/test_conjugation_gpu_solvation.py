@@ -92,11 +92,14 @@ def test_opt_in_cuda_required_for_conjugation_solvation_full_build(tmp_path: Pat
 
     from openff.interchange.interop.openmm._positions import to_openmm_positions
 
+    from polyzymd.builders.conjugation._relaxation import (
+        VacuumSmokeSettings,
+        run_restrained_vacuum_smoke,
+    )
     from polyzymd.builders.conjugation.pablo.parameterization import (
         create_interchange_from_openff_topology,
         set_topology_positions_from_pdb,
     )
-    from polyzymd.builders.conjugation._relaxation import VacuumSmokeSettings, run_restrained_vacuum_smoke
     from polyzymd.builders.solvent import SolventBuilder, SolventComposition
     from polyzymd.data.solvent_molecules import get_solvent_molecule
 

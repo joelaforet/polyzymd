@@ -41,7 +41,7 @@ from polyzymd.builders.conjugation.polymer import (
     generate_polymerist_smoke_polymer,
     generated_fragment_from_polymerist_pdb,
 )
-from polyzymd.builders.conjugation.reaction_roles import (
+from polyzymd.builders.conjugation.reactions._roles import (
     STRUCTURE_MATCHING_BLOCKER_MESSAGE,
     atom_mapped_reaction_from_mechanism_config,
     resolve_reaction_roles_from_identity_map,

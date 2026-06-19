@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
-from importlib import import_module
-from types import ModuleType
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field, field_validator
 
+from polyzymd.builders.conjugation.reactions._rdkit_graph import (
+    AddedBond,
+    LysineReactiveSite,
+    NhsLysAttachmentSite,
+    NhsLysGraphEditPlan,
+    NhsReactiveGroup,
+    RdkitGraphEditResult,
+    detect_nhs_reactive_group,
+    execute_nhs_lys_amide_rdkit_graph_edit,
+    extract_lysine_reactive_site,
+    plan_nhs_lys_amide,
+)
 from polyzymd.builders.conjugation.reactions.base import (
     ReactionContext,
     ReactionResult,
@@ -80,29 +90,13 @@ class NhsLysReactionSettings(BaseModel):
 
 
 class NhsLysReaction(ReactionTemplate):
-    """Adapter for the legacy NHS ester to lysine amide implementation.
-
-    The concrete implementation currently lives in
-    ``polyzymd.builders.conjugation.nhs_lys`` and related workflow helpers. This
-    template owns stable NHS-Lys defaults and delegates to those helpers without
-    moving their internals yet.
-    """
+    """Reaction template for NHS ester coupling to lysine NZ."""
 
     name: ClassVar[str] = "nhs_lys"
     aliases: ClassVar[tuple[str, ...]] = ("nhs_lys_amide",)
     description: ClassVar[str] = "NHS ester coupling to lysine NZ to form an amide."
     Settings: ClassVar[type[NhsLysReactionSettings]] = NhsLysReactionSettings
     coordinate_backend_mechanism: ClassVar[str] = "nhs_lys_amide"
-    legacy_module_path: ClassVar[str] = "polyzymd.builders.conjugation.nhs_lys"
-    legacy_symbols: ClassVar[tuple[str, ...]] = (
-        "LysineReactiveSite",
-        "NhsReactiveGroup",
-        "NhsLysGraphEditPlan",
-        "detect_nhs_reactive_group",
-        "execute_nhs_lys_amide_rdkit_graph_edit",
-        "extract_lysine_reactive_site",
-        "plan_nhs_lys_amide",
-    )
     mapped_reaction_smarts: ClassVar[str] = (
         "[N:1]([H:2]).[C:3](=[O:4])[O:5][N:6]>>[N:1][C:3](=[O:4])"
     )
@@ -133,11 +127,6 @@ class NhsLysReaction(ReactionTemplate):
             "label": "nhs_bridging_oxygen",
         },
     )
-
-    @classmethod
-    def load_legacy_module(cls) -> ModuleType:
-        """Import and return the current NHS-Lys implementation module."""
-        return import_module(cls.legacy_module_path)
 
     @classmethod
     def default_settings(cls) -> NhsLysReactionSettings:
@@ -240,7 +229,7 @@ class NhsLysReaction(ReactionTemplate):
     @classmethod
     def build_role_model(cls) -> Any:
         """Build the generic atom-mapped role model for NHS-Lys diagnostics."""
-        from polyzymd.builders.conjugation.reaction_roles import (
+        from polyzymd.builders.conjugation.reactions._roles import (
             AtomMappedReaction,
             AtomRoleSpec,
             ReactionParticipant,
@@ -258,13 +247,6 @@ class NhsLysReaction(ReactionTemplate):
         )
 
     @classmethod
-    def mechanism_metadata(cls) -> Any:
-        """Return the current declarative mechanism metadata for this reaction."""
-        from polyzymd.builders.conjugation.mechanism_library import get_builtin_mechanism
-
-        return get_builtin_mechanism(cls.coordinate_backend_mechanism)
-
-    @classmethod
     def plan_graph_edit(
         cls,
         site: Any,
@@ -272,20 +254,18 @@ class NhsLysReaction(ReactionTemplate):
         *,
         site_hydrogen_indices_to_remove: Any | None = None,
     ) -> Any:
-        """Delegate explicit graph-edit planning to the current NHS-Lys helper."""
-        legacy = cls.load_legacy_module()
-        return legacy.plan_nhs_lys_amide(
+        """Plan an explicit NHS-Lys graph edit."""
+        return plan_nhs_lys_amide(
             site,
             reactive_group,
             site_hydrogen_indices_to_remove=site_hydrogen_indices_to_remove,
         )
 
     def plan(self, _context: ReactionContext) -> ReactionResult:
-        """Raise until the legacy NHS-Lys planner is migrated."""
+        """Raise until full reaction-template execution owns coordinate surgery."""
         raise NotImplementedError(
-            "NHS-Lys reaction planning has not been migrated to the new reaction "
-            "template API yet. Use the legacy functions in "
-            "polyzymd.builders.conjugation.nhs_lys for Phase 1."
+            "NHS-Lys reaction-template execution is not a standalone public API yet. "
+            "Use build_conjugate_from_config() for the supported conjugation workflow."
         )
 
 
@@ -307,4 +287,17 @@ def _required_int(value: Any, label: str) -> int:
     return int(value)
 
 
-__all__ = ["NhsLysReaction", "NhsLysReactionSettings"]
+__all__ = [
+    "AddedBond",
+    "LysineReactiveSite",
+    "NhsLysAttachmentSite",
+    "NhsLysGraphEditPlan",
+    "NhsLysReaction",
+    "NhsLysReactionSettings",
+    "NhsReactiveGroup",
+    "RdkitGraphEditResult",
+    "detect_nhs_reactive_group",
+    "execute_nhs_lys_amide_rdkit_graph_edit",
+    "extract_lysine_reactive_site",
+    "plan_nhs_lys_amide",
+]

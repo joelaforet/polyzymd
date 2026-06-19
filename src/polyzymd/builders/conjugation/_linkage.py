@@ -12,6 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.reactions.nhs_lys import detect_nhs_reactive_group
 from polyzymd.builders.conjugation.structure.pdb import (
     NhsLysPdbAttachment,
     PdbAtomRecord,
@@ -1160,7 +1161,7 @@ def _resolve_lysine_leaving_hydrogens(
     target_atom: PdbAtomRecord,
 ) -> tuple[tuple[PdbAtomRecord, ...], tuple[str, ...]]:
     """Resolve NZ-bound hydrogens with RDKit graph chemistry and local fallback."""
-    from polyzymd.builders.conjugation.rdkit_inputs import load_pdb_as_rdkit_input
+    from polyzymd.builders.conjugation.structure.pdb import load_pdb_as_rdkit_input
 
     warnings: list[str] = []
     bundle = load_pdb_as_rdkit_input(protein_pdb_path, sanitize=False, proximity_bonding=True)

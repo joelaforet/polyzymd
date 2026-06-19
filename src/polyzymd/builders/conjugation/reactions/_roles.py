@@ -1,4 +1,4 @@
-"""Generic atom-mapped reaction role helpers for covalent conjugation POCs."""
+"""Generic atom-mapped reaction role helpers for reaction preflight."""
 
 from __future__ import annotations
 

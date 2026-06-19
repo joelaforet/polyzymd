@@ -69,16 +69,16 @@ attachments:
 
 Only expose low-level fields when users need to override recipe defaults.
 
-## Add Or Reuse A Mechanism
+## Add Or Reuse A Reaction Template
 
-A mechanism describes how the modification attaches. Add a new mechanism when a
-new reaction class is needed. Reuse an existing mechanism when only the moiety
-changes.
+A reaction template describes how the modification attaches. Add a new template
+when a new reaction class is needed. Reuse an existing template when only the
+moiety changes.
 
-A mechanism should define:
+A reaction template should define:
 
-| Mechanism field | Purpose |
-|-----------------|---------|
+| Template field | Purpose |
+|----------------|---------|
 | `identifier` | Stable name used in config and diagnostics. |
 | `allowed_sites` | Residue and atom rules for the protein site. |
 | `moiety_reactive_group` | Reactive atom or group on the moiety. |
@@ -86,8 +86,8 @@ A mechanism should define:
 | `charge_patch_hint` | Expected charge/template strategy. |
 | `rationale` | Plain-language scientific explanation. |
 
-For built-ins, add the declaration to the mechanism library and include tests
-that it validates compatible sites and rejects incompatible sites.
+For built-ins, add a `ReactionTemplate` implementation under `reactions/` and
+include tests that it exposes stable defaults and rejects incompatible inputs.
 
 ## Add A Moiety Builder If Needed
 
