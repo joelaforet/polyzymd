@@ -1,28 +1,21 @@
-# Conjugation POC — Polymer-Protein Covalent Linkage
+# Conjugation POC Assets
 
-Proof-of-concept for automatically conjugating NHS-ester polymers to lysine
-residues on a protein, building a mixed force-field system (ff14SB + OpenFF
-Sage), and running a full MD simulation workflow.
+Historical proof-of-concept assets for automatically conjugating NHS-ester
+polymers to lysine residues on a protein. The old helper scripts that drove the
+POC have been retired now that the public conjugation API is the maintained
+entry point.
 
 **GitHub issue**: <https://github.com/joelaforet/polyzymd/issues/51>
 
 ## Quick start
 
-```bash
-# 1. Install the conjugation-poc pixi environment (from repo root)
-pixi install -e conjugation-poc
+Use `public_api_conjugation_walkthrough.ipynb` for the maintained runnable
+example. It exercises the supported public API rather than the retired POC
+helper scripts.
 
-# 2. Open the Marimo notebook (interactive)
-pixi run -e conjugation-poc conjugation-poc
-
-# 3. Or run the full simulation workflow (headless)
-pixi run -e conjugation-poc conjugation-sim
-```
-
-> **Note**: The simulation script (`run_conjugate_simulation.py`) imports the
-> notebook (`conjugation_poc.py`) as a module to build the conjugate, then
-> proceeds through solvation, equilibration, and production MD. It takes
-> ~90 min on CPU.
+`conjugation_poc_walkthrough.ipynb` and the bundled PDBs, images, cached
+polymer files, and output snapshots are retained as historical reference
+material only.
 
 ## Test system
 
@@ -42,24 +35,30 @@ pixi run -e conjugation-poc conjugation-sim
 ```
 poc/
 ├── README.md                  ← this file
-├── __init__.py                ← package docstring
-├── conjugation_poc.py         ← Marimo notebook: build conjugate + parameterize
-├── generate_polymer.py        ← subprocess helper: polymer generation via polymerist
-├── run_conjugate_simulation.py← full simulation: solvate → equilibrate → production
+├── public_api_conjugation_walkthrough.ipynb ← maintained runnable example
+├── conjugation_poc_walkthrough.ipynb        ← historical POC notebook
+├── PEG_LYS_Schematic.png      ← historical schematic
+├── *.pdb                      ← historical input and output structures
 ├── data/
-│   └── NH3_terminal_His_proton_updated.pdb   ← Lipase A protein structure
-└── output/                    ← simulation artifacts (git-ignored)
-    └── .gitkeep
+│   └── ...                    ← retained POC data assets
+└── output/                    ← retained generated artifacts and snapshots
 ```
+
+The retired helper scripts were removed from this directory:
+
+- `conjugation_poc.py`
+- `generate_polymer.py`
+- `free_polymer_placement.py`
+- `pdb_convention.py`
+- `run_conjugate_simulation.py`
 
 ## How it works
 
 1. **Protein loading** — Load PDB with RDKit, extract ff14SB partial charges,
    identify reactive LYS-NZ sites.
 
-2. **Polymer generation** — Call `generate_polymer.py` as a subprocess (uses
-   the `build` pixi env with mbuild/polymerist) to create an NHS-SBMA polymer
-   with 3D coordinates.
+2. **Polymer generation** — Generate an NHS-SBMA polymer with 3D coordinates
+   through the maintained public API workflow.
 
 3. **Placement** — Rigid-body translate/rotate each polymer to position the
    NHS carbonyl carbon near the target LYS-NZ, respecting bond angle geometry
@@ -88,19 +87,6 @@ poc/
    - NPT free equilibration at 310 K (0.5 ns)
 
 10. **Production** — 1 ns NPT at 310 K, 1 atm.
-
-## Environment variables (optional overrides)
-
-All paths default to locations relative to this directory. Override with:
-
-| Variable | Default | Description |
-|---|---|---|
-| `CONJUGATION_PROTEIN_PDB` | `data/NH3_terminal_His_proton_updated.pdb` | Protein PDB input |
-| `CONJUGATION_ASSEMBLED_PDB` | `output/conjugate_assembled.pdb` | Pre-minimization output |
-| `CONJUGATION_MINIMIZED_PDB` | `output/conjugate_minimized.pdb` | Post-minimization output |
-| `CONJUGATION_BUILD_PYTHON` | `<repo>/.pixi/envs/build/bin/python` | Python for polymer generation subprocess |
-| `CONJUGATION_GENERATE_SCRIPT` | `generate_polymer.py` | Polymer generation script |
-| `CONJUGATION_POLYMER_CACHE` | `.polymer_cache/` | Cached polymer structures |
 
 ## Validated results
 

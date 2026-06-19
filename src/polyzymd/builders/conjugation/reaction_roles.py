@@ -368,7 +368,9 @@ def _coerce_atom_role(role: AtomRoleSpec | Mapping[str, Any] | Any) -> AtomRoleS
     return AtomRoleSpec.model_validate(role)
 
 
-def _participants_from_atom_roles(atom_roles: Sequence[AtomRoleSpec]) -> tuple[ReactionParticipant, ...]:
+def _participants_from_atom_roles(
+    atom_roles: Sequence[AtomRoleSpec],
+) -> tuple[ReactionParticipant, ...]:
     """Infer participant declarations from role metadata without chemistry assumptions."""
     participants: list[ReactionParticipant] = []
     seen: set[ParticipantRole] = set()

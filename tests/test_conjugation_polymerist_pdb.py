@@ -39,6 +39,58 @@ def _conect(source: int, *targets: int) -> str:
     return f"CONECT{source:5d}" + "".join(f"{target:5d}" for target in targets) + "\n"
 
 
+def _minimal_sidecar_pdb(tmp_path: Path) -> Path:
+    """Write a minimal PDB fixture for sidecar bond-order tests."""
+    path = tmp_path / "sidecar_fixture.pdb"
+    path.write_text(
+        _pdb_atom(1, "C1", "MOL", "C", 1, 0.0, 0.0, 0.0, element="C")
+        + _pdb_atom(2, "O1", "MOL", "C", 1, 1.2, 0.0, 0.0, element="O")
+        + _pdb_atom(3, "C2", "MOL", "C", 1, -1.2, 0.0, 0.0, element="C")
+        + _conect(1, 2, 3)
+        + _conect(2, 1)
+        + _conect(3, 1)
+        + "END\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_sidecar_sdf(
+    path: Path,
+    bonds: tuple[tuple[int, int, int], ...],
+    *,
+    formal_charges: dict[int, int] | None = None,
+) -> None:
+    """Write an RDKit SDF fixture with caller-specified one-based bond orders."""
+    Chem = pytest.importorskip("rdkit.Chem")
+    bond_types = {
+        0: Chem.BondType.UNSPECIFIED,
+        1: Chem.BondType.SINGLE,
+        2: Chem.BondType.DOUBLE,
+        3: Chem.BondType.TRIPLE,
+    }
+
+    editable = Chem.RWMol()
+    formal_charges = formal_charges or {}
+    for index, symbol in enumerate(("C", "O", "C"), start=1):
+        atom = Chem.Atom(symbol)
+        atom.SetFormalCharge(formal_charges.get(index, 0))
+        editable.AddAtom(atom)
+    for atom_1, atom_2, order in bonds:
+        editable.AddBond(atom_1 - 1, atom_2 - 1, bond_types[order])
+    mol = editable.GetMol()
+    mol.UpdatePropertyCache(strict=False)
+    Chem.MolToMolFile(mol, str(path))
+
+
+def _fragment_bond_order(fragment, atom_1: int, atom_2: int) -> float:
+    """Return a generated-fragment bond order by serial pair."""
+    serials = tuple(sorted((atom_1, atom_2)))
+    matches = [order for left, right, order in fragment.bond_orders if (left, right) == serials]
+    assert len(matches) == 1
+    return matches[0]
+
+
 def _nhs_group(*, serial_offset: int = 0, residue_number: int = 1, x_offset: float = 0.0) -> str:
     """Create one small NHS-like ester residue with explicit connectivity."""
     serial = serial_offset
@@ -151,6 +203,55 @@ def test_reactive_carbon_leaving_group_and_bonds_are_mapped_to_pdb_records(tmp_p
     assert all(
         isinstance(source, int) and isinstance(target, int) for source, target in fragment.bonds
     )
+
+
+def test_generated_fragment_uses_aligned_sidecar_positive_bond_orders(tmp_path):
+    """Generated fragments should carry positive bond orders from aligned SDF sidecars."""
+    pdb_path = _minimal_sidecar_pdb(tmp_path)
+    _write_sidecar_sdf(pdb_path.with_suffix(".sdf"), ((1, 2, 2), (1, 3, 1)))
+
+    fragment = generated_fragment_from_polymerist_pdb(
+        pdb_path,
+        reactive_atom_name="C1",
+        leaving_atom_names=("O1",),
+    )
+
+    assert _fragment_bond_order(fragment, 1, 2) == 2.0
+    assert _fragment_bond_order(fragment, 1, 3) == 1.0
+    assert all(order > 0.0 for *_atoms, order in fragment.bond_orders)
+
+
+def test_generated_fragment_preserves_sdf_formal_charges(tmp_path):
+    """Generated fragments should carry non-zero formal charges from aligned SDF sidecars."""
+    pdb_path = _minimal_sidecar_pdb(tmp_path)
+    _write_sidecar_sdf(
+        pdb_path.with_suffix(".sdf"),
+        ((1, 2, 1), (1, 3, 1)),
+        formal_charges={2: -1, 3: 1},
+    )
+
+    fragment = generated_fragment_from_polymerist_pdb(
+        pdb_path,
+        reactive_atom_name="C1",
+        leaving_atom_names=("O1",),
+    )
+
+    charges = {atom.atom_name: atom.formal_charge for atom in fragment.atoms}
+    assert charges["O1"] == -1
+    assert charges["C2"] == 1
+
+
+def test_generated_fragment_rejects_zero_order_sidecar_bonds(tmp_path):
+    """Query/zero-order SDF sidecars should fail instead of being chemistry-repaired."""
+    pdb_path = _minimal_sidecar_pdb(tmp_path)
+    _write_sidecar_sdf(pdb_path.with_suffix(".sdf"), ((1, 2, 0), (1, 3, 1)))
+
+    with pytest.raises(ValueError, match="under-specified zero/unknown bond orders"):
+        generated_fragment_from_polymerist_pdb(
+            pdb_path,
+            reactive_atom_name="C1",
+            leaving_atom_names=("O1",),
+        )
 
 
 def test_multiple_nhs_groups_raise_ambiguity_without_selector(tmp_path):

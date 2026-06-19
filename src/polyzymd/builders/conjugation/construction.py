@@ -72,6 +72,8 @@ class ModifierConstructionResult(BaseModel):
     pablo: PabloIngestionResult
     parameterization: InterchangeParameterizationResult
     smoke: VacuumSmokeResult | None = None
+    local_minimization: Any | None = None
+    product_state_pablo_library: Any | None = Field(default=None, exclude=True)
     crosslinked_pdb_path: Path
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
 

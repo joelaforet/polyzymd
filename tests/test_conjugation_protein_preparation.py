@@ -15,7 +15,9 @@ def test_canonicalize_protein_hydrogens_reports_configured_ph(monkeypatch, tmp_p
     """The helper should surface the pH used for OpenMM hydrogen regeneration."""
     source = tmp_path / "source.pdb"
     output = tmp_path / "source_canonical.pdb"
-    source.write_text("ATOM      1  N   LYS A  23       0.000   0.000   0.000  1.00  0.00           N\nEND\n")
+    source.write_text(
+        "ATOM      1  N   LYS A  23       0.000   0.000   0.000  1.00  0.00           N\nEND\n"
+    )
 
     calls = {}
 

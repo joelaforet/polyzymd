@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from polyzymd.builders.conjugation import CovalentModificationBuilder
-from polyzymd.builders.conjugation import linkers as linkers_module
+import polyzymd.builders.conjugation.linkers as linkers_module
+from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
 from polyzymd.builders.conjugation.diagnostics import DiagnosticCode
 from polyzymd.builders.conjugation.exceptions import (
     ConjugationError,

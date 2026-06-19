@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Literal
@@ -459,6 +460,11 @@ def _append_polymer_fragment(
     reactive_atom = _resolve_reactive_polymer_atom(fragment)
     if _atom_identity(reactive_atom) in removed_keys:
         raise ValueError("The polymer reactive atom cannot be listed as a leaving-group atom")
+    kept_atoms = _order_polymer_atoms_by_connectivity(
+        fragment,
+        kept_atoms,
+        warnings,
+    )
 
     residue_key_to_number: dict[tuple[int, str], int] = {}
     residue_mappings: dict[str, dict[str, int | str]] = {}
@@ -550,6 +556,106 @@ def _append_polymer_fragment(
         next_residue_number=residue_cursor,
         residue_mappings=residue_mappings,
     )
+
+
+def _order_polymer_atoms_by_connectivity(
+    fragment: PlacedPolymerFragment,
+    kept_atoms: list[PdbAtomRecord],
+    warnings: list[str],
+) -> list[PdbAtomRecord]:
+    """Return atoms grouped by linear polymer connectivity where available."""
+    residue_order = list(dict.fromkeys(_polymer_residue_key(atom) for atom in kept_atoms))
+    if len(residue_order) <= 2:
+        return kept_atoms
+
+    residue_rank = {key: index for index, key in enumerate(residue_order)}
+    retained_keys = {_atom_identity(atom) for atom in kept_atoms}
+    adjacency: dict[tuple[int, str], set[tuple[int, str]]] = defaultdict(set)
+    for atom_1_ref, atom_2_ref in fragment.bonds:
+        atom_1 = _resolve_polymer_ref(fragment, atom_1_ref)
+        atom_2 = _resolve_polymer_ref(fragment, atom_2_ref)
+        if atom_1 is None or atom_2 is None:
+            continue
+        if (
+            _atom_identity(atom_1) not in retained_keys
+            or _atom_identity(atom_2) not in retained_keys
+        ):
+            continue
+        key_1 = _polymer_residue_key(atom_1)
+        key_2 = _polymer_residue_key(atom_2)
+        if key_1 == key_2:
+            continue
+        adjacency[key_1].add(key_2)
+        adjacency[key_2].add(key_1)
+
+    if not adjacency:
+        return kept_atoms
+
+    ordered_residues: list[tuple[int, str]] = []
+    visited: set[tuple[int, str]] = set()
+    for seed in residue_order:
+        if seed in visited:
+            continue
+        if seed not in adjacency:
+            ordered_residues.append(seed)
+            visited.add(seed)
+            continue
+        component = _polymer_residue_component(seed, adjacency)
+        visited.update(component)
+        if any(len(adjacency[key]) > 2 for key in component):
+            warnings.append(
+                "Branched polymer residue connectivity was preserved in source PDB order"
+            )
+            ordered_residues.extend(
+                key for key in residue_order if key in component and key not in ordered_residues
+            )
+            continue
+        ordered_residues.extend(_linear_polymer_residue_order(component, adjacency, residue_rank))
+
+    groups: dict[tuple[int, str], list[PdbAtomRecord]] = defaultdict(list)
+    for atom in kept_atoms:
+        groups[_polymer_residue_key(atom)].append(atom)
+    return [atom for key in ordered_residues for atom in groups.get(key, ())]
+
+
+def _polymer_residue_component(
+    seed: tuple[int, str],
+    adjacency: dict[tuple[int, str], set[tuple[int, str]]],
+) -> set[tuple[int, str]]:
+    """Return one connected residue component."""
+    component: set[tuple[int, str]] = set()
+    stack = [seed]
+    while stack:
+        key = stack.pop()
+        if key in component:
+            continue
+        component.add(key)
+        stack.extend(neighbor for neighbor in adjacency[key] if neighbor not in component)
+    return component
+
+
+def _linear_polymer_residue_order(
+    component: set[tuple[int, str]],
+    adjacency: dict[tuple[int, str], set[tuple[int, str]]],
+    residue_rank: dict[tuple[int, str], int],
+) -> list[tuple[int, str]]:
+    """Walk a path-like residue component from the earliest source-order endpoint."""
+    endpoints = [key for key in component if len(adjacency[key]) <= 1]
+    start_candidates = endpoints or list(component)
+    current = min(start_candidates, key=lambda key: residue_rank.get(key, len(residue_rank)))
+    previous: tuple[int, str] | None = None
+    ordered: list[tuple[int, str]] = []
+    while current not in ordered:
+        ordered.append(current)
+        next_entries = [neighbor for neighbor in adjacency[current] if neighbor != previous]
+        if not next_entries:
+            break
+        previous, current = current, min(
+            next_entries,
+            key=lambda key: residue_rank.get(key, len(residue_rank)),
+        )
+    ordered.extend(key for key in component if key not in ordered)
+    return ordered
 
 
 def _parse_pdb_atoms(path: Path) -> list[PdbAtomRecord]:

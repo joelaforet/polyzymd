@@ -12,10 +12,12 @@ from polyzymd.builders.conjugation import (
     ConjugateBuildRequest,
     ConjugationEngine,
     ConjugationResult,
-    NhsLysReaction,
-    ReactionTemplate,
     build_conjugate,
     build_conjugate_from_config,
+)
+from polyzymd.builders.conjugation.reactions import (
+    NhsLysReaction,
+    ReactionTemplate,
     get_reaction,
     list_reactions,
 )
@@ -270,44 +272,53 @@ def test_conjugation_result_collects_legacy_output_paths(tmp_path):
     assert result.status == "completed"
     assert result.output_dir == tmp_path / "legacy-out"
     assert result.config_path == tmp_path / "config.yaml"
+    assert result.crosslinked_conjugate_pdb_path == tmp_path / "crosslinked.pdb"
+    assert result.minimized_conjugate_pdb_path == tmp_path / "minimized.pdb"
+    assert result.equilibrated_conjugate_pdb_path == tmp_path / "equilibrated.pdb"
     assert result.relaxed_conjugate_pdb_path == tmp_path / "relaxed.pdb"
     assert result.solvated_pdb_path == tmp_path / "solvated.pdb"
     assert result.workflow_json_path == tmp_path / "workflow.json"
     assert result.final_interchange_created is False
     assert result.artifact_paths == {
+        "crosslinked_conjugate_pdb": tmp_path / "crosslinked.pdb",
+        "minimized_conjugate_pdb": tmp_path / "minimized.pdb",
+        "equilibrated_conjugate_pdb": tmp_path / "equilibrated.pdb",
         "relaxed_conjugate_pdb": tmp_path / "relaxed.pdb",
         "solvated_pdb": tmp_path / "solvated.pdb",
         "workflow_json": tmp_path / "workflow.json",
     }
 
 
-def test_legacy_facade_exports_still_available():
-    """Existing legacy imports should remain available from the package facade."""
+def test_package_facade_exports_public_api_only():
+    """The package facade should expose only the stable public API."""
     import polyzymd.builders.conjugation as conjugation
 
-    for name in (
-        "ConjugatedPolymerSystemSettings",
-        "build_conjugated_polymer_system_from_config",
-        "build_conjugated_polymer_system_from_config_path",
-    ):
-        assert hasattr(conjugation, name)
-        assert name in conjugation.__all__
-
-    for name in (
+    expected = {
+        "ConjugateBuildRequest",
         "ConjugationResult",
         "ConjugationEngine",
         "build_conjugate",
         "build_conjugate_from_config",
-        "list_reactions",
-        "get_reaction",
-    ):
+    }
+
+    assert set(conjugation.__all__) == expected
+    for name in expected:
         assert hasattr(conjugation, name)
-        assert name in conjugation.__all__
+
+    assert not hasattr(conjugation, "build_conjugated_polymer_system_from_config")
+    assert not hasattr(conjugation, "list_reactions")
 
 
 def _legacy_workflow_result(tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(
         output_dir=tmp_path / "legacy-out",
+        construction=SimpleNamespace(
+            crosslinked_pdb_path=tmp_path / "crosslinked.pdb",
+            smoke=SimpleNamespace(
+                minimized_pdb_path=tmp_path / "minimized.pdb",
+                equilibrated_pdb_path=tmp_path / "equilibrated.pdb",
+            ),
+        ),
         relaxed_conjugate_pdb_path=tmp_path / "relaxed.pdb",
         solvated_pdb_path=tmp_path / "solvated.pdb",
         workflow_json_path=tmp_path / "workflow.json",

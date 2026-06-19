@@ -2,13 +2,78 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from polyzymd.builders.conjugation.contracts import PabloCrosslinkRequirement
 from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
+from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
+from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymerist_pdb import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.product_pablo import build_product_state_pablo_library
 from polyzymd.config.schema import ConjugationCcdPabloPolicyConfig
+
+
+@dataclass(frozen=True)
+class PolymerChemistryFixture:
+    name: str
+    atoms: tuple[tuple[str, str, int, str, str], ...]
+    bonds: tuple[tuple[str, str, int], ...]
+    expected_valences: dict[tuple[int, str], int]
+
+
+_SBMA_EGPMA_NHS_CHEMISTRY = PolymerChemistryFixture(
+    name="sbma_egpma_nhs_explicit_valence",
+    atoms=(
+        ("CAA", "NHX", 1, "C", ""),
+        ("OAA", "NHX", 1, "O", ""),
+        ("CBA", "NHX", 1, "C", ""),
+        ("CCA", "SBM", 2, "C", ""),
+        ("OCA", "SBM", 2, "O", ""),
+        ("OCB", "SBM", 2, "O", ""),
+        ("CSB", "SBM", 2, "C", ""),
+        ("CNQ", "SBM", 2, "C", ""),
+        ("NQA", "SBM", 2, "N", "1+"),
+        ("M1", "SBM", 2, "C", ""),
+        ("M2", "SBM", 2, "C", ""),
+        ("M3", "SBM", 2, "C", ""),
+        ("SUL", "SBM", 2, "S", ""),
+        ("OS1", "SBM", 2, "O", ""),
+        ("OS2", "SBM", 2, "O", ""),
+        ("OS3", "SBM", 2, "O", "1-"),
+        ("E1", "EGP", 3, "C", ""),
+        ("E2", "EGP", 3, "C", ""),
+        ("EO1", "EGP", 3, "O", ""),
+    ),
+    bonds=(
+        ("CAA", "OAA", 2),
+        ("CAA", "CBA", 1),
+        ("CCA", "OCA", 2),
+        ("CCA", "OCB", 1),
+        ("CCA", "CSB", 1),
+        ("CSB", "CNQ", 1),
+        ("CNQ", "NQA", 1),
+        ("NQA", "M1", 1),
+        ("NQA", "M2", 1),
+        ("NQA", "M3", 1),
+        ("CSB", "SUL", 1),
+        ("SUL", "OS1", 2),
+        ("SUL", "OS2", 2),
+        ("SUL", "OS3", 1),
+        ("E1", "E2", 2),
+        ("E2", "EO1", 1),
+    ),
+    expected_valences={
+        (1, "CAA"): 4,
+        (2, "CCA"): 4,
+        (2, "NQA"): 4,
+        (2, "SUL"): 6,
+        (3, "E2"): 3,
+    },
+)
 
 
 def test_product_state_pablo_library_preserves_chain_c_residues(tmp_path: Path):
@@ -56,6 +121,30 @@ def test_product_state_pablo_library_preserves_chain_c_residues(tmp_path: Path):
     assert {"L001", "R001", "L002", "R002"}.issubset(
         {atom for summary in chain_c for atom in summary.leaving_atom_names}
     )
+
+
+def test_product_state_pablo_library_uses_connectivity_for_chain_c_links(tmp_path: Path):
+    """Polymer links should not require adjacent residue numbers in emitted PDB order."""
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(_public_three_mer_product_pdb(), encoding="utf-8")
+    plan = _public_three_mer_resolved_plan_like()
+
+    library = build_product_state_pablo_library(
+        product,
+        source,
+        None,
+        None,
+        plan,
+    )
+
+    chain_c = [summary for summary in library.summaries if summary.chain_id == "C"]
+    assert [summary.residue_name for summary in chain_c] == ["NHX", "SBM", "EGP"]
+    assert all(summary.linking_bond == ("POU", "PIN") for summary in chain_c)
+    assert {"PIN", "POU"}.issubset(chain_c[0].atom_names)
+    assert {"PIN", "POU"} & set(chain_c[2].atom_names)
+    assert any("chain-C connectivity" in diagnostic for diagnostic in library.diagnostics)
 
 
 def test_ingest_structure_accepts_prebuilt_residue_library(monkeypatch, tmp_path: Path):
@@ -110,6 +199,356 @@ def test_ingest_structure_accepts_prebuilt_residue_library(monkeypatch, tmp_path
     assert received == [supplied_library]
 
 
+@pytest.mark.parametrize(
+    "fixture",
+    [_SBMA_EGPMA_NHS_CHEMISTRY],
+    ids=lambda fixture: fixture.name,
+)
+def test_product_state_pablo_library_preserves_fixture_bond_orders_and_valence(
+    fixture: PolymerChemistryFixture,
+    tmp_path: Path,
+):
+    """Product-state definitions should preserve explicit input chemistry generically."""
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    polymer_sdf = tmp_path / "polymer.sdf"
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(_fixture_product_pdb(fixture), encoding="utf-8")
+    polymer_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
+
+    library = build_product_state_pablo_library(
+        product,
+        source,
+        polymer_sdf,
+        _generated_fragment_from_fixture(fixture),
+        _fixture_resolved_plan_like(),
+    )
+
+    definitions = {
+        summary.residue_number: definition for summary, definition in _chain_c_definitions(library)
+    }
+    assert [summary.residue_name for summary, _definition in _chain_c_definitions(library)] == [
+        "NHX",
+        "SBM",
+        "EGP",
+    ]
+    for residue_number, atom_name in fixture.expected_valences:
+        assert (
+            _definition_valence(definitions[residue_number], atom_name)
+            == fixture.expected_valences[(residue_number, atom_name)]
+        )
+    for atom1, atom2, order in fixture.bonds:
+        residue_number = _fixture_residue_number(fixture, atom1)
+        assert _bond_order(definitions[residue_number], atom1, atom2) == order
+    assert _definition_atom_charge(definitions[2], "NQA") == 1
+    assert _definition_atom_charge(definitions[2], "OS3") == -1
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [_SBMA_EGPMA_NHS_CHEMISTRY],
+    ids=lambda fixture: fixture.name,
+)
+def test_product_state_pablo_library_maps_sdf_orders_after_product_residue_renumbering(
+    fixture: PolymerChemistryFixture,
+    tmp_path: Path,
+):
+    """SDF bond orders should map by unique atom identity after product residue renumbering."""
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    polymer_sdf = tmp_path / "polymer.sdf"
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(
+        _fixture_product_pdb(fixture, residue_number_map={1: 3, 2: 1, 3: 2}),
+        encoding="utf-8",
+    )
+    polymer_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
+    fragment = _generated_fragment_from_fixture(fixture, include_bond_orders=False)
+
+    library = build_product_state_pablo_library(
+        product,
+        source,
+        polymer_sdf,
+        fragment,
+        _fixture_resolved_plan_like(modifier_residue_number=3),
+    )
+
+    definitions = {
+        summary.residue_number: definition for summary, definition in _chain_c_definitions(library)
+    }
+    assert _bond_order(definitions[1], "SUL", "OS1") == 2
+    assert _bond_order(definitions[1], "SUL", "OS2") == 2
+    assert _bond_order(definitions[3], "CAA", "OAA") == 2
+
+
+def test_product_state_pablo_library_preserves_sdf_formal_charges_without_pdb_charges(
+    tmp_path: Path,
+):
+    """Product definitions should use generated-fragment SDF charges before PDB fallback."""
+    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    polymer_pdb = tmp_path / "polymer.pdb"
+    polymer_sdf = polymer_pdb.with_suffix(".sdf")
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(_fixture_product_pdb(fixture, include_charges=False), encoding="utf-8")
+    polymer_pdb.write_text(_fixture_polymer_pdb(fixture, include_charges=False), encoding="utf-8")
+    polymer_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
+    fragment = generated_fragment_from_polymerist_pdb(
+        polymer_pdb,
+        reactive_atom_name="CAA",
+        leaving_atom_names=("OAA",),
+    )
+
+    library = build_product_state_pablo_library(
+        product,
+        source,
+        polymer_sdf,
+        fragment,
+        _fixture_resolved_plan_like(),
+    )
+
+    definitions = {
+        summary.residue_number: definition for summary, definition in _chain_c_definitions(library)
+    }
+    assert _definition_atom_charge(definitions[2], "NQA") == 1
+    assert _definition_atom_charge(definitions[2], "OS3") == -1
+
+
+def test_product_state_pablo_library_rejects_under_specified_sdf(tmp_path: Path):
+    """SDF zero-order bonds should fail with an actionable error, not chemistry repair."""
+    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    polymer_sdf = tmp_path / "polymer.sdf"
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(_fixture_product_pdb(fixture), encoding="utf-8")
+    polymer_sdf.write_text(_fixture_sdf(fixture, overrides={("CAA", "OAA"): 0}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="under-specified zero/unknown bond orders"):
+        build_product_state_pablo_library(
+            product,
+            source,
+            polymer_sdf,
+            _generated_fragment_from_fixture(fixture),
+            _fixture_resolved_plan_like(),
+        )
+
+
+def test_generated_fragment_from_polymerist_pdb_preserves_sdf_bond_orders(tmp_path: Path):
+    """GeneratedPolymerFragment should carry explicit SDF orders from the sidecar."""
+    pdb_path = tmp_path / "modifier.pdb"
+    sdf_path = pdb_path.with_suffix(".sdf")
+    atoms = (
+        ("C1", "MOL", 1, "C", ""),
+        ("O1", "MOL", 1, "O", ""),
+        ("C2", "MOL", 1, "C", ""),
+    )
+    pdb_path.write_text(
+        "".join(
+            _pdb_atom(index, atom_name, residue_name, "C", residue_number, element, record="HETATM")
+            for index, (atom_name, residue_name, residue_number, element, _charge) in enumerate(
+                atoms, start=1
+            )
+        )
+        + "CONECT    1    2    3\nCONECT    2    1\nCONECT    3    1\nEND\n",
+        encoding="utf-8",
+    )
+    sdf_path.write_text(
+        _sdf_from_atoms_and_bonds(
+            atoms,
+            (("C1", "O1", 2), ("C1", "C2", 1)),
+        ),
+        encoding="utf-8",
+    )
+
+    fragment = generated_fragment_from_polymerist_pdb(
+        pdb_path,
+        reactive_atom_name="C1",
+        leaving_atom_names=("O1",),
+    )
+
+    assert _fragment_bond_order(fragment, 1, 2) == 2
+    assert _fragment_bond_order(fragment, 1, 3) == 1
+
+
+def _fixture_resolved_plan_like(*, modifier_residue_number: int = 1):
+    requirement = PabloCrosslinkRequirement(
+        residues=("LYX", "NHX"),
+        linking_atoms=("NZ", "CAA"),
+        leaving_atoms=(("HZ2", "HZ3"), ()),
+        bond_order=1,
+    )
+    return SimpleNamespace(
+        pablo_crosslink_requirement=requirement,
+        protein_link_atom=SimpleNamespace(chain_id="A", residue_number=23),
+        modifier_link_atom=SimpleNamespace(chain_id="C", residue_number=modifier_residue_number),
+        modifier_leaving_atoms=(),
+        contract=SimpleNamespace(
+            protein_endpoint=SimpleNamespace(
+                selector=SimpleNamespace(residue_name="LYS"),
+            ),
+        ),
+    )
+
+
+def _generated_fragment_from_fixture(
+    fixture: PolymerChemistryFixture,
+    *,
+    include_bond_orders: bool = True,
+) -> GeneratedPolymerFragment:
+    atoms = [
+        PdbAtomRecord(
+            serial=index,
+            atom_index=index - 1,
+            atom_name=atom_name,
+            residue_name=residue_name,
+            chain_id="C",
+            residue_number=residue_number,
+            x=0.0,
+            y=0.0,
+            z=0.0,
+            element=element,
+            charge=charge,
+            record_name="HETATM",
+        )
+        for index, (atom_name, residue_name, residue_number, element, charge) in enumerate(
+            fixture.atoms,
+            start=1,
+        )
+    ]
+    return GeneratedPolymerFragment.from_atom_records(
+        atoms,
+        bonds=tuple((atom1, atom2) for atom1, atom2, _order in fixture.bonds),
+        bond_orders=fixture.bonds if include_bond_orders else (),
+        reactive_atom_name="CAA",
+        name=fixture.name,
+    )
+
+
+def _fixture_product_pdb(
+    fixture: PolymerChemistryFixture,
+    *,
+    include_charges: bool = True,
+    residue_number_map: dict[int, int] | None = None,
+) -> str:
+    residue_number_map = residue_number_map or {}
+    serial_by_atom = {
+        atom_name: index + 11 for index, (atom_name, *_rest) in enumerate(fixture.atoms)
+    }
+    lines = [*_product_protein_atoms()]
+    lines.extend(
+        _pdb_atom(
+            serial_by_atom[atom_name],
+            atom_name,
+            residue_name,
+            "C",
+            residue_number_map.get(residue_number, residue_number),
+            element,
+            record="HETATM",
+            charge=charge if include_charges else "",
+        )
+        for atom_name, residue_name, residue_number, element, charge in fixture.atoms
+    )
+    lines.append(f"CONECT    9{serial_by_atom['CAA']:5d}\n")
+    conect: dict[int, set[int]] = {}
+    for atom1, atom2, _order in fixture.bonds:
+        serial1 = serial_by_atom[atom1]
+        serial2 = serial_by_atom[atom2]
+        conect.setdefault(serial1, set()).add(serial2)
+        conect.setdefault(serial2, set()).add(serial1)
+    for serial in sorted(conect):
+        bonded = "".join(f"{target:5d}" for target in sorted(conect[serial]))
+        lines.append(f"CONECT{serial:5d}{bonded}\n")
+    lines.append("END\n")
+    return "".join(lines)
+
+
+def _fixture_polymer_pdb(
+    fixture: PolymerChemistryFixture,
+    *,
+    include_charges: bool = True,
+) -> str:
+    lines = [
+        _pdb_atom(
+            index,
+            atom_name,
+            residue_name,
+            "C",
+            residue_number,
+            element,
+            record="HETATM",
+            charge=charge if include_charges else "",
+        )
+        for index, (atom_name, residue_name, residue_number, element, charge) in enumerate(
+            fixture.atoms,
+            start=1,
+        )
+    ]
+    serial_by_atom = {
+        atom_name: index for index, (atom_name, *_rest) in enumerate(fixture.atoms, 1)
+    }
+    conect: dict[int, set[int]] = {}
+    for atom1, atom2, _order in fixture.bonds:
+        serial1 = serial_by_atom[atom1]
+        serial2 = serial_by_atom[atom2]
+        conect.setdefault(serial1, set()).add(serial2)
+        conect.setdefault(serial2, set()).add(serial1)
+    for serial in sorted(conect):
+        bonded = "".join(f"{target:5d}" for target in sorted(conect[serial]))
+        lines.append(f"CONECT{serial:5d}{bonded}\n")
+    lines.append("END\n")
+    return "".join(lines)
+
+
+def _fixture_sdf(
+    fixture: PolymerChemistryFixture,
+    *,
+    overrides: dict[tuple[str, str], int] | None = None,
+) -> str:
+    return _sdf_from_atoms_and_bonds(fixture.atoms, fixture.bonds, overrides=overrides)
+
+
+def _sdf_from_atoms_and_bonds(
+    atoms: tuple[tuple[str, str, int, str, str], ...],
+    bonds: tuple[tuple[str, str, int], ...],
+    *,
+    overrides: dict[tuple[str, str], int] | None = None,
+) -> str:
+    overrides = overrides or {}
+    atom_index = {atom_name: index for index, (atom_name, *_rest) in enumerate(atoms, start=1)}
+    lines = [
+        "\n",
+        "  PolyzyMD test fixture\n",
+        "\n",
+        f"{len(atoms):3d}{len(bonds):3d}  0  0  0  0  0  0  0  0999 V2000\n",
+    ]
+    for index, (_atom_name, _residue_name, _residue_number, element, charge) in enumerate(atoms):
+        x = float(index) * 1.5
+        charge_code = _mdl_charge_code(charge)
+        lines.append(
+            f"{x:10.4f}{0.0:10.4f}{0.0:10.4f} {element:<3} 0  {charge_code:d}"
+            "  0  0  0  0  0  0  0  0  0  0\n"
+        )
+    for atom1, atom2, order in bonds:
+        order = overrides.get((atom1, atom2), overrides.get((atom2, atom1), order))
+        lines.append(f"{atom_index[atom1]:3d}{atom_index[atom2]:3d}{order:3d}  0\n")
+    lines.append("M  END\n$$$$\n")
+    return "".join(lines)
+
+
+def _mdl_charge_code(charge: str) -> int:
+    charge_codes = {"3+": 1, "2+": 2, "1+": 3, "1-": 5, "2-": 6, "3-": 7}
+    return charge_codes.get(charge, 0)
+
+
+def _fixture_residue_number(fixture: PolymerChemistryFixture, atom_name: str) -> int:
+    for candidate_name, _residue_name, residue_number, _element, _charge in fixture.atoms:
+        if candidate_name == atom_name:
+            return residue_number
+    raise AssertionError(f"Fixture atom {atom_name} was not found")
+
+
 def _resolved_plan_like():
     requirement = PabloCrosslinkRequirement(
         residues=("LYX", "NHX"),
@@ -123,6 +562,28 @@ def _resolved_plan_like():
         modifier_link_atom=SimpleNamespace(chain_id="C", residue_number=5),
         modifier_leaving_atoms=(
             SimpleNamespace(atom_name="LG", element="O", charge="", residue_number=5),
+        ),
+        contract=SimpleNamespace(
+            protein_endpoint=SimpleNamespace(
+                selector=SimpleNamespace(residue_name="LYS"),
+            ),
+        ),
+    )
+
+
+def _public_three_mer_resolved_plan_like():
+    requirement = PabloCrosslinkRequirement(
+        residues=("LYX", "NHX"),
+        linking_atoms=("NZ", "C003"),
+        leaving_atoms=(("HZ2", "HZ3"), ("LG",)),
+        bond_order=1,
+    )
+    return SimpleNamespace(
+        pablo_crosslink_requirement=requirement,
+        protein_link_atom=SimpleNamespace(chain_id="A", residue_number=23),
+        modifier_link_atom=SimpleNamespace(chain_id="C", residue_number=1),
+        modifier_leaving_atoms=(
+            SimpleNamespace(atom_name="LG", element="O", charge="", residue_number=1),
         ),
         contract=SimpleNamespace(
             protein_endpoint=SimpleNamespace(
@@ -189,6 +650,101 @@ def _product_pdb() -> str:
     )
 
 
+def _public_three_mer_product_pdb() -> str:
+    return "".join(
+        [
+            _pdb_atom(1, "N", "LYX", "A", 23, "N"),
+            _pdb_atom(2, "CA", "LYX", "A", 23, "C"),
+            _pdb_atom(3, "C", "LYX", "A", 23, "C"),
+            _pdb_atom(4, "O", "LYX", "A", 23, "O"),
+            _pdb_atom(5, "CB", "LYX", "A", 23, "C"),
+            _pdb_atom(6, "CG", "LYX", "A", 23, "C"),
+            _pdb_atom(7, "CD", "LYX", "A", 23, "C"),
+            _pdb_atom(8, "CE", "LYX", "A", 23, "C"),
+            _pdb_atom(9, "NZ", "LYX", "A", 23, "N"),
+            _pdb_atom(10, "HZ1", "LYX", "A", 23, "H"),
+            _pdb_atom(11, "C000", "NHX", "C", 1, "C", record="HETATM"),
+            _pdb_atom(12, "C001", "NHX", "C", 1, "C", record="HETATM"),
+            _pdb_atom(13, "C003", "NHX", "C", 1, "C", record="HETATM"),
+            _pdb_atom(14, "O000", "NHX", "C", 1, "O", record="HETATM"),
+            _pdb_atom(15, "C008", "SBM", "C", 2, "C", record="HETATM"),
+            _pdb_atom(16, "C009", "SBM", "C", 2, "C", record="HETATM"),
+            _pdb_atom(17, "C019", "EGP", "C", 3, "C", record="HETATM"),
+            _pdb_atom(18, "C020", "EGP", "C", 3, "C", record="HETATM"),
+            "CONECT    9   13\n",
+            "CONECT   11   12   15\n",
+            "CONECT   12   11   17\n",
+            "CONECT   13    9   14\n",
+            "CONECT   14   13\n",
+            "CONECT   15   11   16\n",
+            "CONECT   16   15\n",
+            "CONECT   17   12   18\n",
+            "CONECT   18   17\n",
+            "END\n",
+        ]
+    )
+
+
+def _product_protein_atoms() -> list[str]:
+    return [
+        _pdb_atom(1, "N", "LYX", "A", 23, "N"),
+        _pdb_atom(2, "CA", "LYX", "A", 23, "C"),
+        _pdb_atom(3, "C", "LYX", "A", 23, "C"),
+        _pdb_atom(4, "O", "LYX", "A", 23, "O"),
+        _pdb_atom(5, "CB", "LYX", "A", 23, "C"),
+        _pdb_atom(6, "CG", "LYX", "A", 23, "C"),
+        _pdb_atom(7, "CD", "LYX", "A", 23, "C"),
+        _pdb_atom(8, "CE", "LYX", "A", 23, "C"),
+        _pdb_atom(9, "NZ", "LYX", "A", 23, "N"),
+        _pdb_atom(10, "HZ1", "LYX", "A", 23, "H"),
+    ]
+
+
+def _chain_c_definitions(library):
+    return [
+        (summary, definition)
+        for summary, definition in zip(library.summaries, library.definitions, strict=True)
+        if summary.chain_id == "C"
+    ]
+
+
+def _bond_order(definition, atom1: str, atom2: str) -> int:
+    pair = {atom1, atom2}
+    for bond in definition.bonds:
+        if {bond.atom1, bond.atom2} == pair:
+            return bond.order
+    raise AssertionError(f"Bond {atom1}-{atom2} was not defined")
+
+
+def _definition_valence(definition, atom_name: str) -> int:
+    valence = 0
+    for bond in definition.bonds:
+        if atom_name in {bond.atom1, bond.atom2}:
+            valence += int(bond.order)
+    crosslink = getattr(definition, "crosslink", None)
+    if crosslink is not None and atom_name in {crosslink.atom1, crosslink.atom2}:
+        valence += int(crosslink.order)
+    linking_bond = getattr(definition, "linking_bond", None)
+    if linking_bond is not None and atom_name in {linking_bond.atom1, linking_bond.atom2}:
+        valence += int(linking_bond.order)
+    return valence
+
+
+def _definition_atom_charge(definition, atom_name: str) -> int:
+    for atom in definition.atoms:
+        if atom.name == atom_name:
+            return atom.charge
+    raise AssertionError(f"Atom {atom_name} was not defined")
+
+
+def _fragment_bond_order(fragment: GeneratedPolymerFragment, serial1: int, serial2: int) -> int:
+    pair = {serial1, serial2}
+    for left, right, order in fragment.bond_orders:
+        if {left, right} == pair:
+            return int(order)
+    raise AssertionError(f"Fragment bond {serial1}-{serial2} was not defined")
+
+
 def _pdb_atom(
     serial: int,
     atom_name: str,
@@ -198,8 +754,10 @@ def _pdb_atom(
     element: str,
     *,
     record: str = "ATOM",
+    charge: str = "",
 ) -> str:
     return (
         f"{record:<6}{serial:5d} {atom_name:<4} {residue_name:>3} {chain_id}"
-        f"{residue_number:4d}       0.000   0.000   0.000  1.00  0.00          {element:>2}\n"
+        f"{residue_number:4d}       0.000   0.000   0.000  1.00  0.00          "
+        f"{element:>2}{charge:>2}\n"
     )

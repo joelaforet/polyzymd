@@ -119,6 +119,70 @@ def _polymer_fragment() -> PlacedPolymerFragment:
     )
 
 
+def _three_mer_polymer_fragment_with_internal_reactive_residue() -> PlacedPolymerFragment:
+    """Create raw Polymerist-like order: reactive middle residue first, terminals after."""
+    atoms = (
+        PdbAtomRecord(
+            serial=201,
+            atom_index=0,
+            atom_name="N1",
+            residue_name="NH1",
+            chain_id="Z",
+            residue_number=20,
+            x=0.0,
+            y=0.0,
+            z=0.0,
+            element="C",
+            record_name="HETATM",
+        ),
+        PdbAtomRecord(
+            serial=202,
+            atom_index=1,
+            atom_name="RC",
+            residue_name="NH1",
+            chain_id="Z",
+            residue_number=20,
+            x=1.0,
+            y=0.0,
+            z=0.0,
+            element="C",
+            record_name="HETATM",
+        ),
+        PdbAtomRecord(
+            serial=203,
+            atom_index=2,
+            atom_name="A1",
+            residue_name="SB1",
+            chain_id="Z",
+            residue_number=10,
+            x=-1.0,
+            y=0.0,
+            z=0.0,
+            element="C",
+            record_name="HETATM",
+        ),
+        PdbAtomRecord(
+            serial=204,
+            atom_index=3,
+            atom_name="B1",
+            residue_name="EG1",
+            chain_id="Z",
+            residue_number=30,
+            x=2.0,
+            y=0.0,
+            z=0.0,
+            element="C",
+            record_name="HETATM",
+        ),
+    )
+    return PlacedPolymerFragment(
+        atoms=atoms,
+        bonds=((201, 202), (201, 203), (202, 204)),
+        reactive_atom_serial=202,
+        name="public_three_mer_like",
+    )
+
+
 def _write_assembled(tmp_path: Path) -> tuple[Path, str]:
     """Write a crosslinked assembly used by multiple tests."""
     protein_path, original = _protein_pdb(tmp_path)
@@ -162,6 +226,35 @@ def test_crosslinked_writer_appends_polymer_chain_c_and_canonicalizes_names(tmp_
     assert [line[12:16].strip() for line in polymer_lines] == ["C1", "RC", "O1"]
     assert [line[17:20].strip() for line in polymer_lines] == ["SBM", "NHX", "NHX"]
     assert {line[22:26].strip() for line in polymer_lines} == {"1", "2"}
+
+
+def test_crosslinked_writer_orders_linear_polymer_by_connectivity(tmp_path):
+    """A graph-internal reactive residue should not be emitted as chain-C residue 1."""
+    protein_path, _original = _protein_pdb(tmp_path)
+    output_path = tmp_path / "assembled_three_mer.pdb"
+    attachment = NhsLysPdbAttachment(
+        target_chain="A",
+        target_residue_number=23,
+        nz_hydrogen_atom_names_to_remove=("HZ2", "HZ3"),
+    )
+
+    write_crosslinked_pdb(
+        protein_path,
+        _three_mer_polymer_fragment_with_internal_reactive_residue(),
+        attachment,
+        output_path,
+    )
+
+    polymer_lines = [
+        line
+        for line in output_path.read_text().splitlines()
+        if line.startswith("HETATM") and line[21] == "C"
+    ]
+    residue_order = list(
+        dict.fromkeys((line[17:20].strip(), line[22:26].strip()) for line in polymer_lines)
+    )
+
+    assert residue_order == [("SBM", "1"), ("NHX", "2"), ("EGP", "3")]
 
 
 def test_generic_writer_removes_resolved_non_hydrogen_leaving_atom(tmp_path):

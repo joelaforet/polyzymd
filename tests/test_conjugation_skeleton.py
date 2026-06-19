@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
-from polyzymd.builders.conjugation import CovalentModificationBuilder
+from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
 from polyzymd.builders.conjugation.exceptions import ConjugationNotImplementedError
 from polyzymd.builders.conjugation.pablo_adapter import (
     PabloAvailability,

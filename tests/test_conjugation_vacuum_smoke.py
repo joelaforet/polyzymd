@@ -198,7 +198,7 @@ def test_opt_in_conjugation_stack_smoke_requirements_are_available():
         module load slurm/blanca
         salloc ...
         PYTHONNOUSERSITE=1 POLYZYMD_RUN_CONJUGATION_PABLO_SMOKE=1 \
-          pixi run -e conjugation-cuda-12-4 pytest \
+          pixi run -e sim-cuda-12-4 pytest \
           tests/test_conjugation_integrated_smoke.py -v
     """
     if os.environ.get("POLYZYMD_RUN_CONJUGATION_PABLO_SMOKE") != "1":

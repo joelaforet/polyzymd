@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from polyzymd.builders.conjugation.polymer_recipe import (
     PolymerRecipe,
-    _polymerist_to_explicit_h_rdkit_mol,
+    _polymerist_to_pdb_aligned_rdkit_mol,
     _write_rdkit_sdf_sidecar,
     generate_polymerist_smoke_polymer,
     sbma_egpma_nhs_recipe,
@@ -53,6 +53,47 @@ def _minimal_simulation_config_data() -> dict:
 def _recipe_dict() -> dict:
     """Return a realistic SBMA/EGPMA/NHS polymer recipe dictionary."""
     return sbma_egpma_nhs_recipe(length=9, seed=7).model_dump(mode="json")
+
+
+def _pdb_atom_line(serial: int, atom_name: str, element: str, *, x: float) -> str:
+    """Return one PDB HETATM line for a minimal polymer fixture."""
+    return (
+        f"HETATM{serial:5d} {atom_name:<4} MOL C{1:4d}    "
+        f"{x:8.3f}{0.0:8.3f}{0.0:8.3f}  1.00  0.00          {element:>2}\n"
+    )
+
+
+def _write_small_polymer_pdb(path: Path) -> None:
+    """Write a three-atom PDB fixture with explicit connectivity."""
+    path.write_text(
+        _pdb_atom_line(1, "C1", "C", x=0.0)
+        + _pdb_atom_line(2, "O1", "O", x=1.2)
+        + _pdb_atom_line(3, "C2", "C", x=-1.2)
+        + "CONECT    1    2    3\nCONECT    2    1\nCONECT    3    1\nEND\n",
+        encoding="utf-8",
+    )
+
+
+def _small_polymer_rdkit_mol():
+    """Build a three-atom RDKit fixture with one Polymerist-style unspecified bond."""
+    Chem = pytest.importorskip("rdkit.Chem")
+
+    editable = Chem.RWMol()
+    editable.AddAtom(Chem.Atom("C"))
+    editable.AddAtom(Chem.Atom("O"))
+    editable.AddAtom(Chem.Atom("C"))
+    editable.AddBond(0, 1, Chem.BondType.DOUBLE)
+    editable.AddBond(0, 2, Chem.BondType.UNSPECIFIED)
+    mol = editable.GetMol()
+    mol.UpdatePropertyCache(strict=False)
+    return mol
+
+
+def _bond_order(rdkit_mol, atom_1: int, atom_2: int) -> float:
+    """Return a one-based bond order from an RDKit molecule."""
+    bond = rdkit_mol.GetBondBetweenAtoms(atom_1 - 1, atom_2 - 1)
+    assert bond is not None
+    return float(bond.GetBondTypeAsDouble())
 
 
 def test_recipe_validates_probabilities_and_pdb_safe_residue_names():
@@ -236,110 +277,34 @@ def test_real_polymerist_generation_smoke(tmp_path):
     assert result.atom_count is None or result.atom_count > 0
 
 
-def test_polymerist_to_rdkit_adds_explicit_hydrogens_and_fixes_nitrogen(
-    monkeypatch,
+def test_polymerist_to_pdb_aligned_rdkit_mol_matches_pdb_atoms_and_bond_orders(
+    tmp_path,
 ):
-    """Polymerist conversion should preserve charge fixes before explicit H addition."""
-    calls = {}
-
-    class FakeAtom:
-        """Minimal atom exposing the RDKit atom methods used by conversion."""
-
-        def __init__(self):
-            self.formal_charge = 0
-
-        def GetSymbol(self):
-            """Return the atom element symbol."""
-            return "N"
-
-        def GetDegree(self):
-            """Return the atom degree."""
-            return 4
-
-        def GetFormalCharge(self):
-            """Return the current formal charge."""
-            return self.formal_charge
-
-        def SetFormalCharge(self, charge):
-            """Set the formal charge."""
-            self.formal_charge = charge
-
-    class FakeMol:
-        """Minimal implicit-hydrogen RDKit-like molecule."""
-
-        def __init__(self, other=None):
-            self.atom = FakeAtom()
-            self.cache_updated = False
-            if other is not None:
-                self.atom.formal_charge = other.atom.formal_charge
-
-        def GetAtoms(self):
-            """Return atoms for formal-charge adjustment."""
-            return (self.atom,)
-
-        def GetNumConformers(self):
-            """Return one conformer so AddHs should keep coordinates."""
-            return 1
-
-        def UpdatePropertyCache(self, *, strict):
-            """Record property-cache update calls before adding hydrogens."""
-            self.cache_updated = strict is False
-
-    class FakeExplicitMol:
-        """Minimal explicit-hydrogen RDKit-like molecule."""
-
-        def __init__(self):
-            self.cache_updated = False
-
-        def UpdatePropertyCache(self, *, strict):
-            """Record property-cache update calls."""
-            self.cache_updated = strict is False
+    """Sidecar conversion should align to PDB atoms and make bond orders explicit."""
 
     class FakePolymer:
-        """Minimal Polymerist-like object exposing RDKit conversion."""
-
-        def __init__(self):
-            self.mol = FakeMol()
+        """Fake final Polymerist polymer exposing RDKit conversion."""
 
         def to_rdkit(self):
-            """Return the fake molecule for conversion."""
-            return self.mol
+            """Return a minimal Polymerist-like source molecule."""
+            return _small_polymer_rdkit_mol()
 
-    explicit_mol = FakeExplicitMol()
+    pdb_path = tmp_path / "polymer.pdb"
+    _write_small_polymer_pdb(pdb_path)
 
-    def fake_add_hs(mol, *, addCoords):
-        """Record AddHs arguments and return an explicit-H molecule."""
-        calls["mol"] = mol
-        calls["addCoords"] = addCoords
-        calls["charge_before_add_hs"] = mol.atom.formal_charge
-        calls["cache_updated_before_add_hs"] = mol.cache_updated
-        return explicit_mol
+    mol = _polymerist_to_pdb_aligned_rdkit_mol(FakePolymer(), pdb_path)
 
-    fake_chem = ModuleType("rdkit.Chem")
-    fake_chem.AddHs = fake_add_hs
-    fake_chem.Mol = FakeMol
-    fake_rdkit = ModuleType("rdkit")
-    fake_rdkit.Chem = fake_chem
-    monkeypatch.setitem(sys.modules, "rdkit", fake_rdkit)
-    monkeypatch.setitem(sys.modules, "rdkit.Chem", fake_chem)
-
-    polymer = FakePolymer()
-    result = _polymerist_to_explicit_h_rdkit_mol(polymer)
-
-    assert result is explicit_mol
-    assert calls["addCoords"] is True
-    assert calls["charge_before_add_hs"] == 1
-    assert calls["cache_updated_before_add_hs"] is True
-    assert explicit_mol.cache_updated is True
-    assert calls["mol"] is not polymer.mol
-    assert polymer.mol.atom.formal_charge == 0
+    assert mol.GetNumAtoms() == 3
+    assert _bond_order(mol, 1, 2) == 2.0
+    assert _bond_order(mol, 1, 3) == 1.0
+    assert all(float(bond.GetBondTypeAsDouble()) > 0.0 for bond in mol.GetBonds())
 
 
-def test_generate_polymerist_smoke_polymer_returns_explicit_rdkit_sidecar(
+def test_generate_polymerist_smoke_polymer_returns_pdb_aligned_rdkit_sidecar(
     monkeypatch,
     tmp_path,
 ):
-    """Smoke generation should return an explicit-H RDKit mol and SDF sidecar."""
+    """Smoke generation should return a PDB-aligned RDKit mol and SDF sidecar."""
     built_sequences = []
 
     class FakeFragmentGenerator:
@@ -356,74 +321,14 @@ def test_generate_polymerist_smoke_polymer_returns_explicit_rdkit_sidecar(
             """Return the expected monomer-group cache path."""
             return self.cache_directory / f"{recipe_name}.json"
 
-    class FakeAtom:
-        """Minimal neutral tetravalent nitrogen atom."""
-
-        def __init__(self):
-            self.formal_charge = 0
-
-        def GetSymbol(self):
-            """Return the element symbol."""
-            return "N"
-
-        def GetDegree(self):
-            """Return the atom degree."""
-            return 4
-
-        def GetFormalCharge(self):
-            """Return the formal charge."""
-            return self.formal_charge
-
-        def SetFormalCharge(self, charge):
-            """Set the formal charge."""
-            self.formal_charge = charge
-
-    class FakeImplicitMol:
-        """Minimal RDKit-like molecule returned by Polymerist."""
-
-        def __init__(self, other=None):
-            self.atom = FakeAtom()
-            self.cache_updated = False
-            if other is not None:
-                self.atom.formal_charge = other.atom.formal_charge
-
-        def GetAtoms(self):
-            """Return atoms for formal-charge adjustment."""
-            return (self.atom,)
-
-        def GetNumConformers(self):
-            """Return zero conformers."""
-            return 0
-
-        def UpdatePropertyCache(self, *, strict):
-            """Record property-cache update calls before adding hydrogens."""
-            self.cache_updated = strict is False
-
-    class FakeExplicitMol:
-        """Minimal explicit-H RDKit-like molecule returned by AddHs."""
-
-        def __init__(self):
-            self.cache_updated = False
-
-        def UpdatePropertyCache(self, *, strict):
-            """Record cache update behavior."""
-            self.cache_updated = strict is False
-
-        def GetNumAtoms(self):
-            """Return an explicit-H atom count."""
-            return 8
-
     class FakePolymer:
         """Fake Polymerist polymer with RDKit conversion."""
 
-        n_particles = 2
-
-        def __init__(self):
-            self.mol = FakeImplicitMol()
+        n_particles = 3
 
         def to_rdkit(self):
-            """Return the implicit-H fake molecule."""
-            return self.mol
+            """Return the final-chain fixture molecule."""
+            return _small_polymer_rdkit_mol()
 
     class FakePolymerGenerator:
         """Fake polymer generator avoiding Polymerist structure building."""
@@ -435,21 +340,8 @@ def test_generate_polymerist_smoke_polymer_returns_explicit_rdkit_sidecar(
             """Write a PDB and return a fake polymer object."""
             built_sequences.append(sequence)
             pdb_path = tmp_path / "polymer.pdb"
-            pdb_path.write_text("END\n")
+            _write_small_polymer_pdb(pdb_path)
             return FakePolymer(), pdb_path
-
-    explicit_mol = FakeExplicitMol()
-
-    def fake_add_hs(mol, *, addCoords):
-        """Return the explicit-H molecule."""
-        assert addCoords is False
-        assert mol.cache_updated is True
-        return explicit_mol
-
-    def fake_mol_to_mol_file(mol, path):
-        """Write the fake SDF sidecar."""
-        assert mol is explicit_mol
-        Path(path).write_text("fake sdf\n")
 
     fake_fragment_module = ModuleType("polyzymd.builders.fragment_generator")
     fake_fragment_module.FragmentGenerator = FakeFragmentGenerator
@@ -461,26 +353,28 @@ def test_generate_polymerist_smoke_polymer_returns_explicit_rdkit_sidecar(
         "polymerization": tmp_path / "polymerization.rxn",
         "termination": tmp_path / "termination.rxn",
     }
-    fake_chem = ModuleType("rdkit.Chem")
-    fake_chem.AddHs = fake_add_hs
-    fake_chem.Mol = FakeImplicitMol
-    fake_chem.MolToMolFile = fake_mol_to_mol_file
-    fake_rdkit = ModuleType("rdkit")
-    fake_rdkit.Chem = fake_chem
     monkeypatch.setitem(sys.modules, "polyzymd.builders.fragment_generator", fake_fragment_module)
     monkeypatch.setitem(sys.modules, "polyzymd.builders.polymer_generator", fake_polymer_module)
     monkeypatch.setitem(sys.modules, "polyzymd.data.reactions", fake_reactions_module)
-    monkeypatch.setitem(sys.modules, "rdkit", fake_rdkit)
-    monkeypatch.setitem(sys.modules, "rdkit.Chem", fake_chem)
 
     recipe = sbma_nhs_egpma_acb_recipe()
     result = generate_polymerist_smoke_polymer(recipe, tmp_path / "cache")
+    Chem = pytest.importorskip("rdkit.Chem")
+    sidecar_mols = [
+        mol
+        for mol in Chem.SDMolSupplier(str(result.sdf_path), removeHs=False, sanitize=False)
+        if mol is not None
+    ]
 
     assert built_sequences == ["ACB"]
-    assert result.rdkit_mol is explicit_mol
+    assert result.rdkit_mol.GetNumAtoms() == 3
     assert result.sdf_path == tmp_path / "polymer.sdf"
     assert result.sdf_path.exists()
-    assert result.atom_count == 8
+    assert result.atom_count == 3
+    assert [(mol.GetNumAtoms(), mol.GetNumBonds()) for mol in sidecar_mols] == [(3, 2)]
+    assert _bond_order(sidecar_mols[0], 1, 2) == 2.0
+    assert _bond_order(sidecar_mols[0], 1, 3) == 1.0
+    assert all(float(bond.GetBondTypeAsDouble()) > 0.0 for bond in sidecar_mols[0].GetBonds())
     assert "rdkit_mol" not in result.model_dump()
 
 

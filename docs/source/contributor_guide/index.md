@@ -33,8 +33,9 @@ comparison, and artifact-only plotting.
   how to persist arrays, tables, and plotting inputs through registered
   `ArtifactStore` sidecars instead of plugin-specific cache files
 - **[Conjugation Refactor Loop Plan](conjugation_refactor_loop.md)** —
-  agent handoff plan for turning the NHS-Lys conjugation POC into the clean
-  `polyzymd.builders.conjugation` engine and reaction-template library
+  agent handoff plan for keeping conjugation work aligned with the public
+  `build_conjugate_from_config()`/`ConjugationEngine` workflow and retained POC
+  reference assets
 
 ## Contributor Mindset
 
