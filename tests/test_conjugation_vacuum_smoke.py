@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from polyzymd.builders.conjugation.smoke import (
+from polyzymd.builders.conjugation._relaxation import (
     VacuumSmokeSettings,
     _positions_to_numpy,
     _resolve_restrained_indices,

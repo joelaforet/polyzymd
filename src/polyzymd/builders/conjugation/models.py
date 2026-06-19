@@ -7,12 +7,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from polyzymd.builders.conjugation.diagnostics import ConjugationDiagnosticsReport
+from polyzymd.builders.conjugation._artifacts import (
+    ConjugationDiagnosticsReport,
+    ConjugationMetadata,
+)
 from polyzymd.builders.conjugation.execution import (
     RdkitGraphEditExecutionResult,
     RdkitGraphEditExecutionSummary,
 )
-from polyzymd.builders.conjugation.metadata import ConjugationMetadata
 
 
 class ConjugateBuildRequest(BaseModel):

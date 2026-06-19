@@ -4,20 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from polyzymd.builders.conjugation.contracts import (
+from polyzymd.builders.conjugation._assembly import (
+    place_modifier_with_packmol,
+    place_modifier_with_resolved_plan,
+)
+from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
     LinkageBond,
+    NhsLysModifierLinker,
     PdbAtomSelector,
     ReactiveEndpoint,
     resolve_explicit_linkage_contract,
 )
-from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
-from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
-from polyzymd.builders.conjugation.placement import (
-    place_modifier_with_packmol,
-    place_modifier_with_resolved_plan,
-)
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 
 def test_packmol_input_uses_random_constrained_reactive_placement(tmp_path: Path):

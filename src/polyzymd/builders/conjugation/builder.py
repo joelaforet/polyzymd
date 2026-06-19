@@ -6,10 +6,13 @@ import logging
 from pathlib import Path
 from typing import Any, Mapping
 
-from polyzymd.builders.conjugation.diagnostics import (
+from polyzymd.builders.conjugation._artifacts import (
     ConjugationDiagnosticsReport,
+    ConjugationMetadata,
     DiagnosticCode,
     DiagnosticSeverity,
+    chain_policy_from_config,
+    save_metadata,
     write_diagnostics_report,
 )
 from polyzymd.builders.conjugation.exceptions import (
@@ -25,11 +28,6 @@ from polyzymd.builders.conjugation.execution import (
     extract_explicit_rdkit_execution_request,
 )
 from polyzymd.builders.conjugation.mechanism_library import get_builtin_mechanism
-from polyzymd.builders.conjugation.metadata import (
-    ConjugationMetadata,
-    chain_policy_from_config,
-    save_metadata,
-)
 from polyzymd.builders.conjugation.models import ConjugationBuildResult
 from polyzymd.builders.conjugation.moieties import normalize_moiety_descriptor
 from polyzymd.builders.conjugation.nhs_lys import (

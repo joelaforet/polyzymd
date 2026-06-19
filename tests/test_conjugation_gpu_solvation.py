@@ -96,7 +96,7 @@ def test_opt_in_cuda_required_for_conjugation_solvation_full_build(tmp_path: Pat
         create_interchange_from_openff_topology,
         set_topology_positions_from_pdb,
     )
-    from polyzymd.builders.conjugation.smoke import VacuumSmokeSettings, run_restrained_vacuum_smoke
+    from polyzymd.builders.conjugation._relaxation import VacuumSmokeSettings, run_restrained_vacuum_smoke
     from polyzymd.builders.solvent import SolventBuilder, SolventComposition
     from polyzymd.data.solvent_molecules import get_solvent_molecule
 
@@ -374,7 +374,7 @@ def _all_heavy_atom_indices(pdb_path: Path) -> tuple[int, ...]:
 
 def _heavy_atom_records(pdb_path: Path) -> Iterator[Any]:
     """Yield non-hydrogen PDB atom records from a linked conjugate artifact."""
-    from polyzymd.builders.conjugation.contracts import parse_pdb_atom_records
+    from polyzymd.builders.conjugation._linkage import parse_pdb_atom_records
 
     for atom in parse_pdb_atom_records(pdb_path):
         element = (atom.element or "").upper()

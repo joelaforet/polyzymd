@@ -7,25 +7,25 @@ from types import SimpleNamespace
 
 import pytest
 
-from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
-from polyzymd.builders.conjugation.construction import (
+from polyzymd.builders.conjugation._assembly import (
     construct_explicit_pdb_linkage,
     construct_modifier_linked_protein,
 )
-from polyzymd.builders.conjugation.contracts import (
+from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
     LinkageBond,
+    MissingPabloCrosslinkError,
+    NhsLysModifierLinker,
     PdbAtomSelector,
     ReactiveEndpoint,
 )
-from polyzymd.builders.conjugation.crosslinks import MissingPabloCrosslinkError
+from polyzymd.builders.conjugation._relaxation import VacuumSmokeResult
+from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
 from polyzymd.builders.conjugation.exceptions import ConjugationNotImplementedError
-from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
 from polyzymd.builders.conjugation.pablo.ingestion import PabloAvailability, PabloIngestionResult
 from polyzymd.builders.conjugation.pablo.parameterization import InterchangeParameterizationResult
-from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
-from polyzymd.builders.conjugation.smoke import VacuumSmokeResult
+from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.config.schema import (
     ConjugationAttachmentConfig,
     ConjugationConfig,

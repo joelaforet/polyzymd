@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from polyzymd.builders.conjugation.contracts import parse_pdb_atom_records
+from polyzymd.builders.conjugation._linkage import parse_pdb_atom_records
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 

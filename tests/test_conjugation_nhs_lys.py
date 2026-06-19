@@ -6,14 +6,14 @@ from types import SimpleNamespace
 
 import pytest
 
-import polyzymd.builders.conjugation.linkers as linkers_module
+import polyzymd.builders.conjugation._linkage as linkers_module
 from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
-from polyzymd.builders.conjugation.diagnostics import DiagnosticCode
+from polyzymd.builders.conjugation._artifacts import DiagnosticCode
 from polyzymd.builders.conjugation.exceptions import (
     ConjugationError,
     ConjugationNotImplementedError,
 )
-from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker, resolve_modifier_nhs_atoms
+from polyzymd.builders.conjugation._linkage import NhsLysModifierLinker, resolve_modifier_nhs_atoms
 from polyzymd.builders.conjugation.nhs_lys import (
     detect_nhs_reactive_group,
     execute_nhs_lys_amide_rdkit_graph_edit,
