@@ -15,8 +15,8 @@ from polyzymd.builders.conjugation.contracts import (
     PabloCrosslinkRequirement,
     parse_pdb_atom_records,
 )
-from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
-from polyzymd.builders.conjugation.parameterization import (
+from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
+from polyzymd.builders.conjugation.pablo.parameterization import (
     build_formal_charge_smoke_template,
     create_interchange_from_pablo_topology,
 )

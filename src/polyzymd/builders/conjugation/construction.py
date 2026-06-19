@@ -19,8 +19,8 @@ from polyzymd.builders.conjugation.crosslinks import (
     require_pablo_crosslink_requirement,
 )
 from polyzymd.builders.conjugation.linkers import ModifierLinker, NhsLysModifierLinker
-from polyzymd.builders.conjugation.pablo_adapter import PabloIngestionResult, PabloIngestor
-from polyzymd.builders.conjugation.parameterization import (
+from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestionResult, PabloIngestor
+from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationResult,
     InterchangeParameterizationSettings,
     create_interchange_from_pablo_topology,

@@ -27,7 +27,7 @@ from polyzymd.builders.conjugation.metadata import (
     ConjugationMetadata,
     chain_policy_from_config,
 )
-from polyzymd.builders.conjugation.residue_library import build_pablo_residue_library
+from polyzymd.builders.conjugation.pablo.residue_library import build_pablo_residue_library
 from polyzymd.builders.conjugation.structure_inspection import (
     PDBStructureInspection,
     inspect_pdb_structure,

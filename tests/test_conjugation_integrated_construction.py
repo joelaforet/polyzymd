@@ -21,8 +21,8 @@ from polyzymd.builders.conjugation.contracts import (
 from polyzymd.builders.conjugation.crosslinks import MissingPabloCrosslinkError
 from polyzymd.builders.conjugation.exceptions import ConjugationNotImplementedError
 from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
-from polyzymd.builders.conjugation.pablo_adapter import PabloAvailability, PabloIngestionResult
-from polyzymd.builders.conjugation.parameterization import InterchangeParameterizationResult
+from polyzymd.builders.conjugation.pablo.ingestion import PabloAvailability, PabloIngestionResult
+from polyzymd.builders.conjugation.pablo.parameterization import InterchangeParameterizationResult
 from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.smoke import VacuumSmokeResult

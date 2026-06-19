@@ -40,7 +40,7 @@ from polyzymd.builders.conjugation.nhs_lys import (
     extract_lysine_reactive_site,
     plan_nhs_lys_amide,
 )
-from polyzymd.builders.conjugation.pablo_adapter import PabloIngestionResult, PabloIngestor
+from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestionResult, PabloIngestor
 from polyzymd.builders.conjugation.sites import (
     AttachmentSite,
     match_site_rule,

@@ -9,13 +9,13 @@ from types import SimpleNamespace
 import pytest
 
 from polyzymd.builders.conjugation.contracts import PabloCrosslinkRequirement
-from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
+from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
+from polyzymd.builders.conjugation.pablo.product import build_product_state_pablo_library
 from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
 from polyzymd.builders.conjugation.polymer import (
     GeneratedPolymerFragment,
     generated_fragment_from_polymerist_pdb,
 )
-from polyzymd.builders.conjugation.product_pablo import build_product_state_pablo_library
 from polyzymd.config.schema import ConjugationCcdPabloPolicyConfig
 
 
@@ -151,7 +151,7 @@ def test_product_state_pablo_library_uses_connectivity_for_chain_c_links(tmp_pat
 
 def test_ingest_structure_accepts_prebuilt_residue_library(monkeypatch, tmp_path: Path):
     """A caller-supplied library should bypass policy with_crosslink construction."""
-    import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
+    import polyzymd.builders.conjugation.pablo.ingestion as pablo_adapter
 
     structure = tmp_path / "structure.pdb"
     structure.write_text("HEADER    TEST\nEND\n", encoding="utf-8")

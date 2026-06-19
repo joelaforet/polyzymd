@@ -7,7 +7,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from polyzymd.builders.conjugation.pablo_adapter import (
+from polyzymd.builders.conjugation.pablo.ingestion import (
     PabloAvailability,
     PabloIngestionResult,
     PabloIngestor,

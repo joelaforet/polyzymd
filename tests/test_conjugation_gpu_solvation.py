@@ -92,7 +92,7 @@ def test_opt_in_cuda_required_for_conjugation_solvation_full_build(tmp_path: Pat
 
     from openff.interchange.interop.openmm._positions import to_openmm_positions
 
-    from polyzymd.builders.conjugation.parameterization import (
+    from polyzymd.builders.conjugation.pablo.parameterization import (
         create_interchange_from_openff_topology,
         set_topology_positions_from_pdb,
     )

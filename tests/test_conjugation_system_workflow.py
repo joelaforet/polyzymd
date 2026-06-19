@@ -16,8 +16,8 @@ from polyzymd.builders.conjugation.contracts import (
     ReactiveEndpoint,
     ResolvedAttachmentPlan,
 )
-from polyzymd.builders.conjugation.pablo_adapter import PabloAvailability, PabloIngestionResult
-from polyzymd.builders.conjugation.parameterization import InterchangeParameterizationResult
+from polyzymd.builders.conjugation.pablo.ingestion import PabloAvailability, PabloIngestionResult
+from polyzymd.builders.conjugation.pablo.parameterization import InterchangeParameterizationResult
 from polyzymd.builders.conjugation.pdb_assembly import (
     CrosslinkedPdbAssemblyResult,
     PdbAtomRecord,
@@ -316,7 +316,7 @@ def test_construct_uses_product_state_library_and_local_minimization(
 ):
     """NHS-Lys public construction should pass product-state definitions to Pablo."""
     import polyzymd.builders.conjugation.local_minimization as local_min_module
-    import polyzymd.builders.conjugation.product_pablo as product_pablo_module
+    import polyzymd.builders.conjugation.pablo.product as product_pablo_module
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
     requirement = PabloCrosslinkRequirement(
