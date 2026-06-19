@@ -26,6 +26,9 @@ from polyzymd.builders.conjugation.polymer import (
     GeneratedPolymerFragment,
     PolymerFragmentAtom,
     PolymerFragmentResidue,
+    PolymeristGenerationSmokeResult,
+    PolymerMonomerRecipe,
+    PolymerRecipe,
 )
 from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction
 from polyzymd.builders.conjugation.structure.pdb import (
@@ -48,7 +51,11 @@ from polyzymd.builders.conjugation.system_workflow import (
     _require_supported_coordinate_backend,
     _restore_pdb_atom_name_fields,
 )
-from polyzymd.config.schema import ConjugationCcdPabloPolicyConfig
+from polyzymd.config.schema import (
+    ConjugationCcdPabloPolicyConfig,
+    ConjugationChainPolicyConfig,
+    ConjugationMode,
+)
 
 
 class _AtomDouble:
@@ -621,6 +628,213 @@ def test_multi_modifier_construction_parameterizes_and_relaxes_once(monkeypatch,
     assert calls["smoke"] == 1
 
 
+def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_path: Path):
+    """Direct N-gly requests should resolve one build spec per enabled attachment."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    source = tmp_path / "protein.pdb"
+    source.write_text("END\n", encoding="utf-8")
+    relaxed = tmp_path / "relaxed.pdb"
+    relaxed.write_text("END\n", encoding="utf-8")
+    attachments = tuple(_direct_n_gly_attachment(index) for index in (1, 2))
+    built_specs = []
+    calls = {}
+    real_spec_builder = workflow_module.attachment_spec_from_moiety_plan
+
+    class FakeReaction:
+        coordinate_backend_mechanism = "n_glycosylation"
+
+        @staticmethod
+        def resolve_plan(protein_pdb_path, site, fragment, *, settings=None):
+            return _generic_resolved_plan(
+                residue_number=site.residue_number,
+                modifier_residue_number=fragment.residues[0].residue_number,
+                modifier_atom="C001",
+            )
+
+    def counting_spec_builder(*args, **kwargs):
+        spec = real_spec_builder(*args, **kwargs)
+        built_specs.append(spec)
+        return spec
+
+    def fake_construct(**kwargs):
+        calls["construct_spec_count"] = len(built_specs)
+        calls["modifier_count"] = len(kwargs["modifiers"])
+        calls["source_moiety_types"] = tuple(type(item) for item in kwargs["source_moieties"])
+        calls["resolved_plan_count"] = len(kwargs["resolved_plans"])
+        return (
+            SimpleNamespace(
+                smoke=SimpleNamespace(minimized_pdb_path=relaxed, equilibrated_pdb_path=None),
+                crosslinked_pdb_path=tmp_path / "crosslinked.pdb",
+                diagnostics=("fake construction",),
+            ),
+            object(),
+        )
+
+    monkeypatch.setattr(workflow_module, "get_reaction", lambda name: FakeReaction)
+    monkeypatch.setattr(
+        workflow_module,
+        "build_smiles_moiety_fragment",
+        lambda smiles, residue_name, **kwargs: _moiety_fragment(
+            residue_name=residue_name,
+            residue_number=int(Path(kwargs["output_dir"]).name[:2]),
+        ),
+    )
+    monkeypatch.setattr(workflow_module, "attachment_spec_from_moiety_plan", counting_spec_builder)
+    monkeypatch.setattr(
+        workflow_module,
+        "_prepared_protein_pdb_path",
+        lambda protein_pdb_path, **kwargs: (Path(protein_pdb_path), None),
+    )
+    monkeypatch.setattr(workflow_module, "_construct_multi_modifier_linked_protein", fake_construct)
+    monkeypatch.setattr(
+        workflow_module, "topology_with_pdb_positions", lambda topology, path: topology
+    )
+    monkeypatch.setattr(workflow_module, "_restore_pdb_atom_name_fields", lambda *args: 0)
+    monkeypatch.setattr(
+        workflow_module,
+        "_build_direct_solvated_system",
+        lambda **kwargs: _FakeSystemBuilder(tmp_path / "solvated.pdb"),
+    )
+
+    result = workflow_module.build_direct_smiles_moiety_conjugate(
+        protein_pdb_path=source,
+        attachments=attachments,
+        output_dir=tmp_path / "out",
+        settings=workflow_module.ConjugatedPolymerSystemSettings(),
+    )
+
+    assert len(built_specs) == 2
+    assert calls["construct_spec_count"] == 2
+    assert calls["modifier_count"] == 2
+    assert calls["resolved_plan_count"] == 2
+    assert calls["source_moiety_types"] == (GeneratedMoietyFragment, GeneratedMoietyFragment)
+    assert result.workflow_json_path.exists()
+
+
+def test_config_nhs_lys_path_builds_one_spec_before_construction(monkeypatch, tmp_path: Path):
+    """Config NHS-Lys construction should resolve one spec then call the legacy constructor."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    source = tmp_path / "protein.pdb"
+    source.write_text("END\n", encoding="utf-8")
+    polymer_pdb = tmp_path / "polymer.pdb"
+    polymer_pdb.write_text(
+        _pdb_line(1, "C001", "NHS", "C", 1, element="C") + "END\n",
+        encoding="utf-8",
+    )
+    polymer_sdf = tmp_path / "polymer.sdf"
+    polymer_sdf.write_text("", encoding="utf-8")
+    relaxed = tmp_path / "relaxed.pdb"
+    relaxed.write_text("END\n", encoding="utf-8")
+    attachment = _config_nhs_attachment()
+    config = SimpleNamespace(
+        enzyme=SimpleNamespace(pdb_path=source),
+        conjugation=SimpleNamespace(
+            enabled=True,
+            mode=ConjugationMode.CONSTRUCT,
+            attachments=(attachment,),
+            ccd_pablo=ConjugationCcdPabloPolicyConfig(),
+            chain_policy=ConjugationChainPolicyConfig(),
+        ),
+    )
+    generation = PolymeristGenerationSmokeResult(
+        recipe_name="test",
+        sequence="AA",
+        cache_directory=tmp_path / "cache",
+        monomer_group_path=tmp_path / "monomers.json",
+        pdb_path=polymer_pdb,
+        sdf_path=polymer_sdf,
+        object_type="FakePolymer",
+        atom_count=1,
+    )
+    built_specs = []
+    calls = {}
+    real_spec_builder = workflow_module.attachment_spec_from_generated_polymer_plan
+
+    class FakeResult:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+        def save(self, path):
+            Path(path).write_text("{}\n", encoding="utf-8")
+            return Path(path)
+
+    class FakeLinker:
+        def resolve_plan(self, protein_pdb_path, modifier):
+            calls["linker_modifier"] = modifier
+            return _resolved_plan(
+                PabloCrosslinkRequirement(
+                    residues=("LYX", "NHX"),
+                    linking_atoms=("NZ", "C047"),
+                    leaving_atoms=((), ()),
+                    bond_order=1,
+                )
+            )
+
+    def counting_spec_builder(*args, **kwargs):
+        spec = real_spec_builder(*args, **kwargs)
+        built_specs.append(spec)
+        return spec
+
+    def fake_construct(**kwargs):
+        calls["construct_spec_count"] = len(built_specs)
+        calls["modifier"] = kwargs["modifier"]
+        calls["polymer_sdf_path"] = kwargs["polymer_sdf_path"]
+        calls["resolved_plan"] = kwargs["resolved_plan"]
+        return SimpleNamespace(smoke=SimpleNamespace(minimized_pdb_path=relaxed)), object()
+
+    monkeypatch.setattr(workflow_module, "ConjugatedPolymerSystemResult", FakeResult)
+    monkeypatch.setattr(
+        workflow_module, "generate_polymerist_smoke_polymer", lambda *a, **k: generation
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "generated_fragment_from_polymerist_pdb",
+        lambda *args, **kwargs: _generated_fragment(residue_name="NHS", residue_number=1),
+    )
+    monkeypatch.setattr(
+        workflow_module, "_nhs_lys_linker_from_attachment", lambda attachment: FakeLinker()
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "attachment_spec_from_generated_polymer_plan",
+        counting_spec_builder,
+    )
+    monkeypatch.setattr(
+        workflow_module, "_construct_nhs_lys_modifier_linked_protein", fake_construct
+    )
+    monkeypatch.setattr(workflow_module, "_relaxed_conjugate_pdb", lambda construction: relaxed)
+    monkeypatch.setattr(
+        workflow_module,
+        "topology_with_pdb_positions",
+        lambda topology, path, **kwargs: topology,
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "_build_solvated_system",
+        lambda *args, **kwargs: _FakeSystemBuilder(tmp_path / "solvated.pdb"),
+    )
+    monkeypatch.setattr(workflow_module, "_restore_pdb_atom_name_fields", lambda *args: 0)
+
+    settings = workflow_module.ConjugatedPolymerSystemSettings(
+        canonicalize_source_protein_hydrogens=False,
+        preserve_reference_atom_names=False,
+    )
+    result = workflow_module.build_conjugated_polymer_system_from_config(
+        config,
+        output_dir=tmp_path / "out",
+        settings=settings,
+    )
+
+    assert len(built_specs) == 1
+    assert calls["construct_spec_count"] == 1
+    assert calls["modifier"] is built_specs[0].generated_fragment
+    assert calls["polymer_sdf_path"] == polymer_sdf
+    assert calls["resolved_plan"] is built_specs[0].resolved_plan
+    assert result.workflow_json_path.exists()
+
+
 def test_coordinate_backend_gate_allows_explicit_nhs_lys_mechanism():
     """The system workflow should only route the named implemented backend to NHS-Lys."""
     attachment = SimpleNamespace(
@@ -684,6 +898,61 @@ def test_coordinate_backend_gate_blocks_unspecified_mechanisms_without_smarts():
 
     with pytest.raises(NotImplementedError, match="currently implements coordinate surgery only"):
         _require_supported_coordinate_backend(attachment)
+
+
+class _FakeSystemBuilder:
+    def __init__(self, solvated_topology):
+        self.solvated_topology = solvated_topology
+        self.interchange = None
+
+    def save_topology(self, path):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text("END\n", encoding="utf-8")
+
+
+def _direct_n_gly_attachment(index: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        name=f"glycan_{index}",
+        enabled=True,
+        site=SimpleNamespace(residue_number=40 + index),
+        moiety=SimpleNamespace(
+            smiles="CO",
+            residue_name="NAG",
+            name=f"nag_{index}",
+        ),
+        mechanism=SimpleNamespace(name="n_glycosylation"),
+    )
+
+
+def _config_nhs_attachment() -> SimpleNamespace:
+    recipe = PolymerRecipe(
+        name="test_nhs_polymer",
+        monomers=(
+            PolymerMonomerRecipe(
+                label="A",
+                name="NHS",
+                residue_name="NHS",
+                smiles="C",
+                probability=1.0,
+            ),
+        ),
+        length=2,
+        reactive_monomer_index=0,
+        fixed_sequence="AA",
+    )
+    return SimpleNamespace(
+        name="nhs_polymer",
+        enabled=True,
+        moiety=SimpleNamespace(name="nhs_polymer", polymer_recipe=recipe),
+        mechanism=SimpleNamespace(name="nhs_lys_amide", reaction_smarts=None),
+        site=SimpleNamespace(
+            chain_id="A",
+            residue_name="LYS",
+            residue_number=23,
+            insertion_code="",
+            atom_name="NZ",
+        ),
+    )
 
 
 def _pdb_line(

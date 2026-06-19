@@ -30,6 +30,11 @@ from polyzymd.builders.conjugation._relaxation import (
     VacuumSmokeSettings,
     run_restrained_vacuum_smoke,
 )
+from polyzymd.builders.conjugation._specs import (
+    AttachmentBuildSpec,
+    attachment_spec_from_generated_polymer_plan,
+    attachment_spec_from_moiety_plan,
+)
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
 from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationSettings,
@@ -176,41 +181,21 @@ def build_conjugated_polymer_system_from_config(
     construction_dir = artifact_dir / workflow_settings.conjugate_artifact_dir_name
 
     attachment = _single_enabled_attachment(config.conjugation)
-    _require_supported_coordinate_backend(attachment)
-    recipe = _polymer_recipe_from_attachment(attachment)
-    reactive_sequence_index = _reactive_sequence_index(recipe)
-
-    generation = generate_polymerist_smoke_polymer(
-        recipe,
-        artifact_dir / workflow_settings.conjugate_cache_dir_name,
-        force_regenerate=workflow_settings.force_regenerate_conjugate_polymer,
-        max_retries=workflow_settings.conjugate_polymerist_max_retries,
-        energy_minimize=workflow_settings.conjugate_polymerist_energy_minimize,
-    )
-    if generation.pdb_path is None:
-        raise RuntimeError("Polymerist did not produce a conjugate-polymer PDB")
-
-    reactive_selector = _reactive_residue_selector(
-        generation.pdb_path,
-        sequence=generation.sequence,
-        reactive_sequence_index=reactive_sequence_index,
-    )
-    modifier = generated_fragment_from_polymerist_pdb(
-        generation.pdb_path,
-        recipe=recipe,
-        sequence=generation.sequence,
-        name=attachment.moiety.name,
-        reactive_residue_chain_id=_optional_str(reactive_selector.get("chain_id")),
-        reactive_residue_name=str(reactive_selector["residue_name"]),
-        reactive_residue_number=int(reactive_selector["residue_number"]),
-    )
     protein_pdb_path, protein_canonicalization = _prepared_protein_pdb_path(
         config.enzyme.pdb_path,
         output_dir=construction_dir,
         settings=workflow_settings,
     )
-    linker = _nhs_lys_linker_from_attachment(attachment)
-    resolved_plan = linker.resolve_plan(protein_pdb_path, modifier)
+    spec, generation, reactive_sequence_index, reactive_selector, linker = (
+        _build_nhs_lys_attachment_spec(
+            attachment,
+            protein_pdb_path=protein_pdb_path,
+            artifact_dir=artifact_dir,
+            workflow_settings=workflow_settings,
+        )
+    )
+    modifier = spec.generated_fragment
+    resolved_plan = spec.resolved_plan
     ccd_pablo_policy = _policy_with_resolved_crosslink(
         config.conjugation.ccd_pablo,
         resolved_plan,
@@ -317,39 +302,19 @@ def build_direct_smiles_moiety_conjugate(
         output_dir=construction_dir,
         settings=workflow_settings,
     )
-    built_fragments: list[GeneratedPolymerFragment] = []
-    source_moieties: list[GeneratedMoietyFragment] = []
-    resolved_plans: list[ResolvedAttachmentPlan] = []
+    specs: list[AttachmentBuildSpec] = []
     for index, attachment in enumerate(enabled_attachments, start=1):
-        reaction_template = get_reaction(attachment.mechanism.name)
-        if reaction_template.coordinate_backend_mechanism != "n_glycosylation":
-            raise NotImplementedError(
-                "Direct SMILES-moiety requests currently support mechanism "
-                f"'n_glycosylation'; received '{attachment.mechanism.name}'"
+        specs.append(
+            _build_n_gly_direct_moiety_attachment_spec(
+                attachment,
+                attachment_index=index,
+                protein_pdb_path=protein_path,
+                moiety_dir=moiety_dir,
+                random_seed=random_seed,
             )
-        moiety = attachment.moiety
-        if moiety.smiles is None or moiety.residue_name is None:
-            raise ValueError(
-                "Direct SMILES-moiety attachments require moiety.smiles and residue_name"
-            )
-        fragment = build_smiles_moiety_fragment(
-            moiety.smiles,
-            moiety.residue_name,
-            name=moiety.name,
-            output_dir=moiety_dir / f"{index:02d}_{_safe_attachment_token(attachment.name)}",
-            random_seed=random_seed,
         )
-        settings_builder = getattr(reaction_template, "settings_from_attachment", None)
-        reaction_settings = settings_builder(attachment) if callable(settings_builder) else None
-        plan = reaction_template.resolve_plan(
-            protein_path,
-            attachment.site,
-            fragment,
-            settings=reaction_settings,
-        )
-        source_moieties.append(fragment)
-        resolved_plans.append(plan)
-        built_fragments.append(_generated_fragment_from_moiety_plan(fragment, plan))
+    built_fragments = tuple(spec.generated_fragment for spec in specs)
+    resolved_plans = tuple(spec.resolved_plan for spec in specs)
 
     policy = _policy_with_resolved_crosslinks(
         ccd_pablo or ConjugationCcdPabloPolicyConfig(),
@@ -365,9 +330,9 @@ def build_direct_smiles_moiety_conjugate(
 
     construction, construction_topology = _construct_multi_modifier_linked_protein(
         protein_pdb_path=protein_path,
-        modifiers=tuple(built_fragments),
-        source_moieties=tuple(source_moieties),
-        resolved_plans=tuple(resolved_plans),
+        modifiers=built_fragments,
+        source_moieties=tuple(_source_moiety_from_spec(spec) for spec in specs),
+        resolved_plans=resolved_plans,
         ccd_pablo_policy=policy,
         output_dir=construction_dir,
         chain_policy=chain_assignment,
@@ -396,13 +361,13 @@ def build_direct_smiles_moiety_conjugate(
         solvated_pdb_path=solvated_pdb_path,
         workflow_json_path=workflow_path,
         final_interchange_created=builder.interchange is not None,
-        modifier=tuple(built_fragments),
+        modifier=built_fragments,
         relaxed_conjugate_topology=relaxed_topology,
         solvated_topology=builder.solvated_topology,
         final_interchange=builder.interchange,
         system_builder=builder,
     )
-    _save_direct_workflow_summary(result, enabled_attachments, resolved_plans, workflow_path)
+    _save_direct_workflow_summary(result, enabled_attachments, list(resolved_plans), workflow_path)
     return result
 
 
@@ -468,6 +433,106 @@ def _prepared_protein_pdb_path(
     )
     result.save(Path(result.output_path).with_suffix(".canonicalization.json"))
     return result.output_path, result
+
+
+def _build_nhs_lys_attachment_spec(
+    attachment: Any,
+    *,
+    protein_pdb_path: Path | str,
+    artifact_dir: Path,
+    workflow_settings: ConjugatedPolymerSystemSettings,
+) -> tuple[AttachmentBuildSpec, PolymeristGenerationSmokeResult, int, dict[str, int | str], Any]:
+    """Resolve one config-driven NHS-Lys polymer attachment into a build spec."""
+    _require_supported_coordinate_backend(attachment)
+    recipe = _polymer_recipe_from_attachment(attachment)
+    reactive_sequence_index = _reactive_sequence_index(recipe)
+    generation = generate_polymerist_smoke_polymer(
+        recipe,
+        artifact_dir / workflow_settings.conjugate_cache_dir_name,
+        force_regenerate=workflow_settings.force_regenerate_conjugate_polymer,
+        max_retries=workflow_settings.conjugate_polymerist_max_retries,
+        energy_minimize=workflow_settings.conjugate_polymerist_energy_minimize,
+    )
+    if generation.pdb_path is None:
+        raise RuntimeError("Polymerist did not produce a conjugate-polymer PDB")
+
+    reactive_selector = _reactive_residue_selector(
+        generation.pdb_path,
+        sequence=generation.sequence,
+        reactive_sequence_index=reactive_sequence_index,
+    )
+    modifier = generated_fragment_from_polymerist_pdb(
+        generation.pdb_path,
+        recipe=recipe,
+        sequence=generation.sequence,
+        name=attachment.moiety.name,
+        reactive_residue_chain_id=_optional_str(reactive_selector.get("chain_id")),
+        reactive_residue_name=str(reactive_selector["residue_name"]),
+        reactive_residue_number=int(reactive_selector["residue_number"]),
+    )
+    linker = _nhs_lys_linker_from_attachment(attachment)
+    resolved_plan = linker.resolve_plan(protein_pdb_path, modifier)
+    return (
+        attachment_spec_from_generated_polymer_plan(
+            modifier,
+            generation.sdf_path,
+            resolved_plan,
+            attachment_config=attachment,
+            attachment_index=1,
+            reaction_name=attachment.mechanism.name,
+        ),
+        generation,
+        reactive_sequence_index,
+        reactive_selector,
+        linker,
+    )
+
+
+def _build_n_gly_direct_moiety_attachment_spec(
+    attachment: Any,
+    *,
+    attachment_index: int,
+    protein_pdb_path: Path | str,
+    moiety_dir: Path,
+    random_seed: int | None,
+) -> AttachmentBuildSpec:
+    """Resolve one direct SMILES N-gly moiety attachment into a build spec."""
+    reaction_template = get_reaction(attachment.mechanism.name)
+    if reaction_template.coordinate_backend_mechanism != "n_glycosylation":
+        raise NotImplementedError(
+            "Direct SMILES-moiety requests currently support mechanism "
+            f"'n_glycosylation'; received '{attachment.mechanism.name}'"
+        )
+    moiety = attachment.moiety
+    if moiety.smiles is None or moiety.residue_name is None:
+        raise ValueError("Direct SMILES-moiety attachments require moiety.smiles and residue_name")
+    fragment = build_smiles_moiety_fragment(
+        moiety.smiles,
+        moiety.residue_name,
+        name=moiety.name,
+        output_dir=moiety_dir / f"{attachment_index:02d}_{_safe_attachment_token(attachment.name)}",
+        random_seed=random_seed,
+    )
+    settings_builder = getattr(reaction_template, "settings_from_attachment", None)
+    reaction_settings = settings_builder(attachment) if callable(settings_builder) else None
+    plan = reaction_template.resolve_plan(
+        protein_pdb_path,
+        attachment.site,
+        fragment,
+        settings=reaction_settings,
+    )
+    return attachment_spec_from_moiety_plan(
+        fragment,
+        plan,
+        attachment_config=attachment,
+        attachment_index=attachment_index,
+        reaction_name=attachment.mechanism.name,
+    )
+
+
+def _source_moiety_from_spec(spec: AttachmentBuildSpec) -> Any:
+    """Return the current product-library source object for a resolved spec."""
+    return spec.source_fragment or spec.generated_fragment
 
 
 def _single_enabled_attachment(conjugation: ConjugationConfig | None) -> Any:
@@ -884,31 +949,6 @@ def _construct_multi_modifier_linked_protein(
             ),
         ),
         pablo_result.topology,
-    )
-
-
-def _generated_fragment_from_moiety_plan(
-    fragment: GeneratedMoietyFragment,
-    plan: ResolvedAttachmentPlan,
-) -> GeneratedPolymerFragment:
-    """Adapt a one-residue moiety fragment to the existing placement fragment model."""
-    return GeneratedPolymerFragment(
-        atoms=fragment.atoms,
-        bonds=fragment.bonds,
-        bond_orders=fragment.bond_orders,
-        residues=fragment.residues,
-        sequence=None,
-        reactive_atom_serial=plan.modifier_link_atom.serial,
-        reactive_atom_index=plan.modifier_link_atom.atom_index,
-        reactive_atom_name=None,
-        leaving_atom_serials=tuple(
-            atom.serial for atom in plan.modifier_leaving_atoms if atom.serial is not None
-        ),
-        leaving_atom_indices=tuple(
-            atom.atom_index for atom in plan.modifier_leaving_atoms if atom.atom_index is not None
-        ),
-        leaving_atom_names=(),
-        name=fragment.name,
     )
 
 
