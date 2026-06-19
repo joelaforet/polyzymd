@@ -19,7 +19,7 @@ from polyzymd.builders.conjugation.pablo.ingestion import (
     PabloIngestionResult,
     PabloIngestor,
 )
-from polyzymd.builders.conjugation.structure_inspection import inspect_pdb_structure
+from polyzymd.builders.conjugation.structure.inspection import inspect_pdb_structure
 from polyzymd.config.schema import (
     ConjugationCcdPabloPolicyConfig,
     ConjugationChainPolicyConfig,

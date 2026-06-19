@@ -28,12 +28,12 @@ from polyzymd.builders.conjugation.metadata import (
     chain_policy_from_config,
 )
 from polyzymd.builders.conjugation.pablo.residue_library import build_pablo_residue_library
-from polyzymd.builders.conjugation.structure_inspection import (
+from polyzymd.builders.conjugation.structure.inspection import (
     PDBStructureInspection,
     inspect_pdb_structure,
     pdb_atom_records_as_dicts,
 )
-from polyzymd.builders.conjugation.structure_normalization import (
+from polyzymd.builders.conjugation.structure.normalization import (
     PDBNormalizationPlan,
     plan_pdb_chain_normalization,
 )

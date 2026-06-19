@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord, PlacedPolymerFragment
+from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord, PlacedPolymerFragment
 
 
 class PolymerFragmentResidue(BaseModel):

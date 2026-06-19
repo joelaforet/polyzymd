@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from polyzymd.builders.conjugation.pdb_assembly import (
+from polyzymd.builders.conjugation.structure.inspection import inspect_pdb_structure
+from polyzymd.builders.conjugation.structure.pdb import (
     NhsLysPdbAttachment,
     PdbAtomRecord,
     PdbLinkageAttachment,
     PlacedPolymerFragment,
     write_crosslinked_pdb,
 )
-from polyzymd.builders.conjugation.structure_inspection import inspect_pdb_structure
 
 
 def _pdb_atom(

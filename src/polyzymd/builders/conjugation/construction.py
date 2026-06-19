@@ -25,12 +25,6 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationSettings,
     create_interchange_from_pablo_topology,
 )
-from polyzymd.builders.conjugation.pdb_assembly import (
-    CrosslinkedPdbAssemblyOptions,
-    CrosslinkedPdbAssemblyResult,
-    NhsLysPdbAttachment,
-    write_crosslinked_pdb,
-)
 from polyzymd.builders.conjugation.placement import (
     PackmolModifierPlacementResult,
     PackmolModifierPlacementSettings,
@@ -42,6 +36,12 @@ from polyzymd.builders.conjugation.smoke import (
     VacuumSmokeResult,
     VacuumSmokeSettings,
     run_restrained_vacuum_smoke,
+)
+from polyzymd.builders.conjugation.structure.pdb import (
+    CrosslinkedPdbAssemblyOptions,
+    CrosslinkedPdbAssemblyResult,
+    NhsLysPdbAttachment,
+    write_crosslinked_pdb,
 )
 
 

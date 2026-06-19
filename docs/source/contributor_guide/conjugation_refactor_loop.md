@@ -84,13 +84,17 @@ conjugation/
 │   ├── nhs_lys.py           # first working reaction template
 │   └── explicit_linkage.py  # simple explicit-link reaction
 ├── system_workflow.py       # config-driven full-system workflow
-├── protein_preparation.py   # protein canonicalization at configurable pH
+├── structure/               # PDB/structure parsing, preparation, and writing
+│   ├── __init__.py
+│   ├── inspection.py        # pure-Python structure compatibility inspection
+│   ├── normalization.py     # clean-PDB chain normalization planning/writing
+│   ├── pdb.py               # product PDB writing and CONECT handling
+│   └── preparation.py       # protein canonicalization at configurable pH
 ├── polymer/                 # modifier/polymer recipe and fragment helpers
 │   ├── recipe.py
 │   ├── fragment.py
 │   └── polymerist.py
 ├── placement.py             # Packmol/geometric placement
-├── pdb_assembly.py          # product PDB writing and CONECT handling
 ├── pablo/                   # Pablo/OpenFF integration boundary
 │   ├── ingestion.py         # Pablo ingestion boundary
 │   ├── product.py           # product-state Pablo residue definitions
@@ -144,10 +148,9 @@ facade for request/config inputs, but direct molecule/topology construction is
 still explicitly pending.
 
 The public API notebook/workflow should use `build_conjugate_from_config()` or
-`ConjugationEngine`. Internal helpers such as `system_workflow`,
-`protein_preparation`, `local_minimization`, and the `pablo` package remain
-direct module imports for maintainers, but they are not re-exported from
-`polyzymd.builders.conjugation`.
+`ConjugationEngine`. Internal helpers such as `system_workflow`, `structure`,
+`local_minimization`, and the `pablo` package remain direct module imports for
+maintainers, but they are not re-exported from `polyzymd.builders.conjugation`.
 
 ## Core data model
 
@@ -243,11 +246,12 @@ Interchange construction live under `pablo/`. Do not reintroduce top-level shim
 wrappers for the old `product_pablo.py`, `pablo_adapter.py`,
 `residue_library.py`, or `parameterization.py` paths.
 
-### Phase 3 — keep direct workflow modules focused
+### Phase 3 — group structure helpers
 
-Protein canonicalization and restrained minimization live in
-`protein_preparation.py` and `local_minimization.py`. Do not reintroduce
-transitional shim wrappers.
+PDB inspection, clean-PDB normalization, product PDB assembly, and protein
+canonicalization live under `structure/`. Restrained minimization remains in
+`local_minimization.py`. Do not reintroduce transitional shim wrappers for old
+top-level structure paths.
 
 ### Phase 4 — introduce `NhsLysReaction`
 
@@ -306,9 +310,7 @@ pixi run -e build make -C docs clean html
 Maintain these import paths temporarily with wrappers/deprecation notes:
 
 - `polyzymd.builders.conjugation.system_workflow`
-- `polyzymd.builders.conjugation.pdb_assembly`
 - `polyzymd.builders.conjugation.local_minimization`
-- `polyzymd.builders.conjugation.protein_preparation`
 
 Do not delete existing config fields in the first refactor pass. Add new fields
 only when the clean engine consumes them.

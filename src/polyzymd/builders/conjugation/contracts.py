@@ -8,13 +8,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from polyzymd.builders.conjugation.pdb_assembly import (
+from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.structure.pdb import (
     NhsLysPdbAttachment,
     PdbAtomRecord,
     PdbLinkageAttachment,
     PlacedPolymerFragment,
 )
-from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 
 _ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 

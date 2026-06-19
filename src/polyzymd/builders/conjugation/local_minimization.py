@@ -20,7 +20,6 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     build_formal_charge_smoke_template,
     create_interchange_from_pablo_topology,
 )
-from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
 from polyzymd.builders.conjugation.smoke import (
     _add_positional_restraints,
     _openmm_positions_from_interchange,
@@ -29,6 +28,7 @@ from polyzymd.builders.conjugation.smoke import (
     validate_finite_energy,
     validate_finite_positions,
 )
+from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.config.schema import ConjugationCcdCrosslinkConfig, ConjugationCcdPabloPolicyConfig
 
 __all__ = [

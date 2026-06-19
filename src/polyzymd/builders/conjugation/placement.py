@@ -13,8 +13,8 @@ from polyzymd.builders.conjugation.linkers import (
     ModifierLinker,
     ProteinLinkSite,
 )
-from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord, PlacedPolymerFragment
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord, PlacedPolymerFragment
 
 _ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 _SHIFT_PADDING_ANGSTROM = 10.0

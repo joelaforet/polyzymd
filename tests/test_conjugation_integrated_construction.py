@@ -23,7 +23,7 @@ from polyzymd.builders.conjugation.exceptions import ConjugationNotImplementedEr
 from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
 from polyzymd.builders.conjugation.pablo.ingestion import PabloAvailability, PabloIngestionResult
 from polyzymd.builders.conjugation.pablo.parameterization import InterchangeParameterizationResult
-from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
+from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.smoke import VacuumSmokeResult
 from polyzymd.config.schema import (
