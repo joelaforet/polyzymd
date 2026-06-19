@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from polyzymd.builders.conjugation.reactions.base import ReactionTemplate
+from polyzymd.builders.conjugation.reactions.n_glycosylation import NGlycosylationReaction
 from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction
 
-_REACTIONS: dict[str, type[ReactionTemplate]] = dict.fromkeys(
-    NhsLysReaction.identifiers(), NhsLysReaction
-)
+_REACTIONS: dict[str, type[ReactionTemplate]] = {
+    **dict.fromkeys(NhsLysReaction.identifiers(), NhsLysReaction),
+    **dict.fromkeys(NGlycosylationReaction.identifiers(), NGlycosylationReaction),
+}
 
 
 def list_reactions() -> dict[str, type[ReactionTemplate]]:
