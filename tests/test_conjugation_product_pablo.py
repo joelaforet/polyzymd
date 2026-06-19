@@ -11,7 +11,10 @@ import pytest
 from polyzymd.builders.conjugation._linkage import PabloCrosslinkRequirement
 from polyzymd.builders.conjugation.pablo import product as product_pablo_module
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
-from polyzymd.builders.conjugation.pablo.product import build_product_state_pablo_library
+from polyzymd.builders.conjugation.pablo.product import (
+    build_product_state_pablo_library,
+    build_product_state_pablo_library_for_specs,
+)
 from polyzymd.builders.conjugation.polymer import (
     GeneratedPolymerFragment,
     generated_fragment_from_polymerist_pdb,
@@ -218,6 +221,63 @@ def test_ingest_structure_accepts_prebuilt_residue_library(monkeypatch, tmp_path
 
     assert result.success is True
     assert received == [supplied_library]
+
+
+def test_product_state_pablo_library_for_specs_uses_generic_fragments_and_sidecars(
+    monkeypatch,
+    tmp_path: Path,
+):
+    """Plural product library generation should consume spec sidecars, not moiety fields."""
+    product = tmp_path / "product.pdb"
+    source = tmp_path / "source.pdb"
+    sdf_paths = (tmp_path / "one.sdf", tmp_path / "two.sdf")
+    for path in (product, source, *sdf_paths):
+        path.write_text("END\n", encoding="utf-8")
+    requirement = PabloCrosslinkRequirement(
+        residues=("ASX", "NAG"),
+        linking_atoms=("ND2", "C001"),
+        leaving_atoms=((), ()),
+        bond_order=1,
+    )
+    specs = tuple(
+        SimpleNamespace(
+            attachment_id=f"spec_{index}",
+            generated_fragment=object(),
+            source_sidecars={"sdf": sdf_path},
+            resolved_plan=SimpleNamespace(pablo_crosslink_requirement=requirement),
+        )
+        for index, sdf_path in enumerate(sdf_paths, start=1)
+    )
+    calls = []
+
+    def fake_singular(**kwargs):
+        calls.append(kwargs)
+        return product_pablo_module.ProductStatePabloLibrary(
+            residue_library=object(),
+            definitions=(SimpleNamespace(name=f"definition_{len(calls)}"),),
+            summaries=(),
+            crosslink_requirement=requirement,
+        )
+
+    fake_pablo = SimpleNamespace(
+        STD_CCD_CACHE=SimpleNamespace(with_=lambda definitions: ("combined", definitions))
+    )
+    monkeypatch.setattr(product_pablo_module, "build_product_state_pablo_library", fake_singular)
+
+    library = build_product_state_pablo_library_for_specs(
+        product,
+        source,
+        specs,
+        pablo_module=fake_pablo,
+    )
+
+    assert [call["polymer_sdf"] for call in calls] == list(sdf_paths)
+    assert [call["generated_fragment"] for call in calls] == [
+        spec.generated_fragment for spec in specs
+    ]
+    assert [call["resolved_plan"] for call in calls] == [spec.resolved_plan for spec in specs]
+    assert library.residue_library[0] == "combined"
+    assert len(library.definitions) == 2
 
 
 @pytest.mark.parametrize(

@@ -673,7 +673,7 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
     def fake_construct(**kwargs):
         calls["construct_spec_count"] = len(built_specs)
         calls["modifier_count"] = len(kwargs["modifiers"])
-        calls["source_moiety_types"] = tuple(type(item) for item in kwargs["source_moieties"])
+        calls["attachment_specs"] = kwargs["attachment_specs"]
         calls["resolved_plan_count"] = len(kwargs["resolved_plans"])
         return (
             SimpleNamespace(
@@ -721,7 +721,7 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
     assert calls["construct_spec_count"] == 2
     assert calls["modifier_count"] == 2
     assert calls["resolved_plan_count"] == 2
-    assert calls["source_moiety_types"] == (GeneratedMoietyFragment, GeneratedMoietyFragment)
+    assert calls["attachment_specs"] == tuple(built_specs)
     assert result.workflow_json_path.exists()
 
 
