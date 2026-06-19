@@ -15,12 +15,26 @@ from polyzymd.builders.conjugation import (
     build_conjugate,
     build_conjugate_from_config,
 )
+from polyzymd.builders.conjugation._linkage import (
+    ExplicitLinkageContract,
+    LinkageBond,
+    PabloCrosslinkRequirement,
+    PdbAtomSelector,
+    ReactiveEndpoint,
+    ResolvedAttachmentPlan,
+)
+from polyzymd.builders.conjugation.polymer import (
+    GeneratedMoietyFragment,
+    PolymerFragmentAtom,
+    PolymerFragmentResidue,
+)
 from polyzymd.builders.conjugation.reactions import (
     NhsLysReaction,
     ReactionTemplate,
     get_reaction,
     list_reactions,
 )
+from polyzymd.config.schema import ConjugationAttachmentConfig
 
 
 def test_new_conjugation_modules_import():
@@ -259,6 +273,99 @@ def test_engine_build_from_request_delegates_to_config_workflow(monkeypatch, tmp
     }
 
 
+def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
+    monkeypatch,
+    tmp_path,
+):
+    """Public direct requests should plan all SMILES moieties before one construction run."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    protein_path = tmp_path / "protein.pdb"
+    protein_path.write_text("END\n", encoding="utf-8")
+    attachments = (
+        _n_gly_attachment("glycan_1", residue_number=42),
+        _n_gly_attachment("glycan_2", residue_number=87),
+    )
+    calls = {"moieties": [], "plans": [], "construct": 0}
+
+    def fake_build_smiles(smiles, residue_name, *, name=None, output_dir=None, random_seed=None):
+        calls["moieties"].append((smiles, residue_name, name, Path(output_dir), random_seed))
+        return _moiety_fragment(residue_name, name=name or residue_name.lower())
+
+    class FakeReaction:
+        coordinate_backend_mechanism = "n_glycosylation"
+
+        @staticmethod
+        def settings_from_attachment(attachment):
+            return SimpleNamespace(target_atom_name="ND2")
+
+        @staticmethod
+        def resolve_plan(protein, site, fragment, *, settings=None):
+            calls["plans"].append((Path(protein), site.residue_number, site.atom_name, settings))
+            return _resolved_plan(
+                residue_number=site.residue_number,
+                modifier_residue_name=fragment.residue_name,
+                modifier_atom_name="C001",
+            )
+
+    def fake_get_reaction(name):
+        assert name == "n_glycosylation"
+        return FakeReaction
+
+    def fake_construct(**kwargs):
+        calls["construct"] += 1
+        assert len(kwargs["modifiers"]) == 2
+        assert len(kwargs["resolved_plans"]) == 2
+        crosslinked = Path(kwargs["output_dir"]) / "assembled_crosslinked.pdb"
+        minimized = Path(kwargs["output_dir"]) / "minimized.pdb"
+        construction = SimpleNamespace(
+            crosslinked_pdb_path=crosslinked,
+            smoke=SimpleNamespace(minimized_pdb_path=minimized, equilibrated_pdb_path=None),
+            local_minimization=None,
+        )
+        return construction, object()
+
+    monkeypatch.setattr(workflow_module, "build_smiles_moiety_fragment", fake_build_smiles)
+    monkeypatch.setattr(workflow_module, "get_reaction", fake_get_reaction)
+    monkeypatch.setattr(workflow_module, "_construct_multi_modifier_linked_protein", fake_construct)
+
+    result = ConjugationEngine().build(
+        ConjugateBuildRequest(
+            protein_pdb_path=protein_path,
+            attachments=attachments,
+            output_dir=tmp_path / "out",
+            free_polymer_seed=19,
+        )
+    )
+
+    assert result.crosslinked_conjugate_pdb_path == (
+        tmp_path / "out" / "conjugate-construction" / "assembled_crosslinked.pdb"
+    )
+    assert result.minimized_conjugate_pdb_path == (
+        tmp_path / "out" / "conjugate-construction" / "minimized.pdb"
+    )
+    assert [entry[1] for entry in calls["moieties"]] == ["NAG", "NAG"]
+    assert [entry[2] for entry in calls["plans"]] == [None, None]
+    assert calls["construct"] == 1
+
+
+def test_smiles_moiety_residue_name_validation_rejects_non_one_residue_code(tmp_path):
+    """SMILES moieties should require a three-character PDB-safe residue code."""
+    with pytest.raises(ValueError, match="SMILES moiety residue names"):
+        ConjugateBuildRequest(
+            protein_pdb_path=tmp_path / "protein.pdb",
+            output_dir=tmp_path / "out",
+            attachments=(
+                {
+                    "name": "bad_glycan",
+                    "site": {"chain_id": "A", "residue_name": "ASN", "residue_number": 42},
+                    "moiety": {"name": "glycan", "smiles": "CO", "residue_name": "GLCN"},
+                    "mechanism": {"name": "n_glycosylation"},
+                },
+            ),
+        )
+
+
 def test_conjugation_result_collects_legacy_output_paths(tmp_path):
     """The public result should carry status and useful workflow artifact paths."""
     legacy_result = _legacy_workflow_result(tmp_path)
@@ -323,3 +430,128 @@ def _legacy_workflow_result(tmp_path: Path) -> SimpleNamespace:
         workflow_json_path=tmp_path / "workflow.json",
         final_interchange_created=False,
     )
+
+
+def _n_gly_attachment(name: str, *, residue_number: int) -> ConjugationAttachmentConfig:
+    return ConjugationAttachmentConfig.model_validate(
+        {
+            "name": name,
+            "site": {"chain_id": "A", "residue_name": "ASN", "residue_number": residue_number},
+            "moiety": {
+                "name": name,
+                "smiles": "CO",
+                "residue_name": "NAG",
+            },
+            "mechanism": {"name": "n_glycosylation"},
+        }
+    )
+
+
+def _moiety_fragment(residue_name: str, *, name: str) -> GeneratedMoietyFragment:
+    atom = PolymerFragmentAtom(
+        atom_index=0,
+        serial=1,
+        atom_name="C001",
+        residue_name=residue_name,
+        residue_number=1,
+        x=0.0,
+        y=0.0,
+        z=0.0,
+        element="C",
+    )
+    return GeneratedMoietyFragment(
+        atoms=(atom,),
+        bonds=(),
+        bond_orders=(),
+        residues=(
+            PolymerFragmentResidue(
+                sequence_index=0,
+                name=name,
+                residue_name=residue_name,
+                residue_number=1,
+            ),
+        ),
+        residue_name=residue_name,
+        name=name,
+    )
+
+
+def _resolved_plan(
+    *,
+    residue_number: int,
+    modifier_residue_name: str,
+    modifier_atom_name: str,
+) -> ResolvedAttachmentPlan:
+    protein_selector = PdbAtomSelector(
+        chain_id="A",
+        residue_name="ASN",
+        residue_number=residue_number,
+        atom_name="ND2",
+    )
+    modifier_selector = PdbAtomSelector(
+        chain_id="C",
+        residue_name=modifier_residue_name,
+        residue_number=1,
+        atom_name=modifier_atom_name,
+        atom_serial=1,
+        atom_index=0,
+    )
+    contract = ExplicitLinkageContract(
+        protein_endpoint=ReactiveEndpoint(
+            participant="protein",
+            selector=protein_selector,
+            product_residue_name="ASX",
+        ),
+        modifier_endpoint=ReactiveEndpoint(
+            participant="modifier",
+            selector=modifier_selector,
+            product_residue_name=modifier_residue_name,
+        ),
+        bond=LinkageBond(
+            protein_atom_name="ND2",
+            modifier_atom_name=modifier_atom_name,
+            target_bond_length_angstrom=1.45,
+        ),
+        mechanism_name="n_glycosylation",
+    )
+    protein_atom = _pdb_atom_record(
+        serial=10 + residue_number,
+        atom_index=residue_number,
+        atom_name="ND2",
+        residue_name="ASN",
+        chain_id="A",
+        residue_number=residue_number,
+        element="N",
+    )
+    modifier_atom = _pdb_atom_record(
+        serial=1,
+        atom_index=0,
+        atom_name=modifier_atom_name,
+        residue_name=modifier_residue_name,
+        chain_id="C",
+        residue_number=1,
+        element="C",
+    )
+    requirement = PabloCrosslinkRequirement(
+        residues=("ASX", modifier_residue_name),
+        linking_atoms=("ND2", modifier_atom_name),
+        leaving_atoms=((), ()),
+        bond_order=1,
+    )
+    return ResolvedAttachmentPlan(
+        contract=contract,
+        protein_link_atom=protein_atom,
+        modifier_link_atom=modifier_atom,
+        protein_product_residue_name="ASX",
+        modifier_product_residue_name=modifier_residue_name,
+        pablo_crosslink_requirement=requirement,
+        target_bond_length_angstrom=1.45,
+    )
+
+
+def _pdb_atom_record(**kwargs) -> object:
+    from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
+
+    defaults = {"x": 0.0, "y": 0.0, "z": 0.0}
+    defaults.update(kwargs)
+    return PdbAtomRecord(**defaults)

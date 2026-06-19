@@ -442,6 +442,7 @@ class CrosslinkedPdbAssemblyResult(BaseModel):
     removed_atom_serials: tuple[int, ...]
     removed_atom_names: tuple[str, ...]
     added_conect_pair: tuple[int, int]
+    added_conect_pairs: tuple[tuple[int, int], ...] = Field(default_factory=tuple)
     warnings: tuple[str, ...] = Field(default_factory=tuple)
     residue_mappings: dict[str, dict[str, int | str]] = Field(default_factory=dict)
 
@@ -471,7 +472,7 @@ def canonicalize_poc_residue_name(raw_residue_name: str, *, crosslinked: bool = 
 def write_crosslinked_pdb(
     protein_pdb_path: Path | str,
     polymer_fragment: PlacedPolymerFragment | Sequence[PlacedPolymerFragment],
-    attachment: PdbAssemblyAttachment,
+    attachment: PdbAssemblyAttachment | Sequence[PdbAssemblyAttachment],
     output_path: Path | str,
     options: CrosslinkedPdbAssemblyOptions | None = None,
 ) -> CrosslinkedPdbAssemblyResult:
@@ -506,16 +507,23 @@ def write_crosslinked_pdb(
     protein_path = Path(protein_pdb_path)
     destination = Path(output_path)
     fragments = _as_fragment_tuple(polymer_fragment)
+    attachments = _as_attachment_tuple(attachment)
+    if len(attachments) == 1 and len(fragments) > 1:
+        attachments = attachments * len(fragments)
+    if len(attachments) != len(fragments):
+        raise ValueError(
+            "Crosslinked PDB assembly requires one attachment per fragment "
+            f"(attachments={len(attachments)}, fragments={len(fragments)})"
+        )
     warnings: list[str] = []
 
     protein_atoms = _parse_pdb_atoms(protein_path)
     kept_protein_atoms, removed_protein_atoms = _prepare_protein_atoms(
         protein_atoms,
-        attachment,
+        attachments,
         writer_options,
         warnings,
     )
-    target_nz_atom = _resolve_attachment_atom(kept_protein_atoms, attachment)
 
     output_atoms: list[PdbAtomRecord] = []
     atom_lines: list[str] = []
@@ -523,6 +531,7 @@ def write_crosslinked_pdb(
     residue_mappings: dict[str, dict[str, int | str]] = {}
     removed_polymer_atoms: list[PdbAtomRecord] = []
     crosslink_pair: tuple[int, int] | None = None
+    crosslink_pairs: list[tuple[int, int]] = []
 
     next_serial = 1
     used_serials: set[int] = set()
@@ -541,22 +550,24 @@ def write_crosslinked_pdb(
         if atom.serial is not None:
             protein_serial_by_input_serial[atom.serial] = new_serial
 
-    nz_serial = _output_serial_for_atom(
-        target_nz_atom,
-        serial_by_index=protein_serial_by_index,
-        serial_by_input_serial=protein_serial_by_input_serial,
-    )
-
     if writer_options.append_ter_records and output_atoms:
         atom_lines.append(_format_ter_line(output_atoms[-1], next_serial))
         next_serial += 1
 
     next_polymer_residue_number = 1
-    for fragment_index, fragment in enumerate(fragments, start=1):
+    for fragment_index, (fragment, fragment_attachment) in enumerate(
+        zip(fragments, attachments, strict=True), start=1
+    ):
+        target_atom = _resolve_attachment_atom(kept_protein_atoms, fragment_attachment)
+        target_serial = _output_serial_for_atom(
+            target_atom,
+            serial_by_index=protein_serial_by_index,
+            serial_by_input_serial=protein_serial_by_input_serial,
+        )
         fragment_result = _append_polymer_fragment(
             fragment,
             fragment_index=fragment_index,
-            attachment=attachment,
+            attachment=fragment_attachment,
             options=writer_options,
             starting_residue_number=next_polymer_residue_number,
             next_serial=next_serial,
@@ -571,9 +582,10 @@ def write_crosslinked_pdb(
         removed_polymer_atoms.extend(fragment_result.removed_atoms)
         residue_mappings.update(fragment_result.residue_mappings)
 
-        conect_map.setdefault(nz_serial, set()).add(fragment_result.reactive_serial)
-        conect_map.setdefault(fragment_result.reactive_serial, set()).add(nz_serial)
-        crosslink_pair = (nz_serial, fragment_result.reactive_serial)
+        conect_map.setdefault(target_serial, set()).add(fragment_result.reactive_serial)
+        conect_map.setdefault(fragment_result.reactive_serial, set()).add(target_serial)
+        crosslink_pair = (target_serial, fragment_result.reactive_serial)
+        crosslink_pairs.append(crosslink_pair)
 
         if writer_options.append_ter_records and fragment_result.atoms:
             atom_lines.append(_format_ter_line(fragment_result.atoms[-1], next_serial))
@@ -584,7 +596,9 @@ def write_crosslinked_pdb(
 
     link_lines = []
     if writer_options.include_link_records:
-        link_lines.append(_format_link_line(target_nz_atom, crosslink_pair[1], output_atoms))
+        for fragment_attachment, pair in zip(attachments, crosslink_pairs, strict=True):
+            target_atom = _resolve_attachment_atom(kept_protein_atoms, fragment_attachment)
+            link_lines.append(_format_link_line(target_atom, pair[1], output_atoms))
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("w", encoding="utf-8") as handle:
@@ -609,6 +623,7 @@ def write_crosslinked_pdb(
         ),
         removed_atom_names=tuple(atom.atom_name for atom in removed_atoms),
         added_conect_pair=crosslink_pair,
+        added_conect_pairs=tuple(crosslink_pairs),
         warnings=tuple(warnings),
         residue_mappings=residue_mappings,
     )
@@ -857,12 +872,15 @@ def _parse_pdb_atoms(path: Path) -> list[PdbAtomRecord]:
 
 def _prepare_protein_atoms(
     atoms: Sequence[PdbAtomRecord],
-    attachment: PdbAssemblyAttachment,
+    attachment: PdbAssemblyAttachment | Sequence[PdbAssemblyAttachment],
     options: CrosslinkedPdbAssemblyOptions,
     warnings: list[str],
 ) -> tuple[list[PdbAtomRecord], list[PdbAtomRecord]]:
     """Rename the linked residue and remove selected leaving atoms."""
-    atom_indices_to_remove = _select_protein_atoms_to_remove(atoms, attachment, warnings)
+    attachments = _as_attachment_tuple(attachment)
+    atom_indices_to_remove: set[int] = set()
+    for item in attachments:
+        atom_indices_to_remove.update(_select_protein_atoms_to_remove(atoms, item, warnings))
     kept_atoms: list[PdbAtomRecord] = []
     removed_atoms: list[PdbAtomRecord] = []
     for atom in atoms:
@@ -870,10 +888,12 @@ def _prepare_protein_atoms(
             removed_atoms.append(atom)
             continue
         update = {"chain_id": options.protein_chain}
-        if _matches_attachment_residue(atom, attachment):
-            update["residue_name"] = _pdb_safe_residue_name(
-                _attachment_protein_product_resname(attachment)
-            )
+        for item in attachments:
+            if _matches_attachment_residue(atom, item):
+                update["residue_name"] = _pdb_safe_residue_name(
+                    _attachment_protein_product_resname(item)
+                )
+                break
         kept_atoms.append(atom.model_copy(update=update))
     return kept_atoms, removed_atoms
 
@@ -1142,6 +1162,15 @@ def _as_fragment_tuple(
     if isinstance(polymer_fragment, PlacedPolymerFragment):
         return (polymer_fragment,)
     return tuple(polymer_fragment)
+
+
+def _as_attachment_tuple(
+    attachment: PdbAssemblyAttachment | Sequence[PdbAssemblyAttachment],
+) -> tuple[PdbAssemblyAttachment, ...]:
+    """Normalize a single attachment or sequence to a tuple."""
+    if isinstance(attachment, (NhsLysPdbAttachment, PdbLinkageAttachment)):
+        return (attachment,)
+    return tuple(attachment)
 
 
 def _next_atom_serial(

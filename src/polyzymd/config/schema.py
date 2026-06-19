@@ -715,6 +715,12 @@ class ConjugationMoietyConfig(BaseModel):
 
         return PolymerRecipe.model_validate(value)
 
+    @field_validator("residue_name")
+    @classmethod
+    def normalize_optional_moiety_residue_name(cls, value: str | None) -> str | None:
+        """Normalize optional moiety residue names."""
+        return value.strip().upper() if value is not None else None
+
 
 class ConjugationProductResiduesConfig(BaseModel):
     """Product residue names produced by an explicit linkage."""
@@ -905,6 +911,21 @@ class ConjugationAttachmentConfig(BaseModel):
 
         if errors:
             raise ValueError("; ".join(errors))
+        return self
+
+    @model_validator(mode="after")
+    def validate_named_smiles_moiety_identity(self) -> "ConjugationAttachmentConfig":
+        """Require one PDB-safe residue code for wired SMILES moiety mechanisms."""
+        if self.mechanism.name.strip().lower() != "n_glycosylation":
+            return self
+        if self.moiety.smiles is None:
+            return self
+        if self.moiety.residue_name is None:
+            raise ValueError("SMILES moieties require moiety.residue_name")
+        if not re.fullmatch(r"[A-Z0-9]{3}", self.moiety.residue_name):
+            raise ValueError(
+                "SMILES moiety residue names must be exactly three uppercase letters or digits"
+            )
         return self
 
 

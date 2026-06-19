@@ -11,8 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
-from polyzymd.builders.conjugation.reactions.nhs_lys import detect_nhs_reactive_group
+from polyzymd.builders.conjugation.polymer.fragment import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.structure.pdb import (
     NhsLysPdbAttachment,
     PdbAtomRecord,
@@ -737,6 +736,15 @@ class ExplicitCrosslinkRequirement(BaseModel):
 LOGGER = logging.getLogger(__name__)
 
 _ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
+
+
+def detect_nhs_reactive_group(mol: Any) -> Any:
+    """Lazily resolve NHS reactive-group detection for tests and callers."""
+    from polyzymd.builders.conjugation.reactions.nhs_lys import (
+        detect_nhs_reactive_group as detector,
+    )
+
+    return detector(mol)
 
 
 class ProteinLinkSite(BaseModel):
