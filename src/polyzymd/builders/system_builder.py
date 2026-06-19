@@ -404,7 +404,7 @@ class SystemBuilder:
 
         LOGGER.info("Applying covalent modification workflow: %s", conjugation_config.mode.value)
 
-        from polyzymd.builders.conjugation import CovalentModificationBuilder
+        from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
 
         pablo_ingestion_result = self._ingest_existing_conjugation_source(config)
         builder = CovalentModificationBuilder.from_config(config, output_dir=self._working_dir)

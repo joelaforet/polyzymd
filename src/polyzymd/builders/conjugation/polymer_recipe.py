@@ -400,7 +400,7 @@ def generate_polymerist_smoke_polymer(
     pdb_file = Path(pdb_path) if pdb_path is not None else None
     if pdb_file is not None and pdb_file.exists():
         sdf_path = pdb_file.with_suffix(".sdf")
-        rdkit_mol = _polymerist_to_explicit_h_rdkit_mol(polymer_object)
+        rdkit_mol = _polymerist_to_pdb_aligned_rdkit_mol(polymer_object, pdb_file)
         _write_rdkit_sdf_sidecar(rdkit_mol, sdf_path)
     atom_count = _get_rdkit_atom_count(rdkit_mol)
     if atom_count is None:
@@ -450,17 +450,21 @@ def _get_rdkit_atom_count(rdkit_mol: object | None) -> int | None:
     return None
 
 
-def _polymerist_to_explicit_h_rdkit_mol(
+def _polymerist_to_pdb_aligned_rdkit_mol(
     polymer_object: object,
+    pdb_path: Path,
     *,
     required: bool = True,
 ) -> Any | None:
-    """Convert a Polymerist object to an explicit-hydrogen RDKit molecule.
+    """Convert a Polymerist object to a PDB-aligned RDKit sidecar molecule.
 
     Parameters
     ----------
     polymer_object : object
         Polymerist or mBuild object that can provide an RDKit molecule.
+    pdb_path : pathlib.Path
+        PDB exported from the same final Polymerist/mBuild object. Its atom order
+        is used as the authoritative sidecar atom order.
     required : bool, optional
         Raise on conversion failures when ``True``. When ``False``, failures are
         surfaced as warnings, by default ``True``.
@@ -468,8 +472,8 @@ def _polymerist_to_explicit_h_rdkit_mol(
     Returns
     -------
     Any or None
-        RDKit molecule with explicit hydrogens, or ``None`` when optional
-        conversion fails.
+        RDKit molecule with atom ordering aligned to ``pdb_path``, or ``None``
+        when optional conversion fails.
 
     Raises
     ------
@@ -494,21 +498,103 @@ def _polymerist_to_explicit_h_rdkit_mol(
         return None
 
     try:
-        source_mol = to_rdkit()
-        mol = Chem.Mol(source_mol)
+        mol = Chem.Mol(to_rdkit())
         _fix_tetravalent_neutral_nitrogens(mol)
+        _set_unspecified_bonds_to_single(mol)
         mol.UpdatePropertyCache(strict=False)
-        explicit_h_mol = Chem.AddHs(mol, addCoords=mol.GetNumConformers() > 0)
-        explicit_h_mol.UpdatePropertyCache(strict=False)
+        Chem.SanitizeMol(mol)
+        aligned_mol = _align_rdkit_bond_orders_to_pdb_mol(mol, pdb_path)
+        aligned_mol.UpdatePropertyCache(strict=False)
     except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
         _handle_sdf_sidecar_failure(
-            "Failed to convert Polymerist polymer to an explicit-hydrogen RDKit molecule",
+            "Failed to convert Polymerist polymer to a PDB-aligned RDKit molecule",
             required=required,
             cause=exc,
         )
         return None
 
-    return explicit_h_mol
+    return aligned_mol
+
+
+def _set_unspecified_bonds_to_single(rdkit_mol: object) -> None:
+    """Assign explicit single orders to mBuild/Polymerist topology-only bonds."""
+    from rdkit import Chem
+
+    for bond in rdkit_mol.GetBonds():
+        if float(bond.GetBondTypeAsDouble()) <= 0.0:
+            bond.SetBondType(Chem.BondType.SINGLE)
+
+
+def _align_rdkit_bond_orders_to_pdb_mol(source_mol: object, pdb_path: Path) -> Any:
+    """Return a PDB-ordered molecule carrying source-molecule bond orders."""
+    from rdkit import Chem
+
+    pdb_mol = Chem.MolFromPDBFile(
+        str(pdb_path),
+        sanitize=False,
+        removeHs=False,
+        proximityBonding=not _pdb_has_conect_records(pdb_path),
+    )
+    if pdb_mol is None or pdb_mol.GetNumAtoms() == 0:
+        raise ValueError(f"RDKit could not read generated polymer PDB atoms from {pdb_path}")
+    if source_mol.GetNumAtoms() != pdb_mol.GetNumAtoms():
+        raise ValueError(
+            "Polymerist RDKit/PDB atom count mismatch while writing SDF sidecar: "
+            f"RDKit={source_mol.GetNumAtoms()}, PDB={pdb_mol.GetNumAtoms()}"
+        )
+
+    for atom_index, (source_atom, pdb_atom) in enumerate(
+        zip(source_mol.GetAtoms(), pdb_mol.GetAtoms(), strict=True), start=1
+    ):
+        if source_atom.GetSymbol() != pdb_atom.GetSymbol():
+            raise ValueError(
+                "Polymerist RDKit/PDB atom order mismatch while writing SDF sidecar: "
+                f"atom {atom_index} is {source_atom.GetSymbol()} in RDKit and "
+                f"{pdb_atom.GetSymbol()} in PDB"
+            )
+        pdb_atom.SetFormalCharge(source_atom.GetFormalCharge())
+        pdb_atom.SetNoImplicit(True)
+
+    source_pairs = _bond_index_pairs(source_mol)
+    pdb_pairs = _bond_index_pairs(pdb_mol)
+    if source_pairs != pdb_pairs:
+        missing = sorted(source_pairs - pdb_pairs)
+        extra = sorted(pdb_pairs - source_pairs)
+        raise ValueError(
+            "Polymerist RDKit/PDB connectivity mismatch while writing SDF sidecar: "
+            f"missing in PDB={missing[:5]}, extra in PDB={extra[:5]}"
+        )
+
+    editable = Chem.RWMol(pdb_mol)
+    for source_bond in source_mol.GetBonds():
+        pdb_bond = editable.GetBondBetweenAtoms(
+            source_bond.GetBeginAtomIdx(), source_bond.GetEndAtomIdx()
+        )
+        if pdb_bond is None:
+            raise ValueError("Polymerist PDB molecule lost a source bond during alignment")
+        bond_order = float(source_bond.GetBondTypeAsDouble())
+        if bond_order <= 0.0:
+            raise ValueError("Polymerist source molecule contains a zero/unknown bond order")
+        pdb_bond.SetBondType(source_bond.GetBondType())
+
+    aligned = editable.GetMol()
+    _fix_tetravalent_neutral_nitrogens(aligned)
+    Chem.SanitizeMol(aligned)
+    return aligned
+
+
+def _bond_index_pairs(rdkit_mol: object) -> set[tuple[int, int]]:
+    """Return zero-based RDKit bond-index pairs."""
+    return {
+        tuple(sorted((bond.GetBeginAtomIdx(), bond.GetEndAtomIdx())))
+        for bond in rdkit_mol.GetBonds()
+    }
+
+
+def _pdb_has_conect_records(path: Path) -> bool:
+    """Return whether a generated PDB contains explicit CONECT records."""
+    with path.open("r", encoding="utf-8") as handle:
+        return any(line.startswith("CONECT") for line in handle)
 
 
 def _fix_tetravalent_neutral_nitrogens(rdkit_mol: object) -> None:

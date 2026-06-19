@@ -95,8 +95,9 @@ def generated_fragment_from_polymerist_pdb(
         _atom_identity(atom): rdkit_index for rdkit_index, atom in rdkit_to_pdb.items()
     }
 
-    fragment_atoms = tuple(
-        PolymerFragmentAtom.from_pdb_atom(atom, sequence_index=None) for atom in pdb_atoms
+    fragment_atoms = _fragment_atoms_from_pdb_atoms(
+        pdb_atoms,
+        formal_charges=_sdf_formal_charges(bond_order_mol, rdkit_to_pdb),
     )
     effective_sequence = sequence or _sequence_from_recipe_if_compatible(recipe, pdb_atoms)
     residues = _build_residue_records(pdb_atoms, recipe=recipe, sequence=effective_sequence)
@@ -225,15 +226,76 @@ def _load_sdf_bond_order_mol(path: Path, *, expected_atoms: int) -> Any | None:
     from rdkit import Chem
 
     supplier = Chem.SDMolSupplier(str(path), removeHs=False, sanitize=False)
-    molecules = [mol for mol in supplier if mol is not None and mol.GetNumAtoms() == expected_atoms]
+    molecules = [mol for mol in supplier if mol is not None]
     if not molecules:
-        return None
-    mol = max(molecules, key=lambda candidate: candidate.GetNumBonds())
-    for atom in mol.GetAtoms():
-        if atom.GetSymbol() == "N" and atom.GetDegree() == 4 and atom.GetFormalCharge() == 0:
-            atom.SetFormalCharge(1)
-    Chem.SanitizeMol(mol)
+        raise ValueError(
+            f"Polymer SDF sidecar could not be read as an RDKit molecule: {path}. "
+            "Regenerate the polymer SDF with explicit bond orders."
+        )
+    molecules_with_expected_atoms = [
+        mol for mol in molecules if mol.GetNumAtoms() == expected_atoms
+    ]
+    if not molecules_with_expected_atoms:
+        observed = ", ".join(str(mol.GetNumAtoms()) for mol in molecules)
+        raise ValueError(
+            "Polymer SDF sidecar atom count does not match the generated PDB: "
+            f"expected {expected_atoms}, observed {observed} in {path}. "
+            "Regenerate the polymer PDB/SDF pair from the same source molecule."
+        )
+    mol = max(molecules_with_expected_atoms, key=lambda candidate: candidate.GetNumBonds())
+    _validate_sdf_bond_orders(mol, path)
     return mol
+
+
+def _fragment_atoms_from_pdb_atoms(
+    pdb_atoms: Sequence[PdbAtomRecord],
+    *,
+    formal_charges: Mapping[int, int],
+) -> tuple[PolymerFragmentAtom, ...]:
+    """Build fragment atoms with non-zero SDF formal charges when present."""
+    fragment_atoms = []
+    for atom in pdb_atoms:
+        fragment_atom = PolymerFragmentAtom.from_pdb_atom(atom, sequence_index=None)
+        charge = formal_charges.get(atom.atom_index)
+        if charge is not None and charge != 0:
+            fragment_atom = fragment_atom.model_copy(update={"formal_charge": charge})
+        fragment_atoms.append(fragment_atom)
+    return tuple(fragment_atoms)
+
+
+def _sdf_formal_charges(
+    mol: Any | None,
+    rdkit_to_pdb: Mapping[int, PdbAtomRecord],
+) -> dict[int, int]:
+    """Return non-zero SDF formal charges keyed by PDB atom index."""
+    if mol is None:
+        return {}
+    charges: dict[int, int] = {}
+    for rdkit_index, pdb_atom in rdkit_to_pdb.items():
+        if pdb_atom.atom_index is None:
+            continue
+        charge = int(mol.GetAtomWithIdx(rdkit_index).GetFormalCharge())
+        if charge != 0:
+            charges[pdb_atom.atom_index] = charge
+    return charges
+
+
+def _validate_sdf_bond_orders(mol: Any, path: Path) -> None:
+    """Require explicit positive bond orders in a polymer SDF sidecar."""
+    invalid = [
+        (bond.GetBeginAtomIdx() + 1, bond.GetEndAtomIdx() + 1)
+        for bond in mol.GetBonds()
+        if float(bond.GetBondTypeAsDouble()) <= 0.0
+    ]
+    if invalid:
+        preview = ", ".join(f"{left}-{right}" for left, right in invalid[:5])
+        extra = "" if len(invalid) <= 5 else f" and {len(invalid) - 5} more"
+        raise ValueError(
+            "Polymer SDF sidecar contains under-specified zero/unknown bond orders "
+            f"for atom pairs {preview}{extra} in {path}. Polymer SDF files must contain "
+            "explicit bond orders and fully specified valence; regenerate the SDF from the "
+            "source molecule rather than relying on product-state chemistry repair."
+        )
 
 
 def _has_conect_records(path: Path) -> bool:

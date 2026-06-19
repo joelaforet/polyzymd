@@ -39,6 +39,7 @@ class PolymerFragmentAtom(BaseModel):
     temp_factor: float = 0.0
     element: str = ""
     charge: str = Field("", max_length=2)
+    formal_charge: int | None = None
     alt_loc: str = Field("", max_length=1)
     record_name: Literal["ATOM", "HETATM"] = "HETATM"
 
@@ -78,6 +79,7 @@ class PolymerFragmentAtom(BaseModel):
             temp_factor=atom.temp_factor,
             element=atom.element,
             charge=atom.charge,
+            formal_charge=None,
             alt_loc=atom.alt_loc,
             record_name=atom.record_name,
         )

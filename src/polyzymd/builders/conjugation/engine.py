@@ -31,11 +31,14 @@ class ConjugationEngine:
         free_polymer_seed: int | None = None,
     ) -> ConjugationResult:
         """Delegate config-based construction to the existing workflow."""
-        from polyzymd.builders.conjugation import system_workflow
+        from polyzymd.builders.conjugation.system_workflow import (
+            build_conjugated_polymer_system_from_config,
+            build_conjugated_polymer_system_from_config_path,
+        )
 
         workflow_settings = self.settings if settings is None else settings
         if isinstance(config, (str, Path)):
-            legacy_result = system_workflow.build_conjugated_polymer_system_from_config_path(
+            legacy_result = build_conjugated_polymer_system_from_config_path(
                 config,
                 output_dir=output_dir,
                 settings=workflow_settings,
@@ -48,7 +51,7 @@ class ConjugationEngine:
                 "output_dir is required when build_from_config() receives an "
                 "in-memory SimulationConfig."
             )
-        legacy_result = system_workflow.build_conjugated_polymer_system_from_config(
+        legacy_result = build_conjugated_polymer_system_from_config(
             config,
             output_dir=output_dir,
             settings=workflow_settings,

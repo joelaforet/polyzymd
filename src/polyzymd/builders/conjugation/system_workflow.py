@@ -15,18 +15,19 @@ from polyzymd.builders.conjugation.construction import (
     ModifierConstructionSettings,
 )
 from polyzymd.builders.conjugation.contracts import (
+    PabloCrosslinkRequirement,
     ResolvedAttachmentPlan,
+    parse_pdb_atom_records,
     placed_fragment_from_resolved_plan,
 )
 from polyzymd.builders.conjugation.crosslinks import (
     require_pablo_crosslink_requirement,
 )
-from polyzymd.builders.conjugation.direct_openff import build_direct_openff_linkage
 from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
 from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
 from polyzymd.builders.conjugation.parameterization import (
     InterchangeParameterizationSettings,
-    create_interchange_from_openff_topology,
+    build_formal_charge_smoke_template,
     create_interchange_from_pablo_topology,
 )
 from polyzymd.builders.conjugation.pdb_assembly import (
@@ -45,6 +46,11 @@ from polyzymd.builders.conjugation.polymer_recipe import (
     generate_polymerist_smoke_polymer,
 )
 from polyzymd.builders.conjugation.polymerist_pdb import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.protein_preparation import (
+    ProteinCanonicalizationResult,
+    ProteinCanonicalizationSettings,
+    canonicalize_protein_hydrogens,
+)
 from polyzymd.builders.conjugation.reaction_roles import (
     STRUCTURE_MATCHING_BLOCKER_MESSAGE,
     atom_mapped_reaction_from_mechanism_config,
@@ -77,8 +83,14 @@ class ConjugatedPolymerSystemSettings(BaseModel):
     solvated_pdb_name: str = "solvated_conjugate_free_polymers.pdb"
     workflow_json_name: str = "conjugated_polymer_system_workflow.json"
     create_final_interchange: bool = False
-    allow_direct_openff_fallback: bool = False
     preserve_reference_atom_names: bool = True
+    canonicalize_source_protein_hydrogens: bool = True
+    use_product_state_pablo_library: bool = True
+    run_product_state_local_minimization: bool = True
+    protein_canonicalization: ProteinCanonicalizationSettings = Field(
+        default_factory=ProteinCanonicalizationSettings
+    )
+    local_minimization: Any = Field(default_factory=lambda: _default_local_minimization_settings())
     placement: PackmolModifierPlacementSettings = Field(
         default_factory=PackmolModifierPlacementSettings
     )
@@ -99,6 +111,7 @@ class ConjugatedPolymerSystemResult(BaseModel):
     reactive_residue_selector: dict[str, int | str]
     conjugate_generation: PolymeristGenerationSmokeResult
     construction: ModifierConstructionResult
+    protein_canonicalization: ProteinCanonicalizationResult | None = None
     relaxed_conjugate_pdb_path: Path | None = None
     solvated_pdb_path: Path | None = None
     workflow_json_path: Path | None = None
@@ -155,6 +168,7 @@ def build_conjugated_polymer_system_from_config(
     workflow_settings = settings or ConjugatedPolymerSystemSettings()
     artifact_dir = Path(output_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    construction_dir = artifact_dir / workflow_settings.conjugate_artifact_dir_name
 
     attachment = _single_enabled_attachment(config.conjugation)
     _require_supported_coordinate_backend(attachment)
@@ -185,8 +199,13 @@ def build_conjugated_polymer_system_from_config(
         reactive_residue_name=str(reactive_selector["residue_name"]),
         reactive_residue_number=int(reactive_selector["residue_number"]),
     )
+    protein_pdb_path, protein_canonicalization = _prepared_protein_pdb_path(
+        config.enzyme.pdb_path,
+        output_dir=construction_dir,
+        settings=workflow_settings,
+    )
     linker = _nhs_lys_linker_from_attachment(attachment)
-    resolved_plan = linker.resolve_plan(config.enzyme.pdb_path, modifier)
+    resolved_plan = linker.resolve_plan(protein_pdb_path, modifier)
     ccd_pablo_policy = _policy_with_resolved_crosslink(
         config.conjugation.ccd_pablo,
         resolved_plan,
@@ -200,14 +219,20 @@ def build_conjugated_polymer_system_from_config(
     )
     construction, construction_topology = _construct_nhs_lys_modifier_linked_protein(
         protein_pdb_path=config.enzyme.pdb_path,
+        prepared_protein_pdb_path=protein_pdb_path,
         modifier=modifier,
+        polymer_sdf_path=generation.sdf_path,
         linker=linker,
         resolved_plan=resolved_plan,
         ccd_pablo_policy=ccd_pablo_policy,
         chain_policy=config.conjugation.chain_policy,
-        output_dir=artifact_dir / workflow_settings.conjugate_artifact_dir_name,
+        output_dir=construction_dir,
         settings=construction_settings,
-        allow_direct_openff_fallback=workflow_settings.allow_direct_openff_fallback,
+        use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
+        run_product_state_local_minimization=(
+            workflow_settings.run_product_state_local_minimization
+        ),
+        local_minimization_settings=workflow_settings.local_minimization,
     )
     if workflow_settings.preserve_reference_atom_names:
         _restore_smoke_pdb_atom_names(construction, construction.crosslinked_pdb_path)
@@ -242,6 +267,7 @@ def build_conjugated_polymer_system_from_config(
         reactive_residue_selector=reactive_selector,
         conjugate_generation=generation,
         construction=construction,
+        protein_canonicalization=protein_canonicalization,
         relaxed_conjugate_pdb_path=relaxed_pdb,
         solvated_pdb_path=solvated_pdb_path,
         final_interchange_created=builder.interchange is not None,
@@ -285,6 +311,38 @@ def _protein_restrained_smoke() -> VacuumSmokeSettings:
         nvt_steps=10,
         restrain_all_heavy_atoms=False,
     )
+
+
+def _default_local_minimization_settings() -> Any:
+    """Build default post-crosslink local minimization settings lazily."""
+    from polyzymd.builders.conjugation.local_minimization import LocalMinimizationSettings
+
+    return LocalMinimizationSettings()
+
+
+def _prepared_protein_pdb_path(
+    protein_pdb_path: Path | str,
+    *,
+    output_dir: Path,
+    settings: ConjugatedPolymerSystemSettings,
+) -> tuple[Path, ProteinCanonicalizationResult | None]:
+    """Return the protein PDB used for construction, canonicalizing hydrogens if enabled."""
+    source_path = Path(protein_pdb_path)
+    if not settings.canonicalize_source_protein_hydrogens:
+        return source_path, None
+
+    canonical_settings = settings.protein_canonicalization
+    output_path = canonical_settings.output_path
+    if output_path is None:
+        output_path = output_dir / f"source_protein_canonical_pH{canonical_settings.ph:g}.pdb"
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    result = canonicalize_protein_hydrogens(
+        source_path,
+        output_path,
+        settings=canonical_settings,
+    )
+    result.save(Path(result.output_path).with_suffix(".canonicalization.json"))
+    return result.output_path, result
 
 
 def _single_enabled_attachment(conjugation: ConjugationConfig | None) -> Any:
@@ -462,14 +520,18 @@ def _product_state_crosslink_requirement(resolved_plan: ResolvedAttachmentPlan):
 def _construct_nhs_lys_modifier_linked_protein(
     *,
     protein_pdb_path: Path | str,
+    prepared_protein_pdb_path: Path | str,
     modifier: GeneratedPolymerFragment,
+    polymer_sdf_path: Path | str | None,
     linker: NhsLysModifierLinker,
     resolved_plan: ResolvedAttachmentPlan,
     ccd_pablo_policy: Any,
     output_dir: Path | str,
     chain_policy: Any | None,
     settings: ModifierConstructionSettings,
-    allow_direct_openff_fallback: bool,
+    use_product_state_pablo_library: bool,
+    run_product_state_local_minimization: bool,
+    local_minimization_settings: Any,
 ) -> tuple[ModifierConstructionResult, Any]:
     """Run the NHS-Lys construction path using Pablo product-residue crosslinks."""
     artifact_dir = Path(output_dir)
@@ -482,7 +544,7 @@ def _construct_nhs_lys_modifier_linked_protein(
     )
 
     placement_result = place_modifier_with_packmol(
-        protein_pdb_path,
+        prepared_protein_pdb_path,
         modifier,
         linker,
         artifact_dir,
@@ -494,42 +556,69 @@ def _construct_nhs_lys_modifier_linked_protein(
     )
     crosslinked_pdb_path = artifact_dir / settings.crosslinked_pdb_name
     assembly_result = write_crosslinked_pdb(
-        protein_pdb_path,
+        prepared_protein_pdb_path,
         placed_modifier,
         resolved_plan.to_nhs_lys_pdb_attachment(),
         crosslinked_pdb_path,
         CrosslinkedPdbAssemblyOptions(),
     )
 
+    product_state_pablo_library = None
+    product_state_residue_library = None
+    if use_product_state_pablo_library:
+        from polyzymd.builders.conjugation.product_pablo import build_product_state_pablo_library
+
+        product_state_pablo_library = build_product_state_pablo_library(
+            product_pdb=crosslinked_pdb_path,
+            source_protein_pdb=prepared_protein_pdb_path,
+            polymer_sdf=polymer_sdf_path,
+            generated_fragment=modifier,
+            resolved_plan=resolved_plan,
+        )
+        product_state_residue_library = product_state_pablo_library.residue_library
+
     pablo_result = PabloIngestor(policy=ccd_pablo_policy).ingest_structure(
         crosslinked_pdb_path,
         chain_policy=chain_policy,
         output_dir=artifact_dir,
+        residue_library=product_state_residue_library,
     )
     if not pablo_result.success or pablo_result.topology is None:
-        if not allow_direct_openff_fallback:
-            raise RuntimeError(_pablo_failure_message(pablo_result))
-        return _construct_with_direct_openff_fallback(
-            protein_pdb_path=protein_pdb_path,
-            placed_modifier=placed_modifier,
-            resolved_plan=resolved_plan,
-            output_dir=artifact_dir,
-            pablo_result=pablo_result,
-            crosslink_validation=crosslink_validation,
-            placement_result=placement_result,
-            assembly_result=assembly_result,
-            settings=settings,
-        )
+        raise RuntimeError(_pablo_failure_message(pablo_result))
 
     parameterization_result = create_interchange_from_pablo_topology(
         pablo_result.topology,
         settings=settings.parameterization,
+        charge_from_molecules=_formal_charge_templates_from_topology(pablo_result.topology),
     )
     if not parameterization_result.success or parameterization_result.interchange is None:
         raise RuntimeError("OpenFF Interchange parameterization did not produce an interchange")
 
     smoke_result = None
-    if settings.run_smoke:
+    local_minimization_result = None
+    if run_product_state_local_minimization:
+        from polyzymd.builders.conjugation.local_minimization import (
+            run_post_crosslink_local_minimization,
+        )
+
+        local_settings = _local_minimization_settings_for_product(
+            crosslinked_pdb_path,
+            base_settings=local_minimization_settings,
+            requirement=resolved_plan.pablo_crosslink_requirement,
+            product_state_pablo_library=product_state_pablo_library,
+        )
+        local_minimization_result = run_post_crosslink_local_minimization(
+            crosslinked_pdb_path,
+            artifact_dir,
+            settings=local_settings,
+            pablo_crosslink_requirement=product_state_requirement,
+            product_state_pablo_library=product_state_pablo_library,
+            resolved_plan=resolved_plan,
+        )
+        if not local_minimization_result.success:
+            blocker = local_minimization_result.blocker or "unknown blocker"
+            raise RuntimeError(f"Product-state local minimization failed: {blocker}")
+    elif settings.run_smoke:
         smoke_result = run_restrained_vacuum_smoke(
             parameterization_result.interchange,
             artifact_dir,
@@ -548,77 +637,12 @@ def _construct_nhs_lys_modifier_linked_protein(
             pablo=pablo_result,
             parameterization=parameterization_result,
             smoke=smoke_result,
+            local_minimization=local_minimization_result,
+            product_state_pablo_library=product_state_pablo_library,
             crosslinked_pdb_path=crosslinked_pdb_path,
             diagnostics=("NHS-Lys modifier-linked protein construction completed",),
         ),
         pablo_result.topology,
-    )
-
-
-def _construct_with_direct_openff_fallback(
-    *,
-    protein_pdb_path: Path | str,
-    placed_modifier: Any,
-    resolved_plan: Any,
-    output_dir: Path,
-    pablo_result: Any,
-    crosslink_validation: Any,
-    placement_result: Any,
-    assembly_result: Any,
-    settings: ModifierConstructionSettings,
-) -> tuple[ModifierConstructionResult, Any]:
-    """Parameterize and relax the linked conjugate without Pablo topology ingestion."""
-    direct_result = build_direct_openff_linkage(
-        protein_pdb_path=protein_pdb_path,
-        modifier=placed_modifier,
-        resolved_plan=resolved_plan,
-        output_dir=output_dir / "direct-openff-fallback",
-        build_openff_topology=True,
-    )
-    if direct_result.topology is None or direct_result.charge_template is None:
-        raise RuntimeError(
-            _pablo_failure_message(pablo_result)
-            + "; direct OpenFF fallback could not build a connected topology"
-        )
-
-    parameterization_result = create_interchange_from_openff_topology(
-        direct_result.topology,
-        settings=settings.parameterization,
-        charge_from_molecules=[direct_result.charge_template],
-        require_charge_templates=True,
-        success_diagnostic="OpenFF Interchange was created from the direct conjugate topology",
-        failure_subject="direct OpenFF conjugate topology",
-    )
-    if not parameterization_result.success or parameterization_result.interchange is None:
-        raise RuntimeError("Direct OpenFF fallback did not produce an interchange")
-
-    smoke_result = None
-    if settings.run_smoke:
-        smoke_result = run_restrained_vacuum_smoke(
-            parameterization_result.interchange,
-            output_dir,
-            settings=settings.smoke,
-        )
-        if not smoke_result.success:
-            raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
-
-    return (
-        ModifierConstructionResult(
-            output_dir=output_dir,
-            resolved_plan=resolved_plan,
-            crosslink_validation=crosslink_validation,
-            placement=placement_result,
-            assembly=assembly_result,
-            pablo=pablo_result,
-            parameterization=parameterization_result,
-            smoke=smoke_result,
-            crosslinked_pdb_path=direct_result.linked_pdb_path,
-            diagnostics=(
-                "Pablo ingestion failed; direct OpenFF fallback produced the relaxed conjugate",
-                *direct_result.limitations,
-            ),
-        ),
-        direct_result.topology,
     )
 
 
@@ -629,6 +653,11 @@ def _pablo_failure_message(result: Any) -> str:
 
 
 def _relaxed_conjugate_pdb(construction: ModifierConstructionResult) -> Path:
+    local_minimization = getattr(construction, "local_minimization", None)
+    if local_minimization is not None:
+        relaxed_path = getattr(local_minimization, "relaxed_pdb_path", None)
+        if relaxed_path is not None:
+            return relaxed_path
     if construction.smoke is None:
         raise RuntimeError("protein-restrained vacuum smoke did not run")
     if construction.smoke.equilibrated_pdb_path is not None:
@@ -636,6 +665,232 @@ def _relaxed_conjugate_pdb(construction: ModifierConstructionResult) -> Path:
     if construction.smoke.minimized_pdb_path is not None:
         return construction.smoke.minimized_pdb_path
     raise RuntimeError("protein-restrained vacuum smoke did not write a relaxed PDB")
+
+
+def _formal_charge_templates_from_topology(topology: Any) -> tuple[Any, ...]:
+    """Build smoke-only formal-charge templates for product-state parameterization."""
+    molecules = tuple(getattr(topology, "molecules", ()) or ())
+    return tuple(build_formal_charge_smoke_template(molecule) for molecule in molecules)
+
+
+def _local_minimization_settings_for_product(
+    product_pdb_path: Path,
+    *,
+    base_settings: Any,
+    requirement: PabloCrosslinkRequirement,
+    product_state_pablo_library: Any | None = None,
+) -> Any:
+    """Build local minimization selectors from emitted product atom identities."""
+    from polyzymd.builders.conjugation.local_minimization import CrosslinkAtomSelector
+
+    explicit_fields = set(getattr(base_settings, "model_fields_set", set()))
+    if {"nz_selector", "c047_selector", "o020_selector"}.issubset(explicit_fields):
+        return base_settings
+
+    atoms = parse_pdb_atom_records(product_pdb_path)
+    updates = {}
+
+    if "nz_selector" not in explicit_fields:
+        protein_atom = _unique_product_atom(
+            atoms,
+            residue_name=requirement.residues[0],
+            atom_name=requirement.linking_atoms[0],
+        )
+        updates["nz_selector"] = _local_selector(protein_atom, CrosslinkAtomSelector)
+
+    modifier_atom = None
+    if "c047_selector" not in explicit_fields or "o020_selector" not in explicit_fields:
+        modifier_atom = _unique_product_atom(
+            atoms,
+            residue_name=requirement.residues[1],
+            atom_name=requirement.linking_atoms[1],
+        )
+    if "c047_selector" not in explicit_fields and modifier_atom is not None:
+        updates["c047_selector"] = _local_selector(modifier_atom, CrosslinkAtomSelector)
+    if "o020_selector" not in explicit_fields and modifier_atom is not None:
+        modifier_oxygen_atom = _product_modifier_carbonyl_oxygen_atom(
+            product_pdb_path,
+            atoms,
+            modifier_atom=modifier_atom,
+            product_state_pablo_library=product_state_pablo_library,
+        )
+        updates["o020_selector"] = _local_selector(modifier_oxygen_atom, CrosslinkAtomSelector)
+
+    if not updates:
+        return base_settings
+
+    return base_settings.model_copy(update=updates)
+
+
+def _local_selector(atom: PdbAtomRecord, selector_cls: Any) -> Any:
+    return selector_cls(
+        serial=None,
+        chain_id=atom.chain_id,
+        residue_name=atom.residue_name,
+        residue_number=atom.residue_number,
+        atom_name=atom.atom_name,
+    )
+
+
+def _unique_product_atom(
+    atoms: tuple[PdbAtomRecord, ...],
+    *,
+    residue_name: str,
+    atom_name: str,
+    same_residue_as: PdbAtomRecord | None = None,
+) -> PdbAtomRecord:
+    matches = [
+        atom
+        for atom in atoms
+        if atom.residue_name.upper() == residue_name.upper()
+        and atom.atom_name.upper() == atom_name.upper()
+    ]
+    if same_residue_as is not None:
+        matches = [
+            atom
+            for atom in matches
+            if atom.chain_id == same_residue_as.chain_id
+            and atom.residue_number == same_residue_as.residue_number
+            and atom.insertion_code == same_residue_as.insertion_code
+        ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Expected exactly one product atom {residue_name}:{atom_name}, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _product_modifier_carbonyl_oxygen_atom(
+    product_pdb_path: Path,
+    atoms: tuple[PdbAtomRecord, ...],
+    *,
+    modifier_atom: PdbAtomRecord,
+    product_state_pablo_library: Any | None,
+) -> PdbAtomRecord:
+    """Return the product-state oxygen bonded to the modifier linking carbon."""
+    conect = _parse_product_conect_records(product_pdb_path)
+    bonded_oxygen_atoms = _oxygen_atoms_bonded_to_modifier_atom(atoms, modifier_atom, conect)
+    if len(bonded_oxygen_atoms) == 1:
+        return bonded_oxygen_atoms[0]
+
+    definition_oxygen_atoms = _modifier_oxygen_atoms_from_product_definitions(
+        atoms,
+        modifier_atom=modifier_atom,
+        product_state_pablo_library=product_state_pablo_library,
+    )
+    if len(definition_oxygen_atoms) == 1:
+        return definition_oxygen_atoms[0]
+
+    candidates = bonded_oxygen_atoms or definition_oxygen_atoms
+    candidate_text = (
+        ", ".join(
+            f"{atom.chain_id}:{atom.residue_name}:{atom.residue_number}:{atom.atom_name}"
+            for atom in candidates
+        )
+        or "none"
+    )
+    raise RuntimeError(
+        "Could not identify a unique product-state modifier carbonyl oxygen bonded to "
+        f"{modifier_atom.residue_name}:{modifier_atom.atom_name} in {product_pdb_path}; "
+        f"candidates: {candidate_text}. Product-state local minimization requires either "
+        "PDB CONECT records or product-state Pablo residue definitions that identify exactly "
+        "one oxygen atom in the same modifier residue bonded to the modifier linking/carbonyl "
+        "carbon. Reactant leaving atoms are removed from product PDBs and are not valid "
+        "selectors. Provide explicit LocalMinimizationSettings.o020_selector to override."
+    )
+
+
+def _oxygen_atoms_bonded_to_modifier_atom(
+    atoms: tuple[PdbAtomRecord, ...],
+    modifier_atom: PdbAtomRecord,
+    conect: dict[int, set[int]],
+) -> tuple[PdbAtomRecord, ...]:
+    if modifier_atom.serial is None:
+        return ()
+    bonded_serials = conect.get(modifier_atom.serial, set())
+    if not bonded_serials:
+        return ()
+    return tuple(
+        atom
+        for atom in atoms
+        if atom.serial in bonded_serials
+        and _same_product_residue(atom, modifier_atom)
+        and _is_oxygen_atom(atom)
+    )
+
+
+def _modifier_oxygen_atoms_from_product_definitions(
+    atoms: tuple[PdbAtomRecord, ...],
+    *,
+    modifier_atom: PdbAtomRecord,
+    product_state_pablo_library: Any | None,
+) -> tuple[PdbAtomRecord, ...]:
+    definitions = tuple(getattr(product_state_pablo_library, "definitions", ()) or ())
+    if not definitions:
+        return ()
+    residue_atoms = tuple(atom for atom in atoms if _same_product_residue(atom, modifier_atom))
+    residue_atom_by_name = {atom.atom_name: atom for atom in residue_atoms}
+    oxygen_names: set[str] = set()
+    for definition in definitions:
+        if (
+            str(getattr(definition, "residue_name", "")).upper()
+            != modifier_atom.residue_name.upper()
+        ):
+            continue
+        atom_defs = {str(atom.name): atom for atom in getattr(definition, "atoms", ())}
+        if modifier_atom.atom_name not in atom_defs:
+            continue
+        for bond in getattr(definition, "bonds", ()):
+            atom1 = str(getattr(bond, "atom1", ""))
+            atom2 = str(getattr(bond, "atom2", ""))
+            if modifier_atom.atom_name not in (atom1, atom2):
+                continue
+            other_name = atom2 if atom1 == modifier_atom.atom_name else atom1
+            atom_def = atom_defs.get(other_name)
+            if atom_def is not None and str(getattr(atom_def, "symbol", "")).upper() == "O":
+                oxygen_names.add(other_name)
+    return tuple(
+        atom
+        for name, atom in residue_atom_by_name.items()
+        if name in oxygen_names and _is_oxygen_atom(atom)
+    )
+
+
+def _parse_product_conect_records(path: Path) -> dict[int, set[int]]:
+    conect: dict[int, set[int]] = {}
+    with Path(path).open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if not line.startswith("CONECT"):
+                continue
+            try:
+                source = int(line[6:11])
+            except ValueError:
+                continue
+            targets = conect.setdefault(source, set())
+            for start in range(11, len(line), 5):
+                field = line[start : start + 5].strip()
+                if not field:
+                    continue
+                try:
+                    target = int(field)
+                except ValueError:
+                    continue
+                targets.add(target)
+                conect.setdefault(target, set()).add(source)
+    return conect
+
+
+def _same_product_residue(atom: PdbAtomRecord, anchor: PdbAtomRecord) -> bool:
+    return (
+        atom.chain_id == anchor.chain_id
+        and atom.residue_name.upper() == anchor.residue_name.upper()
+        and atom.residue_number == anchor.residue_number
+        and atom.insertion_code == anchor.insertion_code
+    )
+
+
+def _is_oxygen_atom(atom: PdbAtomRecord) -> bool:
+    return atom.element.strip().upper() == "O"
 
 
 def _build_solvated_system(

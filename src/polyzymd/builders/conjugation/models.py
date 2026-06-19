@@ -51,6 +51,9 @@ class ConjugationResult(BaseModel):
     status: str = "completed"
     output_dir: Path | None = None
     config_path: Path | None = None
+    crosslinked_conjugate_pdb_path: Path | None = None
+    minimized_conjugate_pdb_path: Path | None = None
+    equilibrated_conjugate_pdb_path: Path | None = None
     relaxed_conjugate_pdb_path: Path | None = None
     solvated_pdb_path: Path | None = None
     workflow_json_path: Path | None = None
@@ -70,12 +73,24 @@ class ConjugationResult(BaseModel):
         config_path: Path | str | None = None,
     ) -> "ConjugationResult":
         """Create a public result summary from the config workflow result."""
+        construction = getattr(legacy_result, "construction", None)
+        smoke = getattr(construction, "smoke", None)
+        local_minimization = getattr(construction, "local_minimization", None)
+        crosslinked_path = _optional_path(getattr(construction, "crosslinked_pdb_path", None))
+        minimized_path = _optional_path(
+            getattr(smoke, "minimized_pdb_path", None)
+            or getattr(local_minimization, "relaxed_pdb_path", None)
+        )
+        equilibrated_path = _optional_path(getattr(smoke, "equilibrated_pdb_path", None))
         relaxed_path = _optional_path(getattr(legacy_result, "relaxed_conjugate_pdb_path", None))
         solvated_path = _optional_path(getattr(legacy_result, "solvated_pdb_path", None))
         workflow_path = _optional_path(getattr(legacy_result, "workflow_json_path", None))
         artifact_paths = {
             name: path
             for name, path in {
+                "crosslinked_conjugate_pdb": crosslinked_path,
+                "minimized_conjugate_pdb": minimized_path,
+                "equilibrated_conjugate_pdb": equilibrated_path,
                 "relaxed_conjugate_pdb": relaxed_path,
                 "solvated_pdb": solvated_path,
                 "workflow_json": workflow_path,
@@ -86,6 +101,9 @@ class ConjugationResult(BaseModel):
             status="completed",
             output_dir=_optional_path(getattr(legacy_result, "output_dir", None)),
             config_path=_optional_path(config_path),
+            crosslinked_conjugate_pdb_path=crosslinked_path,
+            minimized_conjugate_pdb_path=minimized_path,
+            equilibrated_conjugate_pdb_path=equilibrated_path,
             relaxed_conjugate_pdb_path=relaxed_path,
             solvated_pdb_path=solvated_path,
             workflow_json_path=workflow_path,

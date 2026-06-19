@@ -46,8 +46,8 @@ Examples:
 refactor(conjugation): introduce engine facade
 
 Adds the public build_conjugate entry point and delegates to the existing
-NHS-Lys POC workflow through compatibility shims. Existing import paths are
-unchanged.
+NHS-Lys construction workflow. Internal helper modules remain importable only
+from their owning module paths.
 
 Validation: pixi run -e build pytest tests/test_conjugation_*.py -v
 ```
@@ -83,22 +83,15 @@ conjugation/
 │   ├── library.py           # built-in and future external discovery
 │   ├── nhs_lys.py           # first working reaction template
 │   └── explicit_linkage.py  # simple explicit-link reaction
-├── workflow/
-│   ├── preparation.py       # protein canonicalization at configurable pH
-│   ├── modifier.py          # modifier/polymer loading and generation
-│   ├── placement.py         # Packmol/geometric placement
-│   ├── assembly.py          # product PDB writing and CONECT/LINK handling
-│   ├── pablo.py             # product-state Pablo residue definitions/ingestion
-│   ├── parameterization.py  # Interchange construction
-│   ├── minimization.py      # restrained OpenMM minimization
-│   └── system.py            # config-driven full system workflow
-├── io/
-│   ├── pdb.py               # PDB atom records, selectors, normalization
-│   ├── rdkit.py             # RDKit helpers; lazy imports only
-│   ├── openff.py            # OpenFF/Pablo adapter boundaries
-│   └── polymerist.py        # Polymerist import/generation adapters
-└── _legacy/
-    └── ...                  # temporary compatibility wrappers only
+├── system_workflow.py       # config-driven full-system workflow
+├── protein_preparation.py   # protein canonicalization at configurable pH
+├── polymer_recipe.py        # modifier/polymer recipe and generation helpers
+├── placement.py             # Packmol/geometric placement
+├── pdb_assembly.py          # product PDB writing and CONECT handling
+├── product_pablo.py         # product-state Pablo residue definitions
+├── pablo_adapter.py         # Pablo ingestion boundary
+├── parameterization.py      # Interchange construction
+└── local_minimization.py    # restrained OpenMM minimization
 ```
 
 ## Public API target
@@ -126,9 +119,9 @@ from polyzymd.builders.conjugation import build_conjugate_from_config
 result = build_conjugate_from_config("config.yaml", output_dir="build/")
 ```
 
-The public facade should export only stable request/result models, reaction
-discovery helpers, and the high-level build functions. Keep exploratory helpers
-private or under `_legacy`.
+The package facade should export only stable request/result models, the engine,
+and the high-level build functions. Reaction discovery and lower-level helpers
+are imported from their owning modules, not from the package root.
 
 ### Current public API direction
 
@@ -145,10 +138,11 @@ behind the engine boundary. `build_conjugate()` is retained as a higher-level
 facade for request/config inputs, but direct molecule/topology construction is
 still explicitly pending.
 
-The older workflow/helper imports remain compatibility paths during migration,
-including `system_workflow`, `protein_preparation`, `local_minimization`,
-`product_pablo`, `pablo_adapter`, and `parameterization`. Do not remove these
-paths until callers and tests have moved to the engine-facing API.
+The public API notebook/workflow should use `build_conjugate_from_config()` or
+`ConjugationEngine`. Internal helpers such as `system_workflow`,
+`protein_preparation`, `local_minimization`, `product_pablo`, `pablo_adapter`,
+and `parameterization` remain direct module imports for maintainers, but they
+are not re-exported from `polyzymd.builders.conjugation`.
 
 ## Core data model
 
@@ -205,11 +199,11 @@ belong in `reactions/nhs_lys.py`.
 |-------|--------|-------|
 | 0 | Complete | Current import behavior and POC-adjacent behavior are covered by focused conjugation tests. |
 | 1 | Complete | `api.py`, `engine.py`, public models, and the reaction package skeleton exist. |
-| 2 | Complete, transitional | `workflow.preparation` and `workflow.minimization` expose the working legacy implementations without changing behavior. |
-| 3 | Complete, transitional | `workflow.pablo`, `workflow.parameterization`, and `io.openff` provide the new namespace boundaries while keeping legacy modules import-compatible. |
+| 2 | Superseded | Protein preparation and minimization remain in direct modules; transitional shim packages were removed. |
+| 3 | Superseded | Pablo/OpenFF boundaries remain in direct modules; transitional shim packages were removed. |
 | 4 | Complete, adapter-first | `NhsLysReaction` owns NHS-Lys defaults and reaction metadata, delegating to the proven implementation. |
 | 5 | Complete, conservative | `ConjugationEngine` centralizes public orchestration and delegates executable config builds to the existing system workflow. Direct OpenFF fallback is not silently enabled. |
-| 6 | Current | Preserve the known-working POC notebook, document migration boundaries, and avoid broad cleanup. |
+| 6 | Complete | Preserve old POC assets while keeping the package layout focused on the public API and direct internal modules. |
 
 ### Phase 0 — freeze current behavior
 
@@ -225,9 +219,9 @@ Record any expected skips or external-data requirements in the commit body.
 
 ### Phase 1 — add the new skeleton and facade
 
-Add `api.py`, `engine.py`, `models.py`, `reactions/`, `workflow/`, and `io/`
-without moving major behavior yet. Existing modules should keep working through
-wrappers or shims.
+Add `api.py`, `engine.py`, `models.py`, and `reactions/` without moving major
+behavior yet. Existing direct modules should keep working while public callers
+move to the facade.
 
 Gate:
 
@@ -237,29 +231,17 @@ pixi run -e build ruff check src/polyzymd/builders/conjugation tests/test_conjug
 pixi run -e build black src/polyzymd/builders/conjugation tests/test_conjugation_*.py --check
 ```
 
-### Phase 2 — move preparation and minimization
+### Phase 2 — keep direct workflow modules focused
 
-Move current working protein canonicalization and restrained minimization into:
+Protein canonicalization and restrained minimization live in
+`protein_preparation.py` and `local_minimization.py`. Do not reintroduce
+transitional shim wrappers.
 
-```text
-workflow/preparation.py
-workflow/minimization.py
-```
+### Phase 3 — keep Pablo/OpenFF boundaries direct
 
-Keep compatibility imports from `protein_preparation.py` and
-`local_minimization.py` for now.
-
-### Phase 3 — move Pablo product-state logic
-
-Move product-state Pablo library generation and ingestion into:
-
-```text
-workflow/pablo.py
-io/openff.py
-```
-
-Compatibility wrappers should remain for `product_pablo.py`, `pablo_adapter.py`,
-and related tests until callers migrate.
+Product-state Pablo library generation and ingestion live in
+`product_pablo.py`, `pablo_adapter.py`, and `parameterization.py`. Do not
+reintroduce transitional shim wrappers.
 
 ### Phase 4 — introduce `NhsLysReaction`
 
@@ -277,12 +259,12 @@ NHS/Lys atom names such as `NZ`, `C047`, `O020`, `H11`, `H13`, `HZ2`, or `HZ3`.
 
 ### Phase 5 — consolidate orchestration
 
-Create `ConjugationEngine` in `engine.py`. Existing functions like
-`build_conjugated_polymer_system_from_config()` should delegate to the engine or
-remain as thin compatibility wrappers.
+Create `ConjugationEngine` in `engine.py`. Public callers should enter through
+`build_conjugate_from_config()`, `build_conjugate()`, or the engine. Existing
+full-system internals remain in `system_workflow.py`.
 
-Disable legacy direct OpenFF fallback by default. Fail loudly when Pablo/OpenFF
-cannot ingest the product unless the caller explicitly opts into diagnostics.
+Remove legacy direct OpenFF fallback. Fail loudly when Pablo/OpenFF cannot ingest
+the product.
 
 ### Phase 6 — clean POC artifacts and write docs
 
@@ -291,10 +273,10 @@ available as the known-working reference POC until the refactored public API can
 reproduce the same product-state Pablo/OpenMM minimization result. Do not delete
 or overwrite this notebook during early refactor phases.
 
-During Phase 6, prefer documentation and compatibility notes over deleting POC
-outputs or reshaping the package tree. The notebook remains the reference for
-the proven path; new user-facing code should point toward
-`build_conjugate_from_config()` or `ConjugationEngine`.
+During Phase 6, keep old POC assets for reference while removing transitional
+shim packages and fallback experiments from the importable package tree. The
+notebook remains the reference for the proven path; new user-facing code should
+point toward `build_conjugate_from_config()` or `ConjugationEngine`.
 
 Once the clean API fully reproduces the notebook workflow, copy or move the
 walkthrough into docs/tutorial space and leave a short pointer from the old
@@ -333,10 +315,10 @@ Before each commit, verify:
 - heavy imports remain lazy (`openmm`, `openff`, `MDAnalysis`, `pdbfixer`, `rdkit`)
 - generic engine code does not hardcode NHS-Lys atom names
 - residue identity is preserved; no whole-polymer `POLY` shortcut
-- `allow_direct_openff_fallback` or equivalent legacy fallback is not silently enabled
+- legacy direct OpenFF fallback is absent; Pablo/OpenFF failures surface clearly
 - Pablo/OpenFF failures are surfaced with actionable diagnostics
 - notebook/tutorial code uses public APIs once the API exists
-- tests cover both compatibility imports and the new API path
+- tests cover the public API path and direct internal module paths still in use
 
 ## Known current scientific boundary
 

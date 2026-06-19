@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import importlib
-from collections import defaultdict
+from collections import Counter, defaultdict
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -140,6 +141,7 @@ def build_product_state_pablo_library(
         conect_pairs,
         fragment_bonds=fragment_bonds,
     )
+    product_formal_charges = _product_formal_charges(product_atoms, generated_fragment)
     polymer_link_plans, polymer_link_diagnostics = _plan_polymer_external_links(
         external_polymer_bonds,
         reserved_crosslink_keys={modifier_key},
@@ -163,6 +165,7 @@ def build_product_state_pablo_library(
             residue_cls,
             residue_atoms=residue_atoms,
             bonds=product_bonds.get(key, ()),
+            formal_charges=product_formal_charges.get(key, {}),
             linking_bond=link_plan.linking_bond,
             leaving_atoms=_leaving_atoms_for_residue(
                 resolved_plan,
@@ -424,14 +427,23 @@ def _fragment_bonds(generated_fragment: Any | None) -> tuple[tuple[Any, Any, int
     if generated_fragment is None:
         return ()
     atom_lookup = _fragment_atom_lookup(generated_fragment)
+    unique_atom_names = _unique_fragment_atom_names(generated_fragment)
     order_lookup: dict[frozenset[Any], int] = {}
     for entry in getattr(generated_fragment, "bond_orders", ()) or ():
         if len(entry) >= 3:
-            order_lookup[frozenset((entry[0], entry[1]))] = int(entry[2])
+            order_lookup[frozenset((entry[0], entry[1]))] = _explicit_bond_order(
+                entry[2], source="generated polymer fragment"
+            )
     bonds = []
     for atom1, atom2 in getattr(generated_fragment, "bonds", ()) or ():
-        resolved1 = _fragment_atom_descriptor(atom_lookup.get(atom1)) or atom1
-        resolved2 = _fragment_atom_descriptor(atom_lookup.get(atom2)) or atom2
+        resolved1 = (
+            _fragment_atom_descriptor(atom_lookup.get(atom1), unique_atom_names=unique_atom_names)
+            or atom1
+        )
+        resolved2 = (
+            _fragment_atom_descriptor(atom_lookup.get(atom2), unique_atom_names=unique_atom_names)
+            or atom2
+        )
         bonds.append((resolved1, resolved2, order_lookup.get(frozenset((atom1, atom2)), 1)))
     return tuple(bonds)
 
@@ -441,36 +453,132 @@ def _polymer_sdf_bonds(
     generated_fragment: Any | None,
 ) -> tuple[tuple[Any, Any, int], ...]:
     """Return SDF bond orders mapped to product-PDB atom descriptors."""
-    if polymer_sdf is None or generated_fragment is None:
+    if polymer_sdf is None:
         return ()
+    if generated_fragment is None:
+        raise ValueError(
+            "polymer_sdf was provided but generated_fragment is unavailable; product-state "
+            "Pablo definitions need the generated fragment atom indices to map SDF bond orders "
+            "onto product PDB atom names."
+        )
     sdf_path = Path(polymer_sdf)
     if not sdf_path.exists():
-        return ()
-    try:
-        from rdkit import Chem
-    except ImportError:
-        return ()
+        raise ValueError(f"Polymer SDF sidecar does not exist: {sdf_path}")
+
+    from rdkit import Chem
 
     supplier = Chem.SDMolSupplier(str(sdf_path), removeHs=False, sanitize=False)
-    mol = supplier[0] if supplier and len(supplier) else None
-    if mol is None:
-        return ()
+    molecules = [mol for mol in supplier if mol is not None]
+    if not molecules:
+        raise ValueError(
+            f"Polymer SDF sidecar could not be read as an RDKit molecule: {sdf_path}. "
+            "Regenerate the polymer SDF with explicit bond orders."
+        )
     atoms_by_index = {
         getattr(atom, "atom_index", None): atom
         for atom in getattr(generated_fragment, "atoms", ()) or ()
         if getattr(atom, "atom_index", None) is not None
     }
+    if not atoms_by_index:
+        raise ValueError(
+            "Generated polymer fragment atoms do not carry atom_index values, so SDF bond "
+            "orders cannot be mapped onto product-state Pablo definitions."
+        )
+    mol = _select_sdf_molecule(molecules, expected_atoms=len(atoms_by_index), sdf_path=sdf_path)
+    _validate_sdf_bond_orders(mol, sdf_path)
+    unique_atom_names = _unique_fragment_atom_names(generated_fragment)
     bonds: list[tuple[Any, Any, int]] = []
     for bond in mol.GetBonds():
-        order = int(round(float(bond.GetBondTypeAsDouble())))
-        if order <= 0:
-            continue
-        atom1 = _fragment_atom_descriptor(atoms_by_index.get(bond.GetBeginAtomIdx()))
-        atom2 = _fragment_atom_descriptor(atoms_by_index.get(bond.GetEndAtomIdx()))
+        order = _explicit_bond_order(bond.GetBondTypeAsDouble(), source=f"SDF {sdf_path}")
+        atom1 = _fragment_atom_descriptor(
+            atoms_by_index.get(bond.GetBeginAtomIdx()), unique_atom_names=unique_atom_names
+        )
+        atom2 = _fragment_atom_descriptor(
+            atoms_by_index.get(bond.GetEndAtomIdx()), unique_atom_names=unique_atom_names
+        )
         if atom1 is None or atom2 is None:
-            continue
+            raise ValueError(
+                "Polymer SDF bond endpoint could not be mapped to a generated-fragment atom: "
+                f"SDF atoms {bond.GetBeginAtomIdx() + 1}-{bond.GetEndAtomIdx() + 1} in "
+                f"{sdf_path}. Regenerate the polymer PDB/SDF pair from the same source molecule."
+            )
         bonds.append((atom1, atom2, order))
     return tuple(bonds)
+
+
+def _product_formal_charges(
+    product_atoms: list[PdbAtomRecord],
+    generated_fragment: Any | None,
+) -> dict[tuple[str, str, int, str], dict[str, int]]:
+    """Map non-zero generated-fragment formal charges onto product PDB residues."""
+    if generated_fragment is None:
+        return {}
+    unique_atom_names = _unique_fragment_atom_names(generated_fragment)
+    product_lookup = _product_lookup(product_atoms)
+    charges: dict[tuple[str, str, int, str], dict[str, int]] = defaultdict(dict)
+    for atom in getattr(generated_fragment, "atoms", ()) or ():
+        charge = getattr(atom, "formal_charge", None)
+        if charge in (None, 0):
+            continue
+        descriptor = _fragment_atom_descriptor(atom, unique_atom_names=unique_atom_names)
+        if descriptor is None:
+            continue
+        product_atom = product_lookup.get(descriptor)
+        if product_atom is None:
+            continue
+        charges[_residue_key(product_atom)][product_atom.atom_name] = int(charge)
+    return {key: dict(value) for key, value in charges.items()}
+
+
+def _select_sdf_molecule(molecules: list[Any], *, expected_atoms: int, sdf_path: Path) -> Any:
+    """Select the SDF molecule matching the generated-fragment atom count."""
+    matches = [mol for mol in molecules if mol.GetNumAtoms() == expected_atoms]
+    if not matches:
+        observed = ", ".join(str(mol.GetNumAtoms()) for mol in molecules)
+        raise ValueError(
+            "Polymer SDF sidecar atom count does not match the generated fragment: "
+            f"expected {expected_atoms}, observed {observed} in {sdf_path}. Regenerate the "
+            "polymer PDB/SDF pair from the same source molecule."
+        )
+    return max(matches, key=lambda candidate: candidate.GetNumBonds())
+
+
+def _validate_sdf_bond_orders(mol: Any, sdf_path: Path) -> None:
+    """Require explicit positive bond orders in an SDF source molecule."""
+    invalid = [
+        (bond.GetBeginAtomIdx() + 1, bond.GetEndAtomIdx() + 1)
+        for bond in mol.GetBonds()
+        if float(bond.GetBondTypeAsDouble()) <= 0.0
+    ]
+    if invalid:
+        preview = ", ".join(f"{left}-{right}" for left, right in invalid[:5])
+        extra = "" if len(invalid) <= 5 else f" and {len(invalid) - 5} more"
+        raise ValueError(
+            "Polymer SDF sidecar contains under-specified zero/unknown bond orders "
+            f"for atom pairs {preview}{extra} in {sdf_path}. Polymer SDF files must contain "
+            "explicit bond orders and fully specified valence; regenerate the SDF from the "
+            "source molecule rather than relying on product-state chemistry repair."
+        )
+
+
+def _explicit_bond_order(value: Any, *, source: str) -> int:
+    """Return a supported integer bond order or raise an actionable error."""
+    try:
+        order = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid bond order {value!r} from {source}") from exc
+    if order <= 0.0:
+        raise ValueError(
+            f"Invalid zero/unknown bond order {value!r} from {source}; polymer chemistry "
+            "must be supplied with explicit positive bond orders."
+        )
+    rounded = round(order)
+    if abs(order - rounded) > 1e-6:
+        raise ValueError(
+            f"Unsupported non-integer bond order {value!r} from {source}; product-state "
+            "Pablo definitions currently require explicit integer bond orders."
+        )
+    return int(rounded)
 
 
 def _fragment_atom_lookup(generated_fragment: Any) -> dict[Any, Any]:
@@ -492,13 +600,29 @@ def _fragment_atom_lookup(generated_fragment: Any) -> dict[Any, Any]:
     return lookup
 
 
-def _fragment_atom_descriptor(atom: Any | None) -> tuple[int | None, str] | None:
+def _unique_fragment_atom_names(generated_fragment: Any | None) -> set[str]:
+    """Return atom names that uniquely identify generated-fragment atoms."""
+    if generated_fragment is None:
+        return set()
+    atom_names = [
+        getattr(atom, "atom_name", None) for atom in getattr(generated_fragment, "atoms", ()) or ()
+    ]
+    return {name for name in atom_names if name and atom_names.count(name) == 1}
+
+
+def _fragment_atom_descriptor(
+    atom: Any | None,
+    *,
+    unique_atom_names: set[str] | None = None,
+) -> str | tuple[int | None, str] | None:
     """Return a product-PDB lookup descriptor for a generated-fragment atom."""
     if atom is None:
         return None
     atom_name = getattr(atom, "atom_name", None)
     if not atom_name:
         return None
+    if unique_atom_names is not None and atom_name in unique_atom_names:
+        return atom_name
     return (getattr(atom, "residue_number", None), atom_name)
 
 
@@ -613,9 +737,10 @@ def _plan_polymer_external_links(
     diagnostics: list[str] = []
     leaving_index = 1
 
+    polymer_link_edges = _polymer_link_edge_keys(external_bonds, diagnostics)
     linking_edges = []
     for bond in external_bonds:
-        if abs(bond.left_key[2] - bond.right_key[2]) == 1:
+        if _polymer_external_edge_key(bond) in polymer_link_edges:
             linking_edges.append(bond)
             continue
         if bond.left_key in reserved_crosslink_keys or bond.right_key in reserved_crosslink_keys:
@@ -680,6 +805,67 @@ def _plan_polymer_external_links(
     }, diagnostics
 
 
+def _polymer_link_edge_keys(
+    external_bonds: tuple[_PolymerExternalBond, ...],
+    diagnostics: list[str],
+) -> set[frozenset[tuple[str, str, int, str]]]:
+    """Identify polymer backbone links from chain-C connectivity, not residue numbers."""
+    adjacency: dict[
+        tuple[str, str, int, str],
+        list[tuple[tuple[str, str, int, str], str, str, int]],
+    ] = defaultdict(list)
+    bonds_by_component_edge: dict[frozenset[tuple[str, str, int, str]], _PolymerExternalBond] = {}
+    for bond in external_bonds:
+        adjacency[bond.left_key].append(
+            (bond.right_key, bond.left_atom, bond.right_atom, bond.order)
+        )
+        adjacency[bond.right_key].append(
+            (bond.left_key, bond.right_atom, bond.left_atom, bond.order)
+        )
+        bonds_by_component_edge[_polymer_external_edge_key(bond)] = bond
+
+    link_edges: set[frozenset[tuple[str, str, int, str]]] = set()
+    unvisited = set(adjacency)
+    while unvisited:
+        component = _polymer_component(next(iter(unvisited)), adjacency)
+        unvisited.difference_update(component)
+        component_edges = {
+            edge_key for edge_key in bonds_by_component_edge if edge_key.issubset(component)
+        }
+        if not component_edges:
+            continue
+        if all(len(adjacency[key]) <= 2 for key in component):
+            link_edges.update(component_edges)
+            if any(
+                abs(bond.left_key[2] - bond.right_key[2]) != 1
+                for edge_key, bond in bonds_by_component_edge.items()
+                if edge_key in component_edges
+            ):
+                diagnostics.append(
+                    "Product polymer links were assigned from chain-C connectivity rather "
+                    "than residue-number adjacency"
+                )
+            continue
+
+        diagnostics.append(
+            "Branched product polymer connectivity detected; residue-number-adjacent "
+            "bonds were treated as polymer links"
+        )
+        link_edges.update(
+            edge_key
+            for edge_key, bond in bonds_by_component_edge.items()
+            if edge_key in component_edges and abs(bond.left_key[2] - bond.right_key[2]) == 1
+        )
+    return link_edges
+
+
+def _polymer_external_edge_key(
+    bond: _PolymerExternalBond,
+) -> frozenset[tuple[str, str, int, str]]:
+    """Return an orientation-independent key for an external polymer bond."""
+    return frozenset((bond.left_key, bond.right_key))
+
+
 def _orient_polymer_external_bonds(
     external_bonds: tuple[_PolymerExternalBond, ...],
     diagnostics: list[str],
@@ -710,8 +896,11 @@ def _orient_polymer_external_bonds(
     while unvisited:
         component = _polymer_component(next(iter(unvisited)), adjacency)
         unvisited.difference_update(component)
-        endpoints = sorted(key for key in component if len(adjacency[key]) == 1)
-        start = endpoints[0] if endpoints else sorted(component)[0]
+        endpoints = sorted(
+            (key for key in component if len(adjacency[key]) == 1),
+            key=_polymer_residue_sort_key,
+        )
+        start = endpoints[0] if endpoints else sorted(component, key=_polymer_residue_sort_key)[0]
         previous: tuple[str, str, int, str] | None = None
         current = start
         while True:
@@ -723,7 +912,7 @@ def _orient_polymer_external_bonds(
             if not next_entries:
                 break
             neighbor, current_atom, neighbor_atom, order = sorted(
-                next_entries, key=lambda item: item[0]
+                next_entries, key=lambda item: _polymer_residue_sort_key(item[0])
             )[0]
             visited_edges.add(frozenset((current, neighbor)))
             oriented.append(
@@ -739,6 +928,11 @@ def _orient_polymer_external_bonds(
             if current == start:
                 break
     return tuple(oriented)
+
+
+def _polymer_residue_sort_key(key: tuple[str, str, int, str]) -> tuple[int, str, str, str]:
+    """Sort chain-C residue keys by emitted residue order."""
+    return (key[2], key[3], key[0], key[1])
 
 
 def _polymer_component(
@@ -792,12 +986,14 @@ def _add_link_leaving_bonds(
 def _product_lookup(product_atoms: list[PdbAtomRecord]) -> dict[Any, PdbAtomRecord]:
     """Build flexible product atom lookups for generated-fragment bond references."""
     lookup: dict[Any, PdbAtomRecord] = {}
+    atom_name_counts = Counter(atom.atom_name for atom in product_atoms)
     for atom in product_atoms:
         if atom.serial is not None:
             lookup.setdefault(atom.serial, atom)
         if atom.atom_index is not None:
             lookup.setdefault(atom.atom_index, atom)
-        lookup.setdefault(atom.atom_name, atom)
+        if atom_name_counts[atom.atom_name] == 1:
+            lookup.setdefault(atom.atom_name, atom)
         lookup.setdefault((atom.residue_number, atom.atom_name), atom)
         lookup.setdefault((atom.chain_id, atom.residue_number, atom.atom_name), atom)
     return lookup
@@ -844,6 +1040,7 @@ def _build_pdb_residue_definition(
     *,
     residue_atoms: tuple[PdbAtomRecord, ...],
     bonds: tuple[tuple[str, str, int], ...],
+    formal_charges: Mapping[str, int],
     linking_bond: tuple[str, str, int] | None,
     leaving_atoms: tuple[PdbAtomRecord, ...],
     crosslink: tuple[str, str] | None,
@@ -863,18 +1060,17 @@ def _build_pdb_residue_definition(
                 canonical_name,
                 atom.element or _guess_element(atom.atom_name),
                 synonyms=synonyms,
-                charge=_parse_formal_charge(atom.charge),
+                charge=_formal_charge_for_atom(atom, formal_charges),
             )
         )
     existing = {atom.name for atom in atoms}
-    adjusted_bonds = _adjust_sulfonate_bond_orders(bonds, residue_atoms)
     bond_defs = [
         bond_cls.with_defaults(
             atom_name_aliases.get(atom1, atom1),
             atom_name_aliases.get(atom2, atom2),
             order=order,
         )
-        for atom1, atom2, order in adjusted_bonds
+        for atom1, atom2, order in bonds
     ]
     for leaving_atom in leaving_atoms:
         if leaving_atom.atom_name not in existing:
@@ -883,7 +1079,7 @@ def _build_pdb_residue_definition(
                     leaving_atom.atom_name,
                     leaving_atom.element or _guess_element(leaving_atom.atom_name),
                     leaving=True,
-                    charge=_parse_formal_charge(leaving_atom.charge),
+                    charge=_formal_charge_for_atom(leaving_atom, formal_charges),
                 )
             )
             existing.add(leaving_atom.atom_name)
@@ -931,42 +1127,6 @@ def _build_pdb_residue_definition(
         atoms=tuple(atoms),
         bonds=tuple(bond_defs),
         virtual_sites=(),
-    )
-
-
-def _adjust_sulfonate_bond_orders(
-    bonds: tuple[tuple[str, str, int], ...],
-    residue_atoms: tuple[PdbAtomRecord, ...],
-) -> tuple[tuple[str, str, int], ...]:
-    """Restore S(=O)(=O)[O-] bond orders when PDB/fragment bonds are single."""
-    atoms = {atom.atom_name: atom for atom in residue_atoms}
-    neighbors: dict[str, list[str]] = defaultdict(list)
-    for atom1, atom2, _order in bonds:
-        neighbors[atom1].append(atom2)
-        neighbors[atom2].append(atom1)
-
-    sulfonate_orders: dict[tuple[str, str], int] = {}
-    for atom_name, atom in atoms.items():
-        if (atom.element or _guess_element(atom.atom_name)).upper() != "S":
-            continue
-        oxygen_neighbors = [
-            neighbor
-            for neighbor in neighbors.get(atom_name, ())
-            if neighbor in atoms
-            and (atoms[neighbor].element or _guess_element(neighbor)).upper() == "O"
-        ]
-        if len(oxygen_neighbors) < 3:
-            continue
-        for oxygen_name in oxygen_neighbors:
-            oxygen = atoms[oxygen_name]
-            order = 1 if _parse_formal_charge(oxygen.charge) < 0 else 2
-            sulfonate_orders[_ordered_bond_key(atom_name, oxygen_name)] = order
-
-    if not sulfonate_orders:
-        return bonds
-    return tuple(
-        (atom1, atom2, sulfonate_orders.get(_ordered_bond_key(atom1, atom2), order))
-        for atom1, atom2, order in bonds
     )
 
 
@@ -1062,6 +1222,14 @@ def _parse_formal_charge(charge: str | None) -> int:
         magnitude = int(text[0])
         return magnitude if text[1] == "+" else -magnitude
     return 0
+
+
+def _formal_charge_for_atom(atom: Any, formal_charges: Mapping[str, int]) -> int:
+    """Return source-mapped SDF formal charge, falling back to the PDB charge field."""
+    atom_name = getattr(atom, "atom_name", "")
+    if atom_name in formal_charges:
+        return int(formal_charges[atom_name])
+    return _parse_formal_charge(getattr(atom, "charge", None))
 
 
 def _guess_element(atom_name: str) -> str:

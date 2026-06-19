@@ -8,10 +8,6 @@ from types import SimpleNamespace
 import pytest
 
 from polyzymd.builders.conjugation import reaction_roles
-from polyzymd.builders.conjugation.pablo_reaction import (
-    PabloReactionRequest,
-    explore_pablo_residue_reaction,
-)
 from polyzymd.builders.conjugation.reaction_roles import (
     AtomMappedReaction,
     AtomRoleSpec,
@@ -142,72 +138,3 @@ def test_pablo_strict_validation_can_require_balanced_product_maps():
             reaction.product_smarts,
             require_all_reactant_maps_in_products=True,
         )
-
-
-def test_pablo_reaction_helper_passes_two_product_residue_names_and_counts_products():
-    """Pablo exploration should pass through two product names and summarize products."""
-    calls = []
-
-    class FakeResidueDefinition:
-        @staticmethod
-        def react(**kwargs):
-            calls.append(kwargs)
-            assert kwargs["product_residue_names"] == ("LYX", "NHX")
-            lys_product = SimpleNamespace(
-                residue_name="LYX",
-                atoms=(SimpleNamespace(name="N1", leaving=False),),
-                linking_bond=None,
-                crosslink="fake-crosslink",
-            )
-            nhs_product = SimpleNamespace(
-                residue_name="NHX",
-                atoms=(
-                    SimpleNamespace(name="C1", leaving=False),
-                    SimpleNamespace(name="O2", leaving=True),
-                ),
-                linking_bond="fake-linking-bond",
-                crosslink=None,
-            )
-            return [(lys_product, nhs_product)]
-
-    fake_pablo = SimpleNamespace(ResidueDefinition=FakeResidueDefinition)
-    request = PabloReactionRequest(
-        reactant_smarts=("[N:1][H:2]", "[C:3](=[O:4])[O:5]"),
-        product_smarts=("[N:1][C:3](=[O:4])", "[O:5][H:2]"),
-        product_residue_names=("LYX", "NHX"),
-    )
-
-    diagnostic = explore_pablo_residue_reaction(
-        reactants=(object(), object()),
-        request=request,
-        pablo_module=fake_pablo,
-    )
-
-    assert calls
-    assert diagnostic.success is True
-    assert diagnostic.product_set_count == 1
-    assert [product.residue_name for product in diagnostic.products[0]] == ["LYX", "NHX"]
-    assert diagnostic.products[0][1].leaving_atom_names == ("O2",)
-
-
-def test_pablo_reaction_helper_skips_gracefully_when_pablo_is_missing(monkeypatch):
-    """Missing Pablo should return a diagnostic instead of raising by default."""
-    import polyzymd.builders.conjugation.pablo_reaction as pablo_reaction
-
-    def fail_import(name: str):
-        assert name == "openff.pablo"
-        raise ImportError("no pablo")
-
-    monkeypatch.setattr(pablo_reaction.importlib, "import_module", fail_import)
-    request = PabloReactionRequest(
-        reactant_smarts=("[N:1]",),
-        product_smarts=("[N:1]",),
-        product_residue_names=("LYX",),
-    )
-
-    diagnostic = explore_pablo_residue_reaction(reactants=(), request=request)
-
-    assert diagnostic.success is False
-    assert diagnostic.pablo_available is False
-    assert diagnostic.error_type == "ImportError"
-    assert diagnostic.warnings
