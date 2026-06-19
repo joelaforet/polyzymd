@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from polyzymd.builders.conjugation._linkage import PabloCrosslinkRequirement
+from polyzymd.builders.conjugation.pablo import product as product_pablo_module
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
 from polyzymd.builders.conjugation.pablo.product import build_product_state_pablo_library
 from polyzymd.builders.conjugation.polymer import (
@@ -123,6 +124,24 @@ def test_product_state_pablo_library_preserves_chain_c_residues(tmp_path: Path):
     assert {"L001", "R001", "L002", "R002"}.issubset(
         {atom for summary in chain_c for atom in summary.leaving_atom_names}
     )
+
+
+def test_product_state_guard_allows_single_residue_smiles_moiety():
+    """One-residue SMILES moieties such as NAG should not look like polymer collapse."""
+    summaries = [
+        product_pablo_module.ProductStatePabloDefinitionSummary(
+            residue_name="ASX",
+            chain_id="B",
+            residue_number=625,
+        ),
+        product_pablo_module.ProductStatePabloDefinitionSummary(
+            residue_name="NAG",
+            chain_id="C",
+            residue_number=1,
+        ),
+    ]
+
+    product_pablo_module._validate_no_whole_polymer_collapse(summaries)
 
 
 def test_product_state_pablo_library_uses_connectivity_for_chain_c_links(tmp_path: Path):

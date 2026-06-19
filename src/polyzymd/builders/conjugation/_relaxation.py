@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import traceback
 from pathlib import Path
 from typing import Any
@@ -392,19 +393,36 @@ def _is_heavy_atom(atom: Any) -> bool:
 
 
 def _select_platform(openmm: Any, requested_platform: str | None) -> Any:
-    """Select an OpenMM platform, preferring accelerators when not specified."""
-    names = (requested_platform,) if requested_platform else ("CUDA", "OpenCL", "CPU", "Reference")
+    """Select a usable OpenMM platform, preferring accelerators when available."""
+    requested = requested_platform or os.environ.get("POLYZYMD_CONJUGATION_SMOKE_PLATFORM")
+    names = (requested,) if requested else ("CUDA", "OpenCL", "CPU", "Reference")
     errors: list[str] = []
     for name in names:
         if name is None:
             continue
         try:
-            return openmm.Platform.getPlatformByName(name)
+            platform = openmm.Platform.getPlatformByName(name)
+            _validate_platform_context(openmm, platform)
+            return platform
         except Exception as exc:  # noqa: BLE001 - OpenMM platform errors vary
             errors.append(f"{name}: {exc}")
     raise RuntimeError(
         "No suitable OpenMM platform found for conjugation smoke: " + "; ".join(errors)
     )
+
+
+def _validate_platform_context(openmm: Any, platform: Any) -> None:
+    """Create a tiny context to confirm the registered platform is usable."""
+    from openmm import unit as openmm_unit
+
+    system = openmm.System()
+    system.addParticle(39.9)
+    integrator = openmm.VerletIntegrator(0.001 * openmm_unit.picoseconds)
+    context = openmm.Context(system, integrator, platform)
+    context.setPositions([[0.0, 0.0, 0.0]] * openmm_unit.nanometer)
+    context.getState(getEnergy=True)
+    del context
+    del integrator
 
 
 def _write_openmm_pdb(openmm_app: Any, topology: Any, positions: Any, output_path: Path) -> None:

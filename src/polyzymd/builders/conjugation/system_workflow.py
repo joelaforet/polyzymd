@@ -312,7 +312,11 @@ def build_direct_smiles_moiety_conjugate(
     if not enabled_attachments:
         raise ValueError("Direct conjugation requests require at least one enabled attachment")
 
-    protein_path = Path(protein_pdb_path)
+    protein_path, protein_canonicalization = _prepared_protein_pdb_path(
+        protein_pdb_path,
+        output_dir=construction_dir,
+        settings=workflow_settings,
+    )
     built_fragments: list[GeneratedPolymerFragment] = []
     source_moieties: list[GeneratedMoietyFragment] = []
     resolved_plans: list[ResolvedAttachmentPlan] = []
@@ -371,16 +375,32 @@ def build_direct_smiles_moiety_conjugate(
         use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
     )
 
+    relaxed_pdb = _relaxed_conjugate_pdb(construction)
+    relaxed_topology = topology_with_pdb_positions(construction_topology, relaxed_pdb)
+    builder = _build_direct_solvated_system(
+        relaxed_conjugate_topology=relaxed_topology,
+        working_dir=artifact_dir,
+        create_interchange=workflow_settings.create_final_interchange,
+    )
+    solvated_pdb_path = artifact_dir / workflow_settings.solvated_pdb_name
+    builder.save_topology(solvated_pdb_path)
+    if workflow_settings.preserve_reference_atom_names:
+        _restore_pdb_atom_name_fields(solvated_pdb_path, relaxed_pdb)
+
     workflow_path = artifact_dir / workflow_settings.workflow_json_name
     result = SimpleNamespace(
         output_dir=artifact_dir,
         construction=construction,
-        relaxed_conjugate_pdb_path=_relaxed_conjugate_pdb(construction),
-        solvated_pdb_path=None,
+        protein_canonicalization=protein_canonicalization,
+        relaxed_conjugate_pdb_path=relaxed_pdb,
+        solvated_pdb_path=solvated_pdb_path,
         workflow_json_path=workflow_path,
-        final_interchange_created=False,
+        final_interchange_created=builder.interchange is not None,
         modifier=tuple(built_fragments),
-        relaxed_conjugate_topology=construction_topology,
+        relaxed_conjugate_topology=relaxed_topology,
+        solvated_topology=builder.solvated_topology,
+        final_interchange=builder.interchange,
+        system_builder=builder,
     )
     _save_direct_workflow_summary(result, enabled_attachments, resolved_plans, workflow_path)
     return result
@@ -965,6 +985,7 @@ def _save_direct_workflow_summary(
         "output_dir": str(result.output_dir),
         "crosslinked_pdb_path": str(result.construction.crosslinked_pdb_path),
         "relaxed_conjugate_pdb_path": str(result.relaxed_conjugate_pdb_path),
+        "solvated_pdb_path": str(result.solvated_pdb_path),
         "attachments": [attachment.name for attachment in attachments],
         "resolved_plans": [plan.model_dump(mode="json") for plan in resolved_plans],
         "diagnostics": tuple(getattr(result.construction, "diagnostics", ())),
@@ -1253,6 +1274,25 @@ def _build_solvated_system(
         use_optimized = config.polymers is not None and config.polymers.enabled
         builder.create_interchange(use_optimized_combining=use_optimized)
 
+    return builder
+
+
+def _build_direct_solvated_system(
+    *,
+    relaxed_conjugate_topology: Any,
+    working_dir: Path,
+    create_interchange: bool,
+) -> SystemBuilder:
+    """Solvate a direct SMILES-moiety conjugate without a full SimulationConfig."""
+    builder = SystemBuilder()
+    builder._working_dir = working_dir
+    builder._enzyme_topology = relaxed_conjugate_topology
+    builder._n_enzyme_molecules = 1
+    builder._preserve_enzyme_chain_ids = True
+    builder.combine_solutes()
+    builder.solvate(padding=0.8, box_shape="cube")
+    if create_interchange:
+        builder.create_interchange(use_optimized_combining=False)
     return builder
 
 
