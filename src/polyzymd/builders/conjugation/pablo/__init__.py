@@ -23,6 +23,7 @@ from polyzymd.builders.conjugation.pablo.product import (
     ProductStatePabloDefinitionSummary,
     ProductStatePabloLibrary,
     build_product_state_pablo_library,
+    build_product_state_pablo_library_for_specs,
 )
 from polyzymd.builders.conjugation.pablo.residue_library import (
     PabloResidueLibraryDiagnostic,
@@ -50,6 +51,7 @@ __all__ = [
     "build_formal_charge_smoke_template",
     "build_pablo_residue_library",
     "build_product_state_pablo_library",
+    "build_product_state_pablo_library_for_specs",
     "create_interchange_from_openff_topology",
     "create_interchange_from_pablo_topology",
     "deduplicate_charge_templates",

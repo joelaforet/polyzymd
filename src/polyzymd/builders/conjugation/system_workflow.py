@@ -331,7 +331,7 @@ def build_direct_smiles_moiety_conjugate(
     construction, construction_topology = _construct_multi_modifier_linked_protein(
         protein_pdb_path=protein_path,
         modifiers=built_fragments,
-        source_moieties=tuple(_source_moiety_from_spec(spec) for spec in specs),
+        attachment_specs=tuple(specs),
         resolved_plans=resolved_plans,
         ccd_pablo_policy=policy,
         output_dir=construction_dir,
@@ -528,11 +528,6 @@ def _build_n_gly_direct_moiety_attachment_spec(
         attachment_index=attachment_index,
         reaction_name=attachment.mechanism.name,
     )
-
-
-def _source_moiety_from_spec(spec: AttachmentBuildSpec) -> Any:
-    """Return the current product-library source object for a resolved spec."""
-    return spec.source_fragment or spec.generated_fragment
 
 
 def _single_enabled_attachment(conjugation: ConjugationConfig | None) -> Any:
@@ -840,18 +835,21 @@ def _construct_multi_modifier_linked_protein(
     *,
     protein_pdb_path: Path | str,
     modifiers: tuple[GeneratedPolymerFragment, ...],
-    source_moieties: tuple[GeneratedMoietyFragment, ...],
     resolved_plans: tuple[ResolvedAttachmentPlan, ...],
     ccd_pablo_policy: Any,
     output_dir: Path | str,
     chain_policy: Any | None,
     settings: ModifierConstructionSettings,
     use_product_state_pablo_library: bool,
+    attachment_specs: tuple[AttachmentBuildSpec, ...] | None = None,
+    source_moieties: tuple[GeneratedMoietyFragment, ...] | None = None,
 ) -> tuple[Any, Any]:
     """Construct a product PDB from multiple independent resolved attachments."""
     if not modifiers or len(modifiers) != len(resolved_plans):
         raise ValueError("Multi-attachment construction requires aligned modifiers and plans")
-    if len(source_moieties) != len(resolved_plans):
+    if attachment_specs is not None and len(attachment_specs) != len(resolved_plans):
+        raise ValueError("Multi-attachment construction requires aligned specs and plans")
+    if source_moieties is not None and len(source_moieties) != len(resolved_plans):
         raise ValueError("Multi-attachment construction requires aligned source moieties and plans")
 
     artifact_dir = Path(output_dir)
@@ -892,11 +890,15 @@ def _construct_multi_modifier_linked_protein(
     product_state_pablo_library = None
     product_state_residue_library = None
     if use_product_state_pablo_library:
-        product_state_pablo_library = _product_state_pablo_library_for_plans(
-            product_pdb=crosslinked_pdb_path,
-            source_protein_pdb=protein_pdb_path,
+        product_state_specs = _product_state_specs_for_inputs(
+            attachment_specs=attachment_specs,
             source_moieties=source_moieties,
             resolved_plans=resolved_plans,
+        )
+        product_state_pablo_library = _product_state_pablo_library_for_specs(
+            product_pdb=crosslinked_pdb_path,
+            source_protein_pdb=protein_pdb_path,
+            specs=product_state_specs,
         )
         product_state_residue_library = product_state_pablo_library.residue_library
 
@@ -960,6 +962,52 @@ def _policy_with_resolved_crosslinks(
     return updated
 
 
+def _product_state_specs_for_inputs(
+    *,
+    attachment_specs: tuple[AttachmentBuildSpec, ...] | None,
+    source_moieties: tuple[GeneratedMoietyFragment, ...] | None,
+    resolved_plans: tuple[ResolvedAttachmentPlan, ...],
+) -> tuple[AttachmentBuildSpec, ...]:
+    """Return resolved attachment specs for product-state library generation."""
+    if attachment_specs is not None:
+        return attachment_specs
+    if source_moieties is None:
+        raise ValueError(
+            "Product-state Pablo library generation requires attachment specs or legacy "
+            "source moieties"
+        )
+    return tuple(
+        attachment_spec_from_moiety_plan(
+            moiety,
+            plan,
+            attachment_config=SimpleNamespace(name=f"attachment_{index:02d}"),
+            attachment_index=index,
+            reaction_name=getattr(plan.contract, "mechanism_name", None) or "unknown",
+        )
+        for index, (moiety, plan) in enumerate(
+            zip(source_moieties, resolved_plans, strict=True), start=1
+        )
+    )
+
+
+def _product_state_pablo_library_for_specs(
+    *,
+    product_pdb: Path,
+    source_protein_pdb: Path | str,
+    specs: tuple[AttachmentBuildSpec, ...],
+) -> Any:
+    """Build product-state residue definitions for one or more attachment specs."""
+    from polyzymd.builders.conjugation.pablo.product import (
+        build_product_state_pablo_library_for_specs,
+    )
+
+    return build_product_state_pablo_library_for_specs(
+        product_pdb=product_pdb,
+        source_protein_pdb=source_protein_pdb,
+        specs=specs,
+    )
+
+
 def _product_state_pablo_library_for_plans(
     *,
     product_pdb: Path,
@@ -967,41 +1015,15 @@ def _product_state_pablo_library_for_plans(
     source_moieties: tuple[GeneratedMoietyFragment, ...],
     resolved_plans: tuple[ResolvedAttachmentPlan, ...],
 ) -> Any:
-    """Build product-state residue definitions for one or more resolved plans."""
-    from polyzymd.builders.conjugation.pablo.product import build_product_state_pablo_library
-
-    libraries = []
-    for moiety, plan in zip(source_moieties, resolved_plans, strict=True):
-        libraries.append(
-            build_product_state_pablo_library(
-                product_pdb=product_pdb,
-                source_protein_pdb=source_protein_pdb,
-                polymer_sdf=moiety.sdf_path,
-                generated_fragment=moiety,
-                resolved_plan=plan,
-            )
-        )
-    if len(libraries) == 1:
-        return libraries[0]
-
-    import importlib
-
-    pablo = importlib.import_module("openff.pablo")
-    definitions = tuple(
-        definition for library in libraries for definition in getattr(library, "definitions", ())
-    )
-    summaries = tuple(
-        summary for library in libraries for summary in getattr(library, "summaries", ())
-    )
-    diagnostics = tuple(
-        diagnostic for library in libraries for diagnostic in getattr(library, "diagnostics", ())
-    )
-    return SimpleNamespace(
-        residue_library=pablo.STD_CCD_CACHE.with_(definitions),
-        definitions=definitions,
-        summaries=summaries,
-        crosslink_requirement=resolved_plans[0].pablo_crosslink_requirement,
-        diagnostics=diagnostics,
+    """Build product-state definitions for legacy moiety/plan callers."""
+    return _product_state_pablo_library_for_specs(
+        product_pdb=product_pdb,
+        source_protein_pdb=source_protein_pdb,
+        specs=_product_state_specs_for_inputs(
+            attachment_specs=None,
+            source_moieties=source_moieties,
+            resolved_plans=resolved_plans,
+        ),
     )
 
 

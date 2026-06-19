@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 from collections import Counter, defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -196,6 +196,119 @@ def build_product_state_pablo_library(
         crosslink_requirement=requirement,
         diagnostics=tuple(diagnostics),
     )
+
+
+def build_product_state_pablo_library_for_specs(
+    product_pdb: Path | str,
+    source_protein_pdb: Path | str | None,
+    specs: Iterable[Any],
+    *,
+    pablo_module: Any | None = None,
+) -> Any:
+    """Build product-state Pablo residue definitions for resolved attachment specs."""
+    attachment_specs = tuple(specs)
+    if not attachment_specs:
+        raise ValueError("Product-state Pablo library generation requires at least one spec")
+
+    libraries = []
+    for spec in attachment_specs:
+        generated_fragment = _spec_generated_fragment(spec)
+        sdf_path = _spec_sdf_path(spec)
+        _validate_spec_sidecars(spec, sdf_path=sdf_path, generated_fragment=generated_fragment)
+        libraries.append(
+            build_product_state_pablo_library(
+                product_pdb=product_pdb,
+                source_protein_pdb=source_protein_pdb,
+                polymer_sdf=sdf_path,
+                generated_fragment=generated_fragment,
+                resolved_plan=getattr(spec, "resolved_plan", None),
+                pablo_module=pablo_module,
+            )
+        )
+
+    if len(libraries) == 1:
+        return libraries[0]
+
+    pablo = pablo_module or importlib.import_module("openff.pablo")
+    definitions = tuple(
+        definition for library in libraries for definition in getattr(library, "definitions", ())
+    )
+    summaries = tuple(
+        summary for library in libraries for summary in getattr(library, "summaries", ())
+    )
+    diagnostics = tuple(
+        diagnostic for library in libraries for diagnostic in getattr(library, "diagnostics", ())
+    )
+    return ProductStatePabloLibrary(
+        residue_library=pablo.STD_CCD_CACHE.with_(definitions),
+        definitions=definitions,
+        summaries=summaries,
+        crosslink_requirement=attachment_specs[0].resolved_plan.pablo_crosslink_requirement,
+        diagnostics=diagnostics,
+    )
+
+
+def _spec_generated_fragment(spec: Any) -> Any:
+    """Return a product-library-compatible fragment adapter from a resolved spec."""
+    generated_fragment = getattr(spec, "generated_fragment", None)
+    if generated_fragment is not None:
+        return generated_fragment
+    fragment = getattr(spec, "fragment", None)
+    to_generated = getattr(fragment, "to_generated_polymer_fragment", None)
+    if callable(to_generated):
+        return to_generated()
+    return fragment
+
+
+def _spec_sdf_path(spec: Any) -> Path | None:
+    """Return the SDF sidecar recorded on a resolved spec, if present."""
+    for sidecars in (
+        getattr(spec, "source_sidecars", None),
+        getattr(getattr(spec, "fragment", None), "sidecars", None),
+    ):
+        if sidecars and sidecars.get("sdf") is not None:
+            return Path(sidecars["sdf"])
+    return None
+
+
+def _validate_spec_sidecars(
+    spec: Any,
+    *,
+    sdf_path: Path | None,
+    generated_fragment: Any,
+) -> None:
+    """Fail before Pablo work when a spec lacks required bond-order sidecars."""
+    if sdf_path is not None:
+        if not sdf_path.exists():
+            raise ValueError(f"Product-state Pablo SDF sidecar does not exist: {sdf_path}")
+        return
+
+    fragment = getattr(spec, "fragment", None)
+    if getattr(fragment, "source_kind", None) != "polymer":
+        return
+    if not _fragment_has_complete_bond_orders(generated_fragment):
+        attachment_id = getattr(spec, "attachment_id", "<unknown>")
+        raise ValueError(
+            "Product-state Pablo library generation for polymer attachment "
+            f"{attachment_id!r} requires an SDF sidecar or complete generated-fragment "
+            "bond orders. Regenerate the polymer PDB/SDF pair and preserve the 'sdf' "
+            "source sidecar on the attachment spec."
+        )
+
+
+def _fragment_has_complete_bond_orders(generated_fragment: Any) -> bool:
+    """Return whether every generated-fragment bond has an explicit bond order."""
+    bonds = {
+        frozenset((atom1, atom2)) for atom1, atom2 in getattr(generated_fragment, "bonds", ()) or ()
+    }
+    if not bonds:
+        return True
+    bond_orders = {
+        frozenset((entry[0], entry[1]))
+        for entry in getattr(generated_fragment, "bond_orders", ()) or ()
+        if len(entry) >= 3
+    }
+    return bonds.issubset(bond_orders)
 
 
 def _pablo_residue_module(pablo_module: Any) -> Any:
@@ -1246,4 +1359,5 @@ __all__ = [
     "ProductStatePabloDefinitionSummary",
     "ProductStatePabloLibrary",
     "build_product_state_pablo_library",
+    "build_product_state_pablo_library_for_specs",
 ]

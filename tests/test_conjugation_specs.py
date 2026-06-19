@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
     LinkageBond,
@@ -18,6 +20,7 @@ from polyzymd.builders.conjugation._specs import (
     attachment_spec_from_generated_polymer_plan,
     attachment_spec_from_moiety_plan,
 )
+from polyzymd.builders.conjugation.pablo import product as product_pablo_module
 from polyzymd.builders.conjugation.polymer import (
     GeneratedMoietyFragment,
     GeneratedPolymerFragment,
@@ -107,6 +110,138 @@ def test_polymer_adapter_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_pa
     assert spec.source_sidecars == {"sdf": sdf_path}
     assert spec.generated_fragment is polymer
     assert spec.fragment.to_generated_polymer_fragment().residues == polymer.residues
+
+
+def test_nhs_lys_polymer_spec_carries_sdf_sidecar_to_product_library(
+    monkeypatch,
+    tmp_path: Path,
+):
+    """NHS-Lys polymer specs should pass their SDF sidecar to product libraries."""
+    sdf_path = tmp_path / "polymer.sdf"
+    sdf_path.write_text("END\n", encoding="utf-8")
+    polymer = GeneratedPolymerFragment(
+        atoms=(
+            _atom(0, 10, "C1", "SBM", residue_number=10),
+            _atom(1, 11, "RC", "NHS", residue_number=11),
+            _atom(2, 12, "LG", "NHS", residue_number=11, element="O"),
+        ),
+        bonds=((10, 11), (11, 12)),
+        residues=(_residue(0, "SBM", 10), _residue(1, "NHS", 11)),
+        reactive_atom_serial=11,
+        leaving_atom_serials=(12,),
+        name="sbm_nhs",
+    )
+    plan = _resolved_plan(modifier_residue_name="NHS", modifier_atom_name="RC")
+    spec = attachment_spec_from_generated_polymer_plan(
+        polymer,
+        sdf_path,
+        plan,
+        attachment_config=SimpleNamespace(name="nhs_polymer"),
+        attachment_index=1,
+        reaction_name="nhs_lys",
+    )
+    captured = _capture_singular_product_library_call(monkeypatch, plan.pablo_crosslink_requirement)
+
+    product_pablo_module.build_product_state_pablo_library_for_specs(
+        tmp_path / "product.pdb",
+        tmp_path / "source.pdb",
+        (spec,),
+    )
+
+    assert captured["polymer_sdf"] == sdf_path
+    assert captured["generated_fragment"] is polymer
+    assert captured["resolved_plan"] is plan
+
+
+def test_n_gly_smiles_spec_carries_sdf_sidecar_to_product_library(
+    monkeypatch,
+    tmp_path: Path,
+):
+    """One-residue SMILES moiety specs should keep using their SDF sidecars."""
+    pdb_path = tmp_path / "nag.pdb"
+    sdf_path = tmp_path / "nag.sdf"
+    pdb_path.write_text("END\n", encoding="utf-8")
+    sdf_path.write_text("END\n", encoding="utf-8")
+    moiety = GeneratedMoietyFragment(
+        atoms=(
+            _atom(0, 1, "C001", "NAG"),
+            _atom(1, 2, "O002", "NAG", element="O"),
+        ),
+        bonds=((1, 2),),
+        residues=(_residue(0, "NAG", 1),),
+        residue_name="NAG",
+        name="n_glycan",
+        pdb_path=pdb_path,
+        sdf_path=sdf_path,
+    )
+    plan = _resolved_plan(modifier_residue_name="NAG")
+    spec = attachment_spec_from_moiety_plan(
+        moiety,
+        plan,
+        attachment_config=SimpleNamespace(name="glycan"),
+        attachment_index=1,
+        reaction_name="n_glycosylation",
+    )
+    captured = _capture_singular_product_library_call(monkeypatch, plan.pablo_crosslink_requirement)
+
+    product_pablo_module.build_product_state_pablo_library_for_specs(
+        tmp_path / "product.pdb",
+        tmp_path / "source.pdb",
+        (spec,),
+    )
+
+    assert captured["polymer_sdf"] == sdf_path
+    assert captured["generated_fragment"] is spec.generated_fragment
+    assert captured["resolved_plan"] is plan
+
+
+def test_polymer_product_library_requires_sdf_when_bond_orders_are_incomplete(tmp_path: Path):
+    """Polymer specs should fail fast without sidecars or complete bond orders."""
+    polymer = GeneratedPolymerFragment(
+        atoms=(
+            _atom(0, 10, "C1", "SBM", residue_number=10),
+            _atom(1, 11, "RC", "NHS", residue_number=11),
+        ),
+        bonds=((10, 11),),
+        residues=(_residue(0, "SBM", 10), _residue(1, "NHS", 11)),
+        reactive_atom_serial=11,
+        name="sbm_nhs",
+    )
+    plan = _resolved_plan(modifier_residue_name="NHS", modifier_atom_name="RC")
+    spec = attachment_spec_from_generated_polymer_plan(
+        polymer,
+        None,
+        plan,
+        attachment_config=SimpleNamespace(name="nhs_polymer"),
+        attachment_index=1,
+        reaction_name="nhs_lys",
+    )
+
+    with pytest.raises(ValueError, match="requires an SDF sidecar"):
+        product_pablo_module.build_product_state_pablo_library_for_specs(
+            tmp_path / "product.pdb",
+            tmp_path / "source.pdb",
+            (spec,),
+        )
+
+
+def _capture_singular_product_library_call(
+    monkeypatch,
+    requirement: PabloCrosslinkRequirement,
+) -> dict[str, object]:
+    captured = {}
+
+    def fake_singular(**kwargs):
+        captured.update(kwargs)
+        return product_pablo_module.ProductStatePabloLibrary(
+            residue_library=object(),
+            definitions=(),
+            summaries=(),
+            crosslink_requirement=requirement,
+        )
+
+    monkeypatch.setattr(product_pablo_module, "build_product_state_pablo_library", fake_singular)
+    return captured
 
 
 def _atom(
