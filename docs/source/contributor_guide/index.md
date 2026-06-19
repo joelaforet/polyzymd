@@ -10,6 +10,7 @@ PolyzyMD, understand the codebase, or add new capabilities.
 - [Packaging and Distribution Notes](packaging.md)
 - [Architecture](../explanation/architecture.md)
 - [Conjugation Refactor Loop Plan](conjugation_refactor_loop.md)
+- [N-glycosylation from SMILES Feature Plan](n_glycosylation_feature_plan.md)
 
 ## New Analysis Contributor Path
 
@@ -36,6 +37,9 @@ comparison, and artifact-only plotting.
   agent handoff plan for keeping conjugation work aligned with the public
   `build_conjugate_from_config()`/`ConjugationEngine` workflow and retained POC
   reference assets
+- **[N-glycosylation from SMILES Feature Plan](n_glycosylation_feature_plan.md)** —
+  implementation plan for the next conjugation Ralph loop: SMILES moieties,
+  N-glycosylation reaction planning, multiple attachments, and 5FYJ validation
 
 ## Contributor Mindset
 
@@ -56,4 +60,5 @@ Packaging and Distribution Notes <packaging>
 New Analysis Contributor Path <analysis_plugins/index>
 Extend the Analysis Framework <extending_analyses>
 Conjugation Refactor Loop Plan <conjugation_refactor_loop>
+N-glycosylation from SMILES Feature Plan <n_glycosylation_feature_plan>
 ```
