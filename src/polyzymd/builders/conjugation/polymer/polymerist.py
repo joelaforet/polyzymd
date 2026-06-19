@@ -8,12 +8,12 @@ from typing import Any
 
 from polyzymd.builders.conjugation.nhs_lys import detect_nhs_reactive_group
 from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
-from polyzymd.builders.conjugation.polymer_fragment import (
+from polyzymd.builders.conjugation.polymer.fragment import (
     GeneratedPolymerFragment,
     PolymerFragmentAtom,
     PolymerFragmentResidue,
 )
-from polyzymd.builders.conjugation.polymer_recipe import PolymerRecipe
+from polyzymd.builders.conjugation.polymer.recipe import PolymerRecipe
 
 _ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 

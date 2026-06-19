@@ -11,8 +11,10 @@ import pytest
 from polyzymd.builders.conjugation.contracts import PabloCrosslinkRequirement
 from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
 from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
-from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
-from polyzymd.builders.conjugation.polymerist_pdb import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.polymer import (
+    GeneratedPolymerFragment,
+    generated_fragment_from_polymerist_pdb,
+)
 from polyzymd.builders.conjugation.product_pablo import build_product_state_pablo_library
 from polyzymd.config.schema import ConjugationCcdPabloPolicyConfig
 

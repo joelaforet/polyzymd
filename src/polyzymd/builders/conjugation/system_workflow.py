@@ -39,13 +39,13 @@ from polyzymd.builders.conjugation.placement import (
     PackmolModifierPlacementSettings,
     place_modifier_with_packmol,
 )
-from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
-from polyzymd.builders.conjugation.polymer_recipe import (
+from polyzymd.builders.conjugation.polymer import (
+    GeneratedPolymerFragment,
     PolymeristGenerationSmokeResult,
     PolymerRecipe,
     generate_polymerist_smoke_polymer,
+    generated_fragment_from_polymerist_pdb,
 )
-from polyzymd.builders.conjugation.polymerist_pdb import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.protein_preparation import (
     ProteinCanonicalizationResult,
     ProteinCanonicalizationSettings,

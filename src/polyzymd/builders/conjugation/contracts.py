@@ -14,7 +14,7 @@ from polyzymd.builders.conjugation.pdb_assembly import (
     PdbLinkageAttachment,
     PlacedPolymerFragment,
 )
-from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 
 _ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 

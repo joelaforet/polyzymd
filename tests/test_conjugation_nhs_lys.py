@@ -20,7 +20,7 @@ from polyzymd.builders.conjugation.nhs_lys import (
     extract_lysine_reactive_site,
     plan_nhs_lys_amide,
 )
-from polyzymd.builders.conjugation.polymer_fragment import PolymerFragmentAtom
+from polyzymd.builders.conjugation.polymer import PolymerFragmentAtom
 from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction
 from polyzymd.builders.conjugation.sites import AttachmentSite
 from polyzymd.config.schema import ConjugationConfig
