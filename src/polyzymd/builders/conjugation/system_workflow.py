@@ -77,7 +77,9 @@ from polyzymd.config.schema import (
 )
 
 _ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
-_NHS_LYS_COORDINATE_BACKEND_MECHANISM = get_reaction("nhs_lys").coordinate_backend_mechanism
+_NHS_LYS_REACTION = get_reaction("nhs_lys")
+_NHS_LYS_REACTION_NAME = _NHS_LYS_REACTION.name
+_NHS_LYS_COORDINATE_BACKEND_MECHANISM = _NHS_LYS_REACTION.coordinate_backend_mechanism
 
 
 class ConjugatedPolymerSystemSettings(BaseModel):
@@ -786,6 +788,7 @@ def _construct_nhs_lys_modifier_linked_protein(
     spec = SimpleNamespace(
         attachment_id="nhs_lys_attachment_01",
         attachment_index=1,
+        reaction_name=_NHS_LYS_REACTION_NAME,
         generated_fragment=modifier,
         resolved_plan=resolved_plan,
         source_sidecars={"sdf": Path(polymer_sdf_path)} if polymer_sdf_path is not None else {},
@@ -897,36 +900,47 @@ def _construct_conjugate_from_specs(
     ]
     smoke_result = None
     local_minimization_result = None
+    run_combined_smoke_relaxation = False
     if run_product_state_local_minimization and len(resolved_plans) == 1:
-        product_state_requirement = product_state_requirements[0]
-        local_settings = _local_minimization_settings_for_product(
-            crosslinked_pdb_path,
-            base_settings=local_minimization_settings or _default_local_minimization_settings(),
-            requirement=resolved_plans[0].pablo_crosslink_requirement,
-            product_state_pablo_library=product_state_pablo_library,
-        )
-        local_minimization_result = run_post_crosslink_local_minimization(
-            crosslinked_pdb_path,
-            artifact_dir,
-            settings=local_settings,
-            pablo_crosslink_requirement=product_state_requirement,
-            product_state_pablo_library=product_state_pablo_library,
-            resolved_plan=resolved_plans[0],
-        )
-        if not local_minimization_result.success:
-            blocker = local_minimization_result.blocker or "unknown blocker"
-            raise RuntimeError(f"Product-state local minimization failed: {blocker}")
+        if _supports_product_state_local_minimization(specs[0]):
+            product_state_requirement = product_state_requirements[0]
+            local_settings = _local_minimization_settings_for_product(
+                crosslinked_pdb_path,
+                base_settings=local_minimization_settings or _default_local_minimization_settings(),
+                requirement=resolved_plans[0].pablo_crosslink_requirement,
+                product_state_pablo_library=product_state_pablo_library,
+            )
+            local_minimization_result = run_post_crosslink_local_minimization(
+                crosslinked_pdb_path,
+                artifact_dir,
+                settings=local_settings,
+                pablo_crosslink_requirement=product_state_requirement,
+                product_state_pablo_library=product_state_pablo_library,
+                resolved_plan=resolved_plans[0],
+            )
+            if not local_minimization_result.success:
+                blocker = local_minimization_result.blocker or "unknown blocker"
+                raise RuntimeError(f"Product-state local minimization failed: {blocker}")
+        else:
+            mechanism_name = _attachment_mechanism_name(specs[0])
+            diagnostics.append(
+                "Product-state local minimization was requested for mechanism "
+                f"'{mechanism_name}', but the NHS-Lys local selector machinery does not "
+                "support this chemistry; using one combined restrained vacuum "
+                "smoke/minimization for the assembled product."
+            )
+            run_combined_smoke_relaxation = True
     elif run_product_state_local_minimization and len(resolved_plans) > 1:
         diagnostics.append(
             "Product-state local minimization was requested for multiple attachments; "
             "using one combined restrained vacuum smoke/minimization for the assembled product."
         )
+        run_combined_smoke_relaxation = True
 
-    run_combined_multi_smoke = run_product_state_local_minimization and len(resolved_plans) > 1
     if (
         local_minimization_result is None
         and smoke_result is None
-        and (settings.run_smoke or run_combined_multi_smoke)
+        and (settings.run_smoke or run_combined_smoke_relaxation)
     ):
         smoke_result = run_restrained_vacuum_smoke(
             parameterization_result.interchange,
@@ -957,6 +971,28 @@ def _construct_conjugate_from_specs(
         ),
         pablo_result.topology,
     )
+
+
+def _supports_product_state_local_minimization(spec: Any) -> bool:
+    """Return whether the attachment can use the NHS-Lys local minimizer."""
+    return _attachment_mechanism_name(spec) in {
+        _NHS_LYS_REACTION_NAME,
+        _NHS_LYS_COORDINATE_BACKEND_MECHANISM,
+    }
+
+
+def _attachment_mechanism_name(spec: Any) -> str:
+    """Resolve the best available mechanism name for diagnostics and capability checks."""
+    plan = getattr(spec, "resolved_plan", None)
+    contract = getattr(plan, "contract", None)
+    mechanism_name = getattr(contract, "mechanism_name", None) or getattr(
+        spec,
+        "reaction_name",
+        None,
+    )
+    if mechanism_name is None:
+        return "unknown"
+    return str(mechanism_name).strip().lower() or "unknown"
 
 
 def _construct_multi_modifier_linked_protein(

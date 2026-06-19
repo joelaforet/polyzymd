@@ -326,11 +326,11 @@ def test_local_minimization_settings_can_use_product_residue_definition(tmp_path
     assert settings.o020_selector.atom_name == "ODEF"
 
 
-def test_nhs_lys_shim_uses_shared_product_state_smoke_path(
+def test_nhs_lys_shim_uses_product_state_local_minimization(
     monkeypatch,
     tmp_path: Path,
 ):
-    """The legacy NHS-Lys shim should use shared specs-first construction."""
+    """The legacy NHS-Lys shim should preserve single-site local minimization."""
     import polyzymd.builders.conjugation.pablo.product as product_pablo_module
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
@@ -709,6 +709,150 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     assert calls["smoke"] == 1
     assert construction.local_minimization is None
     assert any("local minimization was requested" in item for item in construction.diagnostics)
+
+
+def test_single_unsupported_local_minimization_request_runs_smoke_with_diagnostic(
+    monkeypatch,
+    tmp_path: Path,
+):
+    """Single N-gly attachments should not use NHS-specific local minimization."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    plan = _generic_resolved_plan(
+        residue_number=42,
+        modifier_residue_number=1,
+        modifier_atom="C001",
+    )
+    modifier = _generated_fragment(residue_name="NAG", residue_number=1)
+    spec = SimpleNamespace(
+        attachment_id="n_gly_attachment_01",
+        attachment_index=1,
+        reaction_name="n_glycosylation",
+        generated_fragment=modifier,
+        resolved_plan=plan,
+        source_sidecars={},
+        fragment=SimpleNamespace(source_kind="moiety"),
+    )
+    calls = {"smoke": 0, "local_minimization": 0}
+
+    def fake_place(protein_pdb_path, modifiers_arg, plans_arg, output_dir, *, settings=None):
+        return (
+            PackmolModifierPlacementResult(
+                placed_modifier=modifiers_arg[0].to_placed_fragment(),
+                packmol_input_path=Path(output_dir) / "packmol.inp",
+                packmol_output_path=Path(output_dir) / "packmol.pdb",
+                protein_sterics_pdb_path=Path(output_dir) / "protein.pdb",
+                modifier_pdb_path=Path(output_dir) / "modifier.pdb",
+                packmol_input_text="",
+                target_bond_length_angstrom=plan.target_bond_length_angstrom,
+                placed_bond_length_angstrom=plan.target_bond_length_angstrom,
+                min_modifier_protein_distance_angstrom=2.0,
+            ),
+        )
+
+    def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
+        Path(output_path).write_text("END\n", encoding="utf-8")
+        return CrosslinkedPdbAssemblyResult(
+            output_path=Path(output_path),
+            protein_atom_count=10,
+            polymer_atom_count=1,
+            removed_protein_atom_count=1,
+            removed_polymer_atom_count=0,
+            removed_atom_serials=(),
+            removed_atom_names=(),
+            added_conect_pair=(1, 2),
+            added_conect_pairs=((1, 2),),
+        )
+
+    class FakeIngestor:
+        def __init__(self, policy):
+            self.policy = policy
+
+        def ingest_structure(
+            self, path, *, chain_policy=None, output_dir=None, residue_library=None
+        ):
+            return PabloIngestionResult(
+                success=True,
+                path=Path(path),
+                suffix=".pdb",
+                pablo=PabloAvailability(available=True),
+                topology=SimpleNamespace(molecules=(object(),)),
+            )
+
+    def fake_parameterize(topology, *, settings=None, charge_from_molecules=None):
+        return InterchangeParameterizationResult(
+            success=True,
+            interchange=object(),
+            force_field_names=("fake.offxml",),
+            topology_type="FakeTopology",
+        )
+
+    def fake_smoke(interchange, output_dir, *, settings=None):
+        calls["smoke"] += 1
+        minimized = Path(output_dir) / "minimized.pdb"
+        minimized.write_text("END\n", encoding="utf-8")
+        return SimpleNamespace(
+            success=True,
+            minimized_pdb_path=minimized,
+            equilibrated_pdb_path=None,
+        )
+
+    def fake_local_minimization(*args, **kwargs):
+        calls["local_minimization"] += 1
+        raise AssertionError("N-gly should not use NHS local minimization")
+
+    monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
+    monkeypatch.setattr(
+        workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
+    )
+    monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
+    monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
+    monkeypatch.setattr(
+        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
+    )
+    monkeypatch.setattr(
+        workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
+    )
+    monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
+    monkeypatch.setattr(
+        workflow_module,
+        "run_post_crosslink_local_minimization",
+        fake_local_minimization,
+    )
+
+    policy = ConjugationCcdPabloPolicyConfig(
+        crosslinks=[
+            {
+                "residues": ("ASX", "NAG"),
+                "linking_atoms": ("ND2", "C001"),
+                "leaving_atoms": ((), ()),
+                "bond_order": 1,
+            }
+        ]
+    )
+
+    construction, topology = workflow_module._construct_conjugate_from_specs(
+        protein_pdb_path=tmp_path / "protein.pdb",
+        specs=(spec,),
+        ccd_pablo_policy=policy,
+        output_dir=tmp_path / "construction",
+        chain_policy=None,
+        settings=ModifierConstructionSettings(run_smoke=False),
+        use_product_state_pablo_library=False,
+        run_product_state_local_minimization=True,
+        local_minimization_settings=object(),
+    )
+
+    assert topology is not None
+    assert construction.local_minimization is None
+    assert construction.smoke is not None
+    assert calls["local_minimization"] == 0
+    assert calls["smoke"] == 1
+    assert any(
+        "mechanism 'n_glycosylation'" in item
+        and "using one combined restrained vacuum smoke/minimization" in item
+        for item in construction.diagnostics
+    )
 
 
 def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_path: Path):
