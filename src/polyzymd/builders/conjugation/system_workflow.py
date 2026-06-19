@@ -27,6 +27,7 @@ from polyzymd.builders.conjugation._linkage import (
 )
 from polyzymd.builders.conjugation._relaxation import (
     VacuumSmokeSettings,
+    run_post_crosslink_local_minimization,
     run_restrained_vacuum_smoke,
 )
 from polyzymd.builders.conjugation._specs import (
@@ -251,6 +252,10 @@ def build_conjugated_polymer_system_from_config(
         chain_policy=config.conjugation.chain_policy,
         settings=construction_settings,
         use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
+        run_product_state_local_minimization=(
+            workflow_settings.run_product_state_local_minimization
+        ),
+        local_minimization_settings=workflow_settings.local_minimization,
     )
     if workflow_settings.preserve_reference_atom_names:
         _restore_smoke_pdb_atom_names(construction, construction.crosslinked_pdb_path)
@@ -369,6 +374,10 @@ def build_direct_smiles_moiety_conjugate(
         chain_policy=chain_assignment,
         settings=construction_settings,
         use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
+        run_product_state_local_minimization=(
+            workflow_settings.run_product_state_local_minimization
+        ),
+        local_minimization_settings=workflow_settings.local_minimization,
     )
 
     relaxed_pdb = _relaxed_conjugate_pdb(construction)
@@ -773,8 +782,6 @@ def _construct_nhs_lys_modifier_linked_protein(
     _ = (
         protein_pdb_path,
         linker,
-        run_product_state_local_minimization,
-        local_minimization_settings,
     )
     spec = SimpleNamespace(
         attachment_id="nhs_lys_attachment_01",
@@ -792,6 +799,8 @@ def _construct_nhs_lys_modifier_linked_protein(
         chain_policy=chain_policy,
         settings=settings,
         use_product_state_pablo_library=use_product_state_pablo_library,
+        run_product_state_local_minimization=run_product_state_local_minimization,
+        local_minimization_settings=local_minimization_settings,
     )
 
 
@@ -804,6 +813,8 @@ def _construct_conjugate_from_specs(
     chain_policy: Any | None,
     settings: ModifierConstructionSettings,
     use_product_state_pablo_library: bool,
+    run_product_state_local_minimization: bool = False,
+    local_minimization_settings: Any | None = None,
 ) -> tuple[Any, Any]:
     """Construct, parameterize, and relax a conjugate from resolved attachment specs."""
     if not specs:
@@ -880,8 +891,43 @@ def _construct_conjugate_from_specs(
     if not parameterization_result.success or parameterization_result.interchange is None:
         raise RuntimeError("OpenFF Interchange parameterization did not produce an interchange")
 
+    site_label = "site" if len(resolved_plans) == 1 else "sites"
+    diagnostics = [
+        f"Conjugate construction completed ({len(resolved_plans)} attachment {site_label})",
+    ]
     smoke_result = None
-    if settings.run_smoke:
+    local_minimization_result = None
+    if run_product_state_local_minimization and len(resolved_plans) == 1:
+        product_state_requirement = product_state_requirements[0]
+        local_settings = _local_minimization_settings_for_product(
+            crosslinked_pdb_path,
+            base_settings=local_minimization_settings or _default_local_minimization_settings(),
+            requirement=resolved_plans[0].pablo_crosslink_requirement,
+            product_state_pablo_library=product_state_pablo_library,
+        )
+        local_minimization_result = run_post_crosslink_local_minimization(
+            crosslinked_pdb_path,
+            artifact_dir,
+            settings=local_settings,
+            pablo_crosslink_requirement=product_state_requirement,
+            product_state_pablo_library=product_state_pablo_library,
+            resolved_plan=resolved_plans[0],
+        )
+        if not local_minimization_result.success:
+            blocker = local_minimization_result.blocker or "unknown blocker"
+            raise RuntimeError(f"Product-state local minimization failed: {blocker}")
+    elif run_product_state_local_minimization and len(resolved_plans) > 1:
+        diagnostics.append(
+            "Product-state local minimization was requested for multiple attachments; "
+            "using one combined restrained vacuum smoke/minimization for the assembled product."
+        )
+
+    run_combined_multi_smoke = run_product_state_local_minimization and len(resolved_plans) > 1
+    if (
+        local_minimization_result is None
+        and smoke_result is None
+        and (settings.run_smoke or run_combined_multi_smoke)
+    ):
         smoke_result = run_restrained_vacuum_smoke(
             parameterization_result.interchange,
             artifact_dir,
@@ -904,12 +950,10 @@ def _construct_conjugate_from_specs(
             pablo=pablo_result,
             parameterization=parameterization_result,
             smoke=smoke_result,
-            local_minimization=None,
+            local_minimization=local_minimization_result,
             product_state_pablo_library=product_state_pablo_library,
             crosslinked_pdb_path=crosslinked_pdb_path,
-            diagnostics=(
-                f"Multi-attachment conjugate construction completed ({len(resolved_plans)} sites)",
-            ),
+            diagnostics=tuple(diagnostics),
         ),
         pablo_result.topology,
     )
@@ -927,6 +971,8 @@ def _construct_multi_modifier_linked_protein(
     use_product_state_pablo_library: bool,
     attachment_specs: tuple[AttachmentBuildSpec, ...] | None = None,
     source_moieties: tuple[GeneratedMoietyFragment, ...] | None = None,
+    run_product_state_local_minimization: bool = False,
+    local_minimization_settings: Any | None = None,
 ) -> tuple[Any, Any]:
     """Compatibility shim for legacy multi-modifier private callers."""
     if not modifiers or len(modifiers) != len(resolved_plans):
@@ -971,6 +1017,8 @@ def _construct_multi_modifier_linked_protein(
         chain_policy=chain_policy,
         settings=settings,
         use_product_state_pablo_library=use_product_state_pablo_library,
+        run_product_state_local_minimization=run_product_state_local_minimization,
+        local_minimization_settings=local_minimization_settings,
     )
 
 

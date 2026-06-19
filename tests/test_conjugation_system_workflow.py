@@ -441,6 +441,19 @@ def test_nhs_lys_shim_uses_shared_product_state_smoke_path(
             success=True, minimized_pdb_path=minimized, equilibrated_pdb_path=None
         )
 
+    def fake_local_minimization(pdb_path, output_dir, **kwargs):
+        calls["local_minimization"] = calls.get("local_minimization", 0) + 1
+        calls["local_settings"] = kwargs["settings"]
+        calls["local_requirement"] = kwargs["pablo_crosslink_requirement"]
+        calls["local_product_library"] = kwargs["product_state_pablo_library"]
+        relaxed = Path(output_dir) / "local-relaxed.pdb"
+        relaxed.write_text("END\n", encoding="utf-8")
+        return SimpleNamespace(
+            success=True,
+            relaxed_pdb_path=relaxed,
+            blocker=None,
+        )
+
     monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
     monkeypatch.setattr(
         workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
@@ -457,6 +470,11 @@ def test_nhs_lys_shim_uses_shared_product_state_smoke_path(
         workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
     )
     monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
+    monkeypatch.setattr(
+        workflow_module,
+        "run_post_crosslink_local_minimization",
+        fake_local_minimization,
+    )
 
     policy = ConjugationCcdPabloPolicyConfig(
         crosslinks=[
@@ -490,8 +508,9 @@ def test_nhs_lys_shim_uses_shared_product_state_smoke_path(
     )
 
     assert topology is not None
-    assert construction.local_minimization is None
-    assert construction.smoke is not None
+    assert construction.local_minimization is not None
+    assert construction.local_minimization.relaxed_pdb_path.name == "local-relaxed.pdb"
+    assert construction.smoke is None
     assert calls["placed_protein_path"] == prepared_protein
     assert calls["modifier_count"] == 1
     assert calls["plan_count"] == 1
@@ -500,7 +519,53 @@ def test_nhs_lys_shim_uses_shared_product_state_smoke_path(
     assert calls["polymer_sdf"] == polymer_sdf
     assert calls["residue_library"] is product_library.residue_library
     assert calls["charge_template_count"] == 1
-    assert calls["smoke"] == 1
+    assert calls.get("smoke", 0) == 0
+    assert calls["local_minimization"] == 1
+    assert calls["local_settings"].nz_selector.residue_name == "LYX"
+    assert calls["local_settings"].c047_selector.residue_name == "NHX"
+    assert calls["local_requirement"].leaving_atoms == ((), ())
+    assert calls["local_product_library"] is product_library
+
+
+def test_nhs_lys_shim_forwards_local_minimization_settings(monkeypatch, tmp_path: Path):
+    """The legacy NHS-Lys shim must not discard public local-min settings."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    requirement = PabloCrosslinkRequirement(
+        residues=("LYX", "NHX"),
+        linking_atoms=("NZ", "C047"),
+        leaving_atoms=(("H11",), ("O020",)),
+        bond_order=1,
+    )
+    resolved_plan = _resolved_plan(requirement)
+    local_settings = object()
+    calls = {}
+
+    def fake_construct(**kwargs):
+        calls.update(kwargs)
+        return SimpleNamespace(), object()
+
+    monkeypatch.setattr(workflow_module, "_construct_conjugate_from_specs", fake_construct)
+
+    _construct_nhs_lys_modifier_linked_protein(
+        protein_pdb_path=tmp_path / "raw.pdb",
+        prepared_protein_pdb_path=tmp_path / "prepared.pdb",
+        modifier=object(),
+        polymer_sdf_path=tmp_path / "polymer.sdf",
+        linker=object(),
+        resolved_plan=resolved_plan,
+        ccd_pablo_policy=ConjugationCcdPabloPolicyConfig(),
+        output_dir=tmp_path / "construction",
+        chain_policy=None,
+        settings=ModifierConstructionSettings(run_smoke=True),
+        use_product_state_pablo_library=True,
+        run_product_state_local_minimization=True,
+        local_minimization_settings=local_settings,
+    )
+
+    assert calls["protein_pdb_path"] == tmp_path / "prepared.pdb"
+    assert calls["run_product_state_local_minimization"] is True
+    assert calls["local_minimization_settings"] is local_settings
 
 
 def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
@@ -626,8 +691,10 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
         ccd_pablo_policy=policy,
         output_dir=tmp_path / "construction",
         chain_policy=None,
-        settings=ModifierConstructionSettings(run_smoke=True),
+        settings=ModifierConstructionSettings(run_smoke=False),
         use_product_state_pablo_library=False,
+        run_product_state_local_minimization=True,
+        local_minimization_settings=object(),
     )
 
     assert topology is not None
@@ -640,6 +707,8 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     assert calls["protein_products"] == ("ASX", "ASX")
     assert calls["parameterize"] == 1
     assert calls["smoke"] == 1
+    assert construction.local_minimization is None
+    assert any("local minimization was requested" in item for item in construction.diagnostics)
 
 
 def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_path: Path):
@@ -676,6 +745,8 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
         calls["spec_count"] = len(kwargs["specs"])
         calls["attachment_specs"] = kwargs["specs"]
         calls["resolved_plan_count"] = len([spec.resolved_plan for spec in kwargs["specs"]])
+        calls["run_local_minimization"] = kwargs["run_product_state_local_minimization"]
+        calls["local_minimization_settings"] = kwargs["local_minimization_settings"]
         return (
             SimpleNamespace(
                 smoke=SimpleNamespace(minimized_pdb_path=relaxed, equilibrated_pdb_path=None),
@@ -723,6 +794,8 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
     assert calls["spec_count"] == 2
     assert calls["resolved_plan_count"] == 2
     assert calls["attachment_specs"] == tuple(built_specs)
+    assert calls["run_local_minimization"] is True
+    assert calls["local_minimization_settings"] is not None
     assert result.workflow_json_path.exists()
 
 
@@ -800,6 +873,8 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     def fake_construct(**kwargs):
         calls["construct_spec_count"] = len(built_specs)
         calls["specs"] = kwargs["specs"]
+        calls["run_local_minimization"] = kwargs["run_product_state_local_minimization"]
+        calls["local_minimization_settings"] = kwargs["local_minimization_settings"]
         return SimpleNamespace(smoke=SimpleNamespace(minimized_pdb_path=relaxed)), object()
 
     monkeypatch.setattr(workflow_module, "ConjugatedPolymerSystemResult", FakeResult)
@@ -846,6 +921,8 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     assert len(built_specs) == 2
     assert calls["construct_spec_count"] == 2
     assert calls["specs"] == tuple(built_specs)
+    assert calls["run_local_minimization"] is True
+    assert calls["local_minimization_settings"] is settings.local_minimization
     assert result.generated_sequences == ("AA", "AA")
     assert result.reactive_sequence_indices == (0, 0)
     assert result.modifiers == tuple(spec.generated_fragment for spec in built_specs)
