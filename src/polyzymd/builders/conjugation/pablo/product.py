@@ -1195,14 +1195,13 @@ def _summarize_definition(
 def _validate_no_whole_polymer_collapse(
     summaries: list[ProductStatePabloDefinitionSummary],
 ) -> None:
-    """Reject the old anti-pattern of describing all chain-C atoms as one POLY residue."""
+    """Reject the old anti-pattern of describing all chain-C atoms as one POLY residue.
+
+    Direct SMILES-moiety requests can legitimately contain a single chain-C
+    residue, such as one GlcNAc/NAG unit for an N-glycosylation smoke example.
+    """
     if any(summary.residue_name == "POLY" for summary in summaries):
         raise ValueError("Product-state Pablo definitions must not collapse chain C to POLY")
-    chain_c = [summary for summary in summaries if summary.chain_id == "C"]
-    if len(chain_c) <= 1:
-        raise ValueError(
-            "Product-state Pablo definitions did not preserve chain-C residue identity"
-        )
 
 
 def _parse_int(value: Any) -> int | None:

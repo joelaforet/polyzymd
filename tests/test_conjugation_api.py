@@ -286,7 +286,7 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
         _n_gly_attachment("glycan_1", residue_number=42),
         _n_gly_attachment("glycan_2", residue_number=87),
     )
-    calls = {"moieties": [], "plans": [], "construct": 0}
+    calls = {"moieties": [], "plans": [], "construct": 0, "solvate": 0}
 
     def fake_build_smiles(smiles, residue_name, *, name=None, output_dir=None, random_seed=None):
         calls["moieties"].append((smiles, residue_name, name, Path(output_dir), random_seed))
@@ -318,6 +318,8 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
         assert len(kwargs["resolved_plans"]) == 2
         crosslinked = Path(kwargs["output_dir"]) / "assembled_crosslinked.pdb"
         minimized = Path(kwargs["output_dir"]) / "minimized.pdb"
+        crosslinked.write_text("END\n", encoding="utf-8")
+        minimized.write_text("END\n", encoding="utf-8")
         construction = SimpleNamespace(
             crosslinked_pdb_path=crosslinked,
             smoke=SimpleNamespace(minimized_pdb_path=minimized, equilibrated_pdb_path=None),
@@ -325,9 +327,34 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
         )
         return construction, object()
 
+    class FakeSolvatedBuilder:
+        interchange = None
+        solvated_topology = object()
+
+        def save_topology(self, path):
+            Path(path).write_text("END\n", encoding="utf-8")
+
+    def fake_solvate(**kwargs):
+        calls["solvate"] += 1
+        assert kwargs["working_dir"] == tmp_path / "out"
+        assert kwargs["create_interchange"] is False
+        return FakeSolvatedBuilder()
+
     monkeypatch.setattr(workflow_module, "build_smiles_moiety_fragment", fake_build_smiles)
     monkeypatch.setattr(workflow_module, "get_reaction", fake_get_reaction)
+    monkeypatch.setattr(
+        workflow_module,
+        "_prepared_protein_pdb_path",
+        lambda path, *, output_dir, settings: (Path(path), None),
+    )
     monkeypatch.setattr(workflow_module, "_construct_multi_modifier_linked_protein", fake_construct)
+    monkeypatch.setattr(
+        workflow_module, "topology_with_pdb_positions", lambda topology, path: topology
+    )
+    monkeypatch.setattr(workflow_module, "_build_direct_solvated_system", fake_solvate)
+    monkeypatch.setattr(
+        workflow_module, "_restore_pdb_atom_name_fields", lambda target, template: 0
+    )
 
     result = ConjugationEngine().build(
         ConjugateBuildRequest(
@@ -344,9 +371,11 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
     assert result.minimized_conjugate_pdb_path == (
         tmp_path / "out" / "conjugate-construction" / "minimized.pdb"
     )
+    assert result.solvated_pdb_path == tmp_path / "out" / "solvated_conjugate_free_polymers.pdb"
     assert [entry[1] for entry in calls["moieties"]] == ["NAG", "NAG"]
     assert [entry[2] for entry in calls["plans"]] == [None, None]
     assert calls["construct"] == 1
+    assert calls["solvate"] == 1
 
 
 def test_smiles_moiety_residue_name_validation_rejects_non_one_residue_code(tmp_path):
