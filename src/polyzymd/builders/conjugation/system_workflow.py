@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -15,6 +16,7 @@ from polyzymd.builders.conjugation._assembly import (
     ModifierConstructionSettings,
     PackmolModifierPlacementSettings,
     place_modifier_with_packmol,
+    place_modifier_with_resolved_plan,
 )
 from polyzymd.builders.conjugation._linkage import (
     NhsLysModifierLinker,
@@ -35,9 +37,11 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     create_interchange_from_pablo_topology,
 )
 from polyzymd.builders.conjugation.polymer import (
+    GeneratedMoietyFragment,
     GeneratedPolymerFragment,
     PolymeristGenerationSmokeResult,
     PolymerRecipe,
+    build_smiles_moiety_fragment,
     generate_polymerist_smoke_polymer,
     generated_fragment_from_polymerist_pdb,
 )
@@ -60,6 +64,8 @@ from polyzymd.builders.conjugation.structure.preparation import (
 from polyzymd.builders.system_builder import SystemBuilder
 from polyzymd.config.schema import (
     ConjugationCcdCrosslinkConfig,
+    ConjugationCcdPabloPolicyConfig,
+    ConjugationChainPolicyConfig,
     ConjugationConfig,
     ConjugationMode,
     SimulationConfig,
@@ -277,6 +283,106 @@ def build_conjugated_polymer_system_from_config(
         system_builder=builder,
     )
     result.workflow_json_path = result.save(artifact_dir / workflow_settings.workflow_json_name)
+    return result
+
+
+def build_direct_smiles_moiety_conjugate(
+    *,
+    protein_pdb_path: Path | str,
+    attachments: tuple[Any, ...],
+    output_dir: Path | str,
+    ccd_pablo: Any | None = None,
+    chain_policy: Any | None = None,
+    settings: ConjugatedPolymerSystemSettings | None = None,
+    random_seed: int | None = None,
+) -> Any:
+    """Build a direct protein plus SMILES-moiety conjugate request.
+
+    This public-engine path is intentionally narrower than the legacy config
+    workflow: the input protein is already cleaned, each enabled attachment must
+    define one SMILES moiety, and the combined product is parameterized once.
+    """
+    workflow_settings = settings or ConjugatedPolymerSystemSettings()
+    artifact_dir = Path(output_dir)
+    construction_dir = artifact_dir / workflow_settings.conjugate_artifact_dir_name
+    moiety_dir = construction_dir / "moieties"
+    construction_dir.mkdir(parents=True, exist_ok=True)
+
+    enabled_attachments = tuple(attachment for attachment in attachments if attachment.enabled)
+    if not enabled_attachments:
+        raise ValueError("Direct conjugation requests require at least one enabled attachment")
+
+    protein_path = Path(protein_pdb_path)
+    built_fragments: list[GeneratedPolymerFragment] = []
+    source_moieties: list[GeneratedMoietyFragment] = []
+    resolved_plans: list[ResolvedAttachmentPlan] = []
+    for index, attachment in enumerate(enabled_attachments, start=1):
+        reaction_template = get_reaction(attachment.mechanism.name)
+        if reaction_template.coordinate_backend_mechanism != "n_glycosylation":
+            raise NotImplementedError(
+                "Direct SMILES-moiety requests currently support mechanism "
+                f"'n_glycosylation'; received '{attachment.mechanism.name}'"
+            )
+        moiety = attachment.moiety
+        if moiety.smiles is None or moiety.residue_name is None:
+            raise ValueError(
+                "Direct SMILES-moiety attachments require moiety.smiles and residue_name"
+            )
+        fragment = build_smiles_moiety_fragment(
+            moiety.smiles,
+            moiety.residue_name,
+            name=moiety.name,
+            output_dir=moiety_dir / f"{index:02d}_{_safe_attachment_token(attachment.name)}",
+            random_seed=random_seed,
+        )
+        settings_builder = getattr(reaction_template, "settings_from_attachment", None)
+        reaction_settings = settings_builder(attachment) if callable(settings_builder) else None
+        plan = reaction_template.resolve_plan(
+            protein_path,
+            attachment.site,
+            fragment,
+            settings=reaction_settings,
+        )
+        source_moieties.append(fragment)
+        resolved_plans.append(plan)
+        built_fragments.append(_generated_fragment_from_moiety_plan(fragment, plan))
+
+    policy = _policy_with_resolved_crosslinks(
+        ccd_pablo or ConjugationCcdPabloPolicyConfig(),
+        resolved_plans,
+    )
+    chain_assignment = chain_policy or ConjugationChainPolicyConfig()
+    construction_settings = ModifierConstructionSettings(
+        placement=workflow_settings.placement,
+        parameterization=workflow_settings.conjugate_parameterization,
+        smoke=workflow_settings.vacuum_smoke,
+        run_smoke=True,
+    )
+
+    construction, construction_topology = _construct_multi_modifier_linked_protein(
+        protein_pdb_path=protein_path,
+        modifiers=tuple(built_fragments),
+        source_moieties=tuple(source_moieties),
+        resolved_plans=tuple(resolved_plans),
+        ccd_pablo_policy=policy,
+        output_dir=construction_dir,
+        chain_policy=chain_assignment,
+        settings=construction_settings,
+        use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
+    )
+
+    workflow_path = artifact_dir / workflow_settings.workflow_json_name
+    result = SimpleNamespace(
+        output_dir=artifact_dir,
+        construction=construction,
+        relaxed_conjugate_pdb_path=_relaxed_conjugate_pdb(construction),
+        solvated_pdb_path=None,
+        workflow_json_path=workflow_path,
+        final_interchange_created=False,
+        modifier=tuple(built_fragments),
+        relaxed_conjugate_topology=construction_topology,
+    )
+    _save_direct_workflow_summary(result, enabled_attachments, resolved_plans, workflow_path)
     return result
 
 
@@ -643,6 +749,228 @@ def _construct_nhs_lys_modifier_linked_protein(
         ),
         pablo_result.topology,
     )
+
+
+def _construct_multi_modifier_linked_protein(
+    *,
+    protein_pdb_path: Path | str,
+    modifiers: tuple[GeneratedPolymerFragment, ...],
+    source_moieties: tuple[GeneratedMoietyFragment, ...],
+    resolved_plans: tuple[ResolvedAttachmentPlan, ...],
+    ccd_pablo_policy: Any,
+    output_dir: Path | str,
+    chain_policy: Any | None,
+    settings: ModifierConstructionSettings,
+    use_product_state_pablo_library: bool,
+) -> tuple[Any, Any]:
+    """Construct a product PDB from multiple independent resolved attachments."""
+    if not modifiers or len(modifiers) != len(resolved_plans):
+        raise ValueError("Multi-attachment construction requires aligned modifiers and plans")
+    if len(source_moieties) != len(resolved_plans):
+        raise ValueError("Multi-attachment construction requires aligned source moieties and plans")
+
+    artifact_dir = Path(output_dir)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    product_state_requirements = tuple(
+        _product_state_crosslink_requirement(plan) for plan in resolved_plans
+    )
+    crosslink_validations = tuple(
+        require_pablo_crosslink_requirement(ccd_pablo_policy, requirement)
+        for requirement in product_state_requirements
+    )
+
+    placements = []
+    placed_modifiers = []
+    for index, (modifier, plan) in enumerate(zip(modifiers, resolved_plans, strict=True), start=1):
+        placement = place_modifier_with_resolved_plan(
+            protein_pdb_path,
+            modifier,
+            plan,
+            artifact_dir / f"placement_{index:02d}",
+            settings=settings.placement,
+        )
+        placements.append(placement)
+        placed_modifiers.append(
+            placed_fragment_from_resolved_plan(
+                placement.placed_modifier,
+                plan,
+            )
+        )
+
+    crosslinked_pdb_path = artifact_dir / settings.crosslinked_pdb_name
+    assembly_result = write_crosslinked_pdb(
+        protein_pdb_path,
+        tuple(placed_modifiers),
+        tuple(plan.to_pdb_linkage_attachment() for plan in resolved_plans),
+        crosslinked_pdb_path,
+        CrosslinkedPdbAssemblyOptions(),
+    )
+
+    product_state_pablo_library = None
+    product_state_residue_library = None
+    if use_product_state_pablo_library:
+        product_state_pablo_library = _product_state_pablo_library_for_plans(
+            product_pdb=crosslinked_pdb_path,
+            source_protein_pdb=protein_pdb_path,
+            source_moieties=source_moieties,
+            resolved_plans=resolved_plans,
+        )
+        product_state_residue_library = product_state_pablo_library.residue_library
+
+    pablo_result = PabloIngestor(policy=ccd_pablo_policy).ingest_structure(
+        crosslinked_pdb_path,
+        chain_policy=chain_policy,
+        output_dir=artifact_dir,
+        residue_library=product_state_residue_library,
+    )
+    if not pablo_result.success or pablo_result.topology is None:
+        raise RuntimeError(_pablo_failure_message(pablo_result))
+
+    parameterization_result = create_interchange_from_pablo_topology(
+        pablo_result.topology,
+        settings=settings.parameterization,
+        charge_from_molecules=_formal_charge_templates_from_topology(pablo_result.topology),
+    )
+    if not parameterization_result.success or parameterization_result.interchange is None:
+        raise RuntimeError("OpenFF Interchange parameterization did not produce an interchange")
+
+    smoke_result = run_restrained_vacuum_smoke(
+        parameterization_result.interchange,
+        artifact_dir,
+        settings=settings.smoke,
+    )
+    if not smoke_result.success:
+        raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
+
+    return (
+        SimpleNamespace(
+            output_dir=artifact_dir,
+            resolved_plan=resolved_plans[0],
+            resolved_plans=resolved_plans,
+            crosslink_validation=crosslink_validations[0],
+            crosslink_validations=crosslink_validations,
+            placement=placements[0],
+            placements=tuple(placements),
+            assembly=assembly_result,
+            pablo=pablo_result,
+            parameterization=parameterization_result,
+            smoke=smoke_result,
+            local_minimization=None,
+            product_state_pablo_library=product_state_pablo_library,
+            crosslinked_pdb_path=crosslinked_pdb_path,
+            diagnostics=(
+                f"Multi-attachment SMILES-moiety construction completed ({len(resolved_plans)} sites)",
+            ),
+        ),
+        pablo_result.topology,
+    )
+
+
+def _generated_fragment_from_moiety_plan(
+    fragment: GeneratedMoietyFragment,
+    plan: ResolvedAttachmentPlan,
+) -> GeneratedPolymerFragment:
+    """Adapt a one-residue moiety fragment to the existing placement fragment model."""
+    return GeneratedPolymerFragment(
+        atoms=fragment.atoms,
+        bonds=fragment.bonds,
+        bond_orders=fragment.bond_orders,
+        residues=fragment.residues,
+        sequence=None,
+        reactive_atom_serial=plan.modifier_link_atom.serial,
+        reactive_atom_index=plan.modifier_link_atom.atom_index,
+        reactive_atom_name=None,
+        leaving_atom_serials=tuple(
+            atom.serial for atom in plan.modifier_leaving_atoms if atom.serial is not None
+        ),
+        leaving_atom_indices=tuple(
+            atom.atom_index for atom in plan.modifier_leaving_atoms if atom.atom_index is not None
+        ),
+        leaving_atom_names=(),
+        name=fragment.name,
+    )
+
+
+def _policy_with_resolved_crosslinks(
+    policy: Any,
+    resolved_plans: tuple[ResolvedAttachmentPlan, ...],
+) -> Any:
+    """Return a Pablo policy containing product-state crosslinks for all plans."""
+    updated = policy
+    for plan in resolved_plans:
+        updated = _policy_with_resolved_crosslink(updated, plan)
+    return updated
+
+
+def _product_state_pablo_library_for_plans(
+    *,
+    product_pdb: Path,
+    source_protein_pdb: Path | str,
+    source_moieties: tuple[GeneratedMoietyFragment, ...],
+    resolved_plans: tuple[ResolvedAttachmentPlan, ...],
+) -> Any:
+    """Build product-state residue definitions for one or more resolved plans."""
+    from polyzymd.builders.conjugation.pablo.product import build_product_state_pablo_library
+
+    libraries = []
+    for moiety, plan in zip(source_moieties, resolved_plans, strict=True):
+        libraries.append(
+            build_product_state_pablo_library(
+                product_pdb=product_pdb,
+                source_protein_pdb=source_protein_pdb,
+                polymer_sdf=moiety.sdf_path,
+                generated_fragment=moiety,
+                resolved_plan=plan,
+            )
+        )
+    if len(libraries) == 1:
+        return libraries[0]
+
+    import importlib
+
+    pablo = importlib.import_module("openff.pablo")
+    definitions = tuple(
+        definition for library in libraries for definition in getattr(library, "definitions", ())
+    )
+    summaries = tuple(
+        summary for library in libraries for summary in getattr(library, "summaries", ())
+    )
+    diagnostics = tuple(
+        diagnostic for library in libraries for diagnostic in getattr(library, "diagnostics", ())
+    )
+    return SimpleNamespace(
+        residue_library=pablo.STD_CCD_CACHE.with_(definitions),
+        definitions=definitions,
+        summaries=summaries,
+        crosslink_requirement=resolved_plans[0].pablo_crosslink_requirement,
+        diagnostics=diagnostics,
+    )
+
+
+def _safe_attachment_token(name: str) -> str:
+    """Return a conservative artifact-directory token."""
+    token = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in name.strip())
+    return token.strip("_-") or "attachment"
+
+
+def _save_direct_workflow_summary(
+    result: Any,
+    attachments: tuple[Any, ...],
+    resolved_plans: list[ResolvedAttachmentPlan],
+    path: Path,
+) -> None:
+    """Write a JSON summary for direct public conjugation requests."""
+    payload = {
+        "output_dir": str(result.output_dir),
+        "crosslinked_pdb_path": str(result.construction.crosslinked_pdb_path),
+        "relaxed_conjugate_pdb_path": str(result.relaxed_conjugate_pdb_path),
+        "attachments": [attachment.name for attachment in attachments],
+        "resolved_plans": [plan.model_dump(mode="json") for plan in resolved_plans],
+        "diagnostics": tuple(getattr(result.construction, "diagnostics", ())),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def _pablo_failure_message(result: Any) -> str:

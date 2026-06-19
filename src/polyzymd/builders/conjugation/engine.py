@@ -68,7 +68,7 @@ class ConjugationEngine:
         """Build from the lightweight public request shell."""
         source = request.config if request.config is not None else request.config_path
         if source is None:
-            raise ValueError("ConjugateBuildRequest requires either config or config_path")
+            return self._build_direct_request(request, settings=settings)
         return self.build_from_config(
             source,
             output_dir=request.output_dir,
@@ -99,6 +99,9 @@ class ConjugationEngine:
                 request = kwargs.pop("config")
             elif "config_path" in kwargs:
                 request = kwargs.pop("config_path")
+            elif "protein_pdb_path" in kwargs or "attachments" in kwargs:
+                request = ConjugateBuildRequest(**kwargs)
+                return self.build_from_request(request, settings=call_settings)
             else:
                 _raise_unsupported_direct_mode(kwargs)
 
@@ -113,6 +116,36 @@ class ConjugationEngine:
             settings=call_settings,
             free_polymer_seed=free_polymer_seed,
         )
+
+    def _build_direct_request(
+        self,
+        request: ConjugateBuildRequest,
+        *,
+        settings: ConjugatedPolymerSystemSettings | None = None,
+    ) -> ConjugationResult:
+        """Build a direct protein plus attachment request."""
+        if request.protein_pdb_path is None or not request.attachments:
+            raise ValueError(
+                "ConjugateBuildRequest requires config/config_path or protein_pdb_path with attachments"
+            )
+        if request.output_dir is None:
+            raise ValueError("output_dir is required for direct conjugation requests")
+
+        from polyzymd.builders.conjugation.system_workflow import (
+            build_direct_smiles_moiety_conjugate,
+        )
+
+        workflow_settings = self.settings if settings is None else settings
+        legacy_result = build_direct_smiles_moiety_conjugate(
+            protein_pdb_path=request.protein_pdb_path,
+            attachments=request.attachments,
+            output_dir=request.output_dir,
+            ccd_pablo=request.ccd_pablo,
+            chain_policy=request.chain_policy,
+            settings=workflow_settings,
+            random_seed=request.free_polymer_seed,
+        )
+        return ConjugationResult.from_legacy_result(legacy_result)
 
 
 def _raise_unsupported_direct_mode(inputs: dict[str, Any]) -> None:

@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from polyzymd.config.schema import (
+    ConjugationAttachmentConfig,
+    ConjugationCcdPabloPolicyConfig,
+    ConjugationChainPolicyConfig,
+)
 
 
 class ConjugateBuildRequest(BaseModel):
@@ -29,6 +35,39 @@ class ConjugateBuildRequest(BaseModel):
         default=None,
         description="Optional seed forwarded to free-polymer placement.",
     )
+    protein_pdb_path: Path | None = Field(
+        default=None,
+        description="Cleaned unmodified protein PDB for direct public conjugation requests.",
+    )
+    attachments: tuple[ConjugationAttachmentConfig, ...] = Field(
+        default_factory=tuple,
+        description="Covalent modifications to apply to the cleaned protein.",
+    )
+    ccd_pablo: ConjugationCcdPabloPolicyConfig | None = Field(
+        default=None,
+        description="Optional Pablo/CCD policy for direct conjugation requests.",
+    )
+    chain_policy: ConjugationChainPolicyConfig | None = Field(
+        default=None,
+        description="Optional chain assignment policy for direct conjugation requests.",
+    )
+
+    @model_validator(mode="after")
+    def validate_supported_sources(self) -> "ConjugateBuildRequest":
+        """Require either the legacy config source or the direct protein/modification source."""
+        has_config = self.config is not None or self.config_path is not None
+        has_direct = self.protein_pdb_path is not None or bool(self.attachments)
+        if has_config and has_direct:
+            raise ValueError(
+                "ConjugateBuildRequest accepts either config/config_path or "
+                "protein_pdb_path with attachments, not both"
+            )
+        if not has_config and has_direct:
+            if self.protein_pdb_path is None:
+                raise ValueError("protein_pdb_path is required when attachments are supplied")
+            if not self.attachments:
+                raise ValueError("attachments are required when protein_pdb_path is supplied")
+        return self
 
 
 class ConjugationResult(BaseModel):

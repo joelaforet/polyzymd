@@ -21,6 +21,12 @@ from polyzymd.builders.conjugation._linkage import (
 )
 from polyzymd.builders.conjugation.pablo.ingestion import PabloAvailability, PabloIngestionResult
 from polyzymd.builders.conjugation.pablo.parameterization import InterchangeParameterizationResult
+from polyzymd.builders.conjugation.polymer import (
+    GeneratedMoietyFragment,
+    GeneratedPolymerFragment,
+    PolymerFragmentAtom,
+    PolymerFragmentResidue,
+)
 from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction
 from polyzymd.builders.conjugation.structure.pdb import (
     CrosslinkedPdbAssemblyResult,
@@ -33,6 +39,7 @@ from polyzymd.builders.conjugation.structure.preparation import (
 )
 from polyzymd.builders.conjugation.system_workflow import (
     _apply_pdb_atom_names_to_topology,
+    _construct_multi_modifier_linked_protein,
     _construct_nhs_lys_modifier_linked_protein,
     _local_minimization_settings_for_product,
     _nhs_lys_linker_from_attachment,
@@ -488,6 +495,132 @@ def test_construct_uses_product_state_library_and_local_minimization(
     assert calls["charge_template_count"] == 1
 
 
+def test_multi_modifier_construction_parameterizes_and_relaxes_once(monkeypatch, tmp_path: Path):
+    """Multi-site construction should place per site but parameterize the combined product once."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    plans = (
+        _generic_resolved_plan(residue_number=42, modifier_residue_number=1, modifier_atom="C001"),
+        _generic_resolved_plan(residue_number=87, modifier_residue_number=2, modifier_atom="C001"),
+    )
+    modifiers = tuple(
+        _generated_fragment(residue_name="NAG", residue_number=index + 1) for index in range(2)
+    )
+    moieties = tuple(
+        _moiety_fragment(residue_name="NAG", residue_number=index + 1) for index in range(2)
+    )
+    calls = {"placements": 0, "parameterize": 0, "smoke": 0}
+
+    def fake_place(protein_pdb_path, modifier, plan, output_dir, *, settings=None):
+        calls["placements"] += 1
+        return PackmolModifierPlacementResult(
+            placed_modifier=modifier.to_placed_fragment(),
+            packmol_input_path=Path(output_dir) / "packmol.inp",
+            packmol_output_path=Path(output_dir) / "packmol.pdb",
+            protein_sterics_pdb_path=Path(output_dir) / "protein.pdb",
+            modifier_pdb_path=Path(output_dir) / "modifier.pdb",
+            packmol_input_text="",
+            target_bond_length_angstrom=plan.target_bond_length_angstrom,
+            placed_bond_length_angstrom=plan.target_bond_length_angstrom,
+            min_modifier_protein_distance_angstrom=2.0,
+        )
+
+    def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
+        calls["fragment_count"] = len(polymer_fragment)
+        calls["attachment_count"] = len(attachment)
+        calls["protein_products"] = tuple(item.protein_target_resname for item in attachment)
+        Path(output_path).write_text("END\n", encoding="utf-8")
+        return CrosslinkedPdbAssemblyResult(
+            output_path=Path(output_path),
+            protein_atom_count=10,
+            polymer_atom_count=2,
+            removed_protein_atom_count=2,
+            removed_polymer_atom_count=0,
+            removed_atom_serials=(),
+            removed_atom_names=(),
+            added_conect_pair=(1, 2),
+            added_conect_pairs=((1, 2), (3, 4)),
+        )
+
+    class FakeIngestor:
+        def __init__(self, policy):
+            self.policy = policy
+
+        def ingest_structure(
+            self, path, *, chain_policy=None, output_dir=None, residue_library=None
+        ):
+            return PabloIngestionResult(
+                success=True,
+                path=Path(path),
+                suffix=".pdb",
+                pablo=PabloAvailability(available=True),
+                topology=SimpleNamespace(molecules=(object(),)),
+            )
+
+    def fake_parameterize(topology, *, settings=None, charge_from_molecules=None):
+        calls["parameterize"] += 1
+        return InterchangeParameterizationResult(
+            success=True,
+            interchange=object(),
+            force_field_names=("fake.offxml",),
+            topology_type="FakeTopology",
+        )
+
+    def fake_smoke(interchange, output_dir, *, settings=None):
+        calls["smoke"] += 1
+        minimized = Path(output_dir) / "minimized.pdb"
+        minimized.write_text("END\n", encoding="utf-8")
+        return SimpleNamespace(
+            success=True, minimized_pdb_path=minimized, equilibrated_pdb_path=None
+        )
+
+    monkeypatch.setattr(workflow_module, "place_modifier_with_resolved_plan", fake_place)
+    monkeypatch.setattr(
+        workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
+    )
+    monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
+    monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
+    monkeypatch.setattr(
+        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
+    )
+    monkeypatch.setattr(
+        workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
+    )
+    monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
+
+    policy = ConjugationCcdPabloPolicyConfig(
+        crosslinks=[
+            {
+                "residues": ("ASX", "NAG"),
+                "linking_atoms": ("ND2", "C001"),
+                "leaving_atoms": ((), ()),
+                "bond_order": 1,
+            }
+        ]
+    )
+
+    construction, topology = _construct_multi_modifier_linked_protein(
+        protein_pdb_path=tmp_path / "protein.pdb",
+        modifiers=modifiers,
+        source_moieties=moieties,
+        resolved_plans=plans,
+        ccd_pablo_policy=policy,
+        output_dir=tmp_path / "construction",
+        chain_policy=None,
+        settings=ModifierConstructionSettings(run_smoke=True),
+        use_product_state_pablo_library=False,
+    )
+
+    assert topology is not None
+    assert len(construction.resolved_plans) == 2
+    assert calls["placements"] == 2
+    assert calls["fragment_count"] == 2
+    assert calls["attachment_count"] == 2
+    assert calls["protein_products"] == ("ASX", "ASX")
+    assert calls["parameterize"] == 1
+    assert calls["smoke"] == 1
+
+
 def test_coordinate_backend_gate_allows_explicit_nhs_lys_mechanism():
     """The system workflow should only route the named implemented backend to NHS-Lys."""
     attachment = SimpleNamespace(
@@ -648,4 +781,120 @@ def _resolved_plan(requirement: PabloCrosslinkRequirement) -> ResolvedAttachment
         protein_product_residue_name="LYX",
         modifier_product_residue_name="NHX",
         pablo_crosslink_requirement=requirement,
+    )
+
+
+def _generic_resolved_plan(
+    *,
+    residue_number: int,
+    modifier_residue_number: int,
+    modifier_atom: str,
+) -> ResolvedAttachmentPlan:
+    requirement = PabloCrosslinkRequirement(
+        residues=("ASX", "NAG"),
+        linking_atoms=("ND2", modifier_atom),
+        leaving_atoms=((), ()),
+        bond_order=1,
+    )
+    protein_selector = PdbAtomSelector(
+        chain_id="A",
+        residue_name="ASN",
+        residue_number=residue_number,
+        atom_name="ND2",
+    )
+    modifier_selector = PdbAtomSelector(
+        chain_id="C",
+        residue_name="NAG",
+        residue_number=modifier_residue_number,
+        atom_name=modifier_atom,
+        atom_serial=1,
+        atom_index=0,
+    )
+    contract = ExplicitLinkageContract(
+        protein_endpoint=ReactiveEndpoint(
+            participant="protein",
+            selector=protein_selector,
+            product_residue_name="ASX",
+        ),
+        modifier_endpoint=ReactiveEndpoint(
+            participant="modifier",
+            selector=modifier_selector,
+            product_residue_name="NAG",
+        ),
+        bond=LinkageBond(
+            protein_atom_selector=protein_selector,
+            modifier_atom_selector=modifier_selector,
+            protein_atom_name="ND2",
+            modifier_atom_name=modifier_atom,
+            target_bond_length_angstrom=1.45,
+        ),
+        mechanism_name="n_glycosylation",
+    )
+    return ResolvedAttachmentPlan(
+        contract=contract,
+        protein_link_atom=PdbAtomRecord(
+            serial=residue_number,
+            atom_index=residue_number,
+            atom_name="ND2",
+            residue_name="ASN",
+            chain_id="A",
+            residue_number=residue_number,
+            x=0,
+            y=0,
+            z=0,
+            element="N",
+        ),
+        modifier_link_atom=PdbAtomRecord(
+            serial=1,
+            atom_index=0,
+            atom_name=modifier_atom,
+            residue_name="NAG",
+            chain_id="C",
+            residue_number=modifier_residue_number,
+            x=1,
+            y=0,
+            z=0,
+            element="C",
+        ),
+        protein_product_residue_name="ASX",
+        modifier_product_residue_name="NAG",
+        pablo_crosslink_requirement=requirement,
+        target_bond_length_angstrom=1.45,
+    )
+
+
+def _generated_fragment(*, residue_name: str, residue_number: int) -> GeneratedPolymerFragment:
+    atom = PolymerFragmentAtom(
+        atom_index=0,
+        serial=1,
+        atom_name="C001",
+        residue_name=residue_name,
+        residue_number=residue_number,
+        x=1.0,
+        y=0.0,
+        z=0.0,
+        element="C",
+    )
+    residue = PolymerFragmentResidue(
+        sequence_index=0,
+        name=residue_name.lower(),
+        residue_name=residue_name,
+        residue_number=residue_number,
+    )
+    return GeneratedPolymerFragment(
+        atoms=(atom,),
+        residues=(residue,),
+        reactive_atom_serial=1,
+        reactive_atom_index=0,
+        name=f"{residue_name.lower()}_{residue_number}",
+    )
+
+
+def _moiety_fragment(*, residue_name: str, residue_number: int) -> GeneratedMoietyFragment:
+    generated = _generated_fragment(residue_name=residue_name, residue_number=residue_number)
+    return GeneratedMoietyFragment(
+        atoms=generated.atoms,
+        residues=generated.residues,
+        residue_name=residue_name,
+        name=generated.name,
     )

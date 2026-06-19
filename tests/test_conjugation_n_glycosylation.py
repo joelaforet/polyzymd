@@ -14,6 +14,7 @@ from polyzymd.builders.conjugation.reactions import (
     get_reaction,
     list_reactions,
 )
+from polyzymd.config.schema import ConjugationAttachmentConfig
 
 pytest.importorskip("rdkit")
 
@@ -43,6 +44,23 @@ def test_site_atom_defaults_to_asn_nd2_when_omitted(tmp_path: Path):
     assert contract.protein_endpoint.product_residue_name == "ASX"
     assert contract.bond.protein_atom_name == "ND2"
     assert contract.bond.target_bond_length_angstrom == pytest.approx(1.45)
+
+
+def test_attachment_settings_default_target_atom_and_bond_length_when_omitted():
+    """Mechanism settings should fill N-glycosylation defaults from sparse configs."""
+    attachment = ConjugationAttachmentConfig.model_validate(
+        {
+            "name": "glycan",
+            "site": {"chain_id": "A", "residue_name": "ASN", "residue_number": 42},
+            "moiety": {"name": "glcnac", "smiles": "CO", "residue_name": "NAG"},
+            "mechanism": {"name": "n_glycosylation"},
+        }
+    )
+
+    settings = NGlycosylationReaction.settings_from_attachment(attachment)
+
+    assert settings.target_atom_name == "ND2"
+    assert settings.target_bond_length_angstrom == pytest.approx(1.45)
 
 
 def test_detects_anomeric_carbon_and_hydroxyl_leaving_atoms_in_branched_glycan(

@@ -9,9 +9,6 @@ from polyzymd.builders.conjugation.polymer.moiety import (
     GeneratedMoietyFragment,
     build_smiles_moiety_fragment,
 )
-from polyzymd.builders.conjugation.polymer.polymerist import (
-    generated_fragment_from_polymerist_pdb,
-)
 from polyzymd.builders.conjugation.polymer.recipe import (
     PolymeristGenerationSmokeResult,
     PolymerMonomerRecipe,
@@ -35,3 +32,14 @@ __all__ = [
     "sbma_nhs_egpma_acb_recipe",
     "sbma_egpma_nhs_recipe",
 ]
+
+
+def __getattr__(name: str):
+    """Lazily expose Polymerist PDB helpers without import-time reaction cycles."""
+    if name == "generated_fragment_from_polymerist_pdb":
+        from polyzymd.builders.conjugation.polymer.polymerist import (
+            generated_fragment_from_polymerist_pdb,
+        )
+
+        return generated_fragment_from_polymerist_pdb
+    raise AttributeError(name)

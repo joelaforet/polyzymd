@@ -161,8 +161,8 @@ class NGlycosylationReaction(ReactionTemplate):
                 _field(bond, "site_atom"),
                 defaults.target_atom_name,
             ),
-            bond_order=_field(bond, "order", defaults.bond_order),
-            target_bond_length_angstrom=_field(
+            bond_order=_field_if_set(bond, "order", defaults.bond_order),
+            target_bond_length_angstrom=_field_if_set(
                 bond,
                 "target_bond_length_angstrom",
                 defaults.target_bond_length_angstrom,
@@ -560,6 +560,18 @@ def _field(obj: Any, name: str, default: Any = None) -> Any:
         return default
     if isinstance(obj, dict):
         return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def _field_if_set(obj: Any, name: str, default: Any = None) -> Any:
+    """Return a Pydantic field only when explicitly supplied, otherwise default."""
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    fields_set = getattr(obj, "model_fields_set", None)
+    if fields_set is not None and name not in fields_set:
+        return default
     return getattr(obj, name, default)
 
 
