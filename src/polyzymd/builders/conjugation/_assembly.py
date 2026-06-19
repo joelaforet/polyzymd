@@ -260,6 +260,168 @@ def place_modifier_with_resolved_plan(
     )
 
 
+def place_modifiers_with_resolved_plans(
+    protein_pdb_path: Path | str,
+    modifiers: tuple[GeneratedPolymerFragment, ...],
+    plans: tuple[ResolvedAttachmentPlan, ...],
+    output_dir: Path | str,
+    *,
+    settings: PackmolModifierPlacementSettings | None = None,
+    run_packmol_func: Any | None = None,
+) -> tuple[PackmolModifierPlacementResult, ...]:
+    """Place multiple generated modifiers with one joint Packmol run.
+
+    Packmol receives one fixed protein sterics structure and one movable
+    retained-fragment structure per attachment. All fragment restraints are
+    solved together so protein-fragment and fragment-fragment sterics are
+    optimized in the same packing problem.
+    """
+    from polyzymd.utils.packmol import build_packmol_input, run_packmol
+
+    if not modifiers or len(modifiers) != len(plans):
+        raise ValueError("Joint Packmol placement requires aligned modifiers and plans")
+
+    placement_settings = settings or PackmolModifierPlacementSettings()
+    protein_path = Path(protein_pdb_path)
+    artifact_dir = Path(output_dir)
+    work_dir = artifact_dir / placement_settings.work_dir_name
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    protein_atoms = _parse_pdb_atoms(protein_path)
+    protein_steric_atoms, excluded_names = _protein_steric_atoms_from_plans(
+        protein_atoms,
+        plans,
+    )
+    protein_coords = _coords_from_atoms(protein_steric_atoms)
+
+    retained_atom_groups = tuple(
+        _retained_modifier_atoms(modifier, plan=plan)
+        for modifier, plan in zip(modifiers, plans, strict=True)
+    )
+    retained_coord_groups = tuple(_coords_from_atoms(atoms) for atoms in retained_atom_groups)
+    full_coord_groups = tuple(
+        _coords_from_atoms(tuple(atom.to_pdb_atom() for atom in modifier.atoms))
+        for modifier in modifiers
+    )
+
+    coord_shift = _coordinate_shift(protein_coords, *retained_coord_groups)
+    shifted_protein = protein_coords + coord_shift
+    shifted_retained_groups = tuple(coords + coord_shift for coords in retained_coord_groups)
+    box_size = (
+        np.vstack((shifted_protein, *shifted_retained_groups)).max(axis=0) + _BOX_PADDING_ANGSTROM
+    )
+
+    protein_sterics_path = work_dir / "protein_fixed_sterics.pdb"
+    _write_simple_pdb(protein_sterics_path, shifted_protein, ["C"] * len(shifted_protein))
+
+    modifier_paths: list[Path] = []
+    structure_extra_lines: list[list[str]] = []
+    for index, (retained_atoms, shifted_modifier, plan) in enumerate(
+        zip(retained_atom_groups, shifted_retained_groups, plans, strict=True),
+        start=1,
+    ):
+        fragment_work_dir = (
+            artifact_dir / f"placement_{index:02d}" / placement_settings.work_dir_name
+        )
+        fragment_work_dir.mkdir(parents=True, exist_ok=True)
+        modifier_path = fragment_work_dir / "modifier_retained.pdb"
+        _write_simple_pdb(
+            modifier_path,
+            shifted_modifier,
+            [(atom.element or "C").strip() or "C" for atom in retained_atoms],
+        )
+        modifier_paths.append(modifier_path)
+
+        reactive_local_index = _retained_local_index(retained_atoms, plan.modifier_link_atom)
+        shifted_site = _coord(plan.protein_link_atom) + coord_shift
+        structure_extra_lines.append(
+            [
+                f"atoms {reactive_local_index + 1}",
+                (
+                    "inside sphere "
+                    f"{shifted_site[0]:.6f} {shifted_site[1]:.6f} {shifted_site[2]:.6f} "
+                    f"{placement_settings.reactive_sphere_radius_angstrom:.1f}"
+                ),
+                "end atoms",
+            ]
+        )
+
+    packmol_input_text = build_packmol_input(
+        molecule_pdb_paths=[str(path) for path in modifier_paths],
+        molecule_counts=[1] * len(modifier_paths),
+        box_size_angstrom=box_size,
+        tolerance_angstrom=placement_settings.tolerance_angstrom,
+        solute_pdb_path=str(protein_sterics_path),
+        use_pbc=False,
+        movebadrandom=placement_settings.movebadrandom,
+        nloop=placement_settings.nloop,
+        structure_extra_lines=structure_extra_lines,
+    )
+    packmol_input_path = work_dir / "packmol.inp"
+    packmol_input_path.write_text(packmol_input_text, encoding="utf-8")
+
+    executor = run_packmol_func or run_packmol
+    packmol_output_path = Path(executor(packmol_input_text, work_dir))
+    packed_coords = _read_pdb_coords(packmol_output_path)
+    retained_counts = tuple(len(atoms) for atoms in retained_atom_groups)
+    expected_atoms = len(shifted_protein) + sum(retained_counts)
+    if len(packed_coords) != expected_atoms:
+        raise RuntimeError(
+            f"Packmol output has {len(packed_coords)} atoms, expected {expected_atoms} "
+            f"(protein={len(shifted_protein)}, modifiers={retained_counts})"
+        )
+
+    results: list[PackmolModifierPlacementResult] = []
+    start = len(shifted_protein)
+    for modifier, plan, retained_coords, full_coords, count, modifier_path in zip(
+        modifiers,
+        plans,
+        retained_coord_groups,
+        full_coord_groups,
+        retained_counts,
+        modifier_paths,
+        strict=True,
+    ):
+        packed_modifier_coords = packed_coords[start : start + count] - coord_shift
+        start += count
+
+        transformed_full_coords = _transform_full_modifier(
+            retained_coords,
+            packed_modifier_coords,
+            full_coords,
+        )
+        transformed_full_coords = _snap_reactive_atom_to_bond_length(
+            transformed_full_coords,
+            plan.modifier_link_atom,
+            plan.protein_link_atom,
+            plan.target_bond_length_angstrom,
+        )
+        placed_fragment = _placed_fragment_from_coords(modifier, transformed_full_coords)
+
+        placed_reactive = _coord(resolve_modifier_reactive_atom_from_placed(placed_fragment))
+        placed_bond_length = float(np.linalg.norm(placed_reactive - _coord(plan.protein_link_atom)))
+        min_distance = _minimum_distance(
+            _coords_from_atoms(tuple(placed_fragment.atoms)),
+            _coords_from_atoms(protein_steric_atoms),
+        )
+        results.append(
+            PackmolModifierPlacementResult(
+                placed_modifier=placed_fragment,
+                packmol_input_path=packmol_input_path,
+                packmol_output_path=packmol_output_path,
+                protein_sterics_pdb_path=protein_sterics_path,
+                modifier_pdb_path=modifier_path,
+                packmol_input_text=packmol_input_text,
+                target_bond_length_angstrom=plan.target_bond_length_angstrom,
+                placed_bond_length_angstrom=placed_bond_length,
+                min_modifier_protein_distance_angstrom=min_distance,
+                excluded_protein_atom_names=excluded_names,
+            )
+        )
+
+    return tuple(results)
+
+
 def resolve_modifier_reactive_atom_from_placed(fragment: PlacedPolymerFragment) -> PdbAtomRecord:
     """Resolve a reactive atom from a placed fragment."""
     matches = [
@@ -316,6 +478,21 @@ def _protein_steric_atoms_from_plan(
     """Return fixed protein sterics after excluding resolved linkage atoms."""
     excluded_identities = {_atom_identity(plan.protein_link_atom)}
     excluded_identities.update(_atom_identity(atom) for atom in plan.protein_leaving_atoms)
+    kept = tuple(atom for atom in atoms if _atom_identity(atom) not in excluded_identities)
+    excluded_names = tuple(
+        atom.atom_name for atom in atoms if _atom_identity(atom) in excluded_identities
+    )
+    return kept, excluded_names
+
+
+def _protein_steric_atoms_from_plans(
+    atoms: tuple[PdbAtomRecord, ...], plans: tuple[ResolvedAttachmentPlan, ...]
+) -> tuple[tuple[PdbAtomRecord, ...], tuple[str, ...]]:
+    """Return fixed protein sterics after excluding all resolved linkage atoms."""
+    excluded_identities = set()
+    for plan in plans:
+        excluded_identities.add(_atom_identity(plan.protein_link_atom))
+        excluded_identities.update(_atom_identity(atom) for atom in plan.protein_leaving_atoms)
     kept = tuple(atom for atom in atoms if _atom_identity(atom) not in excluded_identities)
     excluded_names = tuple(
         atom.atom_name for atom in atoms if _atom_identity(atom) in excluded_identities

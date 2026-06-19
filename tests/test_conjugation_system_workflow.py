@@ -502,8 +502,11 @@ def test_construct_uses_product_state_library_and_local_minimization(
     assert calls["charge_template_count"] == 1
 
 
-def test_multi_modifier_construction_parameterizes_and_relaxes_once(monkeypatch, tmp_path: Path):
-    """Multi-site construction should place per site but parameterize the combined product once."""
+def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
+    monkeypatch,
+    tmp_path: Path,
+):
+    """Multi-site construction should jointly place and parameterize the product once."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
     plans = (
@@ -518,18 +521,26 @@ def test_multi_modifier_construction_parameterizes_and_relaxes_once(monkeypatch,
     )
     calls = {"placements": 0, "parameterize": 0, "smoke": 0}
 
-    def fake_place(protein_pdb_path, modifier, plan, output_dir, *, settings=None):
+    def fake_place(protein_pdb_path, modifiers_arg, plans_arg, output_dir, *, settings=None):
         calls["placements"] += 1
-        return PackmolModifierPlacementResult(
-            placed_modifier=modifier.to_placed_fragment(),
-            packmol_input_path=Path(output_dir) / "packmol.inp",
-            packmol_output_path=Path(output_dir) / "packmol.pdb",
-            protein_sterics_pdb_path=Path(output_dir) / "protein.pdb",
-            modifier_pdb_path=Path(output_dir) / "modifier.pdb",
-            packmol_input_text="",
-            target_bond_length_angstrom=plan.target_bond_length_angstrom,
-            placed_bond_length_angstrom=plan.target_bond_length_angstrom,
-            min_modifier_protein_distance_angstrom=2.0,
+        calls["placed_modifier_count"] = len(modifiers_arg)
+        calls["placed_plan_count"] = len(plans_arg)
+        return tuple(
+            PackmolModifierPlacementResult(
+                placed_modifier=modifier.to_placed_fragment(),
+                packmol_input_path=Path(output_dir) / "packmol.inp",
+                packmol_output_path=Path(output_dir) / "packmol.pdb",
+                protein_sterics_pdb_path=Path(output_dir) / "protein.pdb",
+                modifier_pdb_path=Path(output_dir) / f"modifier_{index}.pdb",
+                packmol_input_text="",
+                target_bond_length_angstrom=plan.target_bond_length_angstrom,
+                placed_bond_length_angstrom=plan.target_bond_length_angstrom,
+                min_modifier_protein_distance_angstrom=2.0,
+            )
+            for index, (modifier, plan) in enumerate(
+                zip(modifiers_arg, plans_arg, strict=True),
+                start=1,
+            )
         )
 
     def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
@@ -581,7 +592,7 @@ def test_multi_modifier_construction_parameterizes_and_relaxes_once(monkeypatch,
             success=True, minimized_pdb_path=minimized, equilibrated_pdb_path=None
         )
 
-    monkeypatch.setattr(workflow_module, "place_modifier_with_resolved_plan", fake_place)
+    monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
     monkeypatch.setattr(
         workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
     )
@@ -620,7 +631,9 @@ def test_multi_modifier_construction_parameterizes_and_relaxes_once(monkeypatch,
 
     assert topology is not None
     assert len(construction.resolved_plans) == 2
-    assert calls["placements"] == 2
+    assert calls["placements"] == 1
+    assert calls["placed_modifier_count"] == 2
+    assert calls["placed_plan_count"] == 2
     assert calls["fragment_count"] == 2
     assert calls["attachment_count"] == 2
     assert calls["protein_products"] == ("ASX", "ASX")

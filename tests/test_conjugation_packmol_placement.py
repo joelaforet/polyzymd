@@ -7,6 +7,7 @@ from pathlib import Path
 from polyzymd.builders.conjugation._assembly import (
     place_modifier_with_packmol,
     place_modifier_with_resolved_plan,
+    place_modifiers_with_resolved_plans,
 )
 from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
@@ -110,6 +111,58 @@ def test_resolved_plan_placement_uses_resolved_atoms_and_target_length(tmp_path:
         if line.startswith(("ATOM", "HETATM"))
     ]
     assert len(retained_lines) == 3
+
+
+def test_joint_resolved_plan_placement_uses_one_packmol_run_for_two_fragments(tmp_path: Path):
+    """Joint placement should build one Packmol input with all constrained fragments."""
+    protein_path = _protein_pdb(tmp_path)
+    modifiers = (_generated_modifier(), _generated_modifier())
+    plans = tuple(
+        resolve_explicit_linkage_contract(
+            protein_path,
+            modifier,
+            _explicit_contract(target_bond_length=1.45),
+        )
+        for modifier in modifiers
+    )
+    calls = {"packmol": 0}
+
+    def fake_run_packmol(input_text: str, work_dir: Path) -> Path:
+        """Write a simple Packmol-like output preserving structure ordering."""
+        calls["packmol"] += 1
+        output_path = work_dir / "packmol_output.pdb"
+        atom_lines = []
+        for line in input_text.splitlines():
+            if not line.startswith("structure "):
+                continue
+            structure_path = Path(line.split(maxsplit=1)[1])
+            atom_lines.extend(
+                pdb_line
+                for pdb_line in structure_path.read_text().splitlines(True)
+                if pdb_line.startswith(("ATOM", "HETATM"))
+            )
+        output_path.write_text("".join([*atom_lines, "END\n"]))
+        assert input_text == (work_dir / "packmol.inp").read_text()
+        return output_path
+
+    results = place_modifiers_with_resolved_plans(
+        protein_path,
+        modifiers,
+        plans,
+        tmp_path,
+        run_packmol_func=fake_run_packmol,
+    )
+
+    assert calls["packmol"] == 1
+    assert len(results) == 2
+    assert results[0].packmol_input_path == results[1].packmol_input_path
+    assert results[0].packmol_output_path == results[1].packmol_output_path
+    assert results[0].modifier_pdb_path.parent.parent.name == "placement_01"
+    assert results[1].modifier_pdb_path.parent.parent.name == "placement_02"
+    input_text = results[0].packmol_input_text
+    assert input_text.count("structure ") == 3
+    assert input_text.count("inside sphere") == 2
+    assert all(abs(result.placed_bond_length_angstrom - 1.45) < 1.0e-6 for result in results)
 
 
 def _explicit_contract(*, target_bond_length: float) -> ExplicitLinkageContract:
