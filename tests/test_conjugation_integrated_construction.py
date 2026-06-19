@@ -24,7 +24,7 @@ from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
 from polyzymd.builders.conjugation.pablo_adapter import PabloAvailability, PabloIngestionResult
 from polyzymd.builders.conjugation.parameterization import InterchangeParameterizationResult
 from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
-from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.smoke import VacuumSmokeResult
 from polyzymd.config.schema import (
     ConjugationAttachmentConfig,

@@ -37,7 +37,7 @@ from polyzymd.builders.conjugation.placement import (
     place_modifier_with_packmol,
     place_modifier_with_resolved_plan,
 )
-from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.smoke import (
     VacuumSmokeResult,
     VacuumSmokeSettings,

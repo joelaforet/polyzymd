@@ -711,7 +711,7 @@ class ConjugationMoietyConfig(BaseModel):
         if value is None or hasattr(value, "generate_sequence"):
             return value
 
-        from polyzymd.builders.conjugation.polymer_recipe import PolymerRecipe
+        from polyzymd.builders.conjugation.polymer import PolymerRecipe
 
         return PolymerRecipe.model_validate(value)
 

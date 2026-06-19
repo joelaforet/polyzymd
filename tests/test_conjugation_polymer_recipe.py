@@ -9,7 +9,7 @@ from types import ModuleType
 import pytest
 from pydantic import ValidationError
 
-from polyzymd.builders.conjugation.polymer_recipe import (
+from polyzymd.builders.conjugation.polymer.recipe import (
     PolymerRecipe,
     _polymerist_to_pdb_aligned_rdkit_mol,
     _write_rdkit_sdf_sidecar,

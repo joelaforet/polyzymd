@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from polyzymd.builders.conjugation.contracts import PabloCrosslinkRequirement
 from polyzymd.builders.conjugation.linkers import ModifierLinkageSpec, ModifierLinker
-from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 
 
 class CrosslinkValidationResult(BaseModel):

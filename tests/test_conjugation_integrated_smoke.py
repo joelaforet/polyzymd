@@ -44,11 +44,11 @@ from polyzymd.builders.conjugation.placement import (
     PackmolModifierPlacementSettings,
     place_modifier_with_packmol,
 )
-from polyzymd.builders.conjugation.polymer_recipe import (
+from polyzymd.builders.conjugation.polymer import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.polymer.recipe import (
     generate_polymerist_smoke_polymer,
     sbma_egpma_nhs_recipe,
 )
-from polyzymd.builders.conjugation.polymerist_pdb import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.smoke import VacuumSmokeSettings, run_restrained_vacuum_smoke
 
 T = TypeVar("T")

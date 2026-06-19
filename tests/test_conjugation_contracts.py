@@ -17,7 +17,7 @@ from polyzymd.builders.conjugation.contracts import (
 )
 from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
 from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
-from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 from polyzymd.config.schema import ConjugationAttachmentConfig
 
 

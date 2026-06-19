@@ -85,7 +85,10 @@ conjugation/
 │   └── explicit_linkage.py  # simple explicit-link reaction
 ├── system_workflow.py       # config-driven full-system workflow
 ├── protein_preparation.py   # protein canonicalization at configurable pH
-├── polymer_recipe.py        # modifier/polymer recipe and generation helpers
+├── polymer/                 # modifier/polymer recipe and fragment helpers
+│   ├── recipe.py
+│   ├── fragment.py
+│   └── polymerist.py
 ├── placement.py             # Packmol/geometric placement
 ├── pdb_assembly.py          # product PDB writing and CONECT handling
 ├── product_pablo.py         # product-state Pablo residue definitions
