@@ -11,11 +11,11 @@ import pytest
 from polyzymd.builders.conjugation._linkage import PabloCrosslinkRequirement
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
 from polyzymd.builders.conjugation.pablo.product import build_product_state_pablo_library
-from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.builders.conjugation.polymer import (
     GeneratedPolymerFragment,
     generated_fragment_from_polymerist_pdb,
 )
+from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.config.schema import ConjugationCcdPabloPolicyConfig
 
 

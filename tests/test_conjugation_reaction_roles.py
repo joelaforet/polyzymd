@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from polyzymd.builders.conjugation import reaction_roles
-from polyzymd.builders.conjugation.reaction_roles import (
+from polyzymd.builders.conjugation.reactions import _roles as reaction_roles
+from polyzymd.builders.conjugation.reactions._roles import (
     AtomMappedReaction,
     AtomRoleSpec,
     PdbAtomIdentity,

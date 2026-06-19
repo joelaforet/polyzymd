@@ -1,4 +1,4 @@
-"""NHS ester to lysine graph edit planning primitives."""
+"""RDKit graph helpers retained for NHS-Lys reaction tests and diagnostics."""
 
 from __future__ import annotations
 
@@ -8,13 +8,51 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from polyzymd.builders.conjugation.graph import AddedBond, RdkitGraphEditResult
-from polyzymd.builders.conjugation.rdkit_utils import (
-    build_old_to_new_atom_map,
-    clone_without_conformers,
-    validate_atom_indices,
-)
-from polyzymd.builders.conjugation.sites import AttachmentSite
+
+class AddedBond(BaseModel):
+    """Atom-index record for a bond created by graph surgery."""
+
+    begin_atom_index: int = Field(..., ge=0, description="Begin atom index in the product molecule")
+    end_atom_index: int = Field(..., ge=0, description="End atom index in the product molecule")
+    order: int = Field(1, ge=1, description="Integer bond order used by the primitive")
+
+
+class RdkitGraphEditResult(BaseModel):
+    """Structured result from an RDKit graph edit primitive."""
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    product_mol: Any = Field(..., exclude=True, description="Product RDKit molecule")
+    removed_protein_atom_indices: tuple[int, ...] = Field(
+        default_factory=tuple,
+        description="Original protein atom indices removed during graph surgery",
+    )
+    removed_moiety_atom_indices: tuple[int, ...] = Field(
+        default_factory=tuple,
+        description="Original moiety atom indices removed during graph surgery",
+    )
+    added_bond: AddedBond = Field(..., description="Product atom indices for the created bond")
+    protein_atom_index_map: dict[int, int] = Field(
+        default_factory=dict,
+        description="Original-to-product atom index map for retained protein atoms",
+    )
+    moiety_atom_index_map: dict[int, int] = Field(
+        default_factory=dict,
+        description="Original-to-product atom index map for retained moiety atoms",
+    )
+    warnings: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Non-fatal warnings emitted by the conservative executor",
+    )
+
+
+class NhsLysAttachmentSite(BaseModel):
+    """Normalized explicit lysine NZ attachment site for NHS-Lys graph helpers."""
+
+    chain_id: str = Field(..., min_length=1, max_length=1)
+    residue_name: str = Field(..., min_length=1)
+    residue_number: int
+    atom_name: str = Field(..., min_length=1)
 
 
 class LysineReactiveSite(BaseModel):
@@ -104,7 +142,7 @@ class NhsLysGraphEditPlan(BaseModel):
 
 
 def extract_lysine_reactive_site(
-    site: AttachmentSite,
+    site: NhsLysAttachmentSite,
     atoms: Iterable[Any],
     *,
     bonds: Iterable[Any] | None = None,
@@ -115,7 +153,7 @@ def extract_lysine_reactive_site(
 
     Parameters
     ----------
-    site : AttachmentSite
+    site : NhsLysAttachmentSite
         Normalized explicit attachment site to resolve.
     atoms : Iterable[Any]
         Atom records from a topology-like object. The resolver supports dict
@@ -506,6 +544,38 @@ def execute_nhs_lys_amide_rdkit_graph_edit(
         moiety_atom_index_map=moiety_old_to_product,
         warnings=tuple(warnings),
     )
+
+
+def clone_without_conformers(mol: Any) -> Any:
+    """Return an RDKit molecule copy with all conformers removed."""
+    from rdkit import Chem
+
+    rw_mol = Chem.RWMol(mol)
+    rw_mol.RemoveAllConformers()
+    return rw_mol.GetMol()
+
+
+def validate_atom_indices(mol: Any, indices: set[int], *, label: str) -> None:
+    """Validate that all atom indices exist in an RDKit molecule."""
+    atom_count = mol.GetNumAtoms()
+    invalid = sorted(index for index in indices if index < 0 or index >= atom_count)
+    if invalid:
+        invalid_text = ", ".join(str(index) for index in invalid)
+        raise ValueError(
+            f"{label} atom indices are outside the valid range 0..{atom_count - 1}: {invalid_text}"
+        )
+
+
+def build_old_to_new_atom_map(atom_count: int, removed_indices: set[int]) -> dict[int, int]:
+    """Build an atom index map after deleting atoms."""
+    old_to_new: dict[int, int] = {}
+    cursor = 0
+    for old_index in range(atom_count):
+        if old_index in removed_indices:
+            continue
+        old_to_new[old_index] = cursor
+        cursor += 1
+    return old_to_new
 
 
 def _resolve_nhs_search_indices(

@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from polyzymd.builders.conjugation.structure.pdb import NhsLysPdbAttachment, write_crosslinked_pdb
 from polyzymd.builders.conjugation.polymer import (
     GeneratedPolymerFragment,
     PolymerFragmentAtom,
     PolymerFragmentResidue,
 )
+from polyzymd.builders.conjugation.structure.pdb import NhsLysPdbAttachment, write_crosslinked_pdb
 
 
 def _pdb_atom(

@@ -376,7 +376,7 @@ class SystemBuilder:
         return self._solvated_topology
 
     def _apply_conjugation(self, config: "SimulationConfig") -> Topology:
-        """Apply covalent modification skeleton before solvation.
+        """Reject legacy in-place conjugation before solvation.
 
         Parameters
         ----------
@@ -393,7 +393,7 @@ class SystemBuilder:
         RuntimeError
             If solutes have not been combined.
         ConjugationNotImplementedError
-            If an enabled skeleton path is requested.
+            If enabled conjugation is requested through the legacy SystemBuilder path.
         """
         if self._combined_topology is None:
             raise RuntimeError("Solutes must be combined before applying conjugation")
@@ -404,24 +404,14 @@ class SystemBuilder:
 
         LOGGER.info("Applying covalent modification workflow: %s", conjugation_config.mode.value)
 
-        from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
+        from polyzymd.builders.conjugation.exceptions import ConjugationNotImplementedError
 
-        pablo_ingestion_result = self._ingest_existing_conjugation_source(config)
-        builder = CovalentModificationBuilder.from_config(config, output_dir=self._working_dir)
-        context = {
-            "n_enzyme_molecules": self._n_enzyme_molecules,
-            "n_substrate_molecules": self._n_substrate_molecules,
-            "n_polymer_chains": self._n_polymer_chains,
-        }
-        if pablo_ingestion_result is not None:
-            context["pablo_ingestion_result"] = pablo_ingestion_result
-        result = builder.build(
-            self._combined_topology,
-            protein_topology=self._enzyme_topology,
-            context=context,
+        raise ConjugationNotImplementedError(
+            "SystemBuilder no longer applies enabled conjugation through the retired "
+            "CovalentModificationBuilder path. Use "
+            "polyzymd.builders.conjugation.build_conjugate_from_config() or the public "
+            "conjugation API workflow to build conjugated systems."
         )
-        self._combined_topology = result.topology
-        return self._combined_topology
 
     def _ingest_existing_conjugation_source(self, config: "SimulationConfig") -> Any | None:
         """Parse a prepared conjugation source once for the builder hook.

@@ -8,13 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
-from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
 from polyzymd.builders.conjugation.exceptions import ConjugationNotImplementedError
-from polyzymd.builders.conjugation.pablo.ingestion import (
-    PabloAvailability,
-    PabloIngestionResult,
-    PabloIngestor,
-)
 from polyzymd.config.schema import (
     CcdLookupPolicy,
     ConjugationCcdPabloPolicyConfig,
@@ -239,52 +233,6 @@ class TestConjugationConfigParsing:
             ConjugationChainPolicyConfig(protein_chain="1")
 
 
-class TestCovalentModificationBuilder:
-    """Builder behavior tests for the no-op skeleton."""
-
-    def test_from_config_accepts_simulation_config(self):
-        """Factory extracts the nested conjugation config."""
-        sim_config = MagicMock()
-        sim_config.conjugation = ConjugationConfig(enabled=False)
-
-        builder = CovalentModificationBuilder.from_config(sim_config)
-
-        assert builder.config is sim_config.conjugation
-
-    def test_disabled_builder_returns_input_unchanged(self):
-        """Disabled conjugation is a no-op with empty sidecar models."""
-        topology = object()
-        builder = CovalentModificationBuilder(ConjugationConfig(enabled=False))
-
-        result = builder.build(topology)
-
-        assert result.topology is topology
-        assert result.metadata.enabled is False
-        assert result.metadata.components == []
-        assert result.diagnostics.enabled is False
-        assert result.diagnostics.diagnostics == []
-
-    def test_enabled_construct_raises_clear_not_implemented(self):
-        """Construct mode fails clearly in the Phase 0-1 skeleton."""
-        builder = CovalentModificationBuilder(ConjugationConfig(enabled=True, mode="construct"))
-
-        with pytest.raises(ConjugationNotImplementedError, match="not implemented"):
-            builder.build(object())
-
-    def test_enabled_ingest_existing_raises_clear_not_implemented(self):
-        """Ingest mode routes through the Pablo adapter boundary and fails clearly."""
-        builder = CovalentModificationBuilder(
-            ConjugationConfig(
-                enabled=True,
-                mode="ingest_existing",
-                source_pdb_path="prebuilt_conjugate.pdb",
-            )
-        )
-
-        with pytest.raises(ConjugationNotImplementedError, match="Pablo|not implemented"):
-            builder.build(object())
-
-
 class TestSystemBuilderConjugationHook:
     """SystemBuilder compatibility tests for the pre-solvation hook."""
 
@@ -315,7 +263,7 @@ class TestSystemBuilderConjugationHook:
         assert builder._apply_conjugation(config) is topology
 
     def test_enabled_conjugation_fails_before_solvation(self):
-        """Enabled skeleton paths fail clearly at the pre-solvation hook."""
+        """Enabled legacy paths fail with a public workflow pointer."""
         from polyzymd.builders.system_builder import SystemBuilder
 
         builder = SystemBuilder.__new__(SystemBuilder)
@@ -329,130 +277,8 @@ class TestSystemBuilderConjugationHook:
         config = MagicMock()
         config.conjugation = ConjugationConfig(enabled=True, mode="construct")
 
-        with pytest.raises(ConjugationNotImplementedError, match="not implemented"):
+        with pytest.raises(ConjugationNotImplementedError, match="build_conjugate_from_config"):
             builder._apply_conjugation(config)
-
-    def test_ingest_existing_passes_cached_pablo_result_to_builder(self, monkeypatch, tmp_path):
-        """SystemBuilder should parse ingest-existing sources once and reuse the result."""
-        from polyzymd.builders.system_builder import SystemBuilder
-
-        source = tmp_path / "prebuilt_conjugate.pdb"
-        source.write_text("HEADER    TEST\nEND\n")
-        cached_topology = object()
-        calls = []
-
-        def fake_ingest_structure(self, path, *, chain_policy=None, output_dir=None):
-            """Return one successful cached Pablo ingestion result."""
-            calls.append(Path(path))
-            return PabloIngestionResult(
-                success=True,
-                path=Path(path),
-                suffix=".pdb",
-                pablo=PabloAvailability(available=True),
-                topology=cached_topology,
-            )
-
-        monkeypatch.setattr(PabloIngestor, "ingest_structure", fake_ingest_structure)
-
-        builder = SystemBuilder.__new__(SystemBuilder)
-        builder._combined_topology = object()
-        builder._enzyme_topology = object()
-        builder._working_dir = tmp_path
-        builder._n_enzyme_molecules = 1
-        builder._n_substrate_molecules = 0
-        builder._n_polymer_chains = 0
-
-        config = MagicMock()
-        config.enzyme.pdb_path = source
-        config.conjugation = ConjugationConfig(
-            enabled=True,
-            mode="ingest_existing",
-            source_pdb_path=source,
-        )
-
-        assert builder._apply_conjugation(config) is cached_topology
-        assert calls == [source]
-
-    def test_construct_with_source_uses_pablo_without_mode_conflict(self, monkeypatch, tmp_path):
-        """Construct workflows with a source PDB should ingest the base structure."""
-        from polyzymd.builders.system_builder import SystemBuilder
-
-        source = tmp_path / "prepared_base.pdb"
-        source.write_text("HEADER    TEST\nEND\n")
-        cached_topology = object()
-        calls = []
-
-        def fake_ingest_structure(self, path, *, chain_policy=None, output_dir=None):
-            """Return one successful cached Pablo ingestion result."""
-            calls.append(Path(path))
-            return PabloIngestionResult(
-                success=True,
-                path=Path(path),
-                suffix=".pdb",
-                pablo=PabloAvailability(available=True),
-                topology=cached_topology,
-            )
-
-        monkeypatch.setattr(PabloIngestor, "ingest_structure", fake_ingest_structure)
-
-        builder = SystemBuilder.__new__(SystemBuilder)
-        builder._combined_topology = object()
-        builder._enzyme_topology = object()
-        builder._working_dir = tmp_path
-        builder._n_enzyme_molecules = 1
-        builder._n_substrate_molecules = 0
-        builder._n_polymer_chains = 0
-
-        config = MagicMock()
-        config.enzyme.pdb_path = tmp_path / "enzyme.pdb"
-        config.conjugation = ConjugationConfig(
-            enabled=True,
-            mode="construct",
-            source_pdb_path=source,
-        )
-
-        assert builder._apply_conjugation(config) is cached_topology
-        assert calls == [source]
-
-    def test_ingest_existing_cached_pablo_failure_is_hard_error(self, monkeypatch, tmp_path):
-        """Failed cached Pablo validation should stop the pre-solvation hook."""
-        from polyzymd.builders.system_builder import SystemBuilder
-
-        source = tmp_path / "prebuilt_conjugate.pdb"
-        source.write_text("HEADER    TEST\nEND\n")
-        calls = []
-
-        def fake_ingest_structure(self, path, *, chain_policy=None, output_dir=None):
-            """Return one failed cached Pablo ingestion result."""
-            calls.append(Path(path))
-            return PabloIngestionResult(
-                success=False,
-                path=Path(path),
-                suffix=".pdb",
-                pablo=PabloAvailability(available=True),
-            )
-
-        monkeypatch.setattr(PabloIngestor, "ingest_structure", fake_ingest_structure)
-
-        builder = SystemBuilder.__new__(SystemBuilder)
-        builder._combined_topology = object()
-        builder._enzyme_topology = object()
-        builder._working_dir = tmp_path
-        builder._n_enzyme_molecules = 1
-        builder._n_substrate_molecules = 0
-        builder._n_polymer_chains = 0
-
-        config = MagicMock()
-        config.enzyme.pdb_path = source
-        config.conjugation = ConjugationConfig(
-            enabled=True,
-            mode="ingest_existing",
-            source_pdb_path=source,
-        )
-
-        with pytest.raises(ConjugationNotImplementedError, match="usable topology"):
-            builder._apply_conjugation(config)
-        assert calls == [source]
 
     def test_pack_polymers_preserves_conjugate_chain_ids(self, monkeypatch):
         """PACKMOL should not overwrite chain IDs on pre-linked conjugates."""

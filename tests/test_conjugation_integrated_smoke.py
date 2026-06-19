@@ -30,26 +30,33 @@ from typing import TypeVar
 
 import pytest
 
-from polyzymd.builders.conjugation._linkage import PabloCrosslinkRequirement
-from polyzymd.builders.conjugation._linkage import require_pablo_crosslink_requirement
-from polyzymd.builders.conjugation._linkage import NhsLysModifierLinker
-from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestionResult, PabloIngestor
-from polyzymd.builders.conjugation.pablo.parameterization import create_interchange_from_pablo_topology
-from polyzymd.builders.conjugation.structure.pdb import (
-    CrosslinkedPdbAssemblyOptions,
-    PdbAtomRecord,
-    write_crosslinked_pdb,
-)
 from polyzymd.builders.conjugation._assembly import (
     PackmolModifierPlacementSettings,
     place_modifier_with_packmol,
+)
+from polyzymd.builders.conjugation._linkage import (
+    NhsLysModifierLinker,
+    PabloCrosslinkRequirement,
+    require_pablo_crosslink_requirement,
+)
+from polyzymd.builders.conjugation._relaxation import (
+    VacuumSmokeSettings,
+    run_restrained_vacuum_smoke,
+)
+from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestionResult, PabloIngestor
+from polyzymd.builders.conjugation.pablo.parameterization import (
+    create_interchange_from_pablo_topology,
 )
 from polyzymd.builders.conjugation.polymer import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.polymer.recipe import (
     generate_polymerist_smoke_polymer,
     sbma_egpma_nhs_recipe,
 )
-from polyzymd.builders.conjugation._relaxation import VacuumSmokeSettings, run_restrained_vacuum_smoke
+from polyzymd.builders.conjugation.structure.pdb import (
+    CrosslinkedPdbAssemblyOptions,
+    PdbAtomRecord,
+    write_crosslinked_pdb,
+)
 
 T = TypeVar("T")
 

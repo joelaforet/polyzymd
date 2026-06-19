@@ -1,4 +1,4 @@
-"""Models for covalent modification and conjugation builders."""
+"""Public models for conjugate construction."""
 
 from __future__ import annotations
 
@@ -6,15 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
-
-from polyzymd.builders.conjugation._artifacts import (
-    ConjugationDiagnosticsReport,
-    ConjugationMetadata,
-)
-from polyzymd.builders.conjugation.execution import (
-    RdkitGraphEditExecutionResult,
-    RdkitGraphEditExecutionSummary,
-)
 
 
 class ConjugateBuildRequest(BaseModel):
@@ -122,22 +113,3 @@ def _optional_path(value: Any) -> Path | None:
     if value is None:
         return None
     return Path(value)
-
-
-class ConjugationBuildResult(BaseModel):
-    """Result returned by the covalent modification builder."""
-
-    model_config = {"arbitrary_types_allowed": True}
-
-    topology: Any
-    metadata: ConjugationMetadata
-    diagnostics: ConjugationDiagnosticsReport
-    graph_edit_results: list[RdkitGraphEditExecutionResult] = Field(
-        default_factory=list,
-        exclude=True,
-        description="In-memory RDKit graph edit results excluded from serialization",
-    )
-    graph_edit_summaries: list[RdkitGraphEditExecutionSummary] = Field(
-        default_factory=list,
-        description="JSON-safe summaries for explicit graph edit execution",
-    )
