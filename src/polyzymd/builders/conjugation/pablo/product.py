@@ -78,6 +78,7 @@ def build_product_state_pablo_library(
     polymer_sdf: Path | str | None = None,
     generated_fragment: Any | None = None,
     resolved_plan: Any | None = None,
+    product_residue_mappings: Mapping[str, Mapping[str, Any]] | None = None,
     *,
     pablo_module: Any | None = None,
 ) -> ProductStatePabloLibrary:
@@ -132,16 +133,35 @@ def build_product_state_pablo_library(
     definitions.append(protein_definition)
     summaries.append(_summarize_definition(protein_definition, protein_key))
 
+    polymer_residue_keys = _product_residue_keys_from_mappings(
+        product_atoms,
+        product_residue_mappings,
+    )
+    polymer_atoms = _scoped_polymer_product_atoms(product_atoms, polymer_residue_keys)
+    source_residue_aliases = _source_residue_aliases(
+        product_atoms,
+        product_residue_mappings,
+    )
+    if polymer_residue_keys is not None:
+        diagnostics.append(
+            "Product-state definitions were scoped to one attachment's emitted chain-C residues"
+        )
+
     fragment_bonds = _fragment_bonds(generated_fragment)
     sdf_bonds = _polymer_sdf_bonds(polymer_sdf, generated_fragment)
     if sdf_bonds:
         fragment_bonds = (*fragment_bonds, *sdf_bonds)
     product_bonds, external_polymer_bonds = _product_bonds_and_links_by_residue(
-        product_atoms,
+        polymer_atoms,
         conect_pairs,
         fragment_bonds=fragment_bonds,
+        source_residue_aliases=source_residue_aliases,
     )
-    product_formal_charges = _product_formal_charges(product_atoms, generated_fragment)
+    product_formal_charges = _product_formal_charges(
+        polymer_atoms,
+        generated_fragment,
+        source_residue_aliases=source_residue_aliases,
+    )
     polymer_link_plans, polymer_link_diagnostics = _plan_polymer_external_links(
         external_polymer_bonds,
         reserved_crosslink_keys={modifier_key},
@@ -156,7 +176,7 @@ def build_product_state_pablo_library(
     if not fragment_bonds:
         diagnostics.append("No generated-fragment bond graph was available; using PDB CONECT bonds")
 
-    for key, residue_atoms in _product_polymer_residues(product_atoms):
+    for key, residue_atoms in _product_polymer_residues(polymer_atoms):
         is_modified = key == modifier_key
         link_plan = polymer_link_plans.get(key, _EMPTY_POLYMER_LINK_PLAN)
         definition = _build_pdb_residue_definition(
@@ -222,6 +242,7 @@ def build_product_state_pablo_library_for_specs(
                 polymer_sdf=sdf_path,
                 generated_fragment=generated_fragment,
                 resolved_plan=getattr(spec, "resolved_plan", None),
+                product_residue_mappings=_spec_product_residue_mappings(spec),
                 pablo_module=pablo_module,
             )
         )
@@ -269,6 +290,12 @@ def _spec_sdf_path(spec: Any) -> Path | None:
         if sidecars and sidecars.get("sdf") is not None:
             return Path(sidecars["sdf"])
     return None
+
+
+def _spec_product_residue_mappings(spec: Any) -> Mapping[str, Mapping[str, Any]] | None:
+    """Return assembly residue mappings recorded for one attachment spec."""
+    mappings = getattr(spec, "product_residue_mappings", None)
+    return mappings or None
 
 
 def _validate_spec_sidecars(
@@ -619,15 +646,92 @@ def _polymer_sdf_bonds(
     return tuple(bonds)
 
 
+def _product_residue_keys_from_mappings(
+    product_atoms: list[PdbAtomRecord],
+    product_residue_mappings: Mapping[str, Mapping[str, Any]] | None,
+) -> set[tuple[str, str, int, str]] | None:
+    """Return concrete product residue keys emitted for one attachment."""
+    if not product_residue_mappings:
+        return None
+    keys: set[tuple[str, str, int, str]] = set()
+    for mapping in product_residue_mappings.values():
+        target_chain = str(mapping.get("target_chain", "C"))
+        target_number = _parse_int(mapping.get("target_residue_number"))
+        if target_number is None:
+            continue
+        keys.update(
+            _residue_key(atom)
+            for atom in product_atoms
+            if atom.chain_id == target_chain and atom.residue_number == target_number
+        )
+    return keys
+
+
+def _scoped_polymer_product_atoms(
+    product_atoms: list[PdbAtomRecord],
+    polymer_residue_keys: set[tuple[str, str, int, str]] | None,
+) -> list[PdbAtomRecord]:
+    """Return atoms with chain-C residues limited to one attachment when known."""
+    if polymer_residue_keys is None:
+        return product_atoms
+    return [
+        atom
+        for atom in product_atoms
+        if atom.chain_id != "C" or _residue_key(atom) in polymer_residue_keys
+    ]
+
+
+def _source_residue_aliases(
+    product_atoms: list[PdbAtomRecord],
+    product_residue_mappings: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[tuple[str, int, str], tuple[int, str]]:
+    """Map emitted product residues back to source fragment residue numbers."""
+    if not product_residue_mappings:
+        return {}
+    aliases: dict[tuple[str, int, str], tuple[int, str]] = {}
+    for source_key, mapping in product_residue_mappings.items():
+        source_number = _parse_source_residue_number(source_key, mapping)
+        if source_number is None:
+            continue
+        target_chain = str(mapping.get("target_chain", "C"))
+        target_number = _parse_int(mapping.get("target_residue_number"))
+        if target_number is None:
+            continue
+        insertion_code = ""
+        for atom in product_atoms:
+            if atom.chain_id == target_chain and atom.residue_number == target_number:
+                insertion_code = atom.insertion_code
+                break
+        aliases[(target_chain, target_number, insertion_code)] = (source_number, "")
+    return aliases
+
+
+def _parse_source_residue_number(
+    source_key: str,
+    mapping: Mapping[str, Any],
+) -> int | None:
+    """Return the source fragment residue number from an assembly mapping."""
+    mapped = _parse_int(mapping.get("source_residue_number"))
+    if mapped is not None:
+        return mapped
+    digits = "".join(char for char in str(source_key) if char.isdigit())
+    return _parse_int(digits)
+
+
 def _product_formal_charges(
     product_atoms: list[PdbAtomRecord],
     generated_fragment: Any | None,
+    *,
+    source_residue_aliases: Mapping[tuple[str, int, str], tuple[int, str]] | None = None,
 ) -> dict[tuple[str, str, int, str], dict[str, int]]:
     """Map non-zero generated-fragment formal charges onto product PDB residues."""
     if generated_fragment is None:
         return {}
     unique_atom_names = _unique_fragment_atom_names(generated_fragment)
-    product_lookup = _product_lookup(product_atoms)
+    product_lookup = _product_lookup(
+        product_atoms,
+        source_residue_aliases=source_residue_aliases,
+    )
     charges: dict[tuple[str, str, int, str], dict[str, int]] = defaultdict(dict)
     for atom in getattr(generated_fragment, "atoms", ()) or ():
         charge = getattr(atom, "formal_charge", None)
@@ -756,6 +860,7 @@ def _product_bonds_and_links_by_residue(
     conect_pairs: tuple[tuple[int, int], ...],
     *,
     fragment_bonds: tuple[tuple[Any, Any, int], ...],
+    source_residue_aliases: Mapping[tuple[str, int, str], tuple[int, str]] | None = None,
 ) -> tuple[
     dict[tuple[str, str, int, str], tuple[tuple[str, str, int], ...]],
     tuple[_PolymerExternalBond, ...],
@@ -775,7 +880,10 @@ def _product_bonds_and_links_by_residue(
         else:
             _record_external_polymer_bond(external_bonds, atom1, atom2, 1)
 
-    product_lookup = _product_lookup(product_atoms)
+    product_lookup = _product_lookup(
+        product_atoms,
+        source_residue_aliases=source_residue_aliases,
+    )
     for raw1, raw2, order in fragment_bonds:
         atom1 = product_lookup.get(raw1)
         atom2 = product_lookup.get(raw2)
@@ -1096,7 +1204,11 @@ def _add_link_leaving_bonds(
     return leaving_index + 1
 
 
-def _product_lookup(product_atoms: list[PdbAtomRecord]) -> dict[Any, PdbAtomRecord]:
+def _product_lookup(
+    product_atoms: list[PdbAtomRecord],
+    *,
+    source_residue_aliases: Mapping[tuple[str, int, str], tuple[int, str]] | None = None,
+) -> dict[Any, PdbAtomRecord]:
     """Build flexible product atom lookups for generated-fragment bond references."""
     lookup: dict[Any, PdbAtomRecord] = {}
     atom_name_counts = Counter(atom.atom_name for atom in product_atoms)
@@ -1109,6 +1221,15 @@ def _product_lookup(product_atoms: list[PdbAtomRecord]) -> dict[Any, PdbAtomReco
             lookup.setdefault(atom.atom_name, atom)
         lookup.setdefault((atom.residue_number, atom.atom_name), atom)
         lookup.setdefault((atom.chain_id, atom.residue_number, atom.atom_name), atom)
+        if source_residue_aliases:
+            alias = source_residue_aliases.get(
+                (atom.chain_id, atom.residue_number, atom.insertion_code)
+            )
+            if alias is not None:
+                source_number, source_insertion = alias
+                lookup.setdefault((source_number, atom.atom_name), atom)
+                lookup.setdefault((source_number, source_insertion, atom.atom_name), atom)
+                lookup.setdefault((atom.chain_id, source_number, atom.atom_name), atom)
     return lookup
 
 

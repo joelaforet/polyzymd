@@ -101,6 +101,10 @@ class AttachmentBuildSpec(BaseModel):
     generated_fragment: GeneratedPolymerFragment = Field(exclude=True)
     resolved_plan: ResolvedAttachmentPlan
     source_sidecars: dict[str, Path] = Field(default_factory=dict)
+    product_residue_mappings: dict[str, dict[str, int | str]] = Field(
+        default_factory=dict,
+        exclude=True,
+    )
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
 
 

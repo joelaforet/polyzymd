@@ -396,6 +396,52 @@ def test_product_state_pablo_library_preserves_sdf_formal_charges_without_pdb_ch
     assert _definition_atom_charge(definitions[2], "OS3") == -1
 
 
+def test_product_state_pablo_library_for_specs_scopes_repeated_polymer_residues(
+    tmp_path: Path,
+):
+    """Repeated NHS-polymer fragments should map bond orders to each emitted copy."""
+    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    source.write_text(_source_two_lys_pdb(), encoding="utf-8")
+    product.write_text(_two_attachment_fixture_product_pdb(fixture), encoding="utf-8")
+
+    fragment = _generated_fragment_from_fixture(fixture)
+    specs = (
+        SimpleNamespace(
+            attachment_id="site_23",
+            generated_fragment=fragment,
+            resolved_plan=_fixture_resolved_plan_like(
+                protein_residue_number=23,
+                modifier_residue_number=6,
+            ),
+            product_residue_mappings=_product_residue_mappings((1, 2, 3), (6, 7, 8)),
+        ),
+        SimpleNamespace(
+            attachment_id="site_44",
+            generated_fragment=fragment,
+            resolved_plan=_fixture_resolved_plan_like(
+                protein_residue_number=44,
+                modifier_residue_number=16,
+            ),
+            product_residue_mappings=_product_residue_mappings((1, 2, 3), (16, 17, 18)),
+        ),
+    )
+
+    library = build_product_state_pablo_library_for_specs(product, source, specs)
+
+    chain_c = _chain_c_definitions(library)
+    assert [summary.residue_number for summary, _definition in chain_c] == [6, 7, 8, 16, 17, 18]
+    definitions = {summary.residue_number: definition for summary, definition in chain_c}
+    for residue_number in (7, 17):
+        assert _definition_valence(definitions[residue_number], "SUL") == 6
+        assert _definition_atom_charge(definitions[residue_number], "NQA") == 1
+        assert _definition_atom_charge(definitions[residue_number], "OS3") == -1
+    for residue_number in (6, 16):
+        assert _bond_order(definitions[residue_number], "CAA", "OAA") == 2
+        assert _bond_order(definitions[residue_number], "CAA", "CBA") == 1
+
+
 def test_product_state_pablo_library_rejects_under_specified_sdf(tmp_path: Path):
     """SDF zero-order bonds should fail with an actionable error, not chemistry repair."""
     fixture = _SBMA_EGPMA_NHS_CHEMISTRY
@@ -453,7 +499,11 @@ def test_generated_fragment_from_polymerist_pdb_preserves_sdf_bond_orders(tmp_pa
     assert _fragment_bond_order(fragment, 1, 3) == 1
 
 
-def _fixture_resolved_plan_like(*, modifier_residue_number: int = 1):
+def _fixture_resolved_plan_like(
+    *,
+    protein_residue_number: int = 23,
+    modifier_residue_number: int = 1,
+):
     requirement = PabloCrosslinkRequirement(
         residues=("LYX", "NHX"),
         linking_atoms=("NZ", "CAA"),
@@ -462,7 +512,7 @@ def _fixture_resolved_plan_like(*, modifier_residue_number: int = 1):
     )
     return SimpleNamespace(
         pablo_crosslink_requirement=requirement,
-        protein_link_atom=SimpleNamespace(chain_id="A", residue_number=23),
+        protein_link_atom=SimpleNamespace(chain_id="A", residue_number=protein_residue_number),
         modifier_link_atom=SimpleNamespace(chain_id="C", residue_number=modifier_residue_number),
         modifier_leaving_atoms=(),
         contract=SimpleNamespace(
@@ -543,6 +593,71 @@ def _fixture_product_pdb(
         lines.append(f"CONECT{serial:5d}{bonded}\n")
     lines.append("END\n")
     return "".join(lines)
+
+
+def _two_attachment_fixture_product_pdb(fixture: PolymerChemistryFixture) -> str:
+    lines = [*_product_two_lys_atoms()]
+    first_serial_by_atom = _append_fixture_product_copy(
+        lines,
+        fixture,
+        serial_offset=200,
+        residue_number_map={1: 6, 2: 7, 3: 8},
+    )
+    second_serial_by_atom = _append_fixture_product_copy(
+        lines,
+        fixture,
+        serial_offset=400,
+        residue_number_map={1: 16, 2: 17, 3: 18},
+    )
+    lines.append(f"CONECT    9{first_serial_by_atom['CAA']:5d}\n")
+    lines.append(f"CONECT  109{second_serial_by_atom['CAA']:5d}\n")
+    _append_fixture_conect(lines, fixture, first_serial_by_atom)
+    _append_fixture_conect(lines, fixture, second_serial_by_atom)
+    lines.append("END\n")
+    return "".join(lines)
+
+
+def _append_fixture_product_copy(
+    lines: list[str],
+    fixture: PolymerChemistryFixture,
+    *,
+    serial_offset: int,
+    residue_number_map: dict[int, int],
+) -> dict[str, int]:
+    serial_by_atom = {
+        atom_name: serial_offset + index
+        for index, (atom_name, *_rest) in enumerate(fixture.atoms, start=1)
+    }
+    lines.extend(
+        _pdb_atom(
+            serial_by_atom[atom_name],
+            atom_name,
+            residue_name,
+            "C",
+            residue_number_map.get(residue_number, residue_number),
+            element,
+            record="HETATM",
+            charge=charge,
+        )
+        for atom_name, residue_name, residue_number, element, charge in fixture.atoms
+    )
+    return serial_by_atom
+
+
+def _append_fixture_conect(
+    lines: list[str],
+    fixture: PolymerChemistryFixture,
+    serial_by_atom: dict[str, int],
+) -> None:
+    conect: dict[int, set[int]] = {}
+    for atom1, atom2, _order in fixture.bonds:
+        serial1 = serial_by_atom[atom1]
+        serial2 = serial_by_atom[atom2]
+        conect.setdefault(serial1, set()).add(serial2)
+        conect.setdefault(serial2, set()).add(serial1)
+    for serial in sorted(conect):
+        bonded = "".join(f"{target:5d}" for target in sorted(conect[serial]))
+        lines.append(f"CONECT{serial:5d}{bonded}\n")
 
 
 def _fixture_polymer_pdb(
@@ -701,6 +816,44 @@ def _source_lys_pdb() -> str:
     )
 
 
+def _source_two_lys_pdb() -> str:
+    lines = []
+    serial = 1
+    for residue_number in (23, 44):
+        for atom_name, element in (
+            ("N", "N"),
+            ("CA", "C"),
+            ("C", "C"),
+            ("O", "O"),
+            ("CB", "C"),
+            ("CG", "C"),
+            ("CD", "C"),
+            ("CE", "C"),
+            ("NZ", "N"),
+            ("HZ1", "H"),
+            ("HZ2", "H"),
+            ("HZ3", "H"),
+        ):
+            lines.append(_pdb_atom(serial, atom_name, "LYS", "A", residue_number, element))
+            serial += 1
+    lines.append("END\n")
+    return "".join(lines)
+
+
+def _product_residue_mappings(
+    source_numbers: tuple[int, ...],
+    target_numbers: tuple[int, ...],
+) -> dict[str, dict[str, int | str]]:
+    return {
+        str(source_number): {
+            "source_residue_number": source_number,
+            "target_chain": "C",
+            "target_residue_number": target_number,
+        }
+        for source_number, target_number in zip(source_numbers, target_numbers, strict=True)
+    }
+
+
 def _product_pdb() -> str:
     return "".join(
         [
@@ -779,6 +932,26 @@ def _product_protein_atoms() -> list[str]:
         _pdb_atom(9, "NZ", "LYX", "A", 23, "N"),
         _pdb_atom(10, "HZ1", "LYX", "A", 23, "H"),
     ]
+
+
+def _product_two_lys_atoms() -> list[str]:
+    lines = _product_protein_atoms()
+    lines.extend(
+        _pdb_atom(serial, atom_name, "LYX", "A", 44, element)
+        for serial, atom_name, element in (
+            (101, "N", "N"),
+            (102, "CA", "C"),
+            (103, "C", "C"),
+            (104, "O", "O"),
+            (105, "CB", "C"),
+            (106, "CG", "C"),
+            (107, "CD", "C"),
+            (108, "CE", "C"),
+            (109, "NZ", "N"),
+            (110, "HZ1", "H"),
+        )
+    )
+    return lines
 
 
 def _chain_c_definitions(library):
