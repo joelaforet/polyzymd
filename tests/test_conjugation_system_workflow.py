@@ -449,7 +449,7 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
         relaxed = Path(output_dir) / "local-relaxed.pdb"
         relaxed.write_text("END\n", encoding="utf-8")
         return SimpleNamespace(
-            success=True,
+            success=False,
             relaxed_pdb_path=relaxed,
             blocker=None,
         )
@@ -510,6 +510,7 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
     assert topology is not None
     assert construction.local_minimization is not None
     assert construction.local_minimization.relaxed_pdb_path.name == "local-relaxed.pdb"
+    assert construction.local_minimization.success is False
     assert construction.smoke is None
     assert calls["placed_protein_path"] == prepared_protein
     assert calls["modifier_count"] == 1
@@ -525,6 +526,10 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
     assert calls["local_settings"].c047_selector.residue_name == "NHX"
     assert calls["local_requirement"].leaving_atoms == ((), ())
     assert calls["local_product_library"] is product_library
+    assert any(
+        "local minimization completed and wrote a relaxed PDB" in item
+        for item in construction.diagnostics
+    )
 
 
 def test_nhs_lys_shim_forwards_local_minimization_settings(monkeypatch, tmp_path: Path):

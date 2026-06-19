@@ -919,8 +919,16 @@ def _construct_conjugate_from_specs(
                 resolved_plan=resolved_plans[0],
             )
             if not local_minimization_result.success:
-                blocker = local_minimization_result.blocker or "unknown blocker"
-                raise RuntimeError(f"Product-state local minimization failed: {blocker}")
+                blocker = getattr(local_minimization_result, "blocker", None)
+                relaxed_path = getattr(local_minimization_result, "relaxed_pdb_path", None)
+                if blocker is not None or relaxed_path is None:
+                    detail = blocker or "local minimization did not produce a relaxed PDB"
+                    raise RuntimeError(f"Product-state local minimization failed: {detail}")
+                diagnostics.append(
+                    "Product-state local minimization completed and wrote a relaxed PDB, "
+                    "but post-minimization geometry validation did not pass. Continuing with "
+                    "the local-minimized artifact without falling back to smoke relaxation."
+                )
         else:
             mechanism_name = _attachment_mechanism_name(specs[0])
             diagnostics.append(
