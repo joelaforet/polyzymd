@@ -35,7 +35,7 @@ from polyzymd.builders.conjugation.crosslinks import require_pablo_crosslink_req
 from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestionResult, PabloIngestor
 from polyzymd.builders.conjugation.pablo.parameterization import create_interchange_from_pablo_topology
-from polyzymd.builders.conjugation.pdb_assembly import (
+from polyzymd.builders.conjugation.structure.pdb import (
     CrosslinkedPdbAssemblyOptions,
     PdbAtomRecord,
     write_crosslinked_pdb,

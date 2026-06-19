@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from polyzymd.builders.conjugation.nhs_lys import detect_nhs_reactive_group
-from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
 from polyzymd.builders.conjugation.polymer.fragment import (
     GeneratedPolymerFragment,
     PolymerFragmentAtom,
     PolymerFragmentResidue,
 )
 from polyzymd.builders.conjugation.polymer.recipe import PolymerRecipe
+from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 _ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 

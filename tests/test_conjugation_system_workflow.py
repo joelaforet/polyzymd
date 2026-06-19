@@ -18,17 +18,17 @@ from polyzymd.builders.conjugation.contracts import (
 )
 from polyzymd.builders.conjugation.pablo.ingestion import PabloAvailability, PabloIngestionResult
 from polyzymd.builders.conjugation.pablo.parameterization import InterchangeParameterizationResult
-from polyzymd.builders.conjugation.pdb_assembly import (
+from polyzymd.builders.conjugation.placement import PackmolModifierPlacementResult
+from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction
+from polyzymd.builders.conjugation.structure.pdb import (
     CrosslinkedPdbAssemblyResult,
     PdbAtomRecord,
     PlacedPolymerFragment,
 )
-from polyzymd.builders.conjugation.placement import PackmolModifierPlacementResult
-from polyzymd.builders.conjugation.protein_preparation import (
+from polyzymd.builders.conjugation.structure.preparation import (
     ProteinCanonicalizationResult,
     ProteinCanonicalizationSettings,
 )
-from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction
 from polyzymd.builders.conjugation.system_workflow import (
     _apply_pdb_atom_names_to_topology,
     _construct_nhs_lys_modifier_linked_protein,

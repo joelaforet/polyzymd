@@ -14,7 +14,7 @@ from polyzymd.builders.conjugation.contracts import (
     PabloCrosslinkRequirement,
     parse_pdb_atom_records,
 )
-from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
+from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 
 class ProductStatePabloDefinitionSummary(BaseModel):

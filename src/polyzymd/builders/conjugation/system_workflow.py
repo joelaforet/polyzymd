@@ -30,11 +30,6 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     build_formal_charge_smoke_template,
     create_interchange_from_pablo_topology,
 )
-from polyzymd.builders.conjugation.pdb_assembly import (
-    CrosslinkedPdbAssemblyOptions,
-    PdbAtomRecord,
-    write_crosslinked_pdb,
-)
 from polyzymd.builders.conjugation.placement import (
     PackmolModifierPlacementSettings,
     place_modifier_with_packmol,
@@ -46,11 +41,6 @@ from polyzymd.builders.conjugation.polymer import (
     generate_polymerist_smoke_polymer,
     generated_fragment_from_polymerist_pdb,
 )
-from polyzymd.builders.conjugation.protein_preparation import (
-    ProteinCanonicalizationResult,
-    ProteinCanonicalizationSettings,
-    canonicalize_protein_hydrogens,
-)
 from polyzymd.builders.conjugation.reaction_roles import (
     STRUCTURE_MATCHING_BLOCKER_MESSAGE,
     atom_mapped_reaction_from_mechanism_config,
@@ -58,6 +48,16 @@ from polyzymd.builders.conjugation.reaction_roles import (
 )
 from polyzymd.builders.conjugation.reactions.library import get_reaction
 from polyzymd.builders.conjugation.smoke import VacuumSmokeSettings, run_restrained_vacuum_smoke
+from polyzymd.builders.conjugation.structure.pdb import (
+    CrosslinkedPdbAssemblyOptions,
+    PdbAtomRecord,
+    write_crosslinked_pdb,
+)
+from polyzymd.builders.conjugation.structure.preparation import (
+    ProteinCanonicalizationResult,
+    ProteinCanonicalizationSettings,
+    canonicalize_protein_hydrogens,
+)
 from polyzymd.builders.system_builder import SystemBuilder
 from polyzymd.config.schema import (
     ConjugationCcdCrosslinkConfig,

@@ -2672,7 +2672,7 @@ def clean_pdb(
     """
     warn_if_wrong_pixi_env("clean-pdb", "build")
 
-    from polyzymd.builders.conjugation.structure_normalization import (
+    from polyzymd.builders.conjugation.structure.normalization import (
         default_cleaned_pdb_path,
         plan_pdb_chain_normalization,
         write_normalized_pdb,

@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from polyzymd.builders.conjugation.contracts import parse_pdb_atom_records
-from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
+from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 
 class AtomIdentity(BaseModel):

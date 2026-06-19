@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from polyzymd.builders.conjugation.pdb_assembly import NhsLysPdbAttachment, write_crosslinked_pdb
+from polyzymd.builders.conjugation.structure.pdb import NhsLysPdbAttachment, write_crosslinked_pdb
 from polyzymd.builders.conjugation.polymer import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.polymer.recipe import (
     generate_polymerist_smoke_polymer,

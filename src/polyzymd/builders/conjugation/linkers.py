@@ -20,9 +20,9 @@ from polyzymd.builders.conjugation.contracts import (
     resolve_explicit_linkage_contract,
 )
 from polyzymd.builders.conjugation.nhs_lys import detect_nhs_reactive_group
-from polyzymd.builders.conjugation.pdb_assembly import NhsLysPdbAttachment, PdbAtomRecord
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.rdkit_inputs import AtomIdentity, load_pdb_as_rdkit_input
+from polyzymd.builders.conjugation.structure.pdb import NhsLysPdbAttachment, PdbAtomRecord
 
 LOGGER = logging.getLogger(__name__)
 

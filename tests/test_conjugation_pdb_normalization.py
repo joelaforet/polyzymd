@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from polyzymd.builders.conjugation.structure_inspection import inspect_pdb_structure
-from polyzymd.builders.conjugation.structure_normalization import (
+from polyzymd.builders.conjugation.structure.inspection import inspect_pdb_structure
+from polyzymd.builders.conjugation.structure.normalization import (
     default_cleaned_pdb_path,
     plan_pdb_chain_normalization,
     write_normalized_pdb,

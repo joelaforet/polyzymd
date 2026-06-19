@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from polyzymd.builders.conjugation.structure_inspection import (
+from polyzymd.builders.conjugation.structure.inspection import (
     POLYZMD_MOIETY_CHAIN,
     POLYZMD_PROTEIN_CHAIN,
     PDBAtomRecord,
