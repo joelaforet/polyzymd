@@ -984,10 +984,16 @@ def _product_state_specs_with_assembly_mappings(
     updated_specs = []
     for fragment_index, spec in enumerate(specs, start=1):
         plan = spec.resolved_plan
+        fragment_prefix = f"fragment_{fragment_index}:"
+        fragment_mappings = {
+            key.removeprefix(fragment_prefix): value
+            for key, value in mappings.items()
+            if key.startswith(fragment_prefix)
+        }
         source_key = _modifier_source_residue_key(plan.modifier_link_atom)
-        mapping = mappings.get(f"fragment_{fragment_index}:{source_key}")
+        mapping = fragment_mappings.get(source_key)
         if mapping is None:
-            updated_specs.append(spec)
+            updated_specs.append(_copy_spec_with_product_mappings(spec, fragment_mappings))
             continue
 
         modifier_link_atom = plan.modifier_link_atom.model_copy(
@@ -998,12 +1004,27 @@ def _product_state_specs_with_assembly_mappings(
             }
         )
         updated_plan = plan.model_copy(update={"modifier_link_atom": modifier_link_atom})
-        copier = getattr(spec, "model_copy", None)
-        if callable(copier):
-            updated_specs.append(copier(update={"resolved_plan": updated_plan}))
-        else:
-            updated_specs.append(_namespace_copy(spec, resolved_plan=updated_plan))
+        updated_specs.append(
+            _copy_spec_with_product_mappings(
+                spec,
+                fragment_mappings,
+                resolved_plan=updated_plan,
+            )
+        )
     return tuple(updated_specs)
+
+
+def _copy_spec_with_product_mappings(
+    spec: Any,
+    product_residue_mappings: dict[str, dict[str, int | str]],
+    **updates: Any,
+) -> Any:
+    """Copy a spec while attaching assembly residue mappings for Pablo templating."""
+    updates["product_residue_mappings"] = product_residue_mappings
+    copier = getattr(spec, "model_copy", None)
+    if callable(copier):
+        return copier(update=updates)
+    return _namespace_copy(spec, **updates)
 
 
 def _modifier_source_residue_key(atom: PdbAtomRecord) -> str:
