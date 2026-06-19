@@ -16,7 +16,7 @@ from polyzymd.builders.conjugation._assembly import (
     ModifierConstructionSettings,
     PackmolModifierPlacementSettings,
     place_modifier_with_packmol,
-    place_modifier_with_resolved_plan,
+    place_modifiers_with_resolved_plans,
 )
 from polyzymd.builders.conjugation._linkage import (
     NhsLysModifierLinker,
@@ -865,23 +865,20 @@ def _construct_multi_modifier_linked_protein(
         for requirement in product_state_requirements
     )
 
-    placements = []
-    placed_modifiers = []
-    for index, (modifier, plan) in enumerate(zip(modifiers, resolved_plans, strict=True), start=1):
-        placement = place_modifier_with_resolved_plan(
-            protein_pdb_path,
-            modifier,
+    placements = place_modifiers_with_resolved_plans(
+        protein_pdb_path,
+        modifiers,
+        resolved_plans,
+        artifact_dir,
+        settings=settings.placement,
+    )
+    placed_modifiers = tuple(
+        placed_fragment_from_resolved_plan(
+            placement.placed_modifier,
             plan,
-            artifact_dir / f"placement_{index:02d}",
-            settings=settings.placement,
         )
-        placements.append(placement)
-        placed_modifiers.append(
-            placed_fragment_from_resolved_plan(
-                placement.placed_modifier,
-                plan,
-            )
-        )
+        for placement, plan in zip(placements, resolved_plans, strict=True)
+    )
 
     crosslinked_pdb_path = artifact_dir / settings.crosslinked_pdb_name
     assembly_result = write_crosslinked_pdb(
@@ -936,7 +933,7 @@ def _construct_multi_modifier_linked_protein(
             crosslink_validation=crosslink_validations[0],
             crosslink_validations=crosslink_validations,
             placement=placements[0],
-            placements=tuple(placements),
+            placements=placements,
             assembly=assembly_result,
             pablo=pablo_result,
             parameterization=parameterization_result,
