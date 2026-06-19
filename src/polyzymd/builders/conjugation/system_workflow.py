@@ -24,8 +24,8 @@ from polyzymd.builders.conjugation.crosslinks import (
     require_pablo_crosslink_requirement,
 )
 from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
-from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
-from polyzymd.builders.conjugation.parameterization import (
+from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
+from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationSettings,
     build_formal_charge_smoke_template,
     create_interchange_from_pablo_topology,
@@ -566,7 +566,7 @@ def _construct_nhs_lys_modifier_linked_protein(
     product_state_pablo_library = None
     product_state_residue_library = None
     if use_product_state_pablo_library:
-        from polyzymd.builders.conjugation.product_pablo import build_product_state_pablo_library
+        from polyzymd.builders.conjugation.pablo.product import build_product_state_pablo_library
 
         product_state_pablo_library = build_product_state_pablo_library(
             product_pdb=crosslinked_pdb_path,

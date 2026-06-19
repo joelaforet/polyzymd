@@ -2833,7 +2833,7 @@ def _validate_clean_pdb_with_pablo(
             ),
         )
 
-    from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
+    from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
     from polyzymd.config.schema import (
         ConjugationCcdPabloPolicyConfig,
         ConjugationChainPolicyConfig,

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from polyzymd.builders.conjugation.parameterization import (
+from polyzymd.builders.conjugation.pablo.parameterization import (
     DEFAULT_CONJUGATION_FORCE_FIELD_NAMES,
     _formal_charge_value,
     _topology_positions_as_angstrom,

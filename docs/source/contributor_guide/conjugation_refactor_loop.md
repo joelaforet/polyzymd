@@ -91,9 +91,11 @@ conjugation/
 │   └── polymerist.py
 ├── placement.py             # Packmol/geometric placement
 ├── pdb_assembly.py          # product PDB writing and CONECT handling
-├── product_pablo.py         # product-state Pablo residue definitions
-├── pablo_adapter.py         # Pablo ingestion boundary
-├── parameterization.py      # Interchange construction
+├── pablo/                   # Pablo/OpenFF integration boundary
+│   ├── ingestion.py         # Pablo ingestion boundary
+│   ├── product.py           # product-state Pablo residue definitions
+│   ├── parameterization.py  # Interchange construction
+│   └── residue_library.py   # Pablo residue-library policy helpers
 └── local_minimization.py    # restrained OpenMM minimization
 ```
 
@@ -143,9 +145,9 @@ still explicitly pending.
 
 The public API notebook/workflow should use `build_conjugate_from_config()` or
 `ConjugationEngine`. Internal helpers such as `system_workflow`,
-`protein_preparation`, `local_minimization`, `product_pablo`, `pablo_adapter`,
-and `parameterization` remain direct module imports for maintainers, but they
-are not re-exported from `polyzymd.builders.conjugation`.
+`protein_preparation`, `local_minimization`, and the `pablo` package remain
+direct module imports for maintainers, but they are not re-exported from
+`polyzymd.builders.conjugation`.
 
 ## Core data model
 
@@ -202,8 +204,8 @@ belong in `reactions/nhs_lys.py`.
 |-------|--------|-------|
 | 0 | Complete | Current import behavior and POC-adjacent behavior are covered by focused conjugation tests. |
 | 1 | Complete | `api.py`, `engine.py`, public models, and the reaction package skeleton exist. |
-| 2 | Superseded | Protein preparation and minimization remain in direct modules; transitional shim packages were removed. |
-| 3 | Superseded | Pablo/OpenFF boundaries remain in direct modules; transitional shim packages were removed. |
+| 2 | Complete | Pablo/OpenFF boundaries live under the internal `pablo/` package; transitional top-level shims remain removed. |
+| 3 | Superseded | Protein preparation and minimization remain in direct modules; transitional shim packages were removed. |
 | 4 | Complete, adapter-first | `NhsLysReaction` owns NHS-Lys defaults and reaction metadata, delegating to the proven implementation. |
 | 5 | Complete, conservative | `ConjugationEngine` centralizes public orchestration and delegates executable config builds to the existing system workflow. Direct OpenFF fallback is not silently enabled. |
 | 6 | Complete | Preserve old POC assets while keeping the package layout focused on the public API and direct internal modules. |
@@ -234,17 +236,18 @@ pixi run -e build ruff check src/polyzymd/builders/conjugation tests/test_conjug
 pixi run -e build black src/polyzymd/builders/conjugation tests/test_conjugation_*.py --check
 ```
 
-### Phase 2 — keep direct workflow modules focused
+### Phase 2 — consolidate Pablo/OpenFF boundaries
+
+Product-state Pablo library generation, ingestion, residue-library policy, and
+Interchange construction live under `pablo/`. Do not reintroduce top-level shim
+wrappers for the old `product_pablo.py`, `pablo_adapter.py`,
+`residue_library.py`, or `parameterization.py` paths.
+
+### Phase 3 — keep direct workflow modules focused
 
 Protein canonicalization and restrained minimization live in
 `protein_preparation.py` and `local_minimization.py`. Do not reintroduce
 transitional shim wrappers.
-
-### Phase 3 — keep Pablo/OpenFF boundaries direct
-
-Product-state Pablo library generation and ingestion live in
-`product_pablo.py`, `pablo_adapter.py`, and `parameterization.py`. Do not
-reintroduce transitional shim wrappers.
 
 ### Phase 4 — introduce `NhsLysReaction`
 
@@ -303,7 +306,6 @@ pixi run -e build make -C docs clean html
 Maintain these import paths temporarily with wrappers/deprecation notes:
 
 - `polyzymd.builders.conjugation.system_workflow`
-- `polyzymd.builders.conjugation.product_pablo`
 - `polyzymd.builders.conjugation.pdb_assembly`
 - `polyzymd.builders.conjugation.local_minimization`
 - `polyzymd.builders.conjugation.protein_preparation`

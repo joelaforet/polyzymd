@@ -449,7 +449,7 @@ class SystemBuilder:
         if not source_backed:
             return None
 
-        from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
+        from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
 
         source_path = conjugation_config.source_pdb_path
         if source_path is None and conjugation_config.mode == ConjugationMode.INGEST_EXISTING:

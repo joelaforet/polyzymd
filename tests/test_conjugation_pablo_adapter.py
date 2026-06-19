@@ -14,7 +14,7 @@ from polyzymd.builders.conjugation.exceptions import (
     ConjugationNotImplementedError,
     PabloIngestionError,
 )
-from polyzymd.builders.conjugation.pablo_adapter import (
+from polyzymd.builders.conjugation.pablo.ingestion import (
     PabloAvailability,
     PabloIngestionResult,
     PabloIngestor,
@@ -50,7 +50,7 @@ def _pdb_atom(
 
 def test_check_available_returns_version_and_path(monkeypatch):
     """Pablo availability checks should report lazy import metadata."""
-    import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
+    import polyzymd.builders.conjugation.pablo.ingestion as pablo_adapter
 
     fake_module = SimpleNamespace(__file__="/tmp/openff/pablo/__init__.py", __version__="9.9.9")
 
@@ -77,7 +77,7 @@ def test_check_available_returns_version_and_path(monkeypatch):
 
 def test_check_available_raises_clear_error_when_missing(monkeypatch):
     """Missing Pablo imports should raise a targeted ingestion error."""
-    import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
+    import polyzymd.builders.conjugation.pablo.ingestion as pablo_adapter
 
     def fake_import_module(name: str):
         """Simulate a missing Pablo installation."""
@@ -132,7 +132,7 @@ def test_preflight_structure_reports_pablo_availability(monkeypatch, tmp_path):
 
 def test_ingest_structure_success_extracts_metadata(monkeypatch, tmp_path):
     """Successful Pablo parsing should return topology and component metadata."""
-    import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
+    import polyzymd.builders.conjugation.pablo.ingestion as pablo_adapter
 
     structure = tmp_path / "structure.pdb"
     structure.write_text("HEADER    TEST\nEND\n")
@@ -214,7 +214,7 @@ def test_ingest_structure_success_extracts_metadata(monkeypatch, tmp_path):
 
 def test_ingest_structure_passes_configured_crosslink_library(monkeypatch, tmp_path):
     """Configured Pablo crosslinks should be applied to the residue library."""
-    import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
+    import polyzymd.builders.conjugation.pablo.ingestion as pablo_adapter
 
     structure = tmp_path / "structure.pdb"
     structure.write_text("HEADER    TEST\nEND\n")
@@ -306,7 +306,7 @@ def test_ingest_structure_passes_configured_crosslink_library(monkeypatch, tmp_p
 
 def test_ingest_structure_reports_crosslink_library_errors(monkeypatch, tmp_path):
     """Unsupported Pablo crosslink APIs should become ingestion diagnostics."""
-    import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
+    import polyzymd.builders.conjugation.pablo.ingestion as pablo_adapter
 
     structure = tmp_path / "structure.pdb"
     structure.write_text("HEADER    TEST\nEND\n")
@@ -340,7 +340,7 @@ def test_ingest_structure_reports_crosslink_library_errors(monkeypatch, tmp_path
 
 def test_ingest_structure_blocks_unapplied_residue_definition_files(monkeypatch, tmp_path):
     """Requested custom residue definitions should block before Pablo ingestion."""
-    import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
+    import polyzymd.builders.conjugation.pablo.ingestion as pablo_adapter
 
     structure = tmp_path / "structure.pdb"
     structure.write_text("HEADER    TEST\nEND\n")
@@ -371,7 +371,7 @@ def test_ingest_structure_blocks_unapplied_residue_definition_files(monkeypatch,
 
 def test_ingest_structure_failure_returns_actionable_diagnostics(monkeypatch, tmp_path):
     """Pablo parser failures should become structured diagnostics."""
-    import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
+    import polyzymd.builders.conjugation.pablo.ingestion as pablo_adapter
 
     structure = tmp_path / "structure.pdb"
     structure.write_text(

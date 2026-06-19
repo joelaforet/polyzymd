@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
 from polyzymd.builders.conjugation.exceptions import ConjugationNotImplementedError
-from polyzymd.builders.conjugation.pablo_adapter import (
+from polyzymd.builders.conjugation.pablo.ingestion import (
     PabloAvailability,
     PabloIngestionResult,
     PabloIngestor,
