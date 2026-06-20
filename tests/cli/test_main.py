@@ -546,6 +546,14 @@ class TestBuildCommandConjugationRouting:
 
         assert result.exit_code == 0
         assert "Conjugation workflow" in result.output
+        assert "Files to Generate (Conjugation OpenMM)" in result.output
+        assert "assembled_crosslinked.pdb" in result.output
+        assert "assembled_minimized.pdb" in result.output
+        assert "assembled_equilibrated.pdb" in result.output
+        assert "solvated_conjugate_free_polymers.pdb" in result.output
+        assert "conjugated_polymer_system_workflow.json" in result.output
+        assert "system.xml" in result.output
+        assert "solvated_system.pdb" not in result.output
 
 
 class TestRunCommandReplicateFlags:

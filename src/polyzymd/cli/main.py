@@ -314,6 +314,26 @@ def _print_openmm_build_summary(working_dir: Path) -> None:
     colored_echo("or 'polyzymd run-segment' to run a single segment locally.", phase="build")
 
 
+def _print_conjugation_dry_run_file_summary() -> None:
+    """Print the expected no-export dry-run artifacts for conjugation builds.
+
+    Notes
+    -----
+    The dry-run preview mirrors the conjugation route without executing the
+    workflow, so it reports the conventional artifact names produced by the
+    default conjugation settings.
+    """
+    colored_echo("Files to Generate (Conjugation OpenMM):", phase="build")
+    colored_echo("  Per replicate:", phase="build")
+    colored_echo("    - conjugate-construction/assembled_crosslinked.pdb", phase="build")
+    colored_echo("    - conjugate-construction/assembled_minimized.pdb", phase="build")
+    colored_echo("    - conjugate-construction/assembled_equilibrated.pdb", phase="build")
+    colored_echo("    - conjugate-construction/relaxed_conjugate.pdb", phase="build")
+    colored_echo("    - solvated_conjugate_free_polymers.pdb", phase="build")
+    colored_echo("    - conjugated_polymer_system_workflow.json", phase="build")
+    colored_echo("    - system.xml (OpenMM system with restraints)", phase="build")
+
+
 def _print_conjugation_openmm_build_summary(result: Any, working_dir: Path) -> None:
     """Print the OpenMM build summary for conjugation workflow output.
 
@@ -752,10 +772,13 @@ def build(
                         phase="build",
                     )
             else:
-                colored_echo("Files to Generate (OpenMM):", phase="build")
-                colored_echo("  Per replicate:", phase="build")
-                colored_echo("    - solvated_system.pdb (topology + positions)", phase="build")
-                colored_echo("    - system.xml (OpenMM system with restraints)", phase="build")
+                if _conjugation_enabled(sim_config):
+                    _print_conjugation_dry_run_file_summary()
+                else:
+                    colored_echo("Files to Generate (OpenMM):", phase="build")
+                    colored_echo("  Per replicate:", phase="build")
+                    colored_echo("    - solvated_system.pdb (topology + positions)", phase="build")
+                    colored_echo("    - system.xml (OpenMM system with restraints)", phase="build")
             colored_echo(phase="build")
 
             if sim_config.restraints:
