@@ -227,6 +227,46 @@ placement:
 | `target_bond_length_angstrom` | Optional target bond length for placement workflows. |
 | `clash_cutoff_angstrom` | Steric clash cutoff for placement checks. |
 
+## Product-State Charge Bridge
+
+Final OpenFF Interchange creation for a covalent protein-polymer conjugate uses
+an explicit full-molecule charge template. OpenFF sees the conjugated protein and
+attached polymer as one covalent molecule, so PolyzyMD must pass one complete
+`charge_from_molecules` template for that molecule rather than separate protein
+and polymer fragments.
+
+The current NHS-lysine bridge is an interoperability bridge, not a
+whole-conjugate AM1-BCC model. Its model choices are:
+
+- Standard protein atoms use ff14SB-style charges from the prepared source
+  protein.
+- Free polymers, substrate, water, and co-solvents continue to use the existing
+  standard charged-template path.
+- Attached polymer atoms use existing charged polymer/template charges when the
+  source-to-product atom mapping is stable.
+- Linkage and noncanonical NHS-lysine product atoms are overridden by a local
+  product-state NAGL/AshGC amide patch. The default model is
+  `openff-gnn-am1bcc-0.1.0-rc.3.pt`; `POLYZYMD_CONJUGATE_PATCH_NAGL_MODEL` can
+  override this for development runs.
+- A small total-charge closure correction may be applied to a mapped attached
+  polymer template atom so the complete template matches the conjugate formal
+  charge.
+
+The final production Interchange path refuses whole-conjugate AM1-BCC,
+Gasteiger fallback, formal-charge smoke templates, and unmarked cached charges.
+If any required atom cannot be mapped to one of the source classes above, the
+build fails with an explicit missing-identity message rather than inventing a
+fallback charge.
+
+The bridge writes `conjugate-construction/product_state_charge_bridge.json`.
+Inspect this sidecar to confirm the NAGL model, ff14SB atom count,
+polymer-template atom count, local patch atom count, total charge, formal charge,
+and any normalization correction.
+
+This charge bridge is experimental and currently scoped to NHS-lysine product
+states using the built-in `LYX` protein product residue and mapped attached
+polymer residues.
+
 ## Support Levels
 
 | Level | Meaning |
