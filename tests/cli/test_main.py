@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import click
 import pytest
@@ -64,6 +64,27 @@ def _make_dry_run_config() -> SimpleNamespace:
         restraints=[],
         get_working_directory=lambda rep: Path(f"/tmp/scratch/run_{rep}"),
     )
+
+
+def _make_build_config(*, conjugation_enabled: bool | None = None) -> SimpleNamespace:
+    """Create a config-like object for build command side-effect tests."""
+    config = _make_dry_run_config()
+    if conjugation_enabled is not None:
+        config.conjugation = SimpleNamespace(enabled=conjugation_enabled)
+    return config
+
+
+def _make_export_result(tmp_path: Path) -> dict[str, object]:
+    """Create an exporter result dictionary with expected file keys."""
+    return {
+        "gro": tmp_path / "system.gro",
+        "top": tmp_path / "system.top",
+        "em_mdp": tmp_path / "em.mdp",
+        "eq_mdps": [tmp_path / "eq.mdp"],
+        "prod_mdp": tmp_path / "prod.mdp",
+        "run_script": tmp_path / "run_gromacs.sh",
+        "posres_defines": {},
+    }
 
 
 def _minimal_cli_config_data(pdb_path: str | Path) -> dict[str, object]:
@@ -332,6 +353,148 @@ class TestBuildCommandReplicateFlags:
 
         assert result.exit_code != 0
         assert f"No such option: {option}" in result.output
+
+
+class TestBuildCommandConjugationRouting:
+    """Tests for build command conjugation workflow routing."""
+
+    @patch("polyzymd.exporters.interchange.export_system")
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    @patch("polyzymd.builders.conjugation.build_conjugate_from_config")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_enabled_conjugation_uses_conjugation_workflow(
+        self,
+        mock_from_yaml,
+        mock_build_conjugate,
+        mock_system_builder_from_config,
+        mock_export_system,
+        tmp_path: Path,
+    ) -> None:
+        """Enabled conjugation should bypass SystemBuilder and preserve replicate seed."""
+        sim_config = _make_build_config(conjugation_enabled=True)
+        mock_from_yaml.return_value = sim_config
+        final_interchange = object()
+        component_info = {"protein": object()}
+        result = MagicMock()
+        result.require_final_interchange.return_value = final_interchange
+        result.get_component_info.return_value = component_info
+        mock_build_conjugate.return_value = result
+        mock_export_system.return_value = _make_export_result(tmp_path)
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        cli_result = CliRunner().invoke(
+            cli,
+            ["build", "-c", str(config_path), "--replicates", "2", "--format", "gromacs"],
+        )
+
+        assert cli_result.exit_code == 0
+        mock_system_builder_from_config.assert_not_called()
+        mock_build_conjugate.assert_called_once()
+        _, kwargs = mock_build_conjugate.call_args
+        assert mock_build_conjugate.call_args.args == (sim_config,)
+        assert kwargs["output_dir"] == sim_config.get_working_directory(2)
+        assert kwargs["free_polymer_seed"] == 2
+        assert kwargs["settings"].create_final_interchange is True
+
+    @patch("polyzymd.exporters.interchange.export_system")
+    @patch("polyzymd.builders.conjugation.build_conjugate_from_config")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_enabled_conjugation_gromacs_exports_final_interchange(
+        self,
+        mock_from_yaml,
+        mock_build_conjugate,
+        mock_export_system,
+        tmp_path: Path,
+    ) -> None:
+        """GROMACS export should use final conjugation Interchange and component info."""
+        sim_config = _make_build_config(conjugation_enabled=True)
+        mock_from_yaml.return_value = sim_config
+        final_interchange = object()
+        component_info = {"conjugate": object()}
+        result = MagicMock()
+        result.require_final_interchange.return_value = final_interchange
+        result.get_component_info.return_value = component_info
+        mock_build_conjugate.return_value = result
+        mock_export_system.return_value = _make_export_result(tmp_path)
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        cli_result = CliRunner().invoke(
+            cli,
+            ["build", "-c", str(config_path), "--format", "gromacs"],
+        )
+
+        assert cli_result.exit_code == 0
+        result.require_final_interchange.assert_called_once_with()
+        result.get_component_info.assert_called_once_with()
+        mock_export_system.assert_called_once_with(
+            interchange=final_interchange,
+            config=sim_config,
+            output_dir=sim_config.get_working_directory(1) / "gromacs",
+            fmt="gromacs",
+            component_info=component_info,
+        )
+
+    @pytest.mark.parametrize("conjugation_enabled", [False, None])
+    @patch("polyzymd.exporters.interchange.export_system")
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    @patch("polyzymd.builders.conjugation.build_conjugate_from_config")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_disabled_or_missing_conjugation_uses_system_builder(
+        self,
+        mock_from_yaml,
+        mock_build_conjugate,
+        mock_system_builder_from_config,
+        mock_export_system,
+        conjugation_enabled: bool | None,
+        tmp_path: Path,
+    ) -> None:
+        """Disabled or absent conjugation should keep the normal SystemBuilder path."""
+        sim_config = _make_build_config(conjugation_enabled=conjugation_enabled)
+        mock_from_yaml.return_value = sim_config
+        builder = MagicMock()
+        interchange = object()
+        component_info = {"standard": object()}
+        builder.build_from_config.return_value = interchange
+        builder.get_component_info.return_value = component_info
+        mock_system_builder_from_config.return_value = builder
+        mock_export_system.return_value = _make_export_result(tmp_path)
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        cli_result = CliRunner().invoke(
+            cli,
+            ["build", "-c", str(config_path), "--format", "gromacs"],
+        )
+
+        assert cli_result.exit_code == 0
+        mock_build_conjugate.assert_not_called()
+        mock_system_builder_from_config.assert_called_once_with(sim_config)
+        builder.build_from_config.assert_called_once_with(
+            config=sim_config,
+            working_dir=sim_config.get_working_directory(1),
+            polymer_seed=1,
+        )
+        mock_export_system.assert_called_once_with(
+            interchange=interchange,
+            config=sim_config,
+            output_dir=sim_config.get_working_directory(1) / "gromacs",
+            fmt="gromacs",
+            component_info=component_info,
+        )
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_dry_run_reports_conjugation_route(self, mock_from_yaml, tmp_path: Path) -> None:
+        """Build dry-run should preview the conjugation workflow route."""
+        mock_from_yaml.return_value = _make_build_config(conjugation_enabled=True)
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path), "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "Conjugation workflow" in result.output
 
 
 class TestRunCommandReplicateFlags:

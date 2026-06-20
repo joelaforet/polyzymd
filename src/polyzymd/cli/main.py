@@ -161,6 +161,159 @@ def _resolve_engine_name(sim_config: object, override: str | None = None) -> str
     return str(engine).lower()
 
 
+def _conjugation_enabled(sim_config: object) -> bool:
+    """Return whether the simulation config requests conjugation workflow routing.
+
+    Parameters
+    ----------
+    sim_config : object
+        Simulation configuration with optional ``conjugation`` settings.
+
+    Returns
+    -------
+    bool
+        ``True`` when conjugation settings are present and enabled.
+    """
+    conjugation = getattr(sim_config, "conjugation", None)
+    return conjugation is not None and bool(getattr(conjugation, "enabled", False))
+
+
+def _print_build_export_summary(
+    *,
+    export_format: str,
+    export_dir: Path,
+    export_result: dict[str, Any],
+) -> None:
+    """Print a build-only export summary.
+
+    Parameters
+    ----------
+    export_format : str
+        Export format name requested by the user.
+    export_dir : Path
+        Directory containing exported files.
+    export_result : dict[str, Any]
+        Result dictionary returned by :func:`polyzymd.exporters.interchange.export_system`.
+    """
+    colored_echo(f"{export_format.upper()} export successful!", phase="export")
+    colored_echo(f"Output directory: {export_dir}", phase="export")
+    colored_echo("Files generated:", phase="export")
+    colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
+    colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
+    colored_echo("  - *.itp (molecule parameters)", phase="export")
+    colored_echo("Convenience defaults generated:", phase="export")
+    colored_echo(f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export")
+    for eq_mdp in export_result.get("eq_mdps", []):
+        colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
+    colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
+    if export_result.get("posres_defines"):
+        colored_echo("Position restraints added to molecule ITP files:", phase="export")
+        for component, define in export_result["posres_defines"].items():
+            colored_echo(f"  - {component}: #ifdef {define}", phase="export")
+    colored_echo(f"  - {export_result['run_script'].name} (convenience run script)", phase="export")
+    colored_echo(phase="export")
+    colored_echo(f"To run: cd {export_dir} && ./{export_result['run_script'].name}", phase="export")
+
+
+def _write_openmm_build_artifacts(
+    *,
+    builder: Any,
+    sim_config: object,
+    working_dir: Path,
+) -> None:
+    """Write OpenMM build artifacts from an initialized system builder.
+
+    Parameters
+    ----------
+    builder : Any
+        Builder object exposing ``get_openmm_components()``.
+    sim_config : object
+        Simulation configuration containing optional restraints.
+    working_dir : Path
+        Directory where ``system.xml`` and related build artifacts are written.
+    """
+    colored_echo("Extracting OpenMM components...", phase="build")
+    omm_topology, omm_system, _omm_positions = builder.get_openmm_components()
+
+    restraints = getattr(sim_config, "restraints", None)
+    if restraints:
+        from polyzymd.core.restraints import RestraintFactory, apply_restraints
+
+        colored_echo(f"Applying {len(restraints)} restraint(s)...", phase="build")
+        restraint_defs = []
+        for restraint in restraints:
+            if not restraint.enabled:
+                colored_echo(f"  - {restraint.name}: DISABLED (skipping)", phase="build")
+                continue
+
+            restraint_def = RestraintFactory.from_config(restraint.model_dump())
+
+            try:
+                indices1 = restraint_def.atom1.resolve(omm_topology)
+                indices2 = restraint_def.atom2.resolve(omm_topology)
+
+                if len(indices1) != 1:
+                    colored_echo(
+                        f"Error: Restraint '{restraint.name}' atom1 selection matched "
+                        f"{len(indices1)} atoms (need exactly 1)",
+                        err=True,
+                        level=logging.ERROR,
+                    )
+                    sys.exit(1)
+                if len(indices2) != 1:
+                    colored_echo(
+                        f"Error: Restraint '{restraint.name}' atom2 selection matched "
+                        f"{len(indices2)} atoms (need exactly 1)",
+                        err=True,
+                        level=logging.ERROR,
+                    )
+                    sys.exit(1)
+
+                colored_echo(
+                    f"  - {restraint.name}: atom {indices1[0]} <-> atom {indices2[0]} "
+                    f"(type={restraint.type.value}, d={restraint.distance} A, "
+                    f"k={restraint.force_constant} kJ/mol/nm^2)",
+                    phase="build",
+                )
+                restraint_defs.append(restraint_def)
+
+            except ValueError as e:
+                colored_echo(
+                    f"Error: Restraint '{restraint.name}' invalid: {e}",
+                    err=True,
+                    level=logging.ERROR,
+                )
+                sys.exit(1)
+
+        if restraint_defs:
+            apply_restraints(restraint_defs, omm_topology, omm_system)
+            colored_echo(f"Successfully applied {len(restraint_defs)} restraint(s)", phase="build")
+
+    from openmm import XmlSerializer
+
+    system_xml_path = working_dir / "system.xml"
+    colored_echo(f"Saving OpenMM system to {system_xml_path}...", phase="build")
+    with open(system_xml_path, "w") as f:
+        f.write(XmlSerializer.serialize(omm_system))
+
+
+def _print_openmm_build_summary(working_dir: Path) -> None:
+    """Print the default OpenMM build success summary.
+
+    Parameters
+    ----------
+    working_dir : Path
+        Directory containing generated build artifacts.
+    """
+    colored_echo("System built successfully!", phase="build")
+    colored_echo(f"Output directory: {working_dir}", phase="build")
+    colored_echo("Files saved:", phase="build")
+    colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
+    colored_echo("  - system.xml (OpenMM system with restraints)", phase="build")
+    colored_echo("Use 'polyzymd submit' to submit for HPC execution,", phase="build")
+    colored_echo("or 'polyzymd run-segment' to run a single segment locally.", phase="build")
+
+
 def _resolve_submission_pixi_env(preset: str, engine_name: str, pixi_env: str | None = None) -> str:
     """Resolve the pixi environment for submit and recover jobs.
 
@@ -412,7 +565,6 @@ def build(
 
     from pydantic import ValidationError as PydanticValidationError
 
-    from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
 
     replicate_list = _resolve_replicates_option(replicates)
@@ -446,6 +598,14 @@ def build(
             colored_echo(f"  Count: {len(replicate_list)}", phase="build")
             colored_echo(f"  IDs: {replicate_list}", phase="build")
             colored_echo(f"  Polymer seeds: {replicate_list} (one per replicate)", phase="build")
+            colored_echo(phase="build")
+
+            colored_echo("Build route:", phase="build")
+            if _conjugation_enabled(sim_config):
+                colored_echo("  Conjugation workflow (enabled conjugation)", phase="build")
+                colored_echo("  Final Interchange: create for OpenMM/GROMACS output", phase="build")
+            else:
+                colored_echo("  Standard SystemBuilder workflow", phase="build")
             colored_echo(phase="build")
 
             colored_echo("System Components:", phase="build")
@@ -596,6 +756,63 @@ def build(
         for rep in replicate_list:
             colored_echo(f"Building system for replicate {rep}...", phase="build")
             working_dir = sim_config.get_working_directory(rep)
+
+            if _conjugation_enabled(sim_config):
+                from polyzymd.builders.conjugation import build_conjugate_from_config
+                from polyzymd.builders.conjugation.system_workflow import (
+                    ConjugatedPolymerSystemSettings,
+                )
+
+                colored_echo("Conjugation enabled; using conjugation workflow...", phase="build")
+                result = build_conjugate_from_config(
+                    sim_config,
+                    output_dir=working_dir,
+                    settings=ConjugatedPolymerSystemSettings(create_final_interchange=True),
+                    free_polymer_seed=rep,
+                )
+
+                if export_format:
+                    from polyzymd.exporters.interchange import export_system
+
+                    colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
+                    export_dir = working_dir / export_format
+                    export_result = export_system(
+                        interchange=result.require_final_interchange(),
+                        config=sim_config,
+                        output_dir=export_dir,
+                        fmt=export_format,
+                        component_info=result.get_component_info(),
+                    )
+                    _print_build_export_summary(
+                        export_format=export_format,
+                        export_dir=export_dir,
+                        export_result=export_result,
+                    )
+                elif result.system_builder is not None:
+                    _write_openmm_build_artifacts(
+                        builder=result.system_builder,
+                        sim_config=sim_config,
+                        working_dir=working_dir,
+                    )
+                    _print_openmm_build_summary(working_dir)
+                else:
+                    result.require_final_interchange()
+                    colored_echo("Conjugation workflow completed successfully!", phase="build")
+                    colored_echo(f"Output directory: {working_dir}", phase="build")
+                    if result.artifact_paths:
+                        colored_echo("Files saved by conjugation workflow:", phase="build")
+                        for label, path in result.artifact_paths.items():
+                            colored_echo(f"  - {label}: {path}", phase="build")
+                    colored_echo(
+                        "OpenMM system.xml was not written because the workflow result did not "
+                        "retain a system builder.",
+                        phase="build",
+                        level=logging.WARNING,
+                    )
+                continue
+
+            from polyzymd.builders.system_builder import SystemBuilder
+
             builder = SystemBuilder.from_config(sim_config)
             interchange = builder.build_from_config(
                 config=sim_config,
@@ -618,121 +835,19 @@ def build(
                     component_info=builder.get_component_info(),
                 )
 
-                colored_echo(f"{export_format.upper()} export successful!", phase="export")
-                colored_echo(f"Output directory: {export_dir}", phase="export")
-                colored_echo("Files generated:", phase="export")
-                colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
-                colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
-                colored_echo("  - *.itp (molecule parameters)", phase="export")
-                colored_echo("Convenience defaults generated:", phase="export")
-                colored_echo(
-                    f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export"
-                )
-                for eq_mdp in export_result.get("eq_mdps", []):
-                    colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
-                colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
-                if export_result.get("posres_defines"):
-                    colored_echo("Position restraints added to molecule ITP files:", phase="export")
-                    for component, define in export_result["posres_defines"].items():
-                        colored_echo(f"  - {component}: #ifdef {define}", phase="export")
-                colored_echo(
-                    f"  - {export_result['run_script'].name} (convenience run script)",
-                    phase="export",
-                )
-                colored_echo(phase="export")
-                colored_echo(
-                    f"To run: cd {export_dir} && ./{export_result['run_script'].name}",
-                    phase="export",
+                _print_build_export_summary(
+                    export_format=export_format,
+                    export_dir=export_dir,
+                    export_result=export_result,
                 )
 
             else:
-                # Default: prepare for OpenMM simulation
-                colored_echo("Extracting OpenMM components...", phase="build")
-                omm_topology, omm_system, omm_positions = builder.get_openmm_components()
-
-                # Apply restraints if configured
-                if sim_config.restraints:
-                    from polyzymd.core.restraints import RestraintFactory, apply_restraints
-
-                    colored_echo(
-                        f"Applying {len(sim_config.restraints)} restraint(s)...", phase="build"
-                    )
-                    restraint_defs = []
-                    for r in sim_config.restraints:
-                        if not r.enabled:
-                            colored_echo(f"  - {r.name}: DISABLED (skipping)", phase="build")
-                            continue
-
-                        # Create restraint definition from config
-                        restraint_def = RestraintFactory.from_config(r.model_dump())
-
-                        # Validate the selection resolves to exactly one atom each
-                        try:
-                            indices1 = restraint_def.atom1.resolve(omm_topology)
-                            indices2 = restraint_def.atom2.resolve(omm_topology)
-
-                            if len(indices1) != 1:
-                                colored_echo(
-                                    f"Error: Restraint '{r.name}' atom1 selection matched "
-                                    f"{len(indices1)} atoms (need exactly 1)",
-                                    err=True,
-                                    level=logging.ERROR,
-                                )
-                                sys.exit(1)
-                            if len(indices2) != 1:
-                                colored_echo(
-                                    f"Error: Restraint '{r.name}' atom2 selection matched "
-                                    f"{len(indices2)} atoms (need exactly 1)",
-                                    err=True,
-                                    level=logging.ERROR,
-                                )
-                                sys.exit(1)
-
-                            colored_echo(
-                                f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
-                                f"(type={r.type.value}, d={r.distance} A, "
-                                f"k={r.force_constant} kJ/mol/nm^2)",
-                                phase="build",
-                            )
-                            restraint_defs.append(restraint_def)
-
-                        except ValueError as e:
-                            colored_echo(
-                                f"Error: Restraint '{r.name}' invalid: {e}",
-                                err=True,
-                                level=logging.ERROR,
-                            )
-                            sys.exit(1)
-
-                    # Apply all validated restraints to the system
-                    if restraint_defs:
-                        apply_restraints(restraint_defs, omm_topology, omm_system)
-                        colored_echo(
-                            f"Successfully applied {len(restraint_defs)} restraint(s)",
-                            phase="build",
-                        )
-
-                # Save OpenMM system to XML for --skip-build support
-                from openmm import XmlSerializer
-
-                system_xml_path = working_dir / "system.xml"
-                colored_echo(f"Saving OpenMM system to {system_xml_path}...", phase="build")
-                with open(system_xml_path, "w") as f:
-                    f.write(XmlSerializer.serialize(omm_system))
-
-                colored_echo("System built successfully!", phase="build")
-                colored_echo(f"Output directory: {working_dir}", phase="build")
-                colored_echo("Files saved:", phase="build")
-                colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
-                colored_echo("  - system.xml (OpenMM system with restraints)", phase="build")
-                colored_echo(
-                    "Use 'polyzymd submit' to submit for HPC execution,",
-                    phase="build",
+                _write_openmm_build_artifacts(
+                    builder=builder,
+                    sim_config=sim_config,
+                    working_dir=working_dir,
                 )
-                colored_echo(
-                    "or 'polyzymd run-segment' to run a single segment locally.",
-                    phase="build",
-                )
+                _print_openmm_build_summary(working_dir)
 
     except PydanticValidationError as e:
         colored_echo("Configuration error:", err=True, level=logging.ERROR)
