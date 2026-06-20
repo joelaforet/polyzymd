@@ -1,5 +1,13 @@
 """Internal Pablo/OpenFF integration helpers for conjugation workflows."""
 
+from polyzymd.builders.conjugation.pablo.charge_bridge import (
+    build_product_state_charge_bridge,
+)
+from polyzymd.builders.conjugation.pablo.charge_records import (
+    AtomPartialChargeRecord,
+    ChargeBridgeReport,
+    ResiduePartialChargeRecord,
+)
 from polyzymd.builders.conjugation.pablo.charge_templates import (
     build_conjugate_charge_templates,
 )
@@ -51,9 +59,13 @@ __all__ = [
     "PabloStructurePreflight",
     "ProductStatePabloDefinitionSummary",
     "ProductStatePabloLibrary",
+    "AtomPartialChargeRecord",
+    "ChargeBridgeReport",
+    "ResiduePartialChargeRecord",
     "build_formal_charge_smoke_template",
     "build_conjugate_charge_templates",
     "build_pablo_residue_library",
+    "build_product_state_charge_bridge",
     "build_product_state_pablo_library",
     "build_product_state_pablo_library_for_specs",
     "create_interchange_from_openff_topology",

@@ -935,6 +935,16 @@ def _construct_conjugate_from_specs(
     if not pablo_result.success or pablo_result.topology is None:
         raise RuntimeError(_pablo_failure_message(pablo_result))
     if product_state_pablo_library is not None:
+        LOGGER.info("Building production product-state charge bridge")
+        product_state_pablo_library = _product_state_library_with_charge_bridge(
+            product_state_pablo_library,
+            product_topology=pablo_result.topology,
+            product_pdb=crosslinked_pdb_path,
+            source_protein_pdb=protein_pdb_path,
+            specs=product_state_specs,
+            output_dir=artifact_dir,
+            settings=settings.parameterization,
+        )
         product_state_pablo_library = _product_state_library_with_charge_templates(
             product_state_pablo_library,
             pablo_result.topology,
@@ -1330,6 +1340,45 @@ def _product_state_library_with_charge_templates(
         return product_state_pablo_library.model_copy(update={"charge_templates": templates})
     product_state_pablo_library.charge_templates = templates
     return product_state_pablo_library
+
+
+def _product_state_library_with_charge_bridge(
+    product_state_pablo_library: Any,
+    *,
+    product_topology: Any,
+    product_pdb: Path,
+    source_protein_pdb: Path | str,
+    specs: tuple[Any, ...],
+    output_dir: Path,
+    settings: InterchangeParameterizationSettings,
+) -> Any:
+    """Attach production partial-charge bridge records to the product library."""
+    if not _supports_charge_bridge(specs, product_state_pablo_library):
+        return product_state_pablo_library
+    from polyzymd.builders.conjugation.pablo.charge_bridge import (
+        build_product_state_charge_bridge,
+    )
+
+    return build_product_state_charge_bridge(
+        product_state_pablo_library=product_state_pablo_library,
+        product_topology=product_topology,
+        product_pdb=product_pdb,
+        source_protein_pdb=source_protein_pdb,
+        specs=specs,
+        output_dir=output_dir,
+        settings=settings,
+    )
+
+
+def _supports_charge_bridge(
+    product_specs: tuple[Any, ...], product_state_pablo_library: Any
+) -> bool:
+    """Return whether the local NAGL bridge supports the product-state library."""
+    names = tuple(getattr(product_state_pablo_library, "residue_names", ()) or ())
+    definitions = tuple(getattr(product_state_pablo_library, "definitions", ()) or ())
+    if not names and not definitions:
+        return False
+    return all(_supports_product_state_local_minimization(spec) for spec in product_specs)
 
 
 def _charged_product_state_molecules_from_topology(
