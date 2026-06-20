@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -150,10 +151,10 @@ def test_build_conjugate_from_config_facade_delegates_to_engine(monkeypatch, tmp
 
 
 def test_build_conjugate_from_config_path_delegates(monkeypatch, tmp_path):
-    """Config paths should delegate to the legacy path-based workflow."""
+    """Config paths should delegate to the path-based workflow."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
-    expected = _legacy_workflow_result(tmp_path)
+    expected = _workflow_result(tmp_path)
     calls = {}
 
     def fake_build_from_path(
@@ -176,7 +177,6 @@ def test_build_conjugate_from_config_path_delegates(monkeypatch, tmp_path):
     result = build_conjugate_from_config(config_path, output_dir=output_dir, free_polymer_seed=7)
 
     assert isinstance(result, ConjugationResult)
-    assert result.legacy_result is expected
     assert result.status == "completed"
     assert result.output_dir == expected.output_dir
     assert result.config_path == config_path
@@ -191,10 +191,10 @@ def test_build_conjugate_from_config_path_delegates(monkeypatch, tmp_path):
 
 
 def test_build_conjugate_from_config_object_delegates(monkeypatch, tmp_path):
-    """In-memory configs should delegate to the legacy object-based workflow."""
+    """In-memory configs should delegate to the object-based workflow."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
-    expected = _legacy_workflow_result(tmp_path)
+    expected = _workflow_result(tmp_path)
     config = object()
     calls = {}
 
@@ -215,7 +215,6 @@ def test_build_conjugate_from_config_object_delegates(monkeypatch, tmp_path):
     result = build_conjugate_from_config(config, output_dir=output_dir, free_polymer_seed=11)
 
     assert isinstance(result, ConjugationResult)
-    assert result.legacy_result is expected
     assert result.status == "completed"
     assert result.output_dir == expected.output_dir
     assert result.config_path is None
@@ -228,7 +227,7 @@ def test_build_conjugate_from_config_object_delegates(monkeypatch, tmp_path):
 
 
 def test_engine_requires_output_dir_for_in_memory_config():
-    """The delegated legacy object workflow still requires an output directory."""
+    """The delegated object workflow still requires an output directory."""
     with pytest.raises(ValueError, match="output_dir is required"):
         ConjugationEngine().build_from_config(object())
 
@@ -237,7 +236,7 @@ def test_engine_build_from_request_delegates_to_config_workflow(monkeypatch, tmp
     """Engine request inputs should use the current config-driven workflow."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
-    expected = _legacy_workflow_result(tmp_path)
+    expected = _workflow_result(tmp_path)
     calls = {}
 
     def fake_build_from_path(
@@ -263,7 +262,6 @@ def test_engine_build_from_request_delegates_to_config_workflow(monkeypatch, tmp
 
     result = ConjugationEngine().build(request)
 
-    assert result.legacy_result is expected
     assert result.output_dir == expected.output_dir
     assert calls == {
         "config_path": tmp_path / "config.yaml",
@@ -395,17 +393,17 @@ def test_smiles_moiety_residue_name_validation_rejects_non_one_residue_code(tmp_
         )
 
 
-def test_conjugation_result_collects_legacy_output_paths(tmp_path):
+def test_conjugation_result_collects_workflow_output_paths(tmp_path):
     """The public result should carry status and useful workflow artifact paths."""
-    legacy_result = _legacy_workflow_result(tmp_path)
+    workflow_result = _workflow_result(tmp_path)
 
-    result = ConjugationResult.from_legacy_result(
-        legacy_result,
+    result = ConjugationResult.from_workflow_result(
+        workflow_result,
         config_path=tmp_path / "config.yaml",
     )
 
     assert result.status == "completed"
-    assert result.output_dir == tmp_path / "legacy-out"
+    assert result.output_dir == tmp_path / "workflow-out"
     assert result.config_path == tmp_path / "config.yaml"
     assert result.crosslinked_conjugate_pdb_path == tmp_path / "crosslinked.pdb"
     assert result.minimized_conjugate_pdb_path == tmp_path / "minimized.pdb"
@@ -422,6 +420,56 @@ def test_conjugation_result_collects_legacy_output_paths(tmp_path):
         "solvated_pdb": tmp_path / "solvated.pdb",
         "workflow_json": tmp_path / "workflow.json",
     }
+
+
+def test_conjugation_result_requires_final_interchange():
+    """Final Interchange access should fail clearly when export state is unavailable."""
+    result = ConjugationResult()
+
+    with pytest.raises(RuntimeError, match="final Interchange"):
+        result.require_final_interchange()
+
+    interchange = object()
+    assert (
+        ConjugationResult(final_interchange=interchange).require_final_interchange() is interchange
+    )
+
+
+def test_conjugation_result_get_component_info_delegates():
+    """Component metadata should come from the retained system builder."""
+    info = {"protein": 1}
+    builder = SimpleNamespace(get_component_info=lambda: info)
+
+    assert ConjugationResult(system_builder=builder).get_component_info() == info
+
+    with pytest.raises(RuntimeError, match="system builder"):
+        ConjugationResult().get_component_info()
+
+
+def test_conjugation_result_serialization_excludes_heavy_fields(tmp_path):
+    """Serialized result payloads should omit in-memory topology and builder objects."""
+    result = ConjugationResult(
+        output_dir=tmp_path / "out",
+        final_interchange=object(),
+        system_builder=object(),
+        relaxed_conjugate_topology=object(),
+        solvated_topology=object(),
+        construction=object(),
+    )
+
+    payload = result.model_dump()
+    output_path = result.save(tmp_path / "result.json")
+    saved_payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    for field in (
+        "final_interchange",
+        "system_builder",
+        "relaxed_conjugate_topology",
+        "solvated_topology",
+        "construction",
+    ):
+        assert field not in payload
+        assert field not in saved_payload
 
 
 def test_package_facade_exports_public_api_only():
@@ -444,9 +492,9 @@ def test_package_facade_exports_public_api_only():
     assert not hasattr(conjugation, "list_reactions")
 
 
-def _legacy_workflow_result(tmp_path: Path) -> SimpleNamespace:
-    return SimpleNamespace(
-        output_dir=tmp_path / "legacy-out",
+def _workflow_result(tmp_path: Path) -> ConjugationResult:
+    return ConjugationResult(
+        output_dir=tmp_path / "workflow-out",
         construction=SimpleNamespace(
             crosslinked_pdb_path=tmp_path / "crosslinked.pdb",
             smoke=SimpleNamespace(

@@ -35,6 +35,7 @@ from polyzymd.builders.conjugation._specs import (
     attachment_spec_from_generated_polymer_plan,
     attachment_spec_from_moiety_plan,
 )
+from polyzymd.builders.conjugation.models import ConjugationResult
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
 from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationSettings,
@@ -111,44 +112,6 @@ class ConjugatedPolymerSystemSettings(BaseModel):
     vacuum_smoke: VacuumSmokeSettings = Field(default_factory=lambda: _protein_restrained_smoke())
 
 
-class ConjugatedPolymerSystemResult(BaseModel):
-    """Artifacts from the complete conjugate plus free-polymer solvation workflow."""
-
-    model_config = {"arbitrary_types_allowed": True}
-
-    output_dir: Path
-    generated_sequence: str
-    reactive_sequence_index: int
-    reactive_residue_selector: dict[str, int | str]
-    conjugate_generation: PolymeristGenerationSmokeResult
-    construction: Any
-    attachment_specs: tuple[AttachmentBuildSpec, ...] = Field(default_factory=tuple, exclude=True)
-    generated_sequences: tuple[str, ...] = Field(default_factory=tuple)
-    reactive_sequence_indices: tuple[int, ...] = Field(default_factory=tuple)
-    reactive_residue_selectors: tuple[dict[str, int | str], ...] = Field(default_factory=tuple)
-    conjugate_generations: tuple[PolymeristGenerationSmokeResult, ...] = Field(
-        default_factory=tuple
-    )
-    protein_canonicalization: ProteinCanonicalizationResult | None = None
-    relaxed_conjugate_pdb_path: Path | None = None
-    solvated_pdb_path: Path | None = None
-    workflow_json_path: Path | None = None
-    final_interchange_created: bool = False
-    modifier: GeneratedPolymerFragment = Field(exclude=True)
-    modifiers: tuple[GeneratedPolymerFragment, ...] = Field(default_factory=tuple, exclude=True)
-    relaxed_conjugate_topology: Any = Field(default=None, exclude=True)
-    solvated_topology: Any = Field(default=None, exclude=True)
-    final_interchange: Any | None = Field(default=None, exclude=True)
-    system_builder: SystemBuilder | None = Field(default=None, exclude=True)
-
-    def save(self, path: Path | str) -> Path:
-        """Write a JSON sidecar excluding heavy topology and Interchange objects."""
-        output_path = Path(path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(self.model_dump(mode="json"), indent=2) + "\n")
-        return output_path
-
-
 class ConjugateConstructionResult(BaseModel):
     """Specs-first construction result with singular compatibility fields."""
 
@@ -178,7 +141,7 @@ def build_conjugated_polymer_system_from_config_path(
     output_dir: Path | str | None = None,
     settings: ConjugatedPolymerSystemSettings | None = None,
     free_polymer_seed: int | None = None,
-) -> ConjugatedPolymerSystemResult:
+) -> ConjugationResult:
     """Load a config YAML and build the relaxed, solvated conjugate system."""
     from polyzymd.config.loader import load_config
 
@@ -199,7 +162,7 @@ def build_conjugated_polymer_system_from_config(
     output_dir: Path | str,
     settings: ConjugatedPolymerSystemSettings | None = None,
     free_polymer_seed: int | None = None,
-) -> ConjugatedPolymerSystemResult:
+) -> ConjugationResult:
     """Build a relaxed protein-polymer conjugate, pack free polymers, and solvate.
 
     The workflow consumes the existing PolyzyMD config schema: ``conjugation``
@@ -284,7 +247,7 @@ def build_conjugated_polymer_system_from_config(
     if workflow_settings.preserve_reference_atom_names:
         _restore_pdb_atom_name_fields(solvated_pdb_path, construction.crosslinked_pdb_path)
 
-    result = ConjugatedPolymerSystemResult(
+    result = ConjugationResult(
         output_dir=artifact_dir,
         generated_sequence=generations[0].sequence,
         reactive_sequence_index=reactive_sequence_indices[0],
@@ -308,6 +271,7 @@ def build_conjugated_polymer_system_from_config(
         system_builder=builder,
     )
     result.workflow_json_path = result.save(artifact_dir / workflow_settings.workflow_json_name)
+    result.artifact_paths["workflow_json"] = result.workflow_json_path
     return result
 
 
@@ -320,7 +284,7 @@ def build_direct_smiles_moiety_conjugate(
     chain_policy: Any | None = None,
     settings: ConjugatedPolymerSystemSettings | None = None,
     random_seed: int | None = None,
-) -> Any:
+) -> ConjugationResult:
     """Build a direct protein plus SMILES-moiety conjugate request.
 
     This public-engine path is intentionally narrower than the legacy config
@@ -393,21 +357,24 @@ def build_direct_smiles_moiety_conjugate(
     if workflow_settings.preserve_reference_atom_names:
         _restore_pdb_atom_name_fields(solvated_pdb_path, relaxed_pdb)
 
-    workflow_path = artifact_dir / workflow_settings.workflow_json_name
-    result = SimpleNamespace(
+    result = ConjugationResult(
         output_dir=artifact_dir,
         construction=construction,
         protein_canonicalization=protein_canonicalization,
         relaxed_conjugate_pdb_path=relaxed_pdb,
         solvated_pdb_path=solvated_pdb_path,
-        workflow_json_path=workflow_path,
         final_interchange_created=builder.interchange is not None,
         modifier=tuple(spec.generated_fragment for spec in specs),
+        modifiers=tuple(spec.generated_fragment for spec in specs),
+        attachment_specs=tuple(specs),
         relaxed_conjugate_topology=relaxed_topology,
         solvated_topology=builder.solvated_topology,
         final_interchange=builder.interchange,
         system_builder=builder,
     )
+    workflow_path = artifact_dir / workflow_settings.workflow_json_name
+    result.workflow_json_path = result.save(workflow_path)
+    result.artifact_paths["workflow_json"] = result.workflow_json_path
     _save_direct_workflow_summary(result, enabled_attachments, list(resolved_plans), workflow_path)
     return result
 

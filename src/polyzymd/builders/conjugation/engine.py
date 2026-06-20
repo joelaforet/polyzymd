@@ -38,26 +38,26 @@ class ConjugationEngine:
 
         workflow_settings = self.settings if settings is None else settings
         if isinstance(config, (str, Path)):
-            legacy_result = build_conjugated_polymer_system_from_config_path(
+            workflow_result = build_conjugated_polymer_system_from_config_path(
                 config,
                 output_dir=output_dir,
                 settings=workflow_settings,
                 free_polymer_seed=free_polymer_seed,
             )
-            return ConjugationResult.from_legacy_result(legacy_result, config_path=config)
+            return ConjugationResult.from_workflow_result(workflow_result, config_path=config)
 
         if output_dir is None:
             raise ValueError(
                 "output_dir is required when build_from_config() receives an "
                 "in-memory SimulationConfig."
             )
-        legacy_result = build_conjugated_polymer_system_from_config(
+        workflow_result = build_conjugated_polymer_system_from_config(
             config,
             output_dir=output_dir,
             settings=workflow_settings,
             free_polymer_seed=free_polymer_seed,
         )
-        return ConjugationResult.from_legacy_result(legacy_result)
+        return ConjugationResult.from_workflow_result(workflow_result)
 
     def build_from_request(
         self,
@@ -136,7 +136,7 @@ class ConjugationEngine:
         )
 
         workflow_settings = self.settings if settings is None else settings
-        legacy_result = build_direct_smiles_moiety_conjugate(
+        workflow_result = build_direct_smiles_moiety_conjugate(
             protein_pdb_path=request.protein_pdb_path,
             attachments=request.attachments,
             output_dir=request.output_dir,
@@ -145,7 +145,7 @@ class ConjugationEngine:
             settings=workflow_settings,
             random_seed=request.free_polymer_seed,
         )
-        return ConjugationResult.from_legacy_result(legacy_result)
+        return ConjugationResult.from_workflow_result(workflow_result)
 
 
 def _raise_unsupported_direct_mode(inputs: dict[str, Any]) -> None:
