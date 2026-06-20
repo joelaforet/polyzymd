@@ -270,8 +270,10 @@ def build_conjugated_polymer_system_from_config(
         final_interchange=builder.interchange,
         system_builder=builder,
     )
-    result.workflow_json_path = result.save(artifact_dir / workflow_settings.workflow_json_name)
-    result.artifact_paths["workflow_json"] = result.workflow_json_path
+    workflow_path = artifact_dir / workflow_settings.workflow_json_name
+    result.workflow_json_path = workflow_path
+    result.artifact_paths["workflow_json"] = workflow_path
+    result.save(workflow_path)
     return result
 
 
@@ -373,8 +375,9 @@ def build_direct_smiles_moiety_conjugate(
         system_builder=builder,
     )
     workflow_path = artifact_dir / workflow_settings.workflow_json_name
-    result.workflow_json_path = result.save(workflow_path)
-    result.artifact_paths["workflow_json"] = result.workflow_json_path
+    result.workflow_json_path = workflow_path
+    result.artifact_paths["workflow_json"] = workflow_path
+    result.save(workflow_path)
     _save_direct_workflow_summary(result, enabled_attachments, list(resolved_plans), workflow_path)
     return result
 
@@ -1184,15 +1187,15 @@ def _save_direct_workflow_summary(
     path: Path,
 ) -> None:
     """Write a JSON summary for direct public conjugation requests."""
-    payload = {
-        "output_dir": str(result.output_dir),
-        "crosslinked_pdb_path": str(result.construction.crosslinked_pdb_path),
-        "relaxed_conjugate_pdb_path": str(result.relaxed_conjugate_pdb_path),
-        "solvated_pdb_path": str(result.solvated_pdb_path),
-        "attachments": [attachment.name for attachment in attachments],
-        "resolved_plans": [plan.model_dump(mode="json") for plan in resolved_plans],
-        "diagnostics": tuple(getattr(result.construction, "diagnostics", ())),
-    }
+    payload = result.model_dump(mode="json")
+    payload.update(
+        {
+            "crosslinked_pdb_path": str(result.construction.crosslinked_pdb_path),
+            "attachments": [attachment.name for attachment in attachments],
+            "resolved_plans": [plan.model_dump(mode="json") for plan in resolved_plans],
+            "diagnostics": tuple(getattr(result.construction, "diagnostics", ())),
+        }
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 

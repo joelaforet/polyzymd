@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -945,6 +946,9 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
     assert calls["run_local_minimization"] is True
     assert calls["local_minimization_settings"] is not None
     assert result.workflow_json_path.exists()
+    payload = json.loads(result.workflow_json_path.read_text(encoding="utf-8"))
+    assert payload["workflow_json_path"] == str(result.workflow_json_path)
+    assert payload["artifact_paths"]["workflow_json"] == str(result.workflow_json_path)
 
 
 def test_config_nhs_lys_path_builds_specs_before_shared_construction(
@@ -1065,6 +1069,9 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     assert result.reactive_sequence_indices == (0, 0)
     assert result.modifiers == tuple(spec.generated_fragment for spec in built_specs)
     assert result.workflow_json_path.exists()
+    payload = json.loads(result.workflow_json_path.read_text(encoding="utf-8"))
+    assert payload["workflow_json_path"] == str(result.workflow_json_path)
+    assert payload["artifact_paths"]["workflow_json"] == str(result.workflow_json_path)
 
 
 def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path: Path):
