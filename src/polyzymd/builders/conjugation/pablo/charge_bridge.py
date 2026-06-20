@@ -80,10 +80,13 @@ def build_product_state_charge_bridge(
 
     artifact_dir = Path(output_dir)
     product_atoms = tuple(parse_pdb_atom_records(Path(product_pdb)))
-    target_molecule = _product_conjugate_molecule(product_topology, product_state_pablo_library)
-    target_identities = tuple(
-        _atom_identity(atom) for atom in getattr(target_molecule, "atoms", ())
+    product_names = _product_residue_names(product_state_pablo_library)
+    target_molecule = _product_conjugate_molecule(
+        product_topology,
+        product_names=product_names,
+        product_atoms=product_atoms,
     )
+    target_identities = _target_identities(target_molecule, product_atoms=product_atoms)
     formal_total = sum(
         _formal_charge_value(getattr(atom, "formal_charge", 0)) for atom in target_molecule.atoms
     )
@@ -189,23 +192,63 @@ def build_product_state_charge_bridge(
     return product_state_pablo_library
 
 
-def _product_conjugate_molecule(product_topology: Any, product_state_pablo_library: Any) -> Any:
-    """Return the topology molecule containing product-state residues."""
+def _product_residue_names(product_state_pablo_library: Any) -> set[str]:
+    """Return product-state residue names from a Pablo library."""
     product_names = {
         str(name).strip().upper()
         for name in tuple(getattr(product_state_pablo_library, "residue_names", ()) or ())
         if str(name).strip()
     }
+    product_names.update(
+        str(getattr(definition, "residue_name", "")).strip().upper()
+        for definition in tuple(getattr(product_state_pablo_library, "definitions", ()) or ())
+        if str(getattr(definition, "residue_name", "")).strip()
+    )
     if not product_names:
-        product_names = {
-            str(getattr(definition, "residue_name", "")).strip().upper()
-            for definition in tuple(getattr(product_state_pablo_library, "definitions", ()) or ())
-            if str(getattr(definition, "residue_name", "")).strip()
-        }
+        raise ValueError("Product-state charge bridge requires product residue names")
+    return product_names
+
+
+def _product_conjugate_molecule(
+    product_topology: Any,
+    *,
+    product_names: set[str],
+    product_atoms: tuple[Any, ...],
+) -> Any:
+    """Return the topology molecule containing product-state residues."""
     for molecule in tuple(getattr(product_topology, "molecules", ()) or ()):
         if any(_atom_identity(atom)[1] in product_names for atom in getattr(molecule, "atoms", ())):
             return molecule
+    molecules = tuple(getattr(product_topology, "molecules", ()) or ())
+    if len(molecules) == 1 and any(
+        atom.residue_name.upper() in product_names for atom in product_atoms
+    ):
+        return molecules[0]
     raise ValueError("Could not locate the product-state conjugate molecule in the Pablo topology")
+
+
+def _target_identities(
+    target_molecule: Any,
+    *,
+    product_atoms: tuple[Any, ...],
+) -> tuple[tuple[str, str, int | None, str, str], ...]:
+    """Return target atom identities, falling back to product PDB order."""
+    atoms = tuple(getattr(target_molecule, "atoms", ()) or ())
+    identities = tuple(_atom_identity(atom) for atom in atoms)
+    if all(identity[1] and identity[4] for identity in identities):
+        return identities
+    if len(atoms) == len(product_atoms):
+        return tuple(
+            (
+                atom.chain_id.strip(),
+                atom.residue_name.strip().upper(),
+                atom.residue_number,
+                atom.insertion_code.strip(),
+                atom.atom_name.strip(),
+            )
+            for atom in product_atoms
+        )
+    return identities
 
 
 def _protein_ff14sb_records(
