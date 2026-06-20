@@ -992,14 +992,6 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     calls = {}
     real_spec_builder = workflow_module.attachment_spec_from_generated_polymer_plan
 
-    class FakeResult:
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
-
-        def save(self, path):
-            Path(path).write_text("{}\n", encoding="utf-8")
-            return Path(path)
-
     class FakeLinker:
         def resolve_plan(self, protein_pdb_path, modifier):
             calls.setdefault("linker_modifiers", []).append(modifier)
@@ -1024,7 +1016,6 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
         calls["local_minimization_settings"] = kwargs["local_minimization_settings"]
         return SimpleNamespace(smoke=SimpleNamespace(minimized_pdb_path=relaxed)), object()
 
-    monkeypatch.setattr(workflow_module, "ConjugatedPolymerSystemResult", FakeResult)
     monkeypatch.setattr(
         workflow_module, "generate_polymerist_smoke_polymer", lambda *a, **k: generation
     )
@@ -1107,14 +1098,6 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
     relaxed = tmp_path / "relaxed.pdb"
     relaxed.write_text("END\n", encoding="utf-8")
 
-    class FakeResult:
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
-
-        def save(self, path):
-            Path(path).write_text("{}\n", encoding="utf-8")
-            return Path(path)
-
     class FakeLinker:
         def resolve_plan(self, protein_pdb_path, modifier):
             return _resolved_plan(
@@ -1126,7 +1109,6 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
                 )
             )
 
-    monkeypatch.setattr(workflow_module, "ConjugatedPolymerSystemResult", FakeResult)
     monkeypatch.setattr(
         workflow_module, "generate_polymerist_smoke_polymer", lambda *a, **k: generation
     )
