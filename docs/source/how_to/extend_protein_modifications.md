@@ -41,10 +41,11 @@ Before adding code, decide what level you are implementing.
 Do not present a workflow as production-ready if it relies on exploratory charge
 fallbacks or unvalidated residue templates.
 
-## Add A Protein Modification Recipe
+## Add A Future Protein Modification Recipe
 
-A `protein_modification_recipe` should package defaults for standard users. It
-should answer:
+`protein_modification_recipe` is future design vocabulary, not an executable
+current config field. A future recipe should package defaults for standard users
+and answer:
 
 | Question | Example |
 |----------|---------|
@@ -55,7 +56,7 @@ should answer:
 | What product names are used? | `SEP`, `LYX`, `NGX` |
 | What parameterization is required? | curated template, OpenFF fallback, custom charges |
 
-The target config shape is:
+The non-executable target config shape is:
 
 ```yaml
 attachments:

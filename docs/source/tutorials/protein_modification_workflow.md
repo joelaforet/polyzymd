@@ -1,56 +1,52 @@
-# Build a Protein With Multiple Modifications
+# Build a Protein With an NHS-Lysine Polymer Attachment
 
-This tutorial shows the intended user experience for building a protein with
-multiple residue modifications in one `config.yaml`. It is written as a
-reference workflow for implementation: the config shape is the target interface,
-while full multi-mechanism execution is still planned.
+This tutorial shows the current executable protein modification workflow: an
+NHS-reactive polymer attached to a lysine through `conjugation.attachments`. The
+examples use the schema accepted by `polyzymd build` today.
 
-By the end, you will have a config that describes three biological requests:
+By the end, you will have a `config.yaml` fragment that:
 
-1. Add an O-linked glycan to residue 4.
-2. Attach a polymer to residue 23.
-3. Add an N-linked glycan to residue 67.
+- enables the conjugation workflow
+- selects a lysine residue on chain `A`
+- defines the polymer as a `moiety.recipe`
+- requests the `nhs_lys_amide` mechanism
+- can be used with the regular build and GROMACS export commands
+
+```{important}
+General biology-first recipe syntax for arbitrary protein modifications is
+planned but not executable in the current schema. This tutorial intentionally
+uses the supported `moiety` plus `mechanism` syntax.
+```
 
 ## Before You Start
 
 You need:
 
-- a prepared protein PDB
-- residue numbers for the modifications you want
-- names of the modifications you want to apply
-- optional PDB or SDF files for custom moieties
+- a prepared protein PDB with residue numbering you trust
+- the chain ID and residue number for a lysine modification site
+- a polymer recipe with an NHS-containing reactive monomer
 
-You do not need to know atom names for standard built-in recipes. The recipe and
-mechanism registries should resolve those for you.
+The examples below use chain `A`, residue `23`, and an SBMA/EGPMA/NHS polymer.
 
-```{important}
-Current executable support is narrower than this tutorial. Today, PolyzyMD can
-execute one NHS-lysine polymer attachment through the prototype workflow. This
-page defines the intended multi-modification workflow that the implementation
-should grow into.
-```
-
-## Step 1: Start With The Protein
+## Step 1: Start With the Protein
 
 Begin with the normal PolyzyMD protein block:
 
 ```yaml
-name: multi-modified-protein
+name: lysine-polymer-conjugate
 
 enzyme:
   name: example-protein
   pdb_path: structures/protein.pdb
 ```
 
-The PDB should already have the residue numbering you want to use. For example,
-if you say `residue_number: 4`, PolyzyMD will look for residue 4 in the selected
-chain.
+The PDB should already use the residue numbering you want. If you set
+`residue_number: 23`, PolyzyMD looks for residue 23 on the selected chain.
 
-## Step 2: Enable Protein Modifications
+## Step 2: Enable Conjugation
 
-Protein modifications live under `conjugation:` because the original executable
-path began as polymer-protein conjugation. The generalized framework treats this
-section as the place for any covalent residue modification.
+Protein modifications live under `conjugation:` because the executable path is
+the conjugation workflow.
 
 ```yaml
 conjugation:
@@ -58,140 +54,122 @@ conjugation:
   attachments: []
 ```
 
-`enabled: true` is opt-in. When this block contains enabled attachments,
-`polyzymd build -c config.yaml` routes the build through the public conjugation
-workflow and constructs the modified structure from the unmodified input protein.
+When this block contains enabled attachments, `polyzymd build -c config.yaml`
+routes the build through conjugate construction before solvation and export.
 
-## Step 3: Add O-Glycosylation At Residue 4
+## Step 3: Select the Lysine Site
 
-For a standard recipe, the user should only need the site and recipe name:
-
-```yaml
-conjugation:
-  enabled: true
-  attachments:
-    - name: ser4-o-glycan
-      site:
-        chain_id: A
-        residue_number: 4
-      protein_modification_recipe:
-        name: core1-o-glycosylation
-```
-
-The recipe should provide the default mechanism, allowed residue types, moiety
-structure, and product residue naming. If residue 4 is not a compatible residue,
-validation should fail with a clear message before any modeling work begins.
-
-## Step 4: Add A Polymer At Residue 23
-
-Polymer attachment can use the same standard recipe pattern. The recipe can
-include polymer-specific options such as length and sequence controls:
-
-```yaml
-    - name: lys23-polymer
-      site:
-        chain_id: A
-        residue_number: 23
-      protein_modification_recipe:
-        name: sbma-egpma-nhs-polymer
-        length: 31
-        forced_reactive_monomer_label: C
-        forced_reactive_monomer_index: 15
-        monomers:
-          - label: A
-            name: SBMA
-            residue_name: SBM
-            probability: 0.945
-            smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
-          - label: B
-            name: EGPMA
-            residue_name: EGP
-            probability: 0.045
-            smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]"
-          - label: C
-            name: NHS
-            residue_name: NHS
-            probability: 0.01
-            smiles: "CC(=C)C(=O)ON1C(=O)CCC1=O"
-```
-
-The NHS monomer is the reactive monomer. The mechanism should know that an NHS
-ester can react with lysine and should resolve the lysine `NZ` atom and the NHS
-acyl carbon.
-
-## Step 5: Add N-Glycosylation At Residue 67
-
-Add the third attachment to the same list:
-
-```yaml
-    - name: asn67-n-glycan
-      site:
-        chain_id: A
-        residue_number: 67
-      protein_modification_recipe:
-        name: high-mannose-n-glycosylation
-```
-
-For N-glycosylation, the mechanism should validate that residue 67 is a
-compatible asparagine site. A future implementation may also validate the
-sequence context around the asparagine when that is scientifically required.
-
-## Step 6: Review The Complete Block
-
-The complete modification block is:
+Add one attachment and identify the target residue:
 
 ```yaml
 conjugation:
   enabled: true
   attachments:
-    - name: ser4-o-glycan
+    - name: lys23-sbma-egpma-nhs
       site:
         chain_id: A
-        residue_number: 4
-      protein_modification_recipe:
-        name: core1-o-glycosylation
-
-    - name: lys23-polymer
-      site:
-        chain_id: A
+        residue_name: LYS
         residue_number: 23
-      protein_modification_recipe:
-        name: sbma-egpma-nhs-polymer
-        length: 31
-        forced_reactive_monomer_label: C
-        forced_reactive_monomer_index: 15
-        monomers:
-          - label: A
-            name: SBMA
-            residue_name: SBM
-            probability: 0.945
-            smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
-          - label: B
-            name: EGPMA
-            residue_name: EGP
-            probability: 0.045
-            smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]"
-          - label: C
-            name: NHS
-            residue_name: NHS
-            probability: 0.01
-            smiles: "CC(=C)C(=O)ON1C(=O)CCC1=O"
-
-    - name: asn67-n-glycan
-      site:
-        chain_id: A
-        residue_number: 67
-      protein_modification_recipe:
-        name: high-mannose-n-glycosylation
 ```
 
-Attachments are applied in order. This means the polymer placement should see
-the O-glycan, and the N-glycan placement should see both earlier modifications.
+The `nhs_lys_amide` mechanism resolves the lysine `NZ` atom from this site. The
+`residue_name` field is recommended because it catches accidental residue-number
+mismatches early.
 
-## Step 7: Add Solvent And Optional Free Polymers
+## Step 4: Add the Polymer Moiety
 
-Protein modifications define covalent changes to the protein. Free polymers are
-still separate non-covalent solutes and should stay under `polymers:`.
+Define the polymer under `moiety.recipe`. The NHS monomer is labeled `C` and is
+forced into the generated sequence so the linker has one reactive site.
+
+```yaml
+      moiety:
+        name: SBMA-EGPMA-NHS
+        recipe:
+          name: SBMA-EGPMA-NHS
+          length: 9
+          seed: 7
+          forced_reactive_monomer_label: C
+          monomers:
+            - label: A
+              name: SBMA
+              residue_name: SBM
+              smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
+              probability: 0.945
+            - label: B
+              name: EGPMA
+              residue_name: EGP
+              smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]"
+              probability: 0.045
+            - label: C
+              name: NHS
+              residue_name: NHS
+              smiles: CC(=C)C(=O)ON1C(=O)CCC1=O
+              probability: 0.01
+```
+
+You can use `polymer_recipe:` instead of `recipe:` if you prefer the explicit
+field name. Both keys map to the same current schema field.
+
+## Step 5: Choose the Mechanism
+
+Set the mechanism name to the built-in NHS-lysine amide linkage:
+
+```yaml
+      mechanism:
+        name: nhs_lys_amide
+```
+
+This mechanism applies the current NHS-lysine defaults for the reactive lysine
+atom, NHS reactive group, leaving atoms, product residue names, and target bond
+length.
+
+## Step 6: Review the Complete Block
+
+The complete executable conjugation block is:
+
+```yaml
+conjugation:
+  enabled: true
+  attachments:
+    - name: lys23-sbma-egpma-nhs
+      site:
+        chain_id: A
+        residue_name: LYS
+        residue_number: 23
+      moiety:
+        name: SBMA-EGPMA-NHS
+        recipe:
+          name: SBMA-EGPMA-NHS
+          length: 9
+          seed: 7
+          forced_reactive_monomer_label: C
+          monomers:
+            - label: A
+              name: SBMA
+              residue_name: SBM
+              smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
+              probability: 0.945
+            - label: B
+              name: EGPMA
+              residue_name: EGP
+              smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]"
+              probability: 0.045
+            - label: C
+              name: NHS
+              residue_name: NHS
+              smiles: CC(=C)C(=O)ON1C(=O)CCC1=O
+              probability: 0.01
+      mechanism:
+        name: nhs_lys_amide
+```
+
+Multiple NHS-lysine polymer attachments can be listed in order when each entry
+uses the same current attachment shape.
+
+## Step 7: Add Solvent and Optional Free Polymers
+
+Covalent polymer attachments belong under `conjugation.attachments`. Free
+polymers are separate non-covalent solutes and stay under `polymers:`.
 
 ```yaml
 polymers:
@@ -210,33 +188,12 @@ solvent:
     padding: 0.5
 ```
 
-This distinction is important. A polymer in `conjugation.attachments` is bonded
-to the protein. A polymer in `polymers:` is packed near the protein but remains
-unattached.
+A polymer in `conjugation.attachments` is bonded to the protein. A polymer in
+`polymers:` is packed near the protein but remains unattached.
 
-## Step 8: Validate Before Building
+## Step 8: Build and Inspect Diagnostics
 
-The generalized workflow should provide a validation command before expensive
-coordinate generation:
-
-```bash
-polyzymd validate -c config.yaml
-```
-
-Validation should report:
-
-| Check | Expected result |
-|-------|-----------------|
-| Site exists | Each requested residue is present in the PDB. |
-| Mechanism compatibility | Each residue can use the requested mechanism. |
-| Recipe resolution | Each recipe name maps to a known modification recipe. |
-| Attachment conflicts | No two attachments unexpectedly modify the same residue. |
-| Template readiness | Required force-field or residue templates are available. |
-
-## Step 9: Build And Inspect Diagnostics
-
-The build command writes the modified protein PDB, relaxed PDB, solvated PDB,
-and diagnostic JSON files:
+Run the regular build command:
 
 ```bash
 polyzymd build -c config.yaml
@@ -254,43 +211,39 @@ OpenFF Interchange to `.gro`, `.top`, and `.itp` files.
 
 Diagnostics should answer these questions in plain language:
 
-1. Which residues were modified?
-2. Which atoms were bonded?
-3. Which atoms were removed?
-4. Which residue names changed?
-5. Which templates or charge policies were used?
+1. Which residue was modified?
+2. Which polymer moiety was added?
+3. Which atoms were bonded?
+4. Which atoms were removed?
+5. Which residue names changed?
 6. Which assumptions are exploratory rather than production-ready?
 
 ## Expected Output
 
-A successful multi-modification build should produce artifacts like:
+A successful build writes artifacts similar to:
 
 ```text
-artifacts/multi-modified-protein/
+artifacts/lysine-polymer-conjugate/
 |- conjugation_diagnostics.json
-|- protein_modification_workflow.json
-|- attachment-001-ser4-o-glycan/
-|- attachment-002-lys23-polymer/
-|- attachment-003-asn67-n-glycan/
-|- relaxed_modified_protein.pdb
-`- solvated_modified_system.pdb
+|- conjugation_metadata.json
+|- conjugate-construction/
+|- relaxed_conjugate.pdb
+`- solvated_conjugate_free_polymers.pdb
 ```
 
-Each attachment directory should contain the local placement inputs, linked PDB,
-parameterization report, and relaxation report for that modification.
+Exact filenames can vary by workflow branch and export options, but the result
+object records the crosslinked, minimized, relaxed, solvated, and export paths
+that were created.
 
 ## What Works Today
 
-The current executable workflow supports a narrower path:
-
 | Requested workflow | Current status |
 |--------------------|----------------|
-| Enabled NHS-lysine polymer attachments | Executable for exploratory builds. |
-| Multiple enabled NHS-lysine attachments in one config | Executable for exploratory builds. |
+| Enabled NHS-lysine polymer attachments with `moiety.recipe` | Executable for exploratory builds. |
+| Multiple enabled NHS-lysine polymer attachments in one config | Executable for exploratory builds. |
+| General biology-first recipe field | Planned and non-executable. |
 | O-glycosylation recipe | Planned. |
-| N-glycosylation recipe | Planned. |
 | Mixed glycan plus polymer mechanisms | Planned. |
 
-Use this tutorial as the target user experience when extending the framework.
-For the currently executable NHS-lysine polymer path, see the conjugation
-notebook and generated artifacts used during development.
+Use the current `moiety` plus `mechanism` attachment shape for examples paired
+with `polyzymd build`.
