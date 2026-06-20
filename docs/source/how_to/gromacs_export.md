@@ -43,7 +43,8 @@ and production with checkpoint-based restart.
 ## Build-only GROMACS export
 
 Use `polyzymd build --format gromacs` when you only want PolyzyMD to construct
-and parameterize the system:
+and parameterize the system. The same command supports enabled conjugation
+configs:
 
 ```bash
 pixi run -e build polyzymd build -c config.yaml --format gromacs
@@ -54,6 +55,10 @@ component `.itp` parameter files. PolyzyMD may also generate MDP defaults and a
 run script as conveniences from the validated `config.yaml`, but those files are
 not required. You may use the generated defaults as a starting point or replace
 them and continue entirely in your own GROMACS workflow.
+
+When `conjugation.enabled: true` and an attachment is enabled, the build first
+constructs, relaxes, solvates, and parameterizes the conjugated system, then
+exports the final OpenFF Interchange to GROMACS.
 
 Use `polyzymd run --engine gromacs` instead when you want PolyzyMD to build and
 execute the full local GROMACS workflow.

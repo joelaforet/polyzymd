@@ -19,7 +19,6 @@ The standard workflow should be biology-first:
 ```yaml
 conjugation:
   enabled: true
-  mode: construct
   attachments:
     - name: ser4-o-glycan
       site:
@@ -33,6 +32,10 @@ In this standard workflow, PolyzyMD should resolve the residue identity, choose
 the correct atom, load or generate the modification, apply the mechanism, place
 the added group, relax the structure, and write diagnostics explaining what it
 did.
+
+The same opt-in block is consumed by `polyzymd build -c config.yaml`. When
+`conjugation.enabled` is false or omitted, the normal non-conjugated system build
+path is used.
 
 Advanced users should still be able to override the resolved atoms, provide
 custom PDB or SDF inputs, specify product residue names, define leaving atoms,

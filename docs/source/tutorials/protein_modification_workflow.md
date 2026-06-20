@@ -55,12 +55,12 @@ section as the place for any covalent residue modification.
 ```yaml
 conjugation:
   enabled: true
-  mode: construct
   attachments: []
 ```
 
-`mode: construct` means PolyzyMD should build the modified structure from the
-unmodified input protein and the requested attachments.
+`enabled: true` is opt-in. When this block contains enabled attachments,
+`polyzymd build -c config.yaml` routes the build through the public conjugation
+workflow and constructs the modified structure from the unmodified input protein.
 
 ## Step 3: Add O-Glycosylation At Residue 4
 
@@ -69,7 +69,6 @@ For a standard recipe, the user should only need the site and recipe name:
 ```yaml
 conjugation:
   enabled: true
-  mode: construct
   attachments:
     - name: ser4-o-glycan
       site:
@@ -144,7 +143,6 @@ The complete modification block is:
 ```yaml
 conjugation:
   enabled: true
-  mode: construct
   attachments:
     - name: ser4-o-glycan
       site:
@@ -237,12 +235,22 @@ Validation should report:
 
 ## Step 9: Build And Inspect Diagnostics
 
-The eventual build command should write a modified protein PDB, a relaxed PDB,
+The build command writes the modified protein PDB, relaxed PDB, solvated PDB,
 and diagnostic JSON files:
 
 ```bash
 polyzymd build -c config.yaml
 ```
+
+For a conjugated GROMACS handoff, request GROMACS export from the same build
+command:
+
+```bash
+polyzymd build -c config.yaml --format gromacs
+```
+
+The GROMACS path first completes the conjugation workflow, then exports the final
+OpenFF Interchange to `.gro`, `.top`, and `.itp` files.
 
 Diagnostics should answer these questions in plain language:
 
@@ -277,8 +285,8 @@ The current executable workflow supports a narrower path:
 
 | Requested workflow | Current status |
 |--------------------|----------------|
-| One NHS-lysine polymer attachment | Executable for exploratory builds. |
-| Multiple attachments in one config | Planned. |
+| Enabled NHS-lysine polymer attachments | Executable for exploratory builds. |
+| Multiple enabled NHS-lysine attachments in one config | Executable for exploratory builds. |
 | O-glycosylation recipe | Planned. |
 | N-glycosylation recipe | Planned. |
 | Mixed glycan plus polymer mechanisms | Planned. |
