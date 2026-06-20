@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from polyzymd.builders.conjugation._linkage import parse_pdb_atom_records
+from polyzymd.builders.conjugation.pablo.charge_patch import (
+    DEFAULT_PATCH_NAGL_MODEL,
+    build_local_product_charge_patch_records,
+)
 from polyzymd.builders.conjugation.pablo.charge_records import (
     AtomPartialChargeRecord,
     ChargeBridgeReport,
@@ -22,13 +25,7 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_PATCH_NAGL_MODEL = "openff-gnn-am1bcc-0.1.0-rc.3.pt"
-PATCH_NAGL_MODEL_ENV = "POLYZYMD_CONJUGATE_PATCH_NAGL_MODEL"
 _BRIDGE_SOURCE = "production:product-state-local-nagl-charge-bridge"
-_PATCH_MAPPED_SMILES = "[CH3:12][NH:13][C:14](=[O:15])[CH3:16]"
-_PATCH_NZ_MAP = 13
-_PATCH_CARBONYL_C_MAP = 14
-_PATCH_CARBONYL_O_MAP = 15
 
 
 def build_product_state_charge_bridge(
@@ -105,7 +102,7 @@ def build_product_state_charge_bridge(
     polymer_records = _polymer_template_records(specs)
     _merge_records(records, polymer_records)
 
-    patch_records, nagl_model = _local_nagl_patch_records(specs)
+    patch_records, nagl_model = _local_nagl_patch_records(specs, product_atoms=product_atoms)
     _merge_records(records, patch_records, replace=True)
 
     missing = [identity for identity in target_identities if identity not in records]
@@ -161,7 +158,7 @@ def build_product_state_charge_bridge(
         assumptions=(
             "Canonical protein atoms retain ff14SB-style charges from the prepared source protein.",
             "Attached polymer atoms retain existing charged polymer/template charges when mapping is stable.",
-            "NHS-Lys linkage atoms are overridden by a local product-state NAGL/AshGC patch.",
+            "Covalent junction atoms are overridden by a local product-state NAGL/AshGC patch.",
             "The complete covalent conjugate is emitted as one charged OpenFF Molecule template.",
             "This bridge is not whole-conjugate AM1-BCC and does not use Gasteiger or formal smoke charges.",
         ),
@@ -343,8 +340,8 @@ def _polymer_template_records(specs: Sequence[Any]) -> tuple[AtomPartialChargeRe
             raise ValueError(
                 "Attached polymer charge transfer requires generated_fragment metadata"
             )
-        template_charges = _charged_sdf_atom_charges(sidecar)
         fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+        template_charges = _charged_sdf_atom_charges(sidecar, generated_fragment=generated_fragment)
         if len(template_charges) != len(fragment_atoms):
             raise ValueError(
                 "Attached polymer charged SDF atom count does not match generated fragment: "
@@ -377,118 +374,19 @@ def _polymer_template_records(specs: Sequence[Any]) -> tuple[AtomPartialChargeRe
 
 def _local_nagl_patch_records(
     specs: Sequence[Any],
-) -> tuple[tuple[AtomPartialChargeRecord, ...], str]:
-    """Generate local NHS-Lys product-state NAGL patch charges."""
-    charged_patch, model_name = _charge_patch_molecule()
-    patch_charges = _mapped_patch_charges(charged_patch)
-    records: list[AtomPartialChargeRecord] = []
-    for spec in specs:
-        plan = getattr(spec, "resolved_plan", None)
-        if plan is None:
-            raise ValueError("NHS-Lys local charge patch requires a resolved attachment plan")
-        protein_atom = getattr(plan, "protein_link_atom", None)
-        modifier_atom = getattr(plan, "modifier_link_atom", None)
-        if protein_atom is None or modifier_atom is None:
-            raise ValueError("NHS-Lys local charge patch requires protein and modifier link atoms")
-        records.append(
-            _record_from_pdb_atom(
-                protein_atom,
-                charge=patch_charges[_PATCH_NZ_MAP],
-                residue_name=str(getattr(plan, "protein_product_residue_name", "LYX") or "LYX"),
-                source=f"{_BRIDGE_SOURCE}:{model_name}:patch-map-{_PATCH_NZ_MAP}",
-            )
-        )
-        records.append(
-            _record_from_pdb_atom(
-                modifier_atom,
-                charge=patch_charges[_PATCH_CARBONYL_C_MAP],
-                residue_name=str(getattr(plan, "modifier_product_residue_name", "") or ""),
-                source=f"{_BRIDGE_SOURCE}:{model_name}:patch-map-{_PATCH_CARBONYL_C_MAP}",
-            )
-        )
-        oxygen = _modifier_carbonyl_oxygen(spec)
-        if oxygen is not None:
-            records.append(
-                _record_from_pdb_atom(
-                    oxygen,
-                    charge=patch_charges[_PATCH_CARBONYL_O_MAP],
-                    residue_name=str(getattr(plan, "modifier_product_residue_name", "") or ""),
-                    source=f"{_BRIDGE_SOURCE}:{model_name}:patch-map-{_PATCH_CARBONYL_O_MAP}",
-                )
-            )
-    return tuple(records), model_name
-
-
-def _charge_patch_molecule() -> tuple[Any, str]:
-    """Charge the local product-state amide patch with NAGL."""
-    from openff.toolkit import Molecule
-    from rdkit import Chem
-
-    from polyzymd.utils.charging import NAGLCharger
-
-    rdmol = Chem.AddHs(Chem.MolFromSmiles(_PATCH_MAPPED_SMILES))
-    molecule = Molecule.from_rdkit(rdmol, allow_undefined_stereo=True, hydrogens_are_explicit=True)
-    for rd_atom, off_atom in zip(rdmol.GetAtoms(), molecule.atoms, strict=True):
-        map_number = rd_atom.GetAtomMapNum()
-        if map_number:
-            off_atom.metadata["atom_map"] = map_number
-    model_name = os.environ.get(PATCH_NAGL_MODEL_ENV, DEFAULT_PATCH_NAGL_MODEL)
-    charger = NAGLCharger(model_name=model_name)
-    charged = charger.charge_molecule(molecule)
-    if getattr(charged, "partial_charges", None) is None:
-        raise ValueError(f"NAGL model {model_name} did not return local patch partial charges")
-    return charged, model_name
-
-
-def _mapped_patch_charges(charged_patch: Any) -> dict[int, float]:
-    """Return local patch charges by atom-map number."""
-    charges = _charge_values(getattr(charged_patch, "partial_charges", ()))
-    mapped: dict[int, float] = {}
-    for atom, charge in zip(tuple(charged_patch.atoms), charges, strict=True):
-        map_number = (getattr(atom, "metadata", None) or {}).get("atom_map")
-        if map_number:
-            mapped[int(map_number)] = charge
-    required = {_PATCH_NZ_MAP, _PATCH_CARBONYL_C_MAP, _PATCH_CARBONYL_O_MAP}
-    if not required.issubset(mapped):
-        raise ValueError(f"NAGL patch molecule is missing mapped charges for {sorted(required)}")
-    return mapped
-
-
-def _modifier_carbonyl_oxygen(spec: Any) -> Any | None:
-    """Return the first oxygen atom in the modifier link residue, if available."""
-    plan = getattr(spec, "resolved_plan", None)
-    modifier_atom = getattr(plan, "modifier_link_atom", None)
-    fragment = getattr(spec, "generated_fragment", None)
-    if modifier_atom is None or fragment is None:
-        return None
-    residue_number = getattr(modifier_atom, "residue_number", None)
-    for atom in tuple(getattr(fragment, "atoms", ()) or ()):
-        if getattr(atom, "residue_number", None) != residue_number:
-            continue
-        element = str(getattr(atom, "element", "") or "").strip().upper()
-        if element == "O":
-            return atom
-    return None
-
-
-def _record_from_pdb_atom(
-    atom: Any,
     *,
-    charge: float,
-    residue_name: str,
-    source: str,
-) -> AtomPartialChargeRecord:
-    """Build one charge record from a PDB-like atom."""
-    return AtomPartialChargeRecord(
-        chain_id=str(getattr(atom, "chain_id", "") or ""),
-        residue_name=residue_name or str(getattr(atom, "residue_name", "") or ""),
-        residue_number=getattr(atom, "residue_number", None),
-        insertion_code=str(getattr(atom, "insertion_code", "") or ""),
-        atom_name=str(getattr(atom, "atom_name", "") or getattr(atom, "name", "")),
-        charge_e=charge,
-        source=source,
-        source_role="local_nagl_patch",
-    )
+    product_atoms: Sequence[Any] = (),
+) -> tuple[tuple[AtomPartialChargeRecord, ...], str]:
+    """Generate generic local product-state NAGL patch charges."""
+    records: list[AtomPartialChargeRecord] = []
+    model_name = DEFAULT_PATCH_NAGL_MODEL
+    for spec in specs:
+        patch_records, model_name = build_local_product_charge_patch_records(
+            spec,
+            product_atoms=product_atoms,
+        )
+        records.extend(patch_records)
+    return tuple(records), model_name
 
 
 def _source_sdf_path(spec: Any) -> Path | None:
@@ -508,10 +406,11 @@ def _source_sdf_path(spec: Any) -> Path | None:
     return None
 
 
-def _charged_sdf_atom_charges(path: Path) -> tuple[float, ...]:
-    """Read partial charges from a production charged SDF via PolyzyMD loaders."""
+def _charged_sdf_atom_charges(path: Path, *, generated_fragment: Any) -> tuple[float, ...]:
+    """Read partial charges from a validated production charged SDF."""
     from polyzymd.utils import get_largest_offmol, topology_from_sdf
 
+    _validate_charged_sdf_matches_fragment(path, generated_fragment=generated_fragment)
     topology = topology_from_sdf(path)
     molecule = get_largest_offmol(topology)
     partial_charges = getattr(molecule, "partial_charges", None)
@@ -521,6 +420,79 @@ def _charged_sdf_atom_charges(path: Path) -> tuple[float, ...]:
             f"Gasteiger, or formal fallback for {path}"
         )
     return _charge_values(partial_charges)
+
+
+def _validate_charged_sdf_matches_fragment(path: Path, *, generated_fragment: Any) -> None:
+    """Validate that a charged SDF preserves generated-fragment atom order."""
+    from rdkit import Chem
+
+    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    if not fragment_atoms:
+        raise ValueError("Attached polymer charge transfer requires generated-fragment atoms")
+    sdf_path = Path(path)
+    if not sdf_path.exists():
+        raise ValueError(f"Attached polymer charged SDF sidecar does not exist: {sdf_path}")
+    supplier = Chem.SDMolSupplier(str(sdf_path), removeHs=False, sanitize=False)
+    molecules = [mol for mol in supplier if mol is not None]
+    if not molecules:
+        raise ValueError(f"Attached polymer charged SDF sidecar could not be read: {sdf_path}")
+    mol = _select_charged_sdf_molecule(
+        molecules,
+        expected_atoms=len(fragment_atoms),
+        sdf_path=sdf_path,
+    )
+    observed = tuple(atom.GetSymbol().upper() for atom in mol.GetAtoms())
+    expected = tuple(
+        _fragment_atom_element(atom) for atom in _fragment_atoms_in_sdf_order(fragment_atoms)
+    )
+    if observed != expected:
+        preview = ", ".join(
+            f"{index + 1}:{want}->{got}"
+            for index, (want, got) in enumerate(zip(expected, observed, strict=True))
+            if want != got
+        )
+        raise ValueError(
+            "Attached polymer charged SDF atom element/order does not match the generated "
+            f"fragment for {sdf_path}: {preview}. Regenerate charged_sdf and bond_sdf from "
+            "the same production polymer molecule."
+        )
+
+
+def _select_charged_sdf_molecule(
+    molecules: Sequence[Any], *, expected_atoms: int, sdf_path: Path
+) -> Any:
+    """Select the charged SDF molecule matching the generated-fragment atom count."""
+    matches = [mol for mol in molecules if mol.GetNumAtoms() == expected_atoms]
+    if not matches:
+        observed = ", ".join(str(mol.GetNumAtoms()) for mol in molecules)
+        raise ValueError(
+            "Attached polymer charged SDF atom count does not match the generated fragment: "
+            f"expected {expected_atoms}, observed {observed} in {sdf_path}"
+        )
+    return matches[0]
+
+
+def _fragment_atoms_in_sdf_order(fragment_atoms: Sequence[Any]) -> tuple[Any, ...]:
+    """Return fragment atoms in the atom-index order used by production SDF sidecars."""
+    if all(getattr(atom, "atom_index", None) is not None for atom in fragment_atoms):
+        return tuple(sorted(fragment_atoms, key=lambda atom: int(atom.atom_index)))
+    return tuple(fragment_atoms)
+
+
+def _fragment_atom_element(atom: Any) -> str:
+    """Return a generated-fragment atom element symbol for sidecar validation."""
+    element = str(getattr(atom, "element", "") or "").strip().upper()
+    if element:
+        return element
+    return _guess_element(str(getattr(atom, "atom_name", "") or getattr(atom, "name", "")))
+
+
+def _guess_element(atom_name: str) -> str:
+    """Guess a PDB-style element symbol from an atom name."""
+    stripped = "".join(char for char in atom_name.strip() if char.isalpha())
+    if not stripped:
+        return ""
+    return stripped[0].upper()
 
 
 def _mapped_polymer_residue(atom: Any, mappings: Mapping[str, Any]) -> dict[str, Any]:

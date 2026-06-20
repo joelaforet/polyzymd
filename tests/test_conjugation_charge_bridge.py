@@ -90,7 +90,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
     monkeypatch.setattr(
         charge_bridge,
         "_polymer_template_records",
-        lambda _: (
+        lambda _, **__: (
             AtomPartialChargeRecord(
                 chain_id="C",
                 residue_name="NHX",
@@ -123,7 +123,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
     monkeypatch.setattr(
         charge_bridge,
         "_local_nagl_patch_records",
-        lambda _: (
+        lambda _, **__: (
             (
                 AtomPartialChargeRecord(
                     chain_id="A",
@@ -181,6 +181,31 @@ def test_bridge_prefers_charged_sdf_source(tmp_path):
     assert charge_bridge._source_sdf_path(spec) == charged_sdf
 
 
+def test_bridge_validates_charged_sdf_atom_order(tmp_path):
+    """Charged SDF sources must match generated-fragment atom order."""
+    charged_sdf = tmp_path / "polymer_charged.sdf"
+    charged_sdf.write_text(_mini_sdf(("C", "O")), encoding="utf-8")
+    fragment = SimpleNamespace(
+        atoms=(
+            SimpleNamespace(atom_index=0, atom_name="C1", element="C"),
+            SimpleNamespace(atom_index=1, atom_name="O1", element="O"),
+        )
+    )
+
+    charge_bridge._validate_charged_sdf_matches_fragment(
+        charged_sdf,
+        generated_fragment=fragment,
+    )
+
+    mismatched_sdf = tmp_path / "polymer_charged_mismatch.sdf"
+    mismatched_sdf.write_text(_mini_sdf(("O", "C")), encoding="utf-8")
+    with pytest.raises(ValueError, match="element/order does not match"):
+        charge_bridge._validate_charged_sdf_matches_fragment(
+            mismatched_sdf,
+            generated_fragment=fragment,
+        )
+
+
 def _molecule(atoms: list[SimpleNamespace]) -> SimpleNamespace:
     """Build an OpenFF-like molecule double."""
     return SimpleNamespace(atoms=tuple(atoms), n_atoms=len(atoms), partial_charges=None)
@@ -204,3 +229,22 @@ def _atom(
             "atom_name": atom_name,
         },
     )
+
+
+def _mini_sdf(elements: tuple[str, ...]) -> str:
+    """Build a minimal V2000 SDF for validation tests."""
+    lines = [
+        "\n",
+        "  PolyzyMD test fixture\n",
+        "\n",
+        f"{len(elements):3d}{max(len(elements) - 1, 0):3d}  0  0  0  0  0  0  0  0999 V2000\n",
+    ]
+    for index, element in enumerate(elements):
+        lines.append(
+            f"{float(index):10.4f}{0.0:10.4f}{0.0:10.4f} {element:<3} 0  0"
+            "  0  0  0  0  0  0  0  0  0  0\n"
+        )
+    for index in range(1, len(elements)):
+        lines.append(f"{index:3d}{index + 1:3d}{1:3d}  0\n")
+    lines.append("M  END\n$$$$\n")
+    return "".join(lines)

@@ -755,7 +755,10 @@ def _product_formal_charges(
     """Map non-zero generated-fragment formal charges onto product PDB residues."""
     if generated_fragment is None:
         return {}
-    charged_formal_charges = _charged_sdf_formal_charges(charged_polymer_sdf)
+    charged_formal_charges = _charged_sdf_formal_charges(
+        charged_polymer_sdf,
+        generated_fragment=generated_fragment,
+    )
     unique_atom_names = _unique_fragment_atom_names(generated_fragment)
     product_lookup = _product_lookup(
         product_atoms,
@@ -776,8 +779,12 @@ def _product_formal_charges(
     return {key: dict(value) for key, value in charges.items()}
 
 
-def _charged_sdf_formal_charges(charged_polymer_sdf: Path | str | None) -> dict[int, int]:
-    """Return non-zero formal charges from a production charged SDF sidecar."""
+def _charged_sdf_formal_charges(
+    charged_polymer_sdf: Path | str | None,
+    *,
+    generated_fragment: Any,
+) -> dict[int, int]:
+    """Return non-zero formal charges from a validated charged SDF sidecar."""
     if charged_polymer_sdf is None:
         return {}
     from rdkit import Chem
@@ -789,7 +796,14 @@ def _charged_sdf_formal_charges(charged_polymer_sdf: Path | str | None) -> dict[
     molecules = [mol for mol in supplier if mol is not None]
     if not molecules:
         raise ValueError(f"Charged polymer SDF sidecar could not be read: {sdf_path}")
-    mol = max(molecules, key=lambda candidate: candidate.GetNumAtoms())
+    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    mol = _select_sdf_molecule(molecules, expected_atoms=len(fragment_atoms), sdf_path=sdf_path)
+    _validate_sdf_atom_elements(
+        mol,
+        fragment_atoms=_fragment_atoms_in_sdf_order(fragment_atoms),
+        sdf_path=sdf_path,
+        source_label="Charged polymer SDF",
+    )
     charges = {}
     for atom in mol.GetAtoms():
         formal_charge = int(atom.GetFormalCharge())
@@ -809,6 +823,46 @@ def _select_sdf_molecule(molecules: list[Any], *, expected_atoms: int, sdf_path:
             "polymer PDB/SDF pair from the same source molecule."
         )
     return max(matches, key=lambda candidate: candidate.GetNumBonds())
+
+
+def _validate_sdf_atom_elements(
+    mol: Any,
+    *,
+    fragment_atoms: tuple[Any, ...],
+    sdf_path: Path,
+    source_label: str,
+) -> None:
+    """Validate that an SDF atom sequence matches a generated fragment."""
+    observed = tuple(atom.GetSymbol().upper() for atom in mol.GetAtoms())
+    expected = tuple(_fragment_atom_element(atom) for atom in fragment_atoms)
+    if observed != expected:
+        mismatches = [
+            f"{index + 1}:{want}->{got}"
+            for index, (want, got) in enumerate(zip(expected, observed, strict=True))
+            if want != got
+        ]
+        preview = ", ".join(mismatches[:8])
+        suffix = "" if len(mismatches) <= 8 else f", ... {len(mismatches) - 8} more"
+        raise ValueError(
+            f"{source_label} atom element/order does not match the generated fragment for "
+            f"{sdf_path}: {preview}{suffix}. Regenerate charged_sdf and bond_sdf from the "
+            "same production polymer molecule."
+        )
+
+
+def _fragment_atoms_in_sdf_order(fragment_atoms: tuple[Any, ...]) -> tuple[Any, ...]:
+    """Return fragment atoms in the atom-index order used by production SDF sidecars."""
+    if all(getattr(atom, "atom_index", None) is not None for atom in fragment_atoms):
+        return tuple(sorted(fragment_atoms, key=lambda atom: int(atom.atom_index)))
+    return fragment_atoms
+
+
+def _fragment_atom_element(atom: Any) -> str:
+    """Return a generated-fragment atom element symbol for sidecar validation."""
+    element = str(getattr(atom, "element", "") or "").strip().upper()
+    if element:
+        return element
+    return _guess_element(str(getattr(atom, "atom_name", "") or getattr(atom, "name", "")))
 
 
 def _validate_sdf_bond_orders(mol: Any, sdf_path: Path) -> None:
