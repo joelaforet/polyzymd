@@ -158,8 +158,8 @@ def test_system_workflow_settings_enable_public_product_state_defaults():
     assert settings.protein_canonicalization.ph == pytest.approx(7.0)
 
 
-def test_build_solvated_system_calls_final_interchange_without_kwargs(monkeypatch, tmp_path: Path):
-    """Config-driven solvation should call the final Interchange builder without kwargs."""
+def test_build_solvated_system_uses_conjugation_final_interchange(monkeypatch, tmp_path: Path):
+    """Config-driven final solvation should use the conjugation-specific helper."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
     config = SimpleNamespace(
@@ -168,6 +168,8 @@ def test_build_solvated_system_calls_final_interchange_without_kwargs(monkeypatc
         solvent=SimpleNamespace(),
     )
     fake_builder = _NoKwargInterchangeBuilder(tmp_path / "solvated.pdb")
+    product_library = _fake_product_state_library()
+    calls = {}
 
     monkeypatch.setattr(
         workflow_module.SystemBuilder,
@@ -176,35 +178,63 @@ def test_build_solvated_system_calls_final_interchange_without_kwargs(monkeypatc
     )
     monkeypatch.setattr(workflow_module, "_build_and_pack_free_polymers", lambda *a, **k: None)
 
+    def fake_final_interchange(builder, *, product_state_pablo_library, settings=None):
+        calls["builder"] = builder
+        calls["product_state_pablo_library"] = product_state_pablo_library
+        calls["settings"] = settings
+        builder._interchange = object()
+        return builder._interchange
+
+    monkeypatch.setattr(
+        workflow_module,
+        "create_final_conjugated_interchange",
+        fake_final_interchange,
+    )
+
     result = _build_solvated_system(
         config,
         relaxed_conjugate_topology=object(),
         working_dir=tmp_path,
         polymer_seed=123,
         create_interchange=True,
+        product_state_pablo_library=product_library,
     )
 
     assert result is fake_builder
-    assert fake_builder.create_interchange_calls == 1
+    assert fake_builder.create_interchange_calls == 0
+    assert calls["builder"] is fake_builder
+    assert calls["product_state_pablo_library"] is product_library
 
 
-def test_build_direct_solvated_system_calls_final_interchange_without_kwargs(
+def test_build_direct_solvated_system_uses_conjugation_final_interchange(
     monkeypatch, tmp_path: Path
 ):
-    """Direct solvation should call the final Interchange builder without kwargs."""
+    """Direct final solvation should use the conjugation-specific helper."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
     fake_builder = _NoKwargInterchangeBuilder(tmp_path / "solvated.pdb")
+    product_library = _fake_product_state_library()
+    calls = {}
     monkeypatch.setattr(workflow_module, "SystemBuilder", lambda: fake_builder)
+    monkeypatch.setattr(
+        workflow_module,
+        "create_final_conjugated_interchange",
+        lambda builder, *, product_state_pablo_library, settings=None: calls.setdefault(
+            "args", (builder, product_state_pablo_library, settings)
+        ),
+    )
 
     result = _build_direct_solvated_system(
         relaxed_conjugate_topology=object(),
         working_dir=tmp_path,
         create_interchange=True,
+        product_state_pablo_library=product_library,
     )
 
     assert result is fake_builder
-    assert fake_builder.create_interchange_calls == 1
+    assert fake_builder.create_interchange_calls == 0
+    assert calls["args"][0] is fake_builder
+    assert calls["args"][1] is product_library
 
 
 def test_prepared_protein_path_canonicalizes_to_construction_dir(monkeypatch, tmp_path: Path):
@@ -1355,7 +1385,15 @@ class _NoKwargInterchangeBuilder(_FakeSystemBuilder):
     def create_interchange(self):
         """Record final Interchange creation while accepting no kwargs."""
         self.create_interchange_calls += 1
-        self.interchange = object()
+        raise AssertionError("generic SystemBuilder.create_interchange must not be called")
+
+
+def _fake_product_state_library():
+    """Build product-state provenance for workflow helper tests."""
+    return SimpleNamespace(
+        definitions=(SimpleNamespace(residue_name="LYX"),),
+        residue_names=("LYX",),
+    )
 
 
 def _direct_n_gly_attachment(index: int) -> SimpleNamespace:
