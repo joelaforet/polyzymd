@@ -11,8 +11,8 @@ from polyzymd.builders.conjugation.final_interchange import create_final_conjuga
 from polyzymd.builders.conjugation.pablo.product import ProductStatePabloLibrary
 
 
-def test_final_helper_combines_product_and_standard_templates():
-    """Final helper should pass product-state and standard templates together."""
+def test_final_helper_passes_standard_templates_without_product_templates():
+    """Final helper should use Pablo provenance and pass only standard templates."""
     conjugate_template = _template("conjugate")
     standard_template = _template("water")
     builder = _Builder(standard_templates=(standard_template,))
@@ -44,14 +44,19 @@ def test_final_helper_combines_product_and_standard_templates():
     assert builder._interchange is interchange
     assert captured["topology"] is builder._solvated_topology
     assert captured["settings"] == "settings"
-    assert captured["charge_from_molecules"] == (conjugate_template, standard_template)
-    assert captured["require_charge_templates"] is True
+    assert captured["charge_from_molecules"] == (standard_template,)
+    assert captured["require_charge_templates"] is False
 
 
 @pytest.mark.parametrize(
     "product_library",
     [
         None,
+        SimpleNamespace(
+            residue_library=None,
+            definitions=(SimpleNamespace(residue_name="LYX"),),
+            residue_names=("LYX",),
+        ),
         SimpleNamespace(definitions=(), residue_names=("LYX",)),
         SimpleNamespace(definitions=(SimpleNamespace(residue_name=""),), residue_names=()),
     ],
@@ -75,44 +80,44 @@ def test_final_helper_refuses_missing_product_state_provenance(product_library):
     assert called is False
 
 
-def test_final_helper_refuses_empty_product_charge_templates_before_openff():
-    """Standard templates must not satisfy product charge-template requirements."""
-    called = False
+def test_final_helper_accepts_empty_product_charge_templates():
+    """Pablo residue provenance, not molecule-level product templates, is required."""
+    captured = {}
+    interchange = object()
 
-    def fake_parameterizer(*args, **kwargs):
-        nonlocal called
-        called = True
+    def fake_parameterizer(topology, **kwargs):
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(success=True, interchange=interchange)
+
+    result = create_final_conjugated_interchange(
+        _Builder(standard_templates=(_template("water"),)),
+        product_state_pablo_library=_product_library(),
+        parameterizer=fake_parameterizer,
+    )
+
+    assert result is interchange
+    assert tuple(captured["kwargs"]["charge_from_molecules"])
+    assert captured["kwargs"]["require_charge_templates"] is False
+
+
+def test_final_helper_ignores_uncharged_product_template_before_openff():
+    """Uncharged cached product templates should not block Pablo parameterization."""
+    captured = {}
+
+    def fake_parameterizer(topology, **kwargs):
+        captured["kwargs"] = kwargs
         return SimpleNamespace(success=True, interchange=object())
 
-    with pytest.raises(RuntimeError, match="Formal-charge smoke templates are not production"):
-        create_final_conjugated_interchange(
-            _Builder(standard_templates=(_template("water"),)),
-            product_state_pablo_library=_product_library(),
-            parameterizer=fake_parameterizer,
-        )
+    create_final_conjugated_interchange(
+        _Builder(),
+        product_state_pablo_library=_product_library(
+            charge_templates=(_template("conjugate", partial_charges=None),)
+        ),
+        parameterizer=fake_parameterizer,
+    )
 
-    assert called is False
-
-
-def test_final_helper_refuses_uncharged_product_template_before_openff():
-    """Uncharged conjugate templates should fail before OpenFF parameterization."""
-    called = False
-
-    def fake_parameterizer(*args, **kwargs):
-        nonlocal called
-        called = True
-        return SimpleNamespace(success=True, interchange=object())
-
-    with pytest.raises(RuntimeError, match="refuses whole-conjugate AM1-BCC"):
-        create_final_conjugated_interchange(
-            _Builder(),
-            product_state_pablo_library=_product_library(
-                charge_templates=(_template("conjugate", partial_charges=None),)
-            ),
-            parameterizer=fake_parameterizer,
-        )
-
-    assert called is False
+    assert tuple(captured["kwargs"]["charge_from_molecules"]) == ()
+    assert captured["kwargs"]["require_charge_templates"] is False
 
 
 def test_final_helper_does_not_call_formal_charge_smoke_template(monkeypatch):
@@ -126,19 +131,44 @@ def test_final_helper_does_not_call_formal_charge_smoke_template(monkeypatch):
     )
     builder = _Builder()
 
-    with pytest.raises(RuntimeError, match="Product-state conjugate charge templates are missing"):
-        create_final_conjugated_interchange(
-            builder,
-            product_state_pablo_library=_product_library(),
-            parameterizer=lambda topology, **kwargs: SimpleNamespace(
-                success=True,
-                interchange="ok",
-            ),
-        )
+    result = create_final_conjugated_interchange(
+        builder,
+        product_state_pablo_library=_product_library(),
+        parameterizer=lambda topology, **kwargs: SimpleNamespace(
+            success=True,
+            interchange="ok",
+        ),
+    )
+
+    assert result == "ok"
 
 
-def test_final_helper_receives_real_openff_product_template_charges():
-    """A semi-real product-state library should propagate real OpenFF charges."""
+def test_final_helper_allows_topology_molecules_without_partial_charges():
+    """Pablo topology molecule charges should not be a final preflight requirement."""
+    captured = {}
+    builder = _Builder()
+    builder._solvated_topology = SimpleNamespace(
+        molecules=(_template("conjugate", partial_charges=None),)
+    )
+
+    def fake_parameterizer(topology, **kwargs):
+        captured["topology"] = topology
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(success=True, interchange="ok")
+
+    result = create_final_conjugated_interchange(
+        builder,
+        product_state_pablo_library=_product_library(),
+        parameterizer=fake_parameterizer,
+    )
+
+    assert result == "ok"
+    assert captured["topology"] is builder._solvated_topology
+    assert captured["kwargs"]["require_charge_templates"] is False
+
+
+def test_final_helper_receives_real_openff_standard_template_charges():
+    """A semi-real product-state library should propagate real standard charges."""
     pytest.importorskip("openff.toolkit")
     from openff.toolkit import Molecule, Topology
     from openff.units import Quantity
@@ -188,10 +218,9 @@ def test_final_helper_receives_real_openff_product_template_charges():
         parameterizer=fake_parameterizer,
     )
 
-    assert captured["templates"][0] is conjugate_template
+    assert captured["templates"] == (water_template,)
     assert captured["templates"][0].partial_charges is not None
-    assert captured["templates"][1] is water_template
-    assert captured["require_charge_templates"] is True
+    assert captured["require_charge_templates"] is False
 
 
 class _Builder:
@@ -210,6 +239,7 @@ class _Builder:
 def _product_library(charge_templates=()):
     """Build fake product-state Pablo provenance."""
     return SimpleNamespace(
+        residue_library=object(),
         definitions=(SimpleNamespace(residue_name="LYX"),),
         residue_names=("LYX",),
         charge_templates=tuple(charge_templates),
