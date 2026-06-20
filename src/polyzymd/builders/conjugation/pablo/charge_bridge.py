@@ -325,6 +325,18 @@ def _source_protein_charges(
             "Could not extract a complete ff14SB charge vector from source protein Interchange: "
             f"{len(charges)} charges for {len(atoms)} atom(s)"
         )
+    source_atoms = tuple(parse_pdb_atom_records(source_protein_pdb))
+    if len(source_atoms) == len(charges):
+        return {
+            (
+                atom.chain_id.strip(),
+                atom.residue_name.strip().upper(),
+                atom.residue_number,
+                atom.insertion_code.strip(),
+                atom.atom_name.strip(),
+            ): charges[index]
+            for index, atom in enumerate(source_atoms)
+        }
     return {_atom_identity(atom): charges[index] for index, atom in enumerate(atoms)}
 
 
