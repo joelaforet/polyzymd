@@ -408,18 +408,31 @@ def _source_sdf_path(spec: Any) -> Path | None:
 
 def _charged_sdf_atom_charges(path: Path, *, generated_fragment: Any) -> tuple[float, ...]:
     """Read partial charges from a validated production charged SDF."""
-    from polyzymd.utils import get_largest_offmol, topology_from_sdf
+    from rdkit import Chem
 
-    _validate_charged_sdf_matches_fragment(path, generated_fragment=generated_fragment)
-    topology = topology_from_sdf(path)
-    molecule = get_largest_offmol(topology)
-    partial_charges = getattr(molecule, "partial_charges", None)
-    if partial_charges is None:
+    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    if not fragment_atoms:
+        raise ValueError("Attached polymer charge transfer requires generated-fragment atoms")
+    sdf_path = Path(path)
+    mol = _validated_charged_sdf_molecule(
+        sdf_path,
+        fragment_atoms=fragment_atoms,
+        supplier_cls=Chem.SDMolSupplier,
+    )
+    charges = []
+    for index, atom in enumerate(mol.GetAtoms(), start=1):
+        if not atom.HasProp("PartialCharge"):
+            raise ValueError(
+                "Attached polymer SDF does not contain per-atom partial charges; refusing to "
+                f"use AM1-BCC, Gasteiger, or formal fallback for atom {index} in {sdf_path}"
+            )
+        charges.append(float(atom.GetDoubleProp("PartialCharge")))
+    if len(charges) != len(fragment_atoms):
         raise ValueError(
-            "Attached polymer SDF does not contain partial charges; refusing to use AM1-BCC, "
-            f"Gasteiger, or formal fallback for {path}"
+            "Attached polymer charged SDF atom count does not match extracted charges: "
+            f"{len(charges)} charges vs {len(fragment_atoms)} atom(s) for {sdf_path}"
         )
-    return _charge_values(partial_charges)
+    return tuple(charges)
 
 
 def _validate_charged_sdf_matches_fragment(path: Path, *, generated_fragment: Any) -> None:
@@ -429,10 +442,23 @@ def _validate_charged_sdf_matches_fragment(path: Path, *, generated_fragment: An
     fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
     if not fragment_atoms:
         raise ValueError("Attached polymer charge transfer requires generated-fragment atoms")
-    sdf_path = Path(path)
+    _validated_charged_sdf_molecule(
+        Path(path),
+        fragment_atoms=fragment_atoms,
+        supplier_cls=Chem.SDMolSupplier,
+    )
+
+
+def _validated_charged_sdf_molecule(
+    sdf_path: Path,
+    *,
+    fragment_atoms: Sequence[Any],
+    supplier_cls: Any,
+) -> Any:
+    """Return the charged SDF molecule after atom-order validation."""
     if not sdf_path.exists():
         raise ValueError(f"Attached polymer charged SDF sidecar does not exist: {sdf_path}")
-    supplier = Chem.SDMolSupplier(str(sdf_path), removeHs=False, sanitize=False)
+    supplier = supplier_cls(str(sdf_path), removeHs=False, sanitize=False)
     molecules = [mol for mol in supplier if mol is not None]
     if not molecules:
         raise ValueError(f"Attached polymer charged SDF sidecar could not be read: {sdf_path}")
@@ -456,6 +482,7 @@ def _validate_charged_sdf_matches_fragment(path: Path, *, generated_fragment: An
             f"fragment for {sdf_path}: {preview}. Regenerate charged_sdf and bond_sdf from "
             "the same production polymer molecule."
         )
+    return mol
 
 
 def _select_charged_sdf_molecule(
