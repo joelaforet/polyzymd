@@ -21,11 +21,11 @@ from polyzymd.builders.conjugation._artifacts import (
     DiagnosticSeverity,
     chain_policy_from_config,
 )
-from polyzymd.builders.conjugation.exceptions import (
-    ConjugationNotImplementedError,
-    PabloIngestionError,
+from polyzymd.builders.conjugation.exceptions import PabloIngestionError
+from polyzymd.builders.conjugation.pablo.residue_library import (
+    PabloResidueLibraryError,
+    build_pablo_residue_library,
 )
-from polyzymd.builders.conjugation.pablo.residue_library import build_pablo_residue_library
 from polyzymd.builders.conjugation.structure.inspection import (
     PDBStructureInspection,
     inspect_pdb_structure,
@@ -142,7 +142,7 @@ class PabloLinkCandidate(BaseModel):
 class PabloStructurePreflight(BaseModel):
     """Preflight diagnostics for a structure intended for Pablo ingestion."""
 
-    intended_mode: str
+    ingestion_context: str = "pablo_ingestion"
     path: Path
     suffix: str
     pablo: PabloAvailability
@@ -209,32 +209,6 @@ class PabloIngestor:
         """
         self._policy = policy
 
-    def ingest_existing(self, pdb_path: Path | str | None) -> Any:
-        """Ingest a pre-conjugated structure with OpenFF Pablo.
-
-        Parameters
-        ----------
-        pdb_path : Path, str, or None
-            Path to a pre-conjugated PDB or mmCIF structure.
-
-        Returns
-        -------
-        Any
-            OpenFF topology returned by Pablo.
-
-        Raises
-        ------
-        ConjugationNotImplementedError
-            If Pablo does not return a topology that downstream builders can use.
-        PabloIngestionError
-            If the input path is missing or invalid.
-        """
-        result = self.ingest_structure(pdb_path)
-        if result.success and result.topology is not None:
-            return result.topology
-
-        raise ConjugationNotImplementedError(_not_implemented_message(result))
-
     def ingest_structure(
         self,
         path: Path | str | None,
@@ -244,7 +218,7 @@ class PabloIngestor:
         residue_library: Any | None = None,
         additional_definitions: Any | None = None,
     ) -> PabloIngestionResult:
-        """Attempt real Pablo/CCD ingestion for an existing structure.
+        """Attempt real Pablo/CCD ingestion for a structure file.
 
         Parameters
         ----------
@@ -324,73 +298,81 @@ class PabloIngestor:
 
         try:
             pablo_module = importlib.import_module("openff.pablo")
-            if residue_library is None:
+        except ImportError as exc:
+            return _build_parse_failure_result(
+                exc=exc,
+                structure_path=structure_path,
+                availability=availability,
+                chain_metadata=chain_metadata,
+                pdb_atom_records=pdb_atom_records,
+                pdb_link_candidates=pdb_link_candidates,
+                diagnostics=diagnostics,
+                inspection=inspection,
+                normalization_plan=normalization_plan,
+                output_dir=output_dir,
+            )
+
+        if residue_library is None:
+            try:
                 residue_library_result = build_pablo_residue_library(
                     self._policy,
                     pablo_module=pablo_module,
                 )
-                residue_library = residue_library_result.residue_library
-                diagnostics.extend(
-                    _diagnostics_from_residue_library(residue_library_result.diagnostics)
+            except PabloResidueLibraryError as exc:
+                return _build_parse_failure_result(
+                    exc=exc,
+                    structure_path=structure_path,
+                    availability=availability,
+                    chain_metadata=chain_metadata,
+                    pdb_atom_records=pdb_atom_records,
+                    pdb_link_candidates=pdb_link_candidates,
+                    diagnostics=diagnostics,
+                    inspection=inspection,
+                    normalization_plan=normalization_plan,
+                    output_dir=output_dir,
                 )
-            else:
-                diagnostics.append(
-                    ConjugationDiagnostic(
-                        code=DiagnosticCode.CCD_POLICY,
-                        severity=DiagnosticSeverity.INFO,
-                        message="Using a prebuilt Pablo residue library for ingestion",
-                        details={
-                            "policy_crosslinks_applied": False,
-                            "reason": "product-state definitions were supplied by the caller",
-                        },
-                    )
+            residue_library = residue_library_result.residue_library
+            diagnostics.extend(
+                _diagnostics_from_residue_library(residue_library_result.diagnostics)
+            )
+        else:
+            diagnostics.append(
+                ConjugationDiagnostic(
+                    code=DiagnosticCode.CCD_POLICY,
+                    severity=DiagnosticSeverity.INFO,
+                    message="Using a prebuilt Pablo residue library for ingestion",
+                    details={
+                        "policy_crosslinks_applied": False,
+                        "reason": "product-state definitions were supplied by the caller",
+                    },
                 )
-            topology_kwargs = {
-                "residue_library": residue_library,
-                "format": _infer_pablo_format(structure_path),
-                "use_canonical_names": self._policy_attr("use_canonical_atom_names", False),
-            }
-            if additional_definitions is not None:
-                topology_kwargs["additional_definitions"] = additional_definitions
+            )
+
+        topology_kwargs = {
+            "residue_library": residue_library,
+            "format": _infer_pablo_format(structure_path),
+            "use_canonical_names": self._policy_attr("use_canonical_atom_names", False),
+        }
+        if additional_definitions is not None:
+            topology_kwargs["additional_definitions"] = additional_definitions
+        try:
             topology = pablo_module.topology_from_pdb(
                 structure_path,
                 **topology_kwargs,
             )
-        except Exception as exc:  # noqa: BLE001 - third-party errors are normalized to diagnostics
-            diagnostics.append(_diagnostic_from_parse_error(exc, structure_path))
-            if not pdb_link_candidates:
-                diagnostics.append(
-                    ConjugationDiagnostic(
-                        code=DiagnosticCode.LINK_DISCOVERY,
-                        severity=DiagnosticSeverity.WARNING,
-                        message=(
-                            "Pablo parsing failed before topology bond inspection, and no PDB "
-                            "LINK/CONECT cross-role candidates were found"
-                        ),
-                        details={
-                            "action": (
-                                "Check whether the input contains LINK/CONECT records for "
-                                "nonstandard covalent junctions"
-                            )
-                        },
-                    )
-                )
-            result = _build_result_from_records(
-                success=False,
-                path=structure_path,
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            return _build_parse_failure_result(
+                exc=exc,
+                structure_path=structure_path,
                 availability=availability,
-                chain_policy=chain_metadata,
-                atom_records=pdb_atom_records,
-                link_candidates=pdb_link_candidates,
+                chain_metadata=chain_metadata,
+                pdb_atom_records=pdb_atom_records,
+                pdb_link_candidates=pdb_link_candidates,
                 diagnostics=diagnostics,
-                notes=[
-                    "Pablo parsing failed; metadata reflects file-level PDB records when available"
-                ],
                 inspection=inspection,
                 normalization_plan=normalization_plan,
+                output_dir=output_dir,
             )
-            _save_result_sidecar(result, output_dir)
-            return result
 
         topology_atom_records = _atom_records_from_topology(topology)
         topology_link_candidates = _topology_link_candidates(topology, chain_metadata)
@@ -529,7 +511,7 @@ class PabloIngestor:
             warnings.extend(normalization_plan.warnings)
             warnings.extend(issue.message for issue in normalization_plan.issues)
         return PabloStructurePreflight(
-            intended_mode="ingest_existing",
+            ingestion_context="pablo_ingestion",
             path=structure_path,
             suffix=structure_path.suffix.lower(),
             pablo=availability,
@@ -775,6 +757,54 @@ def _diagnostic_from_parse_error(exc: Exception, path: Path) -> ConjugationDiagn
     )
 
 
+def _build_parse_failure_result(
+    *,
+    exc: Exception,
+    structure_path: Path,
+    availability: PabloAvailability,
+    chain_metadata: ChainPolicyMetadata,
+    pdb_atom_records: list[dict[str, Any]],
+    pdb_link_candidates: list[PabloLinkCandidate],
+    diagnostics: list[ConjugationDiagnostic],
+    inspection: PDBStructureInspection | None,
+    normalization_plan: PDBNormalizationPlan | None,
+    output_dir: Path | str | None,
+) -> PabloIngestionResult:
+    """Build and save a structured result for expected Pablo ingestion failures."""
+    diagnostics.append(_diagnostic_from_parse_error(exc, structure_path))
+    if not pdb_link_candidates:
+        diagnostics.append(
+            ConjugationDiagnostic(
+                code=DiagnosticCode.LINK_DISCOVERY,
+                severity=DiagnosticSeverity.WARNING,
+                message=(
+                    "Pablo parsing failed before topology bond inspection, and no PDB "
+                    "LINK/CONECT cross-role candidates were found"
+                ),
+                details={
+                    "action": (
+                        "Check whether the input contains LINK/CONECT records for "
+                        "nonstandard covalent junctions"
+                    )
+                },
+            )
+        )
+    result = _build_result_from_records(
+        success=False,
+        path=structure_path,
+        availability=availability,
+        chain_policy=chain_metadata,
+        atom_records=pdb_atom_records,
+        link_candidates=pdb_link_candidates,
+        diagnostics=diagnostics,
+        notes=["Pablo parsing failed; metadata reflects file-level PDB records when available"],
+        inspection=inspection,
+        normalization_plan=normalization_plan,
+    )
+    _save_result_sidecar(result, output_dir)
+    return result
+
+
 def _read_pdb_atom_records(path: Path) -> list[dict[str, Any]]:
     """Read lightweight ATOM/HETATM metadata from a PDB file."""
     records: list[dict[str, Any]] = []
@@ -1011,7 +1041,7 @@ def _build_result_from_records(
     )
     metadata = ConjugationMetadata(
         enabled=True,
-        mode="ingest_existing",
+        mode="pablo_ingestion",
         chain_policy=chain_policy,
         components=components,
         notes=notes,
@@ -1228,19 +1258,3 @@ def _save_result_sidecar(result: PabloIngestionResult, output_dir: Path | str | 
     if output_dir is None:
         return
     result.save(Path(output_dir) / "pablo_ingestion_result.json")
-
-
-def _not_implemented_message(result: PabloIngestionResult) -> str:
-    """Build a clear downstream-not-implemented message from an ingestion result."""
-    error_details = [
-        diagnostic.details.get("error")
-        for diagnostic in result.diagnostics
-        if diagnostic.severity == DiagnosticSeverity.ERROR and diagnostic.details.get("error")
-    ]
-    suffix = f" Last Pablo error: {error_details[0]}" if error_details else ""
-    return (
-        "OpenFF Pablo ingestion did not produce a usable topology for downstream "
-        "conjugation parameterization. Review conjugation diagnostics and the "
-        "pablo_ingestion_result.json sidecar for actionable parser details."
-        f"{suffix}"
-    )

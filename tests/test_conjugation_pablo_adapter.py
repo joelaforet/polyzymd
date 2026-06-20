@@ -118,6 +118,7 @@ def test_preflight_structure_reports_pablo_availability(monkeypatch, tmp_path):
 
     assert report.path == structure
     assert report.suffix == ".pdb"
+    assert report.ingestion_context == "pablo_ingestion"
     assert report.pablo.available is True
     assert report.inspection_implemented is True
     assert report.ingestion_implemented is True
@@ -199,6 +200,7 @@ def test_ingest_structure_success_extracts_metadata(monkeypatch, tmp_path):
 
     assert result.success is True
     assert result.topology is fake_topology
+    assert result.metadata.mode == "pablo_ingestion"
     assert result.counts.atom_count == 2
     assert result.counts.molecule_count == 1
     assert result.noncanonical_residues[0].residue_name == "NAG"
