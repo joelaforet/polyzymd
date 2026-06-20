@@ -12,6 +12,7 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     _formal_charge_value,
     _topology_positions_as_angstrom,
     create_interchange_from_openff_topology,
+    create_interchange_from_pablo_topology,
     deduplicate_charge_templates,
     load_combined_smirnoff_force_field,
     set_topology_positions_from_pdb,
@@ -69,6 +70,17 @@ def test_create_interchange_from_openff_topology_requires_charge_templates():
             SimpleNamespace(),
             force_field=SimpleNamespace(create_interchange=lambda topology, **kwargs: object()),
             charge_from_molecules=(),
+        )
+
+
+def test_create_interchange_from_pablo_topology_can_require_charge_templates():
+    """Pablo topology helper should forward strict charge-template requirements."""
+    with pytest.raises(ValueError, match="requires explicit charged templates"):
+        create_interchange_from_pablo_topology(
+            SimpleNamespace(),
+            force_field=SimpleNamespace(create_interchange=lambda topology, **kwargs: object()),
+            charge_from_molecules=(),
+            require_charge_templates=True,
         )
 
 

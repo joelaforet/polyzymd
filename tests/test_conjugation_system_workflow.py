@@ -942,6 +942,152 @@ def test_single_unsupported_local_minimization_request_runs_smoke_with_diagnosti
     )
 
 
+def test_construction_populates_product_charge_templates_for_final_interchange(
+    monkeypatch,
+    tmp_path: Path,
+):
+    """Product templates from Pablo topology should reach final charge_from_molecules."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+    from polyzymd.builders.conjugation.final_interchange import (
+        create_final_conjugated_interchange,
+    )
+
+    plan = _generic_resolved_plan(
+        residue_number=42,
+        modifier_residue_number=1,
+        modifier_atom="C001",
+    )
+    modifier = _generated_fragment(residue_name="NAG", residue_number=1)
+    spec = SimpleNamespace(
+        attachment_id="n_gly_attachment_01",
+        attachment_index=1,
+        reaction_name="n_glycosylation",
+        generated_fragment=modifier,
+        resolved_plan=plan,
+        source_sidecars={},
+        fragment=SimpleNamespace(source_kind="moiety"),
+    )
+    product_template = _charged_molecule_like("product", residue_name="NAG")
+    standard_template = _charged_molecule_like("water", residue_name="HOH")
+    product_library = SimpleNamespace(
+        definitions=(SimpleNamespace(residue_name="NAG"),),
+        residue_names=("NAG",),
+        residue_library=object(),
+    )
+
+    def fake_place(protein_pdb_path, modifiers_arg, plans_arg, output_dir, *, settings=None):
+        return (
+            PackmolModifierPlacementResult(
+                placed_modifier=modifiers_arg[0].to_placed_fragment(),
+                packmol_input_path=Path(output_dir) / "packmol.inp",
+                packmol_output_path=Path(output_dir) / "packmol.pdb",
+                protein_sterics_pdb_path=Path(output_dir) / "protein.pdb",
+                modifier_pdb_path=Path(output_dir) / "modifier.pdb",
+                packmol_input_text="",
+                target_bond_length_angstrom=plan.target_bond_length_angstrom,
+                placed_bond_length_angstrom=plan.target_bond_length_angstrom,
+                min_modifier_protein_distance_angstrom=2.0,
+            ),
+        )
+
+    def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
+        Path(output_path).write_text("END\n", encoding="utf-8")
+        return CrosslinkedPdbAssemblyResult(
+            output_path=Path(output_path),
+            protein_atom_count=10,
+            polymer_atom_count=1,
+            removed_protein_atom_count=1,
+            removed_polymer_atom_count=0,
+            removed_atom_serials=(),
+            removed_atom_names=(),
+            added_conect_pair=(1, 2),
+            added_conect_pairs=((1, 2),),
+        )
+
+    class FakeIngestor:
+        def __init__(self, policy):
+            self.policy = policy
+
+        def ingest_structure(
+            self, path, *, chain_policy=None, output_dir=None, residue_library=None
+        ):
+            return PabloIngestionResult(
+                success=True,
+                path=Path(path),
+                suffix=".pdb",
+                pablo=PabloAvailability(available=True),
+                topology=SimpleNamespace(molecules=(product_template,)),
+            )
+
+    def fake_parameterize(topology, *, settings=None, charge_from_molecules=None):
+        return InterchangeParameterizationResult(
+            success=True,
+            interchange=object(),
+            force_field_names=("fake.offxml",),
+            topology_type="FakeTopology",
+        )
+
+    monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
+    monkeypatch.setattr(
+        workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
+    )
+    monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
+    monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
+    monkeypatch.setattr(
+        workflow_module,
+        "_product_state_pablo_library_for_specs",
+        lambda **kwargs: product_library,
+    )
+    monkeypatch.setattr(
+        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
+    )
+    monkeypatch.setattr(
+        workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
+    )
+
+    construction, _topology = workflow_module._construct_conjugate_from_specs(
+        protein_pdb_path=tmp_path / "protein.pdb",
+        specs=(spec,),
+        ccd_pablo_policy=ConjugationCcdPabloPolicyConfig(
+            crosslinks=[
+                {
+                    "residues": ("ASX", "NAG"),
+                    "linking_atoms": ("ND2", "C001"),
+                    "leaving_atoms": ((), ()),
+                    "bond_order": 1,
+                }
+            ]
+        ),
+        output_dir=tmp_path / "construction",
+        chain_policy=None,
+        settings=ModifierConstructionSettings(run_smoke=False),
+        use_product_state_pablo_library=True,
+        run_product_state_local_minimization=False,
+    )
+    captured = {}
+    builder = SimpleNamespace(
+        _solvated_topology=object(),
+        _interchange=None,
+        collect_standard_charge_templates=lambda: (standard_template,),
+    )
+
+    def fake_final_parameterizer(topology, **kwargs):
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(success=True, interchange=object())
+
+    create_final_conjugated_interchange(
+        builder,
+        product_state_pablo_library=construction.product_state_pablo_library,
+        parameterizer=fake_final_parameterizer,
+    )
+
+    templates = tuple(captured["kwargs"]["charge_from_molecules"])
+    assert construction.product_state_pablo_library.charge_templates == (product_template,)
+    assert templates[0] is product_template
+    assert templates[1] is standard_template
+    assert captured["kwargs"]["require_charge_templates"] is True
+
+
 def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_path: Path):
     """Direct N-gly requests should resolve one build spec per enabled attachment."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
@@ -1393,6 +1539,15 @@ def _fake_product_state_library():
     return SimpleNamespace(
         definitions=(SimpleNamespace(residue_name="LYX"),),
         residue_names=("LYX",),
+    )
+
+
+def _charged_molecule_like(smiles: str, *, residue_name: str) -> SimpleNamespace:
+    """Build a charged molecule-like object with residue metadata."""
+    return SimpleNamespace(
+        partial_charges=(0.0,),
+        atoms=(SimpleNamespace(metadata={"residue_name": residue_name}),),
+        to_smiles=lambda mapped=False: smiles,
     )
 
 

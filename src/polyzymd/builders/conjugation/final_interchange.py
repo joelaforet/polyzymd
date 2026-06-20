@@ -17,7 +17,8 @@ LOGGER = logging.getLogger(__name__)
 _REFUSAL_MESSAGE = (
     "PolyzyMD refuses whole-conjugate AM1-BCC charge assignment for a polymer-protein "
     "conjugate. Final conjugated Interchange creation requires product-state Pablo "
-    "residue/template provenance from the successful conjugate construction path."
+    "residue/template provenance from the successful conjugate construction path. "
+    "Formal-charge smoke templates are not production charges."
 )
 
 
@@ -57,6 +58,10 @@ def create_final_conjugated_interchange(
 
     _validate_product_state_provenance(product_state_pablo_library)
     product_templates = _product_state_charge_templates(product_state_pablo_library)
+    if not product_templates:
+        raise RuntimeError(
+            f"{_REFUSAL_MESSAGE} Product-state conjugate charge templates are missing."
+        )
     standard_templates = _standard_charge_templates(builder)
     charge_templates = deduplicate_charge_templates((*product_templates, *standard_templates))
 
@@ -71,6 +76,7 @@ def create_final_conjugated_interchange(
         topology,
         settings=settings,
         charge_from_molecules=charge_templates,
+        require_charge_templates=True,
     )
     if not getattr(result, "success", False) or getattr(result, "interchange", None) is None:
         raise RuntimeError(

@@ -934,6 +934,11 @@ def _construct_conjugate_from_specs(
     )
     if not pablo_result.success or pablo_result.topology is None:
         raise RuntimeError(_pablo_failure_message(pablo_result))
+    if product_state_pablo_library is not None:
+        product_state_pablo_library = _product_state_library_with_charge_templates(
+            product_state_pablo_library,
+            pablo_result.topology,
+        )
 
     LOGGER.info("Parameterizing conjugate with OpenFF Interchange")
     parameterization_result = create_interchange_from_pablo_topology(
@@ -1310,6 +1315,76 @@ def _formal_charge_templates_from_topology(topology: Any) -> tuple[Any, ...]:
     """Build smoke-only formal-charge templates for product-state parameterization."""
     molecules = tuple(getattr(topology, "molecules", ()) or ())
     return tuple(build_formal_charge_smoke_template(molecule) for molecule in molecules)
+
+
+def _product_state_library_with_charge_templates(
+    product_state_pablo_library: Any,
+    topology: Any,
+) -> Any:
+    """Attach genuinely charged product-state templates from a Pablo topology."""
+    templates = _charged_product_state_molecules_from_topology(
+        topology,
+        product_residue_names=_product_state_library_residue_names(product_state_pablo_library),
+    )
+    if hasattr(product_state_pablo_library, "model_copy"):
+        return product_state_pablo_library.model_copy(update={"charge_templates": templates})
+    product_state_pablo_library.charge_templates = templates
+    return product_state_pablo_library
+
+
+def _charged_product_state_molecules_from_topology(
+    topology: Any,
+    *,
+    product_residue_names: tuple[str, ...],
+) -> tuple[Any, ...]:
+    """Return charged topology molecules containing product-state residues."""
+    if not product_residue_names:
+        return ()
+    product_names = {name.upper() for name in product_residue_names}
+    templates: list[Any] = []
+    for molecule in tuple(getattr(topology, "molecules", ()) or ()):
+        if getattr(molecule, "partial_charges", None) is None:
+            continue
+        if _molecule_has_product_residue(molecule, product_names):
+            templates.append(molecule)
+    return tuple(templates)
+
+
+def _product_state_library_residue_names(product_state_pablo_library: Any) -> tuple[str, ...]:
+    """Resolve product-state residue names from a generated Pablo library."""
+    names = tuple(
+        str(name) for name in getattr(product_state_pablo_library, "residue_names", ()) or ()
+    )
+    if names:
+        return names
+    definitions = tuple(getattr(product_state_pablo_library, "definitions", ()) or ())
+    return tuple(
+        str(getattr(definition, "residue_name", "")).strip()
+        for definition in definitions
+        if str(getattr(definition, "residue_name", "")).strip()
+    )
+
+
+def _molecule_has_product_residue(molecule: Any, product_names: set[str]) -> bool:
+    """Return whether a molecule contains any product-state residue metadata."""
+    for atom in tuple(getattr(molecule, "atoms", ()) or ()):
+        residue_name = _metadata_residue_name(getattr(atom, "metadata", None))
+        if residue_name in product_names:
+            return True
+    properties = getattr(molecule, "properties", None)
+    residue_name = _metadata_residue_name(properties)
+    return residue_name in product_names
+
+
+def _metadata_residue_name(metadata: Any) -> str:
+    """Return an uppercase residue name from atom or molecule metadata."""
+    if metadata is None:
+        return ""
+    if isinstance(metadata, dict):
+        value = metadata.get("residue_name") or metadata.get("residue")
+    else:
+        value = getattr(metadata, "residue_name", None) or getattr(metadata, "residue", None)
+    return str(value or "").strip().upper()
 
 
 def _local_minimization_settings_for_product(
