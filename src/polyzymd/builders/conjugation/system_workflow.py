@@ -1563,8 +1563,7 @@ def _build_solvated_system(
 
     if create_interchange:
         LOGGER.info("Creating final solvated OpenFF Interchange")
-        use_optimized = config.polymers is not None and config.polymers.enabled
-        builder.create_interchange(use_optimized_combining=use_optimized)
+        builder.create_interchange()
 
     return builder
 
@@ -1587,7 +1586,7 @@ def _build_direct_solvated_system(
     builder.solvate(padding=0.8, box_shape="cube")
     if create_interchange:
         LOGGER.info("Creating final solvated OpenFF Interchange")
-        builder.create_interchange(use_optimized_combining=False)
+        builder.create_interchange()
     return builder
 
 

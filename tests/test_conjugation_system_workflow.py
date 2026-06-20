@@ -44,6 +44,8 @@ from polyzymd.builders.conjugation.structure.preparation import (
 )
 from polyzymd.builders.conjugation.system_workflow import (
     _apply_pdb_atom_names_to_topology,
+    _build_direct_solvated_system,
+    _build_solvated_system,
     _construct_multi_modifier_linked_protein,
     _construct_nhs_lys_modifier_linked_protein,
     _local_minimization_settings_for_product,
@@ -154,6 +156,55 @@ def test_system_workflow_settings_enable_public_product_state_defaults():
     assert settings.use_product_state_pablo_library is True
     assert settings.run_product_state_local_minimization is True
     assert settings.protein_canonicalization.ph == pytest.approx(7.0)
+
+
+def test_build_solvated_system_calls_final_interchange_without_kwargs(monkeypatch, tmp_path: Path):
+    """Config-driven solvation should call the final Interchange builder without kwargs."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    config = SimpleNamespace(
+        substrate=None,
+        polymers=SimpleNamespace(enabled=True),
+        solvent=SimpleNamespace(),
+    )
+    fake_builder = _NoKwargInterchangeBuilder(tmp_path / "solvated.pdb")
+
+    monkeypatch.setattr(
+        workflow_module.SystemBuilder,
+        "from_config",
+        classmethod(lambda cls, config: fake_builder),
+    )
+    monkeypatch.setattr(workflow_module, "_build_and_pack_free_polymers", lambda *a, **k: None)
+
+    result = _build_solvated_system(
+        config,
+        relaxed_conjugate_topology=object(),
+        working_dir=tmp_path,
+        polymer_seed=123,
+        create_interchange=True,
+    )
+
+    assert result is fake_builder
+    assert fake_builder.create_interchange_calls == 1
+
+
+def test_build_direct_solvated_system_calls_final_interchange_without_kwargs(
+    monkeypatch, tmp_path: Path
+):
+    """Direct solvation should call the final Interchange builder without kwargs."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    fake_builder = _NoKwargInterchangeBuilder(tmp_path / "solvated.pdb")
+    monkeypatch.setattr(workflow_module, "SystemBuilder", lambda: fake_builder)
+
+    result = _build_direct_solvated_system(
+        relaxed_conjugate_topology=object(),
+        working_dir=tmp_path,
+        create_interchange=True,
+    )
+
+    assert result is fake_builder
+    assert fake_builder.create_interchange_calls == 1
 
 
 def test_prepared_protein_path_canonicalizes_to_construction_dir(monkeypatch, tmp_path: Path):
@@ -1279,6 +1330,32 @@ class _FakeSystemBuilder:
     def save_topology(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text("END\n", encoding="utf-8")
+
+
+class _NoKwargInterchangeBuilder(_FakeSystemBuilder):
+    """Fake builder whose final Interchange method rejects stale kwargs."""
+
+    def __init__(self, solvated_topology):
+        super().__init__(solvated_topology)
+        self._combined_topology = object()
+        self._solvent_builder = SimpleNamespace(
+            solvated_topology=solvated_topology,
+            solvate_from_config=lambda topology, solvent: None,
+        )
+        self.create_interchange_calls = 0
+
+    def combine_solutes(self):
+        """Record solute combination without building real OpenFF objects."""
+        self.combined_solutes = True
+
+    def solvate(self, *, padding, box_shape):
+        """Record direct solvation without building real OpenFF objects."""
+        self.solvation_settings = {"padding": padding, "box_shape": box_shape}
+
+    def create_interchange(self):
+        """Record final Interchange creation while accepting no kwargs."""
+        self.create_interchange_calls += 1
+        self.interchange = object()
 
 
 def _direct_n_gly_attachment(index: int) -> SimpleNamespace:
