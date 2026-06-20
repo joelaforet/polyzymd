@@ -400,6 +400,49 @@ def test_product_state_pablo_library_preserves_sdf_formal_charges_without_pdb_ch
     assert _definition_atom_charge(definitions[2], "OS3") == -1
 
 
+def test_product_state_pablo_library_uses_charged_sdf_formal_charges(tmp_path: Path):
+    """Product formal charges should come from charged SDF sidecars when present."""
+    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
+    neutral_atoms = tuple(
+        (atom_name, residue_name, residue_number, element, "")
+        for atom_name, residue_name, residue_number, element, _charge in fixture.atoms
+    )
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    polymer_pdb = tmp_path / "polymer.pdb"
+    raw_sdf = tmp_path / "polymer_raw.sdf"
+    charged_sdf = tmp_path / "polymer_charged.sdf"
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(_fixture_product_pdb(fixture, include_charges=False), encoding="utf-8")
+    polymer_pdb.write_text(_fixture_polymer_pdb(fixture, include_charges=False), encoding="utf-8")
+    polymer_pdb.with_suffix(".sdf").write_text(
+        _sdf_from_atoms_and_bonds(neutral_atoms, fixture.bonds),
+        encoding="utf-8",
+    )
+    raw_sdf.write_text(_sdf_from_atoms_and_bonds(neutral_atoms, fixture.bonds), encoding="utf-8")
+    charged_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
+    fragment = generated_fragment_from_polymerist_pdb(
+        polymer_pdb,
+        reactive_atom_name="CAA",
+        leaving_atom_names=("OAA",),
+    )
+
+    library = build_product_state_pablo_library(
+        product,
+        source,
+        raw_sdf,
+        fragment,
+        _fixture_resolved_plan_like(),
+        charged_polymer_sdf=charged_sdf,
+    )
+
+    definitions = {
+        summary.residue_number: definition for summary, definition in _chain_c_definitions(library)
+    }
+    assert _definition_atom_charge(definitions[2], "NQA") == 1
+    assert _definition_atom_charge(definitions[2], "OS3") == -1
+
+
 def test_product_state_pablo_library_for_specs_scopes_repeated_polymer_residues(
     tmp_path: Path,
 ):

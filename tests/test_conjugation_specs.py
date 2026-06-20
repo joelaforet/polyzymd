@@ -76,7 +76,9 @@ def test_moiety_adapter_preserves_fragment_data_and_generated_adapter(tmp_path: 
 def test_polymer_adapter_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_path: Path):
     """Generated polymer specs should preserve residue count independently of attachments."""
     sdf_path = tmp_path / "polymer.sdf"
+    charged_sdf_path = tmp_path / "polymer_charged.sdf"
     sdf_path.write_text("", encoding="utf-8")
+    charged_sdf_path.write_text("", encoding="utf-8")
     polymer = GeneratedPolymerFragment(
         atoms=(
             _atom(0, 10, "C1", "SBM", residue_number=10),
@@ -100,14 +102,21 @@ def test_polymer_adapter_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_pa
         attachment_config=SimpleNamespace(name="polymer_1"),
         attachment_index=1,
         reaction_name="nhs_lys",
+        charged_sdf_path=charged_sdf_path,
     )
+
+    expected_sidecars = {
+        "sdf": sdf_path,
+        "bond_sdf": sdf_path,
+        "charged_sdf": charged_sdf_path,
+    }
 
     assert isinstance(spec.fragment, ConjugationFragment)
     assert spec.fragment.source_kind == "polymer"
     assert len(spec.fragment.residues) == 2
     assert spec.fragment.sequence == "AC"
-    assert spec.fragment.sidecars == {"sdf": sdf_path, "bond_sdf": sdf_path}
-    assert spec.source_sidecars == {"sdf": sdf_path, "bond_sdf": sdf_path}
+    assert spec.fragment.sidecars == expected_sidecars
+    assert spec.source_sidecars == expected_sidecars
     assert spec.generated_fragment is polymer
     assert spec.fragment.to_generated_polymer_fragment().residues == polymer.residues
 
