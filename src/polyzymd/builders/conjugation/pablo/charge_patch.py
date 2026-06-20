@@ -317,16 +317,21 @@ def _fragment_bonds(fragment: Any) -> tuple[tuple[Any, Any, float], ...]:
 def _fragment_atom_lookup(atoms: tuple[Any, ...]) -> dict[Any, Any]:
     """Build lookup keys for generated-fragment atoms."""
     lookup: dict[Any, Any] = {}
+    atom_names = [getattr(atom, "atom_name", None) for atom in atoms]
+    unique_atom_names = {name for name in atom_names if name and atom_names.count(name) == 1}
     for atom in atoms:
-        for value in (
-            getattr(atom, "atom_index", None),
-            getattr(atom, "serial", None),
-            getattr(atom, "atom_name", None),
-            getattr(atom, "name", None),
-        ):
-            if value not in (None, ""):
-                lookup[value] = atom
-                lookup[str(value)] = atom
+        serial = getattr(atom, "serial", None)
+        atom_index = getattr(atom, "atom_index", None)
+        atom_name = getattr(atom, "atom_name", None) or getattr(atom, "name", None)
+        if serial is not None:
+            lookup.setdefault(serial, atom)
+            lookup.setdefault(str(serial), atom)
+        if atom_index is not None:
+            lookup.setdefault(atom_index, atom)
+            lookup.setdefault(str(atom_index), atom)
+        if atom_name in unique_atom_names:
+            lookup.setdefault(atom_name, atom)
+            lookup.setdefault(str(atom_name), atom)
     return lookup
 
 
