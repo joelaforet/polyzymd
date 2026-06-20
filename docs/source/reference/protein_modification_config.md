@@ -235,8 +235,8 @@ attached polymer as one covalent molecule, so PolyzyMD must pass one complete
 `charge_from_molecules` template for that molecule rather than separate protein
 and polymer fragments.
 
-The current NHS-lysine bridge is an interoperability bridge, not a
-whole-conjugate AM1-BCC model. Its model choices are:
+The current bridge is an interoperability bridge, not a whole-conjugate
+AM1-BCC model. Its model choices are:
 
 - Standard protein atoms use ff14SB-style charges from the prepared source
   protein.
@@ -244,8 +244,8 @@ whole-conjugate AM1-BCC model. Its model choices are:
   standard charged-template path.
 - Attached polymer atoms use existing charged polymer/template charges when the
   source-to-product atom mapping is stable.
-- Linkage and noncanonical NHS-lysine product atoms are overridden by a local
-  product-state NAGL/AshGC amide patch. The default model is
+- Linkage-neighborhood atoms are overridden by a local product-state NAGL/AshGC
+  patch built from resolved conjugation metadata. The default model is
   `openff-gnn-am1bcc-0.1.0-rc.3.pt`; `POLYZYMD_CONJUGATE_PATCH_NAGL_MODEL` can
   override this for development runs.
 - A small total-charge closure correction may be applied to a mapped attached
@@ -263,9 +263,14 @@ Inspect this sidecar to confirm the NAGL model, ff14SB atom count,
 polymer-template atom count, local patch atom count, total charge, formal charge,
 and any normalization correction.
 
-This charge bridge is experimental and currently scoped to NHS-lysine product
-states using the built-in `LYX` protein product residue and mapped attached
-polymer residues.
+The local patch builder uses `ResolvedAttachmentPlan`, the Pablo crosslink
+requirement, product residue mappings, generated-fragment atom/bond-order
+metadata, and leaving-atom metadata. It removes leaving atoms, selects a graph
+neighborhood around the two product link atoms, caps only simple omitted
+boundary bonds, charges that local product-state molecule with NAGL/AshGC, and
+maps charges back only to real product atoms. If the mechanism metadata is not
+specific enough to build and cap the local graph, PolyzyMD fails clearly instead
+of falling back to hardcoded NHS-lysine atom names or raw sidecar charges.
 
 ## Support Levels
 
