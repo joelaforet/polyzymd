@@ -114,9 +114,10 @@ def build_product_state_charge_bridge(
             f"conjugate atom(s): {preview}{suffix}"
         )
 
-    correction = formal_total - sum(record.charge_e for record in records.values())
+    target_record_keys = tuple(target_identities)
+    correction = formal_total - sum(records[identity].charge_e for identity in target_record_keys)
     if abs(correction) > total_charge_tolerance:
-        correction_key = _normalization_target(records)
+        correction_key = _normalization_target(records, eligible_keys=set(target_record_keys))
         if correction_key is None:
             raise ValueError(
                 "Product-state charge bridge has no polymer/template atom available for "
@@ -137,7 +138,7 @@ def build_product_state_charge_bridge(
     else:
         correction = 0.0
 
-    atom_records = tuple(records[identity] for identity in target_identities)
+    atom_records = tuple(records[identity] for identity in target_record_keys)
     validate_unique_atom_records(atom_records)
     residue_records = ResiduePartialChargeRecord.from_atom_records(atom_records)
     report = ChargeBridgeReport(
@@ -622,9 +623,13 @@ def _merge_records(
 
 def _normalization_target(
     records: Mapping[tuple[str, str, int | None, str, str], AtomPartialChargeRecord],
+    *,
+    eligible_keys: set[tuple[str, str, int | None, str, str]] | None = None,
 ) -> tuple[str, str, int | None, str, str] | None:
     """Return a conservative attached-polymer atom for total-charge closure."""
     for key, record in reversed(tuple(records.items())):
+        if eligible_keys is not None and key not in eligible_keys:
+            continue
         if record.source_role == "polymer_template":
             return key
     return None
