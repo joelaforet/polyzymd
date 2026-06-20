@@ -147,9 +147,15 @@ def attachment_spec_from_generated_polymer_plan(
     attachment_config: Any,
     attachment_index: int,
     reaction_name: str,
+    charged_sdf_path: Path | str | None = None,
 ) -> AttachmentBuildSpec:
     """Adapt a generated polymer fragment and resolved plan into a build spec."""
-    sidecars = {"sdf": Path(sdf_path)} if sdf_path is not None else {}
+    sidecars = {}
+    if sdf_path is not None:
+        sidecars["sdf"] = Path(sdf_path)
+        sidecars["bond_sdf"] = Path(sdf_path)
+    if charged_sdf_path is not None:
+        sidecars["charged_sdf"] = Path(charged_sdf_path)
     generic_fragment = ConjugationFragment.from_generated_polymer_fragment(
         fragment,
         source_kind="polymer",

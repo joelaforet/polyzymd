@@ -492,17 +492,28 @@ def _record_from_pdb_atom(
 
 
 def _source_sdf_path(spec: Any) -> Path | None:
-    """Return the source SDF path from an attachment spec."""
+    """Return the production charged SDF path from an attachment spec."""
     sidecars = getattr(spec, "source_sidecars", {}) or {}
-    path = sidecars.get("sdf") if isinstance(sidecars, Mapping) else None
-    return Path(path) if path is not None else None
+    if not isinstance(sidecars, Mapping):
+        return None
+    path = sidecars.get("charged_sdf")
+    if path is not None:
+        return Path(path)
+    raw_path = sidecars.get("bond_sdf") or sidecars.get("sdf")
+    if raw_path is not None:
+        raise ValueError(
+            "Attached polymer production charge transfer requires source_sidecars['charged_sdf']; "
+            f"refusing raw bond/geometry SDF {raw_path} as a partial-charge source"
+        )
+    return None
 
 
 def _charged_sdf_atom_charges(path: Path) -> tuple[float, ...]:
-    """Read partial charges from a charged OpenFF SDF molecule."""
-    from openff.toolkit import Molecule
+    """Read partial charges from a production charged SDF via PolyzyMD loaders."""
+    from polyzymd.utils import get_largest_offmol, topology_from_sdf
 
-    molecule = Molecule.from_file(path, allow_undefined_stereo=True)
+    topology = topology_from_sdf(path)
+    molecule = get_largest_offmol(topology)
     partial_charges = getattr(molecule, "partial_charges", None)
     if partial_charges is None:
         raise ValueError(
