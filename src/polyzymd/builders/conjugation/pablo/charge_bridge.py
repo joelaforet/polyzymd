@@ -99,7 +99,7 @@ def build_product_state_charge_bridge(
     )
     _merge_records(records, protein_records)
 
-    polymer_records = _polymer_template_records(specs)
+    polymer_records = _polymer_template_records(specs, product_atoms=product_atoms)
     _merge_records(records, polymer_records)
 
     patch_records, nagl_model = _local_nagl_patch_records(specs, product_atoms=product_atoms)
@@ -340,9 +340,14 @@ def _source_protein_charges(
     return {_atom_identity(atom): charges[index] for index, atom in enumerate(atoms)}
 
 
-def _polymer_template_records(specs: Sequence[Any]) -> tuple[AtomPartialChargeRecord, ...]:
+def _polymer_template_records(
+    specs: Sequence[Any],
+    *,
+    product_atoms: Sequence[Any] = (),
+) -> tuple[AtomPartialChargeRecord, ...]:
     """Transfer attached-polymer charges from existing charged source templates."""
     records: list[AtomPartialChargeRecord] = []
+    product_atom_lookup = _unique_product_atoms_by_name(product_atoms)
     for spec in specs:
         sidecar = _source_sdf_path(spec)
         if sidecar is None:
@@ -369,6 +374,11 @@ def _polymer_template_records(specs: Sequence[Any]) -> tuple[AtomPartialChargeRe
                 continue
             residue_number = int(getattr(atom, "residue_number", 0))
             mapped = _mapped_polymer_residue(atom, mappings)
+            mapped = _mapped_polymer_product_atom(
+                mapped,
+                atom_name=atom_name,
+                product_atom_lookup=product_atom_lookup,
+            )
             records.append(
                 AtomPartialChargeRecord(
                     chain_id=str(mapped.get("chain_id", "C")),
@@ -382,6 +392,45 @@ def _polymer_template_records(specs: Sequence[Any]) -> tuple[AtomPartialChargeRe
                 )
             )
     return tuple(records)
+
+
+def _unique_product_atoms_by_name(product_atoms: Sequence[Any]) -> dict[str, Any]:
+    """Return unique chain-C product atoms keyed by atom name."""
+    grouped: dict[str, list[Any]] = {}
+    for atom in product_atoms:
+        if str(getattr(atom, "chain_id", "") or "").strip() != "C":
+            continue
+        name = str(getattr(atom, "atom_name", "") or "").strip()
+        if not name:
+            continue
+        grouped.setdefault(name, []).append(atom)
+    return {name: atoms[0] for name, atoms in grouped.items() if len(atoms) == 1}
+
+
+def _mapped_polymer_product_atom(
+    mapped: dict[str, Any],
+    *,
+    atom_name: str,
+    product_atom_lookup: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Refine mapped polymer identity from unique product atom names."""
+    product_atom = product_atom_lookup.get(atom_name)
+    if product_atom is None:
+        return mapped
+    return {
+        "chain_id": str(getattr(product_atom, "chain_id", mapped.get("chain_id", "C")) or "C"),
+        "residue_name": str(
+            getattr(product_atom, "residue_name", mapped.get("residue_name", "")) or ""
+        ),
+        "residue_number": getattr(
+            product_atom,
+            "residue_number",
+            mapped.get("residue_number"),
+        ),
+        "insertion_code": str(
+            getattr(product_atom, "insertion_code", mapped.get("insertion_code", "")) or ""
+        ),
+    }
 
 
 def _local_nagl_patch_records(
