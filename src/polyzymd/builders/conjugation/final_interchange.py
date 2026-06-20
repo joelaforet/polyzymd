@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from polyzymd.builders.conjugation.pablo.charge_templates import (
+    build_conjugate_charge_templates,
+)
 from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationSettings,
     create_interchange_from_pablo_topology,
@@ -36,8 +39,8 @@ def create_final_conjugated_interchange(
         Prepared ``SystemBuilder`` with a solvated topology.
     product_state_pablo_library : Any
         Product-state Pablo library created during conjugate construction. The
-        library must provide residue definitions and residue-template
-        provenance; molecule-level charge templates are optional diagnostics.
+        library must provide residue definitions and explicit production
+        partial-charge provenance for the final conjugate molecule template.
     settings : InterchangeParameterizationSettings or None, optional
         Conjugation parameterization settings, by default ``None``.
     parameterizer : Any or None, optional
@@ -58,20 +61,28 @@ def create_final_conjugated_interchange(
         raise RuntimeError("System must be solvated before creating final conjugated Interchange")
 
     residue_names = _validate_product_state_provenance(product_state_pablo_library)
+    conjugate_templates = build_conjugate_charge_templates(topology, product_state_pablo_library)
     standard_templates = _standard_charge_templates(builder)
+    charge_templates = deduplicate_charge_templates((*conjugate_templates, *standard_templates))
 
     LOGGER.info(
         "Creating final conjugated Interchange with product-state Pablo provenance for "
-        "%d residue name(s) and %d standard charge template(s)",
+        "%d residue name(s), %d conjugate charge template(s), %d conjugate atom(s), "
+        "and %d standard charge template(s)",
         len(residue_names),
+        len(conjugate_templates),
+        sum(
+            int(getattr(template, "n_atoms", len(tuple(getattr(template, "atoms", ()) or ()))))
+            for template in conjugate_templates
+        ),
         len(standard_templates),
     )
     parameterize = parameterizer or create_interchange_from_pablo_topology
     result = parameterize(
         topology,
         settings=settings,
-        charge_from_molecules=standard_templates,
-        require_charge_templates=False,
+        charge_from_molecules=charge_templates,
+        require_charge_templates=True,
     )
     if not getattr(result, "success", False) or getattr(result, "interchange", None) is None:
         raise RuntimeError(

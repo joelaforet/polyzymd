@@ -942,11 +942,11 @@ def test_single_unsupported_local_minimization_request_runs_smoke_with_diagnosti
     )
 
 
-def test_construction_final_interchange_uses_standard_templates(
+def test_construction_final_interchange_uses_strict_charge_bridge(
     monkeypatch,
     tmp_path: Path,
 ):
-    """Final Interchange should not require product molecule-level charge templates."""
+    """Final Interchange should pass product and standard charge templates strictly."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
     from polyzymd.builders.conjugation.final_interchange import (
         create_final_conjugated_interchange,
@@ -968,6 +968,7 @@ def test_construction_final_interchange_uses_standard_templates(
         fragment=SimpleNamespace(source_kind="moiety"),
     )
     product_template = _charged_molecule_like("product", residue_name="NAG")
+    product_template.properties = {"polyzymd_charge_provenance": "production:test"}
     standard_template = _charged_molecule_like("water", residue_name="HOH")
     product_library = SimpleNamespace(
         definitions=(SimpleNamespace(residue_name="NAG"),),
@@ -1066,7 +1067,7 @@ def test_construction_final_interchange_uses_standard_templates(
     )
     captured = {}
     builder = SimpleNamespace(
-        _solvated_topology=object(),
+        _solvated_topology=SimpleNamespace(molecules=(product_template, standard_template)),
         _interchange=None,
         collect_standard_charge_templates=lambda: (standard_template,),
     )
@@ -1083,8 +1084,10 @@ def test_construction_final_interchange_uses_standard_templates(
 
     templates = tuple(captured["kwargs"]["charge_from_molecules"])
     assert construction.product_state_pablo_library.charge_templates == (product_template,)
-    assert templates == (standard_template,)
-    assert captured["kwargs"]["require_charge_templates"] is False
+    assert len(templates) == 2
+    assert templates[0] is not product_template
+    assert templates[1] is standard_template
+    assert captured["kwargs"]["require_charge_templates"] is True
 
 
 def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_path: Path):
@@ -1545,7 +1548,7 @@ def _charged_molecule_like(smiles: str, *, residue_name: str) -> SimpleNamespace
     """Build a charged molecule-like object with residue metadata."""
     return SimpleNamespace(
         partial_charges=(0.0,),
-        atoms=(SimpleNamespace(metadata={"residue_name": residue_name}),),
+        atoms=(SimpleNamespace(metadata={"residue_name": residue_name, "atom_name": "C001"}),),
         to_smiles=lambda mapped=False: smiles,
     )
 
