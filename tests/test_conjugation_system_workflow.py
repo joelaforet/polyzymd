@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -954,6 +955,7 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
 def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     monkeypatch,
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ):
     """Config NHS-Lys construction should resolve all enabled specs then construct once."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
@@ -1054,6 +1056,7 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
         canonicalize_source_protein_hydrogens=False,
         preserve_reference_atom_names=False,
     )
+    caplog.set_level(logging.INFO, logger=workflow_module.__name__)
     result = workflow_module.build_conjugated_polymer_system_from_config(
         config,
         output_dir=tmp_path / "out",
@@ -1072,6 +1075,16 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     payload = json.loads(result.workflow_json_path.read_text(encoding="utf-8"))
     assert payload["workflow_json_path"] == str(result.workflow_json_path)
     assert payload["artifact_paths"]["workflow_json"] == str(result.workflow_json_path)
+    messages = [record.getMessage() for record in caplog.records]
+    addition_messages = [message for message in messages if message.startswith("Addition ")]
+    assert "Enabled conjugation attachment count: 2" in messages
+    assert addition_messages == [
+        "Addition 1/2: adding nhs_polymer_1 to A:LYS23:NZ",
+        "Addition 2/2: adding nhs_polymer_2 to A:LYS45:NZ",
+    ]
+    assert any("Generating conjugate polymer/moiety" in message for message in messages)
+    assert any("Preparing relaxed conjugate topology" in message for message in messages)
+    assert any("Saved conjugation workflow JSON" in message for message in messages)
 
 
 def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path: Path):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -80,6 +81,7 @@ _ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 _NHS_LYS_REACTION = get_reaction("nhs_lys")
 _NHS_LYS_REACTION_NAME = _NHS_LYS_REACTION.name
 _NHS_LYS_COORDINATE_BACKEND_MECHANISM = _NHS_LYS_REACTION.coordinate_backend_mechanism
+LOGGER = logging.getLogger(__name__)
 
 
 class ConjugatedPolymerSystemSettings(BaseModel):
@@ -148,6 +150,11 @@ def build_conjugated_polymer_system_from_config_path(
     path = Path(config_path)
     config = load_config(path)
     effective_output_dir = output_dir or path.parent / "artifacts" / path.stem
+    LOGGER.info(
+        "Starting config conjugation build from %s in %s",
+        path,
+        effective_output_dir,
+    )
     return build_conjugated_polymer_system_from_config(
         config,
         output_dir=effective_output_dir,
@@ -176,6 +183,9 @@ def build_conjugated_polymer_system_from_config(
     construction_dir = artifact_dir / workflow_settings.conjugate_artifact_dir_name
 
     attachments = _enabled_supported_nhs_lys_attachments(config.conjugation)
+    LOGGER.info("Enabled conjugation attachment count: %d", len(attachments))
+    _log_attachment_additions(attachments)
+    LOGGER.info("Preparing and canonicalizing source protein")
     protein_pdb_path, protein_canonicalization = _prepared_protein_pdb_path(
         config.enzyme.pdb_path,
         output_dir=construction_dir,
@@ -224,6 +234,7 @@ def build_conjugated_polymer_system_from_config(
     if workflow_settings.preserve_reference_atom_names:
         _restore_smoke_pdb_atom_names(construction, construction.crosslinked_pdb_path)
 
+    LOGGER.info("Preparing relaxed conjugate topology")
     relaxed_pdb = _relaxed_conjugate_pdb(construction)
     relaxed_topology = topology_with_pdb_positions(
         construction_topology,
@@ -244,6 +255,7 @@ def build_conjugated_polymer_system_from_config(
     )
     solvated_pdb_path = artifact_dir / workflow_settings.solvated_pdb_name
     builder.save_topology(solvated_pdb_path)
+    LOGGER.info("Wrote final solvated conjugate PDB to %s", solvated_pdb_path)
     if workflow_settings.preserve_reference_atom_names:
         _restore_pdb_atom_name_fields(solvated_pdb_path, construction.crosslinked_pdb_path)
 
@@ -274,6 +286,8 @@ def build_conjugated_polymer_system_from_config(
     result.workflow_json_path = workflow_path
     result.artifact_paths["workflow_json"] = workflow_path
     result.save(workflow_path)
+    LOGGER.info("Saved conjugation workflow JSON to %s", workflow_path)
+    LOGGER.info("Completed config conjugation build in %s", artifact_dir)
     return result
 
 
@@ -298,11 +312,15 @@ def build_direct_smiles_moiety_conjugate(
     construction_dir = artifact_dir / workflow_settings.conjugate_artifact_dir_name
     moiety_dir = construction_dir / "moieties"
     construction_dir.mkdir(parents=True, exist_ok=True)
+    LOGGER.info("Starting direct conjugation build in %s", artifact_dir)
 
     enabled_attachments = tuple(attachment for attachment in attachments if attachment.enabled)
     if not enabled_attachments:
         raise ValueError("Direct conjugation requests require at least one enabled attachment")
+    LOGGER.info("Enabled conjugation attachment count: %d", len(enabled_attachments))
+    _log_attachment_additions(enabled_attachments)
 
+    LOGGER.info("Preparing and canonicalizing source protein")
     protein_path, protein_canonicalization = _prepared_protein_pdb_path(
         protein_pdb_path,
         output_dir=construction_dir,
@@ -347,6 +365,7 @@ def build_direct_smiles_moiety_conjugate(
         local_minimization_settings=workflow_settings.local_minimization,
     )
 
+    LOGGER.info("Preparing relaxed conjugate topology")
     relaxed_pdb = _relaxed_conjugate_pdb(construction)
     relaxed_topology = topology_with_pdb_positions(construction_topology, relaxed_pdb)
     builder = _build_direct_solvated_system(
@@ -356,6 +375,7 @@ def build_direct_smiles_moiety_conjugate(
     )
     solvated_pdb_path = artifact_dir / workflow_settings.solvated_pdb_name
     builder.save_topology(solvated_pdb_path)
+    LOGGER.info("Wrote final solvated conjugate PDB to %s", solvated_pdb_path)
     if workflow_settings.preserve_reference_atom_names:
         _restore_pdb_atom_name_fields(solvated_pdb_path, relaxed_pdb)
 
@@ -379,6 +399,8 @@ def build_direct_smiles_moiety_conjugate(
     result.artifact_paths["workflow_json"] = workflow_path
     result.save(workflow_path)
     _save_direct_workflow_summary(result, enabled_attachments, list(resolved_plans), workflow_path)
+    LOGGER.info("Saved conjugation workflow JSON to %s", workflow_path)
+    LOGGER.info("Completed direct conjugation build in %s", artifact_dir)
     return result
 
 
@@ -458,6 +480,11 @@ def _build_nhs_lys_attachment_spec(
     _require_supported_coordinate_backend(attachment)
     recipe = _polymer_recipe_from_attachment(attachment)
     reactive_sequence_index = _reactive_sequence_index(recipe)
+    LOGGER.info(
+        "Generating conjugate polymer/moiety for attachment %d (%s)",
+        attachment_index,
+        _attachment_moiety_name(attachment),
+    )
     generation = generate_polymerist_smoke_polymer(
         recipe,
         artifact_dir
@@ -470,6 +497,7 @@ def _build_nhs_lys_attachment_spec(
     if generation.pdb_path is None:
         raise RuntimeError("Polymerist did not produce a conjugate-polymer PDB")
 
+    LOGGER.info("Resolving linkage for attachment %d", attachment_index)
     reactive_selector = _reactive_residue_selector(
         generation.pdb_path,
         sequence=generation.sequence,
@@ -520,6 +548,11 @@ def _build_n_gly_direct_moiety_attachment_spec(
     moiety = attachment.moiety
     if moiety.smiles is None or moiety.residue_name is None:
         raise ValueError("Direct SMILES-moiety attachments require moiety.smiles and residue_name")
+    LOGGER.info(
+        "Generating conjugate polymer/moiety for attachment %d (%s)",
+        attachment_index,
+        _attachment_moiety_name(attachment),
+    )
     fragment = build_smiles_moiety_fragment(
         moiety.smiles,
         moiety.residue_name,
@@ -529,6 +562,7 @@ def _build_n_gly_direct_moiety_attachment_spec(
     )
     settings_builder = getattr(reaction_template, "settings_from_attachment", None)
     reaction_settings = settings_builder(attachment) if callable(settings_builder) else None
+    LOGGER.info("Resolving linkage for attachment %d", attachment_index)
     plan = reaction_template.resolve_plan(
         protein_pdb_path,
         attachment.site,
@@ -568,6 +602,44 @@ def _enabled_supported_nhs_lys_attachments(
         _require_supported_coordinate_backend(attachment)
         _polymer_recipe_from_attachment(attachment)
     return attachments
+
+
+def _log_attachment_additions(attachments: tuple[Any, ...]) -> None:
+    """Log the enabled attachment additions in user-facing site notation.
+
+    Parameters
+    ----------
+    attachments : tuple of Any
+        Enabled attachment-like objects with ``site`` and ``moiety`` attributes.
+    """
+    total = len(attachments)
+    for index, attachment in enumerate(attachments, start=1):
+        site = getattr(attachment, "site", None)
+        LOGGER.info(
+            "Addition %d/%d: adding %s to %s:%s%s:%s",
+            index,
+            total,
+            _attachment_moiety_name(attachment),
+            _site_value(site, "chain_id", "?"),
+            _site_value(site, "residue_name", ""),
+            _site_value(site, "residue_number", "?"),
+            _site_value(site, "atom_name", "?"),
+        )
+
+
+def _attachment_moiety_name(attachment: Any) -> str:
+    """Return a readable moiety name for logging."""
+    moiety = getattr(attachment, "moiety", None)
+    name = getattr(moiety, "name", None) or getattr(attachment, "name", None)
+    return str(name or "moiety")
+
+
+def _site_value(site: Any, field_name: str, default: str) -> str:
+    """Return a non-empty site field value for logging."""
+    value = getattr(site, field_name, None)
+    if value is None or value == "":
+        return default
+    return str(value)
 
 
 def _polymer_recipe_from_attachment(attachment: Any) -> PolymerRecipe:
@@ -798,6 +870,7 @@ def _construct_conjugate_from_specs(
     artifact_dir = Path(output_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
+    LOGGER.info("Resolving product-state Pablo crosslinks")
     product_state_requirements = tuple(
         _product_state_crosslink_requirement(plan) for plan in resolved_plans
     )
@@ -806,6 +879,7 @@ def _construct_conjugate_from_specs(
         for requirement in product_state_requirements
     )
 
+    LOGGER.info("Placing conjugate polymer/moiety fragments")
     placements = place_modifiers_with_resolved_plans(
         protein_pdb_path,
         modifiers,
@@ -822,6 +896,7 @@ def _construct_conjugate_from_specs(
     )
 
     crosslinked_pdb_path = artifact_dir / settings.crosslinked_pdb_name
+    LOGGER.info("Writing crosslinked PDB to %s", crosslinked_pdb_path)
     assembly_result = write_crosslinked_pdb(
         protein_pdb_path,
         tuple(placed_modifiers),
@@ -833,6 +908,7 @@ def _construct_conjugate_from_specs(
     product_state_pablo_library = None
     product_state_residue_library = None
     if use_product_state_pablo_library:
+        LOGGER.info("Building product-state Pablo residue library")
         product_state_specs = _product_state_specs_with_assembly_mappings(
             specs,
             assembly_result=assembly_result,
@@ -844,6 +920,7 @@ def _construct_conjugate_from_specs(
         )
         product_state_residue_library = product_state_pablo_library.residue_library
 
+    LOGGER.info("Ingesting product-state PDB with Pablo")
     pablo_result = PabloIngestor(policy=ccd_pablo_policy).ingest_structure(
         crosslinked_pdb_path,
         chain_policy=chain_policy,
@@ -853,6 +930,7 @@ def _construct_conjugate_from_specs(
     if not pablo_result.success or pablo_result.topology is None:
         raise RuntimeError(_pablo_failure_message(pablo_result))
 
+    LOGGER.info("Parameterizing conjugate with OpenFF Interchange")
     parameterization_result = create_interchange_from_pablo_topology(
         pablo_result.topology,
         settings=settings.parameterization,
@@ -877,6 +955,7 @@ def _construct_conjugate_from_specs(
                 requirement=resolved_plans[0].pablo_crosslink_requirement,
                 product_state_pablo_library=product_state_pablo_library,
             )
+            LOGGER.info("Running product-state local minimization")
             local_minimization_result = run_post_crosslink_local_minimization(
                 crosslinked_pdb_path,
                 artifact_dir,
@@ -917,6 +996,7 @@ def _construct_conjugate_from_specs(
         and smoke_result is None
         and (settings.run_smoke or run_combined_smoke_relaxation)
     ):
+        LOGGER.info("Running combined restrained vacuum smoke relaxation")
         smoke_result = run_restrained_vacuum_smoke(
             parameterization_result.interchange,
             artifact_dir,
@@ -1455,6 +1535,7 @@ def _build_solvated_system(
     polymer_seed: int | None,
     create_interchange: bool,
 ) -> SystemBuilder:
+    """Build the solvated system around a relaxed conjugate topology."""
     builder = SystemBuilder.from_config(config)
     builder._working_dir = working_dir
     builder._enzyme_topology = relaxed_conjugate_topology
@@ -1462,6 +1543,7 @@ def _build_solvated_system(
     builder._preserve_enzyme_chain_ids = True
 
     if config.substrate is not None:
+        LOGGER.info("Building substrate for conjugated system")
         builder.build_substrate(
             sdf_path=config.substrate.sdf_path,
             conformer_index=config.substrate.conformer_index,
@@ -1469,14 +1551,18 @@ def _build_solvated_system(
             residue_name=config.substrate.residue_name,
         )
 
+    LOGGER.info("Combining conjugate, substrate, and free polymer solutes")
     builder.combine_solutes()
     if config.polymers is not None and config.polymers.enabled:
+        LOGGER.info("Building and packing free polymers")
         _build_and_pack_free_polymers(builder, config, polymer_seed=polymer_seed)
 
+    LOGGER.info("Solvating conjugated system")
     builder._solvent_builder.solvate_from_config(builder._combined_topology, config.solvent)
     builder._solvated_topology = builder._solvent_builder.solvated_topology
 
     if create_interchange:
+        LOGGER.info("Creating final solvated OpenFF Interchange")
         use_optimized = config.polymers is not None and config.polymers.enabled
         builder.create_interchange(use_optimized_combining=use_optimized)
 
@@ -1495,9 +1581,12 @@ def _build_direct_solvated_system(
     builder._enzyme_topology = relaxed_conjugate_topology
     builder._n_enzyme_molecules = 1
     builder._preserve_enzyme_chain_ids = True
+    LOGGER.info("Combining direct conjugate solutes")
     builder.combine_solutes()
+    LOGGER.info("Solvating direct conjugated system")
     builder.solvate(padding=0.8, box_shape="cube")
     if create_interchange:
+        LOGGER.info("Creating final solvated OpenFF Interchange")
         builder.create_interchange(use_optimized_combining=False)
     return builder
 
