@@ -48,6 +48,7 @@ def create_interchange_from_pablo_topology(
     settings: InterchangeParameterizationSettings | None = None,
     force_field: Any | None = None,
     charge_from_molecules: Sequence[Any] | None = None,
+    require_charge_templates: bool = False,
 ) -> InterchangeParameterizationResult:
     """Create an OpenFF Interchange from a Pablo topology.
 
@@ -62,6 +63,9 @@ def create_interchange_from_pablo_topology(
     charge_from_molecules : sequence of Any or None, optional
         Charged OpenFF molecule templates forwarded to Interchange, by default
         ``None``.
+    require_charge_templates : bool, optional
+        When ``True``, reject empty charge templates before OpenFF can assign
+        implicit charges, by default ``False``.
 
     Returns
     -------
@@ -78,7 +82,7 @@ def create_interchange_from_pablo_topology(
         settings=settings,
         force_field=force_field,
         charge_from_molecules=charge_from_molecules,
-        require_charge_templates=False,
+        require_charge_templates=require_charge_templates,
         success_diagnostic="OpenFF Interchange was created from the Pablo topology",
         failure_subject="Pablo topology",
     )

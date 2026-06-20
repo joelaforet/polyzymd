@@ -20,10 +20,17 @@ def test_final_helper_combines_product_and_standard_templates():
     captured = {}
     interchange = object()
 
-    def fake_parameterizer(topology, *, settings=None, charge_from_molecules=None):
+    def fake_parameterizer(
+        topology,
+        *,
+        settings=None,
+        charge_from_molecules=None,
+        require_charge_templates=False,
+    ):
         captured["topology"] = topology
         captured["settings"] = settings
         captured["charge_from_molecules"] = tuple(charge_from_molecules)
+        captured["require_charge_templates"] = require_charge_templates
         return SimpleNamespace(success=True, interchange=interchange)
 
     result = create_final_conjugated_interchange(
@@ -38,6 +45,7 @@ def test_final_helper_combines_product_and_standard_templates():
     assert captured["topology"] is builder._solvated_topology
     assert captured["settings"] == "settings"
     assert captured["charge_from_molecules"] == (conjugate_template, standard_template)
+    assert captured["require_charge_templates"] is True
 
 
 @pytest.mark.parametrize(
@@ -61,6 +69,25 @@ def test_final_helper_refuses_missing_product_state_provenance(product_library):
         create_final_conjugated_interchange(
             _Builder(),
             product_state_pablo_library=product_library,
+            parameterizer=fake_parameterizer,
+        )
+
+    assert called is False
+
+
+def test_final_helper_refuses_empty_product_charge_templates_before_openff():
+    """Standard templates must not satisfy product charge-template requirements."""
+    called = False
+
+    def fake_parameterizer(*args, **kwargs):
+        nonlocal called
+        called = True
+        return SimpleNamespace(success=True, interchange=object())
+
+    with pytest.raises(RuntimeError, match="Formal-charge smoke templates are not production"):
+        create_final_conjugated_interchange(
+            _Builder(standard_templates=(_template("water"),)),
+            product_state_pablo_library=_product_library(),
             parameterizer=fake_parameterizer,
         )
 
@@ -99,13 +126,15 @@ def test_final_helper_does_not_call_formal_charge_smoke_template(monkeypatch):
     )
     builder = _Builder()
 
-    result = create_final_conjugated_interchange(
-        builder,
-        product_state_pablo_library=_product_library(),
-        parameterizer=lambda topology, **kwargs: SimpleNamespace(success=True, interchange="ok"),
-    )
-
-    assert result == "ok"
+    with pytest.raises(RuntimeError, match="Product-state conjugate charge templates are missing"):
+        create_final_conjugated_interchange(
+            builder,
+            product_state_pablo_library=_product_library(),
+            parameterizer=lambda topology, **kwargs: SimpleNamespace(
+                success=True,
+                interchange="ok",
+            ),
+        )
 
 
 def test_final_helper_receives_real_openff_product_template_charges():
@@ -142,8 +171,15 @@ def test_final_helper_receives_real_openff_product_template_charges():
     )
     captured = {}
 
-    def fake_parameterizer(topology, *, settings=None, charge_from_molecules=None):
+    def fake_parameterizer(
+        topology,
+        *,
+        settings=None,
+        charge_from_molecules=None,
+        require_charge_templates=False,
+    ):
         captured["templates"] = tuple(charge_from_molecules)
+        captured["require_charge_templates"] = require_charge_templates
         return SimpleNamespace(success=True, interchange=object())
 
     create_final_conjugated_interchange(
@@ -155,6 +191,7 @@ def test_final_helper_receives_real_openff_product_template_charges():
     assert captured["templates"][0] is conjugate_template
     assert captured["templates"][0].partial_charges is not None
     assert captured["templates"][1] is water_template
+    assert captured["require_charge_templates"] is True
 
 
 class _Builder:
