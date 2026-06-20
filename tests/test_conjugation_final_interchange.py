@@ -6,7 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from polyzymd.builders.conjugation._linkage import PabloCrosslinkRequirement
 from polyzymd.builders.conjugation.final_interchange import create_final_conjugated_interchange
+from polyzymd.builders.conjugation.pablo.product import ProductStatePabloLibrary
 
 
 def test_final_helper_combines_product_and_standard_templates():
@@ -104,6 +106,55 @@ def test_final_helper_does_not_call_formal_charge_smoke_template(monkeypatch):
     )
 
     assert result == "ok"
+
+
+def test_final_helper_receives_real_openff_product_template_charges():
+    """A semi-real product-state library should propagate real OpenFF charges."""
+    pytest.importorskip("openff.toolkit")
+    from openff.toolkit import Molecule, Topology
+    from openff.units import Quantity
+
+    conjugate_template = Molecule.from_smiles("NCC(=O)O")
+    conjugate_template.name = "LYX_NHX_PRODUCT_TEMPLATE"
+    conjugate_template.partial_charges = Quantity(
+        [0.0] * conjugate_template.n_atoms,
+        "elementary_charge",
+    )
+    water_template = Molecule.from_smiles("O")
+    water_template.name = "TIP3P_STANDARD_TEMPLATE"
+    water_template.partial_charges = Quantity(
+        [-0.834, 0.417, 0.417],
+        "elementary_charge",
+    )
+    topology = Topology.from_molecules([conjugate_template, water_template])
+    builder = _Builder(standard_templates=(water_template,))
+    builder._solvated_topology = topology
+    library = ProductStatePabloLibrary(
+        residue_library=object(),
+        definitions=(SimpleNamespace(residue_name="LYX"),),
+        charge_templates=(conjugate_template,),
+        crosslink_requirement=PabloCrosslinkRequirement(
+            residues=("LYX", "NHX"),
+            linking_atoms=("NZ", "C047"),
+            leaving_atoms=((), ()),
+            bond_order=1,
+        ),
+    )
+    captured = {}
+
+    def fake_parameterizer(topology, *, settings=None, charge_from_molecules=None):
+        captured["templates"] = tuple(charge_from_molecules)
+        return SimpleNamespace(success=True, interchange=object())
+
+    create_final_conjugated_interchange(
+        builder,
+        product_state_pablo_library=library,
+        parameterizer=fake_parameterizer,
+    )
+
+    assert captured["templates"][0] is conjugate_template
+    assert captured["templates"][0].partial_charges is not None
+    assert captured["templates"][1] is water_template
 
 
 class _Builder:
