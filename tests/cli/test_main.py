@@ -436,6 +436,57 @@ class TestBuildCommandConjugationRouting:
             component_info=component_info,
         )
 
+    @patch("polyzymd.cli.main._write_openmm_build_artifacts")
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    @patch("polyzymd.builders.conjugation.build_conjugate_from_config")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_enabled_conjugation_without_format_reports_conjugation_artifacts(
+        self,
+        mock_from_yaml,
+        mock_build_conjugate,
+        mock_system_builder_from_config,
+        mock_write_openmm_build_artifacts,
+        tmp_path: Path,
+    ) -> None:
+        """OpenMM conjugation build should report conjugation-specific artifacts."""
+        sim_config = _make_build_config(conjugation_enabled=True)
+        working_dir = tmp_path / "run_1"
+        sim_config.get_working_directory = lambda rep: working_dir
+        mock_from_yaml.return_value = sim_config
+        system_builder = object()
+        result = SimpleNamespace(
+            system_builder=system_builder,
+            crosslinked_conjugate_pdb_path=working_dir / "crosslinked_conjugate.pdb",
+            minimized_conjugate_pdb_path=None,
+            equilibrated_conjugate_pdb_path=None,
+            relaxed_conjugate_pdb_path=working_dir / "relaxed_conjugate.pdb",
+            solvated_pdb_path=working_dir / "solvated_conjugate_free_polymers.pdb",
+            workflow_json_path=working_dir / "conjugation_workflow.json",
+            artifact_paths={
+                "solvated_pdb": working_dir / "solvated_conjugate_free_polymers.pdb",
+                "workflow_json": working_dir / "conjugation_workflow.json",
+            },
+        )
+        mock_build_conjugate.return_value = result
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        cli_result = CliRunner().invoke(cli, ["build", "-c", str(config_path)])
+
+        assert cli_result.exit_code == 0
+        mock_system_builder_from_config.assert_not_called()
+        mock_build_conjugate.assert_called_once()
+        mock_write_openmm_build_artifacts.assert_called_once_with(
+            builder=system_builder,
+            sim_config=sim_config,
+            working_dir=working_dir,
+        )
+        assert "Conjugation workflow completed successfully" in cli_result.output
+        assert "system.xml" in cli_result.output
+        assert "solvated_conjugate_free_polymers.pdb" in cli_result.output
+        assert "workflow_json" in cli_result.output
+        assert "solvated_system.pdb" not in cli_result.output
+
     @pytest.mark.parametrize("conjugation_enabled", [False, None])
     @patch("polyzymd.exporters.interchange.export_system")
     @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")

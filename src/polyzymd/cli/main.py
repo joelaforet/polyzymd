@@ -314,6 +314,41 @@ def _print_openmm_build_summary(working_dir: Path) -> None:
     colored_echo("or 'polyzymd run-segment' to run a single segment locally.", phase="build")
 
 
+def _print_conjugation_openmm_build_summary(result: Any, working_dir: Path) -> None:
+    """Print the OpenMM build summary for conjugation workflow output.
+
+    Parameters
+    ----------
+    result : Any
+        Conjugation workflow result carrying artifact path metadata.
+    working_dir : Path
+        Directory containing generated build artifacts.
+    """
+    colored_echo("Conjugation workflow completed successfully!", phase="build")
+    colored_echo(f"Output directory: {working_dir}", phase="build")
+    colored_echo("Files saved:", phase="build")
+    colored_echo(f"  - system.xml: {working_dir / 'system.xml'}", phase="build")
+
+    key_paths = {
+        "crosslinked_conjugate_pdb": getattr(result, "crosslinked_conjugate_pdb_path", None),
+        "minimized_conjugate_pdb": getattr(result, "minimized_conjugate_pdb_path", None),
+        "equilibrated_conjugate_pdb": getattr(result, "equilibrated_conjugate_pdb_path", None),
+        "relaxed_conjugate_pdb": getattr(result, "relaxed_conjugate_pdb_path", None),
+        "solvated_pdb": getattr(result, "solvated_pdb_path", None),
+        "workflow_json": getattr(result, "workflow_json_path", None),
+    }
+    artifact_paths = getattr(result, "artifact_paths", None)
+    if isinstance(artifact_paths, dict):
+        key_paths.update(artifact_paths)
+
+    for label, path in key_paths.items():
+        if path is not None:
+            colored_echo(f"  - {label}: {path}", phase="build")
+
+    colored_echo("Use 'polyzymd submit' to submit for HPC execution,", phase="build")
+    colored_echo("or 'polyzymd run-segment' to run a single segment locally.", phase="build")
+
+
 def _resolve_submission_pixi_env(preset: str, engine_name: str, pixi_env: str | None = None) -> str:
     """Resolve the pixi environment for submit and recover jobs.
 
@@ -794,7 +829,7 @@ def build(
                         sim_config=sim_config,
                         working_dir=working_dir,
                     )
-                    _print_openmm_build_summary(working_dir)
+                    _print_conjugation_openmm_build_summary(result, working_dir)
                 else:
                     result.require_final_interchange()
                     colored_echo("Conjugation workflow completed successfully!", phase="build")
@@ -866,19 +901,6 @@ def build(
 
     except NotImplementedError as e:
         colored_echo(f"Not yet supported: {e}", err=True, level=logging.ERROR)
-        sys.exit(1)
-
-    except Exception as e:
-        colored_echo(f"Unexpected error: {e}", err=True, level=logging.ERROR)
-        colored_echo(
-            "This may be a bug. Re-run with --verbose for details.",
-            err=True,
-            level=logging.ERROR,
-        )
-        if LOGGER.level == logging.DEBUG:
-            import traceback
-
-            traceback.print_exc()
         sys.exit(1)
 
 
