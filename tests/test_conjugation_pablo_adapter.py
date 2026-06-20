@@ -200,7 +200,9 @@ def test_ingest_structure_success_extracts_metadata(monkeypatch, tmp_path):
 
     assert result.success is True
     assert result.topology is fake_topology
-    assert result.metadata.mode == "pablo_ingestion"
+    assert result.metadata.enabled is True
+    assert result.path == structure
+    assert result.pablo.available is True
     assert result.counts.atom_count == 2
     assert result.counts.molecule_count == 1
     assert result.noncanonical_residues[0].residue_name == "NAG"

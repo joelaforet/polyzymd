@@ -22,7 +22,6 @@ class DiagnosticCode(str, Enum):
     """Stable diagnostic codes for conjugation reports."""
 
     CCD_POLICY = "ccd_policy"
-    ENABLED_MODE = "enabled_mode"
     UNSUPPORTED_OPERATION = "unsupported_operation"
     CHARGE_PARAMETERIZATION = "charge_parameterization"
     PABLO_ADAPTER = "pablo_adapter"
@@ -50,7 +49,6 @@ class ConjugationDiagnosticsReport(BaseModel):
     """Collection of covalent modification diagnostic events."""
 
     enabled: bool = False
-    mode: str | None = None
     diagnostics: list[ConjugationDiagnostic] = Field(default_factory=list)
 
     def add(
@@ -140,7 +138,6 @@ class ConjugationMetadata(BaseModel):
     """Top-level metadata for a covalent modification build pass."""
 
     enabled: bool = False
-    mode: str | None = None
     chain_policy: ChainPolicyMetadata = Field(default_factory=ChainPolicyMetadata)
     components: list[ComponentMetadata] = Field(default_factory=list)
     attachments: list[dict[str, Any]] = Field(default_factory=list)

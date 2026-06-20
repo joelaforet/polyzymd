@@ -1041,7 +1041,6 @@ def _build_result_from_records(
     )
     metadata = ConjugationMetadata(
         enabled=True,
-        mode="pablo_ingestion",
         chain_policy=chain_policy,
         components=components,
         notes=notes,
