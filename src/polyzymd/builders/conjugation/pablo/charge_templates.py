@@ -32,6 +32,7 @@ class _PartialChargeSource:
 
     charges: dict[_AtomIdentity, float]
     source: str
+    ordered_charges: tuple[float, ...] = ()
 
 
 def build_conjugate_charge_templates(
@@ -79,6 +80,8 @@ def build_conjugate_charge_templates(
         for molecule in tuple(getattr(topology, "molecules", ()) or ())
         if _molecule_contains_product_residue(molecule, product_names)
     )
+    if not target_molecules:
+        target_molecules = _fallback_target_molecules_by_charge_count(topology, source)
     if not target_molecules:
         names = ", ".join(sorted(product_names))
         raise ValueError(
@@ -156,7 +159,11 @@ def _source_from_residue_records(records: tuple[Any, ...]) -> _PartialChargeSour
             charges[identity] = _finite_charge(charge, identity)
     if not charges:
         raise ValueError("Residue partial-charge records did not contain any atom charges")
-    return _PartialChargeSource(charges=charges, source=", ".join(sorted(sources)))
+    return _PartialChargeSource(
+        charges=charges,
+        source=", ".join(sorted(sources)),
+        ordered_charges=tuple(charges.values()),
+    )
 
 
 def _source_from_marked_templates(templates: tuple[Any, ...]) -> _PartialChargeSource:
@@ -188,7 +195,11 @@ def _source_from_marked_templates(templates: tuple[Any, ...]) -> _PartialChargeS
             charges[identity] = _finite_charge(charge, identity)
     if not charges:
         raise ValueError("Production-marked charge templates did not contain any atom charges")
-    return _PartialChargeSource(charges=charges, source=", ".join(sorted(sources)))
+    return _PartialChargeSource(
+        charges=charges,
+        source=", ".join(sorted(sources)),
+        ordered_charges=tuple(charges.values()),
+    )
 
 
 def _charged_template_from_source(
@@ -199,6 +210,12 @@ def _charged_template_from_source(
 ) -> Any:
     """Copy a molecule and assign source partial charges by atom identity."""
     atoms = tuple(getattr(molecule, "atoms", ()) or ())
+    if _requires_ordered_charge_transfer(atoms, source):
+        return _charged_template_from_ordered_source(
+            molecule,
+            source,
+            total_charge_tolerance=total_charge_tolerance,
+        )
     missing: list[_AtomIdentity] = []
     charges: list[float] = []
     for atom in atoms:
@@ -226,6 +243,50 @@ def _charged_template_from_source(
             f"for {_molecule_label(molecule)}"
         )
 
+    template = copy.deepcopy(molecule)
+    template.partial_charges = _as_openff_quantity(charges)
+    return template
+
+
+def _fallback_target_molecules_by_charge_count(
+    topology: Any,
+    source: _PartialChargeSource,
+) -> tuple[Any, ...]:
+    """Select the conjugate molecule by charge-vector length when metadata is stripped."""
+    if not source.ordered_charges:
+        return ()
+    matches = tuple(
+        molecule
+        for molecule in tuple(getattr(topology, "molecules", ()) or ())
+        if len(tuple(getattr(molecule, "atoms", ()) or ())) == len(source.ordered_charges)
+    )
+    return matches if len(matches) == 1 else ()
+
+
+def _requires_ordered_charge_transfer(atoms: tuple[Any, ...], source: _PartialChargeSource) -> bool:
+    """Return whether atom metadata is unavailable but order is compatible."""
+    if not source.ordered_charges or len(atoms) != len(source.ordered_charges):
+        return False
+    return not any(_atom_identity(atom).residue_name for atom in atoms)
+
+
+def _charged_template_from_ordered_source(
+    molecule: Any,
+    source: _PartialChargeSource,
+    *,
+    total_charge_tolerance: float,
+) -> Any:
+    """Copy a molecule and assign source partial charges by preserved atom order."""
+    atoms = tuple(getattr(molecule, "atoms", ()) or ())
+    charges = list(source.ordered_charges)
+    formal_total = sum(_formal_charge_value(getattr(atom, "formal_charge", 0)) for atom in atoms)
+    partial_total = sum(charges)
+    if abs(partial_total - formal_total) > total_charge_tolerance:
+        raise ValueError(
+            "Final conjugate ordered partial charges do not sum to the molecule formal charge: "
+            f"partial total {partial_total:.8f} e vs formal total {formal_total:.8f} e "
+            f"for {_molecule_label(molecule)}"
+        )
     template = copy.deepcopy(molecule)
     template.partial_charges = _as_openff_quantity(charges)
     return template
