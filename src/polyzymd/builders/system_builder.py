@@ -505,6 +505,41 @@ class SystemBuilder:
 
         return smiles_to_template
 
+    def collect_standard_charge_templates(self) -> tuple[Any, ...]:
+        """Collect charged templates for non-conjugate molecules.
+
+        Returns
+        -------
+        tuple[Any, ...]
+            Charged templates for water, free polymers, substrate, and
+            co-solvents in first-seen order.
+        """
+        from polyzymd.data.solvent_molecules import get_solvent_molecule
+
+        water_model = "tip3p"
+        if self._solvent_builder._composition:
+            water_model = self._solvent_builder._composition.water_model
+        water_mol = get_solvent_molecule(water_model)
+
+        charge_from: list[Any] = [water_mol]
+        seen_smiles: set[str] = set()
+        for mol in self._polymer_molecules:
+            smi = mol.to_smiles()
+            if smi in seen_smiles:
+                continue
+            charge_from.append(mol)
+            seen_smiles.add(smi)
+
+        if self._substrate_molecule:
+            charge_from.append(self._substrate_molecule)
+
+        if self._solvent_builder._composition:
+            for cosolvent in self._solvent_builder._composition.co_solvents:
+                if cosolvent.molecule is not None:
+                    charge_from.append(cosolvent.molecule)
+
+        return tuple(charge_from)
+
     def _create_interchange_single_call(self, ff: ForceField, water_mol: Molecule) -> Interchange:
         """Create Interchange with a single ``ForceField.create_interchange()`` call.
 
@@ -525,26 +560,12 @@ class SystemBuilder:
         """
         # Build charge templates: one per unique species
         t0 = time.perf_counter()
-        charge_from: List[Molecule] = [water_mol]
-
-        seen_smiles: set = set()
-        for mol in self._polymer_molecules:
-            smi = mol.to_smiles()
-            if smi not in seen_smiles:
-                charge_from.append(mol)
-                seen_smiles.add(smi)
-
-        if self._substrate_molecule:
-            charge_from.append(self._substrate_molecule)
-
-        if self._solvent_builder._composition:
-            for cosolvent in self._solvent_builder._composition.co_solvents:
-                if cosolvent.molecule is not None:
-                    charge_from.append(cosolvent.molecule)
+        charge_from = list(self.collect_standard_charge_templates())
+        polymer_template_count = max(len(charge_from) - 1, 0)
 
         LOGGER.info(
             f"Charge templates: {len(charge_from)} "
-            f"(water + {len(seen_smiles)} polymer type(s) + substrate + co-solvents)"
+            f"(water + {polymer_template_count} standard non-water template(s))"
         )
         LOGGER.info(f"  Template prep took {time.perf_counter() - t0:.1f}s")
 

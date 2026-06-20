@@ -36,6 +36,7 @@ from polyzymd.builders.conjugation._specs import (
     attachment_spec_from_generated_polymer_plan,
     attachment_spec_from_moiety_plan,
 )
+from polyzymd.builders.conjugation.final_interchange import create_final_conjugated_interchange
 from polyzymd.builders.conjugation.models import ConjugationResult
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
 from polyzymd.builders.conjugation.pablo.parameterization import (
@@ -252,6 +253,8 @@ def build_conjugated_polymer_system_from_config(
         working_dir=artifact_dir,
         polymer_seed=free_polymer_seed,
         create_interchange=workflow_settings.create_final_interchange,
+        product_state_pablo_library=getattr(construction, "product_state_pablo_library", None),
+        parameterization_settings=workflow_settings.conjugate_parameterization,
     )
     solvated_pdb_path = artifact_dir / workflow_settings.solvated_pdb_name
     builder.save_topology(solvated_pdb_path)
@@ -372,6 +375,8 @@ def build_direct_smiles_moiety_conjugate(
         relaxed_conjugate_topology=relaxed_topology,
         working_dir=artifact_dir,
         create_interchange=workflow_settings.create_final_interchange,
+        product_state_pablo_library=getattr(construction, "product_state_pablo_library", None),
+        parameterization_settings=workflow_settings.conjugate_parameterization,
     )
     solvated_pdb_path = artifact_dir / workflow_settings.solvated_pdb_name
     builder.save_topology(solvated_pdb_path)
@@ -1534,6 +1539,8 @@ def _build_solvated_system(
     working_dir: Path,
     polymer_seed: int | None,
     create_interchange: bool,
+    product_state_pablo_library: Any | None = None,
+    parameterization_settings: InterchangeParameterizationSettings | None = None,
 ) -> SystemBuilder:
     """Build the solvated system around a relaxed conjugate topology."""
     builder = SystemBuilder.from_config(config)
@@ -1563,7 +1570,11 @@ def _build_solvated_system(
 
     if create_interchange:
         LOGGER.info("Creating final solvated OpenFF Interchange")
-        builder.create_interchange()
+        create_final_conjugated_interchange(
+            builder,
+            product_state_pablo_library=product_state_pablo_library,
+            settings=parameterization_settings,
+        )
 
     return builder
 
@@ -1573,6 +1584,8 @@ def _build_direct_solvated_system(
     relaxed_conjugate_topology: Any,
     working_dir: Path,
     create_interchange: bool,
+    product_state_pablo_library: Any | None = None,
+    parameterization_settings: InterchangeParameterizationSettings | None = None,
 ) -> SystemBuilder:
     """Solvate a direct SMILES-moiety conjugate without a full SimulationConfig."""
     builder = SystemBuilder()
@@ -1586,7 +1599,11 @@ def _build_direct_solvated_system(
     builder.solvate(padding=0.8, box_shape="cube")
     if create_interchange:
         LOGGER.info("Creating final solvated OpenFF Interchange")
-        builder.create_interchange()
+        create_final_conjugated_interchange(
+            builder,
+            product_state_pablo_library=product_state_pablo_library,
+            settings=parameterization_settings,
+        )
     return builder
 
 
