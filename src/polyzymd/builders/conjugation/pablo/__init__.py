@@ -1,5 +1,8 @@
 """Internal Pablo/OpenFF integration helpers for conjugation workflows."""
 
+from polyzymd.builders.conjugation.pablo.charge_templates import (
+    build_conjugate_charge_templates,
+)
 from polyzymd.builders.conjugation.pablo.ingestion import (
     PabloAvailability,
     PabloIngestionResult,
@@ -49,6 +52,7 @@ __all__ = [
     "ProductStatePabloDefinitionSummary",
     "ProductStatePabloLibrary",
     "build_formal_charge_smoke_template",
+    "build_conjugate_charge_templates",
     "build_pablo_residue_library",
     "build_product_state_pablo_library",
     "build_product_state_pablo_library_for_specs",

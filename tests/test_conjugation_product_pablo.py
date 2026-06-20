@@ -10,6 +10,7 @@ import pytest
 
 from polyzymd.builders.conjugation._linkage import PabloCrosslinkRequirement
 from polyzymd.builders.conjugation.pablo import product as product_pablo_module
+from polyzymd.builders.conjugation.pablo.charge_templates import build_conjugate_charge_templates
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
 from polyzymd.builders.conjugation.pablo.product import (
     build_product_state_pablo_library,
@@ -323,6 +324,9 @@ def test_product_state_pablo_library_preserves_fixture_bond_orders_and_valence(
         assert _bond_order(definitions[residue_number], atom1, atom2) == order
     assert _definition_atom_charge(definitions[2], "NQA") == 1
     assert _definition_atom_charge(definitions[2], "OS3") == -1
+    assert library.residue_partial_charges == ()
+    with pytest.raises(ValueError, match="no production partial-charge provenance"):
+        build_conjugate_charge_templates(SimpleNamespace(molecules=()), library)
 
 
 @pytest.mark.parametrize(

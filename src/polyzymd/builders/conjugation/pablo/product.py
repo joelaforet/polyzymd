@@ -44,6 +44,7 @@ class ProductStatePabloLibrary(BaseModel):
     residue_library: Any = Field(exclude=True)
     definitions: tuple[Any, ...] = Field(default_factory=tuple, exclude=True)
     charge_templates: tuple[Any, ...] = Field(default_factory=tuple, exclude=True)
+    residue_partial_charges: tuple[Any, ...] = Field(default_factory=tuple, exclude=True)
     summaries: tuple[ProductStatePabloDefinitionSummary, ...] = Field(default_factory=tuple)
     crosslink_requirement: PabloCrosslinkRequirement
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
