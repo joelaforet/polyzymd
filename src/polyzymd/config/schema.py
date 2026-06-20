@@ -450,14 +450,6 @@ class PolymerConfig(BaseModel):
 # =============================================================================
 
 
-class ConjugationMode(str, Enum):
-    """Supported covalent modification workflow modes."""
-
-    INGEST_EXISTING = "ingest_existing"
-    CONSTRUCT = "construct"
-    MIXED = "mixed"
-
-
 class CcdLookupPolicy(str, Enum):
     """Policies for resolving CCD-backed residue definitions."""
 
@@ -778,7 +770,9 @@ class ConjugationAtomRoleConfig(BaseModel):
         description="Mechanism-local role of this mapped atom",
     )
     label: str | None = Field(None, description="Optional human-readable role label")
-    required: bool = Field(True, description="Whether a later structure match must resolve this atom")
+    required: bool = Field(
+        True, description="Whether a later structure match must resolve this atom"
+    )
 
     @field_validator("label")
     @classmethod
@@ -965,20 +959,18 @@ class ConjugationDiagnosticsConfig(BaseModel):
 
 
 class ConjugationConfig(BaseModel):
-    """Top-level covalent modification configuration skeleton.
+    """Top-level covalent modification configuration.
 
-    This Phase 0-1 model is backwards-compatible because the top-level field is
-    optional on :class:`SimulationConfig` and defaults to disabled behavior.
+    Enabled conjugation is requested with ``enabled=True`` and at least one
+    enabled attachment. The top-level field is optional on
+    :class:`SimulationConfig` and defaults to disabled behavior.
     """
 
-    enabled: bool = Field(False, description="Enable covalent modification workflow")
-    mode: ConjugationMode = Field(
-        ConjugationMode.INGEST_EXISTING,
-        description="Covalent modification workflow mode",
-    )
-    source_pdb_path: Path | None = Field(
-        None,
-        description="Optional pre-conjugated PDB path for ingest_existing mode",
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        False,
+        description="Enable covalent modification workflow when at least one attachment is enabled",
     )
     ccd_pablo: ConjugationCcdPabloPolicyConfig = Field(
         default_factory=ConjugationCcdPabloPolicyConfig,
@@ -990,7 +982,7 @@ class ConjugationConfig(BaseModel):
     )
     attachments: list[ConjugationAttachmentConfig] = Field(
         default_factory=list,
-        description="Requested covalent attachments for future construction workflows",
+        description="Requested covalent attachments; at least one must be enabled when enabled=true",
     )
     charge: ConjugationChargeConfig = Field(default_factory=ConjugationChargeConfig)
     diagnostics: ConjugationDiagnosticsConfig = Field(
@@ -999,8 +991,8 @@ class ConjugationConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_source_backed_pablo_policy(self) -> "ConjugationConfig":
-        """Validate Pablo policy for source-backed workflows.
+    def validate_enabled_attachment_contract(self) -> "ConjugationConfig":
+        """Validate the enabled conjugation attachment contract.
 
         Returns
         -------
@@ -1010,13 +1002,8 @@ class ConjugationConfig(BaseModel):
         if not self.enabled:
             return self
 
-        source_backed = (
-            self.mode == ConjugationMode.INGEST_EXISTING or self.source_pdb_path is not None
-        )
-        if source_backed and not self.ccd_pablo.enabled:
-            raise ValueError(
-                "source-backed conjugation workflows require ccd_pablo.enabled to be true"
-            )
+        if not any(attachment.enabled for attachment in self.attachments):
+            raise ValueError("enabled conjugation requires at least one enabled attachment")
         return self
 
 
@@ -1967,25 +1954,6 @@ class SimulationConfig(BaseModel):
     gromacs: GromacsEngineConfig = Field(
         default_factory=GromacsEngineConfig, description="GROMACS engine settings"
     )
-
-    @model_validator(mode="after")
-    def resolve_conjugation_source_pdb_path(self) -> "SimulationConfig":
-        """Default ingest-existing conjugation sources to the enzyme PDB path.
-
-        Returns
-        -------
-        SimulationConfig
-            Validated simulation configuration with a resolved conjugation
-            source path when needed.
-        """
-        if (
-            self.conjugation is not None
-            and self.conjugation.enabled
-            and self.conjugation.mode == ConjugationMode.INGEST_EXISTING
-            and self.conjugation.source_pdb_path is None
-        ):
-            self.conjugation.source_pdb_path = self.enzyme.pdb_path
-        return self
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SimulationConfig":

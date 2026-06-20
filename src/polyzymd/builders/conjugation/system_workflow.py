@@ -72,7 +72,6 @@ from polyzymd.config.schema import (
     ConjugationCcdPabloPolicyConfig,
     ConjugationChainPolicyConfig,
     ConjugationConfig,
-    ConjugationMode,
     SimulationConfig,
 )
 
@@ -575,25 +574,23 @@ def _build_n_gly_direct_moiety_attachment_spec(
     )
 
 
-def _single_enabled_attachment(conjugation: ConjugationConfig | None) -> Any:
-    if conjugation is None or not conjugation.enabled:
-        raise ValueError("conjugation.enabled must be true for this workflow")
-    if conjugation.mode != ConjugationMode.CONSTRUCT:
-        raise ValueError("this workflow requires conjugation.mode: construct")
-    attachments = [attachment for attachment in conjugation.attachments if attachment.enabled]
-    if len(attachments) != 1:
-        raise ValueError("v1 conjugated polymer workflow requires exactly one enabled attachment")
-    return attachments[0]
-
-
 def _enabled_supported_nhs_lys_attachments(
     conjugation: ConjugationConfig | None,
 ) -> tuple[Any, ...]:
-    """Return all enabled attachments supported by the config NHS-Lys path."""
+    """Return all enabled attachments supported by the config NHS-Lys path.
+
+    Parameters
+    ----------
+    conjugation : ConjugationConfig or None
+        Conjugation configuration to inspect.
+
+    Returns
+    -------
+    tuple of Any
+        Enabled attachment configurations supported by this workflow.
+    """
     if conjugation is None or not conjugation.enabled:
         raise ValueError("conjugation.enabled must be true for this workflow")
-    if conjugation.mode != ConjugationMode.CONSTRUCT:
-        raise ValueError("this workflow requires conjugation.mode: construct")
     attachments = tuple(attachment for attachment in conjugation.attachments if attachment.enabled)
     if not attachments:
         raise ValueError("conjugated polymer workflow requires at least one enabled attachment")

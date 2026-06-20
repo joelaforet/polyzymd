@@ -54,7 +54,6 @@ from polyzymd.builders.conjugation.system_workflow import (
 from polyzymd.config.schema import (
     ConjugationCcdPabloPolicyConfig,
     ConjugationChainPolicyConfig,
-    ConjugationMode,
 )
 
 
@@ -974,7 +973,6 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
         enzyme=SimpleNamespace(pdb_path=source),
         conjugation=SimpleNamespace(
             enabled=True,
-            mode=ConjugationMode.CONSTRUCT,
             attachments=attachments,
             ccd_pablo=ConjugationCcdPabloPolicyConfig(),
             chain_policy=ConjugationChainPolicyConfig(),
@@ -1089,7 +1087,6 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
         enzyme=SimpleNamespace(pdb_path=source),
         conjugation=SimpleNamespace(
             enabled=True,
-            mode=ConjugationMode.CONSTRUCT,
             attachments=(attachment,),
             ccd_pablo=ConjugationCcdPabloPolicyConfig(),
             chain_policy=ConjugationChainPolicyConfig(),
@@ -1183,7 +1180,6 @@ def test_config_nhs_lys_mixed_unsupported_mechanisms_fail_clearly(tmp_path: Path
         enzyme=SimpleNamespace(pdb_path=source),
         conjugation=SimpleNamespace(
             enabled=True,
-            mode=ConjugationMode.CONSTRUCT,
             attachments=(
                 _config_nhs_attachment("nhs_polymer", residue_number=23),
                 SimpleNamespace(

@@ -375,82 +375,6 @@ class SystemBuilder:
 
         return self._solvated_topology
 
-    def _apply_conjugation(self, config: "SimulationConfig") -> Topology:
-        """Reject legacy in-place conjugation before solvation.
-
-        Parameters
-        ----------
-        config : SimulationConfig
-            Simulation configuration with optional conjugation settings.
-
-        Returns
-        -------
-        Topology
-            Pre-solvation topology, unchanged when conjugation is absent or disabled.
-
-        Raises
-        ------
-        RuntimeError
-            If solutes have not been combined.
-        ConjugationNotImplementedError
-            If enabled conjugation is requested through the legacy SystemBuilder path.
-        """
-        if self._combined_topology is None:
-            raise RuntimeError("Solutes must be combined before applying conjugation")
-
-        conjugation_config = getattr(config, "conjugation", None)
-        if conjugation_config is None or not conjugation_config.enabled:
-            return self._combined_topology
-
-        LOGGER.info("Applying covalent modification workflow: %s", conjugation_config.mode.value)
-
-        from polyzymd.builders.conjugation.exceptions import ConjugationNotImplementedError
-
-        raise ConjugationNotImplementedError(
-            "SystemBuilder no longer applies enabled conjugation through the retired "
-            "CovalentModificationBuilder path. Use "
-            "polyzymd.builders.conjugation.build_conjugate_from_config() or the public "
-            "conjugation API workflow to build conjugated systems."
-        )
-
-    def _ingest_existing_conjugation_source(self, config: "SimulationConfig") -> Any | None:
-        """Parse a prepared conjugation source once for the builder hook.
-
-        Parameters
-        ----------
-        config : SimulationConfig
-            Simulation configuration with optional conjugation settings.
-
-        Returns
-        -------
-        Any or None
-            Pablo ingestion result for source-backed workflows, otherwise ``None``.
-        """
-        conjugation_config = getattr(config, "conjugation", None)
-        if conjugation_config is None or not conjugation_config.enabled:
-            return None
-
-        from polyzymd.config.schema import ConjugationMode
-
-        source_backed = (
-            conjugation_config.mode == ConjugationMode.INGEST_EXISTING
-            or conjugation_config.source_pdb_path is not None
-        )
-        if not source_backed:
-            return None
-
-        from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
-
-        source_path = conjugation_config.source_pdb_path
-        if source_path is None and conjugation_config.mode == ConjugationMode.INGEST_EXISTING:
-            source_path = config.enzyme.pdb_path
-        ingestor = PabloIngestor(conjugation_config.ccd_pablo)
-        return ingestor.ingest_structure(
-            source_path,
-            chain_policy=conjugation_config.chain_policy,
-            output_dir=self._working_dir,
-        )
-
     def create_interchange(self) -> Interchange:
         """Create the OpenFF Interchange for simulation.
 
@@ -920,9 +844,6 @@ class SystemBuilder:
 
         # 3. Combine enzyme + substrate
         self.combine_solutes()
-
-        # Apply optional covalent modifications before packing and solvation
-        self._apply_conjugation(config)
 
         # 4. Build and pack polymers (if configured)
         if config.polymers and config.polymers.enabled:

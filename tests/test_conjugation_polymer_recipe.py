@@ -178,7 +178,6 @@ def test_simulation_config_accepts_yaml_polymer_recipe(tmp_path):
     data = _minimal_simulation_config_data()
     data["conjugation"] = {
         "enabled": True,
-        "mode": "construct",
         "attachments": [
             {
                 "name": "lys23-sbma-egpma-nhs",
@@ -220,7 +219,6 @@ simulation_phases:
     checkpoint_interval: 5000
 conjugation:
   enabled: true
-  mode: construct
   attachments:
     - name: lys23-sbma-egpma-nhs
       site:
