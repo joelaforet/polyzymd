@@ -1,9 +1,14 @@
 # Protein Modification Config Reference
 
-This reference lists the intended configuration fields for residue-level protein
-modifications. It documents the target interface for the generalized framework.
-The current executable implementation supports enabled NHS-lysine polymer
-attachments; broader multi-mechanism execution is planned.
+This reference describes the executable protein modification configuration used
+by the current `polyzymd build` workflow. Protein modifications are configured
+under `conjugation:` because the supported implementation began as covalent
+polymer-protein conjugation.
+
+Current executable support covers exploratory NHS-lysine polymer attachments and
+the wired moiety-plus-mechanism attachment model. Generalized recipe fields for
+all protein modifications are future design material and are not part of the
+current schema.
 
 ## Top-Level Block
 
@@ -15,40 +20,63 @@ conjugation:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `enabled` | boolean | Turns protein modification handling on or off. This remains opt-in. |
-| `attachments` | list | Ordered list of requested protein modifications. |
+| `enabled` | boolean | Turns conjugation handling on or off. This remains opt-in. |
+| `attachments` | list | Ordered list of requested covalent attachments. |
 | `ccd_pablo` | mapping | Pablo/CCD policy for structure ingestion and custom residues. |
 | `chain_policy` | mapping | Chain assignment policy for protein and attached moieties. |
 | `charge` | mapping | Charge patching and total-charge policy. |
 | `diagnostics` | mapping | Controls diagnostic sidecar output. |
 
+When `enabled: true`, at least one attachment must be present and enabled.
+
 ## Attachment
 
-An attachment is one requested residue modification.
+An attachment is one requested covalent residue modification. The current schema
+requires an explicit `moiety` and `mechanism` for each attachment.
 
 ```yaml
 attachments:
-  - name: lys23-polymer
+  - name: lys23-sbma-egpma-nhs
     enabled: true
     site:
       chain_id: A
+      residue_name: LYS
       residue_number: 23
-    protein_modification_recipe:
-      name: sbma-egpma-nhs-polymer
+    moiety:
+      name: SBMA-EGPMA-NHS
+      recipe:
+        name: SBMA-EGPMA-NHS
+        length: 9
+        seed: 7
+        forced_reactive_monomer_label: C
+        monomers:
+          - label: A
+            name: SBMA
+            residue_name: SBM
+            smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
+            probability: 0.945
+          - label: B
+            name: EGPMA
+            residue_name: EGP
+            smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]"
+            probability: 0.045
+          - label: C
+            name: NHS
+            residue_name: NHS
+            smiles: CC(=C)C(=O)ON1C(=O)CCC1=O
+            probability: 0.01
+    mechanism:
+      name: nhs_lys_amide
 ```
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
-| `name` | string | yes | User-facing identifier for this modification. |
+| `name` | string | yes | User-facing identifier for this attachment. |
 | `enabled` | boolean | no | Whether this attachment should be applied. Defaults to `true`. |
 | `site` | mapping | yes | Protein residue to modify. |
-| `protein_modification_recipe` | mapping | standard workflow | Biology-level modification recipe. |
-| `moiety` | mapping | advanced workflow | Explicit object to add when bypassing recipe defaults. |
-| `mechanism` | mapping | advanced workflow | Explicit chemistry mechanism overrides. |
+| `moiety` | mapping | yes | Object to attach to the protein. |
+| `mechanism` | mapping | yes | Chemistry mechanism used to attach the moiety. |
 | `placement` | mapping | no | Placement and clash-control settings. |
-
-`protein_modification_recipe` is the preferred standard interface. `moiety` and
-`mechanism` remain available for advanced explicit workflows.
 
 ## Site
 
@@ -66,64 +94,62 @@ site:
 |-------|------|----------|---------|
 | `chain_id` | string | yes | Protein chain ID. |
 | `residue_number` | integer | yes | PDB residue number. |
-| `residue_name` | string | standard overrides | Expected input residue name, such as `LYS`. |
-| `atom_name` | string | standard overrides | Protein atom to modify, such as `NZ`. |
+| `residue_name` | string | recommended | Expected input residue name, such as `LYS`. |
+| `atom_name` | string | mechanism-dependent | Protein atom to modify, such as `NZ`. |
 | `insertion_code` | string | no | PDB insertion code. |
+| `atom_serial` | integer | no | PDB atom serial for exact atom selection. |
+| `atom_index` | integer | no | Zero-based atom index for exact atom selection. |
 
-Standard recipes should infer `residue_name` and `atom_name` when the biological
-request is unambiguous. Advanced users can specify them to force exact matching.
-
-## Protein Modification Recipe
-
-The recipe is the standard biology-first interface.
-
-```yaml
-protein_modification_recipe:
-  name: phosphoserine
-```
-
-| Field | Type | Meaning |
-|-------|------|---------|
-| `name` | string | Recipe identifier. |
-| `kind` | string | Optional recipe kind, such as `polymer`, `glycan`, `small_molecule`, or `residue_replacement`. |
-| `mechanism` | string | Optional mechanism override. |
-| `product_residues` | mapping | Optional output residue names. |
-| `input_path` | path | Optional PDB/SDF source for the moiety. |
-| `smiles` | string | Optional SMILES for generated moieties. |
-| `placement` | mapping | Optional placement overrides. |
-| `parameterization` | mapping | Optional force-field or template policy. |
-
-Recipe-specific fields are allowed. Polymer recipes may include `length`,
-`monomers`, probabilities, sequence controls, and Polymerist generation options.
+For `nhs_lys_amide`, the mechanism resolves the lysine `NZ` atom when the site
+identifies a lysine residue. Include `residue_name` to make validation errors
+clearer.
 
 ## Moiety
 
-A moiety is the group added to the protein.
+A moiety is the group added to the protein. Current executable examples use
+either a polymer `recipe` or a single-residue SMILES moiety, depending on the
+mechanism.
+
+### Polymer Recipe Moiety
 
 ```yaml
 moiety:
-  name: custom-label
-  role: small_molecule
-  input_path: structures/custom_label.sdf
-  link_site:
-    chain_id: X
-    residue_name: LIG
-    residue_number: 1
-    atom_name: C1
+  name: SBMA-EGPMA-NHS
+  recipe:
+    name: SBMA-EGPMA-NHS
+    length: 9
+    seed: 7
+    forced_reactive_monomer_label: C
+    monomers:
+      - label: C
+        name: NHS
+        residue_name: NHS
+        smiles: CC(=C)C(=O)ON1C(=O)CCC1=O
+        probability: 0.01
+```
+
+### SMILES Moiety
+
+```yaml
+moiety:
+  name: glcnac
+  smiles: CO
+  residue_name: NAG
 ```
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | `name` | string | Moiety identifier. |
-| `role` | string | Biological role, such as `glycan`, `polymer`, `ptm`, or `moiety`. |
-| `residue_name` | string | Residue name to use for the moiety when applicable. |
-| `input_path` | path | PDB/SDF file to load. |
-| `smiles` | string | SMILES for generated small molecules. |
-| `link_site` | mapping | Explicit moiety atom selected for linkage. |
-| `recipe` | mapping | Compatibility alias for polymer-style recipes. |
+| `role` | string | User-facing role label, such as `polymer`, `glycan`, or `moiety`. |
+| `residue_name` | string | Residue name to use for a generated single-residue moiety. |
+| `input_path` | path | PDB/SDF file to load for explicit-linkage workflows. |
+| `smiles` | string | SMILES for generated single-residue moieties. |
+| `link_site` | mapping | Explicit moiety atom selected for an explicit linkage. |
+| `recipe` | mapping | Polymer recipe for generated polymer moieties. |
+| `polymer_recipe` | mapping | Equivalent explicit name for `recipe`. |
 
-Prefer `protein_modification_recipe` for standard workflows. Use `moiety` when
-you need explicit custom inputs.
+SMILES moieties used with the wired N-glycosylation mechanism must provide a
+three-character PDB-safe `residue_name`.
 
 ## Mechanism
 
@@ -132,106 +158,26 @@ A mechanism describes how the site and moiety react.
 ```yaml
 mechanism:
   name: nhs_lys_amide
-  product_residues:
-    site: LYX
-    moiety: NHX
-  bond:
-    site_atom: NZ
-    moiety_atom: C003
-    order: 1
-    target_bond_length_angstrom: 1.33
-  leaving_atoms:
-    site: [H11, H13]
-    moiety: [O001, N000]
 ```
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `name` | string | Mechanism identifier. |
-| `product_residues.site` | string | Protein residue name after modification. |
-| `product_residues.moiety` | string | Moiety residue name after linkage. |
-| `bond.site_atom` | string | Protein atom participating in the new bond. |
-| `bond.moiety_atom` | string | Moiety atom participating in the new bond. |
+| `name` | string | Mechanism identifier, such as `nhs_lys_amide`, `n_glycosylation`, or `explicit_linkage`. |
+| `product_residues.site` | string | Protein residue name after modification. Required for `explicit_linkage`. |
+| `product_residues.moiety` | string | Moiety residue name after linkage. Required for `explicit_linkage`. |
+| `bond.site_atom` | string | Protein atom participating in the new bond. Required for `explicit_linkage`. |
+| `bond.moiety_atom` | string | Moiety atom participating in the new bond. Required for `explicit_linkage`. |
 | `bond.order` | number | Bond order. |
 | `bond.target_bond_length_angstrom` | number | Target distance after placement. |
 | `leaving_atoms.site` | list | Protein atoms removed during bond formation. |
 | `leaving_atoms.moiety` | list | Moiety atoms removed during bond formation. |
 
-Standard recipes should fill these fields automatically.
+The `nhs_lys_amide` mechanism uses built-in NHS-lysine defaults. Explicit custom
+PDB linkages must specify the atom-level fields required by the schema.
 
-## Placement
+## Explicit PDB Linkage Example
 
-```yaml
-placement:
-  reactive_sphere_radius_angstrom: 2.0
-  tolerance_angstrom: 2.0
-  movebadrandom: true
-  nloop: 1000
-```
-
-| Field | Meaning |
-|-------|---------|
-| `reactive_sphere_radius_angstrom` | Radius around the protein site where the moiety reactive atom is placed. |
-| `tolerance_angstrom` | Packmol distance tolerance. |
-| `target_bond_length_angstrom` | Final snapped bond length. |
-| `movebadrandom` | Allows Packmol to move badly packed structures randomly. |
-| `nloop` | Maximum Packmol optimization loops. |
-
-Large moieties should use placement retries and clash scoring before OpenMM
-relaxation.
-
-## Support Levels
-
-| Level | Meaning |
-|-------|---------|
-| Planned | Config vocabulary is documented, but execution is not implemented. |
-| Validated | Config and mechanism planning work without changing topology. |
-| Executable | PolyzyMD can build, relax, solvate, and write artifacts. |
-| Production-ready | Templates, charges, tests, and scientific guidance are validated. |
-
-Current support:
-
-| Feature | Status |
-|---------|--------|
-| Enabled NHS-lysine polymer attachments | Executable for exploratory workflows. |
-| `protein_modification_recipe` standard field | Planned. |
-| Multiple enabled NHS-lysine attachments | Executable for exploratory workflows. |
-| Mixed mechanisms in one config | Planned. |
-| O-glycosylation | Planned. |
-| N-glycosylation | Planned mechanism placeholder. |
-| Phosphorylation | Planned. |
-| PEGylation | Planned. |
-
-## Standard Example
-
-```yaml
-conjugation:
-  enabled: true
-  attachments:
-    - name: ser4-o-glycan
-      site:
-        chain_id: A
-        residue_number: 4
-      protein_modification_recipe:
-        name: core1-o-glycosylation
-
-    - name: lys23-polymer
-      site:
-        chain_id: A
-        residue_number: 23
-      protein_modification_recipe:
-        name: sbma-egpma-nhs-polymer
-        length: 31
-
-    - name: asn67-n-glycan
-      site:
-        chain_id: A
-        residue_number: 67
-      protein_modification_recipe:
-        name: high-mannose-n-glycosylation
-```
-
-## Advanced Explicit Example
+Use `explicit_linkage` only when built-in mechanism defaults are insufficient.
 
 ```yaml
 conjugation:
@@ -266,12 +212,46 @@ conjugation:
           moiety: [H1]
 ```
 
-Use explicit configuration only when recipe defaults are insufficient.
+## Placement
+
+```yaml
+placement:
+  strategy: preserve_existing
+  target_bond_length_angstrom: 1.33
+  clash_cutoff_angstrom: 1.5
+```
+
+| Field | Meaning |
+|-------|---------|
+| `strategy` | Placement strategy placeholder. |
+| `target_bond_length_angstrom` | Optional target bond length for placement workflows. |
+| `clash_cutoff_angstrom` | Steric clash cutoff for placement checks. |
+
+## Support Levels
+
+| Level | Meaning |
+|-------|---------|
+| Planned | Config vocabulary is documented, but execution is not implemented. |
+| Validated | Config and mechanism planning work without changing topology. |
+| Executable | PolyzyMD can build, relax, solvate, and write artifacts. |
+| Production-ready | Templates, charges, tests, and scientific guidance are validated. |
+
+Current support:
+
+| Feature | Status |
+|---------|--------|
+| Enabled NHS-lysine polymer attachments through `moiety.recipe` and `mechanism.name: nhs_lys_amide` | Executable for exploratory workflows. |
+| Multiple enabled NHS-lysine attachments | Executable for exploratory workflows. |
+| SMILES moiety config with `mechanism.name: n_glycosylation` | Wired for mechanism tests and exploratory workflow development. |
+| Mixed mechanisms in one config | Planned. |
+| O-glycosylation | Planned. |
+| General recipe field for biology-first modifications | Planned and non-executable. |
 
 ## Build Commands
 
-Enabled conjugation configs are handled by the public conjugation workflow when
-you run the regular build command:
+Enabled conjugation configs using the current `moiety` plus `mechanism` syntax
+are handled by the public conjugation workflow when you run the regular build
+command:
 
 ```bash
 polyzymd build -c config.yaml

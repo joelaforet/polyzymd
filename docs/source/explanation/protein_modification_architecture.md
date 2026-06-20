@@ -14,7 +14,8 @@ custom covalent labels.
 
 ## Design Goal
 
-The standard workflow should be biology-first:
+The future standard workflow should be biology-first. The example below is
+design material and is not accepted by the current executable schema:
 
 ```yaml
 conjugation:
@@ -28,14 +29,14 @@ conjugation:
         name: core1-o-glycosylation
 ```
 
-In this standard workflow, PolyzyMD should resolve the residue identity, choose
+In that future standard workflow, PolyzyMD should resolve the residue identity, choose
 the correct atom, load or generate the modification, apply the mechanism, place
 the added group, relax the structure, and write diagnostics explaining what it
 did.
 
-The same opt-in block is consumed by `polyzymd build -c config.yaml`. When
-`conjugation.enabled` is false or omitted, the normal non-conjugated system build
-path is used.
+The current executable workflow uses the same top-level `conjugation.enabled`
+and `conjugation.attachments` block, but each attachment must provide explicit
+`moiety` and `mechanism` fields.
 
 Advanced users should still be able to override the resolved atoms, provide
 custom PDB or SDF inputs, specify product residue names, define leaving atoms,
@@ -58,21 +59,21 @@ These words are used throughout the protein modification workflow.
 | Placement | Coordinate generation for the added moiety near the target site. | Packmol places a polymer near lysine `NZ`. |
 | Relaxation | Energy minimization or short MD after placement. | OpenMM minimization after a polymer is linked. |
 
-## Why Use `protein_modification_recipe`
+## Why Plan `protein_modification_recipe`
 
-A recipe packages the biological intent into a reusable object. Instead of
-forcing every user to define atom-level chemistry, a recipe can provide defaults
-for the moiety, mechanism, product residue names, placement policy, and
-parameterization expectations.
+A future recipe field would package the biological intent into a reusable
+object. Instead of forcing every user to define atom-level chemistry, a recipe
+could provide defaults for the moiety, mechanism, product residue names,
+placement policy, and parameterization expectations.
 
-This keeps common workflows short:
+This planned, non-executable syntax would keep common workflows short:
 
 ```yaml
 protein_modification_recipe:
   name: phosphoserine
 ```
 
-It also keeps advanced workflows possible:
+It would also keep advanced workflows possible:
 
 ```yaml
 protein_modification_recipe:
