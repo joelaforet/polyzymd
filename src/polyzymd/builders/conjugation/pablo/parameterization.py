@@ -61,11 +61,14 @@ def create_interchange_from_pablo_topology(
     force_field : Any or None, optional
         Optional injected force field object for tests, by default ``None``.
     charge_from_molecules : sequence of Any or None, optional
-        Charged OpenFF molecule templates forwarded to Interchange, by default
-        ``None``.
+        Charged OpenFF molecule templates for ordinary non-conjugate components
+        forwarded to Interchange, by default ``None``.
     require_charge_templates : bool, optional
         When ``True``, reject empty charge templates before OpenFF can assign
-        implicit charges, by default ``False``.
+        implicit charges. Pablo residue-template parameterization for a
+        covalent conjugate can set this to ``False`` because product-state
+        residue charges come from Pablo residue definitions, by default
+        ``False``.
 
     Returns
     -------

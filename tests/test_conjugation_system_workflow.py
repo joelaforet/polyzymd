@@ -942,11 +942,11 @@ def test_single_unsupported_local_minimization_request_runs_smoke_with_diagnosti
     )
 
 
-def test_construction_populates_product_charge_templates_for_final_interchange(
+def test_construction_final_interchange_uses_standard_templates(
     monkeypatch,
     tmp_path: Path,
 ):
-    """Product templates from Pablo topology should reach final charge_from_molecules."""
+    """Final Interchange should not require product molecule-level charge templates."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
     from polyzymd.builders.conjugation.final_interchange import (
         create_final_conjugated_interchange,
@@ -1083,9 +1083,8 @@ def test_construction_populates_product_charge_templates_for_final_interchange(
 
     templates = tuple(captured["kwargs"]["charge_from_molecules"])
     assert construction.product_state_pablo_library.charge_templates == (product_template,)
-    assert templates[0] is product_template
-    assert templates[1] is standard_template
-    assert captured["kwargs"]["require_charge_templates"] is True
+    assert templates == (standard_template,)
+    assert captured["kwargs"]["require_charge_templates"] is False
 
 
 def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_path: Path):

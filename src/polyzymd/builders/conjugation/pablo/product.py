@@ -31,7 +31,13 @@ class ProductStatePabloDefinitionSummary(BaseModel):
 
 
 class ProductStatePabloLibrary(BaseModel):
-    """Pablo cache augmented with product-state residue definitions."""
+    """Pablo cache augmented with product-state residue definitions.
+
+    The ``charge_templates`` field is an optional cache of OpenFF molecule-level
+    templates when such templates are available. It is not equivalent to Pablo
+    product-state residue provenance; final conjugate parameterization relies on
+    ``residue_library`` and ``definitions`` for residue-template coverage.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

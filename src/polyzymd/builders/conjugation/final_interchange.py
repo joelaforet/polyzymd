@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
 from typing import Any
 
 from polyzymd.builders.conjugation.pablo.parameterization import (
@@ -36,7 +35,9 @@ def create_final_conjugated_interchange(
     builder : Any
         Prepared ``SystemBuilder`` with a solvated topology.
     product_state_pablo_library : Any
-        Product-state Pablo library created during conjugate construction.
+        Product-state Pablo library created during conjugate construction. The
+        library must provide residue definitions and residue-template
+        provenance; molecule-level charge templates are optional diagnostics.
     settings : InterchangeParameterizationSettings or None, optional
         Conjugation parameterization settings, by default ``None``.
     parameterizer : Any or None, optional
@@ -56,27 +57,21 @@ def create_final_conjugated_interchange(
     if topology is None:
         raise RuntimeError("System must be solvated before creating final conjugated Interchange")
 
-    _validate_product_state_provenance(product_state_pablo_library)
-    product_templates = _product_state_charge_templates(product_state_pablo_library)
-    if not product_templates:
-        raise RuntimeError(
-            f"{_REFUSAL_MESSAGE} Product-state conjugate charge templates are missing."
-        )
+    residue_names = _validate_product_state_provenance(product_state_pablo_library)
     standard_templates = _standard_charge_templates(builder)
-    charge_templates = deduplicate_charge_templates((*product_templates, *standard_templates))
 
     LOGGER.info(
-        "Creating final conjugated Interchange with %d product-state and %d standard "
-        "charge template(s)",
-        len(product_templates),
+        "Creating final conjugated Interchange with product-state Pablo provenance for "
+        "%d residue name(s) and %d standard charge template(s)",
+        len(residue_names),
         len(standard_templates),
     )
     parameterize = parameterizer or create_interchange_from_pablo_topology
     result = parameterize(
         topology,
         settings=settings,
-        charge_from_molecules=charge_templates,
-        require_charge_templates=True,
+        charge_from_molecules=standard_templates,
+        require_charge_templates=False,
     )
     if not getattr(result, "success", False) or getattr(result, "interchange", None) is None:
         raise RuntimeError(
@@ -86,54 +81,37 @@ def create_final_conjugated_interchange(
     return result.interchange
 
 
-def _validate_product_state_provenance(product_state_pablo_library: Any) -> None:
-    """Validate that product-state Pablo residue provenance is available."""
+def _validate_product_state_provenance(product_state_pablo_library: Any) -> tuple[str, ...]:
+    """Validate that product-state Pablo residue provenance is available.
+
+    Returns
+    -------
+    tuple of str
+        Product-state residue names covered by the Pablo library.
+    """
     if product_state_pablo_library is None:
         raise RuntimeError(_REFUSAL_MESSAGE)
 
+    if getattr(product_state_pablo_library, "residue_library", None) is None:
+        raise RuntimeError(f"{_REFUSAL_MESSAGE} Product-state Pablo residue library is missing.")
+
     definitions = tuple(getattr(product_state_pablo_library, "definitions", ()) or ())
     if not definitions:
-        raise RuntimeError(_REFUSAL_MESSAGE)
+        raise RuntimeError(
+            f"{_REFUSAL_MESSAGE} Product-state Pablo residue definitions are missing."
+        )
 
     residue_names = _product_residue_names(product_state_pablo_library, definitions)
     if not residue_names:
-        raise RuntimeError(_REFUSAL_MESSAGE)
-
-
-def _product_state_charge_templates(product_state_pablo_library: Any) -> tuple[Any, ...]:
-    """Return explicit charged product templates when the library provides them."""
-    templates = _first_present_sequence(
-        product_state_pablo_library,
-        (
-            "charge_from_molecules",
-            "charge_templates",
-            "charged_templates",
-            "template_molecules",
-            "molecules",
-        ),
-    )
-    if not templates:
-        return ()
-    try:
-        return deduplicate_charge_templates(templates)
-    except ValueError as exc:
-        raise RuntimeError(f"{_REFUSAL_MESSAGE} Uncharged conjugate template: {exc}") from exc
+        raise RuntimeError(f"{_REFUSAL_MESSAGE} Product-state residue names are missing.")
+    return residue_names
 
 
 def _standard_charge_templates(builder: Any) -> tuple[Any, ...]:
     """Collect standard non-conjugate charge templates from a builder."""
     collector = getattr(builder, "collect_standard_charge_templates", None)
     if callable(collector):
-        return tuple(collector())
-    return ()
-
-
-def _first_present_sequence(source: Any, names: Sequence[str]) -> tuple[Any, ...]:
-    """Return the first non-empty sequence attribute from a source object."""
-    for name in names:
-        value = getattr(source, name, None)
-        if value:
-            return tuple(value)
+        return deduplicate_charge_templates(tuple(collector()))
     return ()
 
 
