@@ -131,12 +131,12 @@ class TestConjugationConfigParsing:
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
             SimulationConfig.model_validate(data)
 
-    def test_stale_source_pdb_path_rejected_as_extra_field(self):
-        """Old source PDB fields are rejected by the public conjugation config."""
+    def test_stale_structure_path_rejected_as_extra_field(self):
+        """Old structure path fields are rejected by the public conjugation config."""
         data = _minimal_simulation_config_data()
         data["conjugation"] = {
             "enabled": True,
-            "source_pdb_path": "prebuilt_conjugate.pdb",
+            "structure_path": "prebuilt_conjugate.pdb",
             "attachments": [_minimal_attachment_data()],
         }
 

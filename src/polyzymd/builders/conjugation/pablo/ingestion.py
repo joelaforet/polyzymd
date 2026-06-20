@@ -272,7 +272,7 @@ class PabloIngestor:
             If the input path is missing or has an unsupported suffix.
         """
         if path is None:
-            raise PabloIngestionError("source_pdb_path is required for Pablo ingestion")
+            raise PabloIngestionError("structure path is required for Pablo ingestion")
 
         structure_path = Path(path)
         _validate_structure_path(structure_path)
