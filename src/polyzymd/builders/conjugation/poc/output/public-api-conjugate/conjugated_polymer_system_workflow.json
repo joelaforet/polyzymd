@@ -1,5 +1,5 @@
 {
-  "output_dir": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate",
+  "output_dir": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate",
   "generated_sequence": "AAAAACAAAA",
   "reactive_sequence_index": 5,
   "reactive_residue_selector": {
@@ -14,15 +14,15 @@
   "conjugate_generation": {
     "recipe_name": "SBMA-EGPMA-NHS",
     "sequence": "AAAAACAAAA",
-    "cache_directory": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs",
-    "monomer_group_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-EGPMA-NHS_monomer_group.json",
-    "pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-NHS_seq=AAAAACAAAA_10-mer.pdb",
-    "sdf_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-NHS_seq=AAAAACAAAA_10-mer.sdf",
+    "cache_directory": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs",
+    "monomer_group_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-EGPMA-NHS_monomer_group.json",
+    "pdb_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-NHS_seq=AAAAACAAAA_10-mer.pdb",
+    "sdf_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-NHS_seq=AAAAACAAAA_10-mer.sdf",
     "object_type": "Polymer",
     "atom_count": 371
   },
   "construction": {
-    "output_dir": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction",
+    "output_dir": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction",
     "resolved_plan": {
       "contract": {
         "protein_endpoint": {
@@ -11151,11 +11151,11 @@
         "reactive_atom_name": "C047",
         "name": "reference-SBMA-EGPMA-NHS"
       },
-      "packmol_input_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/packmol.inp",
-      "packmol_output_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/packmol_output.pdb",
-      "protein_sterics_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/protein_fixed_sterics.pdb",
-      "modifier_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/placement_01/packmol_modifier_placement/modifier_retained.pdb",
-      "packmol_input_text": "tolerance 2.000000\nfiletype pdb\noutput packmol_output.pdb\n\nmovebadrandom\n\nnloop 500\n\nstructure /home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/protein_fixed_sterics.pdb\n  number 1\n  fixed 0. 0. 0. 0. 0. 0.\nend structure\n\nstructure /home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/placement_01/packmol_modifier_placement/modifier_retained.pdb\n  number 1\n  inside box 0. 0. 0. 76.367000 78.459000 78.915000\n  atoms 163\n  inside sphere 37.029000 40.171000 32.581000 5.0\n  end atoms\nend structure\n",
+      "packmol_input_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/packmol.inp",
+      "packmol_output_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/packmol_output.pdb",
+      "protein_sterics_pdb_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/protein_fixed_sterics.pdb",
+      "modifier_pdb_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/placement_01/packmol_modifier_placement/modifier_retained.pdb",
+      "packmol_input_text": "tolerance 2.000000\nfiletype pdb\noutput packmol_output.pdb\n\nmovebadrandom\n\nnloop 500\n\nstructure src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/protein_fixed_sterics.pdb\n  number 1\n  fixed 0. 0. 0. 0. 0. 0.\nend structure\n\nstructure src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/placement_01/packmol_modifier_placement/modifier_retained.pdb\n  number 1\n  inside box 0. 0. 0. 76.367000 78.459000 78.915000\n  atoms 163\n  inside sphere 37.029000 40.171000 32.581000 5.0\n  end atoms\nend structure\n",
       "target_bond_length_angstrom": 1.33,
       "placed_bond_length_angstrom": 1.33,
       "min_modifier_protein_distance_angstrom": 0.47516552911615784,
@@ -21238,11 +21238,11 @@
           "reactive_atom_name": "C047",
           "name": "reference-SBMA-EGPMA-NHS"
         },
-        "packmol_input_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/packmol.inp",
-        "packmol_output_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/packmol_output.pdb",
-        "protein_sterics_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/protein_fixed_sterics.pdb",
-        "modifier_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/placement_01/packmol_modifier_placement/modifier_retained.pdb",
-        "packmol_input_text": "tolerance 2.000000\nfiletype pdb\noutput packmol_output.pdb\n\nmovebadrandom\n\nnloop 500\n\nstructure /home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/protein_fixed_sterics.pdb\n  number 1\n  fixed 0. 0. 0. 0. 0. 0.\nend structure\n\nstructure /home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/placement_01/packmol_modifier_placement/modifier_retained.pdb\n  number 1\n  inside box 0. 0. 0. 76.367000 78.459000 78.915000\n  atoms 163\n  inside sphere 37.029000 40.171000 32.581000 5.0\n  end atoms\nend structure\n",
+        "packmol_input_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/packmol.inp",
+        "packmol_output_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/packmol_output.pdb",
+        "protein_sterics_pdb_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/protein_fixed_sterics.pdb",
+        "modifier_pdb_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/placement_01/packmol_modifier_placement/modifier_retained.pdb",
+        "packmol_input_text": "tolerance 2.000000\nfiletype pdb\noutput packmol_output.pdb\n\nmovebadrandom\n\nnloop 500\n\nstructure src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/packmol_modifier_placement/protein_fixed_sterics.pdb\n  number 1\n  fixed 0. 0. 0. 0. 0. 0.\nend structure\n\nstructure src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/placement_01/packmol_modifier_placement/modifier_retained.pdb\n  number 1\n  inside box 0. 0. 0. 76.367000 78.459000 78.915000\n  atoms 163\n  inside sphere 37.029000 40.171000 32.581000 5.0\n  end atoms\nend structure\n",
         "target_bond_length_angstrom": 1.33,
         "placed_bond_length_angstrom": 1.33,
         "min_modifier_protein_distance_angstrom": 0.47516552911615784,
@@ -21254,7 +21254,7 @@
       }
     ],
     "assembly": {
-      "output_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
+      "output_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
       "protein_atom_count": 2719,
       "polymer_atom_count": 359,
       "removed_protein_atom_count": 2,
@@ -21371,12 +21371,12 @@
     },
     "pablo": {
       "success": true,
-      "path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
+      "path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
       "suffix": ".pdb",
       "pablo": {
         "available": true,
         "version": "0.2.2",
-        "module_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/.pixi/envs/build/lib/python3.12/site-packages/openff/pablo/__init__.py",
+        "module_path": ".pixi/envs/build/lib/python3.12/site-packages/openff/pablo/__init__.py",
         "error": null,
         "warnings": [
           "Pablo import succeeded; structure ingestion can be attempted"
@@ -23667,7 +23667,7 @@
         }
       ],
       "inspection_summary": {
-        "path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
+        "path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
         "atom_count": 3078,
         "residue_count": 191,
         "chain_ids": [
@@ -23908,7 +23908,7 @@
         ]
       },
       "normalization_plan": {
-        "path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
+        "path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
         "clean": true,
         "valid": true,
         "protein_residue_count": 181,
@@ -26601,7 +26601,7 @@
         },
         "chain_id_change_count": 0,
         "residue_number_change_count": 0,
-        "default_output_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked_cleaned.pdb",
+        "default_output_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked_cleaned.pdb",
         "output_recommendations": [
           "Plan is valid for an explicit normalized copy; use write_normalized_pdb with an output path such as assembled_crosslinked_cleaned.pdb",
           "Input PDB is never mutated by the normalization writer"
@@ -29963,7 +29963,7 @@
           "details": {
             "available": true,
             "version": "0.2.2",
-            "module_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/.pixi/envs/build/lib/python3.12/site-packages/openff/pablo/__init__.py",
+            "module_path": ".pixi/envs/build/lib/python3.12/site-packages/openff/pablo/__init__.py",
             "error": null,
             "warnings": [
               "Pablo import succeeded; structure ingestion can be attempted"
@@ -30086,10 +30086,10 @@
     "smoke": null,
     "local_minimization": {
       "success": true,
-      "input_pdb": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
-      "output_dir": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction",
-      "result_json_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/local_minimization_result.json",
-      "relaxed_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/seeded_random_10mer_crosslinked_relaxed.pdb",
+      "input_pdb": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
+      "output_dir": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction",
+      "result_json_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/local_minimization_result.json",
+      "relaxed_pdb_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/seeded_random_10mer_crosslinked_relaxed.pdb",
       "before_geometry": {
         "nz_c047_distance_angstrom": 1.3299936090072015,
         "c047_o020_distance_angstrom": 1.2251057097246754,
@@ -30128,7 +30128,7 @@
         "Relaxed geometry passed local amide validation"
       ]
     },
-    "crosslinked_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
+    "crosslinked_pdb_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
     "diagnostics": [
       "Conjugate construction completed (1 attachment site)"
     ]
@@ -30154,17 +30154,17 @@
     {
       "recipe_name": "SBMA-EGPMA-NHS",
       "sequence": "AAAAACAAAA",
-      "cache_directory": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs",
-      "monomer_group_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-EGPMA-NHS_monomer_group.json",
-      "pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-NHS_seq=AAAAACAAAA_10-mer.pdb",
-      "sdf_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-NHS_seq=AAAAACAAAA_10-mer.sdf",
+      "cache_directory": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs",
+      "monomer_group_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-EGPMA-NHS_monomer_group.json",
+      "pdb_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-NHS_seq=AAAAACAAAA_10-mer.pdb",
+      "sdf_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-polymerist-cache/01_lys23-reference-sbma-egpma-nhs/SBMA-NHS_seq=AAAAACAAAA_10-mer.sdf",
       "object_type": "Polymer",
       "atom_count": 371
     }
   ],
   "protein_canonicalization": {
-    "input_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/data/NH3_terminal_His_proton_updated.pdb",
-    "output_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/source_protein_canonical_pH7.pdb",
+    "input_path": "src/polyzymd/builders/conjugation/poc/data/NH3_terminal_His_proton_updated.pdb",
+    "output_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/source_protein_canonical_pH7.pdb",
     "ph": 7.0,
     "force_field_name": "amber14/protein.ff14SB.xml",
     "atom_count": 2721,
@@ -30175,8 +30175,8 @@
       "OpenMM hydrogen force field: amber14/protein.ff14SB.xml"
     ]
   },
-  "relaxed_conjugate_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/seeded_random_10mer_crosslinked_relaxed.pdb",
-  "solvated_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/solvated_conjugate_free_polymers.pdb",
+  "relaxed_conjugate_pdb_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/seeded_random_10mer_crosslinked_relaxed.pdb",
+  "solvated_pdb_path": "src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/solvated_conjugate_free_polymers.pdb",
   "workflow_json_path": null,
   "final_interchange_created": false
 }
