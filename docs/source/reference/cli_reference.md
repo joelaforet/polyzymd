@@ -166,7 +166,9 @@ Simulation phases:
 
 ## polyzymd build
 
-Build the simulation system (parameterize, solvate) without running.
+Build the simulation system (parameterize, solvate) without running. If
+`conjugation.enabled: true` and at least one attachment is enabled, this command
+uses the public conjugation workflow before writing the final system artifacts.
 
 ```bash
 polyzymd build --config <path> [options]
@@ -202,6 +204,12 @@ polyzymd build -c config.yaml --dry-run
 
 # Export to GROMACS format
 polyzymd build -c config.yaml -r 1 --format gromacs
+
+# Build an enabled conjugation config directly
+polyzymd build -c config.yaml
+
+# Build and export a conjugated system for GROMACS
+polyzymd build -c config.yaml --format gromacs
 ```
 
 ### Output Files (OpenMM)
@@ -226,6 +234,10 @@ PolyzyMD may also generate convenience defaults:
 - `eq_XX_name.mdp` - Equilibration stage parameters
 - `prod.mdp` - Production parameters
 - `run_*_gromacs.sh` - Convenience shell script
+
+For enabled conjugation configs, `--format gromacs` first completes conjugate
+construction and final Interchange creation, then exports that conjugated system
+to the GROMACS handoff files.
 
 The `.mdp` files and run script are not required to continue outside PolyzyMD;
 you may replace them with your own GROMACS workflow. Use

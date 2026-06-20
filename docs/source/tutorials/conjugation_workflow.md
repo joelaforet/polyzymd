@@ -178,7 +178,6 @@ reactive monomer:
 ```yaml
 conjugation:
   enabled: true
-  mode: construct
   attachments:
     - name: lys23-sbma-egpma-nhs
       site:
@@ -217,7 +216,23 @@ This snippet is only the `conjugation:` block. In a real `config.yaml`, keep the
 normal `name`, `engine`, `enzyme`, `solvent`, `thermodynamics`, and simulation
 phase sections as you would for any PolyzyMD build.
 
-Call the config-driven public API:
+Build the conjugate directly from the same configuration:
+
+```bash
+pixi run -e build polyzymd build -c config.yaml
+```
+
+For a GROMACS handoff, add `--format gromacs`:
+
+```bash
+pixi run -e build polyzymd build -c config.yaml --format gromacs
+```
+
+The GROMACS build completes the conjugation workflow, creates the final OpenFF
+Interchange, and exports the solvated conjugate to GROMACS files.
+
+You can call the config-driven public API from Python when embedding the
+workflow in a script:
 
 ```python
 from pathlib import Path

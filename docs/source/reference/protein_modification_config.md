@@ -2,22 +2,20 @@
 
 This reference lists the intended configuration fields for residue-level protein
 modifications. It documents the target interface for the generalized framework.
-The current executable implementation supports one NHS-lysine polymer attachment;
-broader multi-mechanism execution is planned.
+The current executable implementation supports enabled NHS-lysine polymer
+attachments; broader multi-mechanism execution is planned.
 
 ## Top-Level Block
 
 ```yaml
 conjugation:
   enabled: true
-  mode: construct
   attachments: []
 ```
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `enabled` | boolean | Turns protein modification handling on or off. |
-| `mode` | string | Workflow mode. `construct` builds modifications from config. |
+| `enabled` | boolean | Turns protein modification handling on or off. This remains opt-in. |
 | `attachments` | list | Ordered list of requested protein modifications. |
 | `ccd_pablo` | mapping | Pablo/CCD policy for structure ingestion and custom residues. |
 | `chain_policy` | mapping | Chain assignment policy for protein and attached moieties. |
@@ -195,9 +193,9 @@ Current support:
 
 | Feature | Status |
 |---------|--------|
-| One NHS-lysine polymer attachment | Executable for exploratory workflows. |
+| Enabled NHS-lysine polymer attachments | Executable for exploratory workflows. |
 | `protein_modification_recipe` standard field | Planned. |
-| Multiple attachments | Planned. |
+| Multiple enabled NHS-lysine attachments | Executable for exploratory workflows. |
 | Mixed mechanisms in one config | Planned. |
 | O-glycosylation | Planned. |
 | N-glycosylation | Planned mechanism placeholder. |
@@ -209,7 +207,6 @@ Current support:
 ```yaml
 conjugation:
   enabled: true
-  mode: construct
   attachments:
     - name: ser4-o-glycan
       site:
@@ -239,7 +236,6 @@ conjugation:
 ```yaml
 conjugation:
   enabled: true
-  mode: construct
   attachments:
     - name: explicit-custom-linkage
       site:
@@ -271,3 +267,22 @@ conjugation:
 ```
 
 Use explicit configuration only when recipe defaults are insufficient.
+
+## Build Commands
+
+Enabled conjugation configs are handled by the public conjugation workflow when
+you run the regular build command:
+
+```bash
+polyzymd build -c config.yaml
+```
+
+For a conjugated GROMACS handoff, request GROMACS export from the same command:
+
+```bash
+polyzymd build -c config.yaml --format gromacs
+```
+
+The GROMACS export path completes conjugate construction, solvation, final
+OpenFF Interchange creation, and then writes the `.gro`, `.top`, and `.itp`
+handoff files.
