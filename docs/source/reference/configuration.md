@@ -246,7 +246,7 @@ Na+/Cl- ion concentration, not extra salt added after counter-ions.
 
 ### Co-solvents
 
-PolyzyMD supports adding co-solvents to your simulation system. You can specify co-solvents using either **mole fraction** or **molar concentration**.
+PolyzyMD supports adding co-solvents to a water primary solvent. You can specify co-solvents using either **mole fraction** or **molar concentration**.
 
 #### Specification Methods
 
@@ -255,7 +255,7 @@ PolyzyMD supports adding co-solvents to your simulation system. You can specify 
 | Mole Fraction | `mole_fraction` | Fraction of neutral solvent molecules (0-1) | Replaces water in the neutral solvent mixture |
 | Concentration | `concentration` | Molar concentration (mol/L) | Additive (water unchanged) |
 
-**Important:** Use exactly ONE method per co-solvent. Do not specify both `mole_fraction` and `concentration` for the same co-solvent. The previous `volume_fraction` key has been removed and is rejected instead of converted automatically.
+**Important:** Use exactly ONE method per co-solvent. Do not specify both `mole_fraction` and `concentration` for the same co-solvent. The previous `volume_fraction` key has been removed and is rejected instead of converted automatically. Existing configs that used `volume_fraction` must be updated explicitly to either `mole_fraction` or `concentration`; PolyzyMD does not infer mole fractions from volume fractions.
 
 #### Mole Fraction Method
 
@@ -283,7 +283,7 @@ Where:
 
 **Source:** [`src/polyzymd/builders/solvent.py`](https://github.com/joelaforet/polyzymd/blob/main/src/polyzymd/builders/solvent.py)
 
-Mole-fraction co-solvents replace water in the neutral solvent mass budget. If you specify 10 mol% DMSO, DMSO molecules account for about 10% of neutral solvent molecules after rounding.
+Mole-fraction co-solvents replace water in the neutral solvent mass budget. If you specify 10 mol% DMSO, DMSO molecules account for about 10% of neutral solvent molecules after rounding. Naming-template placeholders render mole fractions as mol-percent tokens with the `molpct` suffix; for example, `mole_fraction: 0.30` for DMSO renders as `dmso_30molpct`, and `{solvent_composition}` renders as `water_tip3p_dmso_30molpct`.
 
 #### Concentration Method
 
@@ -367,7 +367,7 @@ co_solvents:
     concentration: 1.0       # Plus 1 M urea
 ```
 
-**Warning:** When using multiple co-solvents with `mole_fraction`, ensure the total is less than 1.0 (100%). The remaining mole fraction is filled with water.
+**Warning:** When using multiple co-solvents with `mole_fraction`, ensure the total is less than 1.0 (100%). The remaining mole fraction is filled with water. Non-water primary solvents and 100% DMSO systems are out of scope for now; model solvent mixtures as water primary solvent plus `co_solvents` entries with `mole_fraction < 1.0`.
 
 ```{warning}
 **YAML List Syntax**
@@ -622,6 +622,13 @@ output:
 | `{polymer_type}` | Polymer type | "SBMA-EGPMA" |
 | `{temperature}` | Temperature in K | "300" |
 | `{replicate}` | Replicate number | "1" |
+| `{primary_solvent}` | Primary solvent token | "water_tip3p" |
+| `{cosolvent_composition}` | Co-solvents sorted by normalized name, or `none` | "dmso_30molpct_urea_2p5M" |
+| `{solvent_composition}` | Primary solvent plus co-solvents when present | "water_tip3p_dmso_30molpct" |
+
+Mole-fraction co-solvents use mol-percent naming tokens with the `molpct`
+suffix. Concentration-based co-solvents use molarity tokens such as `2p5M`.
+The removed `volume_fraction` field is not part of naming-template resolution.
 
 ---
 

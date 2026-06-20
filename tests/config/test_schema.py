@@ -217,13 +217,6 @@ class TestCoSolventCompositionValidation:
         )
         assert len(config.co_solvents) == 2
 
-    def test_volume_fraction_key_rejected_with_migration_error(self):
-        """Removed volume_fraction keys should fail with a migration message."""
-        from polyzymd.config.schema import CoSolventSpec
-
-        with pytest.raises(ValidationError, match="volume_fraction.*removed"):
-            CoSolventSpec(name="dmso", volume_fraction=0.3)
-
     def test_exactly_one_composition_method_required(self):
         """Each co-solvent should have exactly one composition method."""
         from polyzymd.config.schema import CoSolventSpec
@@ -257,10 +250,10 @@ class TestRunDirectoryNaming:
                 temperature=310.0,
                 replicate=2,
                 primary_solvent="water_tip3p",
-                cosolvent_composition="dmso_30pctv",
-                solvent_composition="water_tip3p_dmso_30pctv",
+                cosolvent_composition="dmso_30molpct",
+                solvent_composition="water_tip3p_dmso_30molpct",
             )
-            == "LipA_water_tip3p_dmso_30pctv_water_tip3p_dmso_30pctv_r2"
+            == "LipA_water_tip3p_dmso_30molpct_water_tip3p_dmso_30molpct_r2"
         )
         assert (
             output.format_directory_name(
@@ -270,9 +263,9 @@ class TestRunDirectoryNaming:
                 temperature=310.0,
                 replicate=2,
                 primary_solvent="water_tip3p",
-                cosolvent_composition="dmso_30pctv",
+                cosolvent_composition="dmso_30molpct",
             )
-            == "LipA_water_tip3p_dmso_30pctv_water_tip3p_dmso_30pctv_r2"
+            == "LipA_water_tip3p_dmso_30molpct_water_tip3p_dmso_30molpct_r2"
         )
 
     def test_format_run_directory_name_uses_output_formatter(self, minimal_config_data):
@@ -302,9 +295,9 @@ class TestRunDirectoryNaming:
                     "name": "tert butanol",
                     "smiles": "CC(C)(C)O",
                     "density": 0.78,
-                    "volume_fraction": 0.125,
+                    "mole_fraction": 0.125,
                 },
-                {"name": "dmso", "volume_fraction": 0.30},
+                {"name": "dmso", "mole_fraction": 0.30},
             ],
         }
         minimal_config_data["output"] = {
@@ -314,9 +307,22 @@ class TestRunDirectoryNaming:
         config = SimulationConfig(**minimal_config_data)
 
         assert config.format_run_directory_name() == (
-            "water_tip3p_dmso_30pctv_tert_butanol_12p5pctv_urea_2p5M_"
-            "water_tip3p_dmso_30pctv_tert_butanol_12p5pctv_urea_2p5M"
+            "water_tip3p_dmso_30molpct_tert_butanol_12p5molpct_urea_2p5M_"
+            "water_tip3p_dmso_30molpct_tert_butanol_12p5molpct_urea_2p5M"
         )
+
+    def test_high_mole_fraction_solvent_token_does_not_crash(self, minimal_config_data):
+        """Student DMSO case should format using mole-fraction tokens."""
+        minimal_config_data["solvent"] = {
+            "primary": {"type": "water", "model": "tip3p"},
+            "co_solvents": [{"name": "dmso", "mole_fraction": 0.99}],
+        }
+        minimal_config_data["output"] = {"naming_template": "{cosolvent_composition}"}
+
+        config = SimulationConfig(**minimal_config_data)
+
+        assert config.format_run_directory_name() == "dmso_99molpct"
+        assert config._cosolvent_composition_token() == "dmso_99molpct"
 
     def test_absent_cosolvent_uses_none_and_primary_only_composition(self, minimal_config_data):
         """No co-solvents should produce none and primary-only solvent composition."""
