@@ -68,6 +68,31 @@ def test_patch_fails_when_fragment_metadata_missing():
         charge_patch.build_local_product_charge_patch_records(spec)
 
 
+def test_fragment_bonds_prefer_serial_when_index_collides():
+    """One-based serial bonds should not be remapped to zero-based atom-index neighbors."""
+    atom0 = _atom(
+        atom_index=0,
+        atom_name="C1",
+        element="C",
+        chain_id="C",
+        residue_name="MOD",
+        residue_number=1,
+    )
+    atom1 = _atom(
+        atom_index=1,
+        atom_name="H1",
+        element="H",
+        chain_id="C",
+        residue_name="MOD",
+        residue_number=1,
+    )
+    fragment = SimpleNamespace(atoms=(atom0, atom1), bonds=((1, 2),), bond_orders=())
+
+    bonds = charge_patch._fragment_bonds(fragment)
+
+    assert bonds == ((atom0, atom1, 1.0),)
+
+
 def _spec(
     *,
     protein_atom_name: str = "QX",
