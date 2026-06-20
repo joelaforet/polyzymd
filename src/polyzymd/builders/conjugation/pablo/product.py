@@ -45,6 +45,8 @@ class ProductStatePabloLibrary(BaseModel):
     definitions: tuple[Any, ...] = Field(default_factory=tuple, exclude=True)
     charge_templates: tuple[Any, ...] = Field(default_factory=tuple, exclude=True)
     residue_partial_charges: tuple[Any, ...] = Field(default_factory=tuple, exclude=True)
+    charge_bridge_report: Any | None = Field(default=None, exclude=True)
+    charge_bridge_report_path: Path | None = None
     summaries: tuple[ProductStatePabloDefinitionSummary, ...] = Field(default_factory=tuple)
     crosslink_requirement: PabloCrosslinkRequirement
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
