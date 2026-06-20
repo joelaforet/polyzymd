@@ -90,6 +90,7 @@ def build_product_state_pablo_library(
     resolved_plan: Any | None = None,
     product_residue_mappings: Mapping[str, Mapping[str, Any]] | None = None,
     *,
+    charged_polymer_sdf: Path | str | None = None,
     pablo_module: Any | None = None,
 ) -> ProductStatePabloLibrary:
     """Build POC product-state Pablo residue definitions for an emitted PDB.
@@ -170,6 +171,7 @@ def build_product_state_pablo_library(
     product_formal_charges = _product_formal_charges(
         polymer_atoms,
         generated_fragment,
+        charged_polymer_sdf=charged_polymer_sdf,
         source_residue_aliases=source_residue_aliases,
     )
     polymer_link_plans, polymer_link_diagnostics = _plan_polymer_external_links(
@@ -244,12 +246,14 @@ def build_product_state_pablo_library_for_specs(
     for spec in attachment_specs:
         generated_fragment = _spec_generated_fragment(spec)
         sdf_path = _spec_sdf_path(spec)
+        charged_sdf_path = _spec_charged_sdf_path(spec)
         _validate_spec_sidecars(spec, sdf_path=sdf_path, generated_fragment=generated_fragment)
         libraries.append(
             build_product_state_pablo_library(
                 product_pdb=product_pdb,
                 source_protein_pdb=source_protein_pdb,
                 polymer_sdf=sdf_path,
+                charged_polymer_sdf=charged_sdf_path,
                 generated_fragment=generated_fragment,
                 resolved_plan=getattr(spec, "resolved_plan", None),
                 product_residue_mappings=_spec_product_residue_mappings(spec),
@@ -292,13 +296,26 @@ def _spec_generated_fragment(spec: Any) -> Any:
 
 
 def _spec_sdf_path(spec: Any) -> Path | None:
-    """Return the SDF sidecar recorded on a resolved spec, if present."""
+    """Return the bond-order SDF sidecar recorded on a resolved spec, if present."""
     for sidecars in (
         getattr(spec, "source_sidecars", None),
         getattr(getattr(spec, "fragment", None), "sidecars", None),
     ):
+        if sidecars and sidecars.get("bond_sdf") is not None:
+            return Path(sidecars["bond_sdf"])
         if sidecars and sidecars.get("sdf") is not None:
             return Path(sidecars["sdf"])
+    return None
+
+
+def _spec_charged_sdf_path(spec: Any) -> Path | None:
+    """Return the production charged SDF sidecar recorded on a resolved spec."""
+    for sidecars in (
+        getattr(spec, "source_sidecars", None),
+        getattr(getattr(spec, "fragment", None), "sidecars", None),
+    ):
+        if sidecars and sidecars.get("charged_sdf") is not None:
+            return Path(sidecars["charged_sdf"])
     return None
 
 
@@ -732,19 +749,21 @@ def _product_formal_charges(
     product_atoms: list[PdbAtomRecord],
     generated_fragment: Any | None,
     *,
+    charged_polymer_sdf: Path | str | None = None,
     source_residue_aliases: Mapping[tuple[str, int, str], tuple[int, str]] | None = None,
 ) -> dict[tuple[str, str, int, str], dict[str, int]]:
     """Map non-zero generated-fragment formal charges onto product PDB residues."""
     if generated_fragment is None:
         return {}
+    charged_formal_charges = _charged_sdf_formal_charges(charged_polymer_sdf)
     unique_atom_names = _unique_fragment_atom_names(generated_fragment)
     product_lookup = _product_lookup(
         product_atoms,
         source_residue_aliases=source_residue_aliases,
     )
     charges: dict[tuple[str, str, int, str], dict[str, int]] = defaultdict(dict)
-    for atom in getattr(generated_fragment, "atoms", ()) or ():
-        charge = getattr(atom, "formal_charge", None)
+    for atom_index, atom in enumerate(getattr(generated_fragment, "atoms", ()) or ()):
+        charge = charged_formal_charges.get(atom_index, getattr(atom, "formal_charge", None))
         if charge in (None, 0):
             continue
         descriptor = _fragment_atom_descriptor(atom, unique_atom_names=unique_atom_names)
@@ -755,6 +774,28 @@ def _product_formal_charges(
             continue
         charges[_residue_key(product_atom)][product_atom.atom_name] = int(charge)
     return {key: dict(value) for key, value in charges.items()}
+
+
+def _charged_sdf_formal_charges(charged_polymer_sdf: Path | str | None) -> dict[int, int]:
+    """Return non-zero formal charges from a production charged SDF sidecar."""
+    if charged_polymer_sdf is None:
+        return {}
+    from rdkit import Chem
+
+    sdf_path = Path(charged_polymer_sdf)
+    if not sdf_path.exists():
+        raise ValueError(f"Charged polymer SDF sidecar does not exist: {sdf_path}")
+    supplier = Chem.SDMolSupplier(str(sdf_path), removeHs=False, sanitize=False)
+    molecules = [mol for mol in supplier if mol is not None]
+    if not molecules:
+        raise ValueError(f"Charged polymer SDF sidecar could not be read: {sdf_path}")
+    mol = max(molecules, key=lambda candidate: candidate.GetNumAtoms())
+    charges = {}
+    for atom in mol.GetAtoms():
+        formal_charge = int(atom.GetFormalCharge())
+        if formal_charge:
+            charges[int(atom.GetIdx())] = formal_charge
+    return charges
 
 
 def _select_sdf_molecule(molecules: list[Any], *, expected_atoms: int, sdf_path: Path) -> Any:

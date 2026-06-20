@@ -249,6 +249,7 @@ class PolymeristGenerationSmokeResult(BaseModel):
     monomer_group_path: Path
     pdb_path: Path | None = None
     sdf_path: Path | None = None
+    charged_sdf_path: Path | None = None
     object_type: str
     atom_count: int | None = None
     rdkit_mol: Any | None = Field(default=None, exclude=True)
@@ -397,11 +398,26 @@ def generate_polymerist_smoke_polymer(
     )
     rdkit_mol = None
     sdf_path = None
+    charged_sdf_path = None
     pdb_file = Path(pdb_path) if pdb_path is not None else None
     if pdb_file is not None and pdb_file.exists():
         sdf_path = pdb_file.with_suffix(".sdf")
         rdkit_mol = _polymerist_to_pdb_aligned_rdkit_mol(polymer_object, pdb_file)
         _write_rdkit_sdf_sidecar(rdkit_mol, sdf_path)
+    polymer_generator.generate_polymer(
+        sequence=sequence,
+        monomer_names=recipe.to_sequence_monomer_names(),
+        residue_names=recipe.to_polymerist_residue_names(),
+        force_regenerate=force_regenerate,
+    )
+    charged_filename = polymer_generator._make_polymer_filename(
+        sequence,
+        recipe.to_sequence_monomer_names(),
+        charged=True,
+    )
+    expected_charged_sdf_path = cache_path / f"{charged_filename}.sdf"
+    if expected_charged_sdf_path.exists():
+        charged_sdf_path = expected_charged_sdf_path
     atom_count = _get_rdkit_atom_count(rdkit_mol)
     if atom_count is None:
         atom_count = _get_polymerist_atom_count(polymer_object)
@@ -413,6 +429,7 @@ def generate_polymerist_smoke_polymer(
         monomer_group_path=fragment_generator.get_cache_path(recipe.name),
         pdb_path=pdb_path,
         sdf_path=sdf_path,
+        charged_sdf_path=charged_sdf_path,
         object_type=type(polymer_object).__name__,
         atom_count=atom_count,
         rdkit_mol=rdkit_mol,

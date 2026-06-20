@@ -106,8 +106,8 @@ def test_polymer_adapter_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_pa
     assert spec.fragment.source_kind == "polymer"
     assert len(spec.fragment.residues) == 2
     assert spec.fragment.sequence == "AC"
-    assert spec.fragment.sidecars == {"sdf": sdf_path}
-    assert spec.source_sidecars == {"sdf": sdf_path}
+    assert spec.fragment.sidecars == {"sdf": sdf_path, "bond_sdf": sdf_path}
+    assert spec.source_sidecars == {"sdf": sdf_path, "bond_sdf": sdf_path}
     assert spec.generated_fragment is polymer
     assert spec.fragment.to_generated_polymer_fragment().residues == polymer.residues
 

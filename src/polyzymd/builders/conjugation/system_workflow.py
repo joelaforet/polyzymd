@@ -527,6 +527,7 @@ def _build_nhs_lys_attachment_spec(
             attachment_config=attachment,
             attachment_index=attachment_index,
             reaction_name=attachment.mechanism.name,
+            charged_sdf_path=getattr(generation, "charged_sdf_path", None),
         ),
         generation,
         reactive_sequence_index,

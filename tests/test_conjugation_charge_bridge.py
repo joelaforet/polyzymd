@@ -160,6 +160,27 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
     assert charges[("LYX", "NZ")] == pytest.approx(-0.25)
 
 
+def test_bridge_refuses_raw_sdf_as_production_charge_source(tmp_path):
+    """Raw bond SDF sidecars should not be accepted as production charges."""
+    raw_sdf = tmp_path / "polymer.sdf"
+    raw_sdf.write_text("", encoding="utf-8")
+    spec = SimpleNamespace(source_sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf})
+
+    with pytest.raises(ValueError, match=r"requires source_sidecars\['charged_sdf'\]"):
+        charge_bridge._source_sdf_path(spec)
+
+
+def test_bridge_prefers_charged_sdf_source(tmp_path):
+    """Charged SDF sidecars should be selected for production charge transfer."""
+    raw_sdf = tmp_path / "polymer.sdf"
+    charged_sdf = tmp_path / "polymer_charged.sdf"
+    spec = SimpleNamespace(
+        source_sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf, "charged_sdf": charged_sdf}
+    )
+
+    assert charge_bridge._source_sdf_path(spec) == charged_sdf
+
+
 def _molecule(atoms: list[SimpleNamespace]) -> SimpleNamespace:
     """Build an OpenFF-like molecule double."""
     return SimpleNamespace(atoms=tuple(atoms), n_atoms=len(atoms), partial_charges=None)
