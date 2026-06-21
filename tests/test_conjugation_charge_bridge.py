@@ -164,8 +164,8 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
     assert charges[("LYX", "NZ")] == pytest.approx(-0.25)
 
 
-def test_bridge_rejects_large_single_atom_charge_correction(monkeypatch, tmp_path):
-    """Large total-charge mismatches should not be hidden on one atom."""
+def test_bridge_rejects_reconciliation_without_local_patch_atoms(monkeypatch, tmp_path):
+    """Charge residuals should not be hidden on unrelated polymer atoms."""
     target = _molecule([_atom("C", "NHX", 1, "C001", 0)])
     library = SimpleNamespace(residue_names=("NHX",), definitions=())
     record = AtomPartialChargeRecord(
@@ -177,13 +177,12 @@ def test_bridge_rejects_large_single_atom_charge_correction(monkeypatch, tmp_pat
         source="production:polymer",
         source_role="polymer_template",
     )
-    monkeypatch.delenv(charge_bridge._ALLOW_LARGE_CORRECTION_ENV, raising=False)
     monkeypatch.setattr(charge_bridge, "_protein_ff14sb_records", lambda **_: ())
     monkeypatch.setattr(charge_bridge, "_polymer_template_records", lambda _, **__: (record,))
     monkeypatch.setattr(charge_bridge, "_local_nagl_patch_records", lambda _, **__: ((), None))
     monkeypatch.setattr(charge_bridge, "parse_pdb_atom_records", lambda _: ())
 
-    with pytest.raises(ValueError, match="correction is too large"):
+    with pytest.raises(ValueError, match="no real local NAGL patch atoms"):
         charge_bridge.build_product_state_charge_bridge(
             product_state_pablo_library=library,
             product_topology=SimpleNamespace(molecules=(target,)),
@@ -193,34 +192,40 @@ def test_bridge_rejects_large_single_atom_charge_correction(monkeypatch, tmp_pat
             output_dir=tmp_path,
         )
 
-    diagnostic = json.loads(
-        (tmp_path / "product_state_charge_bridge_large_correction.json").read_text(encoding="utf-8")
-    )
-    assert diagnostic["normalization_correction_e"] == pytest.approx(1.2)
-    assert diagnostic["max_allowed_default_correction_e"] == pytest.approx(0.1)
-    assert diagnostic["correction_atom_identity"] == "chain C residue NHX 1 atom C001"
-    assert diagnostic["per_source_role"] == [
-        {"source_role": "polymer_template", "count": 1, "total_charge_e": -1.2}
-    ]
+    assert not (tmp_path / "product_state_charge_bridge_local_reconciliation.json").exists()
 
 
-def test_bridge_reports_large_correction_when_debug_override_enabled(monkeypatch, tmp_path):
-    """Explicit debug override should retain correction provenance in the report."""
-    target = _molecule([_atom("C", "NHX", 1, "C001", 0)])
+def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tmp_path):
+    """Small residuals should be auditable and local to NAGL patch atoms."""
+    target = _molecule([_atom("C", "NHX", 1, "C001", 0), _atom("C", "NHX", 1, "N001", 0)])
     library = SimpleNamespace(residue_names=("NHX",), definitions=())
-    record = AtomPartialChargeRecord(
+    polymer_record = AtomPartialChargeRecord(
         chain_id="C",
         residue_name="NHX",
         residue_number=1,
         atom_name="C001",
-        charge_e=-1.2,
+        charge_e=-0.10,
         source="production:polymer",
         source_role="polymer_template",
     )
-    monkeypatch.setenv(charge_bridge._ALLOW_LARGE_CORRECTION_ENV, "1")
+    patch_record = AtomPartialChargeRecord(
+        chain_id="C",
+        residue_name="NHX",
+        residue_number=1,
+        atom_name="N001",
+        charge_e=0.08,
+        source="production:nagl-patch",
+        source_role="local_nagl_patch",
+    )
     monkeypatch.setattr(charge_bridge, "_protein_ff14sb_records", lambda **_: ())
-    monkeypatch.setattr(charge_bridge, "_polymer_template_records", lambda _, **__: (record,))
-    monkeypatch.setattr(charge_bridge, "_local_nagl_patch_records", lambda _, **__: ((), None))
+    monkeypatch.setattr(
+        charge_bridge, "_polymer_template_records", lambda _, **__: (polymer_record,)
+    )
+    monkeypatch.setattr(
+        charge_bridge,
+        "_local_nagl_patch_records",
+        lambda _, **__: ((patch_record,), "nagl-test"),
+    )
     monkeypatch.setattr(charge_bridge, "parse_pdb_atom_records", lambda _: ())
 
     result = charge_bridge.build_product_state_charge_bridge(
@@ -233,9 +238,18 @@ def test_bridge_reports_large_correction_when_debug_override_enabled(monkeypatch
     )
 
     report = result.charge_bridge_report
-    assert report.normalization_correction_e == pytest.approx(1.2)
-    assert report.max_per_atom_correction_e == pytest.approx(1.2)
-    assert report.correction_atom_identities == ("chain C residue NHX 1 atom C001",)
+    assert report.normalization_correction_e == pytest.approx(0.02)
+    assert report.max_per_atom_correction_e == pytest.approx(0.02)
+    assert report.correction_atom_identities == ("chain C residue NHX 1 atom N001",)
+    diagnostic = json.loads(
+        (tmp_path / "product_state_charge_bridge_local_reconciliation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    reconciliation = diagnostic["local_reconciliation"]
+    assert reconciliation["success"] is True
+    assert reconciliation["corrected_atom_count"] == 1
+    assert reconciliation["per_atom_correction_e"] == pytest.approx(0.02)
 
 
 def test_bridge_refuses_raw_sdf_as_production_charge_source(tmp_path):
