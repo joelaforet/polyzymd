@@ -817,6 +817,40 @@ class TestBuildDryRunEndToEnd:
 class TestCliExceptionHandlingNarrowing:
     """Regression tests for narrowed run/submit exception handling."""
 
+    @patch("polyzymd.cli.main._run_initial_segment")
+    def test_run_openmm_impl_forwards_production_intervals(
+        self,
+        mock_run_initial_segment,
+    ) -> None:
+        """OpenMM local run should pass production reporter and checkpoint intervals."""
+        from polyzymd.cli.main import _run_openmm_impl
+
+        production = SimpleNamespace(
+            duration=0.5,
+            samples=25,
+            time_step=2.0,
+            report_interval=1000,
+            checkpoint_interval=30.0,
+        )
+        sim_config = SimpleNamespace(
+            simulation_phases=SimpleNamespace(production=production),
+            get_working_directory=lambda replicate: Path(f"/tmp/polyzymd/run_{replicate}"),
+        )
+
+        _run_openmm_impl(sim_config, replicate=1)
+
+        mock_run_initial_segment.assert_called_once_with(
+            sim_config=sim_config,
+            working_dir=Path("/tmp/polyzymd/run_1"),
+            replicate=1,
+            skip_build=False,
+            duration_ns=0.5,
+            num_samples=25,
+            timestep_fs=2.0,
+            report_interval=1000,
+            checkpoint_interval_s=30.0,
+        )
+
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     @patch("polyzymd.cli.main._run_openmm_impl")
     def test_run_catches_runtime_error(

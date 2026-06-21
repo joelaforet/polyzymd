@@ -1295,6 +1295,8 @@ def _run_openmm_impl(
         duration_ns=production.duration,
         num_samples=production.samples,
         timestep_fs=production.time_step,
+        report_interval=production.report_interval,
+        checkpoint_interval_s=production.checkpoint_interval,
     )
     colored_echo("OpenMM simulation completed successfully.", phase="simulation")
     colored_echo(f"Output directory: {working_dir}", phase="simulation")
