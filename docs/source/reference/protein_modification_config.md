@@ -272,25 +272,20 @@ maps charges back only to real product atoms. If the mechanism metadata is not
 specific enough to build and cap the local graph, PolyzyMD fails clearly instead
 of falling back to hardcoded NHS-lysine atom names or raw sidecar charges.
 
-## Support Levels
+## Support Levels and Validation Reports
 
-| Level | Meaning |
-|-------|---------|
-| Planned | Config vocabulary is documented, but execution is not implemented. |
-| Validated | Config and mechanism planning work without changing topology. |
-| Executable | PolyzyMD can build, relax, solvate, and write artifacts. |
-| Production-ready | Templates, charges, tests, and scientific guidance are validated. |
+See {doc}`conjugation_support_matrix` for the current support matrix. In brief,
+the validated reliability milestone covers the opt-in config-driven NHS-lysine
+polymer vertical slice, including Pablo/OpenFF Interchange, ff14SB plus polymer
+templates, local NAGL patch charge bridge, local charge reconciliation,
+restrained OpenMM smoke evidence, final solvation, and
+`conjugate_validation_report.json`.
 
-Current support:
-
-| Feature | Status |
-|---------|--------|
-| Enabled NHS-lysine polymer attachments through `moiety.recipe` and `mechanism.name: nhs_lys_amide` | Executable for exploratory workflows. |
-| Multiple enabled NHS-lysine attachments | Executable for exploratory workflows. |
-| SMILES moiety config with `mechanism.name: n_glycosylation` | Wired for mechanism tests and exploratory workflow development. |
-| Mixed mechanisms in one config | Planned. |
-| O-glycosylation | Planned. |
-| General recipe field for biology-first modifications | Planned and non-executable. |
+The validation report audits product bond graph evidence, link atom presence,
+leaving atom absence, valence sanity, charge evidence, parameter coverage,
+linkage geometry, OpenMM smoke evidence, and paths to supporting sidecars.
+Validation is necessary but not sufficient: a passing report is an internal
+consistency audit, not a guarantee for arbitrary chemistry.
 
 ## Build Commands
 
