@@ -39,6 +39,10 @@ LOGGER = logging.getLogger("polyzymd")
 BUILD_PIXI_ENVS = ("build",)
 SIM_PIXI_ENVS = ("sim-cuda-12-4", "sim-cuda-12-6")
 KNOWN_SPLIT_PIXI_ENVS = (*BUILD_PIXI_ENVS, *SIM_PIXI_ENVS, "analysis", "test", "docs")
+_UNINFORMATIVE_OPENFF_LOGGERS = (
+    "openff.interchange.smirnoff._nonbonded",
+    "openff.pablo._pdb_data",
+)
 
 
 def _echo_branding() -> None:
@@ -85,6 +89,12 @@ def suppress_openff_logs() -> None:
     root_logger.addFilter(OpenFFFilter())
 
 
+def suppress_uninformative_openff_logs() -> None:
+    """Keep noisy OpenFF/Pablo implementation logs at warning level."""
+    for logger_name in _UNINFORMATIVE_OPENFF_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+
 def enable_openff_logs() -> None:
     """Re-enable OpenFF log messages for debugging.
 
@@ -92,6 +102,7 @@ def enable_openff_logs() -> None:
     """
     logging.getLogger("openff.interchange").setLevel(logging.INFO)
     logging.getLogger("openff.toolkit").setLevel(logging.INFO)
+    suppress_uninformative_openff_logs()
 
     # Remove OpenFF filter from root logger
     root_logger = logging.getLogger()
@@ -102,6 +113,7 @@ def enable_openff_logs() -> None:
 
 # Suppress OpenFF logs by default
 suppress_openff_logs()
+suppress_uninformative_openff_logs()
 
 
 def _resolve_replicates_option(
