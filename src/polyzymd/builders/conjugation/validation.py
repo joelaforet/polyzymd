@@ -384,34 +384,42 @@ def validate_atom_presence(
 
     expected_present = []
     expected_absent = []
-    for plan in resolved_plans:
+    for plan_index, plan in enumerate(resolved_plans, start=1):
         for attr_name in ("protein_link_atom", "modifier_link_atom"):
             atom = getattr(plan, attr_name, None)
             if atom is not None:
-                expected_present.append((AtomIdentity.from_pdb_atom(atom), attr_name, plan))
+                expected_present.append(
+                    (AtomIdentity.from_pdb_atom(atom), attr_name, plan, plan_index)
+                )
         for atom in tuple(getattr(plan, "protein_leaving_atoms", ()) or ()):
             expected_absent.append(
-                (AtomIdentity.from_pdb_atom(atom), "protein_leaving_atoms", plan)
+                (AtomIdentity.from_pdb_atom(atom), "protein_leaving_atoms", plan, plan_index)
             )
         for atom in tuple(getattr(plan, "modifier_leaving_atoms", ()) or ()):
             expected_absent.append(
-                (AtomIdentity.from_pdb_atom(atom), "modifier_leaving_atoms", plan)
+                (AtomIdentity.from_pdb_atom(atom), "modifier_leaving_atoms", plan, plan_index)
             )
 
     match_context = _ProductAtomMatchContext(atoms=atoms, assembly=assembly)
 
     present = tuple(
         identity
-        for identity, source, plan in expected_present
-        if _identity_present(identity, match_context, source=source, plan=plan)
+        for identity, source, plan, plan_index in expected_present
+        if _identity_present(
+            identity, match_context, source=source, plan=plan, plan_index=plan_index
+        )
     )
     missing = tuple(
-        identity for identity, _source, _plan in expected_present if identity not in present
+        identity
+        for identity, _source, _plan, _plan_index in expected_present
+        if identity not in present
     )
     lingering = tuple(
         identity
-        for identity, source, plan in expected_absent
-        if _identity_present(identity, match_context, source=source, plan=plan)
+        for identity, source, plan, plan_index in expected_absent
+        if _identity_lingering(
+            identity, match_context, source=source, plan=plan, plan_index=plan_index
+        )
     )
     status = ValidationStatus.FAIL if missing or lingering else ValidationStatus.PASS
     message = "Required link atoms are present and leaving atoms are absent"
@@ -788,13 +796,44 @@ def _identity_present(
     *,
     source: str,
     plan: Any,
+    plan_index: int | None = None,
 ) -> bool:
-    """Return whether an identity is present in product atoms."""
+    """Return whether a required identity has one unambiguous product atom."""
     if any(identity.matches(atom) for atom in context.atoms):
         return True
     if not _allows_product_remap(source, identity):
         return False
-    return _has_unique_remapped_match(identity, context, source=source, plan=plan)
+    return _has_unique_remapped_match(
+        identity,
+        context,
+        source=source,
+        plan=plan,
+        plan_index=plan_index,
+    )
+
+
+def _identity_lingering(
+    identity: AtomIdentity,
+    context: _ProductAtomMatchContext,
+    *,
+    source: str,
+    plan: Any,
+    plan_index: int | None = None,
+) -> bool:
+    """Return whether a forbidden identity has any plausible product atom."""
+    if any(identity.matches(atom) for atom in context.atoms):
+        return True
+    if not _allows_product_remap(source, identity):
+        return False
+    return bool(
+        _filtered_remapped_candidates(
+            identity,
+            context,
+            source=source,
+            plan=plan,
+            plan_index=plan_index,
+        )
+    )
 
 
 def _has_unique_remapped_match(
@@ -803,13 +842,42 @@ def _has_unique_remapped_match(
     *,
     source: str,
     plan: Any,
+    plan_index: int | None = None,
 ) -> bool:
     """Return whether product-remapped matching resolves to one product atom."""
-    candidates = _remapped_candidates(identity, context.atoms)
-    candidates = _filter_by_linkage_metadata(candidates, context.assembly, source=source)
-    candidates = _filter_by_product_residue_name(candidates, source=source, plan=plan)
-    candidates = _filter_by_residue_mapping(identity, candidates, context.assembly)
+    candidates = _filtered_remapped_candidates(
+        identity,
+        context,
+        source=source,
+        plan=plan,
+        plan_index=plan_index,
+    )
     return len(candidates) == 1
+
+
+def _filtered_remapped_candidates(
+    identity: AtomIdentity,
+    context: _ProductAtomMatchContext,
+    *,
+    source: str,
+    plan: Any,
+    plan_index: int | None = None,
+) -> tuple[PdbAtomRecord, ...]:
+    """Return remapped candidates after plan-aware product filters."""
+    candidates = _remapped_candidates(identity, context.atoms)
+    candidates = _filter_by_linkage_metadata(
+        candidates,
+        context.assembly,
+        source=source,
+        plan_index=plan_index,
+    )
+    candidates = _filter_by_product_residue_name(candidates, source=source, plan=plan)
+    return _filter_by_residue_mapping(
+        identity,
+        candidates,
+        context.assembly,
+        plan_index=plan_index,
+    )
 
 
 def _remapped_candidates(
@@ -846,20 +914,23 @@ def _filter_by_linkage_metadata(
     assembly: Any | None,
     *,
     source: str,
+    plan_index: int | None = None,
 ) -> tuple[PdbAtomRecord, ...]:
     """Filter remapped link candidates with product linkage serial metadata."""
     if assembly is None or not source.endswith("_link_atom"):
         return candidates
-    linkage_serials = _assembly_linkage_serials(assembly)
+    linkage_serials = _assembly_linkage_serials(assembly, plan_index=plan_index)
     if not linkage_serials:
         return candidates
     return tuple(atom for atom in candidates if atom.serial in linkage_serials)
 
 
-def _assembly_linkage_serials(assembly: Any) -> set[int]:
+def _assembly_linkage_serials(assembly: Any, *, plan_index: int | None = None) -> set[int]:
     """Return product serials that participate in assembly linkage bonds."""
     pairs = tuple(getattr(assembly, "added_conect_pairs", ()) or ())
-    if not pairs:
+    if pairs and plan_index is not None and 1 <= plan_index <= len(pairs):
+        pairs = (pairs[plan_index - 1],)
+    elif not pairs:
         pair = getattr(assembly, "added_conect_pair", None)
         pairs = (pair,) if pair is not None else ()
     serials: set[int] = set()
@@ -873,11 +944,13 @@ def _filter_by_residue_mapping(
     identity: AtomIdentity,
     candidates: tuple[PdbAtomRecord, ...],
     assembly: Any | None,
+    *,
+    plan_index: int | None = None,
 ) -> tuple[PdbAtomRecord, ...]:
     """Filter candidates with assembly residue remapping metadata when available."""
     if identity.residue_number is None or assembly is None:
         return candidates
-    mappings = _assembly_residue_mappings(assembly)
+    mappings = _assembly_residue_mappings(assembly, plan_index=plan_index)
     if not mappings:
         return candidates
     matched_mappings = []
@@ -906,14 +979,29 @@ def _product_residue_name_for_source(source: str, plan: Any) -> str | None:
     return str(value)
 
 
-def _assembly_residue_mappings(assembly: Any) -> tuple[Any, ...]:
+def _assembly_residue_mappings(assembly: Any, *, plan_index: int | None = None) -> tuple[Any, ...]:
     """Return residue mapping records from product assembly metadata."""
     mappings = getattr(assembly, "residue_mappings", None)
     if mappings is None and isinstance(assembly, dict):
         mappings = assembly.get("residue_mappings")
     if isinstance(mappings, dict):
+        if plan_index is not None:
+            fragment_prefix = f"fragment_{plan_index}:"
+            scoped = tuple(
+                mapping for key, mapping in mappings.items() if str(key).startswith(fragment_prefix)
+            )
+            if scoped:
+                return scoped
         return tuple(mappings.values())
     if isinstance(mappings, (list, tuple)):
+        if plan_index is not None:
+            scoped = tuple(
+                mapping
+                for mapping in mappings
+                if _mapping_int(mapping, "fragment_index") == plan_index
+            )
+            if scoped:
+                return scoped
         return tuple(mappings)
     return ()
 
