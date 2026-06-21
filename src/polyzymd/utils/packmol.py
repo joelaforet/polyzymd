@@ -244,7 +244,7 @@ def run_packmol(
             "Install Packmol and make sure it is accessible as 'packmol'."
         )
 
-    working_directory = Path(working_directory)
+    working_directory = Path(working_directory).resolve()
     working_directory.mkdir(parents=True, exist_ok=True)
 
     _temporary = False

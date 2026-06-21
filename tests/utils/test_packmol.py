@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -18,6 +19,14 @@ from polyzymd.utils.packmol import (
     _PACKMOL_OUTPUT_FILE,
     build_packmol_input,
 )
+
+
+class _CompletedPackmol:
+    """Minimal subprocess result for mocked Packmol execution."""
+
+    returncode = 0
+    stdout = b"Success!\n"
+
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -303,6 +312,34 @@ class TestPolymerPackingConfigSchema:
         cfg = PolymerPackingConfig()
         assert cfg.padding == pytest.approx(2.0)
         assert cfg.tolerance == pytest.approx(2.0)
+
+
+class TestRunPackmol:
+    """Regression tests for Packmol executor path handling."""
+
+    def test_relative_working_directory_is_resolved(self, monkeypatch, tmp_path):
+        """run_packmol should reopen input after cwd changes for relative work dirs."""
+        from polyzymd.utils import packmol
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(packmol.shutil, "which", MagicMock(return_value="packmol"))
+
+        def fake_run(_binary: str, *, stdin, stdout, stderr):
+            """Validate that Packmol receives an existing absolute input file."""
+            del stdout, stderr
+            input_path = Path(stdin.name)
+            assert input_path.is_absolute()
+            assert input_path.exists()
+            assert input_path.read_text(encoding="utf-8") == "Success input\n"
+            return _CompletedPackmol()
+
+        monkeypatch.setattr(packmol.subprocess, "run", fake_run)
+
+        output_path = packmol.run_packmol("Success input\n", Path("relative_packmol_work"))
+
+        assert output_path.is_absolute()
+        assert output_path == (tmp_path / "relative_packmol_work" / _PACKMOL_OUTPUT_FILE).resolve()
+        assert (tmp_path / "relative_packmol_work" / "packmol_input.txt").exists()
 
 
 class _MockTopology:
