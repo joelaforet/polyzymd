@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -72,17 +73,13 @@ class AtomIdentity(BaseModel):
             record_name=atom.record_name.strip(),
         )
 
-    def matches(self, atom: PdbAtomRecord, *, allow_product_remap: bool = False) -> bool:
+    def matches(self, atom: PdbAtomRecord) -> bool:
         """Return whether the identity matches an atom record.
 
         Parameters
         ----------
         atom : PdbAtomRecord
             Candidate PDB atom.
-        allow_product_remap : bool, optional
-            Whether to ignore source serial and residue placement metadata that may be rewritten in
-            product PDB artifacts, by default ``False``.
-
         Returns
         -------
         bool
@@ -90,9 +87,6 @@ class AtomIdentity(BaseModel):
         """
         atom_name_matches = self.atom_name.strip().upper() == atom.atom_name.strip().upper()
         element_matches = _normalized_element(self.element) == _normalized_element(atom.element)
-        if allow_product_remap:
-            return atom_name_matches and element_matches
-
         comparisons = [
             atom_name_matches,
             self.residue_name.strip().upper() == atom.residue_name.strip().upper(),
@@ -110,6 +104,14 @@ class AtomIdentity(BaseModel):
         if self.element.strip():
             comparisons.append(element_matches)
         return all(comparisons)
+
+
+@dataclass(frozen=True)
+class _ProductAtomMatchContext:
+    """Product atom matching inputs shared across presence checks."""
+
+    atoms: tuple[PdbAtomRecord, ...]
+    assembly: Any | None = None
 
 
 class ProductBondGraphReport(BaseModel):
@@ -278,7 +280,9 @@ def build_conjugate_validation_report(
     report = ConjugateValidationReport(
         product_pdb_path=product_path,
         bond_graph=validate_product_bond_graph(expected_bonds, observed_bonds),
-        atom_presence=validate_atom_presence(atoms, resolved_plans=resolved_plans),
+        atom_presence=validate_atom_presence(
+            atoms, resolved_plans=resolved_plans, assembly=assembly
+        ),
         valence_sanity=validate_valence_sanity(expected_bonds, observed_bonds),
         charge_audit=audit_charge_reports(artifact_dir),
         parameter_coverage=audit_parameter_coverage(
@@ -352,8 +356,24 @@ def validate_atom_presence(
     atoms: tuple[PdbAtomRecord, ...],
     *,
     resolved_plans: tuple[Any, ...] = (),
+    assembly: Any | None = None,
 ) -> AtomPresenceReport:
-    """Validate retained/link atoms are present and leaving atoms are absent."""
+    """Validate retained/link atoms are present and leaving atoms are absent.
+
+    Parameters
+    ----------
+    atoms : tuple of PdbAtomRecord
+        Product PDB atoms to validate.
+    resolved_plans : tuple of Any, optional
+        Resolved attachment plans describing expected link and leaving atoms, by default ``()``.
+    assembly : Any or None, optional
+        Product assembly metadata with linkage bonds or residue mappings, by default ``None``.
+
+    Returns
+    -------
+    AtomPresenceReport
+        Presence report for required retained atoms and forbidden leaving atoms.
+    """
     if not atoms or not resolved_plans:
         check = ConjugateValidationCheck(
             name="atom_presence",
@@ -368,24 +388,30 @@ def validate_atom_presence(
         for attr_name in ("protein_link_atom", "modifier_link_atom"):
             atom = getattr(plan, attr_name, None)
             if atom is not None:
-                expected_present.append((AtomIdentity.from_pdb_atom(atom), attr_name))
+                expected_present.append((AtomIdentity.from_pdb_atom(atom), attr_name, plan))
         for atom in tuple(getattr(plan, "protein_leaving_atoms", ()) or ()):
-            expected_absent.append(AtomIdentity.from_pdb_atom(atom))
+            expected_absent.append(
+                (AtomIdentity.from_pdb_atom(atom), "protein_leaving_atoms", plan)
+            )
         for atom in tuple(getattr(plan, "modifier_leaving_atoms", ()) or ()):
-            expected_absent.append(AtomIdentity.from_pdb_atom(atom))
+            expected_absent.append(
+                (AtomIdentity.from_pdb_atom(atom), "modifier_leaving_atoms", plan)
+            )
+
+    match_context = _ProductAtomMatchContext(atoms=atoms, assembly=assembly)
 
     present = tuple(
         identity
-        for identity, source in expected_present
-        if _identity_present(
-            identity,
-            atoms,
-            allow_product_remap=_allows_product_remap(source, identity),
-        )
+        for identity, source, plan in expected_present
+        if _identity_present(identity, match_context, source=source, plan=plan)
     )
-    missing = tuple(identity for identity, _source in expected_present if identity not in present)
+    missing = tuple(
+        identity for identity, _source, _plan in expected_present if identity not in present
+    )
     lingering = tuple(
-        identity for identity in expected_absent if _identity_present(identity, atoms)
+        identity
+        for identity, source, plan in expected_absent
+        if _identity_present(identity, match_context, source=source, plan=plan)
     )
     status = ValidationStatus.FAIL if missing or lingering else ValidationStatus.PASS
     message = "Required link atoms are present and leaving atoms are absent"
@@ -758,12 +784,166 @@ def _normalize_bond_pair(pair: Any) -> tuple[int, int]:
 
 def _identity_present(
     identity: AtomIdentity,
-    atoms: tuple[PdbAtomRecord, ...],
+    context: _ProductAtomMatchContext,
     *,
-    allow_product_remap: bool = False,
+    source: str,
+    plan: Any,
 ) -> bool:
     """Return whether an identity is present in product atoms."""
-    return any(identity.matches(atom, allow_product_remap=allow_product_remap) for atom in atoms)
+    if any(identity.matches(atom) for atom in context.atoms):
+        return True
+    if not _allows_product_remap(source, identity):
+        return False
+    return _has_unique_remapped_match(identity, context, source=source, plan=plan)
+
+
+def _has_unique_remapped_match(
+    identity: AtomIdentity,
+    context: _ProductAtomMatchContext,
+    *,
+    source: str,
+    plan: Any,
+) -> bool:
+    """Return whether product-remapped matching resolves to one product atom."""
+    candidates = _remapped_candidates(identity, context.atoms)
+    candidates = _filter_by_linkage_metadata(candidates, context.assembly, source=source)
+    candidates = _filter_by_product_residue_name(candidates, source=source, plan=plan)
+    candidates = _filter_by_residue_mapping(identity, candidates, context.assembly)
+    return len(candidates) == 1
+
+
+def _remapped_candidates(
+    identity: AtomIdentity,
+    atoms: tuple[PdbAtomRecord, ...],
+) -> tuple[PdbAtomRecord, ...]:
+    """Return atom-name and element candidates after product renumbering."""
+    expected_name = identity.atom_name.strip().upper()
+    expected_element = _normalized_element(identity.element)
+    return tuple(
+        atom
+        for atom in atoms
+        if atom.atom_name.strip().upper() == expected_name
+        and (not expected_element or _normalized_element(atom.element) == expected_element)
+    )
+
+
+def _filter_by_product_residue_name(
+    candidates: tuple[PdbAtomRecord, ...],
+    *,
+    source: str,
+    plan: Any,
+) -> tuple[PdbAtomRecord, ...]:
+    """Filter candidates with product residue names declared by the resolved plan."""
+    target_residue_name = _product_residue_name_for_source(source, plan)
+    if target_residue_name is None:
+        return candidates
+    normalized = str(target_residue_name).strip().upper()
+    return tuple(atom for atom in candidates if atom.residue_name.strip().upper() == normalized)
+
+
+def _filter_by_linkage_metadata(
+    candidates: tuple[PdbAtomRecord, ...],
+    assembly: Any | None,
+    *,
+    source: str,
+) -> tuple[PdbAtomRecord, ...]:
+    """Filter remapped link candidates with product linkage serial metadata."""
+    if assembly is None or not source.endswith("_link_atom"):
+        return candidates
+    linkage_serials = _assembly_linkage_serials(assembly)
+    if not linkage_serials:
+        return candidates
+    return tuple(atom for atom in candidates if atom.serial in linkage_serials)
+
+
+def _assembly_linkage_serials(assembly: Any) -> set[int]:
+    """Return product serials that participate in assembly linkage bonds."""
+    pairs = tuple(getattr(assembly, "added_conect_pairs", ()) or ())
+    if not pairs:
+        pair = getattr(assembly, "added_conect_pair", None)
+        pairs = (pair,) if pair is not None else ()
+    serials: set[int] = set()
+    for pair in pairs:
+        normalized = _normalize_bond_pair(pair)
+        serials.update(normalized)
+    return serials
+
+
+def _filter_by_residue_mapping(
+    identity: AtomIdentity,
+    candidates: tuple[PdbAtomRecord, ...],
+    assembly: Any | None,
+) -> tuple[PdbAtomRecord, ...]:
+    """Filter candidates with assembly residue remapping metadata when available."""
+    if identity.residue_number is None or assembly is None:
+        return candidates
+    mappings = _assembly_residue_mappings(assembly)
+    if not mappings:
+        return candidates
+    matched_mappings = []
+    for mapping in mappings:
+        if _mapping_int(mapping, "source_residue_number") == identity.residue_number:
+            matched_mappings.append(mapping)
+    if not matched_mappings:
+        return candidates
+    return tuple(
+        atom
+        for atom in candidates
+        if any(_atom_matches_residue_mapping(atom, mapping) for mapping in matched_mappings)
+    )
+
+
+def _product_residue_name_for_source(source: str, plan: Any) -> str | None:
+    """Return product residue name metadata for a plan source side."""
+    if source.startswith("protein_"):
+        value = getattr(plan, "protein_product_residue_name", None)
+    elif source.startswith("modifier_"):
+        value = getattr(plan, "modifier_product_residue_name", None)
+    else:
+        value = None
+    if value is None or not str(value).strip():
+        return None
+    return str(value)
+
+
+def _assembly_residue_mappings(assembly: Any) -> tuple[Any, ...]:
+    """Return residue mapping records from product assembly metadata."""
+    mappings = getattr(assembly, "residue_mappings", None)
+    if mappings is None and isinstance(assembly, dict):
+        mappings = assembly.get("residue_mappings")
+    if isinstance(mappings, dict):
+        return tuple(mappings.values())
+    if isinstance(mappings, (list, tuple)):
+        return tuple(mappings)
+    return ()
+
+
+def _atom_matches_residue_mapping(atom: PdbAtomRecord, mapping: Any) -> bool:
+    """Return whether a product atom matches one assembly residue mapping."""
+    target_number = _mapping_int(mapping, "target_residue_number")
+    target_chain = _mapping_str(mapping, "target_chain")
+    if target_number is not None and atom.residue_number != target_number:
+        return False
+    if target_chain and atom.chain_id.strip().upper() != target_chain.upper():
+        return False
+    return True
+
+
+def _mapping_int(mapping: Any, key: str) -> int | None:
+    """Return an integer mapping field when present."""
+    value = mapping.get(key) if isinstance(mapping, dict) else getattr(mapping, key, None)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _mapping_str(mapping: Any, key: str) -> str:
+    """Return a string mapping field when present."""
+    value = mapping.get(key) if isinstance(mapping, dict) else getattr(mapping, key, "")
+    return str(value or "").strip()
 
 
 def _read_json(path: Path) -> dict[str, Any]:

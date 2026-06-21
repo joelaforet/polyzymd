@@ -149,6 +149,103 @@ def test_atom_presence_allows_remapped_modifier_link_atom():
     assert report.missing_atoms == ()
 
 
+def test_atom_presence_detects_remapped_modifier_leaving_atom():
+    """Modifier leaving atoms should be found after product residue remapping."""
+    protein_link_atom = _atom(
+        serial=1,
+        atom_name="NZ",
+        residue_name="LYS",
+        residue_number=10,
+    )
+    modifier_link_atom = _atom(
+        serial=50,
+        atom_name="C7",
+        residue_name="MOD",
+        residue_number=4,
+    )
+    modifier_leaving_atom = _atom(
+        serial=51,
+        atom_name="H7",
+        residue_name="MOD",
+        residue_number=4,
+    )
+    remapped_modifier_link_atom = _atom(
+        serial=2,
+        atom_name="C7",
+        residue_name="PRD",
+        residue_number=99,
+        chain_id="C",
+    )
+    remapped_leaving_atom = _atom(
+        serial=3,
+        atom_name="H7",
+        residue_name="PRD",
+        residue_number=99,
+        chain_id="C",
+    )
+    plan = SimpleNamespace(
+        protein_link_atom=protein_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(),
+        modifier_leaving_atoms=(modifier_leaving_atom,),
+        modifier_product_residue_name="PRD",
+    )
+
+    report = validate_atom_presence(
+        (protein_link_atom, remapped_modifier_link_atom, remapped_leaving_atom),
+        resolved_plans=(plan,),
+    )
+
+    assert report.status == ValidationStatus.FAIL
+    assert len(report.lingering_leaving_atoms) == 1
+    assert report.lingering_leaving_atoms[0].atom_name == "H7"
+
+
+def test_atom_presence_rejects_ambiguous_remapped_modifier_link_atom():
+    """Modifier link matching should not pass duplicate name/element candidates."""
+    protein_link_atom = _atom(
+        serial=1,
+        atom_name="NZ",
+        residue_name="LYS",
+        residue_number=10,
+    )
+    modifier_link_atom = _atom(
+        serial=50,
+        atom_name="C7",
+        residue_name="MOD",
+        residue_number=4,
+    )
+    first_candidate = _atom(
+        serial=2,
+        atom_name="C7",
+        residue_name="PR1",
+        residue_number=99,
+        chain_id="C",
+    )
+    second_candidate = _atom(
+        serial=3,
+        atom_name="C7",
+        residue_name="PR2",
+        residue_number=100,
+        chain_id="C",
+    )
+    plan = SimpleNamespace(
+        protein_link_atom=protein_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(),
+        modifier_leaving_atoms=(),
+    )
+
+    report = validate_atom_presence(
+        (protein_link_atom, first_candidate, second_candidate),
+        resolved_plans=(plan,),
+    )
+
+    assert report.status == ValidationStatus.FAIL
+    assert len(report.missing_atoms) == 1
+    assert report.missing_atoms[0].atom_name == "C7"
+
+
 def test_charge_audit_pass_warn_and_fail(tmp_path):
     """Charge audit should summarize fake bridge payloads."""
     bridge_path = tmp_path / "product_state_charge_bridge.json"
