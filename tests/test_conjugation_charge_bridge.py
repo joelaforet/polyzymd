@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -96,7 +97,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
                 residue_name="NHX",
                 residue_number=1,
                 atom_name="C047",
-                charge_e=0.1,
+                charge_e=0.25,
                 source="production:polymer",
                 source_role="polymer_template",
             ),
@@ -150,7 +151,10 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
     )
 
     assert result.charge_bridge_report.local_nagl_patch_atom_count == 1
-    assert result.charge_bridge_report.polymer_template_atom_count == 2
+    assert result.charge_bridge_report.polymer_template_atom_count == 3
+    assert result.charge_bridge_report.total_partial_charge_before_correction_e == pytest.approx(
+        0.0
+    )
     assert (tmp_path / "product_state_charge_bridge.json").is_file()
     charges = {
         (record.residue_name, atom_name): charge
@@ -158,6 +162,80 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
         for atom_name, charge in record.atom_charges.items()
     }
     assert charges[("LYX", "NZ")] == pytest.approx(-0.25)
+
+
+def test_bridge_rejects_large_single_atom_charge_correction(monkeypatch, tmp_path):
+    """Large total-charge mismatches should not be hidden on one atom."""
+    target = _molecule([_atom("C", "NHX", 1, "C001", 0)])
+    library = SimpleNamespace(residue_names=("NHX",), definitions=())
+    record = AtomPartialChargeRecord(
+        chain_id="C",
+        residue_name="NHX",
+        residue_number=1,
+        atom_name="C001",
+        charge_e=-1.2,
+        source="production:polymer",
+        source_role="polymer_template",
+    )
+    monkeypatch.delenv(charge_bridge._ALLOW_LARGE_CORRECTION_ENV, raising=False)
+    monkeypatch.setattr(charge_bridge, "_protein_ff14sb_records", lambda **_: ())
+    monkeypatch.setattr(charge_bridge, "_polymer_template_records", lambda _, **__: (record,))
+    monkeypatch.setattr(charge_bridge, "_local_nagl_patch_records", lambda _, **__: ((), None))
+    monkeypatch.setattr(charge_bridge, "parse_pdb_atom_records", lambda _: ())
+
+    with pytest.raises(ValueError, match="correction is too large"):
+        charge_bridge.build_product_state_charge_bridge(
+            product_state_pablo_library=library,
+            product_topology=SimpleNamespace(molecules=(target,)),
+            product_pdb=tmp_path / "product.pdb",
+            source_protein_pdb=tmp_path / "source.pdb",
+            specs=(SimpleNamespace(),),
+            output_dir=tmp_path,
+        )
+
+    diagnostic = json.loads(
+        (tmp_path / "product_state_charge_bridge_large_correction.json").read_text(encoding="utf-8")
+    )
+    assert diagnostic["normalization_correction_e"] == pytest.approx(1.2)
+    assert diagnostic["max_allowed_default_correction_e"] == pytest.approx(0.1)
+    assert diagnostic["correction_atom_identity"] == "chain C residue NHX 1 atom C001"
+    assert diagnostic["per_source_role"] == [
+        {"source_role": "polymer_template", "count": 1, "total_charge_e": -1.2}
+    ]
+
+
+def test_bridge_reports_large_correction_when_debug_override_enabled(monkeypatch, tmp_path):
+    """Explicit debug override should retain correction provenance in the report."""
+    target = _molecule([_atom("C", "NHX", 1, "C001", 0)])
+    library = SimpleNamespace(residue_names=("NHX",), definitions=())
+    record = AtomPartialChargeRecord(
+        chain_id="C",
+        residue_name="NHX",
+        residue_number=1,
+        atom_name="C001",
+        charge_e=-1.2,
+        source="production:polymer",
+        source_role="polymer_template",
+    )
+    monkeypatch.setenv(charge_bridge._ALLOW_LARGE_CORRECTION_ENV, "1")
+    monkeypatch.setattr(charge_bridge, "_protein_ff14sb_records", lambda **_: ())
+    monkeypatch.setattr(charge_bridge, "_polymer_template_records", lambda _, **__: (record,))
+    monkeypatch.setattr(charge_bridge, "_local_nagl_patch_records", lambda _, **__: ((), None))
+    monkeypatch.setattr(charge_bridge, "parse_pdb_atom_records", lambda _: ())
+
+    result = charge_bridge.build_product_state_charge_bridge(
+        product_state_pablo_library=library,
+        product_topology=SimpleNamespace(molecules=(target,)),
+        product_pdb=tmp_path / "product.pdb",
+        source_protein_pdb=tmp_path / "source.pdb",
+        specs=(SimpleNamespace(),),
+        output_dir=tmp_path,
+    )
+
+    report = result.charge_bridge_report
+    assert report.normalization_correction_e == pytest.approx(1.2)
+    assert report.max_per_atom_correction_e == pytest.approx(1.2)
+    assert report.correction_atom_identities == ("chain C residue NHX 1 atom C001",)
 
 
 def test_bridge_refuses_raw_sdf_as_production_charge_source(tmp_path):
@@ -179,6 +257,50 @@ def test_bridge_prefers_charged_sdf_source(tmp_path):
     )
 
     assert charge_bridge._source_sdf_path(spec) == charged_sdf
+
+
+def test_polymer_records_refine_duplicate_atom_names_by_residue_mapping(monkeypatch, tmp_path):
+    """Polymer charge transfer should resolve duplicate atom names by mapped product residue."""
+    charged_sdf = tmp_path / "polymer_charged.sdf"
+    charged_sdf.write_text("", encoding="utf-8")
+    fragment = SimpleNamespace(
+        atoms=(
+            SimpleNamespace(
+                atom_index=0,
+                atom_name="C060",
+                element="C",
+                residue_name="NH2",
+                residue_number=5,
+                insertion_code="",
+            ),
+        ),
+        leaving_atom_names=(),
+    )
+    spec = SimpleNamespace(
+        source_sidecars={"charged_sdf": charged_sdf},
+        generated_fragment=fragment,
+        product_residue_mappings={
+            "5": {"target_chain": "C", "target_residue_number": 6},
+        },
+    )
+    product_atoms = (
+        SimpleNamespace(chain_id="C", residue_name="NHX", residue_number=6, atom_name="C060"),
+        SimpleNamespace(chain_id="C", residue_name="PE2", residue_number=15, atom_name="C060"),
+    )
+    monkeypatch.setattr(
+        charge_bridge,
+        "_charged_sdf_atom_charges",
+        lambda *_args, **_kwargs: (0.125,),
+    )
+
+    records = charge_bridge._polymer_template_records((spec,), product_atoms=product_atoms)
+
+    assert len(records) == 1
+    assert records[0].chain_id == "C"
+    assert records[0].residue_name == "NHX"
+    assert records[0].residue_number == 6
+    assert records[0].atom_name == "C060"
+    assert records[0].charge_e == pytest.approx(0.125)
 
 
 def test_bridge_validates_charged_sdf_atom_order(tmp_path):
