@@ -40,6 +40,7 @@ from polyzymd.builders.conjugation.structure.pdb import (
     PlacedPolymerFragment,
     write_crosslinked_pdb,
 )
+from polyzymd.builders.conjugation.validation import build_conjugate_validation_report
 
 _ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 _SHIFT_PADDING_ANGSTROM = 10.0
@@ -702,6 +703,7 @@ class ModifierConstructionResult(BaseModel):
     local_minimization: Any | None = None
     product_state_pablo_library: Any | None = Field(default=None, exclude=True)
     crosslinked_pdb_path: Path
+    validation_report_path: Path | None = None
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
 
 
@@ -813,6 +815,15 @@ def construct_modifier_linked_protein(
         if not smoke_result.success:
             raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
 
+    validation_report = build_conjugate_validation_report(
+        product_pdb_path=crosslinked_pdb_path,
+        resolved_plans=(resolved_plan,),
+        assembly=assembly_result,
+        output_dir=artifact_dir,
+        interchange=parameterization_result.interchange,
+        write=True,
+    )
+
     return ModifierConstructionResult(
         output_dir=artifact_dir,
         resolved_plan=resolved_plan,
@@ -823,6 +834,7 @@ def construct_modifier_linked_protein(
         parameterization=parameterization_result,
         smoke=smoke_result,
         crosslinked_pdb_path=crosslinked_pdb_path,
+        validation_report_path=validation_report.report_path,
         diagnostics=("Modifier-linked protein construction POC completed",),
     )
 
@@ -939,6 +951,15 @@ def construct_explicit_pdb_linkage(
         if not smoke_result.success:
             raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
 
+    validation_report = build_conjugate_validation_report(
+        product_pdb_path=crosslinked_pdb_path,
+        resolved_plans=(resolved_plan,),
+        assembly=assembly_result,
+        output_dir=artifact_dir,
+        interchange=parameterization_result.interchange,
+        write=True,
+    )
+
     return ModifierConstructionResult(
         output_dir=artifact_dir,
         resolved_plan=resolved_plan,
@@ -949,6 +970,7 @@ def construct_explicit_pdb_linkage(
         parameterization=parameterization_result,
         smoke=smoke_result,
         crosslinked_pdb_path=crosslinked_pdb_path,
+        validation_report_path=validation_report.report_path,
         diagnostics=("Explicit PDB linkage construction completed",),
     )
 
