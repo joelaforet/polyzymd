@@ -32,7 +32,7 @@ class VacuumSmokeSettings(BaseModel):
 
     minimization_max_iterations: int = Field(100, ge=0)
     minimization_tolerance_kj_mol_nm: float = Field(10.0, gt=0)
-    nvt_steps: int = Field(10, ge=1)
+    nvt_steps: int = Field(10, ge=0)
     temperature_kelvin: float = Field(50.0, gt=0)
     timestep_femtoseconds: float = Field(0.25, gt=0)
     friction_per_picosecond: float = Field(10.0, gt=0)
@@ -41,8 +41,101 @@ class VacuumSmokeSettings(BaseModel):
     max_position_span_nm: float = Field(50.0, gt=0)
     platform_name: str | None = None
     smoke_json_name: str = "vacuum_smoke.json"
+    diagnostics_json_name: str = "restrained_smoke_diagnostics.json"
+    pre_smoke_geometry_json_name: str = "pre_smoke_geometry.json"
+    failure_json_name: str = "vacuum_smoke_failure.json"
+    failed_pdb_name: str = "assembled_failed_smoke.pdb"
     minimized_pdb_name: str = "assembled_minimized.pdb"
     equilibrated_pdb_name: str = "assembled_equilibrated.pdb"
+
+
+class GeometryPairDiagnostic(BaseModel):
+    """Diagnostic for a close contact or suspicious bonded distance."""
+
+    atom_i: int
+    atom_j: int
+    distance_nm: float
+    distance_angstrom: float
+    atom_i_identity: str | None = None
+    atom_j_identity: str | None = None
+    category: str
+
+
+class CrosslinkBondDiagnostic(BaseModel):
+    """Measured crosslink bond length for one resolved attachment."""
+
+    attachment_id: str | None = None
+    attachment_index: int | None = None
+    reaction_name: str | None = None
+    protein_atom: str | None = None
+    modifier_atom: str | None = None
+    distance_angstrom: float | None = None
+    target_distance_angstrom: float | None = None
+    status: str = "measured"
+
+
+class SmokePhaseDiagnostics(BaseModel):
+    """Geometry and energy diagnostics for one restrained smoke phase."""
+
+    phase: str
+    coordinate_span_nm: float | None = None
+    coordinates_are_finite: bool
+    has_nan: bool
+    has_inf: bool
+    potential_energy_kj_mol: float | None = None
+    max_force_kj_mol_nm: float | None = None
+    min_heavy_heavy_distance_nm: float | None = None
+    min_h_heavy_distance_nm: float | None = None
+    close_contacts: tuple[GeometryPairDiagnostic, ...] = Field(default_factory=tuple)
+    bonded_distance_outliers: tuple[GeometryPairDiagnostic, ...] = Field(default_factory=tuple)
+    crosslink_bonds: tuple[CrosslinkBondDiagnostic, ...] = Field(default_factory=tuple)
+
+
+class RestrainedSmokeDiagnostics(BaseModel):
+    """Full diagnostic report for restrained vacuum minimization and smoke MD."""
+
+    success: bool
+    first_invalid_phase: str | None = None
+    platform_name: str | None = None
+    restrained_atom_count: int = 0
+    settings: dict[str, Any] = Field(default_factory=dict)
+    phases: tuple[SmokePhaseDiagnostics, ...] = Field(default_factory=tuple)
+    smoke_segments: tuple[SmokePhaseDiagnostics, ...] = Field(default_factory=tuple)
+    error_type: str | None = None
+    error_message: str | None = None
+    traceback: str | None = None
+    json_path: Path | None = None
+
+    def write_json(self, path: Path | str) -> Path:
+        """Write diagnostics as JSON and return the output path."""
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.model_copy(update={"json_path": target}).model_dump(mode="json")
+        target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        self.json_path = target
+        return target
+
+
+class PreSmokeGeometryDiagnostics(BaseModel):
+    """Geometry diagnostics collected immediately before OpenMM smoke relaxation."""
+
+    atom_count: int
+    coordinate_span_nm: float
+    min_heavy_heavy_distance_nm: float | None = None
+    min_h_heavy_distance_nm: float | None = None
+    close_contacts: tuple[GeometryPairDiagnostic, ...] = Field(default_factory=tuple)
+    bonded_distance_outliers: tuple[GeometryPairDiagnostic, ...] = Field(default_factory=tuple)
+    crosslink_bonds: tuple[CrosslinkBondDiagnostic, ...] = Field(default_factory=tuple)
+    json_path: Path | None = None
+
+    def write_json(self, path: Path | str) -> Path:
+        """Write diagnostics as JSON and return the output path."""
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.model_copy(update={"json_path": target}).model_dump(mode="json")
+        target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        self.json_path = target
+        return target
 
 
 class VacuumSmokeResult(BaseModel):
@@ -51,14 +144,22 @@ class VacuumSmokeResult(BaseModel):
     success: bool
     output_dir: Path
     smoke_json_path: Path
+    diagnostics_json_path: Path | None = None
+    pre_smoke_geometry_json_path: Path | None = None
+    failure_json_path: Path | None = None
     minimized_pdb_path: Path | None = None
     equilibrated_pdb_path: Path | None = None
+    failed_pdb_path: Path | None = None
     platform_name: str
     restrained_atom_count: int
     energy_before_min_kj_mol: float
     energy_after_min_kj_mol: float
     energy_before_nvt_kj_mol: float
     energy_after_nvt_kj_mol: float
+    minimized_coordinate_span_nm: float | None = None
+    equilibrated_coordinate_span_nm: float | None = None
+    force_group_energies_before_min_kj_mol: dict[str, float] = Field(default_factory=dict)
+    force_group_energies_after_min_kj_mol: dict[str, float] = Field(default_factory=dict)
     nvt_steps: int
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
 
@@ -69,6 +170,8 @@ def run_restrained_vacuum_smoke(
     *,
     protein_heavy_atom_indices: tuple[int, ...] | None = None,
     settings: VacuumSmokeSettings | None = None,
+    crosslinked_pdb_path: Path | str | None = None,
+    attachment_specs: tuple[Any, ...] = (),
 ) -> VacuumSmokeResult:
     """Run restrained minimization and very short vacuum NVT MD.
 
@@ -85,6 +188,12 @@ def run_restrained_vacuum_smoke(
         restrict the smoke to protein-only restraints.
     settings : VacuumSmokeSettings or None, optional
         Smoke settings, by default ``None``.
+    crosslinked_pdb_path : pathlib.Path, str, or None, optional
+        Product PDB used to measure resolved crosslink lengths, by default
+        ``None``.
+    attachment_specs : tuple of Any, optional
+        Resolved attachment build specs used for crosslink-specific diagnostics,
+        by default ``()``.
 
     Returns
     -------
@@ -107,7 +216,7 @@ def run_restrained_vacuum_smoke(
             "environment such as cuda-12-4 when GPU resources are allocated."
         ) from exc
 
-    smoke_settings = settings or VacuumSmokeSettings()
+    smoke_settings = _smoke_settings_from_environment(settings or VacuumSmokeSettings())
     artifact_dir = Path(output_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
@@ -123,105 +232,275 @@ def run_restrained_vacuum_smoke(
 
     platform = _select_platform(openmm, smoke_settings.platform_name)
     platform_name = platform.getName() if hasattr(platform, "getName") else str(platform)
+    diagnostics_path = artifact_dir / smoke_settings.diagnostics_json_name
+    phase_diagnostics: list[SmokePhaseDiagnostics] = []
+    smoke_segment_diagnostics: list[SmokePhaseDiagnostics] = []
+    first_invalid_phase: str | None = None
 
-    system_min = interchange.to_openmm_system()
-    _add_positional_restraints(
-        system_min,
+    current_positions = initial_positions
+    energy_before_min = math.nan
+    energy_after_min = math.nan
+    energy_before_nvt = math.nan
+    energy_after_nvt = math.nan
+    minimized_pdb: Path | None = None
+    equilibrated_pdb: Path | None = None
+    failure_json_path: Path | None = None
+    failed_pdb_path: Path | None = None
+    force_energies_before: dict[str, float] = {}
+    force_energies_after: dict[str, float] = {}
+    pre_smoke = analyze_pre_smoke_geometry(
+        topology,
         initial_positions,
-        restrained_indices,
-        smoke_settings.protein_heavy_restraint_k_kj_mol_nm2,
-        openmm,
         openmm_unit,
+        crosslinked_pdb_path=crosslinked_pdb_path,
+        attachment_specs=attachment_specs,
     )
-    integrator_min = openmm.VerletIntegrator(0.001 * openmm_unit.picoseconds)
-    simulation_min = openmm_app.Simulation(topology, system_min, integrator_min, platform)
-    simulation_min.context.setPositions(initial_positions)
-
-    energy_before_min = _state_energy_kj_mol(
-        simulation_min.context.getState(getEnergy=True), openmm_unit
-    )
-    validate_finite_energy(energy_before_min, label="energy_before_min_kj_mol")
-    openmm.LocalEnergyMinimizer.minimize(
-        simulation_min.context,
-        tolerance=smoke_settings.minimization_tolerance_kj_mol_nm
-        * openmm_unit.kilojoule_per_mole
-        / openmm_unit.nanometer,
-        maxIterations=smoke_settings.minimization_max_iterations,
-    )
-    state_after_min = simulation_min.context.getState(getEnergy=True, getPositions=True)
-    energy_after_min = _state_energy_kj_mol(state_after_min, openmm_unit)
-    minimized_positions = state_after_min.getPositions(asNumpy=True)
-    validate_finite_energy(energy_after_min, label="energy_after_min_kj_mol")
-    minimized_span_nm = validate_finite_positions(
-        minimized_positions,
-        openmm_unit,
-        label="minimized_positions",
-        max_span_nm=smoke_settings.max_position_span_nm,
+    pre_smoke_path = artifact_dir / smoke_settings.pre_smoke_geometry_json_name
+    pre_smoke.write_json(pre_smoke_path)
+    phase_diagnostics.append(
+        _smoke_phase_diagnostics(
+            "before_minimization",
+            topology,
+            initial_positions,
+            openmm_unit,
+            potential_energy_kj_mol=None,
+            attachment_specs=attachment_specs,
+        )
     )
 
-    minimized_pdb = artifact_dir / smoke_settings.minimized_pdb_name
-    _write_openmm_pdb(openmm_app, topology, minimized_positions, minimized_pdb)
+    try:
+        system_min = interchange.to_openmm_system()
+        group_labels_min = _assign_force_groups(system_min)
+        _add_positional_restraints(
+            system_min,
+            initial_positions,
+            restrained_indices,
+            smoke_settings.protein_heavy_restraint_k_kj_mol_nm2,
+            openmm,
+            openmm_unit,
+        )
+        group_labels_min = _force_group_labels(system_min, existing_labels=group_labels_min)
+        integrator_min = openmm.VerletIntegrator(0.001 * openmm_unit.picoseconds)
+        simulation_min = openmm_app.Simulation(topology, system_min, integrator_min, platform)
+        simulation_min.context.setPositions(initial_positions)
 
-    system_nvt = interchange.to_openmm_system()
-    _add_positional_restraints(
-        system_nvt,
-        minimized_positions,
-        restrained_indices,
-        smoke_settings.protein_heavy_restraint_k_kj_mol_nm2,
-        openmm,
-        openmm_unit,
-    )
-    integrator_nvt = openmm.LangevinMiddleIntegrator(
-        smoke_settings.temperature_kelvin * openmm_unit.kelvin,
-        smoke_settings.friction_per_picosecond / openmm_unit.picosecond,
-        smoke_settings.timestep_femtoseconds * openmm_unit.femtosecond,
-    )
-    simulation_nvt = openmm_app.Simulation(topology, system_nvt, integrator_nvt, platform)
-    simulation_nvt.context.setPositions(minimized_positions)
-    simulation_nvt.context.setVelocitiesToTemperature(
-        smoke_settings.temperature_kelvin * openmm_unit.kelvin
-    )
+        energy_before_min = _state_energy_kj_mol(
+            simulation_min.context.getState(getEnergy=True), openmm_unit
+        )
+        validate_finite_energy(energy_before_min, label="energy_before_min_kj_mol")
+        phase_diagnostics[-1].potential_energy_kj_mol = float(energy_before_min)
+        force_energies_before = _force_group_energies(
+            simulation_min.context,
+            group_labels_min,
+            openmm_unit,
+        )
+        openmm.LocalEnergyMinimizer.minimize(
+            simulation_min.context,
+            tolerance=smoke_settings.minimization_tolerance_kj_mol_nm
+            * openmm_unit.kilojoule_per_mole
+            / openmm_unit.nanometer,
+            maxIterations=smoke_settings.minimization_max_iterations,
+        )
+        state_after_min = simulation_min.context.getState(
+            getEnergy=True, getPositions=True, getForces=True
+        )
+        energy_after_min = _state_energy_kj_mol(state_after_min, openmm_unit)
+        minimized_positions = state_after_min.getPositions(asNumpy=True)
+        current_positions = minimized_positions
+        validate_finite_energy(energy_after_min, label="energy_after_min_kj_mol")
+        phase_diagnostics.append(
+            _smoke_phase_diagnostics(
+                "after_minimization",
+                topology,
+                minimized_positions,
+                openmm_unit,
+                potential_energy_kj_mol=energy_after_min,
+                max_force_kj_mol_nm=_state_max_force_kj_mol_nm(state_after_min, openmm_unit),
+                attachment_specs=attachment_specs,
+            )
+        )
+        minimized_span_nm = validate_finite_positions(
+            minimized_positions,
+            openmm_unit,
+            label="minimized_positions",
+            max_span_nm=smoke_settings.max_position_span_nm,
+        )
+        force_energies_after = _force_group_energies(
+            simulation_min.context,
+            group_labels_min,
+            openmm_unit,
+        )
 
-    energy_before_nvt = _state_energy_kj_mol(
-        simulation_nvt.context.getState(getEnergy=True), openmm_unit
-    )
-    validate_finite_energy(energy_before_nvt, label="energy_before_nvt_kj_mol")
-    if smoke_settings.nvt_steps:
-        simulation_nvt.step(smoke_settings.nvt_steps)
-    state_after_nvt = simulation_nvt.context.getState(getEnergy=True, getPositions=True)
-    energy_after_nvt = _state_energy_kj_mol(state_after_nvt, openmm_unit)
-    equilibrated_positions = state_after_nvt.getPositions(asNumpy=True)
-    validate_finite_energy(energy_after_nvt, label="energy_after_nvt_kj_mol")
-    equilibrated_span_nm = validate_finite_positions(
-        equilibrated_positions,
-        openmm_unit,
-        label="equilibrated_positions",
-        max_span_nm=smoke_settings.max_position_span_nm,
-    )
+        minimized_pdb = artifact_dir / smoke_settings.minimized_pdb_name
+        _write_openmm_pdb(openmm_app, topology, minimized_positions, minimized_pdb)
 
-    equilibrated_pdb = artifact_dir / smoke_settings.equilibrated_pdb_name
-    _write_openmm_pdb(openmm_app, topology, equilibrated_positions, equilibrated_pdb)
+        if smoke_settings.nvt_steps == 0:
+            energy_before_nvt = energy_after_min
+            energy_after_nvt = energy_after_min
+            equilibrated_positions = minimized_positions
+            equilibrated_span_nm = minimized_span_nm
+        else:
+            system_nvt = interchange.to_openmm_system()
+            _add_positional_restraints(
+                system_nvt,
+                minimized_positions,
+                restrained_indices,
+                smoke_settings.protein_heavy_restraint_k_kj_mol_nm2,
+                openmm,
+                openmm_unit,
+            )
+            integrator_nvt = openmm.LangevinMiddleIntegrator(
+                smoke_settings.temperature_kelvin * openmm_unit.kelvin,
+                smoke_settings.friction_per_picosecond / openmm_unit.picosecond,
+                smoke_settings.timestep_femtoseconds * openmm_unit.femtosecond,
+            )
+            simulation_nvt = openmm_app.Simulation(topology, system_nvt, integrator_nvt, platform)
+            simulation_nvt.context.setPositions(minimized_positions)
+            simulation_nvt.context.setVelocitiesToTemperature(
+                smoke_settings.temperature_kelvin * openmm_unit.kelvin
+            )
+
+            state_before_nvt = simulation_nvt.context.getState(getEnergy=True, getPositions=True)
+            energy_before_nvt = _state_energy_kj_mol(state_before_nvt, openmm_unit)
+            validate_finite_energy(energy_before_nvt, label="energy_before_nvt_kj_mol")
+            phase_diagnostics.append(
+                _smoke_phase_diagnostics(
+                    "before_md",
+                    topology,
+                    state_before_nvt.getPositions(asNumpy=True),
+                    openmm_unit,
+                    potential_energy_kj_mol=energy_before_nvt,
+                    attachment_specs=attachment_specs,
+                )
+            )
+            for step_index in range(smoke_settings.nvt_steps):
+                simulation_nvt.step(1)
+                segment_state = simulation_nvt.context.getState(getEnergy=True, getPositions=True)
+                segment_energy = _state_energy_kj_mol(segment_state, openmm_unit)
+                segment_positions = segment_state.getPositions(asNumpy=True)
+                segment = _smoke_phase_diagnostics(
+                    f"after_md_step_{step_index + 1}",
+                    topology,
+                    segment_positions,
+                    openmm_unit,
+                    potential_energy_kj_mol=segment_energy,
+                    attachment_specs=attachment_specs,
+                )
+                smoke_segment_diagnostics.append(segment)
+                if first_invalid_phase is None:
+                    first_invalid_phase = _invalid_phase_reason(
+                        segment,
+                        max_span_nm=smoke_settings.max_position_span_nm,
+                    )
+            state_after_nvt = simulation_nvt.context.getState(getEnergy=True, getPositions=True)
+            energy_after_nvt = _state_energy_kj_mol(state_after_nvt, openmm_unit)
+            equilibrated_positions = state_after_nvt.getPositions(asNumpy=True)
+            current_positions = equilibrated_positions
+            validate_finite_energy(energy_after_nvt, label="energy_after_nvt_kj_mol")
+            phase_diagnostics.append(
+                _smoke_phase_diagnostics(
+                    "after_md",
+                    topology,
+                    equilibrated_positions,
+                    openmm_unit,
+                    potential_energy_kj_mol=energy_after_nvt,
+                    attachment_specs=attachment_specs,
+                )
+            )
+            if first_invalid_phase is None:
+                first_invalid_phase = _invalid_phase_reason(
+                    phase_diagnostics[-1],
+                    max_span_nm=smoke_settings.max_position_span_nm,
+                )
+            equilibrated_span_nm = validate_finite_positions(
+                equilibrated_positions,
+                openmm_unit,
+                label="equilibrated_positions",
+                max_span_nm=smoke_settings.max_position_span_nm,
+            )
+    except Exception as exc:
+        if first_invalid_phase is None:
+            first_invalid_phase = _first_invalid_phase(
+                (*phase_diagnostics, *smoke_segment_diagnostics),
+                max_span_nm=smoke_settings.max_position_span_nm,
+            )
+        failed_pdb_path = artifact_dir / smoke_settings.failed_pdb_name
+        _safe_write_failed_pdb(openmm_app, topology, current_positions, failed_pdb_path)
+        _write_restrained_smoke_diagnostics(
+            diagnostics_path,
+            success=False,
+            settings=smoke_settings,
+            platform_name=platform_name,
+            restrained_atom_count=len(restrained_indices),
+            phases=tuple(phase_diagnostics),
+            smoke_segments=tuple(smoke_segment_diagnostics),
+            first_invalid_phase=first_invalid_phase,
+            exc=exc,
+        )
+        failure_json_path = _write_vacuum_smoke_failure(
+            artifact_dir / smoke_settings.failure_json_name,
+            exc=exc,
+            settings=smoke_settings,
+            pre_smoke=pre_smoke,
+            energy_before_min=energy_before_min,
+            energy_after_min=energy_after_min,
+            energy_before_nvt=energy_before_nvt,
+            energy_after_nvt=energy_after_nvt,
+            failed_pdb_path=failed_pdb_path,
+            diagnostics_path=diagnostics_path,
+            first_invalid_phase=first_invalid_phase,
+        )
+        raise
+
+    if smoke_settings.nvt_steps == 0:
+        equilibrated_pdb = minimized_pdb
+    else:
+        equilibrated_pdb = artifact_dir / smoke_settings.equilibrated_pdb_name
+        _write_openmm_pdb(openmm_app, topology, equilibrated_positions, equilibrated_pdb)
 
     result = VacuumSmokeResult(
         success=True,
         output_dir=artifact_dir,
         smoke_json_path=artifact_dir / smoke_settings.smoke_json_name,
+        diagnostics_json_path=diagnostics_path,
+        pre_smoke_geometry_json_path=pre_smoke_path,
+        failure_json_path=failure_json_path,
         minimized_pdb_path=minimized_pdb,
         equilibrated_pdb_path=equilibrated_pdb,
+        failed_pdb_path=failed_pdb_path,
         platform_name=platform_name,
         restrained_atom_count=len(restrained_indices),
         energy_before_min_kj_mol=float(energy_before_min),
         energy_after_min_kj_mol=float(energy_after_min),
         energy_before_nvt_kj_mol=float(energy_before_nvt),
         energy_after_nvt_kj_mol=float(energy_after_nvt),
+        minimized_coordinate_span_nm=minimized_span_nm,
+        equilibrated_coordinate_span_nm=equilibrated_span_nm,
+        force_group_energies_before_min_kj_mol=force_energies_before,
+        force_group_energies_after_min_kj_mol=force_energies_after,
         nvt_steps=smoke_settings.nvt_steps,
         diagnostics=(
             "Restrained vacuum OpenMM smoke completed with finite state values",
             f"Maximum minimized coordinate span was {minimized_span_nm:.3f} nm",
-            f"Maximum equilibrated coordinate span was {equilibrated_span_nm:.3f} nm",
+            (
+                "NVT dynamics were skipped because nvt_steps=0"
+                if smoke_settings.nvt_steps == 0
+                else f"Maximum equilibrated coordinate span was {equilibrated_span_nm:.3f} nm"
+            ),
         ),
     )
     result.smoke_json_path.write_text(json.dumps(result.model_dump(mode="json"), indent=2) + "\n")
+    _write_restrained_smoke_diagnostics(
+        diagnostics_path,
+        success=True,
+        settings=smoke_settings,
+        platform_name=platform_name,
+        restrained_atom_count=len(restrained_indices),
+        phases=tuple(phase_diagnostics),
+        smoke_segments=tuple(smoke_segment_diagnostics),
+        first_invalid_phase=None,
+        exc=None,
+    )
     return result
 
 
@@ -275,6 +554,352 @@ def validate_finite_positions(
     return span_nm
 
 
+def analyze_pre_smoke_geometry(
+    topology: Any,
+    positions: Any,
+    unit_module: Any | None = None,
+    *,
+    crosslinked_pdb_path: Path | str | None = None,
+    attachment_specs: tuple[Any, ...] = (),
+    heavy_heavy_close_nm: float = 0.12,
+    h_heavy_close_nm: float = 0.08,
+    max_pairs: int = 50,
+) -> PreSmokeGeometryDiagnostics:
+    """Measure geometry diagnostics before restrained vacuum smoke.
+
+    Parameters
+    ----------
+    topology : Any
+        OpenMM topology-like object with atoms and bonds.
+    positions : Any
+        Coordinates in nanometers or an OpenMM-compatible quantity.
+    unit_module : Any or None, optional
+        OpenMM unit module used for coordinate conversion, by default ``None``.
+    crosslinked_pdb_path : pathlib.Path, str, or None, optional
+        Product PDB used to measure crosslink lengths, by default ``None``.
+    attachment_specs : tuple of Any, optional
+        Attachment specs carrying resolved plans, by default ``()``.
+    heavy_heavy_close_nm : float, optional
+        Heavy-heavy close-contact threshold, by default 0.12.
+    h_heavy_close_nm : float, optional
+        Hydrogen-heavy close-contact threshold, by default 0.08.
+    max_pairs : int, optional
+        Maximum number of pair diagnostics to retain per category, by default 50.
+
+    Returns
+    -------
+    PreSmokeGeometryDiagnostics
+        Structured geometry report.
+    """
+    coords = _positions_to_numpy(positions, unit_module)
+    if coords.ndim != 2 or coords.shape[1] != 3:
+        raise RuntimeError(f"Pre-smoke coordinates have invalid shape: {coords.shape}")
+    if not np.all(np.isfinite(coords)):
+        raise RuntimeError("Pre-smoke coordinates contain non-finite values")
+    atom_records = tuple(topology.atoms())
+    identities = tuple(_topology_atom_identity(atom) for atom in atom_records)
+    heavy = tuple(_is_heavy_atom(atom) for atom in atom_records)
+    bonded_pairs = _topology_bond_index_pairs(topology)
+    bonded_set = {tuple(sorted(pair)) for pair in bonded_pairs}
+    min_heavy_heavy, min_h_heavy, contacts = _close_contact_diagnostics(
+        coords,
+        heavy,
+        identities,
+        bonded_set=bonded_set,
+        heavy_heavy_close_nm=heavy_heavy_close_nm,
+        h_heavy_close_nm=h_heavy_close_nm,
+        max_pairs=max_pairs,
+    )
+    outliers = _bonded_distance_outliers(coords, identities, bonded_pairs, max_pairs=max_pairs)
+    crosslinks = _crosslink_bond_diagnostics(crosslinked_pdb_path, attachment_specs)
+    return PreSmokeGeometryDiagnostics(
+        atom_count=int(coords.shape[0]),
+        coordinate_span_nm=float(np.max(np.ptp(coords, axis=0))) if coords.size else 0.0,
+        min_heavy_heavy_distance_nm=min_heavy_heavy,
+        min_h_heavy_distance_nm=min_h_heavy,
+        close_contacts=tuple(contacts),
+        bonded_distance_outliers=tuple(outliers),
+        crosslink_bonds=tuple(crosslinks),
+    )
+
+
+def _smoke_phase_diagnostics(
+    phase: str,
+    topology: Any,
+    positions: Any,
+    unit_module: Any | None,
+    *,
+    potential_energy_kj_mol: float | None,
+    max_force_kj_mol_nm: float | None = None,
+    attachment_specs: tuple[Any, ...] = (),
+) -> SmokePhaseDiagnostics:
+    """Collect finite, span, contact, bond, and linkage diagnostics for a phase."""
+    coords = _positions_to_numpy(positions, unit_module)
+    has_nan = bool(np.any(np.isnan(coords))) if coords.size else False
+    has_inf = bool(np.any(np.isinf(coords))) if coords.size else False
+    finite = bool(np.all(np.isfinite(coords))) if coords.size else False
+    span_nm = None
+    min_heavy_heavy = None
+    min_h_heavy = None
+    contacts: list[GeometryPairDiagnostic] = []
+    outliers: list[GeometryPairDiagnostic] = []
+    crosslinks: list[CrosslinkBondDiagnostic] = []
+    if finite and coords.ndim == 2 and coords.shape[1] == 3:
+        atom_records = tuple(topology.atoms())
+        identities = tuple(_topology_atom_identity(atom) for atom in atom_records)
+        heavy = tuple(_is_heavy_atom(atom) for atom in atom_records)
+        bonded_pairs = _topology_bond_index_pairs(topology)
+        bonded_set = {tuple(sorted(pair)) for pair in bonded_pairs}
+        span_nm = float(np.max(np.ptp(coords, axis=0))) if coords.size else 0.0
+        min_heavy_heavy, min_h_heavy, contacts = _close_contact_diagnostics(
+            coords,
+            heavy,
+            identities,
+            bonded_set=bonded_set,
+            heavy_heavy_close_nm=0.12,
+            h_heavy_close_nm=0.08,
+            max_pairs=50,
+        )
+        outliers = _bonded_distance_outliers(coords, identities, bonded_pairs, max_pairs=50)
+        crosslinks = _crosslink_bond_diagnostics_from_topology(topology, coords, attachment_specs)
+    return SmokePhaseDiagnostics(
+        phase=phase,
+        coordinate_span_nm=span_nm,
+        coordinates_are_finite=finite,
+        has_nan=has_nan,
+        has_inf=has_inf,
+        potential_energy_kj_mol=potential_energy_kj_mol,
+        max_force_kj_mol_nm=max_force_kj_mol_nm,
+        min_heavy_heavy_distance_nm=min_heavy_heavy,
+        min_h_heavy_distance_nm=min_h_heavy,
+        close_contacts=tuple(contacts),
+        bonded_distance_outliers=tuple(outliers),
+        crosslink_bonds=tuple(crosslinks),
+    )
+
+
+def _invalid_phase_reason(
+    phase: SmokePhaseDiagnostics,
+    *,
+    max_span_nm: float,
+) -> str | None:
+    """Return the phase name when coordinates or energies first become invalid."""
+    if not phase.coordinates_are_finite or phase.has_nan or phase.has_inf:
+        return phase.phase
+    if phase.coordinate_span_nm is not None and phase.coordinate_span_nm > max_span_nm:
+        return phase.phase
+    energy = phase.potential_energy_kj_mol
+    if energy is not None and not math.isfinite(float(energy)):
+        return phase.phase
+    return None
+
+
+def _first_invalid_phase(
+    phases: tuple[SmokePhaseDiagnostics, ...],
+    *,
+    max_span_nm: float,
+) -> str | None:
+    """Return the first invalid phase name from ordered diagnostics."""
+    for phase in phases:
+        reason = _invalid_phase_reason(phase, max_span_nm=max_span_nm)
+        if reason is not None:
+            return reason
+    return None
+
+
+def _close_contact_diagnostics(
+    coords: np.ndarray,
+    heavy: tuple[bool, ...],
+    identities: tuple[str, ...],
+    *,
+    bonded_set: set[tuple[int, int]],
+    heavy_heavy_close_nm: float,
+    h_heavy_close_nm: float,
+    max_pairs: int,
+) -> tuple[float | None, float | None, list[GeometryPairDiagnostic]]:
+    """Return minimum nonbonded distances and close-contact pairs."""
+    min_heavy_heavy: float | None = None
+    min_h_heavy: float | None = None
+    contacts: list[GeometryPairDiagnostic] = []
+    for i in range(len(coords)):
+        for j in range(i + 1, len(coords)):
+            if (i, j) in bonded_set:
+                continue
+            distance_nm = float(np.linalg.norm(coords[i] - coords[j]))
+            both_heavy = heavy[i] and heavy[j]
+            one_h_one_heavy = heavy[i] != heavy[j]
+            if both_heavy:
+                min_heavy_heavy = (
+                    distance_nm if min_heavy_heavy is None else min(min_heavy_heavy, distance_nm)
+                )
+            if one_h_one_heavy:
+                min_h_heavy = distance_nm if min_h_heavy is None else min(min_h_heavy, distance_nm)
+            category = None
+            if both_heavy and distance_nm < heavy_heavy_close_nm:
+                category = "heavy-heavy-close-contact"
+            elif one_h_one_heavy and distance_nm < h_heavy_close_nm:
+                category = "h-heavy-close-contact"
+            if category is not None and len(contacts) < max_pairs:
+                contacts.append(_pair_diagnostic(i, j, distance_nm, identities, category))
+    contacts.sort(key=lambda item: item.distance_nm)
+    return min_heavy_heavy, min_h_heavy, contacts
+
+
+def _bonded_distance_outliers(
+    coords: np.ndarray,
+    identities: tuple[str, ...],
+    bonded_pairs: tuple[tuple[int, int], ...],
+    *,
+    max_pairs: int,
+) -> list[GeometryPairDiagnostic]:
+    """Return topology bond distances outside broad covalent bounds."""
+    outliers: list[GeometryPairDiagnostic] = []
+    for atom_i, atom_j in bonded_pairs:
+        if atom_i >= len(coords) or atom_j >= len(coords):
+            continue
+        distance_nm = float(np.linalg.norm(coords[atom_i] - coords[atom_j]))
+        if distance_nm < 0.06 or distance_nm > 0.25:
+            outliers.append(
+                _pair_diagnostic(atom_i, atom_j, distance_nm, identities, "bonded-distance-outlier")
+            )
+    outliers.sort(key=lambda item: abs(item.distance_nm - 0.15), reverse=True)
+    return outliers[:max_pairs]
+
+
+def _crosslink_bond_diagnostics(
+    crosslinked_pdb_path: Path | str | None,
+    attachment_specs: tuple[Any, ...],
+) -> list[CrosslinkBondDiagnostic]:
+    """Measure resolved crosslink bonds from the emitted product PDB."""
+    if crosslinked_pdb_path is None or not attachment_specs:
+        return []
+    try:
+        atoms = parse_pdb_atom_records(Path(crosslinked_pdb_path))
+    except (OSError, ValueError) as exc:
+        return [CrosslinkBondDiagnostic(status=f"unavailable: {exc}")]
+    diagnostics: list[CrosslinkBondDiagnostic] = []
+    for spec in attachment_specs:
+        plan = getattr(spec, "resolved_plan", spec)
+        protein_atom = getattr(plan, "protein_link_atom", None)
+        modifier_atom = getattr(plan, "modifier_link_atom", None)
+        product_protein = _matching_product_atom(atoms, protein_atom, plan, role="protein")
+        product_modifier = _matching_product_atom(atoms, modifier_atom, plan, role="modifier")
+        distance = None
+        status = "measured"
+        if product_protein is None or product_modifier is None:
+            status = "missing product atom"
+        else:
+            distance = _distance(_atom_position(product_protein), _atom_position(product_modifier))
+        diagnostics.append(
+            CrosslinkBondDiagnostic(
+                attachment_id=getattr(spec, "attachment_id", None),
+                attachment_index=getattr(spec, "attachment_index", None),
+                reaction_name=getattr(spec, "reaction_name", None),
+                protein_atom=_pdb_atom_identity(product_protein or protein_atom),
+                modifier_atom=_pdb_atom_identity(product_modifier or modifier_atom),
+                distance_angstrom=distance,
+                target_distance_angstrom=getattr(plan, "target_bond_length_angstrom", None),
+                status=status,
+            )
+        )
+    return diagnostics
+
+
+def _crosslink_bond_diagnostics_from_topology(
+    topology: Any,
+    coords_nm: np.ndarray,
+    attachment_specs: tuple[Any, ...],
+) -> list[CrosslinkBondDiagnostic]:
+    """Measure resolved crosslink bond lengths from topology-ordered coordinates."""
+    if not attachment_specs:
+        return []
+    topology_atoms = tuple(topology.atoms())
+    diagnostics: list[CrosslinkBondDiagnostic] = []
+    for spec in attachment_specs:
+        plan = getattr(spec, "resolved_plan", spec)
+        protein_atom = getattr(plan, "protein_link_atom", None)
+        modifier_atom = getattr(plan, "modifier_link_atom", None)
+        protein_index = _matching_topology_atom_index(
+            topology_atoms,
+            protein_atom,
+            plan,
+            role="protein",
+        )
+        modifier_index = _matching_topology_atom_index(
+            topology_atoms,
+            modifier_atom,
+            plan,
+            role="modifier",
+        )
+        distance = None
+        status = "measured"
+        if protein_index is None or modifier_index is None:
+            status = "missing topology atom"
+        elif protein_index >= len(coords_nm) or modifier_index >= len(coords_nm):
+            status = "coordinate index out of range"
+        else:
+            distance = float(np.linalg.norm(coords_nm[protein_index] - coords_nm[modifier_index])) * 10.0
+        diagnostics.append(
+            CrosslinkBondDiagnostic(
+                attachment_id=getattr(spec, "attachment_id", None),
+                attachment_index=getattr(spec, "attachment_index", None),
+                reaction_name=getattr(spec, "reaction_name", None),
+                protein_atom=(
+                    _topology_atom_identity(topology_atoms[protein_index])
+                    if protein_index is not None and protein_index < len(topology_atoms)
+                    else _pdb_atom_identity(protein_atom)
+                ),
+                modifier_atom=(
+                    _topology_atom_identity(topology_atoms[modifier_index])
+                    if modifier_index is not None and modifier_index < len(topology_atoms)
+                    else _pdb_atom_identity(modifier_atom)
+                ),
+                distance_angstrom=distance,
+                target_distance_angstrom=getattr(plan, "target_bond_length_angstrom", None),
+                status=status,
+            )
+        )
+    return diagnostics
+
+
+def _matching_topology_atom_index(
+    topology_atoms: tuple[Any, ...],
+    source_atom: Any,
+    plan: Any,
+    *,
+    role: str,
+) -> int | None:
+    """Find a topology atom index corresponding to a resolved product link atom."""
+    if source_atom is None:
+        return None
+    target_resname = (
+        getattr(plan, "protein_product_residue_name", None)
+        if role == "protein"
+        else getattr(plan, "modifier_product_residue_name", None)
+    )
+    source_chain = str(getattr(source_atom, "chain_id", "") or "").strip()
+    source_number = getattr(source_atom, "residue_number", None)
+    source_insertion = str(getattr(source_atom, "insertion_code", "") or "").strip()
+    source_name = str(getattr(source_atom, "atom_name", "") or "").strip()
+    for atom in topology_atoms:
+        residue = getattr(atom, "residue", None)
+        chain = getattr(residue, "chain", None)
+        if source_chain and str(getattr(chain, "id", "") or "").strip() != source_chain:
+            continue
+        residue_id = str(getattr(residue, "id", "") or "").strip()
+        if source_number is not None and residue_id != str(source_number):
+            continue
+        if source_insertion and not residue_id.endswith(source_insertion):
+            continue
+        if target_resname and str(getattr(residue, "name", "") or "").upper() != str(
+            target_resname
+        ).upper():
+            continue
+        if str(getattr(atom, "name", "") or "").strip().upper() == source_name.upper():
+            return int(atom.index)
+    return None
+
+
 def _openmm_positions_from_interchange(interchange: Any, openmm_unit: Any) -> Any:
     """Extract OpenMM-compatible positions from an Interchange-like object."""
     for attr_name in ("positions",):
@@ -321,12 +946,309 @@ def _positions_to_numpy(positions: Any, unit_module: Any | None) -> np.ndarray:
     return np.asarray(positions, dtype=float)
 
 
+def _topology_bond_index_pairs(topology: Any) -> tuple[tuple[int, int], ...]:
+    """Return atom-index pairs from an OpenMM topology-like object."""
+    pairs: list[tuple[int, int]] = []
+    bonds = getattr(topology, "bonds", None)
+    if bonds is None:
+        return ()
+    for bond in bonds():
+        try:
+            atom_i, atom_j = bond
+            pairs.append((int(atom_i.index), int(atom_j.index)))
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return tuple(pairs)
+
+
+def _topology_atom_identity(atom: Any) -> str:
+    """Format an OpenMM atom-like object for diagnostics."""
+    residue = getattr(atom, "residue", None)
+    chain = getattr(residue, "chain", None)
+    chain_id = str(getattr(chain, "id", "") or "").strip()
+    residue_name = str(getattr(residue, "name", "") or "").strip()
+    residue_id = str(getattr(residue, "id", "") or "").strip()
+    atom_name = str(getattr(atom, "name", "") or "").strip()
+    atom_index = getattr(atom, "index", None)
+    return f"{atom_index}:{chain_id}:{residue_name}{residue_id}:{atom_name}"
+
+
+def _pair_diagnostic(
+    atom_i: int,
+    atom_j: int,
+    distance_nm: float,
+    identities: tuple[str, ...],
+    category: str,
+) -> GeometryPairDiagnostic:
+    """Build a pair diagnostic with atom identity text."""
+    return GeometryPairDiagnostic(
+        atom_i=atom_i,
+        atom_j=atom_j,
+        distance_nm=distance_nm,
+        distance_angstrom=distance_nm * 10.0,
+        atom_i_identity=identities[atom_i] if atom_i < len(identities) else None,
+        atom_j_identity=identities[atom_j] if atom_j < len(identities) else None,
+        category=category,
+    )
+
+
+def _matching_product_atom(
+    atoms: tuple[PdbAtomRecord, ...],
+    source_atom: Any,
+    plan: Any,
+    *,
+    role: str,
+) -> PdbAtomRecord | None:
+    """Find a product PDB atom corresponding to a resolved link atom."""
+    if source_atom is None:
+        return None
+    target_resname = (
+        getattr(plan, "protein_product_residue_name", None)
+        if role == "protein"
+        else getattr(plan, "modifier_product_residue_name", None)
+    )
+    source_chain = str(getattr(source_atom, "chain_id", "") or "").strip()
+    source_number = getattr(source_atom, "residue_number", None)
+    source_insertion = str(getattr(source_atom, "insertion_code", "") or "").strip()
+    source_name = str(getattr(source_atom, "atom_name", "") or "").strip()
+    for atom in atoms:
+        if source_chain and atom.chain_id.strip() != source_chain:
+            continue
+        if source_number is not None and atom.residue_number != source_number:
+            continue
+        if source_insertion and atom.insertion_code.strip() != source_insertion:
+            continue
+        if target_resname and atom.residue_name.strip().upper() != str(target_resname).upper():
+            continue
+        if atom.atom_name.strip().upper() == source_name.upper():
+            return atom
+    return None
+
+
+def _pdb_atom_identity(atom: Any | None) -> str | None:
+    """Format a PDB atom-like record for diagnostics."""
+    if atom is None:
+        return None
+    chain_id = str(getattr(atom, "chain_id", "") or "").strip()
+    residue_name = str(getattr(atom, "residue_name", "") or "").strip()
+    residue_number = getattr(atom, "residue_number", None)
+    atom_name = str(getattr(atom, "atom_name", "") or "").strip()
+    serial = getattr(atom, "serial", None)
+    return f"{serial}:{chain_id}:{residue_name}{residue_number}:{atom_name}"
+
+
+def _assign_force_groups(system: Any) -> dict[int, str]:
+    """Assign one force group per force when supported."""
+    labels: dict[int, str] = {}
+    try:
+        force_count = int(system.getNumForces())
+    except (AttributeError, TypeError, ValueError):
+        return labels
+    if force_count > 31:
+        return labels
+    for index in range(force_count):
+        force = system.getForce(index)
+        try:
+            force.setForceGroup(index)
+            labels[index] = _force_label(force, index)
+        except (AttributeError, ValueError):
+            continue
+    return labels
+
+
+def _force_group_labels(system: Any, *, existing_labels: dict[int, str]) -> dict[int, str]:
+    """Return force group labels after adding restraints."""
+    labels = dict(existing_labels)
+    try:
+        force_count = int(system.getNumForces())
+    except (AttributeError, TypeError, ValueError):
+        return labels
+    if force_count > 31:
+        return labels
+    for index in range(force_count):
+        force = system.getForce(index)
+        try:
+            group = int(force.getForceGroup())
+        except (AttributeError, TypeError, ValueError):
+            group = index
+            try:
+                force.setForceGroup(group)
+            except (AttributeError, ValueError):
+                continue
+        if group in labels and labels[group] != _force_label(force, index):
+            group = index
+            try:
+                force.setForceGroup(group)
+            except (AttributeError, ValueError):
+                continue
+        labels.setdefault(group, _force_label(force, index))
+    return labels
+
+
+def _force_label(force: Any, index: int) -> str:
+    """Return a stable diagnostic label for an OpenMM force."""
+    class_name = type(force).__name__
+    if "Bond" in class_name and "Nonbonded" not in class_name:
+        prefix = "bond"
+    elif "Angle" in class_name:
+        prefix = "angle"
+    elif "Torsion" in class_name:
+        prefix = "torsion"
+    elif "Nonbonded" in class_name:
+        prefix = "nonbonded"
+    elif "External" in class_name:
+        prefix = "restraint"
+    else:
+        prefix = "other"
+    return f"{prefix}:{index}:{class_name}"
+
+
+def _force_group_energies(
+    context: Any,
+    group_labels: dict[int, str],
+    openmm_unit: Any,
+) -> dict[str, float]:
+    """Return potential energies per OpenMM force group with graceful fallback."""
+    energies: dict[str, float] = {}
+    for group, label in sorted(group_labels.items()):
+        try:
+            state = context.getState(getEnergy=True, groups={group})
+            energies[label] = _state_energy_kj_mol(state, openmm_unit)
+        except Exception as exc:  # noqa: BLE001 - OpenMM errors vary by platform
+            LOGGER.debug("Could not collect force-group energy for %s: %s", label, exc)
+    return energies
+
+
+def _safe_write_failed_pdb(
+    openmm_app: Any,
+    topology: Any,
+    positions: Any,
+    output_path: Path,
+) -> None:
+    """Best-effort PDB writer used while handling smoke failures."""
+    try:
+        _write_openmm_pdb(openmm_app, topology, positions, output_path)
+    except Exception as exc:  # noqa: BLE001 - failure artifact writing is best effort
+        LOGGER.warning("Could not write failed smoke PDB %s: %s", output_path, exc)
+
+
+def _write_vacuum_smoke_failure(
+    output_path: Path,
+    *,
+    exc: BaseException,
+    settings: VacuumSmokeSettings,
+    pre_smoke: PreSmokeGeometryDiagnostics,
+    energy_before_min: float,
+    energy_after_min: float,
+    energy_before_nvt: float,
+    energy_after_nvt: float,
+    failed_pdb_path: Path | None,
+    diagnostics_path: Path | None = None,
+    first_invalid_phase: str | None = None,
+) -> Path:
+    """Write structured failure diagnostics for the vacuum smoke stage."""
+    payload = {
+        "success": False,
+        "error_type": type(exc).__name__,
+        "error_message": str(exc),
+        "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        "settings": settings.model_dump(mode="json"),
+        "energies_kj_mol": {
+            "before_min": energy_before_min if math.isfinite(energy_before_min) else None,
+            "after_min": energy_after_min if math.isfinite(energy_after_min) else None,
+            "before_nvt": energy_before_nvt if math.isfinite(energy_before_nvt) else None,
+            "after_nvt": energy_after_nvt if math.isfinite(energy_after_nvt) else None,
+        },
+        "pre_smoke_geometry": pre_smoke.model_dump(mode="json"),
+        "failed_pdb_path": str(failed_pdb_path) if failed_pdb_path is not None else None,
+        "diagnostics_json_path": str(diagnostics_path) if diagnostics_path is not None else None,
+        "first_invalid_phase": first_invalid_phase,
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return output_path
+
+
+def _write_restrained_smoke_diagnostics(
+    output_path: Path,
+    *,
+    success: bool,
+    settings: VacuumSmokeSettings,
+    platform_name: str,
+    restrained_atom_count: int,
+    phases: tuple[SmokePhaseDiagnostics, ...],
+    smoke_segments: tuple[SmokePhaseDiagnostics, ...],
+    first_invalid_phase: str | None,
+    exc: BaseException | None,
+) -> Path:
+    """Write the detailed restrained smoke diagnostic JSON sidecar."""
+    diagnostics = RestrainedSmokeDiagnostics(
+        success=success,
+        first_invalid_phase=first_invalid_phase,
+        platform_name=platform_name,
+        restrained_atom_count=restrained_atom_count,
+        settings=settings.model_dump(mode="json"),
+        phases=phases,
+        smoke_segments=smoke_segments,
+        error_type=type(exc).__name__ if exc is not None else None,
+        error_message=str(exc) if exc is not None else None,
+        traceback=(
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            if exc is not None
+            else None
+        ),
+    )
+    return diagnostics.write_json(output_path)
+
+
 def _state_energy_kj_mol(state: Any, openmm_unit: Any) -> float:
     """Return potential energy from an OpenMM state in kJ/mol."""
     energy = state.getPotentialEnergy()
     if hasattr(energy, "value_in_unit"):
         return float(energy.value_in_unit(openmm_unit.kilojoule_per_mole))
     return float(energy)
+
+
+def _state_max_force_kj_mol_nm(state: Any, openmm_unit: Any) -> float | None:
+    """Return the maximum force norm from an OpenMM state when available."""
+    try:
+        forces = state.getForces(asNumpy=True)
+    except Exception as exc:  # noqa: BLE001 - force retrieval varies by OpenMM state
+        LOGGER.debug("Could not collect max force diagnostic: %s", exc)
+        return None
+    force_array = np.asarray(
+        forces.value_in_unit(openmm_unit.kilojoule_per_mole / openmm_unit.nanometer),
+        dtype=float,
+    )
+    if force_array.size == 0 or not np.all(np.isfinite(force_array)):
+        return None
+    return float(np.max(np.linalg.norm(force_array, axis=1)))
+
+
+def _smoke_settings_from_environment(settings: VacuumSmokeSettings) -> VacuumSmokeSettings:
+    """Apply internal environment-variable diagnostic overrides to smoke settings."""
+    updates: dict[str, Any] = {}
+    if _truthy_environment("POLYZYMD_CONJUGATION_SMOKE_MIN_ONLY"):
+        updates["nvt_steps"] = 0
+    nvt_steps = os.environ.get("POLYZYMD_CONJUGATION_SMOKE_NVT_STEPS")
+    if nvt_steps not in (None, ""):
+        updates["nvt_steps"] = int(nvt_steps)
+    timestep_fs = os.environ.get("POLYZYMD_CONJUGATION_SMOKE_TIMESTEP_FS")
+    if timestep_fs not in (None, ""):
+        updates["timestep_femtoseconds"] = float(timestep_fs)
+    temperature_kelvin = os.environ.get("POLYZYMD_CONJUGATION_SMOKE_TEMPERATURE_K")
+    if temperature_kelvin not in (None, ""):
+        updates["temperature_kelvin"] = float(temperature_kelvin)
+    if not updates:
+        return settings
+    LOGGER.info("Applying restrained smoke diagnostic environment overrides: %s", updates)
+    return settings.model_copy(update=updates)
+
+
+def _truthy_environment(name: str) -> bool:
+    """Return whether an environment variable contains a truthy diagnostic flag."""
+    value = os.environ.get(name)
+    return value is not None and value.strip().lower() not in {"", "0", "false", "no", "off"}
 
 
 def _add_positional_restraints(
@@ -438,6 +1360,7 @@ __all__ = [
     "LocalMinimizationResult",
     "LocalMinimizationSettings",
     "analyze_crosslink_geometry",
+    "analyze_pre_smoke_geometry",
     "build_product_state_pablo_policy",
     "product_state_pablo_crosslink_requirement",
     "run_post_crosslink_local_minimization",

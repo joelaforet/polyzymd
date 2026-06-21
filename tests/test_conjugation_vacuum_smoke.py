@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import shutil
@@ -14,6 +15,8 @@ from polyzymd.builders.conjugation._relaxation import (
     VacuumSmokeSettings,
     _positions_to_numpy,
     _resolve_restrained_indices,
+    _write_vacuum_smoke_failure,
+    analyze_pre_smoke_geometry,
     validate_finite_energy,
     validate_finite_positions,
 )
@@ -29,6 +32,10 @@ class _TopologyDouble:
     def atoms(self) -> tuple[object, ...]:
         """Return atom-like objects in topology order."""
         return self._atoms
+
+    def bonds(self) -> tuple[tuple[object, object], ...]:
+        """Return atom-like topology bonds."""
+        return getattr(self, "_bonds", ())
 
 
 class _AtomDouble:
@@ -119,9 +126,14 @@ def test_validate_finite_positions_rejects_unrealistic_span():
 
 
 def test_vacuum_smoke_settings_require_positive_nvt_steps():
-    """Vacuum smoke settings should require real MD before downstream solvation."""
-    with pytest.raises(ValidationError, match="greater than or equal to 1"):
-        VacuumSmokeSettings(nvt_steps=0)
+    """Vacuum smoke settings should allow minimization-only smoke."""
+    assert VacuumSmokeSettings(nvt_steps=0).nvt_steps == 0
+
+
+def test_vacuum_smoke_settings_reject_negative_nvt_steps():
+    """Vacuum smoke settings should reject negative MD step counts."""
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        VacuumSmokeSettings(nvt_steps=-1)
 
 
 def test_vacuum_smoke_settings_use_conservative_md_defaults():
@@ -134,6 +146,77 @@ def test_vacuum_smoke_settings_use_conservative_md_defaults():
     assert settings.friction_per_picosecond >= 10.0
     assert settings.restrain_all_heavy_atoms is True
     assert settings.max_position_span_nm == 50.0
+
+
+def test_analyze_pre_smoke_geometry_reports_contacts_and_bond_outliers():
+    """Pre-smoke diagnostics should identify close contacts and stretched bonds."""
+    topology = _TopologyDouble(
+        (
+            _AtomDouble(0, "C1", "C", "C"),
+            _AtomDouble(1, "C2", "C", "C"),
+            _AtomDouble(2, "H1", "H", "C"),
+            _AtomDouble(3, "O1", "O", "C"),
+        )
+    )
+    topology._bonds = ((topology._atoms[0], topology._atoms[3]),)
+    positions = np.array(
+        [
+            [0.00, 0.00, 0.00],
+            [0.10, 0.00, 0.00],
+            [0.02, 0.00, 0.00],
+            [0.40, 0.00, 0.00],
+        ]
+    )
+
+    diagnostics = analyze_pre_smoke_geometry(topology, positions)
+
+    assert diagnostics.coordinate_span_nm == pytest.approx(0.40)
+    assert diagnostics.min_heavy_heavy_distance_nm == pytest.approx(0.10)
+    assert diagnostics.min_h_heavy_distance_nm == pytest.approx(0.02)
+    assert [pair.category for pair in diagnostics.close_contacts] == [
+        "h-heavy-close-contact",
+        "heavy-heavy-close-contact",
+    ]
+    assert diagnostics.bonded_distance_outliers[0].distance_nm == pytest.approx(0.40)
+
+
+def test_pre_smoke_geometry_writes_json_sidecar(tmp_path):
+    """Pre-smoke geometry diagnostics should persist JSON artifacts."""
+    topology = _restraint_selection_topology()
+    diagnostics = analyze_pre_smoke_geometry(topology, np.zeros((4, 3)))
+
+    path = diagnostics.write_json(tmp_path / "pre_smoke_geometry.json")
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["atom_count"] == 4
+    assert payload["json_path"].endswith("pre_smoke_geometry.json")
+
+
+def test_vacuum_smoke_failure_artifact_records_span_and_energies(tmp_path):
+    """Smoke failures should write structured diagnostics before raising upstream."""
+    topology = _restraint_selection_topology()
+    pre_smoke = analyze_pre_smoke_geometry(
+        topology,
+        np.array([[0.0, 0.0, 0.0], [60.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 2.0, 0.0]]),
+    )
+
+    path = _write_vacuum_smoke_failure(
+        tmp_path / "vacuum_smoke_failure.json",
+        exc=RuntimeError("span validation failed"),
+        settings=VacuumSmokeSettings(nvt_steps=0),
+        pre_smoke=pre_smoke,
+        energy_before_min=10.0,
+        energy_after_min=5.0,
+        energy_before_nvt=5.0,
+        energy_after_nvt=math.nan,
+        failed_pdb_path=tmp_path / "failed.pdb",
+    )
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["success"] is False
+    assert payload["energies_kj_mol"]["after_min"] == pytest.approx(5.0)
+    assert payload["energies_kj_mol"]["after_nvt"] is None
+    assert payload["pre_smoke_geometry"]["coordinate_span_nm"] == pytest.approx(60.0)
 
 
 def test_resolve_restrained_indices_defaults_to_all_heavy_atoms():

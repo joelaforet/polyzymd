@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -1018,10 +1019,12 @@ def _construct_conjugate_from_specs(
         and (settings.run_smoke or run_combined_smoke_relaxation)
     ):
         LOGGER.info("Running combined restrained vacuum smoke relaxation")
-        smoke_result = run_restrained_vacuum_smoke(
+        smoke_result = _run_restrained_vacuum_smoke_with_diagnostics(
             parameterization_result.interchange,
             artifact_dir,
             settings=settings.smoke,
+            crosslinked_pdb_path=crosslinked_pdb_path,
+            attachment_specs=specs,
         )
         if not smoke_result.success:
             raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
@@ -1046,6 +1049,27 @@ def _construct_conjugate_from_specs(
             diagnostics=tuple(diagnostics),
         ),
         pablo_result.topology,
+    )
+
+
+def _run_restrained_vacuum_smoke_with_diagnostics(
+    interchange: Any,
+    artifact_dir: Path,
+    *,
+    settings: VacuumSmokeSettings,
+    crosslinked_pdb_path: Path,
+    attachment_specs: tuple[Any, ...],
+) -> Any:
+    """Run smoke while preserving compatibility with legacy test doubles."""
+    signature = inspect.signature(run_restrained_vacuum_smoke)
+    if "crosslinked_pdb_path" not in signature.parameters:
+        return run_restrained_vacuum_smoke(interchange, artifact_dir, settings=settings)
+    return run_restrained_vacuum_smoke(
+        interchange,
+        artifact_dir,
+        settings=settings,
+        crosslinked_pdb_path=crosslinked_pdb_path,
+        attachment_specs=attachment_specs,
     )
 
 
