@@ -707,7 +707,8 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
 
     checks: list[ConjugateValidationCheck] = []
     status = ValidationStatus.PASS
-    if smoke_path.exists():
+    has_frozen_relaxation = frozen_diagnostics_path.exists()
+    if smoke_path.exists() and not has_frozen_relaxation:
         smoke = _read_json(smoke_path)
         if not bool(smoke.get("success", False)):
             status = ValidationStatus.FAIL
@@ -718,7 +719,7 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
             checks.append(
                 _check("vacuum_smoke_energy", status, "Vacuum smoke energy is non-finite")
             )
-    if diagnostics_path.exists():
+    if diagnostics_path.exists() and not has_frozen_relaxation:
         diagnostics = _read_json(diagnostics_path)
         if not bool(diagnostics.get("success", False)):
             status = ValidationStatus.FAIL
@@ -727,7 +728,7 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
                     "restrained_smoke_diagnostics", status, "Restrained smoke diagnostics failed"
                 )
             )
-    if pre_smoke_path.exists():
+    if pre_smoke_path.exists() and not has_frozen_relaxation:
         pre_smoke = _read_json(pre_smoke_path)
         span = pre_smoke.get("coordinate_span_nm")
         if span is not None and not _is_finite_number(span):
@@ -744,6 +745,33 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
                     "Frozen-protein relaxation diagnostics failed",
                 )
             )
+        if not bool(diagnostics.get("stage_a_success", False)):
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "frozen_protein_relaxation_stage_a",
+                    status,
+                    "Stage A full-system minimization did not report success",
+                )
+            )
+        if not bool(diagnostics.get("stage_b_success", False)):
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "frozen_protein_relaxation_stage_b",
+                    status,
+                    "Stage B frozen-protein relaxation did not report success",
+                )
+            )
+        if bool(diagnostics.get("barostat_used", False)):
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "frozen_protein_relaxation_barostat",
+                    status,
+                    "Frozen-protein relaxation diagnostics reported a barostat",
+                )
+            )
         energy_values = [value for key, value in diagnostics.items() if key.endswith("_kj_mol")]
         if any(not _is_finite_number(value) for value in energy_values):
             status = ValidationStatus.FAIL
@@ -752,6 +780,55 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
                     "frozen_protein_relaxation_energy",
                     status,
                     "Frozen-protein relaxation energy is non-finite",
+                )
+            )
+        rmsd = diagnostics.get("stage_b_protein_rmsd_from_stage_a_angstrom")
+        max_displacement = diagnostics.get("stage_b_protein_max_displacement_from_stage_a_angstrom")
+        settings = (
+            diagnostics.get("settings", {}) if isinstance(diagnostics.get("settings"), dict) else {}
+        )
+        rmsd_limit = float(settings.get("max_protein_rmsd_angstrom", 0.05))
+        displacement_limit = float(settings.get("max_protein_displacement_angstrom", 0.25))
+        if rmsd is not None and (not _is_finite_number(rmsd) or float(rmsd) > rmsd_limit):
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "frozen_protein_relaxation_protein_rmsd",
+                    status,
+                    "Stage B protein RMSD relative to Stage A exceeds tolerance",
+                    evidence={"rmsd_angstrom": rmsd, "tolerance_angstrom": rmsd_limit},
+                )
+            )
+        if max_displacement is not None and (
+            not _is_finite_number(max_displacement) or float(max_displacement) > displacement_limit
+        ):
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "frozen_protein_relaxation_protein_max_displacement",
+                    status,
+                    "Stage B protein max displacement relative to Stage A exceeds tolerance",
+                    evidence={
+                        "max_displacement_angstrom": max_displacement,
+                        "tolerance_angstrom": displacement_limit,
+                    },
+                )
+            )
+        linkage_errors = diagnostics.get("stage_b_linkage_distance_errors_angstrom", ())
+        linkage_limit = float(settings.get("max_linkage_distance_error_angstrom", 0.35))
+        if any(
+            not _is_finite_number(error) or float(error) > linkage_limit for error in linkage_errors
+        ):
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "frozen_protein_relaxation_linkage_distances",
+                    status,
+                    "Stage B linkage distance error exceeds tolerance",
+                    evidence={
+                        "errors_angstrom": linkage_errors,
+                        "tolerance_angstrom": linkage_limit,
+                    },
                 )
             )
     if not checks:

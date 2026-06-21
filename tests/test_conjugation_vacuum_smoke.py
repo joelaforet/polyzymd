@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 import os
@@ -22,8 +23,10 @@ from polyzymd.builders.conjugation._relaxation import (
     _write_vacuum_smoke_failure,
     analyze_pre_smoke_geometry,
     freeze_chain_a_masses,
+    freeze_protein_chain_masses,
     resolve_product_linkage_pairs,
     restore_particle_masses,
+    run_frozen_protein_product_relaxation,
     validate_finite_energy,
     validate_finite_positions,
 )
@@ -216,6 +219,46 @@ def test_freeze_chain_a_masses_restores_only_protein_chain():
     assert system.masses == [12.0, 14.0, 16.0]
 
 
+def test_freeze_protein_chain_masses_supports_configurable_chains():
+    """Temporary zero masses should support generic configured protein chains."""
+
+    class SystemDouble:
+        """Minimal system double with mutable particle masses."""
+
+        def __init__(self) -> None:
+            """Store particle masses."""
+            self.masses = [12.0, 14.0, 16.0]
+
+        def getParticleMass(self, index: int) -> float:
+            """Return one particle mass."""
+            return self.masses[index]
+
+        def setParticleMass(self, index: int, mass: float) -> None:
+            """Set one particle mass."""
+            self.masses[index] = mass
+
+    topology = _TopologyDouble(
+        (
+            _AtomDouble(0, "CA", "C", "A"),
+            _AtomDouble(1, "CB", "C", "B"),
+            _AtomDouble(2, "C1", "C", "C"),
+        )
+    )
+    system = SystemDouble()
+
+    frozen, original = freeze_protein_chain_masses(
+        system,
+        topology,
+        type("Unit", (), {"dalton": 1.0})(),
+        chain_ids=("B",),
+    )
+
+    assert frozen == (1,)
+    assert system.masses == [12.0, 0.0, 16.0]
+    restore_particle_masses(system, original)
+    assert system.masses == [12.0, 14.0, 16.0]
+
+
 def test_temporary_anchor_restraint_count_matches_linkages():
     """Temporary anchor restraints should add one bond per attachment."""
 
@@ -264,6 +307,19 @@ def test_temporary_anchor_restraint_count_matches_linkages():
     assert len(system.forces[0].bonds) == 2
 
 
+def test_frozen_product_relaxation_minimizes_before_freezing():
+    """Stage A minimization should happen before Stage B zero-mass freezing."""
+    source = inspect.getsource(run_frozen_protein_product_relaxation)
+
+    stage_a_minimization = source.index("LocalEnergyMinimizer.minimize")
+    stage_b_freeze = source.index("freeze_protein_chain_masses")
+    stage_b_md = source.index("_run_frozen_product_md")
+
+    assert stage_a_minimization < stage_b_freeze < stage_b_md
+    assert "system_min = interchange.to_openmm_system()" in source
+    assert "system_md = interchange.to_openmm_system()" in source
+
+
 def test_remove_barostats_removes_only_barostat_forces():
     """Vacuum relaxation should discard barostat forces from transient systems."""
 
@@ -305,16 +361,28 @@ def test_frozen_protein_diagnostics_serializes(tmp_path):
     path = tmp_path / "diagnostics.json"
     diagnostics = FrozenProteinRelaxationDiagnostics(
         success=True,
+        stage_a_success=True,
+        stage_b_success=True,
         frozen_atom_count=2,
         temporary_anchor_count=1,
+        stage_a_energy_after_min_kj_mol=-10.0,
+        stage_b_energy_after_md_kj_mol=-11.0,
+        stage_a_protein_rmsd_from_initial_angstrom=0.2,
+        stage_b_protein_rmsd_from_stage_a_angstrom=0.0,
         linkage_distances_angstrom=(1.4,),
+        stage_b_linkage_distances_angstrom=(1.4,),
+        final_relaxed_pdb_path=tmp_path / "relaxed.pdb",
     )
 
     diagnostics.write_json(path)
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["success"] is True
+    assert payload["stage_a_success"] is True
+    assert payload["stage_b_success"] is True
     assert payload["temporary_anchor_count"] == 1
+    assert payload["barostat_used"] is False
+    assert payload["final_relaxed_pdb_path"] == str(tmp_path / "relaxed.pdb")
     assert payload["json_path"] == str(path)
 
 
