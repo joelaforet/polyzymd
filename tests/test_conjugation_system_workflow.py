@@ -159,6 +159,25 @@ def test_system_workflow_settings_enable_public_product_state_defaults():
     assert settings.protein_canonicalization.ph == pytest.approx(7.0)
 
 
+def test_relaxed_conjugate_pdb_prefers_final_frozen_relaxation_artifact(tmp_path):
+    """Downstream solvation should consume the Stage B relaxed PDB."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    minimized = tmp_path / "assembled_frozen_protein_minimized.pdb"
+    relaxed = tmp_path / "assembled_frozen_protein_relaxed.pdb"
+    minimized.write_text("END\n", encoding="utf-8")
+    relaxed.write_text("END\n", encoding="utf-8")
+    construction = SimpleNamespace(
+        local_minimization=None,
+        smoke=SimpleNamespace(
+            minimized_pdb_path=minimized,
+            equilibrated_pdb_path=relaxed,
+        ),
+    )
+
+    assert workflow_module._relaxed_conjugate_pdb(construction) == relaxed
+
+
 def test_build_solvated_system_uses_conjugation_final_interchange(monkeypatch, tmp_path: Path):
     """Config-driven final solvation should use the conjugation-specific helper."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module

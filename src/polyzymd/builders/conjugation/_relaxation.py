@@ -175,6 +175,7 @@ class FrozenProteinRelaxationSettings(BaseModel):
     friction_per_picosecond: float = Field(1.0, gt=0)
     anchor_k_kj_mol_nm2: float = Field(10_000.0, gt=0)
     fallback_bond_length_angstrom: float = Field(1.5, gt=0)
+    protein_chain_ids: tuple[str, ...] = ("A",)
     max_protein_rmsd_angstrom: float = Field(0.05, ge=0)
     max_protein_displacement_angstrom: float = Field(0.25, ge=0)
     max_linkage_distance_error_angstrom: float = Field(0.35, ge=0)
@@ -202,11 +203,30 @@ class FrozenProteinRelaxationDiagnostics(BaseModel):
     """Diagnostics from generic frozen-protein product relaxation."""
 
     success: bool
+    stage_a_success: bool = False
+    stage_b_success: bool = False
     platform_name: str | None = None
     settings: dict[str, Any] = Field(default_factory=dict)
     frozen_atom_count: int = 0
     temporary_anchor_count: int = 0
     removed_barostat_count: int = 0
+    barostat_used: bool = False
+    stage_a_energy_before_min_kj_mol: float | None = None
+    stage_a_energy_after_min_kj_mol: float | None = None
+    stage_a_force_group_energies_before_min_kj_mol: dict[str, float] = Field(default_factory=dict)
+    stage_a_force_group_energies_after_min_kj_mol: dict[str, float] = Field(default_factory=dict)
+    stage_a_protein_rmsd_from_initial_angstrom: float | None = None
+    stage_a_protein_max_displacement_from_initial_angstrom: float | None = None
+    stage_a_linkage_distances_angstrom: tuple[float, ...] = Field(default_factory=tuple)
+    stage_b_energy_before_md_kj_mol: float | None = None
+    stage_b_energy_after_md_kj_mol: float | None = None
+    stage_b_protein_rmsd_from_stage_a_angstrom: float | None = None
+    stage_b_protein_max_displacement_from_stage_a_angstrom: float | None = None
+    stage_b_protein_rmsd_from_initial_angstrom: float | None = None
+    stage_b_protein_max_displacement_from_initial_angstrom: float | None = None
+    stage_b_linkage_distances_angstrom: tuple[float, ...] = Field(default_factory=tuple)
+    stage_b_linkage_distance_errors_angstrom: tuple[float, ...] = Field(default_factory=tuple)
+    final_relaxed_pdb_path: Path | None = None
     protein_rmsd_angstrom: float | None = None
     protein_max_displacement_angstrom: float | None = None
     linkage_distances_angstrom: tuple[float, ...] = Field(default_factory=tuple)
@@ -247,6 +267,8 @@ class FrozenProteinRelaxationResult(BaseModel):
     energy_before_md_kj_mol: float
     energy_after_md_kj_mol: float
     md_steps: int
+    stage_a_protein_rmsd_angstrom: float | None = None
+    stage_a_protein_max_displacement_angstrom: float | None = None
     protein_rmsd_angstrom: float | None = None
     protein_max_displacement_angstrom: float | None = None
     linkage_distances_angstrom: tuple[float, ...] = Field(default_factory=tuple)
@@ -602,7 +624,7 @@ def run_frozen_protein_product_relaxation(
     assembly: Any | None = None,
     settings: FrozenProteinRelaxationSettings | None = None,
 ) -> FrozenProteinRelaxationResult:
-    """Relax a product-state conjugate with chain A frozen by zero masses.
+    """Relax a product-state conjugate with staged minimization then frozen MD.
 
     Parameters
     ----------
@@ -660,34 +682,60 @@ def run_frozen_protein_product_relaxation(
         warnings=warnings,
     )
 
-    system = interchange.to_openmm_system()
-    removed_barostats = _remove_barostats(system)
-    frozen_indices, original_masses = freeze_chain_a_masses(system, topology, openmm_unit)
-    if not frozen_indices:
-        raise RuntimeError("Frozen-protein relaxation could not identify chain A atoms to freeze")
-    anchor_count = _add_linkage_anchor_restraints(
-        system,
-        linkage_pairs,
-        relaxation_settings.anchor_k_kj_mol_nm2,
-        openmm,
-        openmm_unit,
-    )
+    protein_indices = _protein_chain_indices(topology, relaxation_settings.protein_chain_ids)
+    if not protein_indices:
+        chains = ", ".join(relaxation_settings.protein_chain_ids)
+        raise RuntimeError(
+            "Frozen-protein relaxation could not identify protein chain atoms to freeze "
+            f"for chain IDs: {chains}"
+        )
 
     energy_before_min = math.nan
     energy_after_min = math.nan
     energy_before_md = math.nan
     energy_after_md = math.nan
+    force_energies_before_min: dict[str, float] = {}
+    force_energies_after_min: dict[str, float] = {}
+    stage_a_protein_rmsd = math.nan
+    stage_a_protein_max = math.nan
+    stage_b_protein_rmsd = math.nan
+    stage_b_protein_max = math.nan
+    initial_to_final_protein_rmsd = math.nan
+    initial_to_final_protein_max = math.nan
+    stage_a_distances: tuple[float, ...] = ()
+    distances: tuple[float, ...] = ()
+    errors: tuple[float, ...] = ()
+    removed_barostats = 0
+    frozen_indices: tuple[int, ...] = ()
+    anchor_count = 0
     minimized_pdb = artifact_dir / relaxation_settings.minimized_pdb_name
     relaxed_pdb = artifact_dir / relaxation_settings.relaxed_pdb_name
     try:
+        LOGGER.info("Running Stage A normal-mass full-system minimization for conjugate product")
+        system_min = interchange.to_openmm_system()
+        removed_barostats += _remove_barostats(system_min)
+        group_labels_min = _assign_force_groups(system_min)
+        anchor_count = _add_linkage_anchor_restraints(
+            system_min,
+            linkage_pairs,
+            relaxation_settings.anchor_k_kj_mol_nm2,
+            openmm,
+            openmm_unit,
+        )
+        group_labels_min = _force_group_labels(system_min, existing_labels=group_labels_min)
         integrator_min = openmm.VerletIntegrator(0.001 * openmm_unit.picoseconds)
-        simulation = openmm_app.Simulation(topology, system, integrator_min, platform)
+        simulation = openmm_app.Simulation(topology, system_min, integrator_min, platform)
         simulation.context.setPositions(initial_positions)
         energy_before_min = _state_energy_kj_mol(
             simulation.context.getState(getEnergy=True),
             openmm_unit,
         )
         validate_finite_energy(energy_before_min, label="energy_before_min_kj_mol")
+        force_energies_before_min = _force_group_energies(
+            simulation.context,
+            group_labels_min,
+            openmm_unit,
+        )
         openmm.LocalEnergyMinimizer.minimize(
             simulation.context,
             tolerance=relaxation_settings.minimization_tolerance_kj_mol_nm
@@ -700,45 +748,85 @@ def run_frozen_protein_product_relaxation(
         validate_finite_energy(energy_after_min, label="energy_after_min_kj_mol")
         minimized_positions = min_state.getPositions(asNumpy=True)
         validate_finite_positions(minimized_positions, openmm_unit, label="minimized_positions")
+        force_energies_after_min = _force_group_energies(
+            simulation.context,
+            group_labels_min,
+            openmm_unit,
+        )
         _write_openmm_pdb(openmm_app, topology, minimized_positions, minimized_pdb)
+        minimized_coords_nm = _positions_to_numpy(minimized_positions, openmm_unit)
+        stage_a_protein_rmsd, stage_a_protein_max = _protein_displacements_angstrom(
+            initial_coords_nm,
+            minimized_coords_nm,
+            protein_indices,
+        )
+        stage_a_distances = _linkage_distances_angstrom(minimized_coords_nm, linkage_pairs)
 
         if relaxation_settings.md_steps == 0:
             final_positions = minimized_positions
             energy_before_md = energy_after_min
             energy_after_md = energy_after_min
+            frozen_indices = protein_indices
         else:
-            energy_before_md, energy_after_md, final_positions = _run_frozen_product_md(
+            LOGGER.info("Running Stage B frozen-protein vacuum MD for conjugate product")
+            system_md = interchange.to_openmm_system()
+            removed_barostats += _remove_barostats(system_md)
+            frozen_indices, _original_masses = freeze_protein_chain_masses(
+                system_md,
                 topology,
-                system,
-                minimized_positions,
-                relaxation_settings,
-                openmm,
-                openmm_app,
                 openmm_unit,
-                platform,
-                warnings,
+                chain_ids=relaxation_settings.protein_chain_ids,
             )
+            anchor_count = _add_linkage_anchor_restraints(
+                system_md,
+                linkage_pairs,
+                relaxation_settings.anchor_k_kj_mol_nm2,
+                openmm,
+                openmm_unit,
+            )
+            try:
+                energy_before_md, energy_after_md, final_positions = _run_frozen_product_md(
+                    topology,
+                    system_md,
+                    minimized_positions,
+                    relaxation_settings,
+                    openmm,
+                    openmm_app,
+                    openmm_unit,
+                    platform,
+                    warnings,
+                )
+            finally:
+                restore_particle_masses(system_md, _original_masses)
 
         _write_openmm_pdb(openmm_app, topology, final_positions, relaxed_pdb)
         final_coords_nm = _positions_to_numpy(final_positions, openmm_unit)
-        protein_rmsd, protein_max = _protein_displacements_angstrom(
-            initial_coords_nm,
+        stage_b_protein_rmsd, stage_b_protein_max = _protein_displacements_angstrom(
+            minimized_coords_nm,
             final_coords_nm,
             frozen_indices,
+        )
+        initial_to_final_protein_rmsd, initial_to_final_protein_max = (
+            _protein_displacements_angstrom(
+                initial_coords_nm,
+                final_coords_nm,
+                frozen_indices,
+            )
         )
         distances = _linkage_distances_angstrom(final_coords_nm, linkage_pairs)
         errors = tuple(
             abs(distance - pair.target_bond_length_angstrom)
             for distance, pair in zip(distances, linkage_pairs, strict=True)
         )
-        if protein_rmsd > relaxation_settings.max_protein_rmsd_angstrom:
+        if stage_b_protein_rmsd > relaxation_settings.max_protein_rmsd_angstrom:
             warnings.append(
-                f"Protein RMSD {protein_rmsd:.4f} A exceeds "
+                f"Stage B protein RMSD {stage_b_protein_rmsd:.4f} A relative to Stage A exceeds "
                 f"{relaxation_settings.max_protein_rmsd_angstrom:.4f} A"
             )
-        if protein_max > relaxation_settings.max_protein_displacement_angstrom:
+        if stage_b_protein_max > relaxation_settings.max_protein_displacement_angstrom:
             warnings.append(
-                f"Protein max displacement {protein_max:.4f} A exceeds "
+                f"Stage B protein max displacement {stage_b_protein_max:.4f} A relative to Stage A "
+                "exceeds "
                 f"{relaxation_settings.max_protein_displacement_angstrom:.4f} A"
             )
         if any(error > relaxation_settings.max_linkage_distance_error_angstrom for error in errors):
@@ -763,6 +851,16 @@ def run_frozen_protein_product_relaxation(
             frozen_atom_count=len(frozen_indices),
             temporary_anchor_count=anchor_count,
             removed_barostat_count=removed_barostats,
+            barostat_used=False,
+            stage_a_energy_before_min_kj_mol=(
+                float(energy_before_min) if math.isfinite(energy_before_min) else None
+            ),
+            stage_a_energy_after_min_kj_mol=(
+                float(energy_after_min) if math.isfinite(energy_after_min) else None
+            ),
+            stage_a_force_group_energies_before_min_kj_mol=force_energies_before_min,
+            stage_a_force_group_energies_after_min_kj_mol=force_energies_after_min,
+            stage_a_linkage_distances_angstrom=stage_a_distances,
             linkage_pairs=tuple(linkage_pairs),
             warnings=tuple(warnings),
             error_type=type(exc).__name__,
@@ -771,18 +869,35 @@ def run_frozen_protein_product_relaxation(
         )
         diagnostics.write_json(diagnostics_path)
         raise
-    finally:
-        restore_particle_masses(system, original_masses)
 
     diagnostics = FrozenProteinRelaxationDiagnostics(
         success=True,
+        stage_a_success=True,
+        stage_b_success=True,
         platform_name=platform_name,
         settings=relaxation_settings.model_dump(mode="json"),
         frozen_atom_count=len(frozen_indices),
         temporary_anchor_count=anchor_count,
         removed_barostat_count=removed_barostats,
-        protein_rmsd_angstrom=protein_rmsd,
-        protein_max_displacement_angstrom=protein_max,
+        barostat_used=False,
+        stage_a_energy_before_min_kj_mol=float(energy_before_min),
+        stage_a_energy_after_min_kj_mol=float(energy_after_min),
+        stage_a_force_group_energies_before_min_kj_mol=force_energies_before_min,
+        stage_a_force_group_energies_after_min_kj_mol=force_energies_after_min,
+        stage_a_protein_rmsd_from_initial_angstrom=stage_a_protein_rmsd,
+        stage_a_protein_max_displacement_from_initial_angstrom=stage_a_protein_max,
+        stage_a_linkage_distances_angstrom=stage_a_distances,
+        stage_b_energy_before_md_kj_mol=float(energy_before_md),
+        stage_b_energy_after_md_kj_mol=float(energy_after_md),
+        stage_b_protein_rmsd_from_stage_a_angstrom=stage_b_protein_rmsd,
+        stage_b_protein_max_displacement_from_stage_a_angstrom=stage_b_protein_max,
+        stage_b_protein_rmsd_from_initial_angstrom=initial_to_final_protein_rmsd,
+        stage_b_protein_max_displacement_from_initial_angstrom=initial_to_final_protein_max,
+        stage_b_linkage_distances_angstrom=distances,
+        stage_b_linkage_distance_errors_angstrom=errors,
+        final_relaxed_pdb_path=relaxed_pdb,
+        protein_rmsd_angstrom=stage_b_protein_rmsd,
+        protein_max_displacement_angstrom=stage_b_protein_max,
         linkage_distances_angstrom=distances,
         linkage_distance_errors_angstrom=errors,
         linkage_pairs=tuple(linkage_pairs),
@@ -806,10 +921,16 @@ def run_frozen_protein_product_relaxation(
         energy_before_md_kj_mol=float(energy_before_md),
         energy_after_md_kj_mol=float(energy_after_md),
         md_steps=relaxation_settings.md_steps,
-        protein_rmsd_angstrom=protein_rmsd,
-        protein_max_displacement_angstrom=protein_max,
+        stage_a_protein_rmsd_angstrom=stage_a_protein_rmsd,
+        stage_a_protein_max_displacement_angstrom=stage_a_protein_max,
+        protein_rmsd_angstrom=stage_b_protein_rmsd,
+        protein_max_displacement_angstrom=stage_b_protein_max,
         linkage_distances_angstrom=distances,
-        diagnostics=("Frozen-protein product relaxation completed", *tuple(warnings)),
+        diagnostics=(
+            "Stage A normal-mass minimization completed",
+            "Stage B frozen-protein vacuum MD completed",
+            *tuple(warnings),
+        ),
     )
 
 
@@ -1289,16 +1410,51 @@ def freeze_chain_a_masses(
     openmm_unit: Any,
 ) -> tuple[tuple[int, ...], dict[int, Any]]:
     """Set chain A particle masses to zero and return original masses."""
-    indices = tuple(
-        int(atom.index)
-        for atom in topology.atoms()
-        if getattr(getattr(getattr(atom, "residue", None), "chain", None), "id", None) == "A"
-    )
+    return freeze_protein_chain_masses(system, topology, openmm_unit, chain_ids=("A",))
+
+
+def freeze_protein_chain_masses(
+    system: Any,
+    topology: Any,
+    openmm_unit: Any,
+    *,
+    chain_ids: tuple[str, ...] = ("A",),
+) -> tuple[tuple[int, ...], dict[int, Any]]:
+    """Set selected protein-chain particle masses to zero.
+
+    Parameters
+    ----------
+    system : Any
+        OpenMM-like system with particle mass accessors.
+    topology : Any
+        OpenMM-like topology exposing atoms with residue chain IDs.
+    openmm_unit : Any
+        OpenMM unit module or compatible double.
+    chain_ids : tuple of str, optional
+        Protein chain IDs to freeze, by default ``("A",)``.
+
+    Returns
+    -------
+    tuple[tuple[int, ...], dict[int, Any]]
+        Frozen particle indices and their original masses.
+    """
+    indices = _protein_chain_indices(topology, chain_ids)
     original = {index: system.getParticleMass(index) for index in indices}
     zero_mass = 0.0 * openmm_unit.dalton
     for index in indices:
         system.setParticleMass(index, zero_mass)
     return indices, original
+
+
+def _protein_chain_indices(topology: Any, chain_ids: tuple[str, ...]) -> tuple[int, ...]:
+    """Return topology atom indices belonging to selected protein chains."""
+    selected = {chain_id.strip() for chain_id in chain_ids if chain_id.strip()}
+    return tuple(
+        int(atom.index)
+        for atom in topology.atoms()
+        if str(getattr(getattr(getattr(atom, "residue", None), "chain", None), "id", ""))
+        in selected
+    )
 
 
 def restore_particle_masses(system: Any, original_masses: dict[int, Any]) -> None:
@@ -2006,6 +2162,7 @@ __all__ = [
     "analyze_pre_smoke_geometry",
     "build_product_state_pablo_policy",
     "freeze_chain_a_masses",
+    "freeze_protein_chain_masses",
     "product_state_pablo_crosslink_requirement",
     "resolve_product_linkage_pairs",
     "restore_particle_masses",
