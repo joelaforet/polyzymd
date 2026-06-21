@@ -436,7 +436,7 @@ class TestBuildCommandConjugationRouting:
             component_info=component_info,
         )
 
-    @patch("polyzymd.cli.main._write_openmm_build_artifacts")
+    @patch("polyzymd.builders.openmm_artifacts.write_openmm_system_xml")
     @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
     @patch("polyzymd.builders.conjugation.build_conjugate_from_config")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
@@ -445,7 +445,7 @@ class TestBuildCommandConjugationRouting:
         mock_from_yaml,
         mock_build_conjugate,
         mock_system_builder_from_config,
-        mock_write_openmm_build_artifacts,
+        mock_write_openmm_system_xml,
         tmp_path: Path,
     ) -> None:
         """OpenMM conjugation build should report conjugation-specific artifacts."""
@@ -468,6 +468,15 @@ class TestBuildCommandConjugationRouting:
             },
         )
         mock_build_conjugate.return_value = result
+        (working_dir / "solvated_conjugate_free_polymers.pdb").parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+        (working_dir / "solvated_conjugate_free_polymers.pdb").write_text(
+            "conjugation pdb\n",
+            encoding="utf-8",
+        )
+        mock_write_openmm_system_xml.return_value = working_dir / "system.xml"
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
 
@@ -476,7 +485,7 @@ class TestBuildCommandConjugationRouting:
         assert cli_result.exit_code == 0
         mock_system_builder_from_config.assert_not_called()
         mock_build_conjugate.assert_called_once()
-        mock_write_openmm_build_artifacts.assert_called_once_with(
+        mock_write_openmm_system_xml.assert_called_once_with(
             builder=system_builder,
             sim_config=sim_config,
             working_dir=working_dir,

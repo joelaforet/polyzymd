@@ -186,8 +186,9 @@ def _conjugation_enabled(sim_config: object) -> bool:
     bool
         ``True`` when conjugation settings are present and enabled.
     """
-    conjugation = getattr(sim_config, "conjugation", None)
-    return conjugation is not None and bool(getattr(conjugation, "enabled", False))
+    from polyzymd.builders.openmm_artifacts import conjugation_enabled
+
+    return conjugation_enabled(sim_config)
 
 
 def _print_build_export_summary(
@@ -244,69 +245,16 @@ def _write_openmm_build_artifacts(
     working_dir : Path
         Directory where ``system.xml`` and related build artifacts are written.
     """
+    from polyzymd.builders.openmm_artifacts import write_openmm_system_xml
+
     colored_echo("Extracting OpenMM components...", phase="build")
-    omm_topology, omm_system, _omm_positions = builder.get_openmm_components()
 
-    restraints = getattr(sim_config, "restraints", None)
-    if restraints:
-        from polyzymd.core.restraints import RestraintFactory, apply_restraints
-
-        colored_echo(f"Applying {len(restraints)} restraint(s)...", phase="build")
-        restraint_defs = []
-        for restraint in restraints:
-            if not restraint.enabled:
-                colored_echo(f"  - {restraint.name}: DISABLED (skipping)", phase="build")
-                continue
-
-            restraint_def = RestraintFactory.from_config(restraint.model_dump())
-
-            try:
-                indices1 = restraint_def.atom1.resolve(omm_topology)
-                indices2 = restraint_def.atom2.resolve(omm_topology)
-
-                if len(indices1) != 1:
-                    colored_echo(
-                        f"Error: Restraint '{restraint.name}' atom1 selection matched "
-                        f"{len(indices1)} atoms (need exactly 1)",
-                        err=True,
-                        level=logging.ERROR,
-                    )
-                    sys.exit(1)
-                if len(indices2) != 1:
-                    colored_echo(
-                        f"Error: Restraint '{restraint.name}' atom2 selection matched "
-                        f"{len(indices2)} atoms (need exactly 1)",
-                        err=True,
-                        level=logging.ERROR,
-                    )
-                    sys.exit(1)
-
-                colored_echo(
-                    f"  - {restraint.name}: atom {indices1[0]} <-> atom {indices2[0]} "
-                    f"(type={restraint.type.value}, d={restraint.distance} A, "
-                    f"k={restraint.force_constant} kJ/mol/nm^2)",
-                    phase="build",
-                )
-                restraint_defs.append(restraint_def)
-
-            except ValueError as e:
-                colored_echo(
-                    f"Error: Restraint '{restraint.name}' invalid: {e}",
-                    err=True,
-                    level=logging.ERROR,
-                )
-                sys.exit(1)
-
-        if restraint_defs:
-            apply_restraints(restraint_defs, omm_topology, omm_system)
-            colored_echo(f"Successfully applied {len(restraint_defs)} restraint(s)", phase="build")
-
-    from openmm import XmlSerializer
-
-    system_xml_path = working_dir / "system.xml"
+    system_xml_path = write_openmm_system_xml(
+        builder=builder,
+        sim_config=sim_config,
+        working_dir=working_dir,
+    )
     colored_echo(f"Saving OpenMM system to {system_xml_path}...", phase="build")
-    with open(system_xml_path, "w") as f:
-        f.write(XmlSerializer.serialize(omm_system))
 
 
 def _print_openmm_build_summary(working_dir: Path) -> None:
@@ -827,67 +775,16 @@ def build(
             colored_echo(f"Building system for replicate {rep}...", phase="build")
             working_dir = sim_config.get_working_directory(rep)
 
+            from polyzymd.builders.openmm_artifacts import build_openmm_artifacts
+
             if _conjugation_enabled(sim_config):
-                from polyzymd.builders.conjugation import build_conjugate_from_config
-                from polyzymd.builders.conjugation.system_workflow import (
-                    ConjugatedPolymerSystemSettings,
-                )
-
                 colored_echo("Conjugation enabled; using conjugation workflow...", phase="build")
-                result = build_conjugate_from_config(
-                    sim_config,
-                    output_dir=working_dir,
-                    settings=ConjugatedPolymerSystemSettings(create_final_interchange=True),
-                    free_polymer_seed=rep,
-                )
 
-                if export_format:
-                    from polyzymd.exporters.interchange import export_system
-
-                    colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
-                    export_dir = working_dir / export_format
-                    export_result = export_system(
-                        interchange=result.require_final_interchange(),
-                        config=sim_config,
-                        output_dir=export_dir,
-                        fmt=export_format,
-                        component_info=result.get_component_info(),
-                    )
-                    _print_build_export_summary(
-                        export_format=export_format,
-                        export_dir=export_dir,
-                        export_result=export_result,
-                    )
-                elif result.system_builder is not None:
-                    _write_openmm_build_artifacts(
-                        builder=result.system_builder,
-                        sim_config=sim_config,
-                        working_dir=working_dir,
-                    )
-                    _print_conjugation_openmm_build_summary(result, working_dir)
-                else:
-                    result.require_final_interchange()
-                    colored_echo("Conjugation workflow completed successfully!", phase="build")
-                    colored_echo(f"Output directory: {working_dir}", phase="build")
-                    if result.artifact_paths:
-                        colored_echo("Files saved by conjugation workflow:", phase="build")
-                        for label, path in result.artifact_paths.items():
-                            colored_echo(f"  - {label}: {path}", phase="build")
-                    colored_echo(
-                        "OpenMM system.xml was not written because the workflow result did not "
-                        "retain a system builder.",
-                        phase="build",
-                        level=logging.WARNING,
-                    )
-                continue
-
-            from polyzymd.builders.system_builder import SystemBuilder
-
-            builder = SystemBuilder.from_config(sim_config)
-            interchange = builder.build_from_config(
-                config=sim_config,
+            artifacts = build_openmm_artifacts(
+                sim_config=sim_config,
                 working_dir=working_dir,
                 polymer_seed=rep,
+                write_system=export_format is None,
             )
 
             # Branch based on export format
@@ -898,11 +795,11 @@ def build(
                 colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
                 export_dir = sim_config.get_working_directory(rep) / export_format
                 export_result = export_system(
-                    interchange=interchange,
+                    interchange=artifacts.require_final_interchange(),
                     config=sim_config,
                     output_dir=export_dir,
                     fmt=export_format,
-                    component_info=builder.get_component_info(),
+                    component_info=artifacts.get_component_info(),
                 )
 
                 _print_build_export_summary(
@@ -912,12 +809,10 @@ def build(
                 )
 
             else:
-                _write_openmm_build_artifacts(
-                    builder=builder,
-                    sim_config=sim_config,
-                    working_dir=working_dir,
-                )
-                _print_openmm_build_summary(working_dir)
+                if artifacts.conjugation_enabled:
+                    _print_conjugation_openmm_build_summary(artifacts.result, working_dir)
+                else:
+                    _print_openmm_build_summary(working_dir)
 
     except PydanticValidationError as e:
         colored_echo("Configuration error:", err=True, level=logging.ERROR)
@@ -2138,45 +2033,33 @@ def _run_initial_segment(
     pressure = sim_config.thermodynamics.pressure
 
     if not skip_build:
-        from polyzymd.builders.system_builder import SystemBuilder
+        from polyzymd.builders.openmm_artifacts import build_openmm_artifacts
 
         colored_echo(f"Building system for replicate {replicate}...", phase="build")
-        builder = SystemBuilder.from_config(sim_config)
-        builder.build_from_config(
-            config=sim_config,
+        if _conjugation_enabled(sim_config):
+            colored_echo("Conjugation enabled; using conjugation workflow...", phase="build")
+        artifacts = build_openmm_artifacts(
+            sim_config=sim_config,
             working_dir=working_dir,
             polymer_seed=replicate,
         )
 
         colored_echo("Extracting OpenMM components...", phase="build")
-        omm_topology, omm_system, omm_positions = builder.get_openmm_components()
+        if artifacts.builder is None:
+            raise RuntimeError(
+                "OpenMM build did not return a system builder for simulation startup"
+            )
+        omm_topology, omm_system, omm_positions = artifacts.builder.get_openmm_components()
 
-        # Apply restraints if configured
-        if sim_config.restraints:
-            from polyzymd.core.restraints import RestraintFactory, apply_restraints
-
-            colored_echo(f"Applying {len(sim_config.restraints)} restraint(s)...", phase="build")
-            restraint_defs = []
-            for r in sim_config.restraints:
-                if not r.enabled:
-                    continue
-                restraint_def = RestraintFactory.from_config(r.model_dump())
-                restraint_defs.append(restraint_def)
-            if restraint_defs:
-                apply_restraints(restraint_defs, omm_topology, omm_system)
-                colored_echo(f"Applied {len(restraint_defs)} restraint(s)", phase="build")
     else:
+        from polyzymd.builders.openmm_artifacts import resolve_skip_build_artifacts
+
+        pdb_path, system_path = resolve_skip_build_artifacts(sim_config, working_dir)
+
         from openmm import XmlSerializer
         from openmm.app import PDBFile
 
         colored_echo("Loading pre-built system...", phase="simulation")
-        pdb_path = working_dir / "solvated_system.pdb"
-        system_path = working_dir / "system.xml"
-        if not pdb_path.exists() or not system_path.exists():
-            raise FileNotFoundError(
-                f"Pre-built system not found in {working_dir}. "
-                "Run 'polyzymd build' first or remove --skip-build."
-            )
         pdb = PDBFile(str(pdb_path))
         omm_topology = pdb.topology
         omm_positions = pdb.positions

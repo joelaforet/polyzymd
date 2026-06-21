@@ -15,7 +15,7 @@ def _simulation_config_data(tmp_path: Path) -> dict:
         "thermodynamics": {"temperature": 310.0},
         "solvent": {
             "primary": {"type": "water", "model": "tip3p"},
-            "co_solvents": [{"name": "dmso", "volume_fraction": 0.3}],
+            "co_solvents": [{"name": "dmso", "mole_fraction": 0.3}],
         },
         "simulation_phases": {
             "equilibration_stages": [
