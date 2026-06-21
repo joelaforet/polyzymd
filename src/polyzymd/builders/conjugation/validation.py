@@ -114,6 +114,16 @@ class _ProductAtomMatchContext:
     assembly: Any | None = None
 
 
+@dataclass(frozen=True)
+class _ExpectedAtomPresence:
+    """Required or forbidden atom entry with attachment-specific context."""
+
+    identity: AtomIdentity
+    source: str
+    plan: Any
+    plan_index: int
+
+
 class ProductBondGraphReport(BaseModel):
     """Validation summary for expected product linkage bonds."""
 
@@ -382,45 +392,58 @@ def validate_atom_presence(
         )
         return AtomPresenceReport(status=check.status, checks=(check,))
 
-    expected_present = []
-    expected_absent = []
+    expected_present: list[_ExpectedAtomPresence] = []
+    expected_absent: list[_ExpectedAtomPresence] = []
     for plan_index, plan in enumerate(resolved_plans, start=1):
         for attr_name in ("protein_link_atom", "modifier_link_atom"):
             atom = getattr(plan, attr_name, None)
             if atom is not None:
                 expected_present.append(
-                    (AtomIdentity.from_pdb_atom(atom), attr_name, plan, plan_index)
+                    _ExpectedAtomPresence(
+                        AtomIdentity.from_pdb_atom(atom), attr_name, plan, plan_index
+                    )
                 )
         for atom in tuple(getattr(plan, "protein_leaving_atoms", ()) or ()):
             expected_absent.append(
-                (AtomIdentity.from_pdb_atom(atom), "protein_leaving_atoms", plan, plan_index)
+                _ExpectedAtomPresence(
+                    AtomIdentity.from_pdb_atom(atom), "protein_leaving_atoms", plan, plan_index
+                )
             )
         for atom in tuple(getattr(plan, "modifier_leaving_atoms", ()) or ()):
             expected_absent.append(
-                (AtomIdentity.from_pdb_atom(atom), "modifier_leaving_atoms", plan, plan_index)
+                _ExpectedAtomPresence(
+                    AtomIdentity.from_pdb_atom(atom), "modifier_leaving_atoms", plan, plan_index
+                )
             )
 
     match_context = _ProductAtomMatchContext(atoms=atoms, assembly=assembly)
 
-    present = tuple(
-        identity
-        for identity, source, plan, plan_index in expected_present
+    present_entries = tuple(
+        entry
+        for entry in expected_present
         if _identity_present(
-            identity, match_context, source=source, plan=plan, plan_index=plan_index
+            entry.identity,
+            match_context,
+            source=entry.source,
+            plan=entry.plan,
+            plan_index=entry.plan_index,
         )
     )
-    missing = tuple(
-        identity
-        for identity, _source, _plan, _plan_index in expected_present
-        if identity not in present
-    )
-    lingering = tuple(
-        identity
-        for identity, source, plan, plan_index in expected_absent
+    missing_entries = tuple(entry for entry in expected_present if entry not in present_entries)
+    lingering_entries = tuple(
+        entry
+        for entry in expected_absent
         if _identity_lingering(
-            identity, match_context, source=source, plan=plan, plan_index=plan_index
+            entry.identity,
+            match_context,
+            source=entry.source,
+            plan=entry.plan,
+            plan_index=entry.plan_index,
         )
     )
+    present = tuple(entry.identity for entry in present_entries)
+    missing = tuple(entry.identity for entry in missing_entries)
+    lingering = tuple(entry.identity for entry in lingering_entries)
     status = ValidationStatus.FAIL if missing or lingering else ValidationStatus.PASS
     message = "Required link atoms are present and leaving atoms are absent"
     if missing or lingering:

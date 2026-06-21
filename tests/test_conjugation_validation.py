@@ -397,6 +397,76 @@ def test_atom_presence_scopes_remapped_modifier_link_to_attachment():
     assert report.missing_atoms == ()
 
 
+def test_atom_presence_keeps_duplicate_modifier_identities_plan_scoped():
+    """A remapped match for one attachment should not satisfy another."""
+    first_protein_link_atom = _atom(
+        serial=1,
+        atom_name="NZ",
+        residue_name="LYS",
+        residue_number=10,
+    )
+    second_protein_link_atom = _atom(
+        serial=3,
+        atom_name="NZ",
+        residue_name="LYS",
+        residue_number=11,
+    )
+    modifier_link_atom = _atom(
+        serial=50,
+        atom_name="C7",
+        residue_name="MOD",
+        residue_number=4,
+    )
+    first_product_modifier_link = _atom(
+        serial=2,
+        atom_name="C7",
+        residue_name="PRD",
+        residue_number=99,
+        chain_id="C",
+    )
+    first_plan = SimpleNamespace(
+        protein_link_atom=first_protein_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(),
+        modifier_leaving_atoms=(),
+        modifier_product_residue_name="PRD",
+    )
+    second_plan = SimpleNamespace(
+        protein_link_atom=second_protein_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(),
+        modifier_leaving_atoms=(),
+        modifier_product_residue_name="PRD",
+    )
+    assembly = SimpleNamespace(
+        added_conect_pairs=((1, 2), (3, 999)),
+        residue_mappings={
+            "fragment_1:4": {
+                "source_residue_number": 4,
+                "target_residue_number": 99,
+                "target_chain": "C",
+            },
+            "fragment_2:4": {
+                "source_residue_number": 4,
+                "target_residue_number": 100,
+                "target_chain": "C",
+            },
+        },
+    )
+
+    report = validate_atom_presence(
+        (first_protein_link_atom, first_product_modifier_link, second_protein_link_atom),
+        resolved_plans=(first_plan, second_plan),
+        assembly=assembly,
+    )
+
+    assert report.status == ValidationStatus.FAIL
+    assert len(report.missing_atoms) == 1
+    missing_modifier_identity = report.missing_atoms[0]
+    assert report.present_atoms.count(missing_modifier_identity) == 1
+    assert missing_modifier_identity.atom_name == "C7"
+
+
 def test_charge_audit_pass_warn_and_fail(tmp_path):
     """Charge audit should summarize fake bridge payloads."""
     bridge_path = tmp_path / "product_state_charge_bridge.json"
