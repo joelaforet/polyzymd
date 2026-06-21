@@ -21,12 +21,12 @@ chemistry into a supported workflow.
 |----------------------|-----------------|-------|
 | Opt-in config-driven conjugation with `conjugation.enabled: true` | Executable | Runs through the regular `polyzymd build -c config.yaml` path when attachments are enabled. |
 | NHS-lysine polymer attachment with `mechanism.name: nhs_lys_amide` | Validated vertical slice | Current reliability milestone target. Supports Pablo/OpenFF Interchange, ff14SB plus polymer templates, local NAGL patch charge bridge, charge reconciliation, restrained OpenMM smoke evidence, validation report, and final solvation. |
-| Multiple NHS-lysine polymer attachments | Executable and validation-aware | Multi-site attachment metadata is handled by the validation report. Treat scientific validation as system-specific. |
-| SMILES moiety with `mechanism.name: n_glycosylation` | Wired for mechanism tests and exploratory workflow development | The path exercises N-glyco mechanism metadata and product-state ideas, but it is not the same validated production vertical slice as NHS-Lys polymer conjugation. |
+| Multiple NHS-lysine polymer attachments | Executable | Multi-site attachment metadata is handled by the validation report. Treat scientific validation as system-specific. |
+| SMILES moiety with `mechanism.name: n_glycosylation` | Wired | The path exercises N-glyco mechanism metadata and exploratory product-state ideas, but it is not the same validated vertical slice as NHS-Lys polymer conjugation. |
 | Mixed mechanisms in one config | Planned | Do not assume mixed NHS-Lys plus glycosylation production support unless tests and docs are updated. |
 | O-glycosylation | Planned | Vocabulary/design area only. |
-| Arbitrary SMARTS-defined chemistry | Not generally supported | SMARTS can describe roles for future mechanisms, but does not by itself provide placement, product residues, charge patches, templates, or validation. |
-| Explicit PDB linkage | Advanced/exploratory | Requires explicit atom-level product residue and leaving-atom information. Validate carefully. |
+| Arbitrary SMARTS-defined chemistry | Planned | SMARTS can describe roles for future mechanisms, but does not by itself provide placement, product residues, charge patches, templates, or validation. |
+| Explicit PDB linkage | Wired | Requires explicit atom-level product residue and leaving-atom information. Treat as advanced/exploratory and validate carefully. |
 
 ## Validated NHS-Lys polymer vertical slice
 

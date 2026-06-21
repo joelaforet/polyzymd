@@ -1,8 +1,9 @@
 # Build a Protein With an NHS-Lysine Polymer Attachment
 
-This tutorial shows the current executable protein modification workflow: an
-NHS-reactive polymer attached to a lysine through `conjugation.attachments`. The
-examples use the schema accepted by `polyzymd build` today.
+This tutorial shows the current validated vertical slice for protein
+modification: an NHS-reactive polymer attached to a lysine through
+`conjugation.attachments`. The examples use the schema accepted by
+`polyzymd build` today.
 
 By the end, you will have a `config.yaml` fragment that:
 
@@ -54,8 +55,9 @@ conjugation:
   attachments: []
 ```
 
-When this block contains enabled attachments, `polyzymd build -c config.yaml`
-routes the build through conjugate construction before solvation and export.
+When this block contains enabled attachments,
+`pixi run -e build polyzymd build -c config.yaml` routes the build through
+conjugate construction before solvation and export.
 
 ## Step 3: Select the Lysine Site
 
@@ -193,17 +195,17 @@ A polymer in `conjugation.attachments` is bonded to the protein. A polymer in
 
 ## Step 8: Build and Inspect Diagnostics
 
-Run the regular build command:
+Run the regular build command from your project root:
 
 ```bash
-polyzymd build -c config.yaml
+pixi run -e build polyzymd build -c config.yaml
 ```
 
 For a conjugated GROMACS handoff, request GROMACS export from the same build
 command:
 
 ```bash
-polyzymd build -c config.yaml --format gromacs
+pixi run -e build polyzymd build -c config.yaml --format gromacs
 ```
 
 The GROMACS path first completes the conjugation workflow, then exports the final
@@ -216,7 +218,7 @@ Diagnostics should answer these questions in plain language:
 3. Which atoms were bonded?
 4. Which atoms were removed?
 5. Which residue names changed?
-6. Which assumptions are exploratory rather than production-ready?
+6. Which validation report sections passed, warned, failed, or were skipped?
 
 ## Expected Output
 
@@ -227,6 +229,7 @@ artifacts/lysine-polymer-conjugate/
 |- conjugation_diagnostics.json
 |- conjugation_metadata.json
 |- conjugate-construction/
+|  `- conjugate_validation_report.json
 |- relaxed_conjugate.pdb
 `- solvated_conjugate_free_polymers.pdb
 ```
@@ -239,8 +242,8 @@ that were created.
 
 | Requested workflow | Current status |
 |--------------------|----------------|
-| Enabled NHS-lysine polymer attachments with `moiety.recipe` | Executable for exploratory builds. |
-| Multiple enabled NHS-lysine polymer attachments in one config | Executable for exploratory builds. |
+| Enabled NHS-lysine polymer attachments with `moiety.recipe` | Validated vertical slice for the stated NHS-Lys polymer scope. |
+| Multiple enabled NHS-lysine polymer attachments in one config | Executable; validation metadata is multi-site aware, but scientific validation remains system-specific. |
 | General biology-first recipe field | Planned and non-executable. |
 | O-glycosylation recipe | Planned. |
 | Mixed glycan plus polymer mechanisms | Planned. |

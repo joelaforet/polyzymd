@@ -26,7 +26,7 @@ NHS-lysine polymer vertical slice:
 - final solvation.
 
 The N-glycosylation path is wired for mechanism tests and exploratory workflow
-development, but it is not the same validated production path as the NHS-Lys
+development, but it is not the same validated vertical slice as the NHS-Lys
 polymer workflow. See {doc}`../reference/conjugation_support_matrix` for the
 current support levels.
 
@@ -75,8 +75,18 @@ Open the report and inspect the top-level `status` first:
 import json
 from pathlib import Path
 
-report = json.loads(Path("conjugate_validation_report.json").read_text())
+# After result = build_conjugate_from_config(...) or build_conjugate(...)
+report_path = result.artifact_paths["conjugate_validation_report"]
+report = json.loads(Path(report_path).read_text())
 print(report["status"])
+```
+
+If you are reading artifacts outside the Python result object, use the report
+inside the construction artifact directory, for example:
+
+```python
+report_path = Path("artifacts/lysine-polymer-conjugate/conjugate-construction/conjugate_validation_report.json")
+report = json.loads(report_path.read_text())
 ```
 
 Statuses are:

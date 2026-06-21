@@ -8,12 +8,11 @@ PolyzyMD writes.
 By the end, you will know how to:
 
 - describe an attachment as **site + moiety + mechanism**;
-- choose between the built-in `nhs_lys` and `n_glycosylation` mechanisms;
-- call `build_conjugate()`, `build_conjugate_from_config()`, or
-  `ConjugationEngine` from public API code;
+- run the validated NHS-Lys polymer vertical slice;
+- call `build_conjugate_from_config()` from public API code;
 - read the main `ConjugationResult` artifact paths;
 - find and interpret `conjugate_validation_report.json`; and
-- reason about custom SMARTS without assuming unsupported plugin behavior.
+- recognize exploratory mechanisms without treating them as production-ready.
 
 ```{important}
 Run conjugation examples inside a PolyzyMD pixi environment. The workflow uses
@@ -28,8 +27,7 @@ You need:
 - a cleaned **unmodified** protein PDB, for example
   `structures/protein_clean.pdb`;
 - a residue number and chain ID for the attachment site;
-- either a polymer recipe for an NHS-lysine polymer conjugate, or a SMILES string
-  for an N-glycosylation moiety; and
+- a polymer recipe for an NHS-lysine polymer conjugate; and
 - an output directory where PolyzyMD can write construction artifacts.
 
 If you are starting from a raw crystal structure, first work through
@@ -37,9 +35,9 @@ If you are starting from a raw crystal structure, first work through
 see {doc}`../reference/protein_modification_config`.
 
 The important modeling assumption in this tutorial is that the protein PDB is
-the **source state**. Do not pre-edit the lysine or asparagine into a product
-residue yourself. PolyzyMD needs the unmodified residue so the mechanism can
-find the target atom and the leaving atoms.
+the **source state**. Do not pre-edit the lysine into a product residue yourself.
+PolyzyMD needs the unmodified residue so the NHS-Lys mechanism can find the
+target atom and leaving atoms.
 
 ## Step 1: Describe One Attachment
 
@@ -53,66 +51,58 @@ clean protein PDB
   -> conjugated product artifacts
 ```
 
-For example, an N-glycosylation attachment to asparagine 67 can be written as a
-plain Python dictionary and validated by `ConjugateBuildRequest`:
+For the validated vertical slice, use an NHS-activated polymer attached to a
+lysine side-chain amine. The same attachment shape can be expressed as data and
+validated by `ConjugateBuildRequest`; the monomer SMILES strings are abbreviated
+here and shown in full in Step 4:
 
 ```python
 attachment = {
-    "name": "asn67-glcnac",
+    "name": "lys23-sbma-egpma-nhs",
     "site": {
         "chain_id": "A",
-        "residue_name": "ASN",
-        "residue_number": 67,
-        # atom_name is optional here: n_glycosylation knows the target is ND2.
+        "residue_name": "LYS",
+        "residue_number": 23,
+        # atom_name is optional here: nhs_lys_amide knows the target is NZ.
     },
     "moiety": {
-        "name": "glcnac",
-        "smiles": "OC1C(O)C(O)C(CO)OC1NC(C)=O",
-        "residue_name": "NAG",
+        "name": "SBMA-EGPMA-NHS",
+        "recipe": {
+            "name": "SBMA-EGPMA-NHS",
+            "length": 9,
+            "seed": 7,
+            "forced_reactive_monomer_label": "C",
+            "monomers": [
+                {"label": "A", "name": "SBMA", "residue_name": "SBM", "smiles": "...", "probability": 0.945},
+                {"label": "B", "name": "EGPMA", "residue_name": "EGP", "smiles": "...", "probability": 0.045},
+                {"label": "C", "name": "NHS", "residue_name": "NHS", "smiles": "CC(=C)C(=O)ON1C(=O)CCC1=O", "probability": 0.010},
+            ],
+        },
     },
-    "mechanism": {"name": "n_glycosylation"},
+    "mechanism": {"name": "nhs_lys_amide"},
 }
 ```
 
-For SMILES-defined moieties, `residue_name` is required. PolyzyMD treats the
-entire SMILES moiety as **one residue** in the generated product. This is useful
-for a small glycan-like group or label. Polymers are different: a polymer recipe
-generates a multi-residue moiety, usually with one reactive monomer selected for
-the covalent bond.
+In real configs, use complete monomer SMILES strings as shown in Step 4. A
+polymer recipe generates a multi-residue moiety, usually with one reactive
+monomer selected for the covalent bond.
 
-## Step 2: Run the Public API for a SMILES Moiety
+## Step 2: Run the Config-Driven Public API
 
-Create `scripts/build_asn67_glcnac.py`:
+Create `scripts/build_lys23_polymer.py` after you have the `config.yaml` from
+Step 4:
 
 ```python
 from pathlib import Path
 
-from polyzymd.builders.conjugation import ConjugateBuildRequest, build_conjugate
+from polyzymd.builders.conjugation import build_conjugate_from_config
 
 
-request = ConjugateBuildRequest(
-    protein_pdb_path=Path("structures/protein_clean.pdb"),
-    output_dir=Path("artifacts/asn67-glcnac"),
-    free_polymer_seed=17,
-    attachments=(
-        {
-            "name": "asn67-glcnac",
-            "site": {
-                "chain_id": "A",
-                "residue_name": "ASN",
-                "residue_number": 67,
-            },
-            "moiety": {
-                "name": "glcnac",
-                "smiles": "OC1C(O)C(O)C(CO)OC1NC(C)=O",
-                "residue_name": "NAG",
-            },
-            "mechanism": {"name": "n_glycosylation"},
-        },
-    ),
+result = build_conjugate_from_config(
+    Path("config.yaml"),
+    output_dir=Path("artifacts/lys23-polymer"),
+    free_polymer_seed=7,
 )
-
-result = build_conjugate(request)
 
 print(result.status)
 print(result.crosslinked_conjugate_pdb_path)
@@ -123,19 +113,12 @@ print(result.solvated_pdb_path)
 Run it with pixi:
 
 ```bash
-pixi run -e build python scripts/build_asn67_glcnac.py
+pixi run -e build python scripts/build_lys23_polymer.py
 ```
 
-You can make the engine object explicit if you prefer an object-oriented style:
-
-```python
-from polyzymd.builders.conjugation import ConjugationEngine
-
-engine = ConjugationEngine()
-result = engine.build(request)
-```
-
-Both forms go through the same public orchestration boundary.
+The config-driven helper is the recommended first Python path because it matches
+the validated NHS-Lys vertical slice and the normal `polyzymd build` entry
+point.
 
 ## Step 3: Inspect the Result
 
@@ -264,25 +247,30 @@ Run the script with:
 pixi run -e build python scripts/build_lys23_polymer.py
 ```
 
-## Step 5: Choose the Built-In Mechanism
+## Step 5: Choose the Supported Mechanism
 
-For your first conjugation runs, choose one of the built-in mechanisms instead
-of writing custom chemistry.
+For your first conjugation runs, use the NHS-Lys mechanism instead of writing
+custom chemistry. It is the current validated vertical slice.
 
-| Use this mechanism | When your request looks like | Current public UX |
-|--------------------|------------------------------|-------------------|
-| `nhs_lys` or `nhs_lys_amide` | An NHS ester on a polymer reacts with lysine `NZ` to form an amide. | Config-driven polymer recipe with an NHS reactive monomer. |
-| `n_glycosylation` | A reducing-end glycan-like SMILES moiety reacts with asparagine `ND2`. | Direct `ConjugateBuildRequest` from a cleaned protein plus one or more SMILES moieties. |
+| Use this mechanism | When your request looks like | Current support |
+|--------------------|------------------------------|-----------------|
+| `nhs_lys` or `nhs_lys_amide` | An NHS ester on a polymer reacts with lysine `NZ` to form an amide. | Validated vertical slice for config-driven polymer recipes with an NHS reactive monomer. |
 
-Use `nhs_lys` when the thing you are adding is a polymer made of multiple
-monomer residues. Use `n_glycosylation` when the thing you are adding can be
-represented as a single SMILES-defined moiety residue, such as a small glycan
-fragment in the current workflow.
+Use `nhs_lys_amide` when the thing you are adding is a polymer made of multiple
+monomer residues and one monomer contains the NHS reactive group.
 
-In both cases, the mechanism can fill in known target atoms. For example,
-`n_glycosylation` targets asparagine `ND2`, so you can omit
-`site.atom_name` in the attachment. Add `atom_name` only when you need a strict
-site check or are working with an advanced explicit configuration.
+The mechanism can fill in known target atoms. For NHS-Lys, PolyzyMD targets
+lysine `NZ`, so you can omit `site.atom_name` in the attachment. Add
+`atom_name` only when you need a strict site check or are working with an
+advanced explicit configuration.
+
+```{note}
+`n_glycosylation` is wired for mechanism tests and exploratory workflow
+development. It is useful when developing a reducing-end glycan-like SMILES
+moiety path, but it is not peer support to the validated NHS-Lys polymer
+vertical slice. Check {doc}`../reference/conjugation_support_matrix` before
+treating exploratory mechanisms as supported workflows.
+```
 
 ## Step 6: Read SMARTS as a Map of Roles
 
@@ -324,10 +312,10 @@ Read this as:
 3. atom maps `2` and `5` are removed during bond formation; and
 4. atom map `4` is retained and can help orient or validate the local chemistry.
 
-The built-in templates use the same idea. For NHS-Lys, the linking atoms are the
-lysine nitrogen and NHS acyl carbon. For N-glycosylation, the linking atoms are
-asparagine `ND2` and the glycan anomeric carbon; the mechanism also identifies
-the anomeric hydroxyl atoms that leave.
+The built-in NHS-Lys template uses the same idea: the linking atoms are the
+lysine nitrogen and NHS acyl carbon. Exploratory mechanism metadata, including
+the current N-glycosylation path, follows the same role vocabulary but does not
+automatically provide the same validated workflow support.
 
 ## Step 7: Validate Custom SMARTS Conservatively
 
@@ -351,9 +339,8 @@ When you design a future custom mechanism, use this checklist:
 - Decide the product residue names and force-field/template strategy before
   running expensive builds.
 
-If your chemistry is not NHS-Lys or the current N-glycosylation path, expect to
-write or request a supported reaction template rather than relying on SMARTS
-alone.
+If your chemistry is not NHS-Lys, expect to write or request a supported
+reaction template rather than relying on SMARTS alone.
 
 ## What You Learned
 
@@ -371,5 +358,5 @@ for first use:
 
 For working examples, see the notebooks in
 `src/polyzymd/builders/conjugation/poc/`, especially
-`public_api_conjugation_walkthrough.ipynb` for NHS-Lys and
-`public_api_n_glycosylation_walkthrough.ipynb` for N-glycosylation.
+`public_api_conjugation_walkthrough.ipynb` for the NHS-Lys vertical slice. Treat
+the N-glycosylation notebook as exploratory development material.
