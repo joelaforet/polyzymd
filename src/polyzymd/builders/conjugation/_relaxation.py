@@ -838,7 +838,9 @@ def _crosslink_bond_diagnostics_from_topology(
         elif protein_index >= len(coords_nm) or modifier_index >= len(coords_nm):
             status = "coordinate index out of range"
         else:
-            distance = float(np.linalg.norm(coords_nm[protein_index] - coords_nm[modifier_index])) * 10.0
+            distance = (
+                float(np.linalg.norm(coords_nm[protein_index] - coords_nm[modifier_index])) * 10.0
+            )
         diagnostics.append(
             CrosslinkBondDiagnostic(
                 attachment_id=getattr(spec, "attachment_id", None),
@@ -891,9 +893,10 @@ def _matching_topology_atom_index(
             continue
         if source_insertion and not residue_id.endswith(source_insertion):
             continue
-        if target_resname and str(getattr(residue, "name", "") or "").upper() != str(
+        if (
             target_resname
-        ).upper():
+            and str(getattr(residue, "name", "") or "").upper() != str(target_resname).upper()
+        ):
             continue
         if str(getattr(atom, "name", "") or "").strip().upper() == source_name.upper():
             return int(atom.index)
