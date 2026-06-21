@@ -147,14 +147,15 @@ def test_policy_with_resolved_crosslink_uses_product_state_leaving_atoms():
 
 
 def test_system_workflow_settings_enable_public_product_state_defaults():
-    """Public workflow defaults should mirror the known-working product-state POC path."""
+    """Public workflow defaults should use the generic frozen-protein protocol."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
     settings = workflow_module.ConjugatedPolymerSystemSettings()
 
     assert settings.canonicalize_source_protein_hydrogens is True
     assert settings.use_product_state_pablo_library is True
-    assert settings.run_product_state_local_minimization is True
+    assert settings.run_frozen_protein_product_relaxation is True
+    assert settings.run_product_state_local_minimization is False
     assert settings.protein_canonicalization.ph == pytest.approx(7.0)
 
 
@@ -1173,7 +1174,7 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
     assert calls["spec_count"] == 2
     assert calls["resolved_plan_count"] == 2
     assert calls["attachment_specs"] == tuple(built_specs)
-    assert calls["run_local_minimization"] is True
+    assert calls["run_local_minimization"] is False
     assert calls["local_minimization_settings"] is not None
     assert result.workflow_json_path.exists()
     payload = json.loads(result.workflow_json_path.read_text(encoding="utf-8"))
@@ -1295,7 +1296,7 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     assert len(built_specs) == 2
     assert calls["construct_spec_count"] == 2
     assert calls["specs"] == tuple(built_specs)
-    assert calls["run_local_minimization"] is True
+    assert calls["run_local_minimization"] is False
     assert calls["local_minimization_settings"] is settings.local_minimization
     assert result.generated_sequences == ("AA", "AA")
     assert result.reactive_sequence_indices == (0, 0)
