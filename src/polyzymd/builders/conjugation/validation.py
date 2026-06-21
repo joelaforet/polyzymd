@@ -788,15 +788,20 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
         )
         rmsd_limit = float(settings.get("max_protein_rmsd_angstrom", 0.05))
         displacement_limit = float(settings.get("max_protein_displacement_angstrom", 0.25))
-        md_steps = settings.get("md_steps", diagnostics.get("md_steps"))
-        if md_steps is not None and (not _is_finite_number(md_steps) or int(md_steps) <= 0):
+        if "md_steps" in settings:
+            md_steps = settings["md_steps"]
+            md_steps_source = "settings.md_steps"
+        else:
+            md_steps = diagnostics.get("md_steps")
+            md_steps_source = "md_steps"
+        if not _is_positive_integer(md_steps):
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
                     "frozen_protein_relaxation_md_steps",
                     status,
-                    "Frozen-protein relaxation diagnostics report stale non-positive MD steps",
-                    evidence={"md_steps": md_steps},
+                    "Frozen-protein relaxation diagnostics lack valid positive MD step evidence",
+                    evidence={"md_steps": md_steps, "source": md_steps_source},
                 )
             )
         if rmsd is not None and (not _is_finite_number(rmsd) or float(rmsd) > rmsd_limit):
@@ -1237,6 +1242,11 @@ def _is_finite_number(value: Any) -> bool:
         return math.isfinite(float(value))
     except (TypeError, ValueError):
         return False
+
+
+def _is_positive_integer(value: Any) -> bool:
+    """Return whether a value is a positive integer and not a boolean."""
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 def _atom_has_finite_coordinates(atom: PdbAtomRecord) -> bool:
