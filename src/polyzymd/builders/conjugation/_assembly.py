@@ -21,6 +21,7 @@ from polyzymd.builders.conjugation._linkage import (
     resolve_explicit_linkage_contract,
 )
 from polyzymd.builders.conjugation._relaxation import (
+    FrozenProteinRelaxationSettings,
     VacuumSmokeResult,
     VacuumSmokeSettings,
     run_restrained_vacuum_smoke,
@@ -684,6 +685,9 @@ class ModifierConstructionSettings(BaseModel):
         default_factory=InterchangeParameterizationSettings
     )
     smoke: VacuumSmokeSettings = Field(default_factory=VacuumSmokeSettings)
+    frozen_protein_relaxation: FrozenProteinRelaxationSettings = Field(
+        default_factory=FrozenProteinRelaxationSettings
+    )
     run_smoke: bool = True
 
 
