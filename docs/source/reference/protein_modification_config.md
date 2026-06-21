@@ -5,9 +5,9 @@ by the current `polyzymd build` workflow. Protein modifications are configured
 under `conjugation:` because the supported implementation began as covalent
 polymer-protein conjugation.
 
-Current executable support covers exploratory NHS-lysine polymer attachments and
-the wired moiety-plus-mechanism attachment model. Generalized recipe fields for
-all protein modifications are future design material and are not part of the
+Current validated vertical-slice support covers NHS-lysine polymer attachments
+using the wired moiety-plus-mechanism attachment model. Generalized recipe fields
+for all protein modifications are future design material and are not part of the
 current schema.
 
 ## Top-Level Block
@@ -294,13 +294,13 @@ are handled by the public conjugation workflow when you run the regular build
 command:
 
 ```bash
-polyzymd build -c config.yaml
+pixi run -e build polyzymd build -c config.yaml
 ```
 
 For a conjugated GROMACS handoff, request GROMACS export from the same command:
 
 ```bash
-polyzymd build -c config.yaml --format gromacs
+pixi run -e build polyzymd build -c config.yaml --format gromacs
 ```
 
 The GROMACS export path completes conjugate construction, solvation, final

@@ -43,8 +43,7 @@ Lookup fields for covalent modifications and polymer conjugation.
 :link: conjugation_support_matrix
 :link-type: doc
 
-Current support levels, validation artifacts, and limits for conjugation
-mechanisms.
+Which conjugation mechanisms are planned, wired, executable, or validated.
 :::
 
 :::{grid-item-card} Analysis Plugin Reference
@@ -73,7 +72,7 @@ CLI Reference <cli_reference>
 Configuration Reference <configuration>
 ```
 
-## Input Data & PDB Requirements
+## Input Data, PDB Requirements & Conjugation Support
 
 ```{toctree}
 :maxdepth: 1
