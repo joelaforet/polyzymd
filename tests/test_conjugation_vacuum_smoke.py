@@ -12,11 +12,18 @@ import pytest
 from pydantic import ValidationError
 
 from polyzymd.builders.conjugation._relaxation import (
+    FrozenProteinRelaxationDiagnostics,
+    ProductLinkagePair,
     VacuumSmokeSettings,
+    _add_linkage_anchor_restraints,
     _positions_to_numpy,
+    _remove_barostats,
     _resolve_restrained_indices,
     _write_vacuum_smoke_failure,
     analyze_pre_smoke_geometry,
+    freeze_chain_a_masses,
+    resolve_product_linkage_pairs,
+    restore_particle_masses,
     validate_finite_energy,
     validate_finite_positions,
 )
@@ -47,12 +54,268 @@ class _AtomDouble:
         self.name = name
         self.element = type("ElementDouble", (), {"symbol": element})()
         chain = type("ChainDouble", (), {"id": chain_id})()
-        self.residue = type("ResidueDouble", (), {"chain": chain})()
+        self.residue = type(
+            "ResidueDouble",
+            (),
+            {"chain": chain, "name": "RES", "id": "1"},
+        )()
+
+
+def _pdb_line(
+    serial: int,
+    atom_name: str,
+    residue_name: str,
+    chain_id: str,
+    residue_number: int,
+    x: float,
+) -> str:
+    """Build a compact PDB atom line for product-linkage tests."""
+    element = atom_name[0]
+    return (
+        f"ATOM  {serial:5d} {atom_name:<4s} {residue_name:>3s} {chain_id:1s}"
+        f"{residue_number:4d}    {x:8.3f}{0.0:8.3f}{0.0:8.3f}  1.00  0.00"
+        f"          {element:>2s}\n"
+    )
+
+
+def _topology_atom(
+    index: int,
+    atom_name: str,
+    residue_name: str,
+    chain_id: str,
+    residue_id: str,
+) -> object:
+    """Create a topology atom double with product identity fields."""
+    chain = type("ChainDouble", (), {"id": chain_id})()
+    residue = type("ResidueDouble", (), {"chain": chain, "name": residue_name, "id": residue_id})()
+    return type("TopologyAtomDouble", (), {"index": index, "name": atom_name, "residue": residue})()
 
 
 def test_validate_finite_energy_accepts_finite_values():
     """Finite energies should pass smoke validation."""
     validate_finite_energy(-123.4, label="test_energy")
+
+
+def test_resolve_product_linkage_pairs_uses_generic_assembly_metadata(tmp_path):
+    """Arbitrary residue and atom names should resolve from CONECT metadata."""
+    product = tmp_path / "product.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(1, "Q1", "ABC", "A", 7, 0.0),
+                _pdb_line(2, "Z9", "MNO", "C", 42, 1.4),
+                "CONECT    1    2\nEND\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    topology = _TopologyDouble(
+        (
+            _topology_atom(0, "Q1", "ABC", "A", "7"),
+            _topology_atom(1, "Z9", "MNO", "C", "42"),
+        )
+    )
+    plan = type("PlanDouble", (), {"target_bond_length_angstrom": 1.4})()
+    spec = type(
+        "SpecDouble",
+        (),
+        {"resolved_plan": plan, "attachment_id": "x", "attachment_index": 1},
+    )()
+    assembly = type("AssemblyDouble", (), {"added_conect_pairs": ((1, 2),)})()
+
+    pairs = resolve_product_linkage_pairs(
+        topology,
+        product_pdb_path=product,
+        attachment_specs=(spec,),
+        assembly=assembly,
+    )
+
+    assert pairs[0].protein_atom_index == 0
+    assert pairs[0].modifier_atom_index == 1
+    assert pairs[0].target_bond_length_angstrom == pytest.approx(1.4)
+
+
+def test_resolve_product_linkage_pairs_disambiguates_duplicate_moieties(tmp_path):
+    """Identical duplicated moieties should resolve distinct product linkage pairs."""
+    product = tmp_path / "product.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(1, "Q1", "ABC", "A", 7, 0.0),
+                _pdb_line(2, "Z9", "MNO", "C", 42, 1.4),
+                _pdb_line(3, "Q1", "ABC", "A", 8, 3.0),
+                _pdb_line(4, "Z9", "MNO", "C", 43, 4.4),
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    topology = _TopologyDouble(
+        (
+            _topology_atom(0, "Q1", "ABC", "A", "7"),
+            _topology_atom(1, "Z9", "MNO", "C", "42"),
+            _topology_atom(2, "Q1", "ABC", "A", "8"),
+            _topology_atom(3, "Z9", "MNO", "C", "43"),
+        )
+    )
+    plan = type("PlanDouble", (), {"target_bond_length_angstrom": 1.4})()
+    specs = tuple(
+        type(
+            "SpecDouble",
+            (),
+            {"resolved_plan": plan, "attachment_id": f"x{index}", "attachment_index": index},
+        )()
+        for index in (1, 2)
+    )
+    assembly = type("AssemblyDouble", (), {"added_conect_pairs": ((1, 2), (3, 4))})()
+
+    pairs = resolve_product_linkage_pairs(
+        topology,
+        product_pdb_path=product,
+        attachment_specs=specs,
+        assembly=assembly,
+    )
+
+    assert [(pair.protein_atom_index, pair.modifier_atom_index) for pair in pairs] == [
+        (0, 1),
+        (2, 3),
+    ]
+
+
+def test_freeze_chain_a_masses_restores_only_protein_chain():
+    """Temporary zero masses should affect only chain A particles."""
+
+    class SystemDouble:
+        """Minimal system double with mutable particle masses."""
+
+        def __init__(self) -> None:
+            self.masses = [12.0, 14.0, 16.0]
+
+        def getParticleMass(self, index: int) -> float:
+            """Return one particle mass."""
+            return self.masses[index]
+
+        def setParticleMass(self, index: int, mass: float) -> None:
+            """Set one particle mass."""
+            self.masses[index] = mass
+
+    topology = _TopologyDouble(
+        (
+            _AtomDouble(0, "CA", "C", "A"),
+            _AtomDouble(1, "CB", "C", "A"),
+            _AtomDouble(2, "C1", "C", "C"),
+        )
+    )
+    system = SystemDouble()
+
+    frozen, original = freeze_chain_a_masses(system, topology, type("Unit", (), {"dalton": 1.0})())
+    assert frozen == (0, 1)
+    assert system.masses == [0.0, 0.0, 16.0]
+
+    restore_particle_masses(system, original)
+    assert system.masses == [12.0, 14.0, 16.0]
+
+
+def test_temporary_anchor_restraint_count_matches_linkages():
+    """Temporary anchor restraints should add one bond per attachment."""
+
+    class ForceDouble:
+        """CustomBondForce test double."""
+
+        def __init__(self, expression: str) -> None:
+            self.expression = expression
+            self.bonds = []
+
+        def addPerBondParameter(self, name: str) -> None:
+            """Accept per-bond parameter declarations."""
+
+        def addGlobalParameter(self, name: str, value: float) -> None:
+            """Accept global parameter declarations."""
+
+        def addBond(self, atom_i: int, atom_j: int, parameters: list[float]) -> None:
+            """Store one anchor bond."""
+            self.bonds.append((atom_i, atom_j, parameters))
+
+    class SystemDouble:
+        """System test double collecting added forces."""
+
+        def __init__(self) -> None:
+            self.forces = []
+
+        def addForce(self, force: ForceDouble) -> None:
+            """Store one added force."""
+            self.forces.append(force)
+
+    openmm = type("OpenMMDouble", (), {"CustomBondForce": ForceDouble})()
+    unit = type("UnitDouble", (), {"kilojoule_per_mole": 1.0, "nanometer": 1.0})()
+    pairs = (
+        ProductLinkagePair(
+            protein_atom_index=0, modifier_atom_index=1, target_bond_length_angstrom=1.3
+        ),
+        ProductLinkagePair(
+            protein_atom_index=2, modifier_atom_index=3, target_bond_length_angstrom=1.4
+        ),
+    )
+    system = SystemDouble()
+
+    count = _add_linkage_anchor_restraints(system, pairs, 100.0, openmm, unit)
+
+    assert count == 2
+    assert len(system.forces[0].bonds) == 2
+
+
+def test_remove_barostats_removes_only_barostat_forces():
+    """Vacuum relaxation should discard barostat forces from transient systems."""
+
+    class MonteCarloBarostat:
+        """Barostat marker double."""
+
+    class HarmonicBondForce:
+        """Non-barostat marker double."""
+
+    class SystemDouble:
+        """System double with removable forces."""
+
+        def __init__(self) -> None:
+            self.forces = [HarmonicBondForce(), MonteCarloBarostat(), HarmonicBondForce()]
+
+        def getNumForces(self) -> int:
+            """Return force count."""
+            return len(self.forces)
+
+        def getForce(self, index: int) -> object:
+            """Return force by index."""
+            return self.forces[index]
+
+        def removeForce(self, index: int) -> None:
+            """Remove force by index."""
+            self.forces.pop(index)
+
+    system = SystemDouble()
+
+    assert _remove_barostats(system) == 1
+    assert [type(force).__name__ for force in system.forces] == [
+        "HarmonicBondForce",
+        "HarmonicBondForce",
+    ]
+
+
+def test_frozen_protein_diagnostics_serializes(tmp_path):
+    """Frozen-protein diagnostics should write JSON evidence."""
+    path = tmp_path / "diagnostics.json"
+    diagnostics = FrozenProteinRelaxationDiagnostics(
+        success=True,
+        frozen_atom_count=2,
+        temporary_anchor_count=1,
+        linkage_distances_angstrom=(1.4,),
+    )
+
+    diagnostics.write_json(path)
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["success"] is True
+    assert payload["temporary_anchor_count"] == 1
+    assert payload["json_path"] == str(path)
 
 
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])

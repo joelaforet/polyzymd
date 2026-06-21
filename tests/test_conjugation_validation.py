@@ -606,6 +606,20 @@ def test_smoke_audit_pass_fail_and_skipped(tmp_path):
     assert audit_openmm_smoke_reports(tmp_path).status == ValidationStatus.FAIL
 
 
+def test_smoke_audit_accepts_frozen_relaxation_evidence(tmp_path):
+    """Validation should report generic frozen-protein relaxation evidence."""
+    diagnostics_path = tmp_path / "frozen_protein_relaxation_diagnostics.json"
+    diagnostics_path.write_text(
+        json.dumps({"success": True, "temporary_anchor_count": 2}),
+        encoding="utf-8",
+    )
+
+    report = audit_openmm_smoke_reports(tmp_path)
+
+    assert report.status == ValidationStatus.PASS
+    assert report.frozen_relaxation_diagnostics_json_path == diagnostics_path
+
+
 def test_validation_report_status_aggregation(tmp_path):
     """Top-level report status should aggregate child failures."""
     pdb_path = tmp_path / "product.pdb"
