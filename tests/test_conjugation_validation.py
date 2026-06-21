@@ -606,8 +606,8 @@ def test_smoke_audit_pass_fail_and_skipped(tmp_path):
     assert audit_openmm_smoke_reports(tmp_path).status == ValidationStatus.FAIL
 
 
-def test_smoke_audit_accepts_frozen_relaxation_evidence(tmp_path):
-    """Validation should report generic frozen-protein relaxation evidence."""
+def test_smoke_audit_does_not_mask_failed_legacy_smoke_with_frozen_evidence(tmp_path):
+    """Frozen relaxation evidence must not suppress failed legacy smoke artifacts."""
     (tmp_path / "restrained_smoke_diagnostics.json").write_text(
         json.dumps({"success": False}),
         encoding="utf-8",
@@ -627,6 +627,41 @@ def test_smoke_audit_accepts_frozen_relaxation_evidence(tmp_path):
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
                 "stage_b_linkage_distance_errors_angstrom": [0.1, 0.2],
                 "settings": {
+                    "md_steps": 10,
+                    "max_protein_rmsd_angstrom": 0.05,
+                    "max_protein_displacement_angstrom": 0.25,
+                    "max_linkage_distance_error_angstrom": 0.35,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = audit_openmm_smoke_reports(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert report.frozen_relaxation_diagnostics_json_path == diagnostics_path
+    assert any(check.name == "restrained_smoke_diagnostics" for check in report.checks)
+
+
+def test_smoke_audit_accepts_passing_frozen_relaxation_evidence(tmp_path):
+    """Validation should pass when all present OpenMM smoke evidence passes."""
+    diagnostics_path = tmp_path / "frozen_protein_relaxation_diagnostics.json"
+    diagnostics_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "stage_a_success": True,
+                "stage_b_success": True,
+                "temporary_anchor_count": 2,
+                "barostat_used": False,
+                "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_after_md_kj_mol": -11.0,
+                "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
+                "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
+                "stage_b_linkage_distance_errors_angstrom": [0.1, 0.2],
+                "settings": {
+                    "md_steps": 10,
                     "max_protein_rmsd_angstrom": 0.05,
                     "max_protein_displacement_angstrom": 0.25,
                     "max_linkage_distance_error_angstrom": 0.35,
@@ -640,6 +675,32 @@ def test_smoke_audit_accepts_frozen_relaxation_evidence(tmp_path):
 
     assert report.status == ValidationStatus.PASS
     assert report.frozen_relaxation_diagnostics_json_path == diagnostics_path
+
+
+def test_smoke_audit_rejects_stale_zero_step_frozen_relaxation(tmp_path):
+    """Validation should reject stale frozen diagnostics with no Stage B MD."""
+    (tmp_path / "frozen_protein_relaxation_diagnostics.json").write_text(
+        json.dumps(
+            {
+                "success": True,
+                "stage_a_success": True,
+                "stage_b_success": True,
+                "barostat_used": False,
+                "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_after_md_kj_mol": -11.0,
+                "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
+                "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
+                "stage_b_linkage_distance_errors_angstrom": [0.1],
+                "settings": {"md_steps": 0},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = audit_openmm_smoke_reports(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(check.name == "frozen_protein_relaxation_md_steps" for check in report.checks)
 
 
 def test_smoke_audit_fails_unfixed_frozen_stage_b(tmp_path):

@@ -707,8 +707,7 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
 
     checks: list[ConjugateValidationCheck] = []
     status = ValidationStatus.PASS
-    has_frozen_relaxation = frozen_diagnostics_path.exists()
-    if smoke_path.exists() and not has_frozen_relaxation:
+    if smoke_path.exists():
         smoke = _read_json(smoke_path)
         if not bool(smoke.get("success", False)):
             status = ValidationStatus.FAIL
@@ -719,7 +718,7 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
             checks.append(
                 _check("vacuum_smoke_energy", status, "Vacuum smoke energy is non-finite")
             )
-    if diagnostics_path.exists() and not has_frozen_relaxation:
+    if diagnostics_path.exists():
         diagnostics = _read_json(diagnostics_path)
         if not bool(diagnostics.get("success", False)):
             status = ValidationStatus.FAIL
@@ -728,7 +727,7 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
                     "restrained_smoke_diagnostics", status, "Restrained smoke diagnostics failed"
                 )
             )
-    if pre_smoke_path.exists() and not has_frozen_relaxation:
+    if pre_smoke_path.exists():
         pre_smoke = _read_json(pre_smoke_path)
         span = pre_smoke.get("coordinate_span_nm")
         if span is not None and not _is_finite_number(span):
@@ -789,6 +788,17 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
         )
         rmsd_limit = float(settings.get("max_protein_rmsd_angstrom", 0.05))
         displacement_limit = float(settings.get("max_protein_displacement_angstrom", 0.25))
+        md_steps = settings.get("md_steps", diagnostics.get("md_steps"))
+        if md_steps is not None and (not _is_finite_number(md_steps) or int(md_steps) <= 0):
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "frozen_protein_relaxation_md_steps",
+                    status,
+                    "Frozen-protein relaxation diagnostics report stale non-positive MD steps",
+                    evidence={"md_steps": md_steps},
+                )
+            )
         if rmsd is not None and (not _is_finite_number(rmsd) or float(rmsd) > rmsd_limit):
             status = ValidationStatus.FAIL
             checks.append(

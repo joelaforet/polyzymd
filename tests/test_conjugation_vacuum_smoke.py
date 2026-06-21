@@ -2,24 +2,28 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 import math
 import os
 import shutil
+import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from pydantic import ValidationError
 
+import polyzymd.builders.conjugation._relaxation as relaxation
 from polyzymd.builders.conjugation._relaxation import (
     FrozenProteinRelaxationDiagnostics,
+    FrozenProteinRelaxationSettings,
     ProductLinkagePair,
     VacuumSmokeSettings,
     _add_linkage_anchor_restraints,
     _positions_to_numpy,
     _remove_barostats,
     _resolve_restrained_indices,
+    _run_frozen_product_md,
     _write_vacuum_smoke_failure,
     analyze_pre_smoke_geometry,
     freeze_chain_a_masses,
@@ -307,17 +311,110 @@ def test_temporary_anchor_restraint_count_matches_linkages():
     assert len(system.forces[0].bonds) == 2
 
 
-def test_frozen_product_relaxation_minimizes_before_freezing():
-    """Stage A minimization should happen before Stage B zero-mass freezing."""
-    source = inspect.getsource(run_frozen_protein_product_relaxation)
+def test_frozen_relaxation_stage_b_uses_fresh_frozen_system(monkeypatch, tmp_path):
+    """Stage A should use normal masses and Stage B should use a fresh frozen system."""
+    calls: list[tuple[str, str, tuple[float, ...]]] = []
+    openmm, openmm_app = _install_fake_openmm(monkeypatch, calls)
+    monkeypatch.setattr(
+        relaxation, "_select_platform", lambda *_args: SimpleNamespace(getName=lambda: "CPU")
+    )
+    monkeypatch.setattr(relaxation, "_assign_force_groups", lambda _system: {})
+    monkeypatch.setattr(relaxation, "_force_group_labels", lambda _system, *, existing_labels: {})
+    monkeypatch.setattr(relaxation, "_force_group_energies", lambda *_args: {})
+    monkeypatch.setattr(relaxation, "_add_linkage_anchor_restraints", lambda *_args: 0)
+    monkeypatch.setattr(relaxation, "_write_openmm_pdb", lambda *_args: None)
 
-    stage_a_minimization = source.index("LocalEnergyMinimizer.minimize")
-    stage_b_freeze = source.index("freeze_protein_chain_masses")
-    stage_b_md = source.index("_run_frozen_product_md")
+    topology = _relaxation_topology()
+    interchange = _RelaxationInterchange(topology)
 
-    assert stage_a_minimization < stage_b_freeze < stage_b_md
-    assert "system_min = interchange.to_openmm_system()" in source
-    assert "system_md = interchange.to_openmm_system()" in source
+    result = run_frozen_protein_product_relaxation(
+        interchange,
+        tmp_path,
+        product_pdb_path=tmp_path / "product.pdb",
+        attachment_specs=(),
+        settings=FrozenProteinRelaxationSettings(md_steps=5),
+    )
+
+    assert result.success is True
+    assert len(interchange.systems) == 2
+    assert interchange.systems[0] is not interchange.systems[1]
+    assert calls == [
+        ("stage_a", "init", (12.0, 16.0)),
+        ("stage_b", "init", (0.0, 16.0)),
+        ("stage_b", "step", (0.0, 16.0)),
+    ]
+    assert interchange.systems[0].masses == [12.0, 16.0]
+    assert interchange.systems[1].masses == [12.0, 16.0]
+    assert sys.modules["openmm"] is openmm
+    assert sys.modules["openmm.app"] is openmm_app
+
+
+def test_frozen_relaxation_restores_masses_after_stage_b_error(monkeypatch, tmp_path):
+    """Temporary Stage B zero masses should be restored when MD fails."""
+    calls: list[tuple[str, str, tuple[float, ...]]] = []
+    _install_fake_openmm(monkeypatch, calls)
+    monkeypatch.setattr(
+        relaxation, "_select_platform", lambda *_args: SimpleNamespace(getName=lambda: "CPU")
+    )
+    monkeypatch.setattr(relaxation, "_assign_force_groups", lambda _system: {})
+    monkeypatch.setattr(relaxation, "_force_group_labels", lambda _system, *, existing_labels: {})
+    monkeypatch.setattr(relaxation, "_force_group_energies", lambda *_args: {})
+    monkeypatch.setattr(relaxation, "_add_linkage_anchor_restraints", lambda *_args: 0)
+    monkeypatch.setattr(relaxation, "_write_openmm_pdb", lambda *_args: None)
+
+    def fail_md(*_args, **_kwargs):
+        raise RuntimeError("backend instability")
+
+    monkeypatch.setattr(relaxation, "_run_frozen_product_md", fail_md)
+    interchange = _RelaxationInterchange(_relaxation_topology())
+
+    with pytest.raises(RuntimeError, match="backend instability"):
+        run_frozen_protein_product_relaxation(
+            interchange,
+            tmp_path,
+            product_pdb_path=tmp_path / "product.pdb",
+            attachment_specs=(),
+            settings=FrozenProteinRelaxationSettings(md_steps=5),
+        )
+
+    assert interchange.systems[1].masses == [12.0, 16.0]
+
+
+def test_frozen_relaxation_settings_reject_zero_md_steps():
+    """Frozen-protein relaxation must run a real Stage B MD segment."""
+    with pytest.raises(ValidationError, match="greater than 0"):
+        FrozenProteinRelaxationSettings(md_steps=0)
+
+
+def test_frozen_product_md_propagates_programming_errors(monkeypatch):
+    """Retry handling should not mask programming errors as instability."""
+
+    class BuggySimulation:
+        def __init__(self, *_args):
+            raise TypeError("bad fake API")
+
+    warnings: list[str] = []
+    openmm = SimpleNamespace(
+        LangevinMiddleIntegrator=lambda *_args: object(),
+        OpenMMException=RuntimeError,
+    )
+    app = SimpleNamespace(Simulation=BuggySimulation)
+    unit = SimpleNamespace(kelvin=1.0, picosecond=1.0, femtosecond=1.0, nanometer=1.0)
+
+    with pytest.raises(TypeError, match="bad fake API"):
+        _run_frozen_product_md(
+            _relaxation_topology(),
+            _RelaxationSystem("stage_b"),
+            np.zeros((2, 3)),
+            FrozenProteinRelaxationSettings(md_steps=5),
+            openmm,
+            app,
+            unit,
+            object(),
+            warnings,
+        )
+
+    assert warnings == []
 
 
 def test_remove_barostats_removes_only_barostat_forces():
@@ -599,6 +696,135 @@ def _restraint_selection_topology() -> _TopologyDouble:
             _AtomDouble(3, "H1", "H", "C"),
         )
     )
+
+
+class _RelaxationSystem:
+    """Mutable system double for staged frozen-protein relaxation tests."""
+
+    def __init__(self, label: str) -> None:
+        """Store a label and particle masses."""
+        self.label = label
+        self.masses = [12.0, 16.0]
+
+    def getNumForces(self) -> int:  # noqa: N802 - OpenMM API compatibility
+        """Return no forces for the minimal relaxation path."""
+        return 0
+
+    def getParticleMass(self, index: int) -> float:  # noqa: N802 - OpenMM API compatibility
+        """Return one particle mass."""
+        return self.masses[index]
+
+    def setParticleMass(self, index: int, mass: float) -> None:  # noqa: N802
+        """Set one particle mass."""
+        self.masses[index] = float(mass)
+
+
+class _RelaxationInterchange:
+    """Interchange double returning fresh OpenMM systems."""
+
+    def __init__(self, topology: _TopologyDouble) -> None:
+        """Store topology and emitted systems."""
+        self.topology = topology
+        self.positions = np.array([[0.0, 0.0, 0.0], [0.15, 0.0, 0.0]])
+        self.systems: list[_RelaxationSystem] = []
+
+    def to_openmm_topology(self) -> _TopologyDouble:
+        """Return the fake topology."""
+        return self.topology
+
+    def to_openmm_system(self) -> _RelaxationSystem:
+        """Return a fresh system for each staged OpenMM conversion."""
+        label = "stage_a" if not self.systems else "stage_b"
+        system = _RelaxationSystem(label)
+        self.systems.append(system)
+        return system
+
+
+class _RelaxationState:
+    """OpenMM state double with energy and positions."""
+
+    def __init__(self, positions: np.ndarray) -> None:
+        """Store state positions."""
+        self._positions = np.asarray(positions, dtype=float)
+
+    def getPotentialEnergy(self) -> float:  # noqa: N802 - OpenMM API compatibility
+        """Return a finite energy."""
+        return -1.0
+
+    def getPositions(self, asNumpy: bool = False) -> np.ndarray:  # noqa: N802, FBT001, FBT002
+        """Return the stored positions."""
+        return self._positions.copy()
+
+
+class _RelaxationContext:
+    """OpenMM context double storing positions."""
+
+    def __init__(self) -> None:
+        """Initialize empty positions."""
+        self.positions = np.zeros((2, 3))
+
+    def setPositions(self, positions: np.ndarray) -> None:  # noqa: N802
+        """Store context positions."""
+        self.positions = np.asarray(positions, dtype=float)
+
+    def setVelocities(self, _velocities: np.ndarray) -> None:  # noqa: N802
+        """Accept velocity initialization."""
+
+    def getState(self, **_kwargs) -> _RelaxationState:  # noqa: N802
+        """Return a finite state for requested data."""
+        return _RelaxationState(self.positions)
+
+
+def _relaxation_topology() -> _TopologyDouble:
+    """Build a minimal two-atom protein-conjugate topology."""
+    return _TopologyDouble(
+        (
+            _AtomDouble(0, "CA", "C", "A"),
+            _AtomDouble(1, "C1", "C", "C"),
+        )
+    )
+
+
+def _install_fake_openmm(monkeypatch, calls: list[tuple[str, str, tuple[float, ...]]]):
+    """Install fake OpenMM modules for staged relaxation behavior tests."""
+
+    class FakeSimulation:
+        """OpenMM Simulation double recording stage masses."""
+
+        def __init__(self, _topology, system: _RelaxationSystem, _integrator, _platform) -> None:
+            self.system = system
+            self.context = _RelaxationContext()
+            calls.append((system.label, "init", tuple(system.masses)))
+
+        def step(self, _steps: int) -> None:
+            """Record masses used during MD integration."""
+            calls.append((self.system.label, "step", tuple(self.system.masses)))
+
+    openmm = SimpleNamespace(
+        VerletIntegrator=lambda *_args: object(),
+        LangevinMiddleIntegrator=lambda *_args: object(),
+        LocalEnergyMinimizer=SimpleNamespace(minimize=lambda *_args, **_kwargs: None),
+        OpenMMException=RuntimeError,
+    )
+    openmm_app = SimpleNamespace(
+        Simulation=FakeSimulation,
+        PDBFile=SimpleNamespace(writeFile=lambda *_args, **_kwargs: None),
+    )
+    openmm_unit = SimpleNamespace(
+        picoseconds=1.0,
+        picosecond=1.0,
+        femtosecond=1.0,
+        kelvin=1.0,
+        kilojoule_per_mole=1.0,
+        nanometer=1.0,
+        dalton=1.0,
+    )
+    openmm.app = openmm_app
+    openmm.unit = openmm_unit
+    monkeypatch.setitem(sys.modules, "openmm", openmm)
+    monkeypatch.setitem(sys.modules, "openmm.app", openmm_app)
+    monkeypatch.setitem(sys.modules, "openmm.unit", openmm_unit)
+    return openmm, openmm_app
 
 
 @pytest.mark.slow

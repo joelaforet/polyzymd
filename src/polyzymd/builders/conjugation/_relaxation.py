@@ -169,7 +169,7 @@ class FrozenProteinRelaxationSettings(BaseModel):
 
     minimization_max_iterations: int = Field(0, ge=0)
     minimization_tolerance_kj_mol_nm: float = Field(10.0, gt=0)
-    md_steps: int = Field(10_000, ge=0)
+    md_steps: int = Field(10_000, gt=0)
     temperature_kelvin: float = Field(300.0, gt=0)
     timestep_femtoseconds: float = Field(2.0, gt=0)
     friction_per_picosecond: float = Field(1.0, gt=0)
@@ -762,42 +762,36 @@ def run_frozen_protein_product_relaxation(
         )
         stage_a_distances = _linkage_distances_angstrom(minimized_coords_nm, linkage_pairs)
 
-        if relaxation_settings.md_steps == 0:
-            final_positions = minimized_positions
-            energy_before_md = energy_after_min
-            energy_after_md = energy_after_min
-            frozen_indices = protein_indices
-        else:
-            LOGGER.info("Running Stage B frozen-protein vacuum MD for conjugate product")
-            system_md = interchange.to_openmm_system()
-            removed_barostats += _remove_barostats(system_md)
-            frozen_indices, _original_masses = freeze_protein_chain_masses(
-                system_md,
+        LOGGER.info("Running Stage B frozen-protein vacuum MD for conjugate product")
+        system_md = interchange.to_openmm_system()
+        removed_barostats += _remove_barostats(system_md)
+        frozen_indices, _original_masses = freeze_protein_chain_masses(
+            system_md,
+            topology,
+            openmm_unit,
+            chain_ids=relaxation_settings.protein_chain_ids,
+        )
+        anchor_count = _add_linkage_anchor_restraints(
+            system_md,
+            linkage_pairs,
+            relaxation_settings.anchor_k_kj_mol_nm2,
+            openmm,
+            openmm_unit,
+        )
+        try:
+            energy_before_md, energy_after_md, final_positions = _run_frozen_product_md(
                 topology,
-                openmm_unit,
-                chain_ids=relaxation_settings.protein_chain_ids,
-            )
-            anchor_count = _add_linkage_anchor_restraints(
                 system_md,
-                linkage_pairs,
-                relaxation_settings.anchor_k_kj_mol_nm2,
+                minimized_positions,
+                relaxation_settings,
                 openmm,
+                openmm_app,
                 openmm_unit,
+                platform,
+                warnings,
             )
-            try:
-                energy_before_md, energy_after_md, final_positions = _run_frozen_product_md(
-                    topology,
-                    system_md,
-                    minimized_positions,
-                    relaxation_settings,
-                    openmm,
-                    openmm_app,
-                    openmm_unit,
-                    platform,
-                    warnings,
-                )
-            finally:
-                restore_particle_masses(system_md, _original_masses)
+        finally:
+            restore_particle_masses(system_md, _original_masses)
 
         _write_openmm_pdb(openmm_app, topology, final_positions, relaxed_pdb)
         final_coords_nm = _positions_to_numpy(final_positions, openmm_unit)
@@ -1513,7 +1507,7 @@ def _run_frozen_product_md(
                     f"({timestep_fs:.3f} fs) after instability at the requested timestep"
                 )
             return energy_before, energy_after, final_positions
-        except Exception as exc:  # noqa: BLE001 - OpenMM platform errors vary
+        except _openmm_runtime_exceptions(openmm) as exc:
             last_error = exc
             if timestep_fs == timestep_schedule[-1]:
                 break
@@ -1524,6 +1518,26 @@ def _run_frozen_product_md(
     if last_error is None:
         raise RuntimeError("Frozen-protein MD did not run")
     raise last_error
+
+
+def _openmm_runtime_exceptions(openmm: Any) -> tuple[type[Exception], ...]:
+    """Return expected OpenMM runtime instability exception classes.
+
+    Parameters
+    ----------
+    openmm : Any
+        Imported OpenMM module or compatible test double.
+
+    Returns
+    -------
+    tuple[type[Exception], ...]
+        Exception classes that represent runtime or platform instability.
+    """
+    exceptions: list[type[Exception]] = [RuntimeError, OSError]
+    openmm_exception = getattr(openmm, "OpenMMException", None)
+    if isinstance(openmm_exception, type) and issubclass(openmm_exception, Exception):
+        exceptions.append(openmm_exception)
+    return tuple(exceptions)
 
 
 def _md_timestep_retry_schedule(requested_femtoseconds: float) -> tuple[float, ...]:
