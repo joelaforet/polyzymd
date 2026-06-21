@@ -11,7 +11,8 @@ By the end, you will know how to:
 - choose between the built-in `nhs_lys` and `n_glycosylation` mechanisms;
 - call `build_conjugate()`, `build_conjugate_from_config()`, or
   `ConjugationEngine` from public API code;
-- read the main `ConjugationResult` artifact paths; and
+- read the main `ConjugationResult` artifact paths;
+- find and interpret `conjugate_validation_report.json`; and
 - reason about custom SMARTS without assuming unsupported plugin behavior.
 
 ```{important}
@@ -156,11 +157,19 @@ Common paths include:
 | `relaxed_conjugate_pdb_path` | Relaxed conjugate path from workflows that expose a separate relaxed product. |
 | `solvated_pdb_path` | Solvated system PDB after the conjugate is placed in a box. |
 | `workflow_json_path` | JSON sidecar describing the workflow and assumptions. |
+| `artifact_paths["conjugate_validation_report"]` | Canonical validation report for product connectivity, atom presence, charge evidence, parameter coverage, linkage geometry, and OpenMM smoke evidence. |
 
 Some fields can be `None` depending on the mechanism and settings. A useful
 first success check is that the crosslinked and minimized PDB paths exist, and
 that the modified residue names and new linkage are visible in a molecular
 viewer.
+
+Also inspect `conjugate_validation_report.json` before carrying the product into
+simulation setup. A `pass` report means the available construction checks passed;
+`warn`, `fail`, or `skipped` sections need review. See
+{doc}`../how_to/validate_conjugates` for a practical report-reading workflow and
+{doc}`../reference/conjugation_support_matrix` for current mechanism support
+levels.
 
 Final relaxation/minimization is part of PolyzyMD's OpenMM/Pablo product-state
 workflow. RDKit may help create or inspect molecular inputs, but there is no
@@ -355,7 +364,8 @@ for first use:
 2. Define each attachment as a site, moiety, and mechanism.
 3. Use `build_conjugate()` for direct request objects or
    `build_conjugate_from_config()` for config-driven NHS-Lys polymer builds.
-4. Inspect `ConjugationResult` paths before moving on to simulation.
+4. Inspect `ConjugationResult` paths and `conjugate_validation_report.json`
+   before moving on to simulation.
 5. Use built-in mechanisms first, and treat custom SMARTS as a validation and
    extension design tool until a concrete mechanism implementation exists.
 
