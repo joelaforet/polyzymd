@@ -164,6 +164,95 @@ class VacuumSmokeResult(BaseModel):
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
 
 
+class FrozenProteinRelaxationSettings(BaseModel):
+    """Settings for generic product relaxation with a frozen protein."""
+
+    minimization_max_iterations: int = Field(0, ge=0)
+    minimization_tolerance_kj_mol_nm: float = Field(10.0, gt=0)
+    md_steps: int = Field(10_000, ge=0)
+    temperature_kelvin: float = Field(300.0, gt=0)
+    timestep_femtoseconds: float = Field(2.0, gt=0)
+    friction_per_picosecond: float = Field(1.0, gt=0)
+    anchor_k_kj_mol_nm2: float = Field(10_000.0, gt=0)
+    fallback_bond_length_angstrom: float = Field(1.5, gt=0)
+    max_protein_rmsd_angstrom: float = Field(0.05, ge=0)
+    max_protein_displacement_angstrom: float = Field(0.25, ge=0)
+    max_linkage_distance_error_angstrom: float = Field(0.35, ge=0)
+    platform_name: str | None = None
+    diagnostics_json_name: str = "frozen_protein_relaxation_diagnostics.json"
+    relaxed_pdb_name: str = "assembled_frozen_protein_relaxed.pdb"
+    minimized_pdb_name: str = "assembled_frozen_protein_minimized.pdb"
+    failure_json_name: str = "frozen_protein_relaxation_failure.json"
+
+
+class ProductLinkagePair(BaseModel):
+    """Product topology atom-index pair for one resolved attachment linkage."""
+
+    attachment_id: str | None = None
+    attachment_index: int | None = None
+    protein_atom_index: int
+    modifier_atom_index: int
+    protein_serial: int | None = None
+    modifier_serial: int | None = None
+    target_bond_length_angstrom: float
+    used_fallback_target: bool = False
+
+
+class FrozenProteinRelaxationDiagnostics(BaseModel):
+    """Diagnostics from generic frozen-protein product relaxation."""
+
+    success: bool
+    platform_name: str | None = None
+    settings: dict[str, Any] = Field(default_factory=dict)
+    frozen_atom_count: int = 0
+    temporary_anchor_count: int = 0
+    removed_barostat_count: int = 0
+    protein_rmsd_angstrom: float | None = None
+    protein_max_displacement_angstrom: float | None = None
+    linkage_distances_angstrom: tuple[float, ...] = Field(default_factory=tuple)
+    linkage_distance_errors_angstrom: tuple[float, ...] = Field(default_factory=tuple)
+    linkage_pairs: tuple[ProductLinkagePair, ...] = Field(default_factory=tuple)
+    warnings: tuple[str, ...] = Field(default_factory=tuple)
+    error_type: str | None = None
+    error_message: str | None = None
+    traceback: str | None = None
+    json_path: Path | None = None
+
+    def write_json(self, path: Path | str) -> Path:
+        """Write diagnostics as JSON and return the output path."""
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.model_copy(update={"json_path": target}).model_dump(mode="json")
+        target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        self.json_path = target
+        return target
+
+
+class FrozenProteinRelaxationResult(BaseModel):
+    """Summary and artifacts from generic frozen-protein product relaxation."""
+
+    success: bool
+    output_dir: Path
+    diagnostics_json_path: Path
+    relaxed_pdb_path: Path | None = None
+    equilibrated_pdb_path: Path | None = None
+    minimized_pdb_path: Path | None = None
+    failure_json_path: Path | None = None
+    platform_name: str
+    frozen_atom_count: int
+    temporary_anchor_count: int
+    removed_barostat_count: int
+    energy_before_min_kj_mol: float
+    energy_after_min_kj_mol: float
+    energy_before_md_kj_mol: float
+    energy_after_md_kj_mol: float
+    md_steps: int
+    protein_rmsd_angstrom: float | None = None
+    protein_max_displacement_angstrom: float | None = None
+    linkage_distances_angstrom: tuple[float, ...] = Field(default_factory=tuple)
+    diagnostics: tuple[str, ...] = Field(default_factory=tuple)
+
+
 def run_restrained_vacuum_smoke(
     interchange: Any,
     output_dir: Path | str,
@@ -502,6 +591,226 @@ def run_restrained_vacuum_smoke(
         exc=None,
     )
     return result
+
+
+def run_frozen_protein_product_relaxation(
+    interchange: Any,
+    output_dir: Path | str,
+    *,
+    product_pdb_path: Path | str,
+    attachment_specs: tuple[Any, ...],
+    assembly: Any | None = None,
+    settings: FrozenProteinRelaxationSettings | None = None,
+) -> FrozenProteinRelaxationResult:
+    """Relax a product-state conjugate with chain A frozen by zero masses.
+
+    Parameters
+    ----------
+    interchange : Any
+        OpenFF Interchange-like object exposing OpenMM conversion methods.
+    output_dir : pathlib.Path or str
+        Directory for relaxation artifacts.
+    product_pdb_path : pathlib.Path or str
+        Product PDB carrying assembly serial and residue mapping metadata.
+    attachment_specs : tuple of Any
+        Resolved attachment build specs used to resolve generic product linkage atoms.
+    assembly : Any or None, optional
+        Assembly result with ``added_conect_pairs`` and residue mappings, by default ``None``.
+    settings : FrozenProteinRelaxationSettings or None, optional
+        Relaxation settings, by default ``None``.
+
+    Returns
+    -------
+    FrozenProteinRelaxationResult
+        Energies, validation metrics, and artifact paths.
+    """
+    try:
+        import openmm
+        from openmm import app as openmm_app
+        from openmm import unit as openmm_unit
+    except ImportError as exc:
+        raise RuntimeError(
+            "OpenMM is required for frozen-protein conjugation relaxation. Run under a "
+            "suitable PolyzyMD pixi environment."
+        ) from exc
+
+    relaxation_settings = settings or FrozenProteinRelaxationSettings()
+    artifact_dir = Path(output_dir)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    diagnostics_path = artifact_dir / relaxation_settings.diagnostics_json_name
+    failure_path: Path | None = None
+    platform = _select_platform(openmm, relaxation_settings.platform_name)
+    platform_name = platform.getName() if hasattr(platform, "getName") else str(platform)
+    warnings: list[str] = []
+
+    topology = interchange.to_openmm_topology()
+    initial_positions = _openmm_positions_from_interchange_or_pdb(
+        interchange,
+        openmm_app,
+        openmm_unit,
+        product_pdb_path,
+    )
+    initial_coords_nm = _positions_to_numpy(initial_positions, openmm_unit)
+    linkage_pairs = resolve_product_linkage_pairs(
+        topology,
+        product_pdb_path=product_pdb_path,
+        attachment_specs=attachment_specs,
+        assembly=assembly,
+        fallback_bond_length_angstrom=relaxation_settings.fallback_bond_length_angstrom,
+        warnings=warnings,
+    )
+
+    system = interchange.to_openmm_system()
+    removed_barostats = _remove_barostats(system)
+    frozen_indices, original_masses = freeze_chain_a_masses(system, topology, openmm_unit)
+    if not frozen_indices:
+        raise RuntimeError("Frozen-protein relaxation could not identify chain A atoms to freeze")
+    anchor_count = _add_linkage_anchor_restraints(
+        system,
+        linkage_pairs,
+        relaxation_settings.anchor_k_kj_mol_nm2,
+        openmm,
+        openmm_unit,
+    )
+
+    energy_before_min = math.nan
+    energy_after_min = math.nan
+    energy_before_md = math.nan
+    energy_after_md = math.nan
+    minimized_pdb = artifact_dir / relaxation_settings.minimized_pdb_name
+    relaxed_pdb = artifact_dir / relaxation_settings.relaxed_pdb_name
+    try:
+        integrator_min = openmm.VerletIntegrator(0.001 * openmm_unit.picoseconds)
+        simulation = openmm_app.Simulation(topology, system, integrator_min, platform)
+        simulation.context.setPositions(initial_positions)
+        energy_before_min = _state_energy_kj_mol(
+            simulation.context.getState(getEnergy=True),
+            openmm_unit,
+        )
+        validate_finite_energy(energy_before_min, label="energy_before_min_kj_mol")
+        openmm.LocalEnergyMinimizer.minimize(
+            simulation.context,
+            tolerance=relaxation_settings.minimization_tolerance_kj_mol_nm
+            * openmm_unit.kilojoule_per_mole
+            / openmm_unit.nanometer,
+            maxIterations=relaxation_settings.minimization_max_iterations,
+        )
+        min_state = simulation.context.getState(getEnergy=True, getPositions=True)
+        energy_after_min = _state_energy_kj_mol(min_state, openmm_unit)
+        validate_finite_energy(energy_after_min, label="energy_after_min_kj_mol")
+        minimized_positions = min_state.getPositions(asNumpy=True)
+        validate_finite_positions(minimized_positions, openmm_unit, label="minimized_positions")
+        _write_openmm_pdb(openmm_app, topology, minimized_positions, minimized_pdb)
+
+        if relaxation_settings.md_steps == 0:
+            final_positions = minimized_positions
+            energy_before_md = energy_after_min
+            energy_after_md = energy_after_min
+        else:
+            energy_before_md, energy_after_md, final_positions = _run_frozen_product_md(
+                topology,
+                system,
+                minimized_positions,
+                relaxation_settings,
+                openmm,
+                openmm_app,
+                openmm_unit,
+                platform,
+                warnings,
+            )
+
+        _write_openmm_pdb(openmm_app, topology, final_positions, relaxed_pdb)
+        final_coords_nm = _positions_to_numpy(final_positions, openmm_unit)
+        protein_rmsd, protein_max = _protein_displacements_angstrom(
+            initial_coords_nm,
+            final_coords_nm,
+            frozen_indices,
+        )
+        distances = _linkage_distances_angstrom(final_coords_nm, linkage_pairs)
+        errors = tuple(
+            abs(distance - pair.target_bond_length_angstrom)
+            for distance, pair in zip(distances, linkage_pairs, strict=True)
+        )
+        if protein_rmsd > relaxation_settings.max_protein_rmsd_angstrom:
+            warnings.append(
+                f"Protein RMSD {protein_rmsd:.4f} A exceeds "
+                f"{relaxation_settings.max_protein_rmsd_angstrom:.4f} A"
+            )
+        if protein_max > relaxation_settings.max_protein_displacement_angstrom:
+            warnings.append(
+                f"Protein max displacement {protein_max:.4f} A exceeds "
+                f"{relaxation_settings.max_protein_displacement_angstrom:.4f} A"
+            )
+        if any(error > relaxation_settings.max_linkage_distance_error_angstrom for error in errors):
+            warnings.append("One or more linkage distances deviates from its target")
+    except Exception as exc:
+        failure_path = artifact_dir / relaxation_settings.failure_json_name
+        failure_payload = {
+            "success": False,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "traceback": traceback.format_exc(),
+            "energy_before_min_kj_mol": energy_before_min,
+            "energy_after_min_kj_mol": energy_after_min,
+            "energy_before_md_kj_mol": energy_before_md,
+            "energy_after_md_kj_mol": energy_after_md,
+        }
+        failure_path.write_text(json.dumps(failure_payload, indent=2) + "\n", encoding="utf-8")
+        diagnostics = FrozenProteinRelaxationDiagnostics(
+            success=False,
+            platform_name=platform_name,
+            settings=relaxation_settings.model_dump(mode="json"),
+            frozen_atom_count=len(frozen_indices),
+            temporary_anchor_count=anchor_count,
+            removed_barostat_count=removed_barostats,
+            linkage_pairs=tuple(linkage_pairs),
+            warnings=tuple(warnings),
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+            traceback=traceback.format_exc(),
+        )
+        diagnostics.write_json(diagnostics_path)
+        raise
+    finally:
+        restore_particle_masses(system, original_masses)
+
+    diagnostics = FrozenProteinRelaxationDiagnostics(
+        success=True,
+        platform_name=platform_name,
+        settings=relaxation_settings.model_dump(mode="json"),
+        frozen_atom_count=len(frozen_indices),
+        temporary_anchor_count=anchor_count,
+        removed_barostat_count=removed_barostats,
+        protein_rmsd_angstrom=protein_rmsd,
+        protein_max_displacement_angstrom=protein_max,
+        linkage_distances_angstrom=distances,
+        linkage_distance_errors_angstrom=errors,
+        linkage_pairs=tuple(linkage_pairs),
+        warnings=tuple(warnings),
+    )
+    diagnostics.write_json(diagnostics_path)
+    return FrozenProteinRelaxationResult(
+        success=True,
+        output_dir=artifact_dir,
+        diagnostics_json_path=diagnostics_path,
+        relaxed_pdb_path=relaxed_pdb,
+        equilibrated_pdb_path=relaxed_pdb,
+        minimized_pdb_path=minimized_pdb,
+        failure_json_path=failure_path,
+        platform_name=platform_name,
+        frozen_atom_count=len(frozen_indices),
+        temporary_anchor_count=anchor_count,
+        removed_barostat_count=removed_barostats,
+        energy_before_min_kj_mol=float(energy_before_min),
+        energy_after_min_kj_mol=float(energy_after_min),
+        energy_before_md_kj_mol=float(energy_before_md),
+        energy_after_md_kj_mol=float(energy_after_md),
+        md_steps=relaxation_settings.md_steps,
+        protein_rmsd_angstrom=protein_rmsd,
+        protein_max_displacement_angstrom=protein_max,
+        linkage_distances_angstrom=distances,
+        diagnostics=("Frozen-protein product relaxation completed", *tuple(warnings)),
+    )
 
 
 def validate_finite_energy(value: float, *, label: str = "energy") -> None:
@@ -901,6 +1210,334 @@ def _matching_topology_atom_index(
         if str(getattr(atom, "name", "") or "").strip().upper() == source_name.upper():
             return int(atom.index)
     return None
+
+
+def resolve_product_linkage_pairs(
+    topology: Any,
+    *,
+    product_pdb_path: Path | str,
+    attachment_specs: tuple[Any, ...],
+    assembly: Any | None = None,
+    fallback_bond_length_angstrom: float = 1.5,
+    warnings: list[str] | None = None,
+) -> tuple[ProductLinkagePair, ...]:
+    """Resolve generic product linkage atom-index pairs for relaxation anchors.
+
+    Resolution first uses assembly ``added_conect_pairs`` serial metadata, then
+    falls back to remapped atoms from resolved attachment plans. It does not rely
+    on residue names, atom names, or chemistry-specific assumptions beyond the
+    metadata already carried by the resolved build plan.
+    """
+    if not attachment_specs:
+        return ()
+    product_atoms = parse_pdb_atom_records(Path(product_pdb_path))
+    topology_atoms = tuple(topology.atoms())
+    serial_to_index = _product_serial_to_topology_index(product_atoms, topology_atoms)
+    assembly_pairs = tuple(getattr(assembly, "added_conect_pairs", ()) or ())
+    if not assembly_pairs:
+        pair = getattr(assembly, "added_conect_pair", None)
+        assembly_pairs = (pair,) if pair is not None else ()
+
+    resolved: list[ProductLinkagePair] = []
+    for plan_index, spec in enumerate(attachment_specs, start=1):
+        plan = getattr(spec, "resolved_plan", spec)
+        serial_pair = _serial_pair_for_attachment(
+            plan,
+            spec,
+            plan_index=plan_index,
+            product_atoms=product_atoms,
+            assembly_pairs=assembly_pairs,
+        )
+        if serial_pair is None:
+            raise RuntimeError(
+                f"Could not resolve product linkage atoms for attachment {plan_index}"
+            )
+        protein_serial, modifier_serial = serial_pair
+        if protein_serial not in serial_to_index or modifier_serial not in serial_to_index:
+            raise RuntimeError(
+                "Product linkage serials could not be mapped to OpenMM topology indices: "
+                f"{protein_serial}, {modifier_serial}"
+            )
+        target = getattr(plan, "target_bond_length_angstrom", None)
+        used_fallback = False
+        if target is None:
+            used_fallback = True
+            target = fallback_bond_length_angstrom
+            if warnings is not None:
+                warnings.append(
+                    f"Attachment {plan_index} has no target bond length; using generic "
+                    f"fallback {fallback_bond_length_angstrom:.3f} A"
+                )
+        resolved.append(
+            ProductLinkagePair(
+                attachment_id=getattr(spec, "attachment_id", None),
+                attachment_index=getattr(spec, "attachment_index", plan_index),
+                protein_atom_index=serial_to_index[protein_serial],
+                modifier_atom_index=serial_to_index[modifier_serial],
+                protein_serial=protein_serial,
+                modifier_serial=modifier_serial,
+                target_bond_length_angstrom=float(target),
+                used_fallback_target=used_fallback,
+            )
+        )
+    return tuple(resolved)
+
+
+def freeze_chain_a_masses(
+    system: Any,
+    topology: Any,
+    openmm_unit: Any,
+) -> tuple[tuple[int, ...], dict[int, Any]]:
+    """Set chain A particle masses to zero and return original masses."""
+    indices = tuple(
+        int(atom.index)
+        for atom in topology.atoms()
+        if getattr(getattr(getattr(atom, "residue", None), "chain", None), "id", None) == "A"
+    )
+    original = {index: system.getParticleMass(index) for index in indices}
+    zero_mass = 0.0 * openmm_unit.dalton
+    for index in indices:
+        system.setParticleMass(index, zero_mass)
+    return indices, original
+
+
+def restore_particle_masses(system: Any, original_masses: dict[int, Any]) -> None:
+    """Restore particle masses captured before temporary freezing."""
+    for index, mass in original_masses.items():
+        system.setParticleMass(index, mass)
+
+
+def _set_zero_initial_velocities(context: Any, topology: Any, openmm_unit: Any) -> None:
+    """Set finite initial velocities before the thermostat heats mobile atoms."""
+    atom_count = len(tuple(topology.atoms()))
+    velocities = (
+        np.zeros((atom_count, 3), dtype=float) * openmm_unit.nanometer / openmm_unit.picosecond
+    )
+    context.setVelocities(velocities)
+
+
+def _run_frozen_product_md(
+    topology: Any,
+    system: Any,
+    positions: Any,
+    settings: FrozenProteinRelaxationSettings,
+    openmm: Any,
+    openmm_app: Any,
+    openmm_unit: Any,
+    platform: Any,
+    warnings: list[str],
+) -> tuple[float, float, Any]:
+    """Run finite frozen-product MD, retrying with safer timesteps if needed."""
+    timestep_schedule = _md_timestep_retry_schedule(settings.timestep_femtoseconds)
+    last_error: Exception | None = None
+    for timestep_fs in timestep_schedule:
+        try:
+            integrator = openmm.LangevinMiddleIntegrator(
+                settings.temperature_kelvin * openmm_unit.kelvin,
+                settings.friction_per_picosecond / openmm_unit.picosecond,
+                timestep_fs * openmm_unit.femtosecond,
+            )
+            simulation = openmm_app.Simulation(topology, system, integrator, platform)
+            simulation.context.setPositions(positions)
+            _set_zero_initial_velocities(simulation.context, topology, openmm_unit)
+            energy_before = _state_energy_kj_mol(
+                simulation.context.getState(getEnergy=True),
+                openmm_unit,
+            )
+            validate_finite_energy(energy_before, label="energy_before_md_kj_mol")
+            simulation.step(settings.md_steps)
+            state_after = simulation.context.getState(getEnergy=True, getPositions=True)
+            energy_after = _state_energy_kj_mol(state_after, openmm_unit)
+            validate_finite_energy(energy_after, label="energy_after_md_kj_mol")
+            final_positions = state_after.getPositions(asNumpy=True)
+            validate_finite_positions(final_positions, openmm_unit, label="relaxed_positions")
+            if timestep_fs != settings.timestep_femtoseconds:
+                warnings.append(
+                    "Frozen-protein MD retried with a smaller timestep "
+                    f"({timestep_fs:.3f} fs) after instability at the requested timestep"
+                )
+            return energy_before, energy_after, final_positions
+        except Exception as exc:  # noqa: BLE001 - OpenMM platform errors vary
+            last_error = exc
+            if timestep_fs == timestep_schedule[-1]:
+                break
+            warnings.append(
+                f"Frozen-protein MD was unstable at {timestep_fs:.3f} fs; retrying with a "
+                "smaller timestep"
+            )
+    if last_error is None:
+        raise RuntimeError("Frozen-protein MD did not run")
+    raise last_error
+
+
+def _md_timestep_retry_schedule(requested_femtoseconds: float) -> tuple[float, ...]:
+    """Return requested timestep followed by conservative vacuum-MD fallbacks."""
+    candidates = (requested_femtoseconds, 1.0, 0.5, 0.25)
+    schedule: list[float] = []
+    for value in candidates:
+        if value <= requested_femtoseconds and value not in schedule:
+            schedule.append(value)
+    return tuple(schedule)
+
+
+def _openmm_positions_from_interchange_or_pdb(
+    interchange: Any,
+    openmm_app: Any,
+    openmm_unit: Any,
+    product_pdb_path: Path | str,
+) -> Any:
+    """Extract positions from Interchange, falling back to the product PDB."""
+    try:
+        return _openmm_positions_from_interchange(interchange, openmm_unit)
+    except RuntimeError:
+        pdb = openmm_app.PDBFile(str(product_pdb_path))
+        return pdb.positions
+
+
+def _remove_barostats(system: Any) -> int:
+    """Remove barostat-like forces from a transient vacuum relaxation system."""
+    removed = 0
+    for index in reversed(range(int(system.getNumForces()))):
+        force = system.getForce(index)
+        if "Barostat" in type(force).__name__:
+            system.removeForce(index)
+            removed += 1
+    return removed
+
+
+def _add_linkage_anchor_restraints(
+    system: Any,
+    pairs: tuple[ProductLinkagePair, ...],
+    force_constant_kj_mol_nm2: float,
+    openmm: Any,
+    openmm_unit: Any,
+) -> int:
+    """Add temporary harmonic distance anchors for resolved product linkages."""
+    if not pairs:
+        return 0
+    force = openmm.CustomBondForce("0.5*k*(r-r0)^2")
+    force.addPerBondParameter("r0")
+    force.addGlobalParameter(
+        "k",
+        force_constant_kj_mol_nm2
+        * openmm_unit.kilojoule_per_mole
+        / (openmm_unit.nanometer * openmm_unit.nanometer),
+    )
+    for pair in pairs:
+        force.addBond(
+            pair.protein_atom_index,
+            pair.modifier_atom_index,
+            [pair.target_bond_length_angstrom * 0.1 * openmm_unit.nanometer],
+        )
+    system.addForce(force)
+    return len(pairs)
+
+
+def _product_serial_to_topology_index(
+    product_atoms: tuple[PdbAtomRecord, ...],
+    topology_atoms: tuple[Any, ...],
+) -> dict[int, int]:
+    """Map product PDB atom serials to OpenMM topology atom indices."""
+    identity_to_serials: dict[tuple[str, str, str, str], list[int]] = {}
+    for atom in product_atoms:
+        if atom.serial is None:
+            continue
+        identity_to_serials.setdefault(_pdb_product_identity(atom), []).append(atom.serial)
+    serial_to_index: dict[int, int] = {}
+    consumed: dict[tuple[str, str, str, str], int] = {}
+    for atom in topology_atoms:
+        residue = getattr(atom, "residue", None)
+        chain = getattr(residue, "chain", None)
+        identity = (
+            str(getattr(chain, "id", "") or "").strip(),
+            str(getattr(residue, "name", "") or "").strip(),
+            str(getattr(residue, "id", "") or "").strip(),
+            str(getattr(atom, "name", "") or "").strip(),
+        )
+        serials = identity_to_serials.get(identity, [])
+        offset = consumed.get(identity, 0)
+        if offset < len(serials):
+            serial_to_index[serials[offset]] = int(atom.index)
+            consumed[identity] = offset + 1
+    return serial_to_index
+
+
+def _pdb_product_identity(atom: PdbAtomRecord) -> tuple[str, str, str, str]:
+    """Return identity fields shared by PDB atoms and OpenMM topology atoms."""
+    residue_id = f"{atom.residue_number}{atom.insertion_code.strip()}".strip()
+    return (
+        atom.chain_id.strip(),
+        atom.residue_name.strip(),
+        residue_id,
+        atom.atom_name.strip(),
+    )
+
+
+def _serial_pair_for_attachment(
+    plan: Any,
+    spec: Any,
+    *,
+    plan_index: int,
+    product_atoms: tuple[PdbAtomRecord, ...],
+    assembly_pairs: tuple[Any, ...],
+) -> tuple[int, int] | None:
+    """Resolve product serials for one attachment from assembly or plan metadata."""
+    if 1 <= plan_index <= len(assembly_pairs):
+        normalized = _normalize_serial_pair(assembly_pairs[plan_index - 1])
+        if normalized is not None:
+            return normalized
+    protein = _matching_product_atom(
+        product_atoms, getattr(plan, "protein_link_atom", None), plan, role="protein"
+    )
+    modifier = _matching_product_atom(
+        product_atoms,
+        getattr(plan, "modifier_link_atom", None),
+        plan,
+        role="modifier",
+    )
+    if protein is not None and modifier is not None and protein.serial and modifier.serial:
+        return int(protein.serial), int(modifier.serial)
+    mappings = getattr(spec, "product_residue_mappings", {}) or {}
+    if mappings:
+        # Preserve generic metadata for future richer disambiguation without guessing chemistry
+        return None
+    return None
+
+
+def _normalize_serial_pair(pair: Any) -> tuple[int, int] | None:
+    """Normalize a two-item serial pair from assembly metadata."""
+    try:
+        first, second = pair
+        return int(first), int(second)
+    except (TypeError, ValueError):
+        return None
+
+
+def _protein_displacements_angstrom(
+    initial_nm: np.ndarray,
+    final_nm: np.ndarray,
+    indices: tuple[int, ...],
+) -> tuple[float, float]:
+    """Return RMSD and maximum displacement for frozen protein atoms."""
+    if not indices:
+        return 0.0, 0.0
+    delta_angstrom = (final_nm[list(indices)] - initial_nm[list(indices)]) * 10.0
+    distances = np.linalg.norm(delta_angstrom, axis=1)
+    return float(np.sqrt(np.mean(distances**2))), float(np.max(distances))
+
+
+def _linkage_distances_angstrom(
+    coords_nm: np.ndarray,
+    pairs: tuple[ProductLinkagePair, ...],
+) -> tuple[float, ...]:
+    """Measure product linkage distances from topology-order coordinates."""
+    return tuple(
+        float(
+            np.linalg.norm(coords_nm[pair.protein_atom_index] - coords_nm[pair.modifier_atom_index])
+        )
+        * 10.0
+        for pair in pairs
+    )
 
 
 def _openmm_positions_from_interchange(interchange: Any, openmm_unit: Any) -> Any:
@@ -1359,13 +1996,20 @@ def _write_openmm_pdb(openmm_app: Any, topology: Any, positions: Any, output_pat
 
 __all__ = [
     "CrosslinkAtomSelector",
+    "FrozenProteinRelaxationDiagnostics",
+    "FrozenProteinRelaxationResult",
+    "FrozenProteinRelaxationSettings",
     "LocalGeometryMetrics",
     "LocalMinimizationResult",
     "LocalMinimizationSettings",
     "analyze_crosslink_geometry",
     "analyze_pre_smoke_geometry",
     "build_product_state_pablo_policy",
+    "freeze_chain_a_masses",
     "product_state_pablo_crosslink_requirement",
+    "resolve_product_linkage_pairs",
+    "restore_particle_masses",
+    "run_frozen_protein_product_relaxation",
     "run_post_crosslink_local_minimization",
     "write_pdb_with_replaced_coordinates",
 ]
