@@ -160,8 +160,8 @@ def place_modifier_with_resolved_plan(
     from polyzymd.utils.packmol import build_packmol_input, run_packmol
 
     placement_settings = settings or PackmolModifierPlacementSettings()
-    protein_path = Path(protein_pdb_path)
-    work_dir = Path(output_dir) / placement_settings.work_dir_name
+    protein_path = Path(protein_pdb_path).resolve()
+    work_dir = (Path(output_dir) / placement_settings.work_dir_name).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
 
     protein_atoms = _parse_pdb_atoms(protein_path)
@@ -282,9 +282,9 @@ def place_modifiers_with_resolved_plans(
         raise ValueError("Joint Packmol placement requires aligned modifiers and plans")
 
     placement_settings = settings or PackmolModifierPlacementSettings()
-    protein_path = Path(protein_pdb_path)
-    artifact_dir = Path(output_dir)
-    work_dir = artifact_dir / placement_settings.work_dir_name
+    protein_path = Path(protein_pdb_path).resolve()
+    artifact_dir = Path(output_dir).resolve()
+    work_dir = (artifact_dir / placement_settings.work_dir_name).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
 
     protein_atoms = _parse_pdb_atoms(protein_path)
@@ -322,7 +322,7 @@ def place_modifiers_with_resolved_plans(
     ):
         fragment_work_dir = (
             artifact_dir / f"placement_{index:02d}" / placement_settings.work_dir_name
-        )
+        ).resolve()
         fragment_work_dir.mkdir(parents=True, exist_ok=True)
         modifier_path = fragment_work_dir / "modifier_retained.pdb"
         _write_simple_pdb(

@@ -21,14 +21,21 @@ from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 
-def test_packmol_input_uses_random_constrained_reactive_placement(tmp_path: Path):
+def test_packmol_input_uses_random_constrained_reactive_placement(monkeypatch, tmp_path: Path):
     """Packmol input should use random constrained placement without deterministic orientation."""
     protein_path = _protein_pdb(tmp_path)
     modifier = _generated_modifier()
     linker = NhsLysModifierLinker(target_residue_number=23)
+    monkeypatch.chdir(tmp_path)
 
     def fake_run_packmol(input_text: str, work_dir: Path) -> Path:
         """Write a simple Packmol-like output preserving input ordering."""
+        assert work_dir.is_absolute()
+        for line in input_text.splitlines():
+            if line.startswith("structure "):
+                structure_path = Path(line.split(maxsplit=1)[1])
+                assert structure_path.is_absolute()
+                assert structure_path.exists()
         output_path = work_dir / "packmol_output.pdb"
         protein_lines = [
             line
@@ -48,7 +55,7 @@ def test_packmol_input_uses_random_constrained_reactive_placement(tmp_path: Path
         protein_path,
         modifier,
         linker,
-        tmp_path,
+        Path("relative-placement-artifacts"),
         run_packmol_func=fake_run_packmol,
     )
 
@@ -113,7 +120,10 @@ def test_resolved_plan_placement_uses_resolved_atoms_and_target_length(tmp_path:
     assert len(retained_lines) == 3
 
 
-def test_joint_resolved_plan_placement_uses_one_packmol_run_for_two_fragments(tmp_path: Path):
+def test_joint_resolved_plan_placement_uses_one_packmol_run_for_two_fragments(
+    monkeypatch,
+    tmp_path: Path,
+):
     """Joint placement should build one Packmol input with all constrained fragments."""
     protein_path = _protein_pdb(tmp_path)
     modifiers = (_generated_modifier(), _generated_modifier())
@@ -126,16 +136,20 @@ def test_joint_resolved_plan_placement_uses_one_packmol_run_for_two_fragments(tm
         for modifier in modifiers
     )
     calls = {"packmol": 0}
+    monkeypatch.chdir(tmp_path)
 
     def fake_run_packmol(input_text: str, work_dir: Path) -> Path:
         """Write a simple Packmol-like output preserving structure ordering."""
         calls["packmol"] += 1
+        assert work_dir.is_absolute()
         output_path = work_dir / "packmol_output.pdb"
         atom_lines = []
         for line in input_text.splitlines():
             if not line.startswith("structure "):
                 continue
             structure_path = Path(line.split(maxsplit=1)[1])
+            assert structure_path.is_absolute()
+            assert structure_path.exists()
             atom_lines.extend(
                 pdb_line
                 for pdb_line in structure_path.read_text().splitlines(True)
@@ -149,7 +163,7 @@ def test_joint_resolved_plan_placement_uses_one_packmol_run_for_two_fragments(tm
         protein_path,
         modifiers,
         plans,
-        tmp_path,
+        Path("relative-joint-placement-artifacts"),
         run_packmol_func=fake_run_packmol,
     )
 
