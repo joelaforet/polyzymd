@@ -703,6 +703,66 @@ def test_smoke_audit_rejects_stale_zero_step_frozen_relaxation(tmp_path):
     assert any(check.name == "frozen_protein_relaxation_md_steps" for check in report.checks)
 
 
+def test_smoke_audit_requires_frozen_relaxation_md_steps(tmp_path):
+    """Validation should reject otherwise-passing frozen diagnostics without MD steps."""
+    (tmp_path / "frozen_protein_relaxation_diagnostics.json").write_text(
+        json.dumps(
+            {
+                "success": True,
+                "stage_a_success": True,
+                "stage_b_success": True,
+                "barostat_used": False,
+                "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_after_md_kj_mol": -11.0,
+                "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
+                "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
+                "stage_b_linkage_distance_errors_angstrom": [0.1],
+                "settings": {
+                    "max_protein_rmsd_angstrom": 0.05,
+                    "max_protein_displacement_angstrom": 0.25,
+                    "max_linkage_distance_error_angstrom": 0.35,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = audit_openmm_smoke_reports(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(check.name == "frozen_protein_relaxation_md_steps" for check in report.checks)
+
+
+def test_smoke_audit_accepts_top_level_frozen_relaxation_md_steps(tmp_path):
+    """Validation should accept top-level MD steps when settings omit them."""
+    (tmp_path / "frozen_protein_relaxation_diagnostics.json").write_text(
+        json.dumps(
+            {
+                "success": True,
+                "stage_a_success": True,
+                "stage_b_success": True,
+                "barostat_used": False,
+                "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_after_md_kj_mol": -11.0,
+                "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
+                "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
+                "stage_b_linkage_distance_errors_angstrom": [0.1],
+                "md_steps": 10,
+                "settings": {
+                    "max_protein_rmsd_angstrom": 0.05,
+                    "max_protein_displacement_angstrom": 0.25,
+                    "max_linkage_distance_error_angstrom": 0.35,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = audit_openmm_smoke_reports(tmp_path)
+
+    assert report.status == ValidationStatus.PASS
+
+
 def test_smoke_audit_fails_unfixed_frozen_stage_b(tmp_path):
     """Validation should fail when Stage B does not keep protein fixed."""
     diagnostics_path = tmp_path / "frozen_protein_relaxation_diagnostics.json"

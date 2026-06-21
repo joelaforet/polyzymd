@@ -207,6 +207,7 @@ class FrozenProteinRelaxationDiagnostics(BaseModel):
     stage_b_success: bool = False
     platform_name: str | None = None
     settings: dict[str, Any] = Field(default_factory=dict)
+    md_steps: int | None = None
     frozen_atom_count: int = 0
     temporary_anchor_count: int = 0
     removed_barostat_count: int = 0
@@ -842,6 +843,7 @@ def run_frozen_protein_product_relaxation(
             success=False,
             platform_name=platform_name,
             settings=relaxation_settings.model_dump(mode="json"),
+            md_steps=relaxation_settings.md_steps,
             frozen_atom_count=len(frozen_indices),
             temporary_anchor_count=anchor_count,
             removed_barostat_count=removed_barostats,
@@ -870,6 +872,7 @@ def run_frozen_protein_product_relaxation(
         stage_b_success=True,
         platform_name=platform_name,
         settings=relaxation_settings.model_dump(mode="json"),
+        md_steps=relaxation_settings.md_steps,
         frozen_atom_count=len(frozen_indices),
         temporary_anchor_count=anchor_count,
         removed_barostat_count=removed_barostats,
