@@ -44,6 +44,7 @@ class AtomIdentity(BaseModel):
     residue_number: int | None = None
     insertion_code: str = ""
     element: str = ""
+    record_name: str = ""
 
     @classmethod
     def from_pdb_atom(cls, atom: PdbAtomRecord) -> "AtomIdentity":
@@ -68,23 +69,32 @@ class AtomIdentity(BaseModel):
             residue_number=atom.residue_number,
             insertion_code=atom.insertion_code.strip(),
             element=atom.element.strip(),
+            record_name=atom.record_name.strip(),
         )
 
-    def matches(self, atom: PdbAtomRecord) -> bool:
-        """Return whether the identity matches an atom record conservatively.
+    def matches(self, atom: PdbAtomRecord, *, allow_product_remap: bool = False) -> bool:
+        """Return whether the identity matches an atom record.
 
         Parameters
         ----------
         atom : PdbAtomRecord
             Candidate PDB atom.
+        allow_product_remap : bool, optional
+            Whether to ignore source serial and residue placement metadata that may be rewritten in
+            product PDB artifacts, by default ``False``.
 
         Returns
         -------
         bool
-            Whether all available identity fields agree.
+            Whether the available identity fields agree under the selected matching mode.
         """
+        atom_name_matches = self.atom_name.strip().upper() == atom.atom_name.strip().upper()
+        element_matches = _normalized_element(self.element) == _normalized_element(atom.element)
+        if allow_product_remap:
+            return atom_name_matches and element_matches
+
         comparisons = [
-            self.atom_name.strip().upper() == atom.atom_name.strip().upper(),
+            atom_name_matches,
             self.residue_name.strip().upper() == atom.residue_name.strip().upper(),
         ]
         if self.chain_id.strip():
@@ -97,6 +107,8 @@ class AtomIdentity(BaseModel):
             )
         if self.serial is not None:
             comparisons.append(self.serial == atom.serial)
+        if self.element.strip():
+            comparisons.append(element_matches)
         return all(comparisons)
 
 
@@ -215,7 +227,11 @@ class ConjugateValidationReport(BaseModel):
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = self.model_copy(update={"report_path": target}).model_dump(mode="json")
-        target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        payload = _sanitize_for_strict_json(payload)
+        target.write_text(
+            json.dumps(payload, indent=2, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
         self.report_path = target
         return target
 
@@ -352,14 +368,22 @@ def validate_atom_presence(
         for attr_name in ("protein_link_atom", "modifier_link_atom"):
             atom = getattr(plan, attr_name, None)
             if atom is not None:
-                expected_present.append(AtomIdentity.from_pdb_atom(atom))
+                expected_present.append((AtomIdentity.from_pdb_atom(atom), attr_name))
         for atom in tuple(getattr(plan, "protein_leaving_atoms", ()) or ()):
             expected_absent.append(AtomIdentity.from_pdb_atom(atom))
         for atom in tuple(getattr(plan, "modifier_leaving_atoms", ()) or ()):
             expected_absent.append(AtomIdentity.from_pdb_atom(atom))
 
-    present = tuple(identity for identity in expected_present if _identity_present(identity, atoms))
-    missing = tuple(identity for identity in expected_present if identity not in present)
+    present = tuple(
+        identity
+        for identity, source in expected_present
+        if _identity_present(
+            identity,
+            atoms,
+            allow_product_remap=_allows_product_remap(source, identity),
+        )
+    )
+    missing = tuple(identity for identity, _source in expected_present if identity not in present)
     lingering = tuple(
         identity for identity in expected_absent if _identity_present(identity, atoms)
     )
@@ -440,12 +464,26 @@ def audit_charge_reports(artifact_dir: Path | str | None) -> ChargeAuditReport:
     formal_charge = _optional_float(payload.get("formal_charge_e"))
     correction = _optional_float(payload.get("normalization_correction_e"))
     max_per_atom = _optional_float(payload.get("max_per_atom_correction_e"))
-    if any(
-        value is not None and not math.isfinite(value) for value in (total_charge, formal_charge)
-    ):
+    charge_values = {
+        "total_charge_e": total_charge,
+        "formal_charge_e": formal_charge,
+        "normalization_correction_e": correction,
+        "max_per_atom_correction_e": max_per_atom,
+    }
+    nonfinite_charge_fields = tuple(
+        field
+        for field, value in payload.items()
+        if field in charge_values and not _is_finite_number(value)
+    )
+    if nonfinite_charge_fields:
         status = ValidationStatus.FAIL
         checks.append(
-            _check("charge_finiteness", status, "Charge bridge contains non-finite totals")
+            _check(
+                "charge_finiteness",
+                status,
+                "Charge bridge contains non-finite charge audit values",
+                evidence={"fields": nonfinite_charge_fields},
+            )
         )
     if total_charge is not None and formal_charge is not None and math.isfinite(total_charge):
         delta = abs(total_charge - formal_charge)
@@ -492,7 +530,7 @@ def audit_parameter_coverage(
     try:
         system = interchange.to_openmm_system()
         observed_count = int(system.getNumParticles())
-    except Exception as exc:  # noqa: BLE001 - audit reports conversion failures as evidence
+    except _parameter_conversion_exceptions() as exc:
         check = _check(
             "parameter_coverage",
             ValidationStatus.FAIL,
@@ -554,6 +592,7 @@ def audit_linkage_geometry(
         if atom_left is None or atom_right is None:
             continue
         distances.append(_distance_angstrom(atom_left, atom_right))
+    close_contact_count = _close_contact_count(atoms, observed_bonds)
     if len(distances) != len(expected_bonds):
         status = ValidationStatus.WARN
         message = "One or more expected linkage distances could not be measured"
@@ -563,17 +602,31 @@ def audit_linkage_geometry(
     if any(distance < 0.4 or distance > 2.5 for distance in distances):
         status = ValidationStatus.WARN
         message = "One or more linkage distances is outside a conservative covalent range"
-    check = _check(
-        "linkage_geometry",
-        status,
-        message,
-        evidence={"linkage_distances_angstrom": distances},
-    )
+    if close_contact_count and status is not ValidationStatus.FAIL:
+        status = ValidationStatus.WARN
+        message = "Product geometry contains severe nonbonded close contacts"
+    checks = [
+        _check(
+            "linkage_geometry",
+            status,
+            message,
+            evidence={"linkage_distances_angstrom": distances},
+        )
+    ]
+    if close_contact_count:
+        checks.append(
+            _check(
+                "nonbonded_close_contacts",
+                ValidationStatus.WARN,
+                "Product geometry contains nonbonded atom pairs closer than 0.7 Å",
+                evidence={"close_contact_count": close_contact_count},
+            )
+        )
     return LinkageGeometryReport(
         status=status,
-        checks=(check,),
+        checks=tuple(checks),
         linkage_distances_angstrom=tuple(distances),
-        close_contact_count=_close_contact_count(atoms, observed_bonds),
+        close_contact_count=close_contact_count,
     )
 
 
@@ -703,9 +756,14 @@ def _normalize_bond_pair(pair: Any) -> tuple[int, int]:
         return ()
 
 
-def _identity_present(identity: AtomIdentity, atoms: tuple[PdbAtomRecord, ...]) -> bool:
+def _identity_present(
+    identity: AtomIdentity,
+    atoms: tuple[PdbAtomRecord, ...],
+    *,
+    allow_product_remap: bool = False,
+) -> bool:
     """Return whether an identity is present in product atoms."""
-    return any(identity.matches(atom) for atom in atoms)
+    return any(identity.matches(atom, allow_product_remap=allow_product_remap) for atom in atoms)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -717,13 +775,53 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _optional_float(value: Any) -> float | None:
-    """Return a float value or ``None`` when unavailable."""
+    """Return a finite float value or ``None`` when unavailable or invalid."""
     if value is None:
         return None
     try:
-        return float(value)
+        float_value = float(value)
     except (TypeError, ValueError):
-        return math.nan
+        return None
+    if not math.isfinite(float_value):
+        return None
+    return float_value
+
+
+def _allows_product_remap(source: str, identity: AtomIdentity) -> bool:
+    """Return whether product writing may have rewritten source identity metadata."""
+    return source.startswith("modifier_") or identity.record_name.strip().upper() == "HETATM"
+
+
+def _normalized_element(value: str) -> str:
+    """Return a normalized element symbol for identity matching."""
+    return value.strip().upper()
+
+
+def _parameter_conversion_exceptions() -> tuple[type[Exception], ...]:
+    """Return expected backend conversion exception classes.
+
+    OpenMM is imported lazily so validation remains importable in lightweight environments.
+    """
+    exceptions: list[type[Exception]] = [ValueError, RuntimeError, ImportError, OSError]
+    try:
+        from openmm import OpenMMException
+    except ImportError:
+        return tuple(exceptions)
+    exceptions.append(OpenMMException)
+    return tuple(exceptions)
+
+
+def _sanitize_for_strict_json(value: Any) -> Any:
+    """Recursively normalize non-finite numbers before strict JSON serialization."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _sanitize_for_strict_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_for_strict_json(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_for_strict_json(item) for item in value)
+    return value
 
 
 def _is_finite_number(value: Any) -> bool:
