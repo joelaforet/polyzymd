@@ -28,7 +28,9 @@ from polyzymd.builders.conjugation._linkage import (
     require_pablo_crosslink_requirement,
 )
 from polyzymd.builders.conjugation._relaxation import (
+    FrozenProteinRelaxationSettings,
     VacuumSmokeSettings,
+    run_frozen_protein_product_relaxation,
     run_post_crosslink_local_minimization,
     run_restrained_vacuum_smoke,
 )
@@ -103,7 +105,8 @@ class ConjugatedPolymerSystemSettings(BaseModel):
     preserve_reference_atom_names: bool = True
     canonicalize_source_protein_hydrogens: bool = True
     use_product_state_pablo_library: bool = True
-    run_product_state_local_minimization: bool = True
+    run_product_state_local_minimization: bool = False
+    run_frozen_protein_product_relaxation: bool = True
     protein_canonicalization: ProteinCanonicalizationSettings = Field(
         default_factory=ProteinCanonicalizationSettings
     )
@@ -115,6 +118,9 @@ class ConjugatedPolymerSystemSettings(BaseModel):
         default_factory=InterchangeParameterizationSettings
     )
     vacuum_smoke: VacuumSmokeSettings = Field(default_factory=lambda: _protein_restrained_smoke())
+    frozen_protein_relaxation: FrozenProteinRelaxationSettings = Field(
+        default_factory=FrozenProteinRelaxationSettings
+    )
 
 
 class ConjugateConstructionResult(BaseModel):
@@ -220,6 +226,7 @@ def build_conjugated_polymer_system_from_config(
         placement=workflow_settings.placement,
         parameterization=workflow_settings.conjugate_parameterization,
         smoke=workflow_settings.vacuum_smoke,
+        frozen_protein_relaxation=workflow_settings.frozen_protein_relaxation,
         run_smoke=True,
     )
     construction, construction_topology = _construct_conjugate_from_specs(
@@ -230,6 +237,9 @@ def build_conjugated_polymer_system_from_config(
         chain_policy=config.conjugation.chain_policy,
         settings=construction_settings,
         use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
+        use_frozen_protein_product_relaxation=(
+            workflow_settings.run_frozen_protein_product_relaxation
+        ),
         run_product_state_local_minimization=(
             workflow_settings.run_product_state_local_minimization
         ),
@@ -354,6 +364,7 @@ def build_direct_smiles_moiety_conjugate(
         placement=workflow_settings.placement,
         parameterization=workflow_settings.conjugate_parameterization,
         smoke=workflow_settings.vacuum_smoke,
+        frozen_protein_relaxation=workflow_settings.frozen_protein_relaxation,
         run_smoke=True,
     )
 
@@ -365,6 +376,9 @@ def build_direct_smiles_moiety_conjugate(
         chain_policy=chain_assignment,
         settings=construction_settings,
         use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
+        use_frozen_protein_product_relaxation=(
+            workflow_settings.run_frozen_protein_product_relaxation
+        ),
         run_product_state_local_minimization=(
             workflow_settings.run_product_state_local_minimization
         ),
@@ -850,6 +864,7 @@ def _construct_nhs_lys_modifier_linked_protein(
         chain_policy=chain_policy,
         settings=settings,
         use_product_state_pablo_library=use_product_state_pablo_library,
+        use_frozen_protein_product_relaxation=not run_product_state_local_minimization,
         run_product_state_local_minimization=run_product_state_local_minimization,
         local_minimization_settings=local_minimization_settings,
     )
@@ -864,6 +879,7 @@ def _construct_conjugate_from_specs(
     chain_policy: Any | None,
     settings: ModifierConstructionSettings,
     use_product_state_pablo_library: bool,
+    use_frozen_protein_product_relaxation: bool = True,
     run_product_state_local_minimization: bool = False,
     local_minimization_settings: Any | None = None,
 ) -> tuple[Any, Any]:
@@ -970,7 +986,19 @@ def _construct_conjugate_from_specs(
     smoke_result = None
     local_minimization_result = None
     run_combined_smoke_relaxation = False
-    if run_product_state_local_minimization and len(resolved_plans) == 1:
+    if use_frozen_protein_product_relaxation and settings.run_smoke:
+        LOGGER.info("Running generic frozen-protein product relaxation")
+        smoke_result = run_frozen_protein_product_relaxation(
+            parameterization_result.interchange,
+            artifact_dir,
+            product_pdb_path=crosslinked_pdb_path,
+            attachment_specs=specs,
+            assembly=assembly_result,
+            settings=settings.frozen_protein_relaxation,
+        )
+        if not smoke_result.success:
+            raise RuntimeError("Frozen-protein product relaxation did not report success")
+    elif run_product_state_local_minimization and len(resolved_plans) == 1:
         if _supports_product_state_local_minimization(specs[0]):
             product_state_requirement = product_state_requirements[0]
             local_settings = _local_minimization_settings_for_product(
@@ -1036,7 +1064,11 @@ def _construct_conjugate_from_specs(
         resolved_plans=resolved_plans,
         assembly=assembly_result,
         output_dir=artifact_dir,
-        interchange=parameterization_result.interchange,
+        interchange=(
+            parameterization_result.interchange
+            if hasattr(parameterization_result.interchange, "to_openmm_system")
+            else None
+        ),
         expected_particle_count=getattr(pablo_result.topology, "n_atoms", None),
         write=True,
     )
