@@ -15,6 +15,30 @@ manual dependency chains.
 - know which SLURM preset you want to use
 
 If you are still setting up the project itself, start with {doc}`../get_started/quickstart`.
+If you are preparing conjugated enzyme-polymer systems for CUDA 12.4 HPC nodes,
+read {doc}`hpc_cuda_conjugation` before choosing a pixi environment. Full
+conjugation builds require OpenFF Interchange and build-time OpenMM checks, so a
+simulation-only `sim-cuda-*` environment is not enough for `polyzymd build`.
+
+:::{warning}
+For conjugated systems on CUDA 12.4, use `sim-cuda-12-4` only with pre-built
+runtime inputs. Generate or submit OpenMM jobs with `--skip-build` after a
+full-stack environment has already produced files the runtime can load, such as
+`solvated_system.pdb` and `system.xml` in the replicate working directory. Do
+not run the conjugation build inside `sim-cuda-12-4`.
+:::
+
+Before using `--skip-build`, check that each replicate you plan to run has the
+pre-built runtime inputs expected by the generated OpenMM job:
+
+- a solvated coordinate file such as `solvated_system.pdb`
+- a serialized OpenMM system such as `system.xml`
+- any other restart or runtime files your current workflow expects in the
+  replicate working directory
+
+The exact Interchange-to-runtime artifact handoff can be workflow- and
+implementation-dependent. If these files are not already present, `--skip-build`
+cannot create them; rebuild in a full-stack environment first.
 
 :::{admonition} Use compute resources, not login nodes
 :class: important
@@ -37,6 +61,19 @@ pixi run -e sim-cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replic
 
 The `--generate-only` flag creates a script in `job_scripts/` without submitting it,
 so you can inspect it before launching real jobs.
+
+For a CUDA 12.4 conjugated-system workflow that has already been built, generate
+the script with `--skip-build` so the OpenMM job loads pre-built runtime inputs
+instead of trying to rebuild the conjugate:
+
+```bash
+pixi run -e sim-cuda-12-4 polyzymd submit \
+    -c config.yaml \
+    --preset aa100 \
+    --replicates 1 \
+    --generate-only \
+    --skip-build
+```
 
 :::{versionchanged} 1.3.0
 `--dry-run` is now preview-only (no files written, no submission). Use
@@ -61,7 +98,8 @@ Use `testing` first when you are verifying a new system or workflow.
 
 ## Step 3: submit one small test job
 
-Run a short job before launching many replicates:
+Run a short job before launching many replicates. For systems that can be built
+and run in the same environment, use:
 
 ```bash
 pixi run -e sim-cuda-12-4 polyzymd submit \
@@ -74,9 +112,22 @@ pixi run -e sim-cuda-12-4 polyzymd submit \
 This is the fastest way to catch bad paths, scheduler issues, or environment
 problems.
 
+For a CUDA 12.4 conjugated system with pre-built runtime inputs, use the same
+test but add `--skip-build`:
+
+```bash
+pixi run -e sim-cuda-12-4 polyzymd submit \
+    -c config.yaml \
+    --preset testing \
+    --time-limit 0:05:00 \
+    --replicates 1 \
+    --skip-build
+```
+
 ## Step 4: submit your real run
 
-Once the short test succeeds, submit production jobs:
+Once the short test succeeds, submit production jobs. For systems that can be
+built and run in the same environment, use:
 
 ```bash
 pixi run -e sim-cuda-12-4 polyzymd submit \
@@ -87,6 +138,18 @@ pixi run -e sim-cuda-12-4 polyzymd submit \
 ```
 
 Useful variants:
+
+For a CUDA 12.4 conjugated system with pre-built runtime inputs, add
+`--skip-build` to the production submission:
+
+```bash
+pixi run -e sim-cuda-12-4 polyzymd submit \
+    -c config.yaml \
+    --preset aa100 \
+    --replicates 1-5 \
+    --email your.email@university.edu \
+    --skip-build
+```
 
 ```bash
 # Override storage locations

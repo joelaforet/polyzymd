@@ -44,7 +44,8 @@ Pick the right analysis plugin and get results in a few commands.
 :link: hpc_slurm
 :link-type: doc
 
-Submit simulations or analysis jobs via SLURM.
+Choose CUDA pixi environments for conjugated systems, then submit simulation or
+analysis jobs via SLURM.
 :::
 
 :::{grid-item-card} Plots & Troubleshooting
@@ -79,6 +80,7 @@ Run on SLURM clusters — from individual jobs to daisy-chained workflows.
 ```{toctree}
 :maxdepth: 1
 
+Run Conjugated-System Workflows on CUDA HPC Environments <hpc_cuda_conjugation>
 Run Simulations on SLURM Clusters <hpc_slurm>
 Submit Analysis Jobs to SLURM <hpc_execution>
 ```
