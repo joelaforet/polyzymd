@@ -5,6 +5,7 @@
 # ENVIRONMENTS
 # ------------
 #   build           — system preparation, package development, docs, local checks
+#   build-cuda-12-6 — full system preparation stack with CUDA 12.6 OpenMM
 #   analysis        — trajectory analysis, comparison, and plotting
 #   test            — local and CI test environment
 #   sim-cuda-12-4   — CUDA 12.4 simulation runtime, legacy OpenMM/NumPy stack
@@ -34,7 +35,9 @@
 # - Run: pixi install -e sim-cuda-12-4   (or whichever matches your cluster)
 # - Run: pixi shell -e sim-cuda-12-4
 #
-# Local setup and analysis should use `build` or `analysis`, not a sim-cuda env.
+# Local setup and analysis should use `build` or `analysis`, not a lean sim-cuda env.
+# Use `build-cuda-12-6` when system preparation and local CUDA OpenMM must run
+# in one environment on a driver compatible with CUDA 12.6.
 # =============================================================================
 
 [workspace]
@@ -209,6 +212,7 @@ cuda = "12.4"
 # =============================================================================
 [environments]
 build = { features = ["core", "numpy2", "builder", "analysis", "openmm-any", "dev-tools", "package-build"], no-default-feature = true, solve-group = "numpy2" }
+build-cuda-12-6 = { features = ["core", "numpy2", "builder", "analysis", "sim-cuda-12-6", "dev-tools", "package-build"], no-default-feature = true, solve-group = "build-cuda-12-6" }
 analysis = { features = ["core", "numpy2", "analysis"], no-default-feature = true, solve-group = "numpy2" }
 test = { features = ["core", "numpy2", "builder", "analysis", "openmm-any", "dev-tools"], no-default-feature = true, solve-group = "numpy2" }
 sim-cuda-12-4 = { features = ["core", "numpy1-sim", "sim-cuda-12-4"], no-default-feature = true, solve-group = "sim-cuda-12-4" }
