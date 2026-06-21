@@ -191,6 +191,7 @@ class OpenMMSmokeAuditReport(BaseModel):
     smoke_json_path: Path | None = None
     diagnostics_json_path: Path | None = None
     pre_smoke_geometry_json_path: Path | None = None
+    frozen_relaxation_diagnostics_json_path: Path | None = None
 
 
 class ConjugateValidationReport(BaseModel):
@@ -696,7 +697,11 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
     smoke_path = root / "vacuum_smoke.json"
     diagnostics_path = root / "restrained_smoke_diagnostics.json"
     pre_smoke_path = root / "pre_smoke_geometry.json"
-    if not any(path.exists() for path in (smoke_path, diagnostics_path, pre_smoke_path)):
+    frozen_diagnostics_path = root / "frozen_protein_relaxation_diagnostics.json"
+    if not any(
+        path.exists()
+        for path in (smoke_path, diagnostics_path, pre_smoke_path, frozen_diagnostics_path)
+    ):
         check = _skipped_check("openmm_smoke", "No OpenMM smoke evidence JSON was available")
         return OpenMMSmokeAuditReport(status=check.status, checks=(check,))
 
@@ -728,6 +733,27 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
         if span is not None and not _is_finite_number(span):
             status = ValidationStatus.FAIL
             checks.append(_check("pre_smoke_geometry", status, "Pre-smoke span is non-finite"))
+    if frozen_diagnostics_path.exists():
+        diagnostics = _read_json(frozen_diagnostics_path)
+        if not bool(diagnostics.get("success", False)):
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "frozen_protein_relaxation",
+                    status,
+                    "Frozen-protein relaxation diagnostics failed",
+                )
+            )
+        energy_values = [value for key, value in diagnostics.items() if key.endswith("_kj_mol")]
+        if any(not _is_finite_number(value) for value in energy_values):
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "frozen_protein_relaxation_energy",
+                    status,
+                    "Frozen-protein relaxation energy is non-finite",
+                )
+            )
     if not checks:
         checks.append(_check("openmm_smoke", status, "OpenMM smoke evidence passed audit"))
     return OpenMMSmokeAuditReport(
@@ -736,6 +762,9 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
         smoke_json_path=smoke_path if smoke_path.exists() else None,
         diagnostics_json_path=diagnostics_path if diagnostics_path.exists() else None,
         pre_smoke_geometry_json_path=pre_smoke_path if pre_smoke_path.exists() else None,
+        frozen_relaxation_diagnostics_json_path=(
+            frozen_diagnostics_path if frozen_diagnostics_path.exists() else None
+        ),
     )
 
 
