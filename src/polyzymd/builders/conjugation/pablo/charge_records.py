@@ -129,10 +129,14 @@ class ChargeBridgeReport(BaseModel):
     polymer_template_atom_count: int = 0
     local_nagl_patch_atom_count: int = 0
     normalization_correction_e: float = 0.0
+    total_partial_charge_before_correction_e: float | None = None
+    max_per_atom_correction_e: float = 0.0
+    correction_atom_identities: tuple[str, ...] = Field(default_factory=tuple)
     total_charge_e: float | None = None
     formal_charge_e: float | None = None
     json_path: Path | None = None
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
+    diagnostic_details: dict[str, Any] = Field(default_factory=dict)
     assumptions: tuple[str, ...] = Field(default_factory=tuple)
 
     def write_json(self, path: Path | str) -> Path:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 from collections import deque
@@ -16,6 +17,7 @@ from polyzymd.builders.conjugation.pablo.charge_records import AtomPartialCharge
 DEFAULT_PATCH_NAGL_MODEL = "openff-gnn-am1bcc-0.1.0-rc.3.pt"
 PATCH_NAGL_MODEL_ENV = "POLYZYMD_CONJUGATE_PATCH_NAGL_MODEL"
 PATCH_SOURCE = "production:product-state-local-nagl-charge-bridge"
+LOGGER = logging.getLogger(__name__)
 
 
 class LocalChargePatchError(ValueError):
@@ -49,6 +51,7 @@ def build_local_product_charge_patch_records(
     *,
     product_atoms: Sequence[Any] = (),
     config: ConjugationChargeConfig | None = None,
+    diagnostic_ledgers: list[dict[str, Any]] | None = None,
 ) -> tuple[tuple[AtomPartialChargeRecord, ...], str]:
     """Build atom charge records from a generic product-state local patch.
 
@@ -76,6 +79,16 @@ def build_local_product_charge_patch_records(
     )
     charged = _charge_with_nagl(molecule, model_name=model_name)
     charges = _partial_charges(charged)
+    _log_patch_diagnostics(
+        spec,
+        graph=graph,
+        selected=selected,
+        map_numbers=map_numbers,
+        charged=charged,
+        charges=charges,
+        model_name=model_name,
+        diagnostic_ledgers=diagnostic_ledgers,
+    )
     records = []
     for key, map_number in map_numbers.items():
         atom = graph.atoms[key]
@@ -96,6 +109,158 @@ def build_local_product_charge_patch_records(
     if not records:
         raise LocalChargePatchError("Local product-state patch did not map any real atoms")
     return tuple(records), model_name
+
+
+def _log_patch_diagnostics(
+    spec: Any,
+    *,
+    graph: _PatchGraph,
+    selected: set[tuple[str, int | None, str]],
+    map_numbers: Mapping[tuple[str, int | None, str], int],
+    charged: Any,
+    charges: Mapping[int, float],
+    model_name: str,
+    diagnostic_ledgers: list[dict[str, Any]] | None = None,
+) -> None:
+    """Log temporary local NAGL patch charge diagnostics."""
+    plan = getattr(spec, "resolved_plan", None)
+    fragment = getattr(spec, "generated_fragment", None)
+    link_atoms = ", ".join(_describe_source_atom(atom) for atom in _link_atoms(plan))
+    leaving_atoms = tuple(getattr(plan, "protein_leaving_atoms", ()) or ()) + tuple(
+        getattr(plan, "modifier_leaving_atoms", ()) or ()
+    )
+    leaving_names = tuple(getattr(fragment, "leaving_atom_names", ()) or ())
+    real_selected = [key for key in selected if graph.atoms[key].is_real]
+    selected_real_atoms = [_describe_patch_atom(graph.atoms[key]) for key in sorted(real_selected)]
+    protein_graph_atoms = [
+        _describe_patch_atom(atom)
+        for key, atom in sorted(graph.atoms.items())
+        if key[0] == "protein"
+    ]
+    protein_graph_bond_count = sum(
+        1
+        for left, neighbors in graph.bonds.items()
+        for right in neighbors
+        if left < right and left[0] == "protein" and right[0] == "protein"
+    )
+    cap_charges = _cap_charge_values(charged)
+    real_charge_total = sum(charges.get(map_number, 0.0) for map_number in map_numbers.values())
+    selected_charge_total = sum(charges.get(map_numbers[key], 0.0) for key in real_selected)
+    cap_charge_total = sum(cap_charges)
+    emitted_atoms = []
+    LOGGER.warning(
+        "CHARGE_LEDGER patch ledger site=%s link_atoms=[%s] leaving_atoms=[%s] "
+        "leaving_names=%s selected_atom_count=%d real_product_atoms_mapped=%d "
+        "cap_atoms_discarded=%d nagl_model=%s selected_total=%.8f e real_total=%.8f e "
+        "cap_total=%.8f e selected_real_atoms=%s protein_graph_atom_count=%d "
+        "protein_graph_bond_count=%d",
+        _site_identifier(plan),
+        link_atoms,
+        ", ".join(_describe_source_atom(atom) for atom in leaving_atoms),
+        leaving_names,
+        len(selected),
+        len(real_selected),
+        len(cap_charges),
+        model_name,
+        selected_charge_total,
+        real_charge_total,
+        cap_charge_total,
+        tuple(selected_real_atoms),
+        len(protein_graph_atoms),
+        protein_graph_bond_count,
+    )
+    inverse_map = {map_number: key for key, map_number in map_numbers.items()}
+    for map_number, charge in sorted(charges.items()):
+        key = inverse_map.get(map_number)
+        if key is None:
+            continue
+        atom = graph.atoms[key]
+        emitted_atoms.append({"identity": _describe_patch_atom(atom), "charge_e": float(charge)})
+        LOGGER.warning(
+            "CHARGE_LEDGER patch emitted atom site=%s identity=%s charge=%.8f e",
+            _site_identifier(plan),
+            _describe_patch_atom(atom),
+            charge,
+        )
+    if diagnostic_ledgers is not None:
+        diagnostic_ledgers.append(
+            {
+                "site": _site_identifier(plan),
+                "link_atoms": [_describe_source_atom(atom) for atom in _link_atoms(plan)],
+                "leaving_atoms": [_describe_source_atom(atom) for atom in leaving_atoms],
+                "leaving_names": list(leaving_names),
+                "selected_atom_count": len(selected),
+                "real_product_atoms_mapped": len(real_selected),
+                "cap_atoms_discarded": len(cap_charges),
+                "nagl_model": model_name,
+                "selected_real_total_e": float(selected_charge_total),
+                "emitted_real_total_e": float(real_charge_total),
+                "discarded_cap_total_e": float(cap_charge_total),
+                "emitted_atoms": emitted_atoms,
+                "selected_real_atoms": selected_real_atoms,
+                "protein_graph_atoms": protein_graph_atoms,
+                "protein_graph_bond_count": protein_graph_bond_count,
+            }
+        )
+
+
+def _cap_charge_values(molecule: Any) -> tuple[float, ...]:
+    """Return NAGL charges for un-mapped cap atoms."""
+    quantity = getattr(molecule, "partial_charges", None)
+    if quantity is None:
+        return ()
+    if hasattr(quantity, "m_as"):
+        values = tuple(float(value) for value in quantity.m_as("elementary_charge"))
+    else:
+        values = tuple(float(value) for value in quantity)
+    caps = []
+    for atom, charge in zip(tuple(molecule.atoms), values, strict=True):
+        if not (getattr(atom, "metadata", None) or {}).get("atom_map"):
+            caps.append(charge)
+    return tuple(caps)
+
+
+def _link_atoms(plan: Any) -> tuple[Any, ...]:
+    """Return available link atoms for diagnostics."""
+    if plan is None:
+        return ()
+    return tuple(
+        atom
+        for atom in (
+            getattr(plan, "protein_link_atom", None),
+            getattr(plan, "modifier_link_atom", None),
+        )
+        if atom is not None
+    )
+
+
+def _site_identifier(plan: Any) -> str:
+    """Return a compact site identifier for diagnostics."""
+    if plan is None:
+        return "unknown"
+    atom = getattr(plan, "protein_link_atom", None)
+    if atom is None:
+        return "unknown"
+    return _describe_source_atom(atom)
+
+
+def _describe_patch_atom(atom: _PatchAtom) -> str:
+    """Return a readable patch atom identity."""
+    return (
+        f"chain {atom.chain_id or '?'} residue {atom.residue_name or '?'} "
+        f"{atom.residue_number if atom.residue_number is not None else '?'} "
+        f"atom {atom.atom_name or '?'} element {atom.element or '?'} key={atom.key}"
+    )
+
+
+def _describe_source_atom(atom: Any) -> str:
+    """Return a readable source atom identity."""
+    return (
+        f"chain {getattr(atom, 'chain_id', '') or '?'} "
+        f"residue {getattr(atom, 'residue_name', '') or '?'} "
+        f"{getattr(atom, 'residue_number', None) if getattr(atom, 'residue_number', None) is not None else '?'} "
+        f"atom {getattr(atom, 'atom_name', None) or getattr(atom, 'name', None) or '?'}"
+    )
 
 
 @dataclass
@@ -147,6 +312,7 @@ def _build_product_graph(spec: Any, *, product_atoms: tuple[Any, ...]) -> _Patch
     bonds: dict[tuple[str, int | None, str], dict[tuple[str, int | None, str], int]] = {}
     roots = (_atom_key(protein_link, role="protein"), _atom_key(modifier_link, role="modifier"))
     leaving = _leaving_keys(plan, fragment)
+    modifier_product_atom_lookup = _modifier_product_atom_lookup(product_atoms)
 
     for atom in product_atoms:
         if _same_product_residue(
@@ -162,20 +328,30 @@ def _build_product_graph(spec: Any, *, product_atoms: tuple[Any, ...]) -> _Patch
             role="protein",
             residue_name=getattr(plan, "protein_product_residue_name", None),
         )
-
     for atom in tuple(getattr(fragment, "atoms", ()) or ()):
         key = _atom_key(atom, role="modifier")
         if key not in leaving:
+            mapped = _mapped_modifier_product_identity(
+                spec,
+                atom,
+                product_atom_lookup=modifier_product_atom_lookup,
+            )
             atoms[key] = _patch_atom(
                 atom,
                 key=key,
                 role="modifier",
-                residue_name=_mapped_residue_name(spec, atom),
-                residue_number=_mapped_residue_number(spec, atom),
-                chain_id=_mapped_chain_id(spec, atom),
+                residue_name=mapped["residue_name"],
+                residue_number=mapped["residue_number"],
+                chain_id=mapped["chain_id"],
+                insertion_code=mapped["insertion_code"],
             )
     if roots[1] not in atoms:
-        atoms[roots[1]] = _patch_atom(modifier_link, key=roots[1], role="modifier")
+        atoms[roots[1]] = _patch_atom(
+            modifier_link,
+            key=roots[1],
+            role="modifier",
+            residue_name=getattr(plan, "modifier_product_residue_name", None),
+        )
 
     for left, right, order in _fragment_bonds(fragment):
         left_key = _atom_key(left, role="modifier")
@@ -385,6 +561,7 @@ def _patch_atom(
     residue_name: str | None = None,
     residue_number: int | None = None,
     chain_id: str | None = None,
+    insertion_code: str | None = None,
 ) -> _PatchAtom:
     """Convert PDB-like metadata to a patch atom."""
     return _PatchAtom(
@@ -396,7 +573,11 @@ def _patch_atom(
             residue_number if residue_number is not None else getattr(atom, "residue_number", None)
         ),
         chain_id=(chain_id if chain_id is not None else getattr(atom, "chain_id", "") or ""),
-        insertion_code=str(getattr(atom, "insertion_code", "") or "").strip(),
+        insertion_code=(
+            str(insertion_code).strip()
+            if insertion_code is not None
+            else str(getattr(atom, "insertion_code", "") or "").strip()
+        ),
         source_atom=atom,
         is_real=role in {"protein", "modifier"},
     )
@@ -431,23 +612,113 @@ def _atom_element(atom: Any) -> str:
     return letters[0].upper()
 
 
-def _mapped_residue_name(spec: Any, atom: Any) -> str:
-    """Return product residue name for a generated-fragment atom."""
+def _mapped_modifier_product_identity(
+    spec: Any,
+    atom: Any,
+    *,
+    product_atom_lookup: Mapping[str, Mapping[Any, Any]],
+) -> dict[str, Any]:
+    """Return final product identity for a generated-fragment atom.
+
+    The assembly mapping can carry source-residue names from the modifier side,
+    while the final product PDB may use product residue names from the linkage
+    plan. Product atoms are authoritative when they can be matched.
+    """
     mapping = _mapping_for_atom(spec, atom)
-    return str(mapping.get("target_residue_name", getattr(atom, "residue_name", "")))
+    plan = getattr(spec, "resolved_plan", None)
+    atom_name = str(getattr(atom, "atom_name", "") or getattr(atom, "name", "")).strip()
+    chain_id = str(mapping.get("target_chain", getattr(atom, "chain_id", "C") or "C"))
+    residue_name = str(
+        mapping.get(
+            "target_residue_name",
+            getattr(plan, "modifier_product_residue_name", None)
+            or getattr(atom, "residue_name", ""),
+        )
+    )
+    residue_number = _optional_int(
+        mapping.get("target_residue_number", getattr(atom, "residue_number", None))
+    )
+    insertion_code = str(
+        mapping.get("target_insertion_code", getattr(atom, "insertion_code", "")) or ""
+    )
+    product_atom = _lookup_modifier_product_atom(
+        product_atom_lookup,
+        chain_id=chain_id,
+        residue_name=residue_name,
+        residue_number=residue_number,
+        atom_name=atom_name,
+    )
+    if product_atom is not None:
+        return {
+            "chain_id": str(getattr(product_atom, "chain_id", chain_id) or chain_id),
+            "residue_name": str(
+                getattr(product_atom, "residue_name", residue_name) or residue_name
+            ),
+            "residue_number": getattr(product_atom, "residue_number", residue_number),
+            "insertion_code": str(getattr(product_atom, "insertion_code", insertion_code) or ""),
+        }
+    return {
+        "chain_id": chain_id,
+        "residue_name": residue_name,
+        "residue_number": residue_number,
+        "insertion_code": insertion_code,
+    }
 
 
-def _mapped_residue_number(spec: Any, atom: Any) -> int | None:
-    """Return product residue number for a generated-fragment atom."""
-    mapping = _mapping_for_atom(spec, atom)
-    value = mapping.get("target_residue_number", getattr(atom, "residue_number", None))
-    return int(value) if value not in (None, "") else None
+def _modifier_product_atom_lookup(product_atoms: Sequence[Any]) -> dict[str, dict[Any, Any]]:
+    """Return product atom lookup tables for modifier-side patch identities."""
+    grouped_by_name: dict[str, list[Any]] = {}
+    by_residue_atom: dict[tuple[str, int | None, str, str], Any] = {}
+    for atom in product_atoms:
+        if str(getattr(atom, "chain_id", "") or "").strip() != "C":
+            continue
+        atom_name = str(getattr(atom, "atom_name", "") or getattr(atom, "name", "")).strip()
+        if not atom_name:
+            continue
+        chain_id = str(getattr(atom, "chain_id", "") or "").strip()
+        residue_number = _optional_int(getattr(atom, "residue_number", None))
+        residue_name = str(getattr(atom, "residue_name", "") or "").strip().upper()
+        grouped_by_name.setdefault(atom_name, []).append(atom)
+        by_residue_atom[(chain_id, residue_number, residue_name, atom_name)] = atom
+        by_residue_atom.setdefault((chain_id, residue_number, "", atom_name), atom)
+    return {
+        "by_residue_atom": by_residue_atom,
+        "by_unique_name": {
+            atom_name: atoms[0] for atom_name, atoms in grouped_by_name.items() if len(atoms) == 1
+        },
+    }
 
 
-def _mapped_chain_id(spec: Any, atom: Any) -> str:
-    """Return product chain ID for a generated-fragment atom."""
-    mapping = _mapping_for_atom(spec, atom)
-    return str(mapping.get("target_chain", getattr(atom, "chain_id", "C") or "C"))
+def _lookup_modifier_product_atom(
+    product_atom_lookup: Mapping[str, Mapping[Any, Any]],
+    *,
+    chain_id: str,
+    residue_name: str,
+    residue_number: int | None,
+    atom_name: str,
+) -> Any | None:
+    """Return the matching final product atom for a modifier patch atom."""
+    by_residue_atom = product_atom_lookup.get("by_residue_atom", {})
+    key = (
+        str(chain_id or "C").strip(),
+        residue_number,
+        str(residue_name or "").strip().upper(),
+        atom_name,
+    )
+    product_atom = by_residue_atom.get(key)
+    if product_atom is not None:
+        return product_atom
+    product_atom = by_residue_atom.get((key[0], residue_number, "", atom_name))
+    if product_atom is not None:
+        return product_atom
+    return product_atom_lookup.get("by_unique_name", {}).get(atom_name)
+
+
+def _optional_int(value: Any) -> int | None:
+    """Return an optional integer from metadata."""
+    if value in (None, ""):
+        return None
+    return int(value)
 
 
 def _mapping_for_atom(spec: Any, atom: Any) -> Mapping[str, Any]:

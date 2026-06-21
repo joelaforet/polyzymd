@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 import numpy as np
@@ -16,6 +17,7 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     deduplicate_charge_templates,
     load_combined_smirnoff_force_field,
     set_topology_positions_from_pdb,
+    suppress_openff_library_charge_info,
 )
 
 
@@ -71,6 +73,26 @@ def test_create_interchange_from_openff_topology_requires_charge_templates():
             force_field=SimpleNamespace(create_interchange=lambda topology, **kwargs: object()),
             charge_from_molecules=(),
         )
+
+
+def test_suppress_openff_library_charge_info_restores_specific_logger_level():
+    """Scoped OpenFF log suppression should avoid broad logging side effects."""
+    nonbonded_logger = logging.getLogger("openff.interchange.smirnoff._nonbonded")
+    polyzymd_logger = logging.getLogger("polyzymd.builders.conjugation.pablo.parameterization")
+    previous_nonbonded_level = nonbonded_logger.level
+    previous_polyzymd_level = polyzymd_logger.level
+    nonbonded_logger.setLevel(logging.INFO)
+    polyzymd_logger.setLevel(logging.INFO)
+    try:
+        with suppress_openff_library_charge_info():
+            assert nonbonded_logger.level == logging.WARNING
+            assert polyzymd_logger.level == logging.INFO
+
+        assert nonbonded_logger.level == logging.INFO
+        assert polyzymd_logger.level == logging.INFO
+    finally:
+        nonbonded_logger.setLevel(previous_nonbonded_level)
+        polyzymd_logger.setLevel(previous_polyzymd_level)
 
 
 def test_create_interchange_from_pablo_topology_can_require_charge_templates():

@@ -5,7 +5,8 @@ from __future__ import annotations
 import copy
 import logging
 import math
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,8 @@ from pydantic import BaseModel, Field
 from polyzymd.builders.conjugation._linkage import parse_pdb_atom_records
 
 LOGGER = logging.getLogger(__name__)
+
+_OPENFF_NONBONDED_LOGGER = "openff.interchange.smirnoff._nonbonded"
 
 _POSITION_CONVERSION_ERRORS = (AttributeError, TypeError, ValueError)
 
@@ -428,11 +431,29 @@ def _topology_positions_as_angstrom(topology: Any) -> Any | None:
 
 def _create_interchange_quietly(force_field: Any, topology: Any, kwargs: dict[str, Any]) -> Any:
     """Call ``create_interchange`` while suppressing noisy charge logs."""
-    nonbonded_logger = logging.getLogger("openff.interchange.smirnoff._nonbonded")
+    with suppress_openff_library_charge_info():
+        return force_field.create_interchange(topology, **kwargs)
+
+
+@contextmanager
+def suppress_openff_library_charge_info() -> Iterator[None]:
+    """Temporarily suppress per-atom OpenFF LibraryCharges INFO records.
+
+    OpenFF Interchange emits one INFO record per atom from its SMIRNOFF
+    nonbonded handler while applying library charges. The scoped override keeps
+    OpenFF warnings and errors visible, restores the exact previous logger
+    level, and does not alter PolyzyMD loggers.
+
+    Yields
+    ------
+    None
+        Control while the OpenFF nonbonded logger is raised to ``WARNING``.
+    """
+    nonbonded_logger = logging.getLogger(_OPENFF_NONBONDED_LOGGER)
     previous_level = nonbonded_logger.level
     nonbonded_logger.setLevel(logging.WARNING)
     try:
-        return force_field.create_interchange(topology, **kwargs)
+        yield
     finally:
         nonbonded_logger.setLevel(previous_level)
 
