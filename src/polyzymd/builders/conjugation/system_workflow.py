@@ -70,6 +70,7 @@ from polyzymd.builders.conjugation.structure.preparation import (
     ProteinCanonicalizationSettings,
     canonicalize_protein_hydrogens,
 )
+from polyzymd.builders.conjugation.validation import build_conjugate_validation_report
 from polyzymd.builders.system_builder import SystemBuilder
 from polyzymd.config.schema import (
     ConjugationCcdCrosslinkConfig,
@@ -136,6 +137,7 @@ class ConjugateConstructionResult(BaseModel):
     local_minimization: Any | None = None
     product_state_pablo_library: Any | None = Field(default=None, exclude=True)
     crosslinked_pdb_path: Path
+    validation_report_path: Path | None = None
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
 
 
@@ -1029,6 +1031,16 @@ def _construct_conjugate_from_specs(
         if not smoke_result.success:
             raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
 
+    validation_report = build_conjugate_validation_report(
+        product_pdb_path=crosslinked_pdb_path,
+        resolved_plans=resolved_plans,
+        assembly=assembly_result,
+        output_dir=artifact_dir,
+        interchange=parameterization_result.interchange,
+        expected_particle_count=getattr(pablo_result.topology, "n_atoms", None),
+        write=True,
+    )
+
     return (
         ConjugateConstructionResult(
             output_dir=artifact_dir,
@@ -1046,6 +1058,7 @@ def _construct_conjugate_from_specs(
             local_minimization=local_minimization_result,
             product_state_pablo_library=product_state_pablo_library,
             crosslinked_pdb_path=crosslinked_pdb_path,
+            validation_report_path=validation_report.report_path,
             diagnostics=tuple(diagnostics),
         ),
         pablo_result.topology,

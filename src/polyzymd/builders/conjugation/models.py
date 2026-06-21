@@ -135,6 +135,9 @@ class ConjugationResult(BaseModel):
             "relaxed_conjugate_pdb": self.relaxed_conjugate_pdb_path,
             "solvated_pdb": self.solvated_pdb_path,
             "workflow_json": self.workflow_json_path,
+            "conjugate_validation_report": _optional_path(
+                getattr(construction, "validation_report_path", None)
+            ),
         }
         self.artifact_paths = {
             **{name: path for name, path in paths.items() if path is not None},
@@ -180,6 +183,7 @@ class ConjugationResult(BaseModel):
         relaxed_path = _optional_path(getattr(workflow_result, "relaxed_conjugate_pdb_path", None))
         solvated_path = _optional_path(getattr(workflow_result, "solvated_pdb_path", None))
         workflow_path = _optional_path(getattr(workflow_result, "workflow_json_path", None))
+        validation_path = _optional_path(getattr(construction, "validation_report_path", None))
         artifact_paths = {
             name: path
             for name, path in {
@@ -189,6 +193,7 @@ class ConjugationResult(BaseModel):
                 "relaxed_conjugate_pdb": relaxed_path,
                 "solvated_pdb": solvated_path,
                 "workflow_json": workflow_path,
+                "conjugate_validation_report": validation_path,
             }.items()
             if path is not None
         }
