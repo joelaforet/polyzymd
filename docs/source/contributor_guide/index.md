@@ -40,6 +40,9 @@ comparison, and artifact-only plotting.
 - **[N-glycosylation from SMILES Feature Plan](n_glycosylation_feature_plan.md)** —
   implementation plan for the next conjugation Ralph loop: SMILES moieties,
   N-glycosylation reaction planning, multiple attachments, and 5FYJ validation
+- **[Extend Conjugation Mechanisms](extending_conjugation_mechanisms.md)** —
+  checklist for mechanism metadata, product-state residue definitions, charge
+  patch expectations, tests, validation, and documentation updates
 
 ## Contributor Mindset
 
@@ -59,6 +62,7 @@ Set Up a Contributor Environment <setup>
 Packaging and Distribution Notes <packaging>
 New Analysis Contributor Path <analysis_plugins/index>
 Extend the Analysis Framework <extending_analyses>
+Extend Conjugation Mechanisms <extending_conjugation_mechanisms>
 Conjugation Refactor Loop Plan <conjugation_refactor_loop>
 N-glycosylation from SMILES Feature Plan <n_glycosylation_feature_plan>
 ```
