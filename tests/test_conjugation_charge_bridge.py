@@ -44,6 +44,52 @@ def test_residue_records_group_atom_records():
     assert grouped[0].atom_charges == {"NZ": -0.2, "CE": 0.2}
 
 
+def test_residue_records_preserve_ordered_atom_records():
+    """Ordered atom records should emit one residue record per atom."""
+    records = (
+        AtomPartialChargeRecord(
+            chain_id="A",
+            residue_name="LYX",
+            residue_number=10,
+            atom_name="NZ",
+            charge_e=-0.4,
+            source="production:ff14SB",
+            source_role="protein_ff14sb",
+        ),
+        AtomPartialChargeRecord(
+            chain_id="C",
+            residue_name="NHX",
+            residue_number=1,
+            atom_name="C047",
+            charge_e=0.1,
+            source="production:polymer",
+            source_role="polymer_template",
+        ),
+        AtomPartialChargeRecord(
+            chain_id="A",
+            residue_name="LYX",
+            residue_number=10,
+            atom_name="CE",
+            charge_e=0.3,
+            source="production:ff14SB",
+            source_role="protein_ff14sb",
+        ),
+    )
+
+    ordered = ResiduePartialChargeRecord.from_ordered_atom_records(records)
+
+    assert len(ordered) == len(records)
+    assert [tuple(record.atom_charges) for record in ordered] == [("NZ",), ("C047",), ("CE",)]
+    assert [record.source_role for record in ordered] == [
+        "protein_ff14sb",
+        "polymer_template",
+        "protein_ff14sb",
+    ]
+    assert [next(iter(record.atom_charges.values())) for record in ordered] == pytest.approx(
+        (-0.4, 0.1, 0.3)
+    )
+
+
 def test_validate_unique_atom_records_rejects_duplicate_identity():
     """Duplicate atom identities should fail before template assembly."""
     record = AtomPartialChargeRecord(
@@ -155,7 +201,16 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
     assert result.charge_bridge_report.total_partial_charge_before_correction_e == pytest.approx(
         0.0
     )
+    assert result.charge_bridge_report.source == "production:product-state-local-nagl-charge-bridge"
+    assert result.charge_bridge_report.order_preserving_atom_records is True
     assert (tmp_path / "product_state_charge_bridge.json").is_file()
+    assert len(result.residue_partial_charges) == target.n_atoms
+    assert [tuple(record.atom_charges) for record in result.residue_partial_charges] == [
+        ("NZ",),
+        ("C047",),
+        ("O020",),
+        ("C001",),
+    ]
     charges = {
         (record.residue_name, atom_name): charge
         for record in result.residue_partial_charges

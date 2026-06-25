@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from polyzymd.builders.conjugation.pablo.charge_templates import (
+    _source_from_residue_records,
     build_conjugate_charge_templates,
 )
 
@@ -118,6 +119,142 @@ def test_build_conjugate_charge_templates_validates_total_charge():
         )
 
 
+def test_ordered_residue_records_preserve_metadata_missing_fallback_order():
+    """Metadata-missing fallback should use proven one-atom bridge record order."""
+    records = (
+        {
+            "chain_id": "A",
+            "residue_name": "LYX",
+            "residue_number": 10,
+            "source": "production:ff14SB",
+            "atom_charges": {"NZ": -0.4},
+        },
+        {
+            "chain_id": "C",
+            "residue_name": "NHX",
+            "residue_number": 1,
+            "source": "production:polymer",
+            "atom_charges": {"C047": 0.1},
+        },
+        {
+            "chain_id": "A",
+            "residue_name": "LYX",
+            "residue_number": 10,
+            "source": "production:ff14SB",
+            "atom_charges": {"CE": 0.3},
+        },
+        {
+            "chain_id": "C",
+            "residue_name": "NHX",
+            "residue_number": 1,
+            "source": "production:polymer",
+            "atom_charges": {"O020": 0.0},
+        },
+    )
+    target = _metadata_free_molecule("metadata-free-target", atom_count=4)
+    library = _library(
+        residue_partial_charges=records,
+        charge_bridge_report=SimpleNamespace(
+            source="production:product-state-local-nagl-charge-bridge",
+            success=True,
+            order_preserving_atom_records=True,
+        ),
+    )
+
+    source = _source_from_residue_records(records, library)
+    templates = build_conjugate_charge_templates(
+        SimpleNamespace(molecules=(target,)),
+        library,
+    )
+
+    expected = (-0.4, 0.1, 0.3, 0.0)
+    assert source.ordered_charges == pytest.approx(expected)
+    assert _charge_values(templates[0].partial_charges) == pytest.approx(expected)
+    assert _charge_values(templates[0].partial_charges) != pytest.approx((-0.4, 0.3, 0.1, 0.0))
+
+
+def test_grouped_residue_records_do_not_enable_metadata_missing_fallback():
+    """Grouped mixed-source records should fail without identity metadata."""
+    records = (
+        {
+            "chain_id": "A",
+            "residue_name": "LYX",
+            "residue_number": 10,
+            "source": "production:ff14SB",
+            "source_role": "protein_ff14sb",
+            "atom_charges": {"NZ": -0.4, "CE": 0.3},
+        },
+        {
+            "chain_id": "C",
+            "residue_name": "NHX",
+            "residue_number": 1,
+            "source": "production:polymer",
+            "source_role": "polymer_template",
+            "atom_charges": {"C047": 0.1, "O020": 0.0},
+        },
+    )
+    target = _metadata_free_molecule("metadata-free-target", atom_count=4)
+    library = _library(
+        residue_partial_charges=records,
+        charge_bridge_report=SimpleNamespace(
+            source="production:product-state-local-nagl-charge-bridge",
+            success=True,
+            order_preserving_atom_records=True,
+        ),
+    )
+
+    source = _source_from_residue_records(records, library)
+    assert source.ordered_charges == ()
+    with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
+        build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
+
+
+def test_one_atom_records_without_bridge_provenance_do_not_enable_ordered_fallback():
+    """One-atom records should not imply atom order without bridge provenance."""
+    records = (
+        {
+            "chain_id": "A",
+            "residue_name": "LYX",
+            "residue_number": 10,
+            "source": "production:ff14SB",
+            "atom_charges": {"NZ": 0.0},
+        },
+    )
+    target = _metadata_free_molecule("metadata-free-target", atom_count=1)
+    library = _library(residue_partial_charges=records)
+
+    source = _source_from_residue_records(records, library)
+    assert source.ordered_charges == ()
+    with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
+        build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
+
+
+def test_generic_bridge_source_without_order_marker_does_not_enable_ordered_fallback():
+    """Generic bridge source strings should not imply order-preserving records."""
+    records = (
+        {
+            "chain_id": "A",
+            "residue_name": "LYX",
+            "residue_number": 10,
+            "source": "production:ff14SB",
+            "atom_charges": {"NZ": 0.0},
+        },
+    )
+    target = _metadata_free_molecule("metadata-free-target", atom_count=1)
+    library = _library(
+        residue_partial_charges=records,
+        charge_bridge_report=SimpleNamespace(
+            source="production:product-state-charge-bridge",
+            success=True,
+        ),
+    )
+
+    source = _source_from_residue_records(records, library)
+    assert source.ordered_charges == ()
+    with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
+        build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
+
+
 def _library(**updates):
     """Build a product-state library double."""
     data = {
@@ -142,6 +279,21 @@ def _molecule(name: str, atoms: list[SimpleNamespace], *, properties=None) -> Si
             else None
         ),
         properties=properties or {},
+    )
+
+
+def _metadata_free_molecule(name: str, atom_count: int) -> SimpleNamespace:
+    """Build a molecule double with atoms lacking residue metadata."""
+    atoms = tuple(
+        SimpleNamespace(name=f"X{index}", formal_charge=0, partial_charge=None, metadata={})
+        for index in range(atom_count)
+    )
+    return SimpleNamespace(
+        name=name,
+        atoms=atoms,
+        n_atoms=len(atoms),
+        partial_charges=None,
+        properties={},
     )
 
 

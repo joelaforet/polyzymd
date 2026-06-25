@@ -116,6 +116,37 @@ class ResiduePartialChargeRecord(BaseModel):
             ), atom_charges in grouped.items()
         )
 
+    @classmethod
+    def from_ordered_atom_records(
+        cls, records: tuple[AtomPartialChargeRecord, ...]
+    ) -> tuple["ResiduePartialChargeRecord", ...]:
+        """Convert atom records into one-atom residue records in input order.
+
+        Parameters
+        ----------
+        records : tuple of AtomPartialChargeRecord
+            Atom-level records whose sequence should be preserved for ordered
+            charge fallback paths.
+
+        Returns
+        -------
+        tuple of ResiduePartialChargeRecord
+            One residue-level record per input atom, carrying the atom record's
+            identity and provenance with a single ``atom_charges`` entry.
+        """
+        return tuple(
+            cls(
+                chain_id=record.chain_id,
+                residue_name=record.residue_name,
+                residue_number=record.residue_number,
+                insertion_code=record.insertion_code,
+                source=record.source,
+                source_role=record.source_role,
+                atom_charges={record.atom_name: record.charge_e},
+            )
+            for record in records
+        )
+
 
 class ChargeBridgeReport(BaseModel):
     """Structured report for product-state charge bridge construction."""
@@ -124,6 +155,7 @@ class ChargeBridgeReport(BaseModel):
 
     success: bool
     source: str = "production:product-state-charge-bridge"
+    order_preserving_atom_records: bool = False
     nagl_model: str | None = None
     ff14sb_atom_count: int = 0
     polymer_template_atom_count: int = 0

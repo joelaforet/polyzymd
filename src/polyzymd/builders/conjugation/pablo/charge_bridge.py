@@ -205,10 +205,11 @@ def build_product_state_charge_bridge(
 
     atom_records = tuple(records[identity] for identity in target_record_keys)
     validate_unique_atom_records(atom_records)
-    residue_records = ResiduePartialChargeRecord.from_atom_records(atom_records)
+    residue_records = ResiduePartialChargeRecord.from_ordered_atom_records(atom_records)
     report = ChargeBridgeReport(
         success=True,
         source=_BRIDGE_SOURCE,
+        order_preserving_atom_records=True,
         nagl_model=nagl_model,
         ff14sb_atom_count=sum(record.source_role == "protein_ff14sb" for record in atom_records),
         polymer_template_atom_count=sum(
