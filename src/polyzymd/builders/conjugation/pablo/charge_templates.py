@@ -105,7 +105,7 @@ def _partial_charge_source(product_state_pablo_library: Any) -> _PartialChargeSo
     """Resolve production partial-charge provenance from a product library."""
     records = tuple(getattr(product_state_pablo_library, "residue_partial_charges", ()) or ())
     if records:
-        return _source_from_residue_records(records)
+        return _source_from_residue_records(records, product_state_pablo_library)
 
     templates = tuple(getattr(product_state_pablo_library, "charge_templates", ()) or ())
     marked_templates = tuple(template for template in templates if _has_production_marker(template))
@@ -128,8 +128,25 @@ def _partial_charge_source(product_state_pablo_library: Any) -> _PartialChargeSo
     )
 
 
-def _source_from_residue_records(records: tuple[Any, ...]) -> _PartialChargeSource:
-    """Build an atom charge map from explicit residue records."""
+def _source_from_residue_records(
+    records: tuple[Any, ...], product_state_pablo_library: Any | None = None
+) -> _PartialChargeSource:
+    """Build an atom charge map from explicit residue records.
+
+    Parameters
+    ----------
+    records : tuple of Any
+        Residue-level partial-charge records from a product-state Pablo library.
+    product_state_pablo_library : Any or None, optional
+        Library carrying optional charge-bridge provenance used to decide whether
+        metadata-free ordered fallback is safe, by default ``None``.
+
+    Returns
+    -------
+    _PartialChargeSource
+        Identity-keyed charges plus ordered charges only when bridge provenance
+        and one-atom record shape prove that input order is meaningful.
+    """
     charges: dict[_AtomIdentity, float] = {}
     sources: set[str] = set()
     for record in records:
@@ -159,11 +176,61 @@ def _source_from_residue_records(records: tuple[Any, ...]) -> _PartialChargeSour
             charges[identity] = _finite_charge(charge, identity)
     if not charges:
         raise ValueError("Residue partial-charge records did not contain any atom charges")
+    ordered_charges = ()
+    if _records_support_ordered_charge_fallback(records, product_state_pablo_library):
+        ordered_charges = tuple(charges.values())
     return _PartialChargeSource(
         charges=charges,
         source=", ".join(sorted(sources)),
-        ordered_charges=tuple(charges.values()),
+        ordered_charges=ordered_charges,
     )
+
+
+def _records_support_ordered_charge_fallback(
+    records: tuple[Any, ...], product_state_pablo_library: Any | None
+) -> bool:
+    """Return whether residue records prove atom-order-preserving bridge provenance.
+
+    Parameters
+    ----------
+    records : tuple of Any
+        Residue-level partial-charge records to inspect.
+    product_state_pablo_library : Any or None
+        Library expected to carry an explicit product-state charge-bridge report.
+
+    Returns
+    -------
+    bool
+        ``True`` when ordered fallback can be enabled safely.
+    """
+    if not records or not _has_product_state_bridge_provenance(product_state_pablo_library):
+        return False
+    return all(
+        len(dict(_record_value(record, "atom_charges", {}) or {})) == 1 for record in records
+    )
+
+
+def _has_product_state_bridge_provenance(product_state_pablo_library: Any | None) -> bool:
+    """Return whether the bridge explicitly preserves atom record order.
+
+    Parameters
+    ----------
+    product_state_pablo_library : Any or None
+        Product-state Pablo library with an optional ``charge_bridge_report``.
+
+    Returns
+    -------
+    bool
+        ``True`` when the report marks atom records as order-preserving and any
+        available success flag is ``True``.
+    """
+    report = getattr(product_state_pablo_library, "charge_bridge_report", None)
+    if report is None:
+        return False
+    if _record_value(report, "order_preserving_atom_records", False) is not True:
+        return False
+    success = _record_value(report, "success", None)
+    return success is None or success is True
 
 
 def _source_from_marked_templates(templates: tuple[Any, ...]) -> _PartialChargeSource:
