@@ -418,7 +418,7 @@ def _mapped_bond_orders(smarts_entries: Sequence[str]) -> dict[tuple[int, int], 
     """Return mapped bond orders, preferring RDKit and falling back to a light parser."""
     try:
         return _rdkit_mapped_bond_orders(smarts_entries)
-    except Exception:
+    except (ImportError, ValueError, RuntimeError):
         return _fallback_mapped_bond_orders(smarts_entries)
 
 
