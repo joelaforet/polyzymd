@@ -300,7 +300,7 @@ def test_prepared_protein_path_canonicalizes_to_construction_dir(monkeypatch, tm
 
 
 def test_local_minimization_settings_use_product_atom_identities(tmp_path: Path):
-    """Local minimization selectors should use product atoms, not leaving atoms."""
+    """Local minimization selectors should use generic product link atoms."""
     from polyzymd.builders.conjugation._relaxation import LocalMinimizationSettings
 
     product = tmp_path / "product.pdb"
@@ -327,46 +327,44 @@ def test_local_minimization_settings_use_product_atom_identities(tmp_path: Path)
     settings = _local_minimization_settings_for_product(
         product,
         base_settings=LocalMinimizationSettings(),
-        requirement=requirement,
+        requirements=(requirement,),
     )
 
-    assert settings.nz_selector.serial is None
-    assert settings.nz_selector.chain_id == "A"
-    assert settings.nz_selector.residue_name == "LYX"
-    assert settings.nz_selector.residue_number == 23
-    assert settings.c047_selector.chain_id == "C"
-    assert settings.c047_selector.residue_number == 5
-    assert settings.o020_selector.chain_id == "C"
-    assert settings.o020_selector.residue_number == 5
-    assert settings.o020_selector.atom_name == "OX1"
-    assert settings.o020_selector.atom_name != requirement.leaving_atoms[1][0]
+    linkage = settings.linkages[0]
+    assert linkage.protein_link_selector.serial is None
+    assert linkage.protein_link_selector.chain_id == "A"
+    assert linkage.protein_link_selector.residue_name == "LYX"
+    assert linkage.protein_link_selector.residue_number == 23
+    assert linkage.modifier_link_selector.chain_id == "C"
+    assert linkage.modifier_link_selector.residue_number == 5
+    assert linkage.modifier_link_selector.atom_name == "C047"
 
 
 def test_local_minimization_settings_preserve_explicit_selectors(tmp_path: Path):
     """Explicit local minimization selectors should override product-state inference."""
     from polyzymd.builders.conjugation._relaxation import (
-        CrosslinkAtomSelector,
+        LocalLinkageAtomSelector,
+        LocalLinkageSelectors,
         LocalMinimizationSettings,
     )
 
     settings = LocalMinimizationSettings(
-        nz_selector=CrosslinkAtomSelector(
-            chain_id="A",
-            residue_name="LYX",
-            residue_number=23,
-            atom_name="NZ",
-        ),
-        c047_selector=CrosslinkAtomSelector(
-            chain_id="C",
-            residue_name="NHX",
-            residue_number=5,
-            atom_name="C047",
-        ),
-        o020_selector=CrosslinkAtomSelector(
-            chain_id="C",
-            residue_name="NHX",
-            residue_number=5,
-            atom_name="USER",
+        linkages=(
+            LocalLinkageSelectors(
+                protein_link_selector=LocalLinkageAtomSelector(
+                    chain_id="A",
+                    residue_name="LYX",
+                    residue_number=23,
+                    atom_name="NZ",
+                ),
+                modifier_link_selector=LocalLinkageAtomSelector(
+                    chain_id="C",
+                    residue_name="NHX",
+                    residue_number=5,
+                    atom_name="USER",
+                ),
+                target_bond_length_angstrom=1.33,
+            ),
         ),
     )
     requirement = PabloCrosslinkRequirement(
@@ -379,15 +377,15 @@ def test_local_minimization_settings_preserve_explicit_selectors(tmp_path: Path)
     derived = _local_minimization_settings_for_product(
         tmp_path / "missing-product.pdb",
         base_settings=settings,
-        requirement=requirement,
+        requirements=(requirement,),
     )
 
     assert derived is settings
-    assert derived.o020_selector.atom_name == "USER"
+    assert derived.linkages[0].modifier_link_selector.atom_name == "USER"
 
 
-def test_local_minimization_settings_can_use_product_residue_definition(tmp_path: Path):
-    """Product residue definitions can identify the carbonyl oxygen when CONECT is absent."""
+def test_local_minimization_settings_do_not_require_modifier_oxygen_anchor(tmp_path: Path):
+    """Generic local minimization should not require an auxiliary oxygen anchor."""
     from polyzymd.builders.conjugation._relaxation import LocalMinimizationSettings
 
     product = tmp_path / "product.pdb"
@@ -401,18 +399,6 @@ def test_local_minimization_settings_can_use_product_residue_definition(tmp_path
         ),
         encoding="utf-8",
     )
-    product_library = SimpleNamespace(
-        definitions=(
-            SimpleNamespace(
-                residue_name="NHX",
-                atoms=(
-                    SimpleNamespace(name="C047", symbol="C"),
-                    SimpleNamespace(name="ODEF", symbol="O"),
-                ),
-                bonds=(SimpleNamespace(atom1="C047", atom2="ODEF"),),
-            ),
-        )
-    )
     requirement = PabloCrosslinkRequirement(
         residues=("LYX", "NHX"),
         linking_atoms=("NZ", "C047"),
@@ -423,11 +409,11 @@ def test_local_minimization_settings_can_use_product_residue_definition(tmp_path
     settings = _local_minimization_settings_for_product(
         product,
         base_settings=LocalMinimizationSettings(),
-        requirement=requirement,
-        product_state_pablo_library=product_library,
+        requirements=(requirement,),
+        product_state_pablo_library=SimpleNamespace(definitions=()),
     )
 
-    assert settings.o020_selector.atom_name == "ODEF"
+    assert settings.linkages[0].modifier_link_selector.atom_name == "C047"
 
 
 def test_nhs_lys_shim_uses_product_state_local_minimization(
@@ -548,7 +534,7 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
     def fake_local_minimization(pdb_path, output_dir, **kwargs):
         calls["local_minimization"] = calls.get("local_minimization", 0) + 1
         calls["local_settings"] = kwargs["settings"]
-        calls["local_requirement"] = kwargs["pablo_crosslink_requirement"]
+        calls["local_policy"] = kwargs["pablo_policy"]
         calls["local_product_library"] = kwargs["product_state_pablo_library"]
         relaxed = Path(output_dir) / "local-relaxed.pdb"
         relaxed.write_text("END\n", encoding="utf-8")
@@ -633,9 +619,9 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
     assert calls["charge_template_count"] == 1
     assert calls.get("smoke", 0) == 0
     assert calls["local_minimization"] == 1
-    assert calls["local_settings"].nz_selector.residue_name == "LYX"
-    assert calls["local_settings"].c047_selector.residue_name == "NHX"
-    assert calls["local_requirement"].leaving_atoms == ((), ())
+    assert calls["local_settings"].linkages[0].protein_link_selector.residue_name == "LYX"
+    assert calls["local_settings"].linkages[0].modifier_link_selector.residue_name == "NHX"
+    assert calls["local_policy"].crosslinks[0].leaving_atoms == ((), ())
     assert calls["local_product_library"] is product_library
     assert any(
         "local minimization completed and wrote a relaxed PDB" in item
@@ -660,7 +646,7 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     moieties = tuple(
         _moiety_fragment(residue_name="NAG", residue_number=index + 1) for index in range(2)
     )
-    calls = {"placements": 0, "parameterize": 0, "smoke": 0}
+    calls = {"placements": 0, "parameterize": 0, "smoke": 0, "local_minimization": 0}
 
     def fake_place(protein_pdb_path, modifiers_arg, plans_arg, output_dir, *, settings=None):
         calls["placements"] += 1
@@ -688,7 +674,21 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
         calls["fragment_count"] = len(polymer_fragment)
         calls["attachment_count"] = len(attachment)
         calls["protein_products"] = tuple(item.protein_target_resname for item in attachment)
-        Path(output_path).write_text("END\n", encoding="utf-8")
+        Path(output_path).write_text(
+            "".join(
+                [
+                    _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N"),
+                    _pdb_line(2, "C001", "NAG", "C", 1, element="C"),
+                    _pdb_line(3, "ND2 ", "ASX", "A", 87, element="N"),
+                    _pdb_line(4, "C001", "NAG", "C", 2, element="C"),
+                    "CONECT    1    2\n",
+                    "CONECT    2    1\n",
+                    "CONECT    3    4\n",
+                    "CONECT    4    3\n",
+                ]
+            ),
+            encoding="utf-8",
+        )
         return CrosslinkedPdbAssemblyResult(
             output_path=Path(output_path),
             protein_atom_count=10,
@@ -733,6 +733,13 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
             success=True, minimized_pdb_path=minimized, equilibrated_pdb_path=None
         )
 
+    def fake_local_minimization(pdb_path, output_dir, **kwargs):
+        calls["local_minimization"] += 1
+        calls["local_linkage_count"] = len(kwargs["settings"].linkages)
+        relaxed = Path(output_dir) / "local-relaxed.pdb"
+        relaxed.write_text("END\n", encoding="utf-8")
+        return SimpleNamespace(success=True, relaxed_pdb_path=relaxed, blocker=None)
+
     monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
     monkeypatch.setattr(
         workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
@@ -746,6 +753,11 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
         workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
     )
     monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
+    monkeypatch.setattr(
+        workflow_module,
+        "run_post_crosslink_local_minimization",
+        fake_local_minimization,
+    )
 
     policy = ConjugationCcdPabloPolicyConfig(
         crosslinks=[
@@ -796,9 +808,10 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     assert calls["attachment_count"] == 2
     assert calls["protein_products"] == ("ASX", "ASX")
     assert calls["parameterize"] == 1
-    assert calls["smoke"] == 1
-    assert construction.local_minimization is None
-    assert any("local minimization was requested" in item for item in construction.diagnostics)
+    assert calls["local_minimization"] == 1
+    assert calls["local_linkage_count"] == 2
+    assert calls["smoke"] == 0
+    assert construction.local_minimization is not None
 
 
 def test_single_generic_local_minimization_request_runs_minimizer(
@@ -1186,7 +1199,7 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
         lambda **kwargs: _FakeSystemBuilder(tmp_path / "solvated.pdb"),
     )
 
-    result = workflow_module.build_direct_smiles_moiety_conjugate(
+    result = workflow_module.build_direct_moiety_conjugate(
         protein_pdb_path=source,
         attachments=attachments,
         output_dir=tmp_path / "out",

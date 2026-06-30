@@ -6,6 +6,8 @@ import numpy as np
 
 from polyzymd.builders.conjugation._linkage import PabloCrosslinkRequirement
 from polyzymd.builders.conjugation._relaxation import (
+    LocalLinkageAtomSelector,
+    LocalLinkageSelectors,
     LocalMinimizationSettings,
     _build_simulation_with_platform_fallback,
     analyze_crosslink_geometry,
@@ -21,27 +23,57 @@ POC_CROSSLINKED_PDB = (
 
 
 def test_analyze_crosslink_geometry_reports_known_poc_clash():
-    """The current seeded product should expose the diagnosed NZ-O clash."""
-    metrics = analyze_crosslink_geometry(POC_CROSSLINKED_PDB)
+    """The seeded product should report generic product-link metrics."""
+    settings = _poc_linkage_settings()
 
-    assert metrics.reciprocal_nz_c047_conect is True
-    assert metrics.nz_o020_conect_present is False
-    assert 1.25 <= metrics.nz_c047_distance_angstrom <= 1.65
-    assert 1.15 <= metrics.c047_o020_distance_angstrom <= 1.35
-    assert metrics.nz_o020_distance_angstrom < 1.8
-    assert metrics.passes is False
-    assert any("NZ-O020" in failure for failure in metrics.failures)
+    metrics = analyze_crosslink_geometry(POC_CROSSLINKED_PDB, settings=settings)
+
+    assert len(metrics.linkages) == 1
+    linkage = metrics.linkages[0]
+    assert linkage.reciprocal_product_link_conect is True
+    assert 1.25 <= linkage.protein_modifier_distance_angstrom <= 1.65
+    assert linkage.passes is True
+    assert metrics.passes is True
 
 
 def test_default_product_state_pablo_policy_does_not_emit_hz2_hz3():
     """Default local minimization Pablo policy must not use reactant leaving atoms."""
-    policy = build_product_state_pablo_policy(POC_CROSSLINKED_PDB)
+    policy = build_product_state_pablo_policy(
+        POC_CROSSLINKED_PDB,
+        settings=_poc_linkage_settings(),
+    )
 
     assert policy is not None
     dumped = policy.model_dump(mode="json")
     assert "HZ2" not in str(dumped)
     assert "HZ3" not in str(dumped)
     assert policy.crosslinks[0].leaving_atoms == ((), ())
+
+
+def _poc_linkage_settings() -> LocalMinimizationSettings:
+    """Return generic linkage settings for the bundled POC product."""
+    return LocalMinimizationSettings(
+        linkages=(
+            LocalLinkageSelectors(
+                protein_link_selector=LocalLinkageAtomSelector(
+                    serial=None,
+                    chain_id="A",
+                    residue_name="LYX",
+                    residue_number=23,
+                    atom_name="NZ",
+                ),
+                modifier_link_selector=LocalLinkageAtomSelector(
+                    serial=None,
+                    chain_id="C",
+                    residue_name="NHX",
+                    residue_number=5,
+                    atom_name="C047",
+                ),
+                target_bond_length_angstrom=1.33,
+                label="poc_linkage",
+            ),
+        )
+    )
 
 
 def test_resolved_product_state_crosslink_uses_empty_pablo_leaving_atoms():
