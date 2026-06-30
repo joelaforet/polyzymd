@@ -138,3 +138,15 @@ def test_pablo_strict_validation_can_require_balanced_product_maps():
             reaction.product_smarts,
             require_all_reactant_maps_in_products=True,
         )
+
+
+def test_mapped_bond_order_fallback_does_not_swallow_programming_errors(monkeypatch):
+    """Unexpected RDKit helper errors should not silently use the fallback parser."""
+
+    def raise_programming_error(smarts_entries):
+        raise TypeError("bad helper call")
+
+    monkeypatch.setattr(reaction_roles, "_rdkit_mapped_bond_orders", raise_programming_error)
+
+    with pytest.raises(TypeError, match="bad helper call"):
+        reaction_roles._mapped_bond_orders(("[N:1][C:2]",))

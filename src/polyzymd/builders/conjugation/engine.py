@@ -14,9 +14,10 @@ if TYPE_CHECKING:
 class ConjugationEngine:
     """Boundary for public conjugate construction orchestration.
 
-    The engine currently delegates to the existing config-driven conjugated
-    polymer workflow. Future phases should move orchestration behind this class
-    without duplicating behavior in facade functions.
+    The engine delegates supported public requests to the existing config-driven
+    and direct protein-plus-attachment workflows. Raw molecule/topology inputs
+    remain unsupported so callers do not silently fall into incomplete OpenFF
+    pathways.
     """
 
     def __init__(self, *, settings: ConjugatedPolymerSystemSettings | None = None) -> None:
