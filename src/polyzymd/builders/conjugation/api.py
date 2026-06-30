@@ -39,9 +39,10 @@ def build_conjugate(
 ) -> ConjugationResult:
     """Build a conjugate through the public engine wrapper.
 
-    Supported Phase 5 inputs are a ``ConjugateBuildRequest``, a config object,
-    or a config path. Direct molecule/topology construction fails explicitly in
-    the engine instead of silently falling back to a direct OpenFF path.
+    Supported inputs are a ``ConjugateBuildRequest``, a config object, a config
+    path, or direct request keywords with ``protein_pdb_path`` plus
+    ``attachments``. Raw molecule/topology keyword construction fails explicitly
+    in the engine instead of silently falling back to a direct OpenFF path.
     """
     settings = kwargs.pop("settings", None)
     engine = ConjugationEngine(settings=settings)

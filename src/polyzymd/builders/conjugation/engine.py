@@ -83,9 +83,9 @@ class ConjugationEngine:
     ) -> ConjugationResult:
         """Build from a request, config object, or config path.
 
-        Direct molecule/topology construction is intentionally not routed to a
-        silent OpenFF fallback. Use the config-driven path until a future engine
-        phase owns that workflow explicitly.
+        Supported direct requests use ``protein_pdb_path`` plus ``attachments``.
+        Raw molecule/topology keyword inputs are intentionally not routed to a
+        silent OpenFF fallback.
         """
         call_settings = kwargs.pop("settings", None)
 
@@ -151,7 +151,7 @@ class ConjugationEngine:
 def _raise_unsupported_direct_mode(inputs: dict[str, Any]) -> None:
     supplied = ", ".join(sorted(inputs)) if inputs else "no config input"
     raise NotImplementedError(
-        "Direct ConjugationEngine.build(...) molecule/topology inputs are not implemented. "
-        "Use config, config_path, or ConjugateBuildRequest to delegate to the existing "
-        f"config-driven workflow. Received: {supplied}."
+        "Raw molecule/topology inputs to ConjugationEngine.build(...) are not "
+        "implemented. Use config, config_path, or a direct ConjugateBuildRequest with "
+        f"protein_pdb_path and attachments. Received: {supplied}."
     )

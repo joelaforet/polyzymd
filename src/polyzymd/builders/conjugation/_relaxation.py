@@ -2241,7 +2241,7 @@ class LocalMinimizationSettings(BaseModel):
     max_protein_displacement_angstrom: float = Field(0.05, ge=0)
     max_linkage_distance_error_angstrom: float = Field(0.35, ge=0)
     platform_name: str | None = None
-    relaxed_pdb_name: str = "seeded_random_10mer_crosslinked_relaxed.pdb"
+    relaxed_pdb_name: str = "crosslinked_relaxed.pdb"
     result_json_name: str = "local_minimization_result.json"
     use_default_pablo_crosslink: bool = True
     use_formal_charge_templates: bool = True
@@ -2468,7 +2468,7 @@ def run_post_crosslink_local_minimization(
             mean_restrained_protein_displacement_angstrom=mean_displacement,
             diagnostics=tuple(_success_diagnostics(after_geometry, max_displacement)),
         )
-    except Exception as exc:  # noqa: BLE001 - third-party chemistry errors need capture
+    except (OSError, RuntimeError, ValueError) as exc:
         result = _blocked_result(
             input_pdb,
             artifact_dir,
