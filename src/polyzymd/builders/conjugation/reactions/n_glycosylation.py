@@ -280,6 +280,22 @@ class NGlycosylationReaction(ReactionTemplate):
             contract,
         )
 
+    def resolve_attachment(
+        self,
+        protein_pdb_path: Path | str,
+        site_config: Any,
+        fragment: GeneratedMoietyFragment,
+        *,
+        settings: NGlycosylationReactionSettings | None = None,
+    ) -> ResolvedAttachmentPlan:
+        """Resolve an experimental N-glycosylation generic attachment plan."""
+        return self.resolve_plan(
+            protein_pdb_path,
+            site_config,
+            fragment,
+            settings=settings,
+        )
+
     def plan(self, context: ReactionContext) -> ReactionResult:
         """Resolve a plan from a reaction context carrying protein, site, and moiety."""
         site_config = context.metadata.get("site_config") or context.metadata.get("site")

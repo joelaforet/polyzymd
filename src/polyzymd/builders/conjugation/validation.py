@@ -585,6 +585,12 @@ def audit_parameter_coverage(
     if interchange is None:
         check = _skipped_check("parameter_coverage", "No final Interchange was available")
         return ParameterCoverageReport(status=check.status, checks=(check,))
+    if not hasattr(interchange, "to_openmm_system"):
+        check = _skipped_check(
+            "parameter_coverage",
+            "Final Interchange object does not expose to_openmm_system()",
+        )
+        return ParameterCoverageReport(status=check.status, checks=(check,))
     try:
         system = interchange.to_openmm_system()
         observed_count = int(system.getNumParticles())
