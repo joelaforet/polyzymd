@@ -418,7 +418,7 @@ def _mapped_bond_orders(smarts_entries: Sequence[str]) -> dict[tuple[int, int], 
     """Return mapped bond orders, preferring RDKit and falling back to a light parser."""
     try:
         return _rdkit_mapped_bond_orders(smarts_entries)
-    except (ImportError, ValueError, RuntimeError):
+    except (ImportError, ValueError):
         return _fallback_mapped_bond_orders(smarts_entries)
 
 
@@ -428,7 +428,10 @@ def _rdkit_mapped_bond_orders(smarts_entries: Sequence[str]) -> dict[tuple[int, 
 
     bonds: dict[tuple[int, int], float] = {}
     for smarts in smarts_entries:
-        mol = Chem.MolFromSmarts(smarts)
+        try:
+            mol = Chem.MolFromSmarts(smarts)
+        except RuntimeError as error:
+            raise ValueError(f"RDKit could not parse SMARTS: {smarts}") from error
         if mol is None:
             raise ValueError(f"RDKit could not parse SMARTS: {smarts}")
         for bond in mol.GetBonds():
