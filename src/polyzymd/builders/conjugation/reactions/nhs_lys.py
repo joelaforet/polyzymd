@@ -178,46 +178,6 @@ class NhsLysReaction(ReactionTemplate):
         return resolved.product_residue_names
 
     @classmethod
-    def create_linker(
-        cls,
-        *,
-        target_residue_number: int,
-        target_chain: str = "A",
-        target_residue_name: str | None = None,
-        target_insertion_code: str = "",
-        settings: NhsLysReactionSettings | None = None,
-    ) -> Any:
-        """Create the current NHS-Lys linker implementation from template settings."""
-        from polyzymd.builders.conjugation._linkage import NhsLysModifierLinker
-
-        resolved = settings or cls.default_settings()
-        return NhsLysModifierLinker(
-            target_chain=target_chain,
-            target_residue_number=target_residue_number,
-            target_residue_name=target_residue_name or resolved.source_site_residue_name,
-            target_insertion_code=target_insertion_code,
-            target_atom_name=resolved.target_atom_name,
-            lysine_target_resname=resolved.product_site_residue_name,
-            modifier_target_resname=resolved.product_moiety_residue_name,
-            max_nz_hydrogens_to_remove=resolved.max_nz_hydrogens_to_remove,
-        )
-
-    @classmethod
-    def create_linker_from_attachment(cls, attachment: Any) -> Any:
-        """Create the legacy linker for a config attachment without workflow defaults."""
-        settings = cls.settings_from_attachment(attachment)
-        site = getattr(attachment, "site", None)
-        return cls.create_linker(
-            target_chain=_coalesce_text(getattr(site, "chain_id", None), "A"),
-            target_residue_name=settings.source_site_residue_name,
-            target_residue_number=_required_int(
-                getattr(site, "residue_number", None), "site.residue_number"
-            ),
-            target_insertion_code=str(getattr(site, "insertion_code", "") or ""),
-            settings=settings,
-        )
-
-    @classmethod
     def build_contract(
         cls,
         site_config: Any,
@@ -246,7 +206,7 @@ class NhsLysReaction(ReactionTemplate):
             Generic explicit linkage contract equivalent to the NHS-Lys reaction.
         """
         resolved = settings or cls.default_settings()
-        linker = cls.create_linker(
+        linker = _build_nhs_lys_linker(
             target_chain=_coalesce_text(getattr(site_config, "chain_id", None), "A"),
             target_residue_name=_coalesce_text(
                 getattr(site_config, "residue_name", None), resolved.source_site_residue_name
@@ -364,6 +324,29 @@ def _coalesce_text(*values: str | None) -> str:
         if normalized:
             return normalized
     raise ValueError("Expected at least one non-empty text value")
+
+
+def _build_nhs_lys_linker(
+    *,
+    target_residue_number: int,
+    target_chain: str,
+    target_residue_name: str,
+    target_insertion_code: str,
+    settings: NhsLysReactionSettings,
+) -> Any:
+    """Create the private NHS-Lys linker implementation from template settings."""
+    from polyzymd.builders.conjugation._linkage import NhsLysModifierLinker
+
+    return NhsLysModifierLinker(
+        target_chain=target_chain,
+        target_residue_number=target_residue_number,
+        target_residue_name=target_residue_name,
+        target_insertion_code=target_insertion_code,
+        target_atom_name=settings.target_atom_name,
+        lysine_target_resname=settings.product_site_residue_name,
+        modifier_target_resname=settings.product_moiety_residue_name,
+        max_nz_hydrogens_to_remove=settings.max_nz_hydrogens_to_remove,
+    )
 
 
 def _required_int(value: Any, label: str) -> int:

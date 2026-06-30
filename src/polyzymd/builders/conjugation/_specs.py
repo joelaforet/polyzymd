@@ -148,18 +148,21 @@ def attachment_spec_from_generated_polymer_plan(
     attachment_index: int,
     reaction_name: str,
     charged_sdf_path: Path | str | None = None,
+    source_kind: Literal["moiety", "polymer"] = "polymer",
+    source_fragment: Any | None = None,
+    sidecars: dict[str, Path] | None = None,
 ) -> AttachmentBuildSpec:
     """Adapt a generated polymer fragment and resolved plan into a build spec."""
-    sidecars = {}
+    resolved_sidecars = dict(sidecars or {})
     if sdf_path is not None:
-        sidecars["sdf"] = Path(sdf_path)
-        sidecars["bond_sdf"] = Path(sdf_path)
+        resolved_sidecars["sdf"] = Path(sdf_path)
+        resolved_sidecars["bond_sdf"] = Path(sdf_path)
     if charged_sdf_path is not None:
-        sidecars["charged_sdf"] = Path(charged_sdf_path)
+        resolved_sidecars["charged_sdf"] = Path(charged_sdf_path)
     generic_fragment = ConjugationFragment.from_generated_polymer_fragment(
         fragment,
-        source_kind="polymer",
-        sidecars=sidecars,
+        source_kind=source_kind,
+        sidecars=resolved_sidecars,
         diagnostics=("Adapted GeneratedPolymerFragment to ConjugationFragment",),
     )
     return AttachmentBuildSpec(
@@ -168,11 +171,11 @@ def attachment_spec_from_generated_polymer_plan(
         attachment_config=attachment_config,
         reaction_name=reaction_name,
         fragment=generic_fragment,
-        source_fragment=fragment,
+        source_fragment=source_fragment or fragment,
         generated_fragment=fragment,
         resolved_plan=plan,
-        source_sidecars=sidecars,
-        diagnostics=("Resolved polymer attachment build spec",),
+        source_sidecars=resolved_sidecars,
+        diagnostics=(f"Resolved {source_kind} attachment build spec",),
     )
 
 
