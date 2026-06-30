@@ -5,10 +5,13 @@ by the current `polyzymd build` workflow. Protein modifications are configured
 under `conjugation:` because the supported implementation began as covalent
 polymer-protein conjugation.
 
-Current validated vertical-slice support covers NHS-lysine polymer attachments
-using the wired moiety-plus-mechanism attachment model. Generalized recipe fields
-for all protein modifications are future design material and are not part of the
-current schema.
+Current validated vertical-slice support covers NHS-lysine polymer attachments.
+The active architecture is generic: a moiety provider resolves each source, a
+mechanism resolves a product-state attachment plan, and the workflow carries an
+attachment spec through shared assembly, Pablo/OpenFF parameterization, charge
+patching, and local minimization. Non-NHS mechanisms and generic explicit
+linkages are executable development paths, but they remain experimental unless a
+mechanism-specific validation note says otherwise.
 
 ## Top-Level Block
 
@@ -78,6 +81,12 @@ attachments:
 | `mechanism` | mapping | yes | Chemistry mechanism used to attach the moiety. |
 | `placement` | mapping | no | Placement and clash-control settings. |
 
+Internally, each enabled attachment becomes an attachment spec containing the
+resolved moiety source, resolved attachment plan, product residue mapping, and
+sidecar paths. Multi-attachment builds assemble all specs into one product PDB
+before product-state minimization runs, so shared validation and charge-patch
+logic sees the combined conjugate.
+
 ## Site
 
 The site identifies the protein residue being modified.
@@ -106,9 +115,10 @@ clearer.
 
 ## Moiety
 
-A moiety is the group added to the protein. Current executable examples use
-either a polymer `recipe` or a single-residue SMILES moiety, depending on the
-mechanism.
+A moiety is the group added to the protein. The active provider layer resolves
+polymer recipes, single-residue SMILES moieties, and explicit file-based sources
+used by advanced linkage workflows. The mechanism decides which source forms are
+supported for a given attachment.
 
 ### Polymer Recipe Moiety
 
@@ -148,8 +158,8 @@ moiety:
 | `recipe` | mapping | Polymer recipe for generated polymer moieties. |
 | `polymer_recipe` | mapping | Equivalent explicit name for `recipe`. |
 
-SMILES moieties used with the wired N-glycosylation mechanism must provide a
-three-character PDB-safe `residue_name`.
+SMILES moieties used with the experimental N-glycosylation mechanism must
+provide a three-character PDB-safe `residue_name`.
 
 ## Mechanism
 
@@ -172,8 +182,15 @@ mechanism:
 | `leaving_atoms.site` | list | Protein atoms removed during bond formation. |
 | `leaving_atoms.moiety` | list | Moiety atoms removed during bond formation. |
 
-The `nhs_lys_amide` mechanism uses built-in NHS-lysine defaults. Explicit custom
-PDB linkages must specify the atom-level fields required by the schema.
+The `nhs_lys_amide` mechanism uses built-in NHS-lysine defaults and is the
+validated vertical slice. Experimental non-NHS mechanisms use the same resolved
+plan and attachment-spec pipeline, but users should validate product chemistry,
+charges, and geometry carefully. Explicit custom PDB linkages must specify the
+atom-level fields required by the schema.
+
+The public engine also accepts direct requests built from `protein_pdb_path` plus
+the same `attachments` entries. Raw molecule/topology keyword arguments are not
+supported by the public API.
 
 ## Explicit PDB Linkage Example
 
@@ -235,7 +252,8 @@ attached polymer as one covalent molecule, so PolyzyMD must pass one complete
 `charge_from_molecules` template for that molecule rather than separate protein
 and polymer fragments.
 
-The current bridge is an interoperability bridge, not a whole-conjugate
+The current bridge is an active generic product-state interoperability bridge,
+not a whole-conjugate
 AM1-BCC model. Its model choices are:
 
 - Standard protein atoms use ff14SB-style charges from the prepared source
@@ -263,8 +281,8 @@ Inspect this sidecar to confirm the NAGL model, ff14SB atom count,
 polymer-template atom count, local patch atom count, total charge, formal charge,
 and any normalization correction.
 
-The local patch builder uses `ResolvedAttachmentPlan`, the Pablo crosslink
-requirement, product residue mappings, generated-fragment atom/bond-order
+The local patch builder uses `ResolvedAttachmentPlan`, attachment specs, the
+Pablo crosslink requirement, product residue mappings, generated-fragment atom/bond-order
 metadata, and leaving-atom metadata. It removes leaving atoms, selects a graph
 neighborhood around the two product link atoms, caps only simple omitted
 boundary bonds, charges that local product-state molecule with NAGL/AshGC, and
@@ -272,13 +290,18 @@ maps charges back only to real product atoms. If the mechanism metadata is not
 specific enough to build and cap the local graph, PolyzyMD fails clearly instead
 of falling back to hardcoded NHS-lysine atom names or raw sidecar charges.
 
+Product-state local minimization is active for generic resolved plans. It writes
+`local_minimization_result.json` and, on coordinate output,
+`crosslinked_relaxed.pdb`. Multi-attachment products are minimized once with all
+resolved linkages rather than independently relaxing each attachment.
+
 ## Support Levels and Validation Reports
 
 See {doc}`conjugation_support_matrix` for the current support matrix. In brief,
-the validated reliability milestone covers the opt-in config-driven NHS-lysine
-polymer vertical slice, including Pablo/OpenFF Interchange, ff14SB plus polymer
-templates, local NAGL patch charge bridge, local charge reconciliation,
-restrained OpenMM smoke evidence, final solvation, and
+the validated reliability milestone covers the opt-in config-driven and direct
+request NHS-lysine polymer vertical slice, including Pablo/OpenFF Interchange,
+ff14SB plus polymer templates, local NAGL patch charge bridge, local charge
+reconciliation, product-state local minimization, final solvation, and
 `conjugate_validation_report.json`.
 
 The validation report audits product bond graph evidence, link atom presence,

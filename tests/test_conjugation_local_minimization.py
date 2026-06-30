@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from polyzymd.builders.conjugation._linkage import PabloCrosslinkRequirement
 from polyzymd.builders.conjugation._relaxation import (
@@ -13,6 +14,7 @@ from polyzymd.builders.conjugation._relaxation import (
     analyze_crosslink_geometry,
     build_product_state_pablo_policy,
     product_state_pablo_crosslink_requirement,
+    run_post_crosslink_local_minimization,
     write_pdb_with_replaced_coordinates,
 )
 
@@ -191,3 +193,43 @@ def test_local_minimization_platform_creation_falls_back_to_cpu():
 
     assert platform_name == "CPU"
     assert simulation.platform.getName() == "CPU"
+
+
+def test_local_minimization_reraises_unexpected_programming_errors(monkeypatch, tmp_path):
+    """Unexpected implementation errors should not be converted to blockers."""
+    import polyzymd.builders.conjugation._relaxation as relaxation_module
+
+    product = tmp_path / "crosslinked.pdb"
+    product.write_text(
+        "ATOM      1  NZ  LYX A  23       0.000   0.000   0.000  1.00  0.00           N  \n"
+        "HETATM    2 C047 NHX C   5       1.330   0.000   0.000  1.00  0.00           C  \n"
+        "CONECT    1    2\n"
+        "CONECT    2    1\n"
+        "END\n",
+        encoding="utf-8",
+    )
+
+    class FakeIngestor:
+        def __init__(self, policy):
+            self.policy = policy
+
+        def ingest_structure(self, *args, **kwargs):
+            return type("Ingestion", (), {"success": True, "topology": object()})()
+
+    def raise_type_error(*args, **kwargs):
+        raise TypeError("programming bug")
+
+    monkeypatch.setattr(relaxation_module, "PabloIngestor", FakeIngestor)
+    monkeypatch.setattr(
+        relaxation_module,
+        "create_interchange_from_pablo_topology",
+        raise_type_error,
+    )
+
+    with pytest.raises(TypeError, match="programming bug"):
+        run_post_crosslink_local_minimization(
+            product,
+            tmp_path,
+            settings=_poc_linkage_settings(),
+            pablo_policy=object(),
+        )

@@ -20,10 +20,11 @@ chemistry into a supported workflow.
 | Mechanism or feature | Current support | Notes |
 |----------------------|-----------------|-------|
 | Opt-in config-driven conjugation with `conjugation.enabled: true` | Executable | Runs through the regular `polyzymd build -c config.yaml` path when attachments are enabled. |
-| NHS-lysine polymer attachment with `mechanism.name: nhs_lys_amide` | Validated vertical slice | Current reliability milestone target. Supports Pablo/OpenFF Interchange, ff14SB plus polymer templates, local NAGL patch charge bridge, charge reconciliation, restrained OpenMM smoke evidence, validation report, and final solvation. |
-| Multiple NHS-lysine polymer attachments | Executable | Multi-site attachment metadata is handled by the validation report. Treat scientific validation as system-specific. |
-| SMILES moiety with `mechanism.name: n_glycosylation` | Wired | The path exercises N-glyco mechanism metadata and exploratory product-state ideas, but it is not the same validated vertical slice as NHS-Lys polymer conjugation. |
-| Mixed mechanisms in one config | Planned | Do not assume mixed NHS-Lys plus glycosylation production support unless tests and docs are updated. |
+| Direct public requests with `protein_pdb_path` plus `attachments` | Executable | `ConjugationEngine` and `build_conjugate()` accept the same attachment specification model used by config workflows. Raw molecule/topology keyword inputs remain unsupported. |
+| NHS-lysine polymer attachment with `mechanism.name: nhs_lys_amide` | Validated vertical slice | Current reliability milestone target. Supports generic provider/resolved-plan/attachment-spec orchestration, Pablo/OpenFF Interchange, ff14SB plus polymer templates, local NAGL patch charge bridge, charge reconciliation, product-state local minimization, validation report, and final solvation. |
+| Multiple NHS-lysine polymer attachments | Executable | Multi-site attachment metadata is handled by the validation report and combined product-state minimization. Treat scientific validation as system-specific. |
+| SMILES moiety with `mechanism.name: n_glycosylation` | Wired, experimental | The path uses the generic moiety provider, resolved attachment plans, attachment specs, product-state charge patching, and local minimization. It is not the same validated vertical slice as NHS-Lys polymer conjugation. |
+| Mixed mechanisms in one config | Wired, experimental | Shared assembly and minimization can handle multiple resolved plans, but mixed-chemistry scientific validation remains mechanism-specific. |
 | O-glycosylation | Planned | Vocabulary/design area only. |
 | Arbitrary SMARTS-defined chemistry | Planned | SMARTS can describe roles for future mechanisms, but does not by itself provide placement, product residues, charge patches, templates, or validation. |
 | Explicit PDB linkage | Wired | Requires explicit atom-level product residue and leaving-atom information. Treat as advanced/exploratory and validate carefully. |
@@ -35,18 +36,18 @@ The validated current path is:
 1. Start from an unmodified protein PDB.
 2. Enable conjugation in config and request one or more NHS-Lys polymer
    attachments.
-3. Generate or load the polymer moiety from a recipe with an NHS reactive
-   monomer.
+3. Resolve the moiety through the generic provider layer from a polymer recipe,
+   SMILES moiety, or explicit source supported by the mechanism.
 4. Resolve the attachment plan, reactive atoms, leaving atoms, product residue
-   names, and product-state mappings.
+   names, and product-state mappings into an attachment spec.
 5. Build a crosslinked product PDB with expected linkage `CONECT` records.
 6. Ingest the product state with Pablo and build the final OpenFF Interchange.
 7. Combine ff14SB-style protein treatment, polymer template charges/parameters,
    and a local NAGL/AshGC patch charge bridge near the linkage.
 8. Reconcile local charge evidence instead of falling back to whole-conjugate
    AM1-BCC or unmarked cached charges.
-9. Run restrained OpenMM smoke/minimization evidence when enabled by the build
-   workflow.
+9. Run generic product-state local minimization or restrained OpenMM smoke
+   evidence when enabled by the build workflow.
 10. Write final solvated artifacts and `conjugate_validation_report.json`.
 
 ## Validation report schema overview
@@ -80,11 +81,16 @@ Common conjugation reliability artifacts include:
 | `vacuum_smoke.json` | Vacuum smoke evidence when that check runs. |
 | `restrained_smoke_diagnostics.json` | Restrained smoke diagnostics when available. |
 | `pre_smoke_geometry.json` | Geometry evidence collected before smoke checks. |
+| `local_minimization_result.json` | Product-state local minimization metrics and blockers when that path runs. |
+| `crosslinked_relaxed.pdb` | Generic product-state local minimization output PDB. |
 
 ## Limits and caveats
 
 - A passing validation report means available checks passed. It does not prove
   that a mechanism outside the support matrix is chemically valid.
+- NHS-Lys is the validated vertical slice. Non-NHS mechanisms and generic
+  explicit linkages are active development paths and should be treated as
+  experimental even when they produce artifacts.
 - The exact runtime handoff from a build-time OpenFF Interchange to a lean CUDA
   12.4 simulation environment is planned or workflow-specific. Follow only
   documented commands and site-tested scripts.
