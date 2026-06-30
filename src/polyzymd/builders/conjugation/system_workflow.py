@@ -308,7 +308,7 @@ def build_conjugated_polymer_system_from_config(
     return result
 
 
-def build_direct_smiles_moiety_conjugate(
+def build_direct_moiety_conjugate(
     *,
     protein_pdb_path: Path | str,
     attachments: tuple[Any, ...],
@@ -318,7 +318,7 @@ def build_direct_smiles_moiety_conjugate(
     settings: ConjugatedPolymerSystemSettings | None = None,
     random_seed: int | None = None,
 ) -> ConjugationResult:
-    """Build a direct protein plus SMILES-moiety conjugate request.
+    """Build a direct protein plus moiety conjugate request.
 
     This public-engine path is intentionally narrower than the legacy config
     workflow: the input protein is already cleaned, each enabled attachment must
@@ -656,8 +656,9 @@ def _require_supported_coordinate_backend(attachment: Any) -> None:
             f"Received mechanism '{mechanism.name}'. Provide a built-in mechanism with "
             "resolve_plan() support."
         )
-    supported_backend = getattr(reaction_template, "coordinate_backend_mechanism", mechanism_name)
-    if supported_backend in {_NHS_LYS_COORDINATE_BACKEND_MECHANISM, "n_glycosylation"}:
+    if getattr(reaction_template, "supports_coordinate_assembly", False) or callable(
+        getattr(reaction_template, "resolve_plan", None)
+    ):
         return
 
     if mechanism.reaction_smarts is not None:
@@ -674,8 +675,8 @@ def _require_supported_coordinate_backend(attachment: Any) -> None:
             f"{STRUCTURE_MATCHING_BLOCKER_MESSAGE} Mechanism '{mechanism.name}' passed "
             f"generic SMARTS preflight with {added} added, {removed} removed, and "
             f"{order_changed} order-changed mapped bonds, but the config-driven system "
-            "workflow currently has coordinate surgery only for mechanism "
-            f"'{_NHS_LYS_COORDINATE_BACKEND_MECHANISM}' without reaction_smarts."
+            "workflow currently requires a registered reaction template with coordinate "
+            "assembly capability."
         )
 
     raise NotImplementedError(
@@ -785,15 +786,16 @@ def _construct_conjugate_from_specs(
         crosslinked_pdb_path,
         CrosslinkedPdbAssemblyOptions(),
     )
+    product_state_specs = _product_state_specs_with_assembly_mappings(
+        specs,
+        assembly_result=assembly_result,
+    )
+    product_state_resolved_plans = tuple(spec.resolved_plan for spec in product_state_specs)
 
     product_state_pablo_library = None
     product_state_residue_library = None
     if use_product_state_pablo_library:
         LOGGER.info("Building product-state Pablo residue library")
-        product_state_specs = _product_state_specs_with_assembly_mappings(
-            specs,
-            assembly_result=assembly_result,
-        )
         product_state_pablo_library = _product_state_pablo_library_for_specs(
             product_pdb=crosslinked_pdb_path,
             source_protein_pdb=protein_pdb_path,
@@ -842,22 +844,26 @@ def _construct_conjugate_from_specs(
     smoke_result = None
     local_minimization_result = None
     run_combined_smoke_relaxation = False
-    if run_product_state_local_minimization and len(resolved_plans) == 1:
-        product_state_requirement = product_state_requirements[0]
+    if run_product_state_local_minimization:
         local_settings = _local_minimization_settings_for_product(
             crosslinked_pdb_path,
             base_settings=local_minimization_settings or _default_local_minimization_settings(),
-            requirement=resolved_plans[0].pablo_crosslink_requirement,
+            requirements=tuple(
+                plan.pablo_crosslink_requirement for plan in product_state_resolved_plans
+            ),
+            resolved_plans=product_state_resolved_plans,
             product_state_pablo_library=product_state_pablo_library,
         )
-        LOGGER.info("Running product-state local minimization")
+        LOGGER.info(
+            "Running product-state local minimization for %d linkage(s)",
+            len(resolved_plans),
+        )
         local_minimization_result = run_post_crosslink_local_minimization(
             crosslinked_pdb_path,
             artifact_dir,
             settings=local_settings,
-            pablo_crosslink_requirement=product_state_requirement,
+            pablo_policy=ccd_pablo_policy,
             product_state_pablo_library=product_state_pablo_library,
-            resolved_plan=resolved_plans[0],
         )
         if not local_minimization_result.success:
             blocker = getattr(local_minimization_result, "blocker", None)
@@ -870,13 +876,6 @@ def _construct_conjugate_from_specs(
                 "but post-minimization geometry validation did not pass. Continuing with "
                 "the local-minimized artifact without falling back to smoke relaxation."
             )
-    elif run_product_state_local_minimization and len(resolved_plans) > 1:
-        diagnostics.append(
-            "Product-state local minimization was requested for multiple attachments; "
-            "using one combined restrained vacuum smoke/minimization for the assembled product."
-        )
-        run_combined_smoke_relaxation = True
-
     if (
         local_minimization_result is None
         and not run_combined_smoke_relaxation
@@ -1229,49 +1228,55 @@ def _local_minimization_settings_for_product(
     product_pdb_path: Path,
     *,
     base_settings: Any,
-    requirement: PabloCrosslinkRequirement,
+    requirements: tuple[PabloCrosslinkRequirement, ...] | None = None,
+    resolved_plans: tuple[ResolvedAttachmentPlan, ...] = (),
     product_state_pablo_library: Any | None = None,
 ) -> Any:
     """Build local minimization selectors from emitted product atom identities."""
-    from polyzymd.builders.conjugation._relaxation import CrosslinkAtomSelector
+    _ = product_state_pablo_library
+    from polyzymd.builders.conjugation._relaxation import (
+        LocalLinkageAtomSelector,
+        LocalLinkageSelectors,
+    )
 
     explicit_fields = set(getattr(base_settings, "model_fields_set", set()))
-    if {"nz_selector", "c047_selector", "o020_selector"}.issubset(explicit_fields):
+    if "linkages" in explicit_fields:
         return base_settings
+    if not hasattr(base_settings, "model_copy"):
+        base_settings = _default_local_minimization_settings()
 
     atoms = parse_pdb_atom_records(product_pdb_path)
-    updates = {}
+    if requirements is None:
+        requirements = tuple(plan.pablo_crosslink_requirement for plan in resolved_plans)
+    if not requirements:
+        raise RuntimeError("Local minimization requires at least one resolved crosslink")
 
-    if "nz_selector" not in explicit_fields:
-        protein_atom = _unique_product_atom(
+    linkages = []
+    for index, requirement in enumerate(requirements, start=1):
+        plan = resolved_plans[index - 1] if index <= len(resolved_plans) else None
+        protein_atom = _product_link_atom(
             atoms,
-            residue_name=requirement.residues[0],
-            atom_name=requirement.linking_atoms[0],
+            requirement=requirement,
+            participant="protein",
+            plan=plan,
         )
-        updates["nz_selector"] = _local_selector(protein_atom, CrosslinkAtomSelector)
-
-    modifier_atom = None
-    if "c047_selector" not in explicit_fields or "o020_selector" not in explicit_fields:
-        modifier_atom = _unique_product_atom(
+        modifier_atom = _product_link_atom(
             atoms,
-            residue_name=requirement.residues[1],
-            atom_name=requirement.linking_atoms[1],
+            requirement=requirement,
+            participant="modifier",
+            plan=plan,
         )
-    if "c047_selector" not in explicit_fields and modifier_atom is not None:
-        updates["c047_selector"] = _local_selector(modifier_atom, CrosslinkAtomSelector)
-    if "o020_selector" not in explicit_fields and modifier_atom is not None:
-        modifier_oxygen_atom = _product_modifier_carbonyl_oxygen_atom(
-            product_pdb_path,
-            atoms,
-            modifier_atom=modifier_atom,
-            product_state_pablo_library=product_state_pablo_library,
+        target = float(getattr(plan, "target_bond_length_angstrom", 1.33) if plan else 1.33)
+        linkages.append(
+            LocalLinkageSelectors(
+                protein_link_selector=_local_selector(protein_atom, LocalLinkageAtomSelector),
+                modifier_link_selector=_local_selector(modifier_atom, LocalLinkageAtomSelector),
+                target_bond_length_angstrom=target,
+                label=f"linkage_{index}",
+            )
         )
-        updates["o020_selector"] = _local_selector(modifier_oxygen_atom, CrosslinkAtomSelector)
 
-    if not updates:
-        return base_settings
-
-    return base_settings.model_copy(update=updates)
+    return base_settings.model_copy(update={"linkages": tuple(linkages)})
 
 
 def _local_selector(atom: PdbAtomRecord, selector_cls: Any) -> Any:
@@ -1281,6 +1286,26 @@ def _local_selector(atom: PdbAtomRecord, selector_cls: Any) -> Any:
         residue_name=atom.residue_name,
         residue_number=atom.residue_number,
         atom_name=atom.atom_name,
+    )
+
+
+def _product_link_atom(
+    atoms: tuple[PdbAtomRecord, ...],
+    *,
+    requirement: PabloCrosslinkRequirement,
+    participant: str,
+    plan: ResolvedAttachmentPlan | None,
+) -> PdbAtomRecord:
+    """Resolve one product link atom without requiring auxiliary anchor atoms."""
+    side = 0 if participant == "protein" else 1
+    plan_atom = None
+    if plan is not None:
+        plan_atom = plan.protein_link_atom if participant == "protein" else plan.modifier_link_atom
+    return _unique_product_atom(
+        atoms,
+        residue_name=requirement.residues[side],
+        atom_name=requirement.linking_atoms[side],
+        same_residue_as=plan_atom,
     )
 
 
@@ -1310,139 +1335,6 @@ def _unique_product_atom(
             f"Expected exactly one product atom {residue_name}:{atom_name}, found {len(matches)}"
         )
     return matches[0]
-
-
-def _product_modifier_carbonyl_oxygen_atom(
-    product_pdb_path: Path,
-    atoms: tuple[PdbAtomRecord, ...],
-    *,
-    modifier_atom: PdbAtomRecord,
-    product_state_pablo_library: Any | None,
-) -> PdbAtomRecord:
-    """Return the product-state oxygen bonded to the modifier linking carbon."""
-    conect = _parse_product_conect_records(product_pdb_path)
-    bonded_oxygen_atoms = _oxygen_atoms_bonded_to_modifier_atom(atoms, modifier_atom, conect)
-    if len(bonded_oxygen_atoms) == 1:
-        return bonded_oxygen_atoms[0]
-
-    definition_oxygen_atoms = _modifier_oxygen_atoms_from_product_definitions(
-        atoms,
-        modifier_atom=modifier_atom,
-        product_state_pablo_library=product_state_pablo_library,
-    )
-    if len(definition_oxygen_atoms) == 1:
-        return definition_oxygen_atoms[0]
-
-    candidates = bonded_oxygen_atoms or definition_oxygen_atoms
-    candidate_text = (
-        ", ".join(
-            f"{atom.chain_id}:{atom.residue_name}:{atom.residue_number}:{atom.atom_name}"
-            for atom in candidates
-        )
-        or "none"
-    )
-    raise RuntimeError(
-        "Could not identify a unique product-state modifier carbonyl oxygen bonded to "
-        f"{modifier_atom.residue_name}:{modifier_atom.atom_name} in {product_pdb_path}; "
-        f"candidates: {candidate_text}. Product-state local minimization requires either "
-        "PDB CONECT records or product-state Pablo residue definitions that identify exactly "
-        "one oxygen atom in the same modifier residue bonded to the modifier linking/carbonyl "
-        "carbon. Reactant leaving atoms are removed from product PDBs and are not valid "
-        "selectors. Provide explicit LocalMinimizationSettings.o020_selector to override."
-    )
-
-
-def _oxygen_atoms_bonded_to_modifier_atom(
-    atoms: tuple[PdbAtomRecord, ...],
-    modifier_atom: PdbAtomRecord,
-    conect: dict[int, set[int]],
-) -> tuple[PdbAtomRecord, ...]:
-    if modifier_atom.serial is None:
-        return ()
-    bonded_serials = conect.get(modifier_atom.serial, set())
-    if not bonded_serials:
-        return ()
-    return tuple(
-        atom
-        for atom in atoms
-        if atom.serial in bonded_serials
-        and _same_product_residue(atom, modifier_atom)
-        and _is_oxygen_atom(atom)
-    )
-
-
-def _modifier_oxygen_atoms_from_product_definitions(
-    atoms: tuple[PdbAtomRecord, ...],
-    *,
-    modifier_atom: PdbAtomRecord,
-    product_state_pablo_library: Any | None,
-) -> tuple[PdbAtomRecord, ...]:
-    definitions = tuple(getattr(product_state_pablo_library, "definitions", ()) or ())
-    if not definitions:
-        return ()
-    residue_atoms = tuple(atom for atom in atoms if _same_product_residue(atom, modifier_atom))
-    residue_atom_by_name = {atom.atom_name: atom for atom in residue_atoms}
-    oxygen_names: set[str] = set()
-    for definition in definitions:
-        if (
-            str(getattr(definition, "residue_name", "")).upper()
-            != modifier_atom.residue_name.upper()
-        ):
-            continue
-        atom_defs = {str(atom.name): atom for atom in getattr(definition, "atoms", ())}
-        if modifier_atom.atom_name not in atom_defs:
-            continue
-        for bond in getattr(definition, "bonds", ()):
-            atom1 = str(getattr(bond, "atom1", ""))
-            atom2 = str(getattr(bond, "atom2", ""))
-            if modifier_atom.atom_name not in (atom1, atom2):
-                continue
-            other_name = atom2 if atom1 == modifier_atom.atom_name else atom1
-            atom_def = atom_defs.get(other_name)
-            if atom_def is not None and str(getattr(atom_def, "symbol", "")).upper() == "O":
-                oxygen_names.add(other_name)
-    return tuple(
-        atom
-        for name, atom in residue_atom_by_name.items()
-        if name in oxygen_names and _is_oxygen_atom(atom)
-    )
-
-
-def _parse_product_conect_records(path: Path) -> dict[int, set[int]]:
-    conect: dict[int, set[int]] = {}
-    with Path(path).open("r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            if not line.startswith("CONECT"):
-                continue
-            try:
-                source = int(line[6:11])
-            except ValueError:
-                continue
-            targets = conect.setdefault(source, set())
-            for start in range(11, len(line), 5):
-                field = line[start : start + 5].strip()
-                if not field:
-                    continue
-                try:
-                    target = int(field)
-                except ValueError:
-                    continue
-                targets.add(target)
-                conect.setdefault(target, set()).add(source)
-    return conect
-
-
-def _same_product_residue(atom: PdbAtomRecord, anchor: PdbAtomRecord) -> bool:
-    return (
-        atom.chain_id == anchor.chain_id
-        and atom.residue_name.upper() == anchor.residue_name.upper()
-        and atom.residue_number == anchor.residue_number
-        and atom.insertion_code == anchor.insertion_code
-    )
-
-
-def _is_oxygen_atom(atom: PdbAtomRecord) -> bool:
-    return atom.element.strip().upper() == "O"
 
 
 def _build_solvated_system(

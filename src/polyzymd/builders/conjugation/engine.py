@@ -132,11 +132,11 @@ class ConjugationEngine:
             raise ValueError("output_dir is required for direct conjugation requests")
 
         from polyzymd.builders.conjugation.system_workflow import (
-            build_direct_smiles_moiety_conjugate,
+            build_direct_moiety_conjugate,
         )
 
         workflow_settings = self.settings if settings is None else settings
-        workflow_result = build_direct_smiles_moiety_conjugate(
+        workflow_result = build_direct_moiety_conjugate(
             protein_pdb_path=request.protein_pdb_path,
             attachments=request.attachments,
             output_dir=request.output_dir,

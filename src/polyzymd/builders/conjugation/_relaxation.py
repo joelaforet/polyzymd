@@ -2168,11 +2168,13 @@ def _write_openmm_pdb(openmm_app: Any, topology: Any, positions: Any, output_pat
 
 
 __all__ = [
-    "CrosslinkAtomSelector",
     "FrozenProteinRelaxationDiagnostics",
     "FrozenProteinRelaxationResult",
     "FrozenProteinRelaxationSettings",
     "LocalGeometryMetrics",
+    "LocalLinkageAtomSelector",
+    "LocalLinkageGeometryMetrics",
+    "LocalLinkageSelectors",
     "LocalMinimizationResult",
     "LocalMinimizationSettings",
     "analyze_crosslink_geometry",
@@ -2189,8 +2191,8 @@ __all__ = [
 ]
 
 
-class CrosslinkAtomSelector(BaseModel):
-    """Fixed PDB atom selector for the local crosslink geometry check."""
+class LocalLinkageAtomSelector(BaseModel):
+    """Fixed PDB atom selector for one product-state linkage atom."""
 
     serial: int | None = Field(None, ge=1)
     chain_id: str
@@ -2199,15 +2201,31 @@ class CrosslinkAtomSelector(BaseModel):
     atom_name: str
 
 
-class LocalGeometryMetrics(BaseModel):
-    """Geometry and connectivity metrics around the NHS-Lys product amide."""
+class LocalLinkageSelectors(BaseModel):
+    """Selectors and target geometry for one product-state conjugation linkage."""
 
-    nz_c047_distance_angstrom: float
-    c047_o020_distance_angstrom: float
-    nz_o020_distance_angstrom: float
-    nz_c047_o020_angle_degrees: float
-    reciprocal_nz_c047_conect: bool
-    nz_o020_conect_present: bool
+    protein_link_selector: LocalLinkageAtomSelector
+    modifier_link_selector: LocalLinkageAtomSelector
+    target_bond_length_angstrom: float = Field(1.33, gt=0)
+    label: str = "linkage"
+
+
+class LocalLinkageGeometryMetrics(BaseModel):
+    """Geometry and connectivity metrics for one product-state linkage."""
+
+    label: str
+    protein_modifier_distance_angstrom: float
+    target_bond_length_angstrom: float
+    distance_error_angstrom: float
+    reciprocal_product_link_conect: bool
+    passes: bool
+    failures: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class LocalGeometryMetrics(BaseModel):
+    """Geometry and connectivity metrics for all product-state linkages."""
+
+    linkages: tuple[LocalLinkageGeometryMetrics, ...]
     passes: bool
     failures: tuple[str, ...] = Field(default_factory=tuple)
 
@@ -2215,37 +2233,13 @@ class LocalGeometryMetrics(BaseModel):
 class LocalMinimizationSettings(BaseModel):
     """Settings for restrained post-crosslink OpenMM/OpenFF/Pablo minimization."""
 
-    nz_selector: CrosslinkAtomSelector = Field(
-        default_factory=lambda: CrosslinkAtomSelector(
-            serial=324,
-            chain_id="A",
-            residue_name="LYX",
-            residue_number=23,
-            atom_name="NZ",
-        )
-    )
-    c047_selector: CrosslinkAtomSelector = Field(
-        default_factory=lambda: CrosslinkAtomSelector(
-            serial=2883,
-            chain_id="C",
-            residue_name="NHX",
-            residue_number=5,
-            atom_name="C047",
-        )
-    )
-    o020_selector: CrosslinkAtomSelector = Field(
-        default_factory=lambda: CrosslinkAtomSelector(
-            serial=2884,
-            chain_id="C",
-            residue_name="NHX",
-            residue_number=5,
-            atom_name="O020",
-        )
-    )
+    linkages: tuple[LocalLinkageSelectors, ...] = Field(default_factory=tuple)
     polymer_mobile_residue_window: int = Field(1, ge=0)
     restraint_k_kj_mol_nm2: float = Field(1_000_000.0, gt=0)
     minimization_tolerance_kj_mol_nm: float = Field(1.0, gt=0)
     minimization_max_iterations: int = Field(500, ge=0)
+    max_protein_displacement_angstrom: float = Field(0.05, ge=0)
+    max_linkage_distance_error_angstrom: float = Field(0.35, ge=0)
     platform_name: str | None = None
     relaxed_pdb_name: str = "seeded_random_10mer_crosslinked_relaxed.pdb"
     result_json_name: str = "local_minimization_result.json"
@@ -2290,52 +2284,47 @@ def analyze_crosslink_geometry(
     *,
     settings: LocalMinimizationSettings | None = None,
 ) -> LocalGeometryMetrics:
-    """Measure local amide geometry and required ``CONECT`` records."""
+    """Measure product-link distances and required reciprocal ``CONECT`` records."""
     minimization_settings = settings or LocalMinimizationSettings()
+    if not minimization_settings.linkages:
+        raise ValueError("Local minimization geometry analysis requires at least one linkage")
     atoms = parse_pdb_atom_records(pdb_path)
-    nz_atom = _select_atom(atoms, minimization_settings.nz_selector)
-    c047_atom = _select_atom(atoms, minimization_settings.c047_selector)
-    o020_atom = _select_atom(atoms, minimization_settings.o020_selector)
     conect = _parse_conect_records(Path(pdb_path))
-
-    nz_position = _atom_position(nz_atom)
-    c047_position = _atom_position(c047_atom)
-    o020_position = _atom_position(o020_atom)
-
-    nz_c047 = _distance(nz_position, c047_position)
-    c047_o020 = _distance(c047_position, o020_position)
-    nz_o020 = _distance(nz_position, o020_position)
-    angle = _angle_degrees(nz_position, c047_position, o020_position)
-    reciprocal = _has_conect(conect, nz_atom.serial, c047_atom.serial) and _has_conect(
-        conect, c047_atom.serial, nz_atom.serial
-    )
-    nz_o020_conect = _has_conect(conect, nz_atom.serial, o020_atom.serial) or _has_conect(
-        conect, o020_atom.serial, nz_atom.serial
-    )
-
-    failures: list[str] = []
-    if not 1.25 <= nz_c047 <= 1.65:
-        failures.append(f"NZ-C047 distance {nz_c047:.3f} A outside 1.25-1.65 A")
-    if not 1.15 <= c047_o020 <= 1.35:
-        failures.append(f"C047-O020 distance {c047_o020:.3f} A outside 1.15-1.35 A")
-    if nz_o020 < 1.8:
-        failures.append(f"NZ-O020 distance {nz_o020:.3f} A below hard 1.8 A minimum")
-    if not 105.0 <= angle <= 135.0:
-        failures.append(f"NZ-C047-O020 angle {angle:.2f} deg outside 105-135 deg")
-    if not reciprocal:
-        failures.append("NZ-C047 CONECT is not reciprocal")
-    if nz_o020_conect:
-        failures.append("Unexpected NZ-O020 CONECT is present")
+    linkage_metrics: list[LocalLinkageGeometryMetrics] = []
+    all_failures: list[str] = []
+    for linkage in minimization_settings.linkages:
+        protein_atom = _select_atom(atoms, linkage.protein_link_selector)
+        modifier_atom = _select_atom(atoms, linkage.modifier_link_selector)
+        distance = _distance(_atom_position(protein_atom), _atom_position(modifier_atom))
+        error = abs(distance - linkage.target_bond_length_angstrom)
+        reciprocal = _has_conect(conect, protein_atom.serial, modifier_atom.serial) and _has_conect(
+            conect, modifier_atom.serial, protein_atom.serial
+        )
+        failures: list[str] = []
+        if error > minimization_settings.max_linkage_distance_error_angstrom:
+            failures.append(
+                f"{linkage.label} distance error {error:.3f} A exceeds "
+                f"{minimization_settings.max_linkage_distance_error_angstrom:.3f} A"
+            )
+        if not reciprocal:
+            failures.append(f"{linkage.label} product link CONECT is not reciprocal")
+        all_failures.extend(failures)
+        linkage_metrics.append(
+            LocalLinkageGeometryMetrics(
+                label=linkage.label,
+                protein_modifier_distance_angstrom=distance,
+                target_bond_length_angstrom=linkage.target_bond_length_angstrom,
+                distance_error_angstrom=error,
+                reciprocal_product_link_conect=reciprocal,
+                passes=not failures,
+                failures=tuple(failures),
+            )
+        )
 
     return LocalGeometryMetrics(
-        nz_c047_distance_angstrom=nz_c047,
-        c047_o020_distance_angstrom=c047_o020,
-        nz_o020_distance_angstrom=nz_o020,
-        nz_c047_o020_angle_degrees=angle,
-        reciprocal_nz_c047_conect=reciprocal,
-        nz_o020_conect_present=nz_o020_conect,
-        passes=not failures,
-        failures=tuple(failures),
+        linkages=tuple(linkage_metrics),
+        passes=not all_failures,
+        failures=tuple(all_failures),
     )
 
 
@@ -2463,7 +2452,8 @@ def run_post_crosslink_local_minimization(
         )
 
         result = LocalMinimizationResult(
-            success=after_geometry.passes and (max_displacement < 0.05),
+            success=after_geometry.passes
+            and (max_displacement <= minimization_settings.max_protein_displacement_angstrom),
             input_pdb=input_pdb,
             output_dir=artifact_dir,
             relaxed_pdb_path=relaxed_path,
@@ -2692,14 +2682,17 @@ def _coerce_pablo_crosslink_requirement(
 ) -> PabloCrosslinkRequirement:
     """Normalize resolved plans, requirements, dicts, or objects to a requirement."""
     if value is None:
+        if not default_settings.linkages:
+            raise ValueError("Cannot infer a Pablo crosslink without resolved linkage settings")
+        linkage = default_settings.linkages[0]
         return PabloCrosslinkRequirement(
             residues=(
-                default_settings.nz_selector.residue_name,
-                default_settings.c047_selector.residue_name,
+                linkage.protein_link_selector.residue_name,
+                linkage.modifier_link_selector.residue_name,
             ),
             linking_atoms=(
-                default_settings.nz_selector.atom_name,
-                default_settings.c047_selector.atom_name,
+                linkage.protein_link_selector.atom_name,
+                linkage.modifier_link_selector.atom_name,
             ),
             leaving_atoms=((), ()),
             bond_order=1,
@@ -2765,14 +2758,14 @@ def _success_diagnostics(
         f"Maximum restrained protein displacement was {max_displacement_angstrom:.4f} A",
     ]
     if geometry.passes:
-        diagnostics.append("Relaxed geometry passed local amide validation")
+        diagnostics.append("Relaxed geometry passed product-link validation")
     else:
         diagnostics.extend(geometry.failures)
     return diagnostics
 
 
 def _select_atom(
-    atoms: tuple[PdbAtomRecord, ...], selector: CrosslinkAtomSelector
+    atoms: tuple[PdbAtomRecord, ...], selector: LocalLinkageAtomSelector
 ) -> PdbAtomRecord:
     """Return exactly one atom matching a fixed selector."""
     matches = [atom for atom in atoms if _selector_matches(atom, selector)]
@@ -2784,7 +2777,7 @@ def _select_atom(
     return matches[0]
 
 
-def _selector_matches(atom: PdbAtomRecord, selector: CrosslinkAtomSelector) -> bool:
+def _selector_matches(atom: PdbAtomRecord, selector: LocalLinkageAtomSelector) -> bool:
     """Return whether an atom matches a crosslink selector."""
     return (
         (selector.serial is None or atom.serial == selector.serial)
@@ -2850,46 +2843,37 @@ def _mobile_atom_indices(
     atoms: tuple[PdbAtomRecord, ...],
     settings: LocalMinimizationSettings,
 ) -> tuple[int, ...]:
-    """Select lysine side chain and local polymer atoms allowed to move."""
+    """Select protein link residues and local modifier residues allowed to move."""
     mobile: set[int] = set()
-    lysine_sidechain_names = {
-        "CB",
-        "CG",
-        "CD",
-        "CE",
-        "NZ",
-        "H02",
-        "H03",
-        "H04",
-        "H05",
-        "H06",
-        "H07",
-        "H08",
-        "H09",
-        "H10",
-    }
-    polymer_residue_min = (
-        settings.c047_selector.residue_number - settings.polymer_mobile_residue_window
-    )
-    polymer_residue_max = (
-        settings.c047_selector.residue_number + settings.polymer_mobile_residue_window
-    )
-    for atom in atoms:
-        if atom.atom_index is None:
-            continue
-        if (
-            atom.chain_id.upper() == settings.nz_selector.chain_id.upper()
-            and atom.residue_name.upper() == settings.nz_selector.residue_name.upper()
-            and atom.residue_number == settings.nz_selector.residue_number
-            and atom.atom_name.upper() in lysine_sidechain_names
-        ):
-            mobile.add(atom.atom_index)
-        if (
-            atom.chain_id.upper() == settings.c047_selector.chain_id.upper()
-            and polymer_residue_min <= atom.residue_number <= polymer_residue_max
-        ):
-            mobile.add(atom.atom_index)
+    for linkage in settings.linkages:
+        protein_selector = linkage.protein_link_selector
+        modifier_selector = linkage.modifier_link_selector
+        modifier_residue_min = (
+            modifier_selector.residue_number - settings.polymer_mobile_residue_window
+        )
+        modifier_residue_max = (
+            modifier_selector.residue_number + settings.polymer_mobile_residue_window
+        )
+        for atom in atoms:
+            if atom.atom_index is None:
+                continue
+            if _same_selector_residue(atom, protein_selector):
+                mobile.add(atom.atom_index)
+            if (
+                atom.chain_id.upper() == modifier_selector.chain_id.upper()
+                and modifier_residue_min <= atom.residue_number <= modifier_residue_max
+            ):
+                mobile.add(atom.atom_index)
     return tuple(sorted(mobile))
+
+
+def _same_selector_residue(atom: PdbAtomRecord, selector: LocalLinkageAtomSelector) -> bool:
+    """Return whether an atom is in the selected residue."""
+    return (
+        atom.chain_id.upper() == selector.chain_id.upper()
+        and atom.residue_name.upper() == selector.residue_name.upper()
+        and atom.residue_number == selector.residue_number
+    )
 
 
 def _restrained_protein_indices(
