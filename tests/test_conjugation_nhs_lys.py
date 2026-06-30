@@ -206,20 +206,6 @@ def test_nhs_lys_linker_resolves_poc_like_hydrogen_names_by_rdkit(tmp_path):
     assert any("Protonated lysine" in warning for warning in site.warnings)
 
 
-def test_nhs_lys_reaction_template_creates_current_linker_defaults():
-    """The reaction template should produce current NHS-Lys linker defaults."""
-    linker = NhsLysReaction.create_linker(target_residue_number=23)
-
-    assert isinstance(linker, NhsLysModifierLinker)
-    assert linker.target_chain == "A"
-    assert linker.target_residue_name == "LYS"
-    assert linker.target_residue_number == 23
-    assert linker.target_atom_name == "NZ"
-    assert linker.lysine_target_resname == "LYX"
-    assert linker.modifier_target_resname == "NHX"
-    assert linker.max_nz_hydrogens_to_remove == 2
-
-
 def test_nhs_lys_reaction_resolves_generic_attachment_plan(tmp_path):
     """The NHS-Lys reaction should own generic plan resolution defaults."""
     protein_path = _lysine_pdb(

@@ -286,9 +286,37 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
     )
     calls = {"moieties": [], "plans": [], "construct": 0, "solvate": 0}
 
-    def fake_build_smiles(smiles, residue_name, *, name=None, output_dir=None, random_seed=None):
-        calls["moieties"].append((smiles, residue_name, name, Path(output_dir), random_seed))
-        return _moiety_fragment(residue_name, name=name or residue_name.lower())
+    def fake_resolve_source(
+        attachment,
+        *,
+        attachment_index,
+        output_dir,
+        protein_pdb_path,
+        random_seed=None,
+        **kwargs,
+    ):
+        calls["moieties"].append(
+            (
+                attachment.moiety.smiles,
+                attachment.moiety.residue_name,
+                attachment.moiety.name,
+                Path(output_dir),
+                random_seed,
+            )
+        )
+        fragment = _moiety_fragment(
+            attachment.moiety.residue_name,
+            name=attachment.moiety.name,
+        )
+        return SimpleNamespace(
+            fragment=fragment,
+            source_fragment=fragment,
+            source_kind="smiles",
+            sidecars={},
+            generation=None,
+            reactive_sequence_index=None,
+            reactive_selector=None,
+        )
 
     class FakeReaction:
         coordinate_backend_mechanism = "n_glycosylation"
@@ -338,7 +366,7 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
         assert kwargs["create_interchange"] is False
         return FakeSolvatedBuilder()
 
-    monkeypatch.setattr(workflow_module, "build_smiles_moiety_fragment", fake_build_smiles)
+    monkeypatch.setattr(workflow_module, "resolve_moiety_source", fake_resolve_source)
     monkeypatch.setattr(workflow_module, "get_reaction", fake_get_reaction)
     monkeypatch.setattr(
         workflow_module,
