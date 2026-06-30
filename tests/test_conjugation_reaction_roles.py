@@ -150,3 +150,26 @@ def test_mapped_bond_order_fallback_does_not_swallow_programming_errors(monkeypa
 
     with pytest.raises(TypeError, match="bad helper call"):
         reaction_roles._mapped_bond_orders(("[N:1][C:2]",))
+
+
+def test_mapped_bond_order_fallback_does_not_swallow_runtime_errors(monkeypatch):
+    """Unexpected runtime errors should propagate instead of using fallback parsing."""
+
+    def raise_runtime_error(smarts_entries):
+        raise RuntimeError("unexpected helper failure")
+
+    monkeypatch.setattr(reaction_roles, "_rdkit_mapped_bond_orders", raise_runtime_error)
+
+    with pytest.raises(RuntimeError, match="unexpected helper failure"):
+        reaction_roles._mapped_bond_orders(("[N:1][C:2]",))
+
+
+def test_mapped_bond_order_fallback_still_handles_value_errors(monkeypatch):
+    """Expected RDKit parsing errors should still fall back to the lightweight parser."""
+
+    def raise_value_error(smarts_entries):
+        raise ValueError("invalid query")
+
+    monkeypatch.setattr(reaction_roles, "_rdkit_mapped_bond_orders", raise_value_error)
+
+    assert reaction_roles._mapped_bond_orders(("[N:1][C:2]",)) == {(1, 2): 1.0}
