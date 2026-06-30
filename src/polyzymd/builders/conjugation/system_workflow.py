@@ -20,7 +20,6 @@ from polyzymd.builders.conjugation._assembly import (
     place_modifiers_with_resolved_plans,
 )
 from polyzymd.builders.conjugation._linkage import (
-    NhsLysModifierLinker,
     PabloCrosslinkRequirement,
     ResolvedAttachmentPlan,
     parse_pdb_atom_records,
@@ -192,7 +191,7 @@ def build_conjugated_polymer_system_from_config(
     artifact_dir.mkdir(parents=True, exist_ok=True)
     construction_dir = artifact_dir / workflow_settings.conjugate_artifact_dir_name
 
-    attachments = _enabled_supported_nhs_lys_attachments(config.conjugation)
+    attachments = _enabled_supported_attachments(config.conjugation)
     LOGGER.info("Enabled conjugation attachment count: %d", len(attachments))
     _log_attachment_additions(attachments)
     LOGGER.info("Preparing and canonicalizing source protein")
@@ -202,7 +201,7 @@ def build_conjugated_polymer_system_from_config(
         settings=workflow_settings,
     )
     spec_payloads = tuple(
-        _build_nhs_lys_attachment_spec(
+        _build_attachment_spec(
             attachment,
             attachment_index=index,
             protein_pdb_path=protein_pdb_path,
@@ -345,7 +344,7 @@ def build_direct_smiles_moiety_conjugate(
     specs: list[AttachmentBuildSpec] = []
     for index, attachment in enumerate(enabled_attachments, start=1):
         specs.append(
-            _build_n_gly_direct_moiety_attachment_spec(
+            _build_direct_moiety_attachment_spec(
                 attachment,
                 attachment_index=index,
                 protein_pdb_path=protein_path,
@@ -490,7 +489,7 @@ def _prepared_protein_pdb_path(
     return result.output_path, result
 
 
-def _build_nhs_lys_attachment_spec(
+def _build_attachment_spec(
     attachment: Any,
     *,
     attachment_index: int,
@@ -498,7 +497,7 @@ def _build_nhs_lys_attachment_spec(
     artifact_dir: Path,
     workflow_settings: ConjugatedPolymerSystemSettings,
 ) -> tuple[AttachmentBuildSpec, PolymeristGenerationSmokeResult, int, dict[str, int | str], Any]:
-    """Resolve one config-driven NHS-Lys polymer attachment into a build spec."""
+    """Resolve one config-driven polymer attachment into a generic build spec."""
     _require_supported_coordinate_backend(attachment)
     recipe = _polymer_recipe_from_attachment(attachment)
     reactive_sequence_index = _reactive_sequence_index(recipe)
@@ -534,8 +533,21 @@ def _build_nhs_lys_attachment_spec(
         reactive_residue_name=str(reactive_selector["residue_name"]),
         reactive_residue_number=int(reactive_selector["residue_number"]),
     )
-    linker = _nhs_lys_linker_from_attachment(attachment)
-    resolved_plan = linker.resolve_plan(protein_pdb_path, modifier)
+    reaction_template = get_reaction(attachment.mechanism.name)
+    if reaction_template.name == _NHS_LYS_REACTION_NAME:
+        resolved_plan = _nhs_lys_linker_from_attachment(attachment).resolve_plan(
+            protein_pdb_path,
+            modifier,
+        )
+    else:
+        settings_builder = getattr(reaction_template, "settings_from_attachment", None)
+        reaction_settings = settings_builder(attachment) if callable(settings_builder) else None
+        resolved_plan = reaction_template.resolve_plan(
+            protein_pdb_path,
+            attachment.site,
+            modifier,
+            settings=reaction_settings,
+        )
     return (
         attachment_spec_from_generated_polymer_plan(
             modifier,
@@ -549,11 +561,11 @@ def _build_nhs_lys_attachment_spec(
         generation,
         reactive_sequence_index,
         reactive_selector,
-        linker,
+        reaction_template,
     )
 
 
-def _build_n_gly_direct_moiety_attachment_spec(
+def _build_direct_moiety_attachment_spec(
     attachment: Any,
     *,
     attachment_index: int,
@@ -561,13 +573,8 @@ def _build_n_gly_direct_moiety_attachment_spec(
     moiety_dir: Path,
     random_seed: int | None,
 ) -> AttachmentBuildSpec:
-    """Resolve one direct SMILES N-gly moiety attachment into a build spec."""
+    """Resolve one direct SMILES moiety attachment into a generic build spec."""
     reaction_template = get_reaction(attachment.mechanism.name)
-    if reaction_template.coordinate_backend_mechanism != "n_glycosylation":
-        raise NotImplementedError(
-            "Direct SMILES-moiety requests currently support mechanism "
-            f"'n_glycosylation'; received '{attachment.mechanism.name}'"
-        )
     moiety = attachment.moiety
     if moiety.smiles is None or moiety.residue_name is None:
         raise ValueError("Direct SMILES-moiety attachments require moiety.smiles and residue_name")
@@ -601,10 +608,10 @@ def _build_n_gly_direct_moiety_attachment_spec(
     )
 
 
-def _enabled_supported_nhs_lys_attachments(
+def _enabled_supported_attachments(
     conjugation: ConjugationConfig | None,
 ) -> tuple[Any, ...]:
-    """Return all enabled attachments supported by the config NHS-Lys path.
+    """Return all enabled attachments supported by the generic config path.
 
     Parameters
     ----------
@@ -625,6 +632,49 @@ def _enabled_supported_nhs_lys_attachments(
         _require_supported_coordinate_backend(attachment)
         _polymer_recipe_from_attachment(attachment)
     return attachments
+
+
+def _build_nhs_lys_attachment_spec(
+    attachment: Any,
+    *,
+    attachment_index: int,
+    protein_pdb_path: Path | str,
+    artifact_dir: Path,
+    workflow_settings: ConjugatedPolymerSystemSettings,
+) -> tuple[AttachmentBuildSpec, PolymeristGenerationSmokeResult, int, dict[str, int | str], Any]:
+    """Compatibility wrapper for generic config attachment resolution."""
+    return _build_attachment_spec(
+        attachment,
+        attachment_index=attachment_index,
+        protein_pdb_path=protein_pdb_path,
+        artifact_dir=artifact_dir,
+        workflow_settings=workflow_settings,
+    )
+
+
+def _build_n_gly_direct_moiety_attachment_spec(
+    attachment: Any,
+    *,
+    attachment_index: int,
+    protein_pdb_path: Path | str,
+    moiety_dir: Path,
+    random_seed: int | None,
+) -> AttachmentBuildSpec:
+    """Compatibility wrapper for generic direct moiety attachment resolution."""
+    return _build_direct_moiety_attachment_spec(
+        attachment,
+        attachment_index=attachment_index,
+        protein_pdb_path=protein_pdb_path,
+        moiety_dir=moiety_dir,
+        random_seed=random_seed,
+    )
+
+
+def _enabled_supported_nhs_lys_attachments(
+    conjugation: ConjugationConfig | None,
+) -> tuple[Any, ...]:
+    """Compatibility wrapper for enabled generic attachment discovery."""
+    return _enabled_supported_attachments(conjugation)
 
 
 def _log_attachment_additions(attachments: tuple[Any, ...]) -> None:
@@ -731,10 +781,37 @@ def _require_supported_coordinate_backend(attachment: Any) -> None:
     """Gate config-driven coordinate construction to implemented backends."""
     mechanism = attachment.mechanism
     mechanism_name = mechanism.name.strip().lower()
-    if (
-        mechanism_name == _NHS_LYS_COORDINATE_BACKEND_MECHANISM
-        and mechanism.reaction_smarts is None
-    ):
+    try:
+        reaction_template = get_reaction(mechanism_name)
+    except KeyError:
+        reaction_template = None
+    if reaction_template is None:
+        if mechanism.reaction_smarts is not None:
+            reaction = atom_mapped_reaction_from_mechanism_config(mechanism)
+            preflight = resolve_reaction_roles_from_identity_map(
+                reaction,
+                {},
+                require_required_identities=False,
+            )
+            added = len(preflight.bond_changes.added_bonds)
+            removed = len(preflight.bond_changes.removed_bonds)
+            order_changed = len(preflight.bond_changes.order_changes)
+            raise NotImplementedError(
+                f"{STRUCTURE_MATCHING_BLOCKER_MESSAGE} Mechanism '{mechanism.name}' passed "
+                f"generic SMARTS preflight with {added} added, {removed} removed, and "
+                f"{order_changed} order-changed mapped bonds, but the config-driven system "
+                "workflow currently has coordinate surgery only for mechanism "
+                f"'{_NHS_LYS_COORDINATE_BACKEND_MECHANISM}' or registered generic "
+                "attachment mechanisms."
+            )
+        raise NotImplementedError(
+            "Config-driven conjugated polymer system construction currently implements coordinate "
+            "surgery only for registered generic attachment mechanisms. "
+            f"Received mechanism '{mechanism.name}'. Provide a built-in mechanism with "
+            "resolve_plan() support."
+        )
+    supported_backend = getattr(reaction_template, "coordinate_backend_mechanism", mechanism_name)
+    if supported_backend in {_NHS_LYS_COORDINATE_BACKEND_MECHANISM, "n_glycosylation"}:
         return
 
     if mechanism.reaction_smarts is not None:
@@ -757,9 +834,9 @@ def _require_supported_coordinate_backend(attachment: Any) -> None:
 
     raise NotImplementedError(
         "Config-driven conjugated polymer system construction currently implements coordinate "
-        f"surgery only for mechanism '{_NHS_LYS_COORDINATE_BACKEND_MECHANISM}'. "
-        f"Received mechanism '{mechanism.name}'. Provide reaction_smarts for a generic preflight "
-        "or use the supported NHS-Lys mechanism."
+        "surgery only for registered generic attachment mechanisms. "
+        f"Received mechanism '{mechanism.name}'. Provide a built-in mechanism with "
+        "resolve_plan() support."
     )
 
 
@@ -781,7 +858,8 @@ def _unique_pdb_residues(path: Path) -> tuple[tuple[str, int, str, str], ...]:
     return tuple(residues)
 
 
-def _nhs_lys_linker_from_attachment(attachment: Any) -> NhsLysModifierLinker:
+def _nhs_lys_linker_from_attachment(attachment: Any) -> Any:
+    """Return an NHS-Lys linker for legacy private callers only."""
     reaction_template: Any = get_reaction("nhs_lys")
     return reaction_template.create_linker_from_attachment(attachment)
 
@@ -832,7 +910,7 @@ def _construct_nhs_lys_modifier_linked_protein(
     prepared_protein_pdb_path: Path | str,
     modifier: GeneratedPolymerFragment,
     polymer_sdf_path: Path | str | None,
-    linker: NhsLysModifierLinker,
+    linker: Any,
     resolved_plan: ResolvedAttachmentPlan,
     ccd_pablo_policy: Any,
     output_dir: Path | str,

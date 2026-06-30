@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field, field_validator
@@ -217,6 +218,94 @@ class NhsLysReaction(ReactionTemplate):
         )
 
     @classmethod
+    def build_contract(
+        cls,
+        site_config: Any,
+        fragment: Any,
+        *,
+        protein_pdb_path: Path | str | None = None,
+        settings: NhsLysReactionSettings | None = None,
+    ) -> Any:
+        """Build the generic NHS-Lys linkage contract from site and fragment data.
+
+        Parameters
+        ----------
+        site_config : Any
+            Attachment-site configuration for the source lysine.
+        fragment : Any
+            Generated fragment containing an NHS ester reactive group.
+        protein_pdb_path : pathlib.Path, str, or None, optional
+            Optional protein PDB used to resolve the leaving lysine hydrogen,
+            by default ``None``.
+        settings : NhsLysReactionSettings or None, optional
+            Resolved reaction settings, by default ``None``.
+
+        Returns
+        -------
+        Any
+            Generic explicit linkage contract equivalent to the NHS-Lys reaction.
+        """
+        resolved = settings or cls.default_settings()
+        linker = cls.create_linker(
+            target_chain=_coalesce_text(getattr(site_config, "chain_id", None), "A"),
+            target_residue_name=_coalesce_text(
+                getattr(site_config, "residue_name", None), resolved.source_site_residue_name
+            ),
+            target_residue_number=_required_int(
+                getattr(site_config, "residue_number", None), "site.residue_number"
+            ),
+            target_insertion_code=str(getattr(site_config, "insertion_code", "") or ""),
+            settings=resolved,
+        )
+        contract = linker.generic_contract(fragment, protein_pdb_path=protein_pdb_path)
+        return contract.model_copy(
+            update={
+                "bond": contract.bond.model_copy(
+                    update={
+                        "bond_order": resolved.bond_order,
+                        "target_bond_length_angstrom": resolved.target_bond_length_angstrom,
+                    }
+                )
+            }
+        )
+
+    @classmethod
+    def resolve_plan(
+        cls,
+        protein_pdb_path: Path | str,
+        site_config: Any,
+        fragment: Any,
+        *,
+        settings: NhsLysReactionSettings | None = None,
+    ) -> Any:
+        """Resolve an NHS-Lys attachment plan through the generic contract path."""
+        from polyzymd.builders.conjugation._linkage import resolve_explicit_linkage_contract
+
+        contract = cls.build_contract(
+            site_config,
+            fragment,
+            protein_pdb_path=protein_pdb_path,
+            settings=settings,
+        )
+        return resolve_explicit_linkage_contract(protein_pdb_path, fragment, contract)
+
+    def resolve_attachment(
+        self,
+        protein_pdb_path: Path | str,
+        site_config: Any,
+        fragment: Any,
+        *,
+        settings: NhsLysReactionSettings | None = None,
+    ) -> Any:
+        """Resolve an NHS-Lys attachment plan for the generic construction flow."""
+        return self.resolve_plan(
+            protein_pdb_path,
+            site_config,
+            fragment,
+            settings=settings,
+        )
+
+    @classmethod
     def reaction_smarts(cls) -> str:
         """Return the atom-mapped reaction SMARTS used for diagnostics."""
         return cls.mapped_reaction_smarts
@@ -261,12 +350,9 @@ class NhsLysReaction(ReactionTemplate):
             site_hydrogen_indices_to_remove=site_hydrogen_indices_to_remove,
         )
 
-    def plan(self, _context: ReactionContext) -> ReactionResult:
-        """Raise until full reaction-template execution owns coordinate surgery."""
-        raise NotImplementedError(
-            "NHS-Lys reaction-template execution is not a standalone public API yet. "
-            "Use build_conjugate_from_config() for the supported conjugation workflow."
-        )
+    def plan(self, context: ReactionContext) -> ReactionResult:
+        """Resolve a generic NHS-Lys plan from a reaction context."""
+        return super().plan(context)
 
 
 def _coalesce_text(*values: str | None) -> str:
