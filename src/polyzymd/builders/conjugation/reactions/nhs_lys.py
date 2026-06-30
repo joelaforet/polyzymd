@@ -98,6 +98,7 @@ class NhsLysReaction(ReactionTemplate):
     description: ClassVar[str] = "NHS ester coupling to lysine NZ to form an amide."
     Settings: ClassVar[type[NhsLysReactionSettings]] = NhsLysReactionSettings
     coordinate_backend_mechanism: ClassVar[str] = "nhs_lys_amide"
+    supports_coordinate_assembly: ClassVar[bool] = True
     mapped_reaction_smarts: ClassVar[str] = (
         "[N:1]([H:2]).[C:3](=[O:4])[O:5][N:6]>>[N:1][C:3](=[O:4])"
     )

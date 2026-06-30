@@ -38,6 +38,7 @@ class ReactionTemplate(ABC):
     name: ClassVar[str]
     description: ClassVar[str] = ""
     aliases: ClassVar[tuple[str, ...]] = ()
+    supports_coordinate_assembly: ClassVar[bool] = False
 
     @classmethod
     def identifiers(cls) -> tuple[str, ...]:

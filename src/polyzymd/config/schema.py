@@ -922,22 +922,22 @@ class ConjugationAttachmentConfig(BaseModel):
 
 
 class ConjugationChargeConfig(BaseModel):
-    """Charge patching policy for future covalent junction workflows."""
+    """Charge patching policy for product-state covalent junction workflows."""
 
     local_junction_patching: bool = Field(
         True,
-        description="Enable future local charge patching around covalent junctions",
+        description="Enable local product-state charge patching around covalent junctions",
     )
     patch_radius_bonds: int = Field(
         3,
         ge=0,
-        description="Bond radius for future local junction charge patches",
+        description="Bond radius for local product-state junction charge patches",
     )
     preserve_total_charge: bool = Field(True, description="Preserve integer total system charge")
     integer_tolerance: float = Field(
         1.0e-4,
         gt=0.0,
-        description="Tolerance for future integer-charge diagnostics",
+        description="Tolerance for integer-charge diagnostics after local patching",
     )
 
 

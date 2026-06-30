@@ -101,6 +101,7 @@ class NGlycosylationReaction(ReactionTemplate):
     description: ClassVar[str] = "N-glycosylation of asparagine ND2 by a glycan C1."
     Settings: ClassVar[type[NGlycosylationReactionSettings]] = NGlycosylationReactionSettings
     coordinate_backend_mechanism: ClassVar[str] = "n_glycosylation"
+    supports_coordinate_assembly: ClassVar[bool] = True
     mapped_reaction_smarts: ClassVar[str] = (
         "[N:1]([H:2]).[C:3]([O:4][H:5])([O:6])>>[N:1][C:3]([O:6])"
     )
