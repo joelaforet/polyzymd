@@ -1,4 +1,4 @@
-"""Polymer recipe models and Polymerist generation boundary."""
+"""Polymer recipe models and multi-residue generation boundary."""
 
 from __future__ import annotations
 
@@ -7,16 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
-
-POC_SBMA_SMILES = (
-    "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+]"
-    "(C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])"
-    "C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
-)
-POC_EGPMA_SMILES = (
-    "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]"
-)
-POC_NHS_SMILES = "CC(=C)C(=O)ON1C(=O)CCC1=O"
 
 DEFAULT_PROBABILITY_TOLERANCE = 1.0e-6
 
@@ -42,7 +32,7 @@ class PolymerMonomerRecipe(BaseModel):
     @field_validator("name")
     @classmethod
     def normalize_name(cls, value: str) -> str:
-        """Normalize a monomer name for Polymerist fragment lookup."""
+        """Normalize a monomer name for backend fragment lookup."""
         normalized = value.strip()
         if not normalized:
             raise ValueError("Monomer names cannot be blank")
@@ -230,7 +220,7 @@ class PolymerRecipe(BaseModel):
         return {monomer.name: monomer.smiles for monomer in self.monomers}
 
     def to_sequence_monomer_names(self) -> dict[str, str]:
-        """Return the sequence-label to monomer-name mapping expected by Polymerist."""
+        """Return the sequence-label to monomer-name mapping expected by the backend."""
         return {monomer.label: monomer.name for monomer in self.monomers}
 
     def to_polymerist_residue_names(self) -> dict[str, str]:
@@ -238,11 +228,12 @@ class PolymerRecipe(BaseModel):
         return {monomer.name: monomer.residue_name for monomer in self.monomers}
 
 
-class PolymeristGenerationSmokeResult(BaseModel):
-    """Summary from the optional Polymerist recipe-generation boundary."""
+class MultiResidueGenerationResult(BaseModel):
+    """Summary from the optional multi-residue generation boundary."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    backend: str = "polymerist"
     recipe_name: str
     sequence: str
     cache_directory: Path
@@ -255,93 +246,17 @@ class PolymeristGenerationSmokeResult(BaseModel):
     rdkit_mol: Any | None = Field(default=None, exclude=True)
 
 
-def sbma_egpma_nhs_recipe(
-    *,
-    length: int = 10,
-    seed: int | None = 42,
-    reactive_monomer_index: int | None = None,
-    fixed_sequence: str | None = None,
-) -> PolymerRecipe:
-    """Build the SBMA/EGPMA/NHS recipe used by the conjugation POC.
-
-    Parameters
-    ----------
-    length : int, optional
-        Degree of polymerization, by default 10.
-    seed : int or None, optional
-        Random seed for deterministic sequence generation, by default 42.
-    reactive_monomer_index : int or None, optional
-        Zero-based NHS residue index. ``None`` centers NHS, by default ``None``.
-    fixed_sequence : str or None, optional
-        Exact monomer-label sequence overriding stochastic generation, by default
-        ``None``.
-
-    Returns
-    -------
-    PolymerRecipe
-        Validated stochastic polymer recipe.
-    """
-    return PolymerRecipe(
-        name="SBMA-EGPMA-NHS",
-        monomers=(
-            PolymerMonomerRecipe(
-                label="A",
-                name="SBMA",
-                residue_name="SBM",
-                smiles=POC_SBMA_SMILES,
-                probability=0.945,
-            ),
-            PolymerMonomerRecipe(
-                label="B",
-                name="EGPMA",
-                residue_name="EGP",
-                smiles=POC_EGPMA_SMILES,
-                probability=0.045,
-            ),
-            PolymerMonomerRecipe(
-                label="C",
-                name="NHS",
-                residue_name="NHS",
-                smiles=POC_NHS_SMILES,
-                probability=0.01,
-            ),
-        ),
-        length=length,
-        seed=seed,
-        reactive_monomer_label="C",
-        reactive_monomer_index=reactive_monomer_index,
-        fixed_sequence=fixed_sequence,
-    )
-
-
-def sbma_nhs_egpma_acb_recipe() -> PolymerRecipe:
-    """Build the deterministic v1 SBMA:NHS:EGPMA recipe.
-
-    Returns
-    -------
-    PolymerRecipe
-        Three-monomer recipe whose fixed sequence ``ACB`` maps to
-        SBMA:NHS:EGPMA with the NHS monomer centered for Lys linkage.
-    """
-    return sbma_egpma_nhs_recipe(
-        length=3,
-        seed=None,
-        reactive_monomer_index=1,
-        fixed_sequence="ACB",
-    )
-
-
-def generate_polymerist_smoke_polymer(
+def generate_multi_residue_molecule(
     recipe: PolymerRecipe,
     cache_directory: Path | str,
     *,
     force_regenerate: bool = False,
     max_retries: int = 3,
     energy_minimize: bool = True,
-) -> PolymeristGenerationSmokeResult:
-    """Generate a small Polymerist-backed polymer artifact from a recipe.
+) -> MultiResidueGenerationResult:
+    """Generate a small multi-residue molecule artifact from a recipe.
 
-    This boundary intentionally stops at Polymerist fragment and PDB generation.
+    This boundary intentionally stops at backend fragment and PDB generation.
     It does not perform placement, relaxation, charging, Interchange export, or
     simulation setup.
 
@@ -350,18 +265,18 @@ def generate_polymerist_smoke_polymer(
     recipe : PolymerRecipe
         Validated polymer recipe containing monomer SMILES and probabilities.
     cache_directory : pathlib.Path or str
-        Directory for Polymerist fragment and polymer PDB cache files.
+        Directory for generated fragment and polymer PDB cache files.
     force_regenerate : bool, optional
-        Rebuild cached Polymerist fragments when possible, by default ``False``.
+        Rebuild cached backend fragments when possible, by default ``False``.
     max_retries : int, optional
-        Maximum Polymerist structure-building attempts, by default 3.
+        Maximum backend structure-building attempts, by default 3.
     energy_minimize : bool, optional
-        Whether Polymerist should run its built-in minimization during structure
+        Whether the backend should run its built-in minimization during structure
         generation, by default ``True``.
 
     Returns
     -------
-    PolymeristGenerationSmokeResult
+    MultiResidueGenerationResult
         Summary with generated sequence, cache paths, and object metadata.
     """
     from polyzymd.builders.fragment_generator import FragmentGenerator
@@ -425,7 +340,7 @@ def generate_polymerist_smoke_polymer(
     if atom_count is None:
         atom_count = _get_polymerist_atom_count(polymer_object)
 
-    return PolymeristGenerationSmokeResult(
+    return MultiResidueGenerationResult(
         recipe_name=recipe.name,
         sequence=sequence,
         cache_directory=cache_path,
