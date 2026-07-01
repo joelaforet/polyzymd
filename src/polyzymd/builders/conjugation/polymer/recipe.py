@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from polyzymd.builders.conjugation.structure.parsing import pdb_has_conect_records
+
 DEFAULT_PROBABILITY_TOLERANCE = 1.0e-6
 
 
@@ -468,7 +470,7 @@ def _align_rdkit_bond_orders_to_pdb_mol(source_mol: object, pdb_path: Path) -> A
         str(pdb_path),
         sanitize=False,
         removeHs=False,
-        proximityBonding=not _pdb_has_conect_records(pdb_path),
+        proximityBonding=not pdb_has_conect_records(pdb_path),
     )
     if pdb_mol is None or pdb_mol.GetNumAtoms() == 0:
         raise ValueError(f"RDKit could not read generated polymer PDB atoms from {pdb_path}")
@@ -524,12 +526,6 @@ def _bond_index_pairs(rdkit_mol: object) -> set[tuple[int, int]]:
         tuple(sorted((bond.GetBeginAtomIdx(), bond.GetEndAtomIdx())))
         for bond in rdkit_mol.GetBonds()
     }
-
-
-def _pdb_has_conect_records(path: Path) -> bool:
-    """Return whether a generated PDB contains explicit CONECT records."""
-    with path.open("r", encoding="utf-8") as handle:
-        return any(line.startswith("CONECT") for line in handle)
 
 
 def _fix_tetravalent_neutral_nitrogens(rdkit_mol: object) -> None:

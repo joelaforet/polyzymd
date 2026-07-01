@@ -14,6 +14,7 @@ from polyzymd.builders.conjugation._linkage import (
     PabloCrosslinkRequirement,
     parse_pdb_atom_records,
 )
+from polyzymd.builders.conjugation.structure.parsing import parse_pdb_conect_pairs
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 
@@ -111,7 +112,7 @@ def build_product_state_pablo_library(
     source_path = Path(source_protein_pdb) if source_protein_pdb is not None else None
     product_atoms = parse_pdb_atom_records(product_path)
     source_atoms = parse_pdb_atom_records(source_path) if source_path is not None else []
-    conect_pairs = _parse_conect_pairs(product_path)
+    conect_pairs = parse_pdb_conect_pairs(product_path)
     requirement = _coerce_requirement(resolved_plan)
     diagnostics: list[str] = []
 
@@ -571,22 +572,6 @@ def _template_linking_leaving_names(source_template: Any) -> set[str]:
         for atom in getattr(source_template, "atoms", ())
         if getattr(atom, "leaving", False)
     }
-
-
-def _parse_conect_pairs(path: Path) -> tuple[tuple[int, int], ...]:
-    """Parse unique PDB CONECT atom-serial pairs."""
-    pairs: set[tuple[int, int]] = set()
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if not line.startswith("CONECT"):
-            continue
-        source = _parse_int(line[6:11].strip())
-        if source is None:
-            continue
-        for start in range(11, len(line), 5):
-            target = _parse_int(line[start : start + 5].strip())
-            if target is not None and target != source:
-                pairs.add(tuple(sorted((source, target))))
-    return tuple(sorted(pairs))
 
 
 def _fragment_bonds(generated_fragment: Any | None) -> tuple[tuple[Any, Any, int], ...]:

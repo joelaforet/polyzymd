@@ -57,6 +57,13 @@ from polyzymd.builders.conjugation.reactions._roles import (
     resolve_reaction_roles_from_identity_map,
 )
 from polyzymd.builders.conjugation.reactions.library import get_reaction
+from polyzymd.builders.conjugation.structure.parsing import (
+    ATOM_RECORD_PREFIXES,
+    pdb_coordinates,
+)
+from polyzymd.builders.conjugation.structure.parsing import (
+    parse_pdb_atom_records as parse_structure_pdb_atom_records,
+)
 from polyzymd.builders.conjugation.structure.pdb import (
     CrosslinkedPdbAssemblyOptions,
     PdbAtomRecord,
@@ -77,7 +84,7 @@ from polyzymd.config.schema import (
     SimulationConfig,
 )
 
-_ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
+_ATOM_RECORD_PREFIXES = ATOM_RECORD_PREFIXES
 _NHS_LYS_REACTION = get_reaction("nhs_lys")
 _NHS_LYS_COORDINATE_BACKEND_MECHANISM = _NHS_LYS_REACTION.coordinate_backend_mechanism
 LOGGER = logging.getLogger(__name__)
@@ -1446,15 +1453,7 @@ def _build_and_pack_free_polymers(
 
 
 def _pdb_coordinates_angstrom(path: Path) -> np.ndarray:
-    coords: list[tuple[float, float, float]] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.startswith(_ATOM_RECORD_PREFIXES):
-                continue
-            coords.append((float(line[30:38]), float(line[38:46]), float(line[46:54])))
-    if not coords:
-        raise ValueError(f"No ATOM/HETATM coordinates found in {path}")
-    return np.asarray(coords, dtype=float)
+    return np.asarray(pdb_coordinates(path), dtype=float)
 
 
 def _restore_smoke_pdb_atom_names(
@@ -1524,12 +1523,7 @@ def _apply_pdb_atom_names_to_topology(topology: Any, template_pdb_path: Path | s
 
 
 def _pdb_atom_records(path: Path) -> tuple[PdbAtomRecord, ...]:
-    records: list[PdbAtomRecord] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith(_ATOM_RECORD_PREFIXES):
-                records.append(PdbAtomRecord.from_pdb_line(line, atom_index=len(records)))
-    return tuple(records)
+    return parse_structure_pdb_atom_records(path)
 
 
 def _pdb_atom_name_fields(path: Path) -> tuple[str, ...]:

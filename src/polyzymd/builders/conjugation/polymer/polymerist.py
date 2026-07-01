@@ -13,9 +13,11 @@ from polyzymd.builders.conjugation.polymer.fragment import (
 )
 from polyzymd.builders.conjugation.polymer.recipe import PolymerRecipe
 from polyzymd.builders.conjugation.reactions.nhs_lys import detect_nhs_reactive_group
+from polyzymd.builders.conjugation.structure.parsing import (
+    parse_pdb_atom_records,
+    pdb_has_conect_records,
+)
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
-
-_ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 
 
 def generated_fragment_from_polymerist_pdb(
@@ -190,21 +192,17 @@ def generated_fragment_from_polymerist_pdb(
 
 def _parse_polymerist_pdb_atoms(path: Path) -> tuple[PdbAtomRecord, ...]:
     """Parse all PDB atom records from a Polymerist PDB file."""
-    atoms: list[PdbAtomRecord] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith(_ATOM_RECORD_PREFIXES):
-                atoms.append(PdbAtomRecord.from_pdb_line(line, atom_index=len(atoms)))
-    if not atoms:
-        raise ValueError(f"No ATOM/HETATM records found in Polymerist PDB: {path}")
-    return tuple(atoms)
+    try:
+        return parse_pdb_atom_records(path, require_atoms=True)
+    except ValueError as exc:
+        raise ValueError(f"No ATOM/HETATM records found in Polymerist PDB: {path}") from exc
 
 
 def _load_rdkit_pdb(path: Path) -> Any:
     """Load a PDB file through RDKit while preserving explicit hydrogens."""
     from rdkit import Chem
 
-    use_proximity_bonding = not _has_conect_records(path)
+    use_proximity_bonding = not pdb_has_conect_records(path)
     mol = Chem.MolFromPDBFile(
         str(path),
         sanitize=False,
@@ -296,12 +294,6 @@ def _validate_sdf_bond_orders(mol: Any, path: Path) -> None:
             "explicit bond orders and fully specified valence; regenerate the SDF from the "
             "source molecule rather than relying on product-state chemistry repair."
         )
-
-
-def _has_conect_records(path: Path) -> bool:
-    """Return whether a PDB file contains explicit CONECT records."""
-    with path.open("r", encoding="utf-8") as handle:
-        return any(line.startswith("CONECT") for line in handle)
 
 
 def _map_rdkit_atoms_to_pdb_atoms(
