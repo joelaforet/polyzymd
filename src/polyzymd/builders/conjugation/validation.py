@@ -11,6 +11,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from polyzymd.builders.conjugation.structure.parsing import (
+    parse_pdb_atom_records,
+    parse_pdb_conect_pairs,
+)
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 VALIDATION_REPORT_NAME = "conjugate_validation_report.json"
@@ -868,35 +872,14 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
 
 def parse_pdb_conect_bonds(path: Path | str | None) -> tuple[tuple[int, int], ...]:
     """Parse unique PDB CONECT bonds as normalized serial-number pairs."""
-    if path is None:
-        return ()
-    pdb_path = Path(path)
-    if not pdb_path.exists():
-        return ()
-    bonds: set[tuple[int, int]] = set()
-    with pdb_path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.startswith("CONECT"):
-                continue
-            serials = _conect_serials(line)
-            if len(serials) < 2:
-                continue
-            source = serials[0]
-            for target in serials[1:]:
-                bonds.add(tuple(sorted((source, target))))
-    return tuple(sorted(bonds))
+    return parse_pdb_conect_pairs(path)
 
 
 def _read_product_atoms(path: Path | None) -> tuple[PdbAtomRecord, ...]:
     """Read product atoms from a PDB path if available."""
     if path is None or not path.exists():
         return ()
-    atoms: list[PdbAtomRecord] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith(("ATOM", "HETATM")):
-                atoms.append(PdbAtomRecord.from_pdb_line(line, atom_index=len(atoms)))
-    return tuple(atoms)
+    return parse_pdb_atom_records(path)
 
 
 def _aggregate_status(statuses: tuple[ValidationStatus, ...]) -> ValidationStatus:
@@ -1281,17 +1264,3 @@ def _close_contact_count(
             if _distance_angstrom(left, right) < 0.7:
                 count += 1
     return count
-
-
-def _conect_serials(line: str) -> tuple[int, ...]:
-    """Parse serials from one CONECT line."""
-    values: list[int] = []
-    for start in range(6, len(line), 5):
-        field = line[start : start + 5].strip()
-        if not field:
-            continue
-        try:
-            values.append(int(field))
-        except ValueError:
-            continue
-    return tuple(values)
