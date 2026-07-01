@@ -1,4 +1,4 @@
-"""Tests for conjugation polymer recipes and Polymerist generation."""
+"""Tests for conjugation polymer recipes and multi-residue generation."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from polyzymd.builders.conjugation.polymer.recipe import (
     PolymerRecipe,
     _polymerist_to_pdb_aligned_rdkit_mol,
     _write_rdkit_sdf_sidecar,
-    generate_polymerist_recipe_polymer,
+    generate_multi_residue_molecule,
 )
 from polyzymd.config.loader import load_config
 from polyzymd.config.schema import SimulationConfig
@@ -260,16 +260,17 @@ conjugation:
     assert loaded_recipe.generate_sequence()[loaded_recipe.effective_reactive_index] == "C"
 
 
-def test_real_polymerist_recipe_generation(tmp_path):
-    """Polymerist should consume the real SBMA/EGPMA/NHS recipe when installed."""
+def test_real_multi_residue_recipe_generation(tmp_path):
+    """The backend should consume the real SBMA/EGPMA/NHS recipe when installed."""
     recipe = sbma_egpma_nhs_recipe(length=3, seed=5, reactive_monomer_index=1)
 
     try:
-        result = generate_polymerist_recipe_polymer(recipe, tmp_path / "polymerist", max_retries=1)
+        result = generate_multi_residue_molecule(recipe, tmp_path / "polymerist", max_retries=1)
     except Exception as exc:
         pytest.skip(f"Polymerist generation stack unavailable in this environment: {exc}")
 
     assert result.sequence[1] == "C"
+    assert result.backend == "polymerist"
     assert result.monomer_group_path.exists()
     assert result.pdb_path is not None and result.pdb_path.exists()
     assert result.pdb_path.with_suffix(".sdf").exists()
@@ -300,7 +301,7 @@ def test_polymerist_to_pdb_aligned_rdkit_mol_matches_pdb_atoms_and_bond_orders(
     assert all(float(bond.GetBondTypeAsDouble()) > 0.0 for bond in mol.GetBonds())
 
 
-def test_generate_polymerist_recipe_polymer_returns_pdb_aligned_rdkit_sidecar(
+def test_generate_multi_residue_molecule_returns_pdb_aligned_rdkit_sidecar(
     monkeypatch,
     tmp_path,
 ):
@@ -358,7 +359,7 @@ def test_generate_polymerist_recipe_polymer_returns_pdb_aligned_rdkit_sidecar(
     monkeypatch.setitem(sys.modules, "polyzymd.data.reactions", fake_reactions_module)
 
     recipe = sbma_nhs_egpma_acb_recipe()
-    result = generate_polymerist_recipe_polymer(recipe, tmp_path / "cache")
+    result = generate_multi_residue_molecule(recipe, tmp_path / "cache")
     Chem = pytest.importorskip("rdkit.Chem")
     sidecar_mols = [
         mol

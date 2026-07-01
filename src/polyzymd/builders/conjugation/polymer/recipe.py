@@ -1,4 +1,4 @@
-"""Polymer recipe models and Polymerist generation boundary."""
+"""Polymer recipe models and multi-residue generation boundary."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class PolymerMonomerRecipe(BaseModel):
     @field_validator("name")
     @classmethod
     def normalize_name(cls, value: str) -> str:
-        """Normalize a monomer name for Polymerist fragment lookup."""
+        """Normalize a monomer name for backend fragment lookup."""
         normalized = value.strip()
         if not normalized:
             raise ValueError("Monomer names cannot be blank")
@@ -220,7 +220,7 @@ class PolymerRecipe(BaseModel):
         return {monomer.name: monomer.smiles for monomer in self.monomers}
 
     def to_sequence_monomer_names(self) -> dict[str, str]:
-        """Return the sequence-label to monomer-name mapping expected by Polymerist."""
+        """Return the sequence-label to monomer-name mapping expected by the backend."""
         return {monomer.label: monomer.name for monomer in self.monomers}
 
     def to_polymerist_residue_names(self) -> dict[str, str]:
@@ -228,11 +228,12 @@ class PolymerRecipe(BaseModel):
         return {monomer.name: monomer.residue_name for monomer in self.monomers}
 
 
-class PolymeristGenerationResult(BaseModel):
-    """Summary from the optional Polymerist recipe-generation boundary."""
+class MultiResidueGenerationResult(BaseModel):
+    """Summary from the optional multi-residue generation boundary."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    backend: str = "polymerist"
     recipe_name: str
     sequence: str
     cache_directory: Path
@@ -245,17 +246,17 @@ class PolymeristGenerationResult(BaseModel):
     rdkit_mol: Any | None = Field(default=None, exclude=True)
 
 
-def generate_polymerist_recipe_polymer(
+def generate_multi_residue_molecule(
     recipe: PolymerRecipe,
     cache_directory: Path | str,
     *,
     force_regenerate: bool = False,
     max_retries: int = 3,
     energy_minimize: bool = True,
-) -> PolymeristGenerationResult:
-    """Generate a small Polymerist-backed polymer artifact from a recipe.
+) -> MultiResidueGenerationResult:
+    """Generate a small multi-residue molecule artifact from a recipe.
 
-    This boundary intentionally stops at Polymerist fragment and PDB generation.
+    This boundary intentionally stops at backend fragment and PDB generation.
     It does not perform placement, relaxation, charging, Interchange export, or
     simulation setup.
 
@@ -264,18 +265,18 @@ def generate_polymerist_recipe_polymer(
     recipe : PolymerRecipe
         Validated polymer recipe containing monomer SMILES and probabilities.
     cache_directory : pathlib.Path or str
-        Directory for Polymerist fragment and polymer PDB cache files.
+        Directory for generated fragment and polymer PDB cache files.
     force_regenerate : bool, optional
-        Rebuild cached Polymerist fragments when possible, by default ``False``.
+        Rebuild cached backend fragments when possible, by default ``False``.
     max_retries : int, optional
-        Maximum Polymerist structure-building attempts, by default 3.
+        Maximum backend structure-building attempts, by default 3.
     energy_minimize : bool, optional
-        Whether Polymerist should run its built-in minimization during structure
+        Whether the backend should run its built-in minimization during structure
         generation, by default ``True``.
 
     Returns
     -------
-    PolymeristGenerationResult
+    MultiResidueGenerationResult
         Summary with generated sequence, cache paths, and object metadata.
     """
     from polyzymd.builders.fragment_generator import FragmentGenerator
@@ -339,7 +340,7 @@ def generate_polymerist_recipe_polymer(
     if atom_count is None:
         atom_count = _get_polymerist_atom_count(polymer_object)
 
-    return PolymeristGenerationResult(
+    return MultiResidueGenerationResult(
         recipe_name=recipe.name,
         sequence=sequence,
         cache_directory=cache_path,

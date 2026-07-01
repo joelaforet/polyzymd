@@ -50,7 +50,7 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     build_formal_charge_smoke_template,
     create_interchange_from_pablo_topology,
 )
-from polyzymd.builders.conjugation.polymer import PolymeristGenerationResult
+from polyzymd.builders.conjugation.polymer import MultiResidueGenerationResult
 from polyzymd.builders.conjugation.reactions._roles import (
     STRUCTURE_MATCHING_BLOCKER_MESSAGE,
     atom_mapped_reaction_from_mechanism_config,
@@ -502,7 +502,7 @@ def _build_attachment_spec(
     use_cache_dir: bool = True,
 ) -> tuple[
     AttachmentBuildSpec,
-    PolymeristGenerationResult | None,
+    MultiResidueGenerationResult | None,
     int,
     dict[str, int | str],
     Any,
