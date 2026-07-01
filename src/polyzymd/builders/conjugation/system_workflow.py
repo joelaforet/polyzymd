@@ -48,6 +48,12 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     build_formal_charge_smoke_template,
     create_interchange_from_pablo_topology,
 )
+from polyzymd.builders.conjugation.pablo.product_state import (
+    metadata_residue_name,
+    molecule_contains_product_residue,
+    product_residue_names,
+    product_state_library_has_provenance,
+)
 from polyzymd.builders.conjugation.placement import (
     PackmolModifierPlacementSettings,
     place_modifiers_with_resolved_plans,
@@ -1151,9 +1157,7 @@ def _supports_charge_bridge(
 ) -> bool:
     """Return whether the local NAGL bridge supports the product-state library."""
     _ = product_specs
-    names = tuple(getattr(product_state_pablo_library, "residue_names", ()) or ())
-    definitions = tuple(getattr(product_state_pablo_library, "definitions", ()) or ())
-    return bool(names or definitions)
+    return product_state_library_has_provenance(product_state_pablo_library)
 
 
 def _charged_product_state_molecules_from_topology(
@@ -1176,39 +1180,17 @@ def _charged_product_state_molecules_from_topology(
 
 def _product_state_library_residue_names(product_state_pablo_library: Any) -> tuple[str, ...]:
     """Resolve product-state residue names from a generated Pablo library."""
-    names = tuple(
-        str(name) for name in getattr(product_state_pablo_library, "residue_names", ()) or ()
-    )
-    if names:
-        return names
-    definitions = tuple(getattr(product_state_pablo_library, "definitions", ()) or ())
-    return tuple(
-        str(getattr(definition, "residue_name", "")).strip()
-        for definition in definitions
-        if str(getattr(definition, "residue_name", "")).strip()
-    )
+    return product_residue_names(product_state_pablo_library)
 
 
 def _molecule_has_product_residue(molecule: Any, product_names: set[str]) -> bool:
     """Return whether a molecule contains any product-state residue metadata."""
-    for atom in tuple(getattr(molecule, "atoms", ()) or ()):
-        residue_name = _metadata_residue_name(getattr(atom, "metadata", None))
-        if residue_name in product_names:
-            return True
-    properties = getattr(molecule, "properties", None)
-    residue_name = _metadata_residue_name(properties)
-    return residue_name in product_names
+    return molecule_contains_product_residue(molecule, product_names)
 
 
 def _metadata_residue_name(metadata: Any) -> str:
     """Return an uppercase residue name from atom or molecule metadata."""
-    if metadata is None:
-        return ""
-    if isinstance(metadata, dict):
-        value = metadata.get("residue_name") or metadata.get("residue")
-    else:
-        value = getattr(metadata, "residue_name", None) or getattr(metadata, "residue", None)
-    return str(value or "").strip().upper()
+    return metadata_residue_name(metadata)
 
 
 def _local_minimization_settings_for_product(

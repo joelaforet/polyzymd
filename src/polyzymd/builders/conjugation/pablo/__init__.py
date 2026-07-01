@@ -41,6 +41,10 @@ from polyzymd.builders.conjugation.pablo.product import (
     build_product_state_pablo_library,
     build_product_state_pablo_library_for_specs,
 )
+from polyzymd.builders.conjugation.pablo.product_state import (
+    product_residue_names,
+    product_state_library_has_provenance,
+)
 from polyzymd.builders.conjugation.pablo.residue_library import (
     PabloResidueLibraryDiagnostic,
     PabloResidueLibraryError,
@@ -80,4 +84,6 @@ __all__ = [
     "create_interchange_from_pablo_topology",
     "deduplicate_charge_templates",
     "load_combined_smirnoff_force_field",
+    "product_residue_names",
+    "product_state_library_has_provenance",
 ]
