@@ -7,11 +7,9 @@ from pathlib import Path
 import pytest
 
 from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
-from polyzymd.builders.conjugation.polymer.recipe import (
-    generate_polymerist_smoke_polymer,
-    sbma_egpma_nhs_recipe,
-)
+from polyzymd.builders.conjugation.polymer.recipe import generate_multi_residue_molecule
 from polyzymd.builders.conjugation.structure.pdb import NhsLysPdbAttachment, write_crosslinked_pdb
+from tests._support.conjugation_polymer_recipes import sbma_egpma_nhs_recipe
 
 
 def _pdb_atom(
@@ -299,7 +297,7 @@ def test_real_polymerist_generation_pdb_converts_to_generated_fragment(tmp_path)
     pytest.importorskip("polymerist", exc_type=ImportError)
 
     recipe = sbma_egpma_nhs_recipe(length=3, seed=5, reactive_monomer_index=1)
-    result = generate_polymerist_smoke_polymer(recipe, tmp_path / "polymerist", max_retries=1)
+    result = generate_multi_residue_molecule(recipe, tmp_path / "polymerist", max_retries=1)
     assert result.pdb_path is not None
 
     fragment = generated_fragment_from_polymerist_pdb(

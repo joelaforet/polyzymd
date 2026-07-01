@@ -26,9 +26,9 @@ from polyzymd.builders.conjugation.pablo.parameterization import InterchangePara
 from polyzymd.builders.conjugation.polymer import (
     GeneratedMoietyFragment,
     GeneratedPolymerFragment,
+    MultiResidueGenerationResult,
     PolymerFragmentAtom,
     PolymerFragmentResidue,
-    PolymeristGenerationSmokeResult,
     PolymerMonomerRecipe,
     PolymerRecipe,
 )
@@ -1408,7 +1408,7 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
             chain_policy=ConjugationChainPolicyConfig(),
         ),
     )
-    generation = PolymeristGenerationSmokeResult(
+    generation = MultiResidueGenerationResult(
         recipe_name="test",
         sequence="AA",
         cache_directory=tmp_path / "cache",
@@ -1534,7 +1534,7 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
             chain_policy=ConjugationChainPolicyConfig(),
         ),
     )
-    generation = PolymeristGenerationSmokeResult(
+    generation = MultiResidueGenerationResult(
         recipe_name="test",
         sequence="AA",
         cache_directory=tmp_path / "cache",

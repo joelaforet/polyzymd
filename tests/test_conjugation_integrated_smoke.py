@@ -48,15 +48,13 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     create_interchange_from_pablo_topology,
 )
 from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
-from polyzymd.builders.conjugation.polymer.recipe import (
-    generate_polymerist_smoke_polymer,
-    sbma_egpma_nhs_recipe,
-)
+from polyzymd.builders.conjugation.polymer.recipe import generate_multi_residue_molecule
 from polyzymd.builders.conjugation.structure.pdb import (
     CrosslinkedPdbAssemblyOptions,
     PdbAtomRecord,
     write_crosslinked_pdb,
 )
+from tests._support.conjugation_polymer_recipes import sbma_egpma_nhs_recipe
 
 T = TypeVar("T")
 
@@ -92,9 +90,9 @@ def test_opt_in_integrated_conjugation_physics_smoke(tmp_path: Path):
 
     recipe = sbma_egpma_nhs_recipe(length=3, seed=51, reactive_monomer_index=1)
     generation = _run_stage(
-        "Polymerist SBMA/EGPMA/NHS generation",
+        "SBMA/EGPMA/NHS multi-residue generation",
         artifact_dir,
-        lambda: generate_polymerist_smoke_polymer(
+        lambda: generate_multi_residue_molecule(
             recipe,
             artifact_dir / "polymerist-cache",
             force_regenerate=True,
@@ -103,8 +101,8 @@ def test_opt_in_integrated_conjugation_physics_smoke(tmp_path: Path):
     )
     if generation.pdb_path is None:
         _fail_blocker(
-            "Polymerist SBMA/EGPMA/NHS generation",
-            RuntimeError("Polymerist did not return a generated PDB path"),
+            "SBMA/EGPMA/NHS multi-residue generation",
+            RuntimeError("Generation backend did not return a generated PDB path"),
             artifact_dir,
         )
 
