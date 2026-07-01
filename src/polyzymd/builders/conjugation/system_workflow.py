@@ -12,12 +12,6 @@ from typing import Any
 import numpy as np
 from pydantic import BaseModel, Field
 
-from polyzymd.builders.conjugation._assembly import (
-    ModifierConstructionResult,
-    ModifierConstructionSettings,
-    PackmolModifierPlacementSettings,
-    place_modifiers_with_resolved_plans,
-)
 from polyzymd.builders.conjugation._linkage import (
     PabloCrosslinkRequirement,
     ResolvedAttachmentPlan,
@@ -42,6 +36,10 @@ from polyzymd.builders.conjugation._specs import (
     AttachmentBuildSpec,
     attachment_spec_from_generated_polymer_plan,
 )
+from polyzymd.builders.conjugation.construction import (
+    ModifierConstructionResult,
+    ModifierConstructionSettings,
+)
 from polyzymd.builders.conjugation.final_interchange import create_final_conjugated_interchange
 from polyzymd.builders.conjugation.models import ConjugationResult
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
@@ -49,6 +47,10 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationSettings,
     build_formal_charge_smoke_template,
     create_interchange_from_pablo_topology,
+)
+from polyzymd.builders.conjugation.placement import (
+    PackmolModifierPlacementSettings,
+    place_modifiers_with_resolved_plans,
 )
 from polyzymd.builders.conjugation.polymer import MultiResidueGenerationResult
 from polyzymd.builders.conjugation.reactions._roles import (

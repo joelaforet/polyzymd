@@ -4,11 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from polyzymd.builders.conjugation._assembly import (
-    place_modifier_with_packmol,
-    place_modifier_with_resolved_plan,
-    place_modifiers_with_resolved_plans,
-)
 from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
     LinkageBond,
@@ -16,6 +11,11 @@ from polyzymd.builders.conjugation._linkage import (
     PdbAtomSelector,
     ReactiveEndpoint,
     resolve_explicit_linkage_contract,
+)
+from polyzymd.builders.conjugation.placement import (
+    place_modifier_with_packmol,
+    place_modifier_with_resolved_plan,
+    place_modifiers_with_resolved_plans,
 )
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
