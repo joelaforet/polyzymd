@@ -17,11 +17,7 @@ from polyzymd.builders.conjugation._linkage import (
     resolve_explicit_linkage_contract,
 )
 from polyzymd.builders.conjugation.polymer import GeneratedMoietyFragment
-from polyzymd.builders.conjugation.reactions.base import (
-    ReactionContext,
-    ReactionResult,
-    ReactionTemplate,
-)
+from polyzymd.builders.conjugation.reactions.base import ReactionTemplate
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 
@@ -296,23 +292,6 @@ class NGlycosylationReaction(ReactionTemplate):
             fragment,
             settings=settings,
         )
-
-    def plan(self, context: ReactionContext) -> ReactionResult:
-        """Resolve a plan from a reaction context carrying protein, site, and moiety."""
-        site_config = context.metadata.get("site_config") or context.metadata.get("site")
-        settings = context.metadata.get("settings")
-        if context.protein is None or context.moiety is None or site_config is None:
-            raise ValueError(
-                "N-glycosylation planning requires context.protein, context.moiety, and "
-                "metadata['site_config']"
-            )
-        plan = self.resolve_plan(
-            context.protein,
-            site_config,
-            context.moiety,
-            settings=settings,
-        )
-        return ReactionResult(plan=plan, metadata={"mechanism": self.name})
 
 
 def detect_glycan_anomeric_group(mol: Any) -> GlycanAnomericGroup:
