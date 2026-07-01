@@ -10,12 +10,10 @@ from polyzymd.builders.conjugation.polymer.moiety import (
     build_smiles_moiety_fragment,
 )
 from polyzymd.builders.conjugation.polymer.recipe import (
-    PolymeristGenerationSmokeResult,
+    PolymeristGenerationResult,
     PolymerMonomerRecipe,
     PolymerRecipe,
-    generate_polymerist_smoke_polymer,
-    sbma_egpma_nhs_recipe,
-    sbma_nhs_egpma_acb_recipe,
+    generate_polymerist_recipe_polymer,
 )
 
 __all__ = [
@@ -26,8 +24,6 @@ __all__ = [
     "build_smiles_moiety_fragment",
     "PolymerMonomerRecipe",
     "PolymerRecipe",
-    "PolymeristGenerationSmokeResult",
-    "generate_polymerist_smoke_polymer",
-    "sbma_nhs_egpma_acb_recipe",
-    "sbma_egpma_nhs_recipe",
+    "PolymeristGenerationResult",
+    "generate_polymerist_recipe_polymer",
 ]

@@ -28,7 +28,7 @@ from polyzymd.builders.conjugation.polymer import (
     GeneratedPolymerFragment,
     PolymerFragmentAtom,
     PolymerFragmentResidue,
-    PolymeristGenerationSmokeResult,
+    PolymeristGenerationResult,
     PolymerMonomerRecipe,
     PolymerRecipe,
 )
@@ -1408,7 +1408,7 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
             chain_policy=ConjugationChainPolicyConfig(),
         ),
     )
-    generation = PolymeristGenerationSmokeResult(
+    generation = PolymeristGenerationResult(
         recipe_name="test",
         sequence="AA",
         cache_directory=tmp_path / "cache",
@@ -1534,7 +1534,7 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
             chain_policy=ConjugationChainPolicyConfig(),
         ),
     )
-    generation = PolymeristGenerationSmokeResult(
+    generation = PolymeristGenerationResult(
         recipe_name="test",
         sequence="AA",
         cache_directory=tmp_path / "cache",
