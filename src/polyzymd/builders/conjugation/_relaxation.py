@@ -19,6 +19,7 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     build_formal_charge_smoke_template,
     create_interchange_from_pablo_topology,
 )
+from polyzymd.builders.conjugation.structure.parsing import parse_pdb_conect_records
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.config.schema import ConjugationCcdCrosslinkConfig, ConjugationCcdPabloPolicyConfig
 
@@ -2811,25 +2812,7 @@ def _angle_degrees(first: np.ndarray, vertex: np.ndarray, third: np.ndarray) -> 
 
 def _parse_conect_records(path: Path) -> dict[int, set[int]]:
     """Parse PDB ``CONECT`` records into a serial adjacency map."""
-    conect: dict[int, set[int]] = {}
-    with path.open("r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            if not line.startswith("CONECT"):
-                continue
-            try:
-                source = int(line[6:11])
-            except ValueError:
-                continue
-            targets = conect.setdefault(source, set())
-            for start in range(11, len(line), 5):
-                field = line[start : start + 5].strip()
-                if not field:
-                    continue
-                try:
-                    targets.add(int(field))
-                except ValueError:
-                    continue
-    return conect
+    return {source: set(targets) for source, targets in parse_pdb_conect_records(path).items()}
 
 
 def _has_conect(conect: dict[int, set[int]], source: int | None, target: int | None) -> bool:

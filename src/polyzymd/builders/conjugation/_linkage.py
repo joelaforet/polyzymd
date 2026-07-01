@@ -12,14 +12,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.builders.conjugation.polymer.fragment import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.structure.parsing import parse_pdb_atom_records as _parse_atoms
 from polyzymd.builders.conjugation.structure.pdb import (
     NhsLysPdbAttachment,
     PdbAtomRecord,
     PdbLinkageAttachment,
     PlacedPolymerFragment,
 )
-
-_ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 
 
 class PdbAtomSelector(BaseModel):
@@ -416,15 +415,7 @@ def parse_pdb_atom_records(path: Path | str) -> tuple[PdbAtomRecord, ...]:
     tuple of PdbAtomRecord
         Parsed atom records with zero-based ``atom_index`` values.
     """
-    pdb_path = Path(path)
-    atoms: list[PdbAtomRecord] = []
-    with pdb_path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith(_ATOM_RECORD_PREFIXES):
-                atoms.append(PdbAtomRecord.from_pdb_line(line, atom_index=len(atoms)))
-    if not atoms:
-        raise ValueError(f"No ATOM/HETATM records found in {pdb_path}")
-    return tuple(atoms)
+    return _parse_atoms(path, require_atoms=True)
 
 
 def placed_fragment_from_resolved_plan(
@@ -734,8 +725,6 @@ class ExplicitCrosslinkRequirement(BaseModel):
 
 
 LOGGER = logging.getLogger(__name__)
-
-_ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 
 
 def detect_nhs_reactive_group(mol: Any) -> Any:
@@ -1319,14 +1308,7 @@ def _same_pdb_residue(left: PdbAtomRecord, right: PdbAtomRecord) -> bool:
 
 def _parse_pdb_atoms(path: Path) -> tuple[PdbAtomRecord, ...]:
     """Parse atom records from a PDB file."""
-    atoms: list[PdbAtomRecord] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith(_ATOM_RECORD_PREFIXES):
-                atoms.append(PdbAtomRecord.from_pdb_line(line, atom_index=len(atoms)))
-    if not atoms:
-        raise ValueError(f"No ATOM/HETATM records found in {path}")
-    return tuple(atoms)
+    return _parse_atoms(path, require_atoms=True)
 
 
 def _is_hydrogen_atom(atom: PdbAtomRecord) -> bool:

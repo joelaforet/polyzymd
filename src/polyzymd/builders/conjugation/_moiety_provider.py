@@ -266,22 +266,18 @@ def _reactive_residue_selector(
     reactive_sequence_index: int,
 ) -> dict[str, int | str]:
     """Return the PDB residue selector corresponding to a polymer sequence index."""
-    from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
+    from polyzymd.builders.conjugation.structure.parsing import parse_pdb_atom_records
 
     if reactive_sequence_index >= len(sequence):
         raise ValueError("reactive sequence index is outside the generated polymer sequence")
     residues: list[tuple[str, int, str, str]] = []
     seen: set[tuple[str, int, str, str]] = set()
-    with Path(pdb_path).open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.startswith(("ATOM", "HETATM")):
-                continue
-            atom = PdbAtomRecord.from_pdb_line(line, atom_index=0)
-            key = (atom.chain_id, atom.residue_number, atom.insertion_code, atom.residue_name)
-            if key in seen:
-                continue
-            seen.add(key)
-            residues.append(key)
+    for atom in parse_pdb_atom_records(pdb_path):
+        key = (atom.chain_id, atom.residue_number, atom.insertion_code, atom.residue_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        residues.append(key)
     if not residues:
         raise ValueError(f"No ATOM/HETATM residues found in {pdb_path}")
     pdb_order_index = _polymerist_pdb_order_index(

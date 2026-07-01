@@ -33,6 +33,13 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     create_interchange_from_pablo_topology,
 )
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.structure.parsing import (
+    parse_pdb_atom_records as parse_structure_pdb_atom_records,
+)
+from polyzymd.builders.conjugation.structure.parsing import (
+    parse_pdb_conect_pairs,
+    pdb_coordinates,
+)
 from polyzymd.builders.conjugation.structure.pdb import (
     CrosslinkedPdbAssemblyOptions,
     CrosslinkedPdbAssemblyResult,
@@ -43,7 +50,6 @@ from polyzymd.builders.conjugation.structure.pdb import (
 )
 from polyzymd.builders.conjugation.validation import build_conjugate_validation_report
 
-_ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 _SHIFT_PADDING_ANGSTROM = 10.0
 _BOX_PADDING_ANGSTROM = 30.0
 
@@ -449,14 +455,7 @@ def resolve_modifier_reactive_atom_from_placed(fragment: PlacedPolymerFragment) 
 
 def _parse_pdb_atoms(path: Path) -> tuple[PdbAtomRecord, ...]:
     """Parse atom records from a PDB file."""
-    atoms: list[PdbAtomRecord] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith(_ATOM_RECORD_PREFIXES):
-                atoms.append(PdbAtomRecord.from_pdb_line(line, atom_index=len(atoms)))
-    if not atoms:
-        raise ValueError(f"No ATOM/HETATM records found in {path}")
-    return tuple(atoms)
+    return parse_structure_pdb_atom_records(path, require_atoms=True)
 
 
 def _protein_steric_atoms(
@@ -562,12 +561,7 @@ def _write_simple_pdb(path: Path, coords: np.ndarray, elements: list[str]) -> No
 
 def _read_pdb_coords(path: Path) -> np.ndarray:
     """Read coordinates from PDB atom records."""
-    coords = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith(_ATOM_RECORD_PREFIXES):
-                coords.append([float(line[30:38]), float(line[38:46]), float(line[46:54])])
-    return np.asarray(coords, dtype=float)
+    return np.asarray(pdb_coordinates(path, require_atoms=False), dtype=float)
 
 
 def _retained_local_index(
@@ -997,7 +991,7 @@ def _generated_fragment_from_explicit_pdb(
 ) -> GeneratedPolymerFragment:
     """Parse a modifier PDB into a generated fragment using resolved selectors."""
     atoms = parse_pdb_atom_records(modifier_pdb_path)
-    bonds = _conect_bonds_from_pdb(modifier_pdb_path)
+    bonds = parse_pdb_conect_pairs(modifier_pdb_path)
     return GeneratedPolymerFragment.from_atom_records(
         atoms,
         bonds=bonds,
@@ -1013,35 +1007,6 @@ def _generated_fragment_from_explicit_pdb(
         leaving_atom_names=(),
         name=modifier_pdb_path.stem,
     )
-
-
-def _conect_bonds_from_pdb(path: Path) -> tuple[tuple[int, int], ...]:
-    """Parse unique serial-based CONECT bonds from a PDB file."""
-    bonds: set[tuple[int, int]] = set()
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.startswith("CONECT"):
-                continue
-            source = _parse_conect_serial(line[6:11])
-            if source is None:
-                continue
-            for start in range(11, len(line), 5):
-                target = _parse_conect_serial(line[start : start + 5])
-                if target is None or target == source:
-                    continue
-                bonds.add(tuple(sorted((source, target))))
-    return tuple(sorted(bonds))
-
-
-def _parse_conect_serial(value: str) -> int | None:
-    """Parse a CONECT serial field."""
-    stripped = value.strip()
-    if not stripped:
-        return None
-    try:
-        return int(stripped)
-    except ValueError:
-        return None
 
 
 def _attachment_from_plan_or_linker(

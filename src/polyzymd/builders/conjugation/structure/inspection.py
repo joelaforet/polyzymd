@@ -9,6 +9,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from polyzymd.builders.conjugation.structure.parsing import (
+    parse_int,
+    parse_pdb_atom_metadata_line,
+    parse_pdb_conect_target_serials,
+    pdb_link_side_dicts,
+)
+
 POLYZMD_PROTEIN_CHAIN = "A"
 POLYZMD_MOIETY_CHAIN = "C"
 STRUCTURAL_ATTACHMENT_CUTOFF_ANGSTROM = 1.9
@@ -105,7 +112,7 @@ POLYMER_LIKE_RESIDUES = frozenset(
 )
 
 
-class PDBAtomRecord(BaseModel):
+class _DiagnosticAtomRecord(BaseModel):
     """Lightweight atom metadata parsed from a PDB ATOM/HETATM record."""
 
     atom_index: int
@@ -267,35 +274,21 @@ def pdb_atom_records_as_dicts(inspection: PDBStructureInspection) -> list[dict[s
     return [atom.model_dump(mode="python") for atom in atoms]
 
 
-def _parse_atom_records(lines: list[str]) -> list[PDBAtomRecord]:
+def _parse_atom_records(lines: list[str]) -> list[_DiagnosticAtomRecord]:
     """Parse fixed-width ATOM/HETATM records from PDB lines."""
-    atoms: list[PDBAtomRecord] = []
+    atoms: list[_DiagnosticAtomRecord] = []
     for line_number, line in enumerate(lines, start=1):
         if not line.startswith(("ATOM  ", "HETATM")):
             continue
         atoms.append(
-            PDBAtomRecord(
-                atom_index=len(atoms),
-                atom_serial=_parse_int(line[6:11].strip()),
-                atom_name=line[12:16].strip() or None,
-                residue_name=(line[17:20].strip() or "").upper(),
-                chain_id=line[21:22].strip(),
-                residue_number=_parse_int(line[22:26].strip()),
-                res_seq=line[22:26].strip() or None,
-                insertion_code=line[26:27].strip() or None,
-                record_name=line[:6].strip(),
-                line_number=line_number,
-                element=(line[76:78].strip() or _element_from_atom_name(line[12:16])).upper()
-                or None,
-                x=_parse_float(line[30:38].strip()),
-                y=_parse_float(line[38:46].strip()),
-                z=_parse_float(line[46:54].strip()),
+            _DiagnosticAtomRecord(
+                **parse_pdb_atom_metadata_line(line, atom_index=len(atoms), line_number=line_number)
             )
         )
     return atoms
 
 
-def _summarize_residues(atoms: list[PDBAtomRecord]) -> list[PDBResidueInspection]:
+def _summarize_residues(atoms: list[_DiagnosticAtomRecord]) -> list[PDBResidueInspection]:
     """Group atom records into residue diagnostics."""
     grouped = _group_atoms_by_residue(atoms)
     residues: list[PDBResidueInspection] = []
@@ -325,12 +318,12 @@ def _summarize_residues(atoms: list[PDBAtomRecord]) -> list[PDBResidueInspection
 
 
 def _group_atoms_by_residue(
-    atoms: list[PDBAtomRecord],
-) -> dict[tuple[str, str, int | None, str | None, str | None], list[PDBAtomRecord]]:
+    atoms: list[_DiagnosticAtomRecord],
+) -> dict[tuple[str, str, int | None, str | None, str | None], list[_DiagnosticAtomRecord]]:
     """Group atoms by PDB residue identity."""
-    grouped: dict[tuple[str, str, int | None, str | None, str | None], list[PDBAtomRecord]] = (
-        defaultdict(list)
-    )
+    grouped: dict[
+        tuple[str, str, int | None, str | None, str | None], list[_DiagnosticAtomRecord]
+    ] = defaultdict(list)
     for atom in atoms:
         grouped[
             (
@@ -346,7 +339,9 @@ def _group_atoms_by_residue(
 
 def _annotate_nearest_protein_distances(
     residues: list[PDBResidueInspection],
-    residue_atoms: dict[tuple[str, str, int | None, str | None, str | None], list[PDBAtomRecord]],
+    residue_atoms: dict[
+        tuple[str, str, int | None, str | None, str | None], list[_DiagnosticAtomRecord]
+    ],
 ) -> None:
     """Annotate noncanonical residues with nearest heavy-atom protein distances."""
     protein_atoms = [
@@ -406,49 +401,12 @@ def _parse_link_candidates(
 
 def _parse_link_sides(line: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """Parse LINK residue sides with a whitespace fallback for hand-written records."""
-    parts = line.split()
-    if len(parts) >= 9 and parts[0] == "LINK":
-        return (
-            {
-                "atom_name": parts[1],
-                "residue_name": parts[2].upper(),
-                "chain_id": parts[3],
-                "residue_number": _parse_int(parts[4]),
-                "res_seq": parts[4],
-                "insertion_code": None,
-            },
-            {
-                "atom_name": parts[5],
-                "residue_name": parts[6].upper(),
-                "chain_id": parts[7],
-                "residue_number": _parse_int(parts[8]),
-                "res_seq": parts[8],
-                "insertion_code": None,
-            },
-        )
-
-    side_1 = {
-        "atom_name": line[12:16].strip() or None,
-        "residue_name": (line[17:20].strip() or "").upper(),
-        "chain_id": line[21:22].strip(),
-        "residue_number": _parse_int(line[22:26].strip()),
-        "res_seq": line[22:26].strip() or None,
-        "insertion_code": line[26:27].strip() or None,
-    }
-    side_2 = {
-        "atom_name": line[42:46].strip() or None,
-        "residue_name": (line[47:50].strip() or "").upper(),
-        "chain_id": line[51:52].strip(),
-        "residue_number": _parse_int(line[52:56].strip()),
-        "res_seq": line[52:56].strip() or None,
-        "insertion_code": line[56:57].strip() or None,
-    }
-    return side_1, side_2
+    return pdb_link_side_dicts(line)
 
 
 def _parse_conect_candidates(
     lines: list[str],
-    serial_lookup: dict[int, PDBAtomRecord],
+    serial_lookup: dict[int, _DiagnosticAtomRecord],
 ) -> list[PDBCovalentAttachmentCandidate]:
     """Parse protein-to-noncanonical candidates from CONECT records."""
     candidates: list[PDBCovalentAttachmentCandidate] = []
@@ -459,7 +417,7 @@ def _parse_conect_candidates(
         source_serial = _parse_int(line[6:11].strip())
         if source_serial is None:
             continue
-        for target_serial in _parse_conect_targets(line):
+        for target_serial in parse_pdb_conect_target_serials(line):
             pair = tuple(sorted((source_serial, target_serial)))
             if pair in seen_pairs:
                 continue
@@ -502,8 +460,8 @@ def _candidate_from_link_sides(
 
 
 def _candidate_from_atoms(
-    atom_1: PDBAtomRecord,
-    atom_2: PDBAtomRecord,
+    atom_1: _DiagnosticAtomRecord,
+    atom_2: _DiagnosticAtomRecord,
     line_number: int,
 ) -> PDBCovalentAttachmentCandidate | None:
     """Build a covalent candidate from two atom records when roles match."""
@@ -630,7 +588,7 @@ def _residue_from_link_side(
     )
 
 
-def _residue_from_atom(atom: PDBAtomRecord) -> PDBResidueInspection:
+def _residue_from_atom(atom: _DiagnosticAtomRecord) -> PDBResidueInspection:
     """Create a residue classification from one atom record."""
     category = _classify_residue(atom.residue_name)
     return PDBResidueInspection(
@@ -775,16 +733,6 @@ def _is_attachment_candidate_residue(residue: PDBResidueInspection) -> bool:
     return residue.category not in {"water", "ion", "solvent"}
 
 
-def _parse_conect_targets(line: str) -> list[int]:
-    """Parse bonded atom serials from a PDB CONECT record."""
-    targets: list[int] = []
-    for start in range(11, len(line), 5):
-        target = _parse_int(line[start : start + 5].strip())
-        if target is not None:
-            targets.append(target)
-    return targets
-
-
 def _format_residue_id(
     chain_id: str,
     residue_name: str,
@@ -799,45 +747,16 @@ def _format_residue_id(
     return f"{chain_id or '_'}:{residue_name}{number}{insertion_code or ''}"
 
 
-def _element_from_atom_name(atom_name: str) -> str:
-    """Infer an element from a PDB atom name field when element columns are blank."""
-    stripped = atom_name.strip()
-    if not stripped:
-        return ""
-    if stripped[0].isdigit() and len(stripped) > 1:
-        return stripped[1]
-    return stripped[0]
-
-
-def _has_coordinates(atom: PDBAtomRecord) -> bool:
+def _has_coordinates(atom: _DiagnosticAtomRecord) -> bool:
     """Return whether an atom has parsed Cartesian coordinates."""
     return atom.x is not None and atom.y is not None and atom.z is not None
 
 
-def _has_heavy_atom_coordinates(atom: PDBAtomRecord) -> bool:
+def _has_heavy_atom_coordinates(atom: _DiagnosticAtomRecord) -> bool:
     """Return whether an atom has non-hydrogen coordinates."""
     return _has_coordinates(atom) and (atom.element or "").upper() != "H"
 
 
 def _parse_int(value: Any) -> int | None:
     """Parse an integer-like value and return ``None`` on failure."""
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    try:
-        return int(str(value).strip())
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_float(value: Any) -> float | None:
-    """Parse a floating-point value and return ``None`` on failure."""
-    if value is None:
-        return None
-    if isinstance(value, float):
-        return value
-    try:
-        return float(str(value).strip())
-    except (TypeError, ValueError):
-        return None
+    return parse_int(value)

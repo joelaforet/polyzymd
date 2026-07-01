@@ -5,11 +5,19 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-_ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
+from polyzymd.builders.conjugation.structure.parsing import (
+    ATOM_RECORD_PREFIXES as _ATOM_RECORD_PREFIXES,
+)
+from polyzymd.builders.conjugation.structure.parsing import (
+    PdbAtomRecord,
+    parse_pdb_atom_lines,
+    parse_pdb_atom_records,
+)
+
 _MAX_CONECT_TARGETS = 4
 
 _POC_RESIDUE_NAME_MAP = {
@@ -26,82 +34,6 @@ _POC_RESIDUE_NAME_MAP = {
     "NHS": "NHS",
     "NHX": "NHX",
 }
-
-
-class PdbAtomRecord(BaseModel):
-    """Fixed-width PDB atom record data used by the crosslinked writer."""
-
-    serial: int | None = Field(None, description="Input or output PDB atom serial")
-    atom_index: int | None = Field(None, description="Zero-based source atom index")
-    atom_name: str = Field(..., min_length=1, description="PDB atom name")
-    residue_name: str = Field(..., min_length=1, description="PDB residue name")
-    chain_id: str = Field("", max_length=1, description="PDB chain identifier")
-    residue_number: int = Field(..., description="PDB residue sequence number")
-    insertion_code: str = Field("", max_length=1, description="PDB insertion code")
-    x: float = Field(..., description="X coordinate in angstrom")
-    y: float = Field(..., description="Y coordinate in angstrom")
-    z: float = Field(..., description="Z coordinate in angstrom")
-    occupancy: float = Field(1.0, description="PDB occupancy")
-    temp_factor: float = Field(0.0, description="PDB temperature factor")
-    element: str = Field("", description="Element symbol")
-    charge: str = Field("", max_length=2, description="PDB formal charge field")
-    alt_loc: str = Field("", max_length=1, description="PDB alternate location code")
-    record_name: Literal["ATOM", "HETATM"] = Field("ATOM", description="PDB record type")
-
-    @classmethod
-    def from_pdb_line(cls, line: str, *, atom_index: int | None = None) -> PdbAtomRecord:
-        """Parse one fixed-width PDB ATOM/HETATM line.
-
-        Parameters
-        ----------
-        line : str
-            Input PDB line.
-        atom_index : int or None, optional
-            Optional zero-based source atom index, by default ``None``.
-
-        Returns
-        -------
-        PdbAtomRecord
-            Parsed atom record.
-
-        Raises
-        ------
-        ValueError
-            If the line is not an ATOM/HETATM record or lacks required fields.
-        """
-        if not line.startswith(_ATOM_RECORD_PREFIXES):
-            raise ValueError("PDB atom parsing requires an ATOM or HETATM record")
-
-        atom_name = _slice(line, 12, 16).strip()
-        residue_name = _slice(line, 17, 20).strip()
-        residue_number = _parse_int(_slice(line, 22, 26).strip())
-        x = _parse_float(_slice(line, 30, 38).strip())
-        y = _parse_float(_slice(line, 38, 46).strip())
-        z = _parse_float(_slice(line, 46, 54).strip())
-        if not atom_name or not residue_name or residue_number is None:
-            raise ValueError(f"Invalid PDB atom record fields: {line.rstrip()}")
-        if x is None or y is None or z is None:
-            raise ValueError(f"Invalid PDB coordinate fields: {line.rstrip()}")
-
-        record_name = "HETATM" if line.startswith("HETATM") else "ATOM"
-        return cls(
-            serial=_parse_int(_slice(line, 6, 11).strip()),
-            atom_index=atom_index,
-            atom_name=atom_name,
-            residue_name=residue_name.upper(),
-            chain_id=_slice(line, 21, 22).strip(),
-            residue_number=residue_number,
-            insertion_code=_slice(line, 26, 27).strip(),
-            x=x,
-            y=y,
-            z=z,
-            occupancy=_parse_float(_slice(line, 54, 60).strip()) or 1.0,
-            temp_factor=_parse_float(_slice(line, 60, 66).strip()) or 0.0,
-            element=_parse_element(line),
-            charge=_slice(line, 78, 80).strip(),
-            alt_loc=_slice(line, 16, 17).strip(),
-            record_name=record_name,
-        )
 
 
 class AtomIdentity(BaseModel):
@@ -157,7 +89,7 @@ def load_pdb_as_rdkit_input(
     from rdkit import Chem
 
     pdb_path = Path(path)
-    pdb_atoms = _parse_pdb_atom_records(pdb_path)
+    pdb_atoms = parse_pdb_atom_records(pdb_path)
     mol = Chem.MolFromPDBFile(
         str(pdb_path),
         sanitize=sanitize,
@@ -214,16 +146,6 @@ def build_rdkit_input_bundle(
         rdkit_index_to_pdb_index=rdkit_index_to_pdb_index,
         serial_to_rdkit_index=serial_to_rdkit_index,
     )
-
-
-def _parse_pdb_atom_records(path: Path) -> tuple[PdbAtomRecord, ...]:
-    """Parse PDB atom records in source order for RDKit identity mapping."""
-    records: list[PdbAtomRecord] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith(_ATOM_RECORD_PREFIXES):
-                records.append(PdbAtomRecord.from_pdb_line(line, atom_index=len(records)))
-    return tuple(records)
 
 
 def _identity_from_pdb_atom(
@@ -348,11 +270,7 @@ class PlacedPolymerFragment(BaseModel):
         PlacedPolymerFragment
             Parsed placed polymer fragment.
         """
-        atoms_list: list[PdbAtomRecord] = []
-        for line in lines:
-            if line.startswith(_ATOM_RECORD_PREFIXES):
-                atoms_list.append(PdbAtomRecord.from_pdb_line(line, atom_index=len(atoms_list)))
-        atoms = tuple(atoms_list)
+        atoms = parse_pdb_atom_lines(lines)
         return cls(
             atoms=atoms,
             bonds=tuple(bonds),
@@ -860,13 +778,7 @@ def _linear_polymer_residue_order(
 
 def _parse_pdb_atoms(path: Path) -> list[PdbAtomRecord]:
     """Parse all ATOM/HETATM records from a PDB file."""
-    atoms: list[PdbAtomRecord] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith(_ATOM_RECORD_PREFIXES):
-                atoms.append(PdbAtomRecord.from_pdb_line(line, atom_index=len(atoms)))
-    if not atoms:
-        raise ValueError(f"No ATOM/HETATM records found in {path}")
+    atoms = list(parse_pdb_atom_records(path, require_atoms=True))
     return atoms
 
 
@@ -1274,41 +1186,6 @@ def _format_link_line(
         f"{polymer_atom.atom_name:<4} {polymer_atom.residue_name:>3} "
         f"{polymer_atom.chain_id:1}{polymer_atom.residue_number:4d}\n"
     )
-
-
-def _parse_element(line: str) -> str:
-    """Parse or infer a PDB element symbol."""
-    element = _slice(line, 76, 78).strip()
-    if element:
-        return _format_element(element, _slice(line, 12, 16).strip())
-    return _format_element("", _slice(line, 12, 16).strip())
-
-
-def _slice(value: str, start: int, stop: int) -> str:
-    """Return a safe fixed-width slice from a possibly short line."""
-    if len(value) < stop:
-        value = value.ljust(stop)
-    return value[start:stop]
-
-
-def _parse_int(value: str) -> int | None:
-    """Parse an integer value, returning ``None`` for blanks or invalid text."""
-    if not value:
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        return None
-
-
-def _parse_float(value: str) -> float | None:
-    """Parse a float value, returning ``None`` for blanks or invalid text."""
-    if not value:
-        return None
-    try:
-        return float(value)
-    except ValueError:
-        return None
 
 
 def _pdb_safe_residue_name(residue_name: str) -> str:
