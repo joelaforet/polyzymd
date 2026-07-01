@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from polyzymd.builders.conjugation.structure.parsing import parse_pdb_atom_lines
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord, PlacedPolymerFragment
 
 
@@ -176,10 +177,7 @@ class GeneratedPolymerFragment(BaseModel):
         GeneratedPolymerFragment
             Fragment ready for conversion to :class:`PlacedPolymerFragment`.
         """
-        pdb_atoms = []
-        for line in lines:
-            if line.startswith(("ATOM", "HETATM")):
-                pdb_atoms.append(PdbAtomRecord.from_pdb_line(line, atom_index=len(pdb_atoms)))
+        pdb_atoms = parse_pdb_atom_lines(lines)
         return cls.from_atom_records(
             pdb_atoms,
             bonds=bonds,

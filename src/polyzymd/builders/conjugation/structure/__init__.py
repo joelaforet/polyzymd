@@ -1,7 +1,6 @@
 """Internal PDB and structure helpers for conjugation workflows."""
 
 from polyzymd.builders.conjugation.structure.inspection import (
-    PDBAtomRecord,
     PDBCovalentAttachmentCandidate,
     PDBResidueInspection,
     PDBStructureInspection,
@@ -40,7 +39,6 @@ __all__ = [
     "CrosslinkedPdbAssemblyResult",
     "AtomIdentity",
     "NhsLysPdbAttachment",
-    "PDBAtomRecord",
     "PDBChainNormalizationAction",
     "PDBCovalentAttachmentCandidate",
     "PDBCleanlinessIssue",

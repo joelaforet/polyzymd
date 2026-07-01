@@ -11,17 +11,17 @@ from pydantic import BaseModel, Field
 from polyzymd.builders.conjugation.structure.inspection import (
     POLYZMD_MOIETY_CHAIN,
     POLYZMD_PROTEIN_CHAIN,
-    PDBAtomRecord,
     PDBResidueInspection,
     PDBStructureInspection,
+    _DiagnosticAtomRecord,
     _format_residue_id,
     _parse_atom_records,
-    _parse_conect_targets,
     _parse_int,
     _parse_link_sides,
     _summarize_residues,
     inspect_pdb_structure,
 )
+from polyzymd.builders.conjugation.structure.parsing import parse_pdb_conect_target_serials
 
 ERROR_SEVERITY = "error"
 
@@ -242,7 +242,7 @@ def _coerce_inspection(
 
 def _build_covalent_residue_graph(
     lines: list[str],
-    atoms: list[PDBAtomRecord],
+    atoms: list[_DiagnosticAtomRecord],
     residue_lookup: dict[str, PDBResidueInspection],
 ) -> dict[str, set[str]]:
     """Build residue connectivity from LINK and CONECT records."""
@@ -278,7 +278,7 @@ def _residue_ids_from_link(
 
 def _residue_id_pairs_from_conect(
     line: str,
-    serial_lookup: dict[int, PDBAtomRecord],
+    serial_lookup: dict[int, _DiagnosticAtomRecord],
 ) -> list[tuple[str, str]]:
     """Return residue ID pairs connected by one CONECT record."""
     source_serial = _parse_int(line[6:11].strip())
@@ -289,7 +289,7 @@ def _residue_id_pairs_from_conect(
         return []
     source_residue_id = _residue_id_from_atom(source_atom)
     pairs: list[tuple[str, str]] = []
-    for target_serial in _parse_conect_targets(line):
+    for target_serial in parse_pdb_conect_target_serials(line):
         target_atom = serial_lookup.get(target_serial)
         if target_atom is None:
             continue
@@ -630,7 +630,7 @@ def _residue_id_from_link_side(side: dict[str, Any]) -> str:
     )
 
 
-def _residue_id_from_atom(atom: PDBAtomRecord) -> str:
+def _residue_id_from_atom(atom: _DiagnosticAtomRecord) -> str:
     """Format a residue ID from an atom record."""
     return _format_residue_id(
         atom.chain_id,
