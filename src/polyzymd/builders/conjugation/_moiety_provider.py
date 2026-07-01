@@ -11,10 +11,10 @@ from polyzymd.builders.conjugation._specs import _generated_fragment_from_moiety
 from polyzymd.builders.conjugation.polymer import (
     GeneratedMoietyFragment,
     GeneratedPolymerFragment,
-    PolymeristGenerationSmokeResult,
+    PolymeristGenerationResult,
     PolymerRecipe,
     build_smiles_moiety_fragment,
-    generate_polymerist_smoke_polymer,
+    generate_polymerist_recipe_polymer,
 )
 from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
 
@@ -28,7 +28,7 @@ class ResolvedMoietySource(BaseModel):
     source_fragment: Any | None = Field(default=None, exclude=True)
     source_kind: Literal["polymer", "smiles"]
     sidecars: dict[str, Path] = Field(default_factory=dict)
-    generation: PolymeristGenerationSmokeResult | None = None
+    generation: PolymeristGenerationResult | None = None
     reactive_sequence_index: int | None = None
     reactive_selector: dict[str, int | str] | None = None
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
@@ -142,7 +142,7 @@ def _resolve_polymer_recipe_source(
     if not isinstance(recipe, PolymerRecipe):
         raise ValueError("attachment.moiety.polymer_recipe must define a PolymerRecipe")
     reactive_sequence_index = _reactive_sequence_index(recipe)
-    generation = generate_polymerist_smoke_polymer(
+    generation = generate_polymerist_recipe_polymer(
         recipe,
         output_dir / f"{attachment_index:02d}_{_safe_attachment_token(attachment.name)}",
         force_regenerate=force_regenerate,

@@ -1,4 +1,4 @@
-"""Tests for conjugation polymer recipes and Polymerist smoke generation."""
+"""Tests for conjugation polymer recipes and Polymerist generation."""
 
 from __future__ import annotations
 
@@ -13,12 +13,14 @@ from polyzymd.builders.conjugation.polymer.recipe import (
     PolymerRecipe,
     _polymerist_to_pdb_aligned_rdkit_mol,
     _write_rdkit_sdf_sidecar,
-    generate_polymerist_smoke_polymer,
-    sbma_egpma_nhs_recipe,
-    sbma_nhs_egpma_acb_recipe,
+    generate_polymerist_recipe_polymer,
 )
 from polyzymd.config.loader import load_config
 from polyzymd.config.schema import SimulationConfig
+from tests._support.conjugation_polymer_recipes import (
+    sbma_egpma_nhs_recipe,
+    sbma_nhs_egpma_acb_recipe,
+)
 
 
 def _minimal_simulation_config_data() -> dict:
@@ -258,12 +260,12 @@ conjugation:
     assert loaded_recipe.generate_sequence()[loaded_recipe.effective_reactive_index] == "C"
 
 
-def test_real_polymerist_generation_smoke(tmp_path):
+def test_real_polymerist_recipe_generation(tmp_path):
     """Polymerist should consume the real SBMA/EGPMA/NHS recipe when installed."""
     recipe = sbma_egpma_nhs_recipe(length=3, seed=5, reactive_monomer_index=1)
 
     try:
-        result = generate_polymerist_smoke_polymer(recipe, tmp_path / "polymerist", max_retries=1)
+        result = generate_polymerist_recipe_polymer(recipe, tmp_path / "polymerist", max_retries=1)
     except Exception as exc:
         pytest.skip(f"Polymerist generation stack unavailable in this environment: {exc}")
 
@@ -298,11 +300,11 @@ def test_polymerist_to_pdb_aligned_rdkit_mol_matches_pdb_atoms_and_bond_orders(
     assert all(float(bond.GetBondTypeAsDouble()) > 0.0 for bond in mol.GetBonds())
 
 
-def test_generate_polymerist_smoke_polymer_returns_pdb_aligned_rdkit_sidecar(
+def test_generate_polymerist_recipe_polymer_returns_pdb_aligned_rdkit_sidecar(
     monkeypatch,
     tmp_path,
 ):
-    """Smoke generation should return a PDB-aligned RDKit mol and SDF sidecar."""
+    """Recipe generation should return a PDB-aligned RDKit mol and SDF sidecar."""
     built_sequences = []
 
     class FakeFragmentGenerator:
@@ -356,7 +358,7 @@ def test_generate_polymerist_smoke_polymer_returns_pdb_aligned_rdkit_sidecar(
     monkeypatch.setitem(sys.modules, "polyzymd.data.reactions", fake_reactions_module)
 
     recipe = sbma_nhs_egpma_acb_recipe()
-    result = generate_polymerist_smoke_polymer(recipe, tmp_path / "cache")
+    result = generate_polymerist_recipe_polymer(recipe, tmp_path / "cache")
     Chem = pytest.importorskip("rdkit.Chem")
     sidecar_mols = [
         mol
