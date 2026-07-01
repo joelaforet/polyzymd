@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from polyzymd.builders.conjugation.polymer import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.polymer.recipe import (
     generate_polymerist_smoke_polymer,
     sbma_egpma_nhs_recipe,

@@ -47,7 +47,7 @@ from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestionResult, 
 from polyzymd.builders.conjugation.pablo.parameterization import (
     create_interchange_from_pablo_topology,
 )
-from polyzymd.builders.conjugation.polymer import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.polymer.recipe import (
     generate_polymerist_smoke_polymer,
     sbma_egpma_nhs_recipe,
