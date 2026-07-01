@@ -15,8 +15,8 @@ from polyzymd.builders.conjugation.polymer import (
     PolymerRecipe,
     build_smiles_moiety_fragment,
     generate_polymerist_smoke_polymer,
-    generated_fragment_from_polymerist_pdb,
 )
+from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
 
 
 class ResolvedMoietySource(BaseModel):
