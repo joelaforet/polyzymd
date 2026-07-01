@@ -28,18 +28,6 @@ __all__ = [
     "PolymerRecipe",
     "PolymeristGenerationSmokeResult",
     "generate_polymerist_smoke_polymer",
-    "generated_fragment_from_polymerist_pdb",
     "sbma_nhs_egpma_acb_recipe",
     "sbma_egpma_nhs_recipe",
 ]
-
-
-def __getattr__(name: str):
-    """Lazily expose Polymerist PDB helpers without import-time reaction cycles."""
-    if name == "generated_fragment_from_polymerist_pdb":
-        from polyzymd.builders.conjugation.polymer.polymerist import (
-            generated_fragment_from_polymerist_pdb,
-        )
-
-        return generated_fragment_from_polymerist_pdb
-    raise AttributeError(name)

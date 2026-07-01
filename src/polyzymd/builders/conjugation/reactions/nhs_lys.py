@@ -19,11 +19,7 @@ from polyzymd.builders.conjugation.reactions._rdkit_graph import (
     extract_lysine_reactive_site,
     plan_nhs_lys_amide,
 )
-from polyzymd.builders.conjugation.reactions.base import (
-    ReactionContext,
-    ReactionResult,
-    ReactionTemplate,
-)
+from polyzymd.builders.conjugation.reactions.base import ReactionTemplate
 
 
 class NhsLysReactionSettings(BaseModel):
@@ -310,10 +306,6 @@ class NhsLysReaction(ReactionTemplate):
             reactive_group,
             site_hydrogen_indices_to_remove=site_hydrogen_indices_to_remove,
         )
-
-    def plan(self, context: ReactionContext) -> ReactionResult:
-        """Resolve a generic NHS-Lys plan from a reaction context."""
-        return super().plan(context)
 
 
 def _coalesce_text(*values: str | None) -> str:

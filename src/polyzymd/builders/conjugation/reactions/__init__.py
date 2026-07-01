@@ -1,10 +1,6 @@
 """Reaction-template registry for conjugation builders."""
 
-from polyzymd.builders.conjugation.reactions.base import (
-    ReactionContext,
-    ReactionResult,
-    ReactionTemplate,
-)
+from polyzymd.builders.conjugation.reactions.base import ReactionTemplate
 from polyzymd.builders.conjugation.reactions.library import get_reaction, list_reactions
 from polyzymd.builders.conjugation.reactions.n_glycosylation import (
     NGlycosylationReaction,
@@ -17,8 +13,6 @@ __all__ = [
     "NGlycosylationReactionSettings",
     "NhsLysReaction",
     "NhsLysReactionSettings",
-    "ReactionContext",
-    "ReactionResult",
     "ReactionTemplate",
     "get_reaction",
     "list_reactions",
