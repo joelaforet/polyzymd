@@ -30,10 +30,6 @@ from typing import TypeVar
 
 import pytest
 
-from polyzymd.builders.conjugation._assembly import (
-    PackmolModifierPlacementSettings,
-    place_modifier_with_packmol,
-)
 from polyzymd.builders.conjugation._linkage import (
     NhsLysModifierLinker,
     PabloCrosslinkRequirement,
@@ -46,6 +42,10 @@ from polyzymd.builders.conjugation._relaxation import (
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestionResult, PabloIngestor
 from polyzymd.builders.conjugation.pablo.parameterization import (
     create_interchange_from_pablo_topology,
+)
+from polyzymd.builders.conjugation.placement import (
+    PackmolModifierPlacementSettings,
+    place_modifier_with_packmol,
 )
 from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.polymer.recipe import generate_multi_residue_molecule

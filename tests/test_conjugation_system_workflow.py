@@ -9,10 +9,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from polyzymd.builders.conjugation._assembly import (
-    ModifierConstructionSettings,
-    PackmolModifierPlacementResult,
-)
 from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
     LinkageBond,
@@ -21,8 +17,10 @@ from polyzymd.builders.conjugation._linkage import (
     ReactiveEndpoint,
     ResolvedAttachmentPlan,
 )
+from polyzymd.builders.conjugation.construction import ModifierConstructionSettings
 from polyzymd.builders.conjugation.pablo.ingestion import PabloAvailability, PabloIngestionResult
 from polyzymd.builders.conjugation.pablo.parameterization import InterchangeParameterizationResult
+from polyzymd.builders.conjugation.placement import PackmolModifierPlacementResult
 from polyzymd.builders.conjugation.polymer import (
     GeneratedMoietyFragment,
     GeneratedPolymerFragment,
