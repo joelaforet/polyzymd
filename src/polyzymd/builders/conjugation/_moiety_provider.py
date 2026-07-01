@@ -11,10 +11,10 @@ from polyzymd.builders.conjugation._specs import _generated_fragment_from_moiety
 from polyzymd.builders.conjugation.polymer import (
     GeneratedMoietyFragment,
     GeneratedPolymerFragment,
-    PolymeristGenerationResult,
+    MultiResidueGenerationResult,
     PolymerRecipe,
     build_smiles_moiety_fragment,
-    generate_polymerist_recipe_polymer,
+    generate_multi_residue_molecule,
 )
 from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
 
@@ -28,7 +28,7 @@ class ResolvedMoietySource(BaseModel):
     source_fragment: Any | None = Field(default=None, exclude=True)
     source_kind: Literal["polymer", "smiles"]
     sidecars: dict[str, Path] = Field(default_factory=dict)
-    generation: PolymeristGenerationResult | None = None
+    generation: MultiResidueGenerationResult | None = None
     reactive_sequence_index: int | None = None
     reactive_selector: dict[str, int | str] | None = None
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
@@ -60,9 +60,9 @@ def resolve_moiety_source(
     force_regenerate : bool, optional
         Regenerate polymer artifacts when using a polymer recipe, by default ``False``.
     max_retries : int, optional
-        Polymerist generation retry count, by default 3.
+        Multi-residue generation retry count, by default 3.
     energy_minimize : bool, optional
-        Whether Polymerist should minimize generated polymers, by default ``True``.
+        Whether the generation backend should minimize generated polymers, by default ``True``.
     random_seed : int or None, optional
         Optional RDKit seed for SMILES moiety conformer generation, by default ``None``.
 
@@ -137,12 +137,12 @@ def _resolve_polymer_recipe_source(
     max_retries: int,
     energy_minimize: bool,
 ) -> ResolvedMoietySource:
-    """Resolve a Polymerist-backed polymer source."""
+    """Resolve a recipe-backed multi-residue polymer source."""
     recipe = getattr(attachment.moiety, "polymer_recipe", None)
     if not isinstance(recipe, PolymerRecipe):
         raise ValueError("attachment.moiety.polymer_recipe must define a PolymerRecipe")
     reactive_sequence_index = _reactive_sequence_index(recipe)
-    generation = generate_polymerist_recipe_polymer(
+    generation = generate_multi_residue_molecule(
         recipe,
         output_dir / f"{attachment_index:02d}_{_safe_attachment_token(attachment.name)}",
         force_regenerate=force_regenerate,
@@ -150,7 +150,7 @@ def _resolve_polymer_recipe_source(
         energy_minimize=energy_minimize,
     )
     if generation.pdb_path is None:
-        raise RuntimeError("Polymerist did not produce a conjugate-polymer PDB")
+        raise RuntimeError("Generation backend did not produce a conjugate-polymer PDB")
     reactive_selector = _reactive_residue_selector(
         generation.pdb_path,
         sequence=generation.sequence,
@@ -290,7 +290,7 @@ def _reactive_residue_selector(
     )
     if pdb_order_index >= len(residues):
         raise ValueError(
-            "reactive sequence index maps outside the Polymerist PDB residue list: "
+            "reactive sequence index maps outside the generated PDB residue list: "
             f"sequence_index={reactive_sequence_index}, pdb_order_index={pdb_order_index}, "
             f"residues={len(residues)}"
         )
