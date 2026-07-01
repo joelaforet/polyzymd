@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PolyzyMD Conjugation Engine Refactor Plan</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f7f9;
+      --card: #ffffff;
+      --ink: #20242a;
+      --muted: #667085;
+      --accent: #2563eb;
+      --border: #d0d5dd;
+      --code: #101828;
+      --code-bg: #eef2ff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --card: #1f2937;
+        --ink: #f9fafb;
+        --muted: #cbd5e1;
+        --accent: #60a5fa;
+        --border: #374151;
+        --code: #e5e7eb;
+        --code-bg: #0f172a;
+      }
+    }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1rem 4rem;
+    }
+    header, section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.25rem 1.5rem;
+      margin: 1rem 0;
+      box-shadow: 0 1px 2px rgb(16 24 40 / 0.06);
+    }
+    h1, h2, h3 {
+      line-height: 1.2;
+      margin-top: 0;
+    }
+    h1 { font-size: 2rem; }
+    h2 { color: var(--accent); margin-bottom: 0.5rem; }
+    h3 { margin-top: 1rem; }
+    .meta, .note { color: var(--muted); }
+    .phase { border-left: 5px solid var(--accent); }
+    code, pre {
+      color: var(--code);
+      background: var(--code-bg);
+      border-radius: 8px;
+    }
+    code { padding: 0.1rem 0.35rem; }
+    pre {
+      overflow-x: auto;
+      padding: 1rem;
+      border: 1px solid var(--border);
+    }
+    ul.checklist {
+      list-style: none;
+      padding-left: 0;
+    }
+    ul.checklist li {
+      margin: 0.35rem 0;
+      display: flex;
+      gap: 0.6rem;
+      align-items: flex-start;
+    }
+    input[type="checkbox"] {
+      margin-top: 0.3rem;
+      transform: scale(1.1);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.55rem 0.7rem;
+      vertical-align: top;
+    }
+    th { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+    .risk-low { color: #16a34a; font-weight: 600; }
+    .risk-med { color: #ca8a04; font-weight: 600; }
+    .risk-high { color: #dc2626; font-weight: 600; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>PolyzyMD Conjugation Engine Refactor Plan</h1>
+    <p class="meta">Standalone checklist for iterative branches and PRs. This plan preserves the functional conjugation implementation while reducing bloat and duplication in small, validated phases.</p>
+    <p><strong>Known working checkpoint config:</strong></p>
+    <pre><code>CONFIG=/home/joelaforet/Shirts-Lab-Linux/Conjugation_Tests/constant_200_conjugation_configs/config_005_linkages.yaml</code></pre>
+    <p><strong>Branching model:</strong></p>
+    <ul>
+      <li>Functional base branch: <code>refactor/conjugation-engine</code></li>
+      <li>Integration branch for this effort: <code>conjugation-engine-refactor</code></li>
+      <li>One work branch per checklist phase, branched from <code>conjugation-engine-refactor</code>, e.g. <code>conjugation-engine-refactor-phase-01-shims</code></li>
+      <li>Each work branch opens a PR into <code>conjugation-engine-refactor</code></li>
+      <li>When all phases are complete, merge <code>conjugation-engine-refactor</code> back into <code>refactor/conjugation-engine</code></li>
+    </ul>
+  </header>
+
+  <section>
+    <h2>Global rules</h2>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Before each phase, inspect <code>git status --short</code>, <code>git diff</code>, and <code>git log --oneline -10</code>.</span></li>
+      <li><input type="checkbox"> <span>Do not stage pre-existing unrelated changes: <code>pixi.*</code>, POC notebooks/temp files, or untracked local test files.</span></li>
+      <li><input type="checkbox"> <span>Keep every phase small enough to review independently.</span></li>
+      <li><input type="checkbox"> <span>Do not touch notebook/marimo POC files unless a dedicated POC cleanup phase is explicitly approved.</span></li>
+      <li><input type="checkbox"> <span>After each phase, run targeted tests, the conjugation subset, formatting/linting, and the user config checkpoint.</span></li>
+      <li><input type="checkbox"> <span>Preserve atom order, PDB serials, insertion codes, chain IDs, residue IDs, coordinates, CONECT evidence, and charge provenance.</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Standard checkpoint commands</h2>
+    <p>Use the phase number in the checkpoint directory name.</p>
+    <pre><code>CHECK=/tmp/polyzymd-refactor-checkpoints/phase-N
+
+pixi run -e build polyzymd build --config "$CONFIG" --replicates 1 \
+  --scratch-dir "$CHECK/scratch" \
+  --projects-dir "$CHECK/projects"</code></pre>
+    <p class="note">If CLI flags differ, use the equivalent Python workflow call. The checkpoint passes when the known LipA NHS-Lys conjugation build completes and writes the expected conjugation/local-minimization/solvation artifacts.</p>
+  </section>
+
+  <section class="phase" id="phase-0">
+    <h2>Phase 0 — Baseline safety checkpoint</h2>
+    <p><strong>Objective:</strong> Lock in current working behavior before deleting or moving code.</p>
+    <h3>To-do</h3>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Run the conjugation test subset.</span></li>
+      <li><input type="checkbox"> <span>Run schema tests.</span></li>
+      <li><input type="checkbox"> <span>Run lint/format checks.</span></li>
+      <li><input type="checkbox"> <span>Run the checkpoint config and archive/log the output location.</span></li>
+    </ul>
+    <h3>Tests</h3>
+    <pre><code>pixi run -e build pytest tests/ -v -k "conjugation"
+pixi run -e build pytest tests/config/test_schema.py -v
+pixi run -e build ruff check src/ tests/
+pixi run -e build black src/ tests/ --check</code></pre>
+    <p><strong>Commit:</strong> optional <code>test(conjugation): capture refactor baseline</code></p>
+    <p><strong>Risk:</strong> <span class="risk-low">Low</span>. No production changes.</p>
+  </section>
+
+  <section class="phase" id="phase-1">
+    <h2>Phase 1 — Remove easy shims and dead planning API</h2>
+    <p><strong>Objective:</strong> Delete low-risk compatibility surfaces that are not needed by the generic <code>AttachmentBuildSpec</code> path.</p>
+    <h3>To-do</h3>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Remove <code>polymer/__init__.py::__getattr__</code>.</span></li>
+      <li><input type="checkbox"> <span>Import <code>generated_fragment_from_polymerist_pdb</code> directly from <code>polymer.polymerist</code>.</span></li>
+      <li><input type="checkbox"> <span>Audit and remove unused <code>ReactionContext</code>, <code>ReactionResult</code>, and <code>ReactionTemplate.plan()</code>.</span></li>
+      <li><input type="checkbox"> <span>Remove dead <code>plan()</code> overrides from NHS-Lys and N-glycosylation if unused.</span></li>
+      <li><input type="checkbox"> <span>Delete tests whose only purpose is removed private planning/shim API.</span></li>
+    </ul>
+    <h3>Files</h3>
+    <p><code>polymer/__init__.py</code>, <code>_moiety_provider.py</code>, <code>system_workflow.py</code>, <code>reactions/base.py</code>, <code>reactions/nhs_lys.py</code>, <code>reactions/n_glycosylation.py</code>, relevant tests.</p>
+    <h3>Tests</h3>
+    <pre><code>pixi run -e build pytest tests/test_conjugation_nhs_lys.py tests/test_conjugation_n_glycosylation.py -v
+pixi run -e build pytest tests/test_conjugation_system_workflow.py tests/test_conjugation_api.py -v</code></pre>
+    <p><strong>Commit:</strong> <code>refactor(conjugation): remove legacy planning shims</code></p>
+    <p><strong>Risk:</strong> <span class="risk-low">Low/Medium</span>. Hidden external imports may exist, but internal path should be generic.</p>
+  </section>
+
+  <section class="phase" id="phase-2">
+    <h2>Phase 2 — Remove production POC/smoke leakage</h2>
+    <p><strong>Objective:</strong> Remove source-code APIs that only exist for old marimo/notebook POC or smoke naming. Tests should use pytest fixtures, not production POC helpers.</p>
+    <h3>To-do</h3>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Rename production-used <code>generate_polymerist_smoke_polymer()</code> to a neutral provider name.</span></li>
+      <li><input type="checkbox"> <span>Move hardcoded POC recipe constants/functions out of production if only tests/notebooks use them.</span></li>
+      <li><input type="checkbox"> <span>Replace test usage of POC helpers with pytest fixtures.</span></li>
+      <li><input type="checkbox"> <span>Do not edit notebook POC files in this phase.</span></li>
+    </ul>
+    <h3>Tests</h3>
+    <pre><code>pixi run -e build pytest tests/test_conjugation_polymer_recipe.py tests/test_conjugation_polymerist_pdb.py -v
+pixi run -e build pytest tests/ -v -k "conjugation"</code></pre>
+    <p><strong>Commit:</strong> <code>refactor(conjugation): remove production POC recipe paths</code></p>
+    <p><strong>Risk:</strong> <span class="risk-med">Medium</span>. Public imports may reference old recipe names.</p>
+  </section>
+
+  <section class="phase" id="phase-3">
+    <h2>Phase 3 — Centralize PDB atom and connectivity parsing</h2>
+    <p><strong>Objective:</strong> Replace repeated fixed-width PDB, CONECT, and LINK parsing with one shared abstraction while preserving identity and evidence.</p>
+    <h3>To-do</h3>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Add <code>structure/parsing.py</code> with canonical atom, CONECT, LINK, and coordinate readers.</span></li>
+      <li><input type="checkbox"> <span>Add identity-preservation tests for atom order, serials, insertion codes, altLocs, residue IDs, and CONECT pairs.</span></li>
+      <li><input type="checkbox"> <span>Migrate callers in small chunks: <code>structure/pdb.py</code>, <code>_linkage.py</code>, <code>_assembly.py</code>, <code>validation.py</code>, <code>polymer/polymerist.py</code>, <code>pablo/product.py</code>, <code>pablo/ingestion.py</code>, <code>_relaxation.py</code>, <code>system_workflow.py</code>.</span></li>
+      <li><input type="checkbox"> <span>Delete old local parser implementations once migrated.</span></li>
+    </ul>
+    <h3>Tests</h3>
+    <pre><code>pixi run -e build pytest tests/test_conjugation_pdb_assembly.py tests/test_conjugation_validation.py -v
+pixi run -e build pytest tests/test_conjugation_pablo_adapter.py tests/test_conjugation_polymerist_pdb.py -v
+pixi run -e build pytest tests/test_conjugation_integrated_construction.py -v</code></pre>
+    <p><strong>Commits:</strong> <code>refactor(conjugation): add shared PDB parser</code>, then <code>refactor(conjugation): migrate PDB parsing callers</code></p>
+    <p><strong>Risk:</strong> <span class="risk-high">High</span>. Parser drift can break linkage identity; validate with the known config.</p>
+  </section>
+
+  <section class="phase" id="phase-4">
+    <h2>Phase 4 — Delete specs-obsolete assembly paths</h2>
+    <p><strong>Objective:</strong> Make <code>AttachmentBuildSpec</code> the only construction boundary and remove legacy single-linker construction paths.</p>
+    <h3>To-do</h3>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Create focused <code>placement.py</code> for Packmol resolved-plan placement helpers.</span></li>
+      <li><input type="checkbox"> <span>Create focused <code>construction.py</code> only for specs-first construction settings/results if needed.</span></li>
+      <li><input type="checkbox"> <span>Migrate production imports away from <code>_assembly.py</code>.</span></li>
+      <li><input type="checkbox"> <span>Delete <code>construct_modifier_linked_protein()</code> and <code>construct_explicit_pdb_linkage()</code> if tests can target generic construction.</span></li>
+      <li><input type="checkbox"> <span>Delete <code>_assembly.py</code> once all production imports are gone.</span></li>
+    </ul>
+    <h3>Tests</h3>
+    <pre><code>pixi run -e build pytest tests/test_conjugation_packmol_placement.py -v
+pixi run -e build pytest tests/test_conjugation_integrated_construction.py -v
+pixi run -e build pytest tests/test_conjugation_system_workflow.py -v</code></pre>
+    <p><strong>Commit:</strong> <code>refactor(conjugation): migrate assembly to specs-first construction</code></p>
+    <p><strong>Risk:</strong> <span class="risk-med">Medium</span>. Private imports may exist in tests or user scripts.</p>
+  </section>
+
+  <section class="phase" id="phase-5">
+    <h2>Phase 5 — Centralize Pablo product and charge helpers</h2>
+    <p><strong>Objective:</strong> Remove duplicated product-state charge/template/SDF/provenance logic while preserving charge auditability.</p>
+    <h3>To-do</h3>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Split product-state residue definitions and product-link planning from <code>pablo/product.py</code>.</span></li>
+      <li><input type="checkbox"> <span>Centralize SDF reading, bond-order validation, formal charge extraction, and atom-order checks.</span></li>
+      <li><input type="checkbox"> <span>Centralize product charge-template and charge reconciliation helpers.</span></li>
+      <li><input type="checkbox"> <span>Update <code>system_workflow.py</code> and <code>final_interchange.py</code> to use canonical helpers.</span></li>
+      <li><input type="checkbox"> <span>Assert charge bridge JSON, product residue names, atom mapping, and total-charge evidence are still produced.</span></li>
+    </ul>
+    <h3>Tests</h3>
+    <pre><code>pixi run -e build pytest tests/test_conjugation_charge_templates.py tests/test_conjugation_charge_bridge.py -v
+pixi run -e build pytest tests/test_conjugation_product_pablo.py tests/test_conjugation_final_interchange.py -v
+pixi run -e build pytest tests/test_conjugation_system_workflow.py -v</code></pre>
+    <p><strong>Commit:</strong> <code>refactor(conjugation): centralize Pablo product charge helpers</code></p>
+    <p><strong>Risk:</strong> <span class="risk-high">High</span>. Do not lose charge provenance or product-state residue mapping.</p>
+  </section>
+
+  <section class="phase" id="phase-6">
+    <h2>Phase 6 — Mechanically split relaxation workflow</h2>
+    <p><strong>Objective:</strong> Break up <code>_relaxation.py</code> without changing behavior.</p>
+    <h3>To-do</h3>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Create <code>relaxation/</code> package with focused modules: settings, geometry, local minimization, vacuum smoke, frozen protein, OpenMM utilities, reporting.</span></li>
+      <li><input type="checkbox"> <span>Keep <code>_relaxation.py</code> as a thin facade temporarily if internal imports still use it.</span></li>
+      <li><input type="checkbox"> <span>Move code mechanically first; avoid semantic redesign.</span></li>
+      <li><input type="checkbox"> <span>Use shared parser from Phase 3 for any PDB coordinate/record reads.</span></li>
+    </ul>
+    <h3>Tests</h3>
+    <pre><code>pixi run -e build pytest tests/test_conjugation_local_minimization.py -v
+pixi run -e build pytest tests/test_conjugation_vacuum_smoke.py -v
+pixi run -e build pytest tests/test_conjugation_system_workflow.py -v</code></pre>
+    <p><strong>Commit:</strong> <code>refactor(conjugation): split relaxation workflow modules</code></p>
+    <p><strong>Risk:</strong> <span class="risk-med">Medium</span>. Keep this phase mechanical to avoid OpenMM behavior changes.</p>
+  </section>
+
+  <section class="phase" id="phase-7">
+    <h2>Phase 7 — Audit and deduplicate split relaxation code</h2>
+    <p><strong>Objective:</strong> After the mechanical split, remove genuine duplicated relaxation helpers and stale paths.</p>
+    <h3>To-do</h3>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Deduplicate OpenMM platform/integrator setup.</span></li>
+      <li><input type="checkbox"> <span>Deduplicate PDB writing/reporting helpers.</span></li>
+      <li><input type="checkbox"> <span>Deduplicate geometry diagnostics and restraint creation.</span></li>
+      <li><input type="checkbox"> <span>Remove unused fallback branches proven unreachable by tests and checkpoint config.</span></li>
+    </ul>
+    <h3>Tests</h3>
+    <pre><code>pixi run -e build pytest tests/test_conjugation_local_minimization.py -v
+pixi run -e build pytest tests/test_conjugation_vacuum_smoke.py -v
+pixi run -e build pytest tests/test_conjugation_validation.py -v</code></pre>
+    <p><strong>Commits:</strong> small commits such as <code>refactor(conjugation): deduplicate relaxation geometry helpers</code>.</p>
+    <p><strong>Risk:</strong> <span class="risk-med">Medium/High</span>. Validate the known config after each semantic cleanup.</p>
+  </section>
+
+  <section class="phase" id="phase-8">
+    <h2>Phase 8 — Replace custom logic with native APIs where safe</h2>
+    <p><strong>Objective:</strong> Use RDKit/OpenFF/Pablo/MDAnalysis/OpenMM native functions where they preserve PolyzyMD identity and provenance requirements.</p>
+    <h3>To-do</h3>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Replace custom SMARTS/reaction parsing with RDKit reaction APIs where atom mapping is preserved.</span></li>
+      <li><input type="checkbox"> <span>Use RDKit/OpenFF molecule graph APIs for bond orders/formal charges where synchronized with PDB/SDF atom order.</span></li>
+      <li><input type="checkbox"> <span>Use MDAnalysis distance utilities for large coordinate/contact calculations if they can operate directly on arrays concisely and faster.</span></li>
+      <li><input type="checkbox"> <span>Use Pablo native crosslink helpers only where product-state empty-leaving-group behavior is supported.</span></li>
+      <li><input type="checkbox"> <span>Use OpenMM native state/platform helpers where they simplify code without changing behavior.</span></li>
+    </ul>
+    <h3>Tests</h3>
+    <pre><code>pixi run -e build pytest tests/test_conjugation_product_pablo.py -v
+pixi run -e build pytest tests/test_conjugation_charge_bridge.py -v
+pixi run -e build pytest tests/test_conjugation_final_interchange.py -v
+pixi run -e build pytest tests/test_conjugation_system_workflow.py -v</code></pre>
+    <p><strong>Commit pattern:</strong> one commit per dependency boundary, e.g. <code>refactor(conjugation): use RDKit native connectivity where safe</code>.</p>
+    <p><strong>Risk:</strong> <span class="risk-high">High</span>. Native APIs may reorder atoms or drop PDB metadata; only merge with identity-preservation tests.</p>
+  </section>
+
+  <section>
+    <h2>Phase summary</h2>
+    <table>
+      <thead><tr><th>Phase</th><th>Branch suggestion</th><th>PR target</th><th>Risk</th></tr></thead>
+      <tbody>
+        <tr><td>0 Baseline</td><td><code>conjugation-engine-refactor-phase-00-baseline</code></td><td><code>conjugation-engine-refactor</code></td><td class="risk-low">Low</td></tr>
+        <tr><td>1 Shims/dead API</td><td><code>conjugation-engine-refactor-phase-01-shims</code></td><td><code>conjugation-engine-refactor</code></td><td class="risk-low">Low/Med</td></tr>
+        <tr><td>2 POC/smoke leakage</td><td><code>conjugation-engine-refactor-phase-02-poc-smoke</code></td><td><code>conjugation-engine-refactor</code></td><td class="risk-med">Medium</td></tr>
+        <tr><td>3 Shared parser</td><td><code>conjugation-engine-refactor-phase-03-parser</code></td><td><code>conjugation-engine-refactor</code></td><td class="risk-high">High</td></tr>
+        <tr><td>4 Specs-first assembly</td><td><code>conjugation-engine-refactor-phase-04-assembly</code></td><td><code>conjugation-engine-refactor</code></td><td class="risk-med">Medium</td></tr>
+        <tr><td>5 Pablo charge helpers</td><td><code>conjugation-engine-refactor-phase-05-pablo-charge</code></td><td><code>conjugation-engine-refactor</code></td><td class="risk-high">High</td></tr>
+        <tr><td>6 Relaxation split</td><td><code>conjugation-engine-refactor-phase-06-relaxation-split</code></td><td><code>conjugation-engine-refactor</code></td><td class="risk-med">Medium</td></tr>
+        <tr><td>7 Relaxation dedupe</td><td><code>conjugation-engine-refactor-phase-07-relaxation-dedupe</code></td><td><code>conjugation-engine-refactor</code></td><td class="risk-high">Med/High</td></tr>
+        <tr><td>8 Native APIs</td><td><code>conjugation-engine-refactor-phase-08-native-apis</code></td><td><code>conjugation-engine-refactor</code></td><td class="risk-high">High</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>
