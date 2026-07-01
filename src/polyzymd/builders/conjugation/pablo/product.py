@@ -14,6 +14,17 @@ from polyzymd.builders.conjugation._linkage import (
     PabloCrosslinkRequirement,
     parse_pdb_atom_records,
 )
+from polyzymd.builders.conjugation.pablo.sdf import (
+    charged_sdf_formal_charges,
+    explicit_bond_order,
+    fragment_atom_element,
+    fragment_atoms_in_sdf_order,
+    guess_element,
+    read_sdf_molecules,
+    select_sdf_molecule,
+    validate_sdf_atom_elements,
+    validate_sdf_bond_orders,
+)
 from polyzymd.builders.conjugation.structure.parsing import parse_pdb_conect_pairs
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
@@ -583,7 +594,7 @@ def _fragment_bonds(generated_fragment: Any | None) -> tuple[tuple[Any, Any, int
     order_lookup: dict[frozenset[Any], int] = {}
     for entry in getattr(generated_fragment, "bond_orders", ()) or ():
         if len(entry) >= 3:
-            order_lookup[frozenset((entry[0], entry[1]))] = _explicit_bond_order(
+            order_lookup[frozenset((entry[0], entry[1]))] = explicit_bond_order(
                 entry[2], source="generated polymer fragment"
             )
     bonds = []
@@ -617,15 +628,7 @@ def _polymer_sdf_bonds(
     if not sdf_path.exists():
         raise ValueError(f"Polymer SDF sidecar does not exist: {sdf_path}")
 
-    from rdkit import Chem
-
-    supplier = Chem.SDMolSupplier(str(sdf_path), removeHs=False, sanitize=False)
-    molecules = [mol for mol in supplier if mol is not None]
-    if not molecules:
-        raise ValueError(
-            f"Polymer SDF sidecar could not be read as an RDKit molecule: {sdf_path}. "
-            "Regenerate the polymer SDF with explicit bond orders."
-        )
+    molecules = read_sdf_molecules(sdf_path, source_label="Polymer SDF")
     atoms_by_index = {
         getattr(atom, "atom_index", None): atom
         for atom in getattr(generated_fragment, "atoms", ()) or ()
@@ -636,12 +639,18 @@ def _polymer_sdf_bonds(
             "Generated polymer fragment atoms do not carry atom_index values, so SDF bond "
             "orders cannot be mapped onto product-state Pablo definitions."
         )
-    mol = _select_sdf_molecule(molecules, expected_atoms=len(atoms_by_index), sdf_path=sdf_path)
-    _validate_sdf_bond_orders(mol, sdf_path)
+    mol = select_sdf_molecule(
+        molecules,
+        expected_atoms=len(atoms_by_index),
+        sdf_path=sdf_path,
+        source_label="Polymer SDF sidecar",
+        prefer_most_bonds=True,
+    )
+    validate_sdf_bond_orders(mol, sdf_path, source_label="Polymer SDF sidecar")
     unique_atom_names = _unique_fragment_atom_names(generated_fragment)
     bonds: list[tuple[Any, Any, int]] = []
     for bond in mol.GetBonds():
-        order = _explicit_bond_order(bond.GetBondTypeAsDouble(), source=f"SDF {sdf_path}")
+        order = explicit_bond_order(bond.GetBondTypeAsDouble(), source=f"SDF {sdf_path}")
         atom1 = _fragment_atom_descriptor(
             atoms_by_index.get(bond.GetBeginAtomIdx()), unique_atom_names=unique_atom_names
         )
@@ -772,42 +781,19 @@ def _charged_sdf_formal_charges(
     """Return non-zero formal charges from a validated charged SDF sidecar."""
     if charged_polymer_sdf is None:
         return {}
-    from rdkit import Chem
-
-    sdf_path = Path(charged_polymer_sdf)
-    if not sdf_path.exists():
-        raise ValueError(f"Charged polymer SDF sidecar does not exist: {sdf_path}")
-    supplier = Chem.SDMolSupplier(str(sdf_path), removeHs=False, sanitize=False)
-    molecules = [mol for mol in supplier if mol is not None]
-    if not molecules:
-        raise ValueError(f"Charged polymer SDF sidecar could not be read: {sdf_path}")
     fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
-    mol = _select_sdf_molecule(molecules, expected_atoms=len(fragment_atoms), sdf_path=sdf_path)
-    _validate_sdf_atom_elements(
-        mol,
-        fragment_atoms=_fragment_atoms_in_sdf_order(fragment_atoms),
-        sdf_path=sdf_path,
-        source_label="Charged polymer SDF",
-    )
-    charges = {}
-    for atom in mol.GetAtoms():
-        formal_charge = int(atom.GetFormalCharge())
-        if formal_charge:
-            charges[int(atom.GetIdx())] = formal_charge
-    return charges
+    return charged_sdf_formal_charges(charged_polymer_sdf, fragment_atoms=fragment_atoms)
 
 
 def _select_sdf_molecule(molecules: list[Any], *, expected_atoms: int, sdf_path: Path) -> Any:
     """Select the SDF molecule matching the generated-fragment atom count."""
-    matches = [mol for mol in molecules if mol.GetNumAtoms() == expected_atoms]
-    if not matches:
-        observed = ", ".join(str(mol.GetNumAtoms()) for mol in molecules)
-        raise ValueError(
-            "Polymer SDF sidecar atom count does not match the generated fragment: "
-            f"expected {expected_atoms}, observed {observed} in {sdf_path}. Regenerate the "
-            "polymer PDB/SDF pair from the same source molecule."
-        )
-    return max(matches, key=lambda candidate: candidate.GetNumBonds())
+    return select_sdf_molecule(
+        molecules,
+        expected_atoms=expected_atoms,
+        sdf_path=sdf_path,
+        source_label="Polymer SDF sidecar",
+        prefer_most_bonds=True,
+    )
 
 
 def _validate_sdf_atom_elements(
@@ -818,74 +804,32 @@ def _validate_sdf_atom_elements(
     source_label: str,
 ) -> None:
     """Validate that an SDF atom sequence matches a generated fragment."""
-    observed = tuple(atom.GetSymbol().upper() for atom in mol.GetAtoms())
-    expected = tuple(_fragment_atom_element(atom) for atom in fragment_atoms)
-    if observed != expected:
-        mismatches = [
-            f"{index + 1}:{want}->{got}"
-            for index, (want, got) in enumerate(zip(expected, observed, strict=True))
-            if want != got
-        ]
-        preview = ", ".join(mismatches[:8])
-        suffix = "" if len(mismatches) <= 8 else f", ... {len(mismatches) - 8} more"
-        raise ValueError(
-            f"{source_label} atom element/order does not match the generated fragment for "
-            f"{sdf_path}: {preview}{suffix}. Regenerate charged_sdf and bond_sdf from the "
-            "same production polymer molecule."
-        )
+    validate_sdf_atom_elements(
+        mol,
+        fragment_atoms=fragment_atoms,
+        sdf_path=sdf_path,
+        source_label=source_label,
+    )
 
 
 def _fragment_atoms_in_sdf_order(fragment_atoms: tuple[Any, ...]) -> tuple[Any, ...]:
     """Return fragment atoms in the atom-index order used by production SDF sidecars."""
-    if all(getattr(atom, "atom_index", None) is not None for atom in fragment_atoms):
-        return tuple(sorted(fragment_atoms, key=lambda atom: int(atom.atom_index)))
-    return fragment_atoms
+    return fragment_atoms_in_sdf_order(fragment_atoms)
 
 
 def _fragment_atom_element(atom: Any) -> str:
     """Return a generated-fragment atom element symbol for sidecar validation."""
-    element = str(getattr(atom, "element", "") or "").strip().upper()
-    if element:
-        return element
-    return _guess_element(str(getattr(atom, "atom_name", "") or getattr(atom, "name", "")))
+    return fragment_atom_element(atom)
 
 
 def _validate_sdf_bond_orders(mol: Any, sdf_path: Path) -> None:
     """Require explicit positive bond orders in an SDF source molecule."""
-    invalid = [
-        (bond.GetBeginAtomIdx() + 1, bond.GetEndAtomIdx() + 1)
-        for bond in mol.GetBonds()
-        if float(bond.GetBondTypeAsDouble()) <= 0.0
-    ]
-    if invalid:
-        preview = ", ".join(f"{left}-{right}" for left, right in invalid[:5])
-        extra = "" if len(invalid) <= 5 else f" and {len(invalid) - 5} more"
-        raise ValueError(
-            "Polymer SDF sidecar contains under-specified zero/unknown bond orders "
-            f"for atom pairs {preview}{extra} in {sdf_path}. Polymer SDF files must contain "
-            "explicit bond orders and fully specified valence; regenerate the SDF from the "
-            "source molecule rather than relying on product-state chemistry repair."
-        )
+    validate_sdf_bond_orders(mol, sdf_path, source_label="Polymer SDF sidecar")
 
 
 def _explicit_bond_order(value: Any, *, source: str) -> int:
     """Return a supported integer bond order or raise an actionable error."""
-    try:
-        order = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"Invalid bond order {value!r} from {source}") from exc
-    if order <= 0.0:
-        raise ValueError(
-            f"Invalid zero/unknown bond order {value!r} from {source}; polymer chemistry "
-            "must be supplied with explicit positive bond orders."
-        )
-    rounded = round(order)
-    if abs(order - rounded) > 1e-6:
-        raise ValueError(
-            f"Unsupported non-integer bond order {value!r} from {source}; product-state "
-            "Pablo definitions currently require explicit integer bond orders."
-        )
-    return int(rounded)
+    return explicit_bond_order(value, source=source)
 
 
 def _fragment_atom_lookup(generated_fragment: Any) -> dict[Any, Any]:
