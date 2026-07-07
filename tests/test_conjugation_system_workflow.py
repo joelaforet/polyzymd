@@ -431,6 +431,7 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
     )
     resolved_plan = _resolved_plan(requirement)
     product_library = SimpleNamespace(residue_library=object())
+    production_template = SimpleNamespace(partial_charges=(0.0,))
     calls = {}
 
     placed = PlacedPolymerFragment(
@@ -513,8 +514,15 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
                 topology=SimpleNamespace(molecules=(object(),)),
             )
 
-    def fake_parameterize(topology, *, settings=None, charge_from_molecules=None):
+    def fake_parameterize(
+        topology,
+        *,
+        settings=None,
+        charge_from_molecules=None,
+        require_charge_templates=False,
+    ):
         calls["charge_template_count"] = len(charge_from_molecules or ())
+        calls["require_charge_templates"] = require_charge_templates
         return InterchangeParameterizationResult(
             success=True,
             interchange=object(),
@@ -555,6 +563,11 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
     monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
     monkeypatch.setattr(
         product_pablo_module, "build_product_state_pablo_library", fake_product_library
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "build_conjugate_charge_templates",
+        lambda topology, library: (production_template,),
     )
     monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
     monkeypatch.setattr(
@@ -617,7 +630,8 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
     assert calls["source_protein_pdb"] == prepared_protein
     assert calls["polymer_sdf"] == polymer_sdf
     assert calls["residue_library"] is product_library.residue_library
-    assert calls["charge_template_count"] == 0
+    assert calls["charge_template_count"] == 1
+    assert calls["require_charge_templates"] is True
     assert calls.get("validation", 0) == 0
     assert calls["local_minimization"] == 1
     assert calls["local_settings"].linkages[0].protein_link_selector.residue_name == "LYX"
@@ -717,8 +731,15 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
                 topology=SimpleNamespace(molecules=(object(),)),
             )
 
-    def fake_parameterize(topology, *, settings=None, charge_from_molecules=None):
+    def fake_parameterize(
+        topology,
+        *,
+        settings=None,
+        charge_from_molecules=None,
+        require_charge_templates=False,
+    ):
         calls["parameterize"] += 1
+        calls["require_charge_templates"] = require_charge_templates
         return InterchangeParameterizationResult(
             success=True,
             interchange=object(),
@@ -888,7 +909,14 @@ def test_single_generic_local_minimization_request_runs_minimizer(
                 topology=SimpleNamespace(molecules=(object(),)),
             )
 
-    def fake_parameterize(topology, *, settings=None, charge_from_molecules=None):
+    def fake_parameterize(
+        topology,
+        *,
+        settings=None,
+        charge_from_molecules=None,
+        require_charge_templates=False,
+    ):
+        calls["require_charge_templates"] = require_charge_templates
         return InterchangeParameterizationResult(
             success=True,
             interchange=object(),
@@ -1197,7 +1225,17 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
                 topology=SimpleNamespace(molecules=(product_template,)),
             )
 
-    def fake_parameterize(topology, *, settings=None, charge_from_molecules=None):
+    intermediate = {}
+
+    def fake_parameterize(
+        topology,
+        *,
+        settings=None,
+        charge_from_molecules=None,
+        require_charge_templates=False,
+    ):
+        intermediate["charge_from_molecules"] = tuple(charge_from_molecules or ())
+        intermediate["require_charge_templates"] = require_charge_templates
         return InterchangeParameterizationResult(
             success=True,
             interchange=object(),
@@ -1263,6 +1301,9 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
 
     templates = tuple(captured["kwargs"]["charge_from_molecules"])
     assert construction.product_state_pablo_library.charge_templates == (product_template,)
+    assert len(intermediate["charge_from_molecules"]) == 1
+    assert intermediate["charge_from_molecules"][0] is not product_template
+    assert intermediate["require_charge_templates"] is True
     assert len(templates) == 2
     assert templates[0] is not product_template
     assert templates[1] is standard_template
