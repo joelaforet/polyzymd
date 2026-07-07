@@ -111,14 +111,30 @@ class SystemBuilder:
     def build_enzyme(self, pdb_path: Union[str, Path]) -> Topology:
         """Build the enzyme component.
 
-        Args:
-            pdb_path: Path to enzyme PDB file.
+        Parameters
+        ----------
+        pdb_path : str or Path
+            Path to enzyme PDB file.
 
-        Returns:
+        Returns
+        -------
+        Topology
             Enzyme topology.
+
+        Raises
+        ------
+        RuntimeError
+            If OpenFF loads the enzyme PDB without any molecules.
         """
         self._enzyme_topology = self._enzyme_builder.build(pdb_path)
-        self._n_enzyme_molecules = 1
+        self._n_enzyme_molecules = self._enzyme_topology.n_molecules
+        if self._n_enzyme_molecules <= 0:
+            raise RuntimeError("OpenFF enzyme topology contains no molecules")
+        if self._n_enzyme_molecules > 1:
+            LOGGER.info(
+                "Enzyme topology contains %d protein molecules; retaining all on chain A",
+                self._n_enzyme_molecules,
+            )
         return self._enzyme_topology
 
     def build_substrate(
@@ -219,11 +235,19 @@ class SystemBuilder:
     def combine_solutes(self) -> Topology:
         """Combine enzyme, substrate, and polymers into a single topology.
 
-        Returns:
+        All OpenFF enzyme topology molecules are retained in their original
+        order before substrate and polymer components are added. During export,
+        every enzyme molecule is assigned to PolyzyMD protein chain ``A``.
+
+        Returns
+        -------
+        Topology
             Combined topology ready for solvation.
 
-        Raises:
-            RuntimeError: If enzyme has not been built.
+        Raises
+        ------
+        RuntimeError
+            If enzyme has not been built or contains no molecules.
         """
         if self._enzyme_topology is None:
             raise RuntimeError("Enzyme must be built before combining solutes")
@@ -232,8 +256,13 @@ class SystemBuilder:
 
         from openff.toolkit import Topology
 
-        # Start with enzyme
-        molecules = [self._enzyme_topology.molecule(0)]
+        enzyme_molecule_count = self._enzyme_topology.n_molecules
+        if enzyme_molecule_count <= 0:
+            raise RuntimeError("OpenFF enzyme topology contains no molecules")
+        self._n_enzyme_molecules = enzyme_molecule_count
+
+        # Retain all enzyme molecules before substrate and polymers
+        molecules = [self._enzyme_topology.molecule(i) for i in range(self._n_enzyme_molecules)]
 
         # Add substrate if present
         if self._substrate_molecule is not None:
@@ -594,7 +623,8 @@ class SystemBuilder:
         source of truth for what each molecule represents.
 
         Chain assignment uses FIXED letters regardless of component presence:
-        - Chain A: Protein (preserves original residue numbers from input PDB)
+
+        - Chain A: Protein/enzyme molecules (preserves original residue numbers)
         - Chain B: Substrate (residue 1; letter reserved even if no substrate)
         - Chain C: Polymers (preserves per-monomer residue numbers)
         - Chain D+: Solvent (overflow at 9999 residues per chain)
@@ -617,7 +647,7 @@ class SystemBuilder:
         CHAIN_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         mol_idx = 0
 
-        # Fixed chain letter assignments per component type.
+        # Fixed chain letter assignments per component type
         # A=protein, B=substrate, C=polymer, D+=solvent — regardless of whether
         # a component is present. This ensures downstream code (SystemComponentInfo,
         # AtomGroupResolver, from_topology()) always sees the expected chain IDs.
@@ -626,9 +656,12 @@ class SystemBuilder:
         POLYMER_CHAIN = "C"
         SOLVENT_START_IDX = 3  # index of 'D' in CHAIN_LETTERS
 
-        # 1. Protein: Always chain A, preserve original residue numbers
+        # Protein molecules always use chain A and preserve original residue numbers
         if self._n_enzyme_molecules > 0:
-            LOGGER.debug(f"Assigning chain {PROTEIN_CHAIN} to protein")
+            LOGGER.debug(
+                f"Assigning chain {PROTEIN_CHAIN} to "
+                f"{self._n_enzyme_molecules} protein molecule(s)"
+            )
 
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
@@ -640,7 +673,7 @@ class SystemBuilder:
                         atom.metadata["residue_number"] = str(atom.metadata["residue_number"])
                 mol_idx += 1
 
-        # 2. Substrate: Always chain B, residue 1
+        # Substrate always uses chain B and residue 1
         if self._n_substrate_molecules > 0:
             LOGGER.debug(f"Assigning chain {SUBSTRATE_CHAIN} to substrate")
 
@@ -651,7 +684,7 @@ class SystemBuilder:
                     atom.metadata["residue_number"] = "1"
                 mol_idx += 1
 
-        # 3. Polymers: Always chain C, continue residue numbering across chains
+        # Polymers always use chain C and continue residue numbering across chains
         if self._n_polymer_chains > 0:
             LOGGER.debug(
                 f"Assigning chain {POLYMER_CHAIN} to {self._n_polymer_chains} polymer chain(s)"
@@ -685,7 +718,7 @@ class SystemBuilder:
                 polymer_residue_num += 1
                 mol_idx += 1
 
-        # 4. Solvent: Always starts at chain D (index 3)
+        # Solvent always starts at chain D
         self._assign_solvent_identifiers(
             start_mol_idx=mol_idx,
             start_chain_idx=SOLVENT_START_IDX,
