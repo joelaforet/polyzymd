@@ -38,6 +38,9 @@ from polyzymd.builders.conjugation.local_minimization import (
     run_post_crosslink_local_minimization,
 )
 from polyzymd.builders.conjugation.models import ConjugationResult
+from polyzymd.builders.conjugation.pablo.charge_templates import (
+    build_conjugate_charge_templates,
+)
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
 from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationSettings,
@@ -840,11 +843,16 @@ def _construct_conjugate_from_specs(
             pablo_result.topology,
         )
 
+    charge_templates, require_charge_templates = _intermediate_conjugate_charge_templates(
+        pablo_result.topology,
+        product_state_pablo_library,
+    )
     LOGGER.info("Parameterizing conjugate with OpenFF Interchange")
     parameterization_result = create_interchange_from_pablo_topology(
         pablo_result.topology,
         settings=settings.parameterization,
-        charge_from_molecules=(),
+        charge_from_molecules=charge_templates,
+        require_charge_templates=require_charge_templates,
     )
     if not parameterization_result.success or parameterization_result.interchange is None:
         raise RuntimeError("OpenFF Interchange parameterization did not produce an interchange")
@@ -1105,6 +1113,45 @@ def _product_state_library_with_charge_templates(
         return product_state_pablo_library.model_copy(update={"charge_templates": templates})
     product_state_pablo_library.charge_templates = templates
     return product_state_pablo_library
+
+
+def _intermediate_conjugate_charge_templates(
+    topology: Any,
+    product_state_pablo_library: Any | None,
+) -> tuple[tuple[Any, ...], bool]:
+    """Build production charge templates for intermediate conjugate parameterization.
+
+    Parameters
+    ----------
+    topology : Any
+        Current product-state Pablo topology to parameterize.
+    product_state_pablo_library : Any or None
+        Product-state Pablo library carrying production partial-charge provenance.
+
+    Returns
+    -------
+    tuple of tuple of Any and bool
+        Charged molecule templates and whether OpenFF parameterization must
+        reject empty templates before implicit charge assignment can occur.
+
+    Raises
+    ------
+    RuntimeError
+        If product-state provenance is active but production charge templates
+        cannot be built.
+    """
+    if product_state_pablo_library is None:
+        return (), False
+
+    try:
+        templates = build_conjugate_charge_templates(topology, product_state_pablo_library)
+    except ValueError as exc:
+        raise RuntimeError(
+            "Product-state conjugate parameterization requires production charge templates from "
+            "the product-state Pablo library. Refusing to let OpenFF fall back to whole-conjugate "
+            f"implicit charge assignment. Original error: {exc}"
+        ) from exc
+    return templates, True
 
 
 def _product_state_library_with_charge_bridge(
