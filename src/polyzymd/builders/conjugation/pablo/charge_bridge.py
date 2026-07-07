@@ -24,6 +24,20 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     load_combined_smirnoff_force_field,
     suppress_openff_library_charge_info,
 )
+from polyzymd.builders.conjugation.pablo.product_state import (
+    atom_identity_tuple,
+    format_identity,
+    product_conjugate_molecule,
+    product_residue_name_set,
+    target_identities_from_molecule,
+)
+from polyzymd.builders.conjugation.pablo.sdf import (
+    charged_sdf_partial_charges,
+    fragment_atom_element,
+    fragment_atoms_in_sdf_order,
+    guess_element,
+    validated_charged_sdf_molecule,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -263,19 +277,7 @@ def build_product_state_charge_bridge(
 
 def _product_residue_names(product_state_pablo_library: Any) -> set[str]:
     """Return product-state residue names from a Pablo library."""
-    product_names = {
-        str(name).strip().upper()
-        for name in tuple(getattr(product_state_pablo_library, "residue_names", ()) or ())
-        if str(name).strip()
-    }
-    product_names.update(
-        str(getattr(definition, "residue_name", "")).strip().upper()
-        for definition in tuple(getattr(product_state_pablo_library, "definitions", ()) or ())
-        if str(getattr(definition, "residue_name", "")).strip()
-    )
-    if not product_names:
-        raise ValueError("Product-state charge bridge requires product residue names")
-    return product_names
+    return product_residue_name_set(product_state_pablo_library, require=True)
 
 
 def _empty_local_reconciliation_diagnostic(
@@ -480,15 +482,11 @@ def _product_conjugate_molecule(
     product_atoms: tuple[Any, ...],
 ) -> Any:
     """Return the topology molecule containing product-state residues."""
-    for molecule in tuple(getattr(product_topology, "molecules", ()) or ()):
-        if any(_atom_identity(atom)[1] in product_names for atom in getattr(molecule, "atoms", ())):
-            return molecule
-    molecules = tuple(getattr(product_topology, "molecules", ()) or ())
-    if len(molecules) == 1 and any(
-        atom.residue_name.upper() in product_names for atom in product_atoms
-    ):
-        return molecules[0]
-    raise ValueError("Could not locate the product-state conjugate molecule in the Pablo topology")
+    return product_conjugate_molecule(
+        product_topology,
+        product_names=product_names,
+        product_atoms=product_atoms,
+    )
 
 
 def _target_identities(
@@ -497,22 +495,7 @@ def _target_identities(
     product_atoms: tuple[Any, ...],
 ) -> tuple[tuple[str, str, int | None, str, str], ...]:
     """Return target atom identities, falling back to product PDB order."""
-    atoms = tuple(getattr(target_molecule, "atoms", ()) or ())
-    identities = tuple(_atom_identity(atom) for atom in atoms)
-    if all(identity[1] and identity[4] for identity in identities):
-        return identities
-    if len(atoms) == len(product_atoms):
-        return tuple(
-            (
-                atom.chain_id.strip(),
-                atom.residue_name.strip().upper(),
-                atom.residue_number,
-                atom.insertion_code.strip(),
-                atom.atom_name.strip(),
-            )
-            for atom in product_atoms
-        )
-    return identities
+    return target_identities_from_molecule(target_molecule, product_atoms=product_atoms)
 
 
 def _protein_ff14sb_records(
@@ -1138,44 +1121,19 @@ def _source_sdf_path(spec: Any) -> Path | None:
 
 def _charged_sdf_atom_charges(path: Path, *, generated_fragment: Any) -> tuple[float, ...]:
     """Read partial charges from a validated production charged SDF."""
-    from rdkit import Chem
-
     fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
-    if not fragment_atoms:
-        raise ValueError("Attached polymer charge transfer requires generated-fragment atoms")
-    sdf_path = Path(path)
-    mol = _validated_charged_sdf_molecule(
-        sdf_path,
-        fragment_atoms=fragment_atoms,
-        supplier_cls=Chem.SDMolSupplier,
-    )
-    charges = []
-    for index, atom in enumerate(mol.GetAtoms(), start=1):
-        if not atom.HasProp("PartialCharge"):
-            raise ValueError(
-                "Attached polymer SDF does not contain per-atom partial charges; refusing to "
-                f"use AM1-BCC, Gasteiger, or formal fallback for atom {index} in {sdf_path}"
-            )
-        charges.append(float(atom.GetDoubleProp("PartialCharge")))
-    if len(charges) != len(fragment_atoms):
-        raise ValueError(
-            "Attached polymer charged SDF atom count does not match extracted charges: "
-            f"{len(charges)} charges vs {len(fragment_atoms)} atom(s) for {sdf_path}"
-        )
-    return tuple(charges)
+    return charged_sdf_partial_charges(path, fragment_atoms=fragment_atoms)
 
 
 def _validate_charged_sdf_matches_fragment(path: Path, *, generated_fragment: Any) -> None:
     """Validate that a charged SDF preserves generated-fragment atom order."""
-    from rdkit import Chem
-
     fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
     if not fragment_atoms:
         raise ValueError("Attached polymer charge transfer requires generated-fragment atoms")
-    _validated_charged_sdf_molecule(
-        Path(path),
+    validated_charged_sdf_molecule(
+        path,
         fragment_atoms=fragment_atoms,
-        supplier_cls=Chem.SDMolSupplier,
+        source_label="Attached polymer charged SDF",
     )
 
 
@@ -1186,33 +1144,12 @@ def _validated_charged_sdf_molecule(
     supplier_cls: Any,
 ) -> Any:
     """Return the charged SDF molecule after atom-order validation."""
-    if not sdf_path.exists():
-        raise ValueError(f"Attached polymer charged SDF sidecar does not exist: {sdf_path}")
-    supplier = supplier_cls(str(sdf_path), removeHs=False, sanitize=False)
-    molecules = [mol for mol in supplier if mol is not None]
-    if not molecules:
-        raise ValueError(f"Attached polymer charged SDF sidecar could not be read: {sdf_path}")
-    mol = _select_charged_sdf_molecule(
-        molecules,
-        expected_atoms=len(fragment_atoms),
-        sdf_path=sdf_path,
+    _ = supplier_cls
+    return validated_charged_sdf_molecule(
+        sdf_path,
+        fragment_atoms=fragment_atoms,
+        source_label="Attached polymer charged SDF",
     )
-    observed = tuple(atom.GetSymbol().upper() for atom in mol.GetAtoms())
-    expected = tuple(
-        _fragment_atom_element(atom) for atom in _fragment_atoms_in_sdf_order(fragment_atoms)
-    )
-    if observed != expected:
-        preview = ", ".join(
-            f"{index + 1}:{want}->{got}"
-            for index, (want, got) in enumerate(zip(expected, observed, strict=True))
-            if want != got
-        )
-        raise ValueError(
-            "Attached polymer charged SDF atom element/order does not match the generated "
-            f"fragment for {sdf_path}: {preview}. Regenerate charged_sdf and bond_sdf from "
-            "the same production polymer molecule."
-        )
-    return mol
 
 
 def _select_charged_sdf_molecule(
@@ -1231,25 +1168,17 @@ def _select_charged_sdf_molecule(
 
 def _fragment_atoms_in_sdf_order(fragment_atoms: Sequence[Any]) -> tuple[Any, ...]:
     """Return fragment atoms in the atom-index order used by production SDF sidecars."""
-    if all(getattr(atom, "atom_index", None) is not None for atom in fragment_atoms):
-        return tuple(sorted(fragment_atoms, key=lambda atom: int(atom.atom_index)))
-    return tuple(fragment_atoms)
+    return fragment_atoms_in_sdf_order(fragment_atoms)
 
 
 def _fragment_atom_element(atom: Any) -> str:
     """Return a generated-fragment atom element symbol for sidecar validation."""
-    element = str(getattr(atom, "element", "") or "").strip().upper()
-    if element:
-        return element
-    return _guess_element(str(getattr(atom, "atom_name", "") or getattr(atom, "name", "")))
+    return fragment_atom_element(atom)
 
 
 def _guess_element(atom_name: str) -> str:
     """Guess a PDB-style element symbol from an atom name."""
-    stripped = "".join(char for char in atom_name.strip() if char.isalpha())
-    if not stripped:
-        return ""
-    return stripped[0].upper()
+    return guess_element(atom_name)
 
 
 def _mapped_polymer_residue(atom: Any, mappings: Mapping[str, Any]) -> dict[str, Any]:
@@ -1369,16 +1298,7 @@ def _interchange_charges_by_atom_index(interchange: Any) -> dict[int, float]:
 
 def _atom_identity(atom: Any) -> tuple[str, str, int | None, str, str]:
     """Return chain/residue/atom identity for an OpenFF-like atom."""
-    metadata = getattr(atom, "metadata", None) or {}
-    return (
-        str(_metadata_value(metadata, "chain_id", "chain", default="") or "").strip(),
-        str(_metadata_value(metadata, "residue_name", "residue", default="") or "").strip().upper(),
-        _optional_int(_metadata_value(metadata, "residue_number", "residue_id", default=None)),
-        str(_metadata_value(metadata, "insertion_code", default="") or "").strip(),
-        str(
-            _metadata_value(metadata, "atom_name", "name", default=getattr(atom, "name", "")) or ""
-        ).strip(),
-    )
+    return atom_identity_tuple(atom)
 
 
 def _metadata_value(metadata: Any, *names: str, default: Any = None) -> Any:
@@ -1435,9 +1355,4 @@ def _optional_int(value: Any) -> int | None:
 
 def _format_identity(identity: tuple[str, str, int | None, str, str]) -> str:
     """Format an atom identity for diagnostics."""
-    chain_id, residue_name, residue_number, insertion_code, atom_name = identity
-    return (
-        f"chain {chain_id or '?'} residue {residue_name or '?'} "
-        f"{residue_number if residue_number is not None else '?'}{insertion_code} "
-        f"atom {atom_name or '?'}"
-    )
+    return format_identity(identity)

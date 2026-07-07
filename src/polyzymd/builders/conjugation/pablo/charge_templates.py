@@ -7,6 +7,11 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from polyzymd.builders.conjugation.pablo.product_state import (
+    metadata_value,
+    product_residue_name_set,
+)
+
 _PROVENANCE_KEYS = (
     "polyzymd_charge_provenance",
     "charge_provenance",
@@ -361,18 +366,7 @@ def _charged_template_from_ordered_source(
 
 def _product_residue_names(product_state_pablo_library: Any) -> set[str]:
     """Return uppercase product-state residue names from a Pablo library."""
-    names = {
-        str(name).strip().upper()
-        for name in tuple(getattr(product_state_pablo_library, "residue_names", ()) or ())
-        if str(name).strip()
-    }
-    definitions = tuple(getattr(product_state_pablo_library, "definitions", ()) or ())
-    names.update(
-        str(getattr(definition, "residue_name", "")).strip().upper()
-        for definition in definitions
-        if str(getattr(definition, "residue_name", "")).strip()
-    )
-    return names
+    return product_residue_name_set(product_state_pablo_library)
 
 
 def _molecule_contains_product_residue(molecule: Any, product_names: set[str]) -> bool:
@@ -403,14 +397,7 @@ def _atom_identity(atom: Any) -> _AtomIdentity:
 
 def _metadata_value(metadata: Any, *names: str, default: Any = None) -> Any:
     """Return the first populated metadata value for a set of field names."""
-    for name in names:
-        if isinstance(metadata, dict):
-            value = metadata.get(name)
-        else:
-            value = getattr(metadata, name, None)
-        if value not in (None, ""):
-            return value
-    return default
+    return metadata_value(metadata, *names, default=default)
 
 
 def _record_value(record: Any, name: str, default: Any) -> Any:

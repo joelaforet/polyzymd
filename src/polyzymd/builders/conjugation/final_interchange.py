@@ -13,6 +13,7 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
     create_interchange_from_pablo_topology,
     deduplicate_charge_templates,
 )
+from polyzymd.builders.conjugation.pablo.product_state import product_residue_names
 
 LOGGER = logging.getLogger(__name__)
 
@@ -130,14 +131,4 @@ def _product_residue_names(
     product_state_pablo_library: Any, definitions: tuple[Any, ...]
 ) -> tuple[str, ...]:
     """Resolve product residue names from summaries or definitions."""
-    names = tuple(
-        str(name) for name in getattr(product_state_pablo_library, "residue_names", ()) or ()
-    )
-    if names:
-        return names
-    definition_names = []
-    for definition in definitions:
-        name = str(getattr(definition, "residue_name", "")).strip()
-        if name:
-            definition_names.append(name)
-    return tuple(definition_names)
+    return product_residue_names(product_state_pablo_library, definitions)
