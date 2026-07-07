@@ -35,7 +35,7 @@ if TYPE_CHECKING:
         SimulationConfig,
         SimulationPhaseConfig,
     )
-    from polyzymd.core.atom_groups import SystemComponentInfo
+    from polyzymd.core.atom_groups import AtomGroupResolver, SystemComponentInfo
 
 logger = logging.getLogger(__name__)
 
@@ -83,26 +83,6 @@ WATER_COMPRESSIBILITY = 4.5e-5
 POLYZYMD_BRANDING = FULL_CREDIT_LINE
 _GROMACS_TEMPLATE_PACKAGE = "polyzymd.engines.gromacs"
 _LOCAL_RUN_TEMPLATE = "run_gromacs.sh.jinja"
-
-
-def _is_hydrogen_atom_name(name: str) -> bool:
-    """Return whether an atom name denotes hydrogen.
-
-    Leading digits are ignored because PDB-derived and force-field atom names
-    can place numeric disambiguators before hydrogen labels, such as ``1H``,
-    ``2HA``, or ``3HD1``.
-
-    Parameters
-    ----------
-    name : str
-        Atom name from a topology or ITP atom record.
-
-    Returns
-    -------
-    bool
-        ``True`` when the digit-stripped atom name starts with ``H``.
-    """
-    return name.lstrip("0123456789").upper().startswith("H")
 
 
 def _validate_local_shell_token(value: str, field_name: str) -> str:
@@ -765,17 +745,6 @@ class MDPGenerator:
 # =============================================================================
 
 
-@dataclass(frozen=True)
-class _ComponentItpAssignment:
-    """Topology-derived component assignment for one molecule ITP."""
-
-    component_type: str
-    mol_name: str
-    itp_path: Path
-    atom_count: int
-    n_copies: int
-
-
 class PositionRestraintGenerator:
     """Generates GROMACS position restraint sections for molecule ITP files.
 
@@ -783,21 +752,23 @@ class PositionRestraintGenerator:
     using local atom indices (1 to N within each molecule), which is required
     by GROMACS.
 
-    Component ITPs are classified from the exported topology molecule layout
-    and SystemComponentInfo atom counts. Each selected ITP is restrained using
-    atom indices parsed from that ITP's own [ atoms ] section, so homodimers
-    and other multi-protein layouts do not generate global atom indices inside
-    molecule-local restraint blocks.
+    For protein and ligand components (single molecule type each), it uses the
+    AtomGroupResolver to identify restrained atoms by global index and maps
+    them to local indices within that molecule's ITP.
+
+    For polymers, OpenFF Interchange may create multiple unique molecule types
+    (one per unique monomer sequence). This class discovers ALL polymer ITP
+    files and adds position restraints to each by parsing the ITP's [ atoms ]
+    section to identify heavy (non-hydrogen) atoms directly, rather than
+    relying on global-to-local index mapping.
 
     GROMACS requires position restraints to be:
-
     1. Inside the [ moleculetype ] section of each molecule
     2. Using local atom indices (1 to N) within that molecule
 
-    Examples
-    --------
-    >>> generator = PositionRestraintGenerator(topology, component_info)
-    >>> generator.add_posres_to_itp_files(config, output_dir, "MySystem")
+    Example:
+        >>> generator = PositionRestraintGenerator(topology, component_info)
+        >>> generator.add_posres_to_itp_files(config, output_dir, "MySystem")
     """
 
     # Maps atom group names to (component_type, posres_define)
@@ -816,15 +787,15 @@ class PositionRestraintGenerator:
     ):
         """Initialize the position restraint generator.
 
-        Parameters
-        ----------
-        topology : OpenMMTopology
-            OpenMM Topology object from Interchange.
-        component_info : SystemComponentInfo
-            SystemComponentInfo with atom counts and chain assignments.
+        Args:
+            topology: OpenMM Topology object from Interchange.
+            component_info: SystemComponentInfo with atom counts/chain assignments.
         """
+        from polyzymd.core.atom_groups import AtomGroupResolver
+
         self._topology = topology
         self._component_info = component_info
+        self._resolver = AtomGroupResolver(topology, component_info)
 
     def add_posres_to_itp_files(
         self,
@@ -834,25 +805,24 @@ class PositionRestraintGenerator:
     ) -> Dict[str, str]:
         """Add position restraint sections to molecule .itp files.
 
-        For each restraint group in the config's equilibration stages, the
-        exporter determines the component type, finds topology-classified ITP
-        files, parses local restrained atoms from each ITP, and appends
-        ``#ifdef POSRES`` blocks.
+        For each restraint group in the config's equilibration stages:
+        1. Determines the component type (protein, ligand, or polymer)
+        2. Finds the relevant ITP file(s)
+        3. Identifies restrained atoms (heavy atoms for *_heavy groups)
+        4. Appends #ifdef POSRES blocks to each ITP
 
-        Parameters
-        ----------
-        config : SimulationConfig
-            Simulation configuration with equilibration stages.
-        output_dir : Path
-            Directory containing exported ITP files.
-        prefix : str
-            Filename prefix used for exported files.
+        For protein/ligand, there is exactly one ITP per component. For
+        polymers, there may be many unique molecule types (one per unique
+        monomer sequence), and ALL polymer ITPs receive position restraints.
 
-        Returns
-        -------
-        dict[str, str]
-            Mapping of component types to POSRES define names used, such as
-            ``{"protein": "POSRES_PROTEIN", "polymer": "POSRES_POLYMER"}``.
+        Args:
+            config: SimulationConfig with equilibration stages.
+            output_dir: Directory containing .itp files.
+            prefix: Filename prefix used for .itp files.
+
+        Returns:
+            Dictionary mapping component types to POSRES define names used.
+            E.g., {"protein": "POSRES_PROTEIN", "polymer": "POSRES_POLYMER"}
         """
         phases = config.simulation_phases
         posres_defines: Dict[str, str] = {}
@@ -879,24 +849,31 @@ class PositionRestraintGenerator:
                 logger.warning(f"Cannot determine component for group '{group_name}' - skipping")
                 continue
 
-            count = self._add_posres_to_component_itps(
-                output_dir,
-                prefix,
-                component_type,
-                group_name,
-                force_constant,
-                posres_define,
-            )
-            if count > 0:
-                posres_defines[component_type] = posres_define
+            if component_type == "polymer":
+                count = self._add_posres_to_polymer_itps(
+                    output_dir, prefix, force_constant, posres_define, group_name
+                )
+                if count > 0:
+                    posres_defines[component_type] = posres_define
+            else:
+                added = self._add_posres_to_single_itp(
+                    output_dir,
+                    prefix,
+                    component_type,
+                    group_name,
+                    force_constant,
+                    posres_define,
+                )
+                if added:
+                    posres_defines[component_type] = posres_define
 
         return posres_defines
 
     # ------------------------------------------------------------------
-    # Component ITP discovery and classification
+    # Single-ITP path (protein / ligand)
     # ------------------------------------------------------------------
 
-    def _add_posres_to_component_itps(
+    def _add_posres_to_single_itp(
         self,
         output_dir: Path,
         prefix: str,
@@ -904,259 +881,60 @@ class PositionRestraintGenerator:
         group_name: str,
         force_constant: float,
         posres_define: str,
-    ) -> int:
-        """Add position restraints to every ITP assigned to a component.
+    ) -> bool:
+        """Add position restraints to a single-molecule-type ITP (protein or ligand).
 
-        Parameters
-        ----------
-        output_dir : Path
-            Directory containing exported topology and ITP files.
-        prefix : str
-            Export filename prefix.
-        component_type : str
-            Component type to restrain, such as ``"protein"`` or ``"polymer"``.
-        group_name : str
-            Restraint atom group name.
-        force_constant : float
-            Position restraint force constant in kJ/mol/nm^2.
-        posres_define : str
-            Preprocessor define wrapping the generated restraints.
+        Uses global-to-local index mapping via the AtomGroupResolver.
 
-        Returns
-        -------
-        int
-            Number of ITP files that received position restraints.
+        Returns:
+            True if restraints were added, False otherwise.
         """
-        itp_paths = self._find_component_itps(output_dir, prefix, component_type)
-        if not itp_paths:
-            logger.warning(
-                f"Cannot find valid ITP files for {component_type} - skipping position restraints"
-            )
-            return 0
-
-        count = 0
-        for itp_path in itp_paths:
-            local_indices = self._get_local_atom_indices_from_itp(itp_path, group_name)
-            if not local_indices:
-                logger.warning(f"No local indices for group '{group_name}' in {itp_path.name}")
-                continue
-
-            atom_count = self._get_atom_count_from_itp(itp_path)
-            if atom_count <= 0 or max(local_indices) > atom_count:
-                logger.warning(
-                    f"Skipping {itp_path.name}: restraint indices for '{group_name}' exceed "
-                    f"the ITP atom count ({atom_count})"
-                )
-                continue
-
-            self._append_posres_to_itp(
-                itp_path, local_indices, force_constant, posres_define, group_name
-            )
-            count += 1
-            logger.info(
-                f"Added {len(local_indices)} position restraints to "
-                f"{itp_path.name} (#ifdef {posres_define})"
-            )
-
-        return count
-
-    def _find_component_itps(
-        self,
-        output_dir: Path,
-        prefix: str,
-        component_type: str,
-    ) -> List[Path]:
-        """Find ITP files assigned to a component.
-
-        The topology layout path is preferred because it can distinguish
-        homodimers from ligand or polymer molecule types. If no topology file is
-        available, this method falls back to the historical filename-order
-        helpers.
-
-        Parameters
-        ----------
-        output_dir : Path
-            Directory containing exported topology and ITP files.
-        prefix : str
-            Export filename prefix.
-        component_type : str
-            Component type to locate.
-
-        Returns
-        -------
-        list[Path]
-            ITP paths for the requested component.
-        """
-        assignments = self._classify_itps_by_topology_layout(output_dir, prefix)
-        if assignments is not None:
-            component_itps = []
-            seen_itps = set()
-            for assignment in assignments.get(component_type, []):
-                if assignment.itp_path in seen_itps:
-                    continue
-                seen_itps.add(assignment.itp_path)
-                component_itps.append(assignment.itp_path)
-            return component_itps
-
-        if component_type == "polymer":
-            return self._find_all_polymer_itps(output_dir, prefix)
+        global_indices = self._resolver.resolve(group_name)
+        if not global_indices:
+            logger.warning(f"No atoms found for group '{group_name}' - skipping")
+            return False
 
         itp_path = self._find_single_itp(output_dir, prefix, component_type)
-        return [itp_path] if itp_path is not None else []
-
-    def _classify_itps_by_topology_layout(
-        self,
-        output_dir: Path,
-        prefix: str,
-    ) -> Dict[str, List[_ComponentItpAssignment]] | None:
-        """Classify component ITPs from topology order and atom counts.
-
-        Parameters
-        ----------
-        output_dir : Path
-            Directory containing ``{prefix}.top`` and molecule ITP files.
-        prefix : str
-            Export filename prefix.
-
-        Returns
-        -------
-        dict[str, list[_ComponentItpAssignment]] | None
-            Component assignments, or ``None`` when no topology layout is
-            available and fallback discovery should be used.
-        """
-        top_path = output_dir / f"{prefix}.top"
-        if not top_path.exists():
-            return None
-
-        mol_layout = GromacsExporter._parse_molecules_from_top(top_path)
-        if not mol_layout:
+        if itp_path is None:
             logger.warning(
-                f"No [ molecules ] layout found in {top_path.name} - skipping topology-based "
-                "position restraint classification"
+                f"Cannot find ITP file for {component_type} - skipping position restraints"
             )
-            return {"protein": [], "ligand": [], "polymer": []}
+            return False
 
-        component_targets = self._component_atom_targets()
-        assignments: Dict[str, List[_ComponentItpAssignment]] = {
-            "protein": [],
-            "ligand": [],
-            "polymer": [],
-        }
-        if not component_targets:
-            return assignments
+        local_indices = self._global_to_local_indices(global_indices, component_type)
+        if not local_indices:
+            logger.warning(f"No local indices for group '{group_name}' - skipping")
+            return False
 
-        target_idx = 0
-        remaining = component_targets[target_idx][1]
-
-        for mol_name, n_copies in mol_layout:
-            if target_idx >= len(component_targets):
-                break
-
-            while remaining == 0:
-                target_idx += 1
-                if target_idx >= len(component_targets):
-                    break
-                remaining = component_targets[target_idx][1]
-            if target_idx >= len(component_targets):
-                break
-
-            itp_path = output_dir / f"{prefix}_{mol_name}.itp"
-            if not itp_path.exists():
-                logger.warning(
-                    f"Cannot classify {mol_name}: missing ITP file {itp_path.name}. "
-                    "Skipping remaining topology-based position restraints"
-                )
-                return assignments
-
-            atom_count = self._get_atom_count_from_itp(itp_path)
-            entry_atoms = atom_count * n_copies
-            if atom_count <= 0 or entry_atoms <= 0:
-                logger.warning(
-                    f"Cannot classify {mol_name}: invalid atom count in {itp_path.name}. "
-                    "Skipping remaining topology-based position restraints"
-                )
-                return assignments
-
-            component_type, component_atoms = component_targets[target_idx]
-            if entry_atoms > remaining:
-                logger.warning(
-                    f"Topology/count mismatch while classifying {mol_name}: entry has "
-                    f"{entry_atoms} atoms but {remaining}/{component_atoms} atoms remain for "
-                    f"{component_type}. Skipping questionable component restraints"
-                )
-                assignments[component_type] = []
-                return assignments
-
-            assignments[component_type].append(
-                _ComponentItpAssignment(
-                    component_type=component_type,
-                    mol_name=mol_name,
-                    itp_path=itp_path,
-                    atom_count=atom_count,
-                    n_copies=n_copies,
-                )
-            )
-            remaining -= entry_atoms
-
-        while target_idx < len(component_targets) and remaining == 0:
-            target_idx += 1
-            if target_idx < len(component_targets):
-                remaining = component_targets[target_idx][1]
-
-        if target_idx < len(component_targets):
-            incomplete_component, component_atoms = component_targets[target_idx]
-            if remaining > 0:
-                logger.warning(
-                    f"Topology/count mismatch: {remaining}/{component_atoms} atoms remain "
-                    f"unmatched for {incomplete_component}. Skipping its restraints"
-                )
-                assignments[incomplete_component] = []
-
-        return assignments
-
-    def _component_atom_targets(self) -> List[Tuple[str, int]]:
-        """Return non-empty component atom targets in topology order.
-
-        Returns
-        -------
-        list[tuple[str, int]]
-            Component names and atom counts in PolyzyMD build order.
-        """
-        return [
-            (component_type, atom_count)
-            for component_type, atom_count in (
-                ("protein", getattr(self._component_info, "n_protein_atoms", 0)),
-                ("ligand", getattr(self._component_info, "n_substrate_atoms", 0)),
-                ("polymer", getattr(self._component_info, "n_polymer_atoms", 0)),
-            )
-            if atom_count > 0
-        ]
+        self._append_posres_to_itp(
+            itp_path, local_indices, force_constant, posres_define, group_name
+        )
+        logger.info(
+            f"Added {len(local_indices)} position restraints to "
+            f"{itp_path.name} (#ifdef {posres_define})"
+        )
+        return True
 
     def _find_single_itp(
         self,
         output_dir: Path,
         prefix: str,
         component_type: str,
-    ) -> Path | None:
-        """Find a component ITP by historical filename order.
+    ) -> Optional[Path]:
+        """Find the ITP file for a single-instance component (protein or ligand).
 
-        This fallback is used only when ``{prefix}.top`` is unavailable. When
-        the topology layout exists, component classification uses molecule
-        order and atom counts instead.
+        OpenFF Interchange names molecule types MOL0, MOL1, ... based on
+        PolyzyMD's building order:
+        - MOL0 = protein
+        - MOL1 = substrate/ligand (if protein present, else MOL0)
 
-        Parameters
-        ----------
-        output_dir : Path
-            Directory containing ITP files.
-        prefix : str
-            Filename prefix.
-        component_type : str
-            Component type, either ``"protein"`` or ``"ligand"``.
+        Args:
+            output_dir: Directory containing ITP files.
+            prefix: Filename prefix.
+            component_type: "protein" or "ligand"
 
-        Returns
-        -------
-        Path | None
-            Path to the ITP file, or ``None`` if not found.
+        Returns:
+            Path to the ITP file, or None if not found.
         """
         if component_type == "protein":
             mol_index = 0
@@ -1172,6 +950,37 @@ class PositionRestraintGenerator:
         logger.warning(f"ITP file not found: {itp_path}")
         return None
 
+    def _global_to_local_indices(
+        self,
+        global_indices: List[int],
+        component_type: str,
+    ) -> List[int]:
+        """Convert global atom indices to local 1-indexed indices.
+
+        Args:
+            global_indices: 0-indexed global atom indices.
+            component_type: "protein" or "ligand"
+
+        Returns:
+            Sorted list of 1-indexed local atom indices for GROMACS.
+        """
+        if component_type == "protein":
+            start_index = 0
+            n_atoms = self._component_info.n_protein_atoms
+        elif component_type == "ligand":
+            start_index = self._component_info.n_protein_atoms
+            n_atoms = self._component_info.n_substrate_atoms
+        else:
+            return []
+
+        end_index = start_index + n_atoms
+        local_indices = [
+            global_idx - start_index + 1
+            for global_idx in global_indices
+            if start_index <= global_idx < end_index
+        ]
+        return sorted(local_indices)
+
     # ------------------------------------------------------------------
     # Multi-ITP path (polymers)
     # ------------------------------------------------------------------
@@ -1184,31 +993,29 @@ class PositionRestraintGenerator:
         posres_define: str,
         group_name: str,
     ) -> int:
-        """Add position restraints to polymer ITP files.
+        """Add position restraints to ALL polymer ITP files.
 
-        This compatibility helper uses topology-based component classification
-        when possible and falls back to historical polymer discovery only when
-        the topology layout is unavailable.
+        OpenFF Interchange creates one molecule type (and ITP file) per unique
+        polymer sequence. For random copolymers, 25 chains might produce 12+
+        unique molecule types. Every polymer ITP needs its own position
+        restraints.
 
-        Parameters
-        ----------
-        output_dir : Path
-            Directory containing ITP files.
-        prefix : str
-            Filename prefix.
-        force_constant : float
-            Position restraint force constant in kJ/mol/nm^2.
-        posres_define : str
-            POSRES define name, such as ``"POSRES_POLYMER"``.
-        group_name : str
-            Atom group name for comment headers.
+        Instead of mapping global indices (which requires knowing the exact
+        molecule ordering), this method parses each ITP's [ atoms ] section
+        directly and identifies heavy atoms by atom name (names NOT starting
+        with 'H' are heavy atoms).
 
-        Returns
-        -------
-        int
+        Args:
+            output_dir: Directory containing ITP files.
+            prefix: Filename prefix.
+            force_constant: Force constant in kJ/mol/nm^2.
+            posres_define: POSRES define name (e.g., "POSRES_POLYMER").
+            group_name: Atom group name for comment headers.
+
+        Returns:
             Number of ITP files that received position restraints.
         """
-        polymer_itps = self._find_component_itps(output_dir, prefix, "polymer")
+        polymer_itps = self._find_all_polymer_itps(output_dir, prefix)
         if not polymer_itps:
             logger.warning("No polymer ITP files found - skipping polymer position restraints")
             return 0
@@ -1237,24 +1044,18 @@ class PositionRestraintGenerator:
         output_dir: Path,
         prefix: str,
     ) -> List[Path]:
-        """Discover polymer molecule ITP files without topology classification.
+        """Discover all polymer molecule ITP files in the output directory.
 
-        This fallback is used only when ``{prefix}.top`` is unavailable. When
-        the topology layout exists, polymer ITPs are classified by molecule
-        order and SystemComponentInfo atom counts to avoid treating retained
-        protein ITPs as polymer.
+        Polymer ITPs start at the first MOL index after protein and ligand.
+        We glob for all ``{prefix}_MOL*.itp`` files, exclude known non-polymer
+        molecules (water, ions), and return the rest sorted by MOL index.
 
-        Parameters
-        ----------
-        output_dir : Path
-            Directory containing ITP files.
-        prefix : str
-            Filename prefix.
+        Args:
+            output_dir: Directory containing ITP files.
+            prefix: Filename prefix (e.g., "FnIII_OEGMA-SBMA-1-1").
 
-        Returns
-        -------
-        list[Path]
-            Sorted list of fallback-discovered polymer ITP file paths.
+        Returns:
+            Sorted list of polymer ITP file paths.
         """
         # Determine the first polymer MOL index
         first_polymer_mol = 0
@@ -1340,12 +1141,10 @@ class PositionRestraintGenerator:
         """Parse an ITP file and return 1-indexed local indices of heavy atoms.
 
         Heavy atoms are identified by atom name: any atom whose name does NOT
-        start with ``H`` after stripping leading digits is considered heavy.
-        This handles digit-prefixed hydrogen names such as ``1H``, ``2HA``,
-        and ``3HD1``. This convention is universal across AMBER, CHARMM, OPLS,
-        and SMIRNOFF force fields. It is also invariant to hydrogen mass
-        repartitioning (HMR), which changes atom masses but never changes atom
-        names.
+        start with 'H' is considered heavy. This convention is universal across
+        AMBER, CHARMM, OPLS, and SMIRNOFF force fields. It is also invariant
+        to hydrogen mass repartitioning (HMR), which changes atom masses but
+        never changes atom names.
 
         The ITP [ atoms ] section format (from OpenFF Interchange) is::
 
@@ -1353,18 +1152,13 @@ class PositionRestraintGenerator:
                  1 MOL2_0       1 RES1     C1      1  -0.123456789012  12.010780000000
 
         Column indices (0-based, whitespace-split):
-
         - 0: atom index (1-indexed)
         - 4: atom name
 
-        Parameters
-        ----------
-        itp_path : Path
-            Path to the ITP file.
+        Args:
+            itp_path: Path to the ITP file.
 
-        Returns
-        -------
-        list[int]
+        Returns:
             Sorted list of 1-indexed atom indices for non-hydrogen atoms.
         """
         heavy_indices: List[int] = []
@@ -1388,81 +1182,9 @@ class PositionRestraintGenerator:
                 if len(parts) >= 5 and parts[0].isdigit():
                     atom_index = int(parts[0])
                     atom_name = parts[4]
-                    if not _is_hydrogen_atom_name(atom_name):
+                    if not atom_name.startswith("H"):
                         heavy_indices.append(atom_index)
         return sorted(heavy_indices)
-
-    @classmethod
-    def _get_local_atom_indices_from_itp(cls, itp_path: Path, group_name: str) -> List[int]:
-        """Parse local atom indices for a restraint group from one ITP.
-
-        Parameters
-        ----------
-        itp_path : Path
-            Path to the molecule ITP file.
-        group_name : str
-            Restraint group name such as ``"protein_heavy"``,
-            ``"protein_backbone"``, or ``"ligand_heavy"``.
-
-        Returns
-        -------
-        list[int]
-            Sorted 1-indexed atom indices local to the ITP molecule type.
-        """
-        if group_name.endswith("_heavy"):
-            return cls._get_heavy_atom_indices_from_itp(itp_path)
-
-        atom_indices: List[int] = []
-        for atom_index, atom_name in cls._iter_itp_atom_names(itp_path):
-            atom_name_upper = atom_name.upper()
-            if group_name == "protein_backbone" and atom_name_upper in {
-                "N",
-                "CA",
-                "C",
-                "O",
-                "OXT",
-            }:
-                atom_indices.append(atom_index)
-            elif group_name == "protein_calpha" and atom_name_upper == "CA":
-                atom_indices.append(atom_index)
-
-        return sorted(atom_indices)
-
-    @staticmethod
-    def _iter_itp_atom_names(itp_path: Path) -> List[Tuple[int, str]]:
-        """Return local atom indices and names from an ITP [ atoms ] section.
-
-        Parameters
-        ----------
-        itp_path : Path
-            Path to the molecule ITP file.
-
-        Returns
-        -------
-        list[tuple[int, str]]
-            Pairs of 1-indexed atom index and atom name.
-        """
-        atom_names: List[Tuple[int, str]] = []
-        try:
-            lines = itp_path.read_text().splitlines()
-        except (OSError, UnicodeDecodeError) as exc:
-            logger.warning(f"Failed to read ITP file {itp_path}: {exc}")
-            return atom_names
-
-        in_atoms_section = False
-        for line in lines:
-            stripped = line.strip()
-            if not stripped or stripped.startswith(";"):
-                continue
-            if stripped.startswith("["):
-                section = stripped.strip("[] \t").lower()
-                in_atoms_section = section == "atoms"
-                continue
-            if in_atoms_section:
-                parts = stripped.split()
-                if len(parts) >= 5 and parts[0].isdigit():
-                    atom_names.append((int(parts[0]), parts[4]))
-        return atom_names
 
     # ------------------------------------------------------------------
     # Shared helpers
