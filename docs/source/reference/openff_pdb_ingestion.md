@@ -24,7 +24,7 @@ analysis. These are project conventions, not OpenFF parser requirements.
 
 | Role | PolyzyMD chain convention | Notes |
 |---|---|---|
-| Protein/enzyme | `A` | The enzyme PDB passed to OpenFF is usually protein-only on chain `A` |
+| Protein/enzyme | `A` | The enzyme PDB passed to OpenFF is usually protein-only on chain `A`; multiple OpenFF enzyme molecules are all retained on chain `A` |
 | Substrate | `B` | Usually kept separate from the enzyme PDB and configured as substrate input |
 | Polymer | `C` | Used for conjugates and polymer-specific selections |
 | Solvent/ions/other | `D` and later | Usually generated or handled outside the enzyme PDB |
@@ -32,6 +32,26 @@ analysis. These are project conventions, not OpenFF parser requirements.
 An enzyme PDB can satisfy PolyzyMD chain conventions and still fail OpenFF
 ingestion if the residue graph, hydrogens, termini, or disulfide connectivity do
 not match supported chemistry.
+
+## Multi-molecule enzyme topology behavior
+
+OpenFF may parse a protein-only enzyme PDB as multiple molecules when the input
+contains disconnected protein copies, such as a homodimer. Diagnose this with:
+
+```python
+from openff.toolkit import Topology
+
+topology = Topology.from_pdb("enzyme.pdb")
+print(topology.n_molecules)
+```
+
+Fixed PolyzyMD builds retain all enzyme molecules in the original OpenFF order
+before substrate and polymer components. Chain assignment still follows the
+canonical convention: every protein/enzyme molecule is chain `A`, substrate is
+chain `B`, polymers are chain `C`, and solvent/ions start at chain `D`. Older
+builds incorrectly used only `molecule(0)`, which made homodimer outputs look
+like single-monomer systems even though OpenFF had loaded multiple protein
+molecules.
 
 ## OpenFF disulfide behavior
 
@@ -90,6 +110,7 @@ narrow custom-substructure proof of concept. Do not suppress the error.
 | Error dump names `CYS#0001`, terminal `H`, or N-terminal cysteine/cystine | N-terminal cysteine has terminal hydrogens plus disulfide chemistry that does not match OpenFF's template | Check SG-HG absence, SG-SG bond, N-terminal hydrogens, and residue naming | Curate the cystine or test a structure-specific `NCYX` custom substructure | Seen in 4CHA proof of concept; not universal |
 | Renaming disulfide cysteine to `CYX` does not resolve ingestion | `CYX` aliasing is not equivalent to a complete public template for all contexts | Validate direct OpenFF ingestion and inspect charge mismatch | Fix connectivity/hydrogens or prepare an upstream OpenFF issue/PR | Avoid relying on residue rename alone |
 | Failure adjacent to residues listed in `REMARK 465` | Missing-coordinate residues or missing heavy atoms alter termini or local chemistry | Read PDB header and visualize gaps | Model missing regions externally if required for the study | Automatic filling is a modeling decision |
+| `Topology.from_pdb()` reports `n_molecules > 1`, but older output contains only one protein copy | Historical PolyzyMD solute combination dropped all enzyme molecules except `molecule(0)` | Compare `Topology.from_pdb(path).n_molecules` and output atom counts/chains | Use a fixed PolyzyMD build; all enzyme molecules are retained before substrate/polymers | Multiple protein molecules intentionally share chain `A` |
 
 ## Catalog maintenance rule
 

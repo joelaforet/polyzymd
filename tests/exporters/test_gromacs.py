@@ -14,6 +14,7 @@ Covers:
 
 from importlib import resources
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -92,12 +93,99 @@ water           2
      1      1    0.09572    0.15139
 """
 
+LIGAND_ITP_TEMPLATE = """\
+[ moleculetype ]
+{mol_name}           3
+
+[ atoms ]
+     1 {mol_name}_0       1 LIG      C1      1  -0.100000000000  12.010780000000
+     2 {mol_name}_1       1 LIG      O1      2  -0.200000000000  15.999430000000
+     3 {mol_name}_2       1 LIG      H1      3   0.100000000000   1.007940000000
+     4 {mol_name}_3       1 LIG      N1      4  -0.100000000000  14.006720000000
+
+[ bonds ]
+     1      2      1    0.14900  224262.400
+"""
+
 
 def _write_itp(directory: Path, prefix: str, mol_name: str, content: str) -> Path:
     """Write an ITP file and return its path."""
     path = directory / f"{prefix}_{mol_name}.itp"
     path.write_text(content)
     return path
+
+
+def _write_top(directory: Path, prefix: str, molecules: list[tuple[str, int]]) -> Path:
+    """Write a minimal topology file with a [ molecules ] layout."""
+    molecule_lines = [f"{mol_name}    {count}" for mol_name, count in molecules]
+    path = directory / f"{prefix}.top"
+    path.write_text("[ system ]\ntest\n\n[ molecules ]\n" + "\n".join(molecule_lines) + "\n")
+    return path
+
+
+def _protein_itp_content(mol_name: str) -> str:
+    """Return the synthetic protein ITP content with the requested molecule name."""
+    return PROTEIN_ITP_CONTENT.replace("MOL0", mol_name)
+
+
+def _posres_config(groups: list[str]) -> SimpleNamespace:
+    """Build a minimal config object with position restraint groups."""
+    restraints = [SimpleNamespace(group=group, force_constant=1000.0) for group in groups]
+    stage = SimpleNamespace(position_restraints=restraints)
+    return SimpleNamespace(simulation_phases=SimpleNamespace(equilibration_stages=[stage]))
+
+
+def _component_info(
+    n_protein_atoms: int = 0,
+    n_substrate_atoms: int = 0,
+    n_polymer_atoms: int = 0,
+) -> SimpleNamespace:
+    """Build minimal SystemComponentInfo-like counts for synthetic tests."""
+    return SimpleNamespace(
+        n_protein_atoms=n_protein_atoms,
+        n_substrate_atoms=n_substrate_atoms,
+        n_polymer_atoms=n_polymer_atoms,
+        has_protein=n_protein_atoms > 0,
+        has_substrate=n_substrate_atoms > 0,
+        has_polymers=n_polymer_atoms > 0,
+    )
+
+
+def _posres_generator(component_info: SimpleNamespace) -> PositionRestraintGenerator:
+    """Create a PositionRestraintGenerator without OpenMM topology dependencies."""
+    generator = PositionRestraintGenerator.__new__(PositionRestraintGenerator)
+    generator._component_info = component_info
+    return generator
+
+
+def _posres_indices(itp_path: Path, define: str) -> list[int]:
+    """Read local atom indices from a generated position restraint block."""
+    indices = []
+    in_define = False
+    in_posres = False
+    for line in itp_path.read_text().splitlines():
+        stripped = line.strip()
+        if stripped == f"#ifdef {define}":
+            in_define = True
+            continue
+        if in_define and stripped == "#endif":
+            break
+        if in_define and stripped.startswith("["):
+            in_posres = stripped.strip("[] ").lower() == "position_restraints"
+            continue
+        if in_define and in_posres and stripped and not stripped.startswith(";"):
+            parts = stripped.split()
+            if parts and parts[0].isdigit():
+                indices.append(int(parts[0]))
+    return indices
+
+
+def _assert_posres_indices_within_atom_count(itp_path: Path, define: str) -> None:
+    """Assert generated position restraint indices are local to their ITP."""
+    indices = _posres_indices(itp_path, define)
+    atom_count = PositionRestraintGenerator._get_atom_count_from_itp(itp_path)
+    assert indices
+    assert max(indices) <= atom_count
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +215,29 @@ class TestGetHeavyAtomIndicesFromItp:
         # OW(1), HW1(2), HW2(3) -> non-H: 1 only
         # Wait — HW1 starts with 'H', so only OW is heavy
         assert heavy == [1]
+
+    def test_digit_prefixed_hydrogen_names_are_excluded(self, tmp_path):
+        content = """\
+[ moleculetype ]
+MOLX           3
+
+[ atoms ]
+     1 MOLX_0       1 RES      H       1   0.100000000000   1.007940000000
+     2 MOLX_1       1 RES      1H      2   0.100000000000   1.007940000000
+     3 MOLX_2       1 RES      2HA     3   0.100000000000   1.007940000000
+     4 MOLX_3       1 RES      3HD1    4   0.100000000000   1.007940000000
+     5 MOLX_4       1 RES      C1      5  -0.100000000000  12.010780000000
+     6 MOLX_5       1 RES      O1      6  -0.200000000000  15.999430000000
+     7 MOLX_6       1 RES      1C      7  -0.100000000000  12.010780000000
+
+[ bonds ]
+     1      5      1    0.10900  284512.000
+"""
+        itp = _write_itp(tmp_path, "sys", "MOLX", content)
+
+        heavy = PositionRestraintGenerator._get_heavy_atom_indices_from_itp(itp)
+
+        assert heavy == [5, 6, 7]
 
     def test_nonexistent_file(self, tmp_path):
         path = tmp_path / "nope.itp"
@@ -244,6 +355,116 @@ class TestFindAllPolymerItps:
         gen._component_info = component_info
         itps = gen._find_all_polymer_itps(tmp_path, "sys")
         assert itps == []
+
+
+class TestTopologyLayoutPositionRestraints:
+    """Topology layout classification keeps homodimer restraints local and typed."""
+
+    def test_identical_homodimer_mol0_two_plus_ligand(self, tmp_path):
+        """MOL0 with two copies should be one protein ITP, not protein plus ligand."""
+        prefix = "sys"
+        protein_itp = _write_itp(tmp_path, prefix, "MOL0", _protein_itp_content("MOL0"))
+        ligand_itp = _write_itp(
+            tmp_path,
+            prefix,
+            "MOL1",
+            LIGAND_ITP_TEMPLATE.format(mol_name="MOL1"),
+        )
+        _write_top(tmp_path, prefix, [("MOL0", 2), ("MOL1", 1)])
+
+        generator = _posres_generator(_component_info(n_protein_atoms=12, n_substrate_atoms=4))
+        defines = generator.add_posres_to_itp_files(
+            _posres_config(["protein_heavy", "ligand_heavy"]),
+            tmp_path,
+            prefix,
+        )
+
+        assert defines == {"protein": "POSRES_PROTEIN", "ligand": "POSRES_LIGAND"}
+        assert _posres_indices(protein_itp, "POSRES_PROTEIN") == [1, 2, 4, 5]
+        assert _posres_indices(ligand_itp, "POSRES_LIGAND") == [1, 2, 4]
+        _assert_posres_indices_within_atom_count(protein_itp, "POSRES_PROTEIN")
+        _assert_posres_indices_within_atom_count(ligand_itp, "POSRES_LIGAND")
+
+    def test_distinct_dimer_mol0_mol1_plus_ligand_mol2(self, tmp_path):
+        """Distinct protein ITPs should both receive protein restraints."""
+        prefix = "sys"
+        protein_a = _write_itp(tmp_path, prefix, "MOL0", _protein_itp_content("MOL0"))
+        protein_b = _write_itp(tmp_path, prefix, "MOL1", _protein_itp_content("MOL1"))
+        ligand_itp = _write_itp(
+            tmp_path,
+            prefix,
+            "MOL2",
+            LIGAND_ITP_TEMPLATE.format(mol_name="MOL2"),
+        )
+        _write_top(tmp_path, prefix, [("MOL0", 1), ("MOL1", 1), ("MOL2", 1)])
+
+        generator = _posres_generator(_component_info(n_protein_atoms=12, n_substrate_atoms=4))
+        defines = generator.add_posres_to_itp_files(
+            _posres_config(["protein_heavy", "ligand_heavy"]),
+            tmp_path,
+            prefix,
+        )
+
+        assert defines == {"protein": "POSRES_PROTEIN", "ligand": "POSRES_LIGAND"}
+        assert _posres_indices(protein_a, "POSRES_PROTEIN") == [1, 2, 4, 5]
+        assert _posres_indices(protein_b, "POSRES_PROTEIN") == [1, 2, 4, 5]
+        assert _posres_indices(ligand_itp, "POSRES_LIGAND") == [1, 2, 4]
+        for itp_path, define in (
+            (protein_a, "POSRES_PROTEIN"),
+            (protein_b, "POSRES_PROTEIN"),
+            (ligand_itp, "POSRES_LIGAND"),
+        ):
+            _assert_posres_indices_within_atom_count(itp_path, define)
+
+    def test_ligand_after_multiple_proteins_is_not_second_protein(self, tmp_path):
+        """Ligand restraints should start after all topology-classified proteins."""
+        prefix = "sys"
+        protein_a = _write_itp(tmp_path, prefix, "MOL0", _protein_itp_content("MOL0"))
+        protein_b = _write_itp(tmp_path, prefix, "MOL1", _protein_itp_content("MOL1"))
+        ligand_itp = _write_itp(
+            tmp_path,
+            prefix,
+            "MOL2",
+            LIGAND_ITP_TEMPLATE.format(mol_name="MOL2"),
+        )
+        _write_top(tmp_path, prefix, [("MOL0", 1), ("MOL1", 1), ("MOL2", 1)])
+
+        generator = _posres_generator(_component_info(n_protein_atoms=12, n_substrate_atoms=4))
+        defines = generator.add_posres_to_itp_files(
+            _posres_config(["ligand_heavy"]),
+            tmp_path,
+            prefix,
+        )
+
+        assert defines == {"ligand": "POSRES_LIGAND"}
+        assert "POSRES_LIGAND" not in protein_a.read_text()
+        assert "POSRES_LIGAND" not in protein_b.read_text()
+        assert _posres_indices(ligand_itp, "POSRES_LIGAND") == [1, 2, 4]
+        _assert_posres_indices_within_atom_count(ligand_itp, "POSRES_LIGAND")
+
+    def test_polymer_after_multiple_proteins_is_not_second_protein(self, tmp_path):
+        """Polymer discovery should not classify retained protein ITPs as polymer."""
+        prefix = "sys"
+        protein_itp = _write_itp(tmp_path, prefix, "MOL0", _protein_itp_content("MOL0"))
+        polymer_itp = _write_itp(
+            tmp_path,
+            prefix,
+            "MOL1",
+            POLYMER_ITP_TEMPLATE.format(mol_name="MOL1"),
+        )
+        _write_top(tmp_path, prefix, [("MOL0", 2), ("MOL1", 1)])
+
+        generator = _posres_generator(_component_info(n_protein_atoms=12, n_polymer_atoms=10))
+        defines = generator.add_posres_to_itp_files(
+            _posres_config(["polymer_heavy"]),
+            tmp_path,
+            prefix,
+        )
+
+        assert defines == {"polymer": "POSRES_POLYMER"}
+        assert "POSRES_POLYMER" not in protein_itp.read_text()
+        assert _posres_indices(polymer_itp, "POSRES_POLYMER") == [1, 3, 4, 6, 8, 10]
+        _assert_posres_indices_within_atom_count(polymer_itp, "POSRES_POLYMER")
 
 
 class TestAppendPosresToItp:

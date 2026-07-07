@@ -82,8 +82,9 @@ def main() -> None:
 
     from openff.toolkit import Topology
 
-    Topology.from_pdb(args.pdb)
+    topology = Topology.from_pdb(args.pdb)
     print("OpenFF PDB ingestion succeeded")
+    print(f"molecules: {topology.n_molecules}")
 
 
 if __name__ == "__main__":
@@ -99,6 +100,20 @@ pixi run -e build python validate_openff.py prepared_enzyme.pdb
 If direct validation fails, the problem is in the PDB chemistry OpenFF sees. A
 passing `polyzymd validate` or `polyzymd build --dry-run` does not prove OpenFF
 can ingest the enzyme PDB.
+
+## Check multi-molecule enzyme inputs
+
+Some valid enzyme PDBs contain more than one disconnected protein molecule. For
+example, homodimer preparations may load with more than one OpenFF molecule
+(`Topology.from_pdb(...).n_molecules > 1`). Older PolyzyMD builds only carried
+`molecule(0)` forward, so output PDB/GRO files silently kept one monomer and
+dropped the other.
+
+Use the direct OpenFF validation script above and check the printed molecule
+count. If `n_molecules` is greater than one, the fixed behavior is that PolyzyMD
+retains all enzyme molecules in OpenFF order. All retained enzyme/protein
+molecules are assigned chain `A`; substrate remains chain `B`, polymers chain
+`C`, and solvent starts at `D`.
 
 ## Interpret OpenFF error dumps
 
@@ -122,6 +137,7 @@ consistent model and validate it again.
 | Failure around `CYS#0001`, terminal `H`, or N-terminal cysteine | N-terminal cysteine/cystine has terminal hydrogens and disulfide state OpenFF does not match cleanly | Check N-terminal atom names, SG-HG absence, and SG-SG bond | Curate the terminal cystine or use a narrow `NCYX` custom substructure proof of concept | Private OpenFF API; not universal |
 | Residue names include `CYX`, but OpenFF still fails | `CYX` may be treated as a cysteine alias, not a complete public template solution | Compare residue atoms and SG-SG connectivity | Add/verify disulfide connectivity and hydrogens; consider upstream issue/PR | Do not assume renaming to CYX is sufficient |
 | Failure near residues reported in `REMARK 465` | Missing-coordinate residues or missing heavy atoms affect chemistry or termini | Read PDB header and visualize gaps | Model missing regions with an external tool when scientifically appropriate | PolyzyMD should receive a curated result |
+| OpenFF validation succeeds with `n_molecules > 1`, but older PolyzyMD output has one monomer | Historical PolyzyMD builds retained only enzyme `molecule(0)` after OpenFF parsing | Print `Topology.from_pdb(path).n_molecules` and compare output atom counts to the input enzyme copies | Use a fixed PolyzyMD build; all enzyme molecules are retained before substrate and polymers | All enzyme/protein molecules use chain `A` by convention |
 
 ## Disulfides
 
