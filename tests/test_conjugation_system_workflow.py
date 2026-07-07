@@ -141,31 +141,32 @@ def test_policy_with_resolved_crosslink_uses_product_state_leaving_atoms():
 
 
 def test_system_workflow_settings_enable_public_product_state_defaults():
-    """Public workflow defaults should use the generic frozen-protein protocol."""
+    """Public workflow defaults should use the generic conjugate protocol."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
     settings = workflow_module.ConjugatedPolymerSystemSettings()
 
     assert settings.canonicalize_source_protein_hydrogens is True
     assert settings.use_product_state_pablo_library is True
-    assert settings.run_frozen_protein_product_relaxation is True
-    assert settings.run_product_state_local_minimization is True
+    assert settings.run_relaxation is True
+    assert settings.run_openmm_validation is False
+    assert settings.run_product_state_local_minimization is False
     assert settings.protein_canonicalization.ph == pytest.approx(7.0)
 
 
-def test_relaxed_conjugate_pdb_prefers_final_frozen_relaxation_artifact(tmp_path):
+def test_relaxed_conjugate_pdb_prefers_final_conjugate_relaxation_artifact(tmp_path):
     """Downstream solvation should consume the Stage B relaxed PDB."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
-    minimized = tmp_path / "assembled_frozen_protein_minimized.pdb"
-    relaxed = tmp_path / "assembled_frozen_protein_relaxed.pdb"
+    minimized = tmp_path / "conjugate_minimized.pdb"
+    relaxed = tmp_path / "conjugate_relaxed.pdb"
     minimized.write_text("END\n", encoding="utf-8")
     relaxed.write_text("END\n", encoding="utf-8")
     construction = SimpleNamespace(
         local_minimization=None,
-        smoke=SimpleNamespace(
+        relaxation=SimpleNamespace(
             minimized_pdb_path=minimized,
-            equilibrated_pdb_path=relaxed,
+            relaxed_pdb_path=relaxed,
         ),
     )
 
@@ -299,7 +300,7 @@ def test_prepared_protein_path_canonicalizes_to_construction_dir(monkeypatch, tm
 
 def test_local_minimization_settings_use_product_atom_identities(tmp_path: Path):
     """Local minimization selectors should use generic product link atoms."""
-    from polyzymd.builders.conjugation._relaxation import LocalMinimizationSettings
+    from polyzymd.builders.conjugation.local_minimization import LocalMinimizationSettings
 
     product = tmp_path / "product.pdb"
     product.write_text(
@@ -340,7 +341,7 @@ def test_local_minimization_settings_use_product_atom_identities(tmp_path: Path)
 
 def test_local_minimization_settings_preserve_explicit_selectors(tmp_path: Path):
     """Explicit local minimization selectors should override product-state inference."""
-    from polyzymd.builders.conjugation._relaxation import (
+    from polyzymd.builders.conjugation.local_minimization import (
         LocalLinkageAtomSelector,
         LocalLinkageSelectors,
         LocalMinimizationSettings,
@@ -384,7 +385,7 @@ def test_local_minimization_settings_preserve_explicit_selectors(tmp_path: Path)
 
 def test_local_minimization_settings_do_not_require_modifier_oxygen_anchor(tmp_path: Path):
     """Generic local minimization should not require an auxiliary oxygen anchor."""
-    from polyzymd.builders.conjugation._relaxation import LocalMinimizationSettings
+    from polyzymd.builders.conjugation.local_minimization import LocalMinimizationSettings
 
     product = tmp_path / "product.pdb"
     product.write_text(
@@ -521,7 +522,7 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
             topology_type="FakeTopology",
         )
 
-    def fake_smoke(
+    def fake_validation(
         interchange,
         output_dir,
         *,
@@ -529,14 +530,10 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
         crosslinked_pdb_path=None,
         attachment_specs=(),
     ):
-        calls["smoke"] = calls.get("smoke", 0) + 1
-        calls["smoke_crosslinked_pdb_path"] = crosslinked_pdb_path
-        calls["smoke_attachment_specs"] = attachment_specs
-        minimized = Path(output_dir) / "minimized.pdb"
-        minimized.write_text("END\n", encoding="utf-8")
-        return SimpleNamespace(
-            success=True, minimized_pdb_path=minimized, equilibrated_pdb_path=None
-        )
+        calls["validation"] = calls.get("validation", 0) + 1
+        calls["validation_crosslinked_pdb_path"] = crosslinked_pdb_path
+        calls["validation_attachment_specs"] = attachment_specs
+        return SimpleNamespace(success=True)
 
     def fake_local_minimization(pdb_path, output_dir, **kwargs):
         calls["local_minimization"] = calls.get("local_minimization", 0) + 1
@@ -561,12 +558,9 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
     )
     monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
     monkeypatch.setattr(
-        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
-    )
-    monkeypatch.setattr(
         workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
     )
-    monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
+    monkeypatch.setattr(workflow_module, "validate_openmm_product", fake_validation)
     monkeypatch.setattr(
         workflow_module,
         "run_post_crosslink_local_minimization",
@@ -604,9 +598,9 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
         ccd_pablo_policy=policy,
         chain_policy=None,
         output_dir=tmp_path / "construction",
-        settings=ModifierConstructionSettings(run_smoke=True),
+        settings=ModifierConstructionSettings(run_relaxation=False),
         use_product_state_pablo_library=True,
-        use_frozen_protein_product_relaxation=False,
+        use_conjugate_relaxation=False,
         run_product_state_local_minimization=True,
         local_minimization_settings=workflow_module._default_local_minimization_settings(),
     )
@@ -615,7 +609,7 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
     assert construction.local_minimization is not None
     assert construction.local_minimization.relaxed_pdb_path.name == "local-relaxed.pdb"
     assert construction.local_minimization.success is False
-    assert construction.smoke is None
+    assert construction.relaxation is None
     assert calls["placed_protein_path"] == prepared_protein
     assert calls["modifier_count"] == 1
     assert calls["plan_count"] == 1
@@ -623,8 +617,8 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
     assert calls["source_protein_pdb"] == prepared_protein
     assert calls["polymer_sdf"] == polymer_sdf
     assert calls["residue_library"] is product_library.residue_library
-    assert calls["charge_template_count"] == 1
-    assert calls.get("smoke", 0) == 0
+    assert calls["charge_template_count"] == 0
+    assert calls.get("validation", 0) == 0
     assert calls["local_minimization"] == 1
     assert calls["local_settings"].linkages[0].protein_link_selector.residue_name == "LYX"
     assert calls["local_settings"].linkages[0].modifier_link_selector.residue_name == "NHX"
@@ -653,7 +647,7 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     moieties = tuple(
         _moiety_fragment(residue_name="NAG", residue_number=index + 1) for index in range(2)
     )
-    calls = {"placements": 0, "parameterize": 0, "smoke": 0, "local_minimization": 0}
+    calls = {"placements": 0, "parameterize": 0, "validation": 0, "local_minimization": 0}
 
     def fake_place(protein_pdb_path, modifiers_arg, plans_arg, output_dir, *, settings=None):
         calls["placements"] += 1
@@ -732,7 +726,7 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
             topology_type="FakeTopology",
         )
 
-    def fake_smoke(
+    def fake_validation(
         interchange,
         output_dir,
         *,
@@ -740,14 +734,10 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
         crosslinked_pdb_path=None,
         attachment_specs=(),
     ):
-        calls["smoke"] += 1
-        calls["smoke_crosslinked_pdb_path"] = crosslinked_pdb_path
-        calls["smoke_attachment_specs"] = attachment_specs
-        minimized = Path(output_dir) / "minimized.pdb"
-        minimized.write_text("END\n", encoding="utf-8")
-        return SimpleNamespace(
-            success=True, minimized_pdb_path=minimized, equilibrated_pdb_path=None
-        )
+        calls["validation"] += 1
+        calls["validation_crosslinked_pdb_path"] = crosslinked_pdb_path
+        calls["validation_attachment_specs"] = attachment_specs
+        return SimpleNamespace(success=True)
 
     def fake_local_minimization(pdb_path, output_dir, **kwargs):
         calls["local_minimization"] += 1
@@ -764,12 +754,9 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
     monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
     monkeypatch.setattr(
-        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
-    )
-    monkeypatch.setattr(
         workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
     )
-    monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
+    monkeypatch.setattr(workflow_module, "validate_openmm_product", fake_validation)
     monkeypatch.setattr(
         workflow_module,
         "run_post_crosslink_local_minimization",
@@ -810,7 +797,7 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
         ccd_pablo_policy=policy,
         output_dir=tmp_path / "construction",
         chain_policy=None,
-        settings=ModifierConstructionSettings(run_smoke=False),
+        settings=ModifierConstructionSettings(run_relaxation=False),
         use_product_state_pablo_library=False,
         run_product_state_local_minimization=True,
         local_minimization_settings=object(),
@@ -829,7 +816,7 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     assert calls["local_linkage_count"] == 2
     assert calls["local_settings"].linkages[0].protein_link_selector.residue_name == "ASX"
     assert calls["local_settings"].linkages[1].modifier_link_selector.residue_name == "NAG"
-    assert calls["smoke"] == 0
+    assert calls["validation"] == 0
     assert construction.local_minimization is not None
 
 
@@ -855,7 +842,7 @@ def test_single_generic_local_minimization_request_runs_minimizer(
         source_sidecars={},
         fragment=SimpleNamespace(source_kind="moiety"),
     )
-    calls = {"smoke": 0, "local_minimization": 0}
+    calls = {"validation": 0, "local_minimization": 0}
 
     def fake_place(protein_pdb_path, modifiers_arg, plans_arg, output_dir, *, settings=None):
         return (
@@ -909,7 +896,7 @@ def test_single_generic_local_minimization_request_runs_minimizer(
             topology_type="FakeTopology",
         )
 
-    def fake_smoke(
+    def fake_validation(
         interchange,
         output_dir,
         *,
@@ -917,16 +904,10 @@ def test_single_generic_local_minimization_request_runs_minimizer(
         crosslinked_pdb_path=None,
         attachment_specs=(),
     ):
-        calls["smoke"] += 1
-        calls["smoke_crosslinked_pdb_path"] = crosslinked_pdb_path
-        calls["smoke_attachment_specs"] = attachment_specs
-        minimized = Path(output_dir) / "minimized.pdb"
-        minimized.write_text("END\n", encoding="utf-8")
-        return SimpleNamespace(
-            success=True,
-            minimized_pdb_path=minimized,
-            equilibrated_pdb_path=None,
-        )
+        calls["validation"] += 1
+        calls["validation_crosslinked_pdb_path"] = crosslinked_pdb_path
+        calls["validation_attachment_specs"] = attachment_specs
+        return SimpleNamespace(success=True)
 
     def fake_local_minimization(*args, **kwargs):
         calls["local_minimization"] += 1
@@ -941,12 +922,9 @@ def test_single_generic_local_minimization_request_runs_minimizer(
     monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
     monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
     monkeypatch.setattr(
-        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
-    )
-    monkeypatch.setattr(
         workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
     )
-    monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
+    monkeypatch.setattr(workflow_module, "validate_openmm_product", fake_validation)
     monkeypatch.setattr(
         workflow_module,
         "run_post_crosslink_local_minimization",
@@ -975,22 +953,32 @@ def test_single_generic_local_minimization_request_runs_minimizer(
         ccd_pablo_policy=policy,
         output_dir=tmp_path / "construction",
         chain_policy=None,
-        settings=ModifierConstructionSettings(run_smoke=False),
+        settings=ModifierConstructionSettings(run_relaxation=False),
         use_product_state_pablo_library=False,
-        use_frozen_protein_product_relaxation=False,
+        use_conjugate_relaxation=False,
         run_product_state_local_minimization=True,
         local_minimization_settings=object(),
     )
 
     assert topology is not None
     assert construction.local_minimization is not None
-    assert construction.smoke is None
+    assert construction.relaxation is None
     assert calls["local_minimization"] == 1
-    assert calls["smoke"] == 0
+    assert calls["validation"] == 0
 
 
-def test_combined_smoke_receives_product_path_and_attachment_specs(monkeypatch, tmp_path: Path):
-    """Combined smoke relaxation should use the current product-aware signature."""
+@pytest.mark.parametrize(
+    ("run_relaxation", "use_conjugate_relaxation", "expect_relaxation"),
+    ((False, False, False), (True, True, True)),
+)
+def test_openmm_validation_receives_product_path_and_attachment_specs(
+    monkeypatch,
+    tmp_path: Path,
+    run_relaxation: bool,
+    use_conjugate_relaxation: bool,
+    expect_relaxation: bool,
+):
+    """OpenMM validation should use the current product-aware signature."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
     plan = _generic_resolved_plan(
@@ -1054,7 +1042,7 @@ def test_combined_smoke_receives_product_path_and_attachment_specs(monkeypatch, 
                 topology=SimpleNamespace(molecules=(object(),)),
             )
 
-    def fake_smoke(
+    def fake_validation(
         interchange,
         output_dir,
         *,
@@ -1064,11 +1052,20 @@ def test_combined_smoke_receives_product_path_and_attachment_specs(monkeypatch, 
     ):
         calls["crosslinked_pdb_path"] = crosslinked_pdb_path
         calls["attachment_specs"] = attachment_specs
-        minimized = Path(output_dir) / "minimized.pdb"
-        minimized.write_text("END\n", encoding="utf-8")
-        return SimpleNamespace(
-            success=True, minimized_pdb_path=minimized, equilibrated_pdb_path=None
-        )
+        return SimpleNamespace(success=True)
+
+    def fake_relax_conjugate(
+        interchange,
+        output_dir,
+        *,
+        product_pdb_path=None,
+        attachment_specs=(),
+        assembly=None,
+        settings=None,
+    ):
+        calls["relaxation_product_pdb_path"] = product_pdb_path
+        calls["relaxation_attachment_specs"] = attachment_specs
+        return SimpleNamespace(success=True, relaxed_pdb_path=Path(output_dir) / "relaxed.pdb")
 
     monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
     monkeypatch.setattr(
@@ -1076,9 +1073,6 @@ def test_combined_smoke_receives_product_path_and_attachment_specs(monkeypatch, 
     )
     monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
     monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
-    monkeypatch.setattr(
-        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
-    )
     monkeypatch.setattr(
         workflow_module,
         "create_interchange_from_pablo_topology",
@@ -1089,7 +1083,8 @@ def test_combined_smoke_receives_product_path_and_attachment_specs(monkeypatch, 
             topology_type="FakeTopology",
         ),
     )
-    monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
+    monkeypatch.setattr(workflow_module, "validate_openmm_product", fake_validation)
+    monkeypatch.setattr(workflow_module, "relax_conjugate", fake_relax_conjugate)
 
     construction, _topology = workflow_module._construct_conjugate_from_specs(
         protein_pdb_path=tmp_path / "protein.pdb",
@@ -1106,14 +1101,21 @@ def test_combined_smoke_receives_product_path_and_attachment_specs(monkeypatch, 
         ),
         output_dir=tmp_path / "construction",
         chain_policy=None,
-        settings=ModifierConstructionSettings(run_smoke=True),
+        settings=ModifierConstructionSettings(
+            run_relaxation=run_relaxation,
+            run_openmm_validation=True,
+        ),
         use_product_state_pablo_library=False,
-        use_frozen_protein_product_relaxation=False,
+        use_conjugate_relaxation=use_conjugate_relaxation,
         run_product_state_local_minimization=False,
     )
 
     assert calls["crosslinked_pdb_path"] == construction.crosslinked_pdb_path
     assert calls["attachment_specs"] == (spec,)
+    assert ("relaxation_product_pdb_path" in calls) is expect_relaxation
+    if expect_relaxation:
+        assert calls["relaxation_product_pdb_path"] == construction.crosslinked_pdb_path
+        assert calls["relaxation_attachment_specs"] == (spec,)
 
 
 def test_construction_final_interchange_uses_strict_charge_bridge(
@@ -1220,9 +1222,6 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
         lambda **kwargs: kwargs["product_state_pablo_library"],
     )
     monkeypatch.setattr(
-        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
-    )
-    monkeypatch.setattr(
         workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
     )
 
@@ -1241,7 +1240,7 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
         ),
         output_dir=tmp_path / "construction",
         chain_policy=None,
-        settings=ModifierConstructionSettings(run_smoke=False),
+        settings=ModifierConstructionSettings(run_relaxation=False),
         use_product_state_pablo_library=True,
         run_product_state_local_minimization=False,
     )
@@ -1308,7 +1307,7 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
         calls["local_minimization_settings"] = kwargs["local_minimization_settings"]
         return (
             SimpleNamespace(
-                smoke=SimpleNamespace(minimized_pdb_path=relaxed, equilibrated_pdb_path=None),
+                relaxation=SimpleNamespace(minimized_pdb_path=relaxed, relaxed_pdb_path=relaxed),
                 crosslinked_pdb_path=tmp_path / "crosslinked.pdb",
                 diagnostics=("fake construction",),
             ),
@@ -1358,7 +1357,9 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
         protein_pdb_path=source,
         attachments=attachments,
         output_dir=tmp_path / "out",
-        settings=workflow_module.ConjugatedPolymerSystemSettings(),
+        settings=workflow_module.ConjugatedPolymerSystemSettings(
+            run_product_state_local_minimization=True
+        ),
     )
 
     assert len(built_specs) == 2
@@ -1446,7 +1447,12 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
         calls["specs"] = kwargs["specs"]
         calls["run_local_minimization"] = kwargs["run_product_state_local_minimization"]
         calls["local_minimization_settings"] = kwargs["local_minimization_settings"]
-        return SimpleNamespace(smoke=SimpleNamespace(minimized_pdb_path=relaxed)), object()
+        return (
+            SimpleNamespace(
+                relaxation=SimpleNamespace(minimized_pdb_path=relaxed, relaxed_pdb_path=relaxed)
+            ),
+            object(),
+        )
 
     monkeypatch.setattr(workflow_module, "get_reaction", lambda name: FakeReaction())
     monkeypatch.setattr(
@@ -1484,6 +1490,7 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     settings = workflow_module.ConjugatedPolymerSystemSettings(
         canonicalize_source_protein_hydrogens=False,
         preserve_reference_atom_names=False,
+        run_product_state_local_minimization=True,
     )
     caplog.set_level(logging.INFO, logger=workflow_module.__name__)
     result = workflow_module.build_conjugated_polymer_system_from_config(
@@ -1580,7 +1587,9 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
         workflow_module,
         "_construct_conjugate_from_specs",
         lambda **kwargs: (
-            SimpleNamespace(smoke=SimpleNamespace(minimized_pdb_path=relaxed)),
+            SimpleNamespace(
+                relaxation=SimpleNamespace(minimized_pdb_path=relaxed, relaxed_pdb_path=relaxed)
+            ),
             object(),
         ),
     )

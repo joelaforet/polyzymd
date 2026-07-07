@@ -1,4 +1,4 @@
-"""Tests for restrained vacuum smoke validation helpers."""
+"""Tests for conjugate relaxation and OpenMM validation helpers."""
 
 from __future__ import annotations
 
@@ -13,27 +13,32 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-import polyzymd.builders.conjugation._relaxation as relaxation
-from polyzymd.builders.conjugation._relaxation import (
-    FrozenProteinRelaxationDiagnostics,
-    FrozenProteinRelaxationSettings,
-    ProductLinkagePair,
-    VacuumSmokeSettings,
-    _add_linkage_anchor_restraints,
+import polyzymd.builders.conjugation.relaxation._openmm_workflows as relaxation_workflows
+import polyzymd.builders.conjugation.relaxation.openmm as relaxation
+from polyzymd.builders.conjugation.relaxation._diagnostics import (
     _positions_to_numpy,
-    _remove_barostats,
-    _resolve_restrained_indices,
-    _run_frozen_product_md,
-    _write_vacuum_smoke_failure,
-    analyze_pre_smoke_geometry,
-    freeze_chain_a_masses,
-    freeze_protein_chain_masses,
-    resolve_product_linkage_pairs,
-    restore_particle_masses,
-    run_frozen_protein_product_relaxation,
+    analyze_product_geometry,
     validate_finite_energy,
     validate_finite_positions,
 )
+from polyzymd.builders.conjugation.relaxation._linkages import resolve_product_linkage_pairs
+from polyzymd.builders.conjugation.relaxation._openmm_system import (
+    _add_linkage_anchor_restraints,
+    _freeze_protein_chain_masses,
+    _remove_barostats,
+    _resolve_restrained_indices,
+    _restore_particle_masses,
+    _run_fixed_product_md,
+)
+from polyzymd.builders.conjugation.relaxation.models import (
+    ConjugateRelaxationDiagnostics,
+    ConjugateRelaxationSettings,
+    OpenMMValidationPhaseDiagnostics,
+    OpenMMValidationResult,
+    OpenMMValidationSettings,
+    ProductLinkage,
+)
+from polyzymd.builders.conjugation.relaxation.openmm import relax_conjugate
 
 
 class _TopologyDouble:
@@ -99,7 +104,7 @@ def _topology_atom(
 
 
 def test_validate_finite_energy_accepts_finite_values():
-    """Finite energies should pass smoke validation."""
+    """Finite energies should pass OpenMM validation."""
     validate_finite_energy(-123.4, label="test_energy")
 
 
@@ -189,14 +194,14 @@ def test_resolve_product_linkage_pairs_disambiguates_duplicate_moieties(tmp_path
     ]
 
 
-def test_freeze_chain_a_masses_restores_only_protein_chain():
-    """Temporary zero masses should affect only chain A particles."""
+def test__freeze_protein_chain_masses_supports_chain_a_and_multiple_chains():
+    """Temporary zero masses should support chain A and multiple configured chains."""
 
     class SystemDouble:
         """Minimal system double with mutable particle masses."""
 
         def __init__(self) -> None:
-            self.masses = [12.0, 14.0, 16.0]
+            self.masses = [12.0, 14.0, 16.0, 32.0]
 
         def getParticleMass(self, index: int) -> float:
             """Return one particle mass."""
@@ -211,19 +216,25 @@ def test_freeze_chain_a_masses_restores_only_protein_chain():
             _AtomDouble(0, "CA", "C", "A"),
             _AtomDouble(1, "CB", "C", "A"),
             _AtomDouble(2, "C1", "C", "C"),
+            _AtomDouble(3, "S1", "S", "D"),
         )
     )
     system = SystemDouble()
 
-    frozen, original = freeze_chain_a_masses(system, topology, type("Unit", (), {"dalton": 1.0})())
-    assert frozen == (0, 1)
-    assert system.masses == [0.0, 0.0, 16.0]
+    frozen, original = _freeze_protein_chain_masses(
+        system,
+        topology,
+        type("Unit", (), {"dalton": 1.0})(),
+        chain_ids=("A", "D"),
+    )
+    assert frozen == (0, 1, 3)
+    assert system.masses == [0.0, 0.0, 16.0, 0.0]
 
-    restore_particle_masses(system, original)
-    assert system.masses == [12.0, 14.0, 16.0]
+    _restore_particle_masses(system, original)
+    assert system.masses == [12.0, 14.0, 16.0, 32.0]
 
 
-def test_freeze_protein_chain_masses_supports_configurable_chains():
+def test__freeze_protein_chain_masses_supports_configurable_chains():
     """Temporary zero masses should support generic configured protein chains."""
 
     class SystemDouble:
@@ -250,7 +261,7 @@ def test_freeze_protein_chain_masses_supports_configurable_chains():
     )
     system = SystemDouble()
 
-    frozen, original = freeze_protein_chain_masses(
+    frozen, original = _freeze_protein_chain_masses(
         system,
         topology,
         type("Unit", (), {"dalton": 1.0})(),
@@ -259,7 +270,7 @@ def test_freeze_protein_chain_masses_supports_configurable_chains():
 
     assert frozen == (1,)
     assert system.masses == [12.0, 0.0, 16.0]
-    restore_particle_masses(system, original)
+    _restore_particle_masses(system, original)
     assert system.masses == [12.0, 14.0, 16.0]
 
 
@@ -296,10 +307,10 @@ def test_temporary_anchor_restraint_count_matches_linkages():
     openmm = type("OpenMMDouble", (), {"CustomBondForce": ForceDouble})()
     unit = type("UnitDouble", (), {"kilojoule_per_mole": 1.0, "nanometer": 1.0})()
     pairs = (
-        ProductLinkagePair(
+        ProductLinkage(
             protein_atom_index=0, modifier_atom_index=1, target_bond_length_angstrom=1.3
         ),
-        ProductLinkagePair(
+        ProductLinkage(
             protein_atom_index=2, modifier_atom_index=3, target_bond_length_angstrom=1.4
         ),
     )
@@ -311,28 +322,32 @@ def test_temporary_anchor_restraint_count_matches_linkages():
     assert len(system.forces[0].bonds) == 2
 
 
-def test_frozen_relaxation_stage_b_uses_fresh_frozen_system(monkeypatch, tmp_path):
+def test_conjugate_relaxation_stage_b_uses_fresh_fixed_system(monkeypatch, tmp_path):
     """Stage A should use normal masses and Stage B should use a fresh frozen system."""
     calls: list[tuple[str, str, tuple[float, ...]]] = []
     openmm, openmm_app = _install_fake_openmm(monkeypatch, calls)
     monkeypatch.setattr(
-        relaxation, "_select_platform", lambda *_args: SimpleNamespace(getName=lambda: "CPU")
+        relaxation_workflows,
+        "_select_platform",
+        lambda *_args: SimpleNamespace(getName=lambda: "CPU"),
     )
-    monkeypatch.setattr(relaxation, "_assign_force_groups", lambda _system: {})
-    monkeypatch.setattr(relaxation, "_force_group_labels", lambda _system, *, existing_labels: {})
-    monkeypatch.setattr(relaxation, "_force_group_energies", lambda *_args: {})
-    monkeypatch.setattr(relaxation, "_add_linkage_anchor_restraints", lambda *_args: 0)
-    monkeypatch.setattr(relaxation, "_write_openmm_pdb", lambda *_args: None)
+    monkeypatch.setattr(relaxation_workflows, "_assign_force_groups", lambda _system: {})
+    monkeypatch.setattr(
+        relaxation_workflows, "_force_group_labels", lambda _system, *, existing_labels: {}
+    )
+    monkeypatch.setattr(relaxation_workflows, "_force_group_energies", lambda *_args: {})
+    monkeypatch.setattr(relaxation_workflows, "_add_linkage_anchor_restraints", lambda *_args: 0)
+    monkeypatch.setattr(relaxation_workflows, "_write_openmm_pdb", lambda *_args: None)
 
     topology = _relaxation_topology()
     interchange = _RelaxationInterchange(topology)
 
-    result = run_frozen_protein_product_relaxation(
+    result = relax_conjugate(
         interchange,
         tmp_path,
         product_pdb_path=tmp_path / "product.pdb",
         attachment_specs=(),
-        settings=FrozenProteinRelaxationSettings(md_steps=5),
+        settings=ConjugateRelaxationSettings(md_steps=5),
     )
 
     assert result.success is True
@@ -349,41 +364,45 @@ def test_frozen_relaxation_stage_b_uses_fresh_frozen_system(monkeypatch, tmp_pat
     assert sys.modules["openmm.app"] is openmm_app
 
 
-def test_frozen_relaxation_restores_masses_after_stage_b_error(monkeypatch, tmp_path):
+def test_conjugate_relaxation_restores_masses_after_stage_b_error(monkeypatch, tmp_path):
     """Temporary Stage B zero masses should be restored when MD fails."""
     calls: list[tuple[str, str, tuple[float, ...]]] = []
     _install_fake_openmm(monkeypatch, calls)
     monkeypatch.setattr(
-        relaxation, "_select_platform", lambda *_args: SimpleNamespace(getName=lambda: "CPU")
+        relaxation_workflows,
+        "_select_platform",
+        lambda *_args: SimpleNamespace(getName=lambda: "CPU"),
     )
-    monkeypatch.setattr(relaxation, "_assign_force_groups", lambda _system: {})
-    monkeypatch.setattr(relaxation, "_force_group_labels", lambda _system, *, existing_labels: {})
-    monkeypatch.setattr(relaxation, "_force_group_energies", lambda *_args: {})
-    monkeypatch.setattr(relaxation, "_add_linkage_anchor_restraints", lambda *_args: 0)
-    monkeypatch.setattr(relaxation, "_write_openmm_pdb", lambda *_args: None)
+    monkeypatch.setattr(relaxation_workflows, "_assign_force_groups", lambda _system: {})
+    monkeypatch.setattr(
+        relaxation_workflows, "_force_group_labels", lambda _system, *, existing_labels: {}
+    )
+    monkeypatch.setattr(relaxation_workflows, "_force_group_energies", lambda *_args: {})
+    monkeypatch.setattr(relaxation_workflows, "_add_linkage_anchor_restraints", lambda *_args: 0)
+    monkeypatch.setattr(relaxation_workflows, "_write_openmm_pdb", lambda *_args: None)
 
     def fail_md(*_args, **_kwargs):
         raise RuntimeError("backend instability")
 
-    monkeypatch.setattr(relaxation, "_run_frozen_product_md", fail_md)
+    monkeypatch.setattr(relaxation_workflows, "_run_fixed_product_md", fail_md)
     interchange = _RelaxationInterchange(_relaxation_topology())
 
     with pytest.raises(RuntimeError, match="backend instability"):
-        run_frozen_protein_product_relaxation(
+        relax_conjugate(
             interchange,
             tmp_path,
             product_pdb_path=tmp_path / "product.pdb",
             attachment_specs=(),
-            settings=FrozenProteinRelaxationSettings(md_steps=5),
+            settings=ConjugateRelaxationSettings(md_steps=5),
         )
 
     assert interchange.systems[1].masses == [12.0, 16.0]
 
 
-def test_frozen_relaxation_settings_reject_zero_md_steps():
-    """Frozen-protein relaxation must run a real Stage B MD segment."""
+def test_conjugate_relaxation_settings_reject_zero_md_steps():
+    """Conjugate relaxation must run a real Stage B MD segment."""
     with pytest.raises(ValidationError, match="greater than 0"):
-        FrozenProteinRelaxationSettings(md_steps=0)
+        ConjugateRelaxationSettings(md_steps=0)
 
 
 def test_frozen_product_md_propagates_programming_errors(monkeypatch):
@@ -402,11 +421,11 @@ def test_frozen_product_md_propagates_programming_errors(monkeypatch):
     unit = SimpleNamespace(kelvin=1.0, picosecond=1.0, femtosecond=1.0, nanometer=1.0)
 
     with pytest.raises(TypeError, match="bad fake API"):
-        _run_frozen_product_md(
+        _run_fixed_product_md(
             _relaxation_topology(),
             _RelaxationSystem("stage_b"),
             np.zeros((2, 3)),
-            FrozenProteinRelaxationSettings(md_steps=5),
+            ConjugateRelaxationSettings(md_steps=5),
             openmm,
             app,
             unit,
@@ -453,10 +472,10 @@ def test_remove_barostats_removes_only_barostat_forces():
     ]
 
 
-def test_frozen_protein_diagnostics_serializes(tmp_path):
-    """Frozen-protein diagnostics should write JSON evidence."""
+def test_conjugate_relaxation_diagnostics_serializes(tmp_path):
+    """Conjugate diagnostics should write JSON evidence."""
     path = tmp_path / "diagnostics.json"
-    diagnostics = FrozenProteinRelaxationDiagnostics(
+    diagnostics = ConjugateRelaxationDiagnostics(
         success=True,
         stage_a_success=True,
         stage_b_success=True,
@@ -491,7 +510,7 @@ def test_validate_finite_energy_rejects_nonfinite_values(value: float):
 
 
 def test_validate_finite_positions_accepts_numpy_arrays():
-    """Finite coordinate arrays should pass smoke validation."""
+    """Finite coordinate arrays should pass OpenMM validation."""
     span_nm = validate_finite_positions(np.zeros((3, 3)), label="positions")
 
     assert span_nm == 0.0
@@ -546,27 +565,27 @@ def test_validate_finite_positions_rejects_nonfinite_arrays():
 
 
 def test_validate_finite_positions_rejects_unrealistic_span():
-    """Blown-up post-MD coordinates should fail before solvation."""
+    """Expanded post-relaxation coordinates should fail before solvation."""
     positions = np.array([[0.0, 0.0, 0.0], [51.0, 1.0, 1.0]])
 
     with pytest.raises(RuntimeError, match="unrealistic coordinate span"):
         validate_finite_positions(positions, label="equilibrated_positions", max_span_nm=50.0)
 
 
-def test_vacuum_smoke_settings_require_positive_nvt_steps():
-    """Vacuum smoke settings should allow minimization-only smoke."""
-    assert VacuumSmokeSettings(nvt_steps=0).nvt_steps == 0
+def test_openmm_validation_settings_require_positive_nvt_steps():
+    """OpenMM validation settings should allow minimization-only validation."""
+    assert OpenMMValidationSettings(nvt_steps=0).nvt_steps == 0
 
 
-def test_vacuum_smoke_settings_reject_negative_nvt_steps():
-    """Vacuum smoke settings should reject negative MD step counts."""
+def test_openmm_validation_settings_reject_negative_nvt_steps():
+    """OpenMM validation settings should reject negative MD step counts."""
     with pytest.raises(ValidationError, match="greater than or equal to 0"):
-        VacuumSmokeSettings(nvt_steps=-1)
+        OpenMMValidationSettings(nvt_steps=-1)
 
 
-def test_vacuum_smoke_settings_use_conservative_md_defaults():
-    """Default smoke MD settings should be conservative for vacuum stability."""
-    settings = VacuumSmokeSettings()
+def test_openmm_validation_settings_use_conservative_md_defaults():
+    """Default validation MD settings should be conservative for product validation."""
+    settings = OpenMMValidationSettings()
 
     assert settings.nvt_steps > 0
     assert settings.timestep_femtoseconds <= 0.25
@@ -576,8 +595,8 @@ def test_vacuum_smoke_settings_use_conservative_md_defaults():
     assert settings.max_position_span_nm == 50.0
 
 
-def test_analyze_pre_smoke_geometry_reports_contacts_and_bond_outliers():
-    """Pre-smoke diagnostics should identify close contacts and stretched bonds."""
+def test_analyze_product_geometry_reports_contacts_and_bond_outliers():
+    """Product geometry diagnostics should identify close contacts and stretched bonds."""
     topology = _TopologyDouble(
         (
             _AtomDouble(0, "C1", "C", "C"),
@@ -596,7 +615,7 @@ def test_analyze_pre_smoke_geometry_reports_contacts_and_bond_outliers():
         ]
     )
 
-    diagnostics = analyze_pre_smoke_geometry(topology, positions)
+    diagnostics = analyze_product_geometry(topology, positions)
 
     assert diagnostics.coordinate_span_nm == pytest.approx(0.40)
     assert diagnostics.min_heavy_heavy_distance_nm == pytest.approx(0.10)
@@ -608,43 +627,60 @@ def test_analyze_pre_smoke_geometry_reports_contacts_and_bond_outliers():
     assert diagnostics.bonded_distance_outliers[0].distance_nm == pytest.approx(0.40)
 
 
-def test_pre_smoke_geometry_writes_json_sidecar(tmp_path):
-    """Pre-smoke geometry diagnostics should persist JSON artifacts."""
+def test_product_geometry_geometry_writes_json_sidecar(tmp_path):
+    """Product geometry geometry diagnostics should persist JSON artifacts."""
     topology = _restraint_selection_topology()
-    diagnostics = analyze_pre_smoke_geometry(topology, np.zeros((4, 3)))
+    diagnostics = analyze_product_geometry(topology, np.zeros((4, 3)))
 
-    path = diagnostics.write_json(tmp_path / "pre_smoke_geometry.json")
+    path = diagnostics.write_json(tmp_path / "product_geometry_geometry.json")
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["atom_count"] == 4
-    assert payload["json_path"].endswith("pre_smoke_geometry.json")
+    assert payload["json_path"].endswith("product_geometry_geometry.json")
 
 
-def test_vacuum_smoke_failure_artifact_records_span_and_energies(tmp_path):
-    """Smoke failures should write structured diagnostics before raising upstream."""
+def test_openmm_validation_failure_artifact_records_span_and_error(tmp_path):
+    """OpenMM validation failures should write the canonical schema before raising upstream."""
     topology = _restraint_selection_topology()
-    pre_smoke = analyze_pre_smoke_geometry(
+    analyze_product_geometry(
         topology,
         np.array([[0.0, 0.0, 0.0], [60.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 2.0, 0.0]]),
     )
-
-    path = _write_vacuum_smoke_failure(
-        tmp_path / "vacuum_smoke_failure.json",
-        exc=RuntimeError("span validation failed"),
-        settings=VacuumSmokeSettings(nvt_steps=0),
-        pre_smoke=pre_smoke,
-        energy_before_min=10.0,
-        energy_after_min=5.0,
-        energy_before_nvt=5.0,
-        energy_after_nvt=math.nan,
-        failed_pdb_path=tmp_path / "failed.pdb",
+    phase = OpenMMValidationPhaseDiagnostics(
+        phase="after_md",
+        coordinate_span_nm=60.0,
+        coordinates_are_finite=True,
+        has_nan=False,
+        has_inf=False,
+        potential_energy_kj_mol=-1.0,
     )
+
+    output_path = tmp_path / "openmm_validation.json"
+    exc = RuntimeError("span validation failed")
+    result = OpenMMValidationResult(
+        success=False,
+        output_dir=tmp_path,
+        validation_json_path=output_path,
+        diagnostics_json_path=output_path,
+        platform_name="CPU",
+        restrained_atom_count=2,
+        settings=OpenMMValidationSettings(nvt_steps=0).model_dump(mode="json"),
+        phases=(phase,),
+        validation_segments=(),
+        first_invalid_phase="after_md",
+        error_type=type(exc).__name__,
+        error_message=str(exc),
+    )
+    path = result.write_json(output_path)
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["success"] is False
-    assert payload["energies_kj_mol"]["after_min"] == pytest.approx(5.0)
-    assert payload["energies_kj_mol"]["after_nvt"] is None
-    assert payload["pre_smoke_geometry"]["coordinate_span_nm"] == pytest.approx(60.0)
+    assert payload["error_message"] == "span validation failed"
+    assert payload["first_invalid_phase"] == "after_md"
+    assert payload["validation_json_path"].endswith("openmm_validation.json")
+    assert payload["diagnostics_json_path"].endswith("openmm_validation.json")
+    assert payload["phases"][0]["phase"] == "after_md"
+    assert "energy_after_min_kj_mol" in payload
 
 
 def test_resolve_restrained_indices_defaults_to_all_heavy_atoms():
@@ -661,7 +697,7 @@ def test_resolve_restrained_indices_defaults_to_all_heavy_atoms():
 
 
 def test_resolve_restrained_indices_ignores_protein_only_selection_in_all_heavy_mode():
-    """Supplying chain-A atoms must not restrict all-heavy vacuum restraints."""
+    """Supplying chain-A atoms must not restrict all-heavy validation restraints."""
     topology = _restraint_selection_topology()
 
     indices = _resolve_restrained_indices(
@@ -699,7 +735,7 @@ def _restraint_selection_topology() -> _TopologyDouble:
 
 
 class _RelaxationSystem:
-    """Mutable system double for staged frozen-protein relaxation tests."""
+    """Mutable system double for staged conjugate relaxation tests."""
 
     def __init__(self, label: str) -> None:
         """Store a label and particle masses."""
@@ -829,20 +865,22 @@ def _install_fake_openmm(monkeypatch, calls: list[tuple[str, str, tuple[float, .
 
 @pytest.mark.slow
 @pytest.mark.conjugation_stack
-def test_opt_in_conjugation_stack_smoke_requirements_are_available():
-    """Opt-in guard for stack availability before the integrated smoke test.
+def test_opt_in_conjugation_stack_validation_requirements_are_available():
+    """Opt-in guard for stack availability before the integrated validation test.
 
     The physics acceptance test lives in
-    ``tests/test_conjugation_integrated_smoke.py`` and should be run under::
+    ``tests/test_conjugation_integrated_validation.py`` and should be run under::
 
         module load slurm/blanca
         salloc ...
-        PYTHONNOUSERSITE=1 POLYZYMD_RUN_CONJUGATION_PABLO_SMOKE=1 \
+        PYTHONNOUSERSITE=1 POLYZYMD_RUN_CONJUGATION_PABLO_VALIDATION=1 \
           pixi run -e sim-cuda-12-4 pytest \
-          tests/test_conjugation_integrated_smoke.py -v
+          tests/test_conjugation_integrated_validation.py -v
     """
-    if os.environ.get("POLYZYMD_RUN_CONJUGATION_PABLO_SMOKE") != "1":
-        pytest.skip("Set POLYZYMD_RUN_CONJUGATION_PABLO_SMOKE=1 to check the Pablo smoke stack")
+    if os.environ.get("POLYZYMD_RUN_CONJUGATION_PABLO_VALIDATION") != "1":
+        pytest.skip(
+            "Set POLYZYMD_RUN_CONJUGATION_PABLO_VALIDATION=1 to check the Pablo validation stack"
+        )
     if shutil.which("packmol") is None:
         pytest.skip("Packmol binary is not available on PATH")
     pytest.importorskip("polymerist")

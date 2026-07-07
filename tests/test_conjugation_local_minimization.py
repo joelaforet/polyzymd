@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from polyzymd.builders.conjugation._linkage import PabloCrosslinkRequirement
-from polyzymd.builders.conjugation._relaxation import (
+from polyzymd.builders.conjugation.local_minimization import (
     LocalLinkageAtomSelector,
     LocalLinkageSelectors,
     LocalMinimizationSettings,
@@ -197,7 +197,7 @@ def test_local_minimization_platform_creation_falls_back_to_cpu():
 
 def test_local_minimization_reraises_unexpected_programming_errors(monkeypatch, tmp_path):
     """Unexpected implementation errors should not be converted to blockers."""
-    import polyzymd.builders.conjugation._relaxation as relaxation_module
+    import polyzymd.builders.conjugation.local_minimization as relaxation_module
 
     product = tmp_path / "crosslinked.pdb"
     product.write_text(

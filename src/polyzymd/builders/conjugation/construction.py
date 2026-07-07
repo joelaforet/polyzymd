@@ -8,11 +8,6 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from polyzymd.builders.conjugation._linkage import CrosslinkValidationResult, ResolvedAttachmentPlan
-from polyzymd.builders.conjugation._relaxation import (
-    FrozenProteinRelaxationSettings,
-    VacuumSmokeResult,
-    VacuumSmokeSettings,
-)
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestionResult
 from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationResult,
@@ -21,6 +16,11 @@ from polyzymd.builders.conjugation.pablo.parameterization import (
 from polyzymd.builders.conjugation.placement import (
     PackmolModifierPlacementResult,
     PackmolModifierPlacementSettings,
+)
+from polyzymd.builders.conjugation.relaxation import (
+    ConjugateRelaxationResult,
+    ConjugateRelaxationSettings,
+    OpenMMValidationSettings,
 )
 from polyzymd.builders.conjugation.structure.pdb import CrosslinkedPdbAssemblyResult
 
@@ -35,11 +35,10 @@ class ModifierConstructionSettings(BaseModel):
     parameterization: InterchangeParameterizationSettings = Field(
         default_factory=InterchangeParameterizationSettings
     )
-    smoke: VacuumSmokeSettings = Field(default_factory=VacuumSmokeSettings)
-    frozen_protein_relaxation: FrozenProteinRelaxationSettings = Field(
-        default_factory=FrozenProteinRelaxationSettings
-    )
-    run_smoke: bool = True
+    relaxation: ConjugateRelaxationSettings = Field(default_factory=ConjugateRelaxationSettings)
+    openmm_validation: OpenMMValidationSettings = Field(default_factory=OpenMMValidationSettings)
+    run_relaxation: bool = True
+    run_openmm_validation: bool = False
 
 
 class ModifierConstructionResult(BaseModel):
@@ -54,7 +53,7 @@ class ModifierConstructionResult(BaseModel):
     assembly: CrosslinkedPdbAssemblyResult
     pablo: PabloIngestionResult
     parameterization: InterchangeParameterizationResult
-    smoke: VacuumSmokeResult | None = None
+    relaxation: ConjugateRelaxationResult | None = None
     local_minimization: Any | None = None
     product_state_pablo_library: Any | None = Field(default=None, exclude=True)
     crosslinked_pdb_path: Path

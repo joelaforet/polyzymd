@@ -170,7 +170,7 @@ class ChargeAuditReport(BaseModel):
 
 
 class ParameterCoverageReport(BaseModel):
-    """Parameter coverage smoke audit for the final product interchange."""
+    """Parameter coverage audit for the final product interchange."""
 
     status: ValidationStatus
     checks: tuple[ConjugateValidationCheck, ...] = Field(default_factory=tuple)
@@ -187,15 +187,15 @@ class LinkageGeometryReport(BaseModel):
     close_contact_count: int = 0
 
 
-class OpenMMSmokeAuditReport(BaseModel):
-    """OpenMM smoke and pre-smoke evidence summary."""
+class OpenMMValidationAuditReport(BaseModel):
+    """OpenMM validation and relaxation evidence summary."""
 
     status: ValidationStatus
     checks: tuple[ConjugateValidationCheck, ...] = Field(default_factory=tuple)
-    smoke_json_path: Path | None = None
+    validation_json_path: Path | None = None
     diagnostics_json_path: Path | None = None
-    pre_smoke_geometry_json_path: Path | None = None
-    frozen_relaxation_diagnostics_json_path: Path | None = None
+    product_geometry_json_path: Path | None = None
+    relaxation_diagnostics_json_path: Path | None = None
 
 
 class ConjugateValidationReport(BaseModel):
@@ -209,7 +209,7 @@ class ConjugateValidationReport(BaseModel):
     charge_audit: ChargeAuditReport
     parameter_coverage: ParameterCoverageReport
     linkage_geometry: LinkageGeometryReport
-    openmm_smoke: OpenMMSmokeAuditReport
+    openmm_validation: OpenMMValidationAuditReport
     report_path: Path | None = None
     notes: tuple[str, ...] = Field(default_factory=tuple)
 
@@ -223,7 +223,7 @@ class ConjugateValidationReport(BaseModel):
             self.charge_audit.status,
             self.parameter_coverage.status,
             self.linkage_geometry.status,
-            self.openmm_smoke.status,
+            self.openmm_validation.status,
         )
         self.status = _aggregate_status(statuses)
         return self
@@ -274,7 +274,7 @@ def build_conjugate_validation_report(
     assembly : Any, optional
         Crosslinked PDB assembly result, by default ``None``.
     output_dir : Path, str, or None, optional
-        Artifact directory that may contain charge and smoke JSON evidence.
+        Artifact directory that may contain charge and OpenMM validation JSON evidence.
     interchange : Any, optional
         OpenFF Interchange-like object for particle-count coverage checks.
     expected_particle_count : int or None, optional
@@ -305,7 +305,7 @@ def build_conjugate_validation_report(
             expected_particle_count=expected_particle_count,
         ),
         linkage_geometry=audit_linkage_geometry(atoms, expected_bonds, observed_bonds),
-        openmm_smoke=audit_openmm_smoke_reports(artifact_dir),
+        openmm_validation=audit_openmm_validation_reports(artifact_dir),
     )
     if write and artifact_dir is not None:
         report.write_json(artifact_dir / VALIDATION_REPORT_NAME)
@@ -698,67 +698,65 @@ def audit_linkage_geometry(
     )
 
 
-def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAuditReport:
-    """Audit OpenMM smoke JSON evidence without importing OpenMM."""
+def audit_openmm_validation_reports(artifact_dir: Path | str | None) -> OpenMMValidationAuditReport:
+    """Audit OpenMM validation JSON evidence without importing OpenMM."""
     if artifact_dir is None:
-        check = _skipped_check("openmm_smoke", "No artifact directory was available")
-        return OpenMMSmokeAuditReport(status=check.status, checks=(check,))
+        check = _skipped_check("openmm_validation", "No artifact directory was available")
+        return OpenMMValidationAuditReport(status=check.status, checks=(check,))
     root = Path(artifact_dir)
-    smoke_path = root / "vacuum_smoke.json"
-    diagnostics_path = root / "restrained_smoke_diagnostics.json"
-    pre_smoke_path = root / "pre_smoke_geometry.json"
-    frozen_diagnostics_path = root / "frozen_protein_relaxation_diagnostics.json"
+    validation_path = root / "openmm_validation.json"
+    product_geometry_path = root / "product_geometry_diagnostics.json"
+    relaxation_diagnostics_path = root / "conjugate_relaxation.json"
     if not any(
         path.exists()
-        for path in (smoke_path, diagnostics_path, pre_smoke_path, frozen_diagnostics_path)
+        for path in (
+            validation_path,
+            product_geometry_path,
+            relaxation_diagnostics_path,
+        )
     ):
-        check = _skipped_check("openmm_smoke", "No OpenMM smoke evidence JSON was available")
-        return OpenMMSmokeAuditReport(status=check.status, checks=(check,))
+        check = _skipped_check(
+            "openmm_validation", "No OpenMM validation evidence JSON was available"
+        )
+        return OpenMMValidationAuditReport(status=check.status, checks=(check,))
 
     checks: list[ConjugateValidationCheck] = []
     status = ValidationStatus.PASS
-    if smoke_path.exists():
-        smoke = _read_json(smoke_path)
-        if not bool(smoke.get("success", False)):
+    if validation_path.exists():
+        validation = _read_json(validation_path)
+        if not bool(validation.get("success", False)):
             status = ValidationStatus.FAIL
-            checks.append(_check("vacuum_smoke_success", status, "Vacuum smoke reported failure"))
-        energy_values = [value for key, value in smoke.items() if key.endswith("_kj_mol")]
+            checks.append(
+                _check("openmm_validation_success", status, "OpenMM validation reported failure")
+            )
+        energy_values = [value for key, value in validation.items() if key.endswith("_kj_mol")]
         if any(not _is_finite_number(value) for value in energy_values):
             status = ValidationStatus.FAIL
             checks.append(
-                _check("vacuum_smoke_energy", status, "Vacuum smoke energy is non-finite")
+                _check("openmm_validation_energy", status, "OpenMM validation energy is non-finite")
             )
-    if diagnostics_path.exists():
-        diagnostics = _read_json(diagnostics_path)
-        if not bool(diagnostics.get("success", False)):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "restrained_smoke_diagnostics", status, "Restrained smoke diagnostics failed"
-                )
-            )
-    if pre_smoke_path.exists():
-        pre_smoke = _read_json(pre_smoke_path)
-        span = pre_smoke.get("coordinate_span_nm")
+    if product_geometry_path.exists():
+        product_geometry = _read_json(product_geometry_path)
+        span = product_geometry.get("coordinate_span_nm")
         if span is not None and not _is_finite_number(span):
             status = ValidationStatus.FAIL
-            checks.append(_check("pre_smoke_geometry", status, "Pre-smoke span is non-finite"))
-    if frozen_diagnostics_path.exists():
-        diagnostics = _read_json(frozen_diagnostics_path)
+            checks.append(_check("product_geometry", status, "Product geometry span is non-finite"))
+    if relaxation_diagnostics_path.exists():
+        diagnostics = _read_json(relaxation_diagnostics_path)
         if not bool(diagnostics.get("success", False)):
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
-                    "frozen_protein_relaxation",
+                    "conjugate_relaxation",
                     status,
-                    "Frozen-protein relaxation diagnostics failed",
+                    "Conjugate relaxation diagnostics failed",
                 )
             )
         if not bool(diagnostics.get("stage_a_success", False)):
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
-                    "frozen_protein_relaxation_stage_a",
+                    "conjugate_relaxation_stage_a",
                     status,
                     "Stage A full-system minimization did not report success",
                 )
@@ -767,18 +765,18 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
-                    "frozen_protein_relaxation_stage_b",
+                    "conjugate_relaxation_stage_b",
                     status,
-                    "Stage B frozen-protein relaxation did not report success",
+                    "Stage B conjugate relaxation did not report success",
                 )
             )
         if bool(diagnostics.get("barostat_used", False)):
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
-                    "frozen_protein_relaxation_barostat",
+                    "conjugate_relaxation_barostat",
                     status,
-                    "Frozen-protein relaxation diagnostics reported a barostat",
+                    "Conjugate relaxation diagnostics reported a barostat",
                 )
             )
         energy_values = [value for key, value in diagnostics.items() if key.endswith("_kj_mol")]
@@ -786,9 +784,9 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
-                    "frozen_protein_relaxation_energy",
+                    "conjugate_relaxation_energy",
                     status,
-                    "Frozen-protein relaxation energy is non-finite",
+                    "Conjugate relaxation energy is non-finite",
                 )
             )
         rmsd = diagnostics.get("stage_b_protein_rmsd_from_stage_a_angstrom")
@@ -808,9 +806,9 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
-                    "frozen_protein_relaxation_md_steps",
+                    "conjugate_relaxation_md_steps",
                     status,
-                    "Frozen-protein relaxation diagnostics lack valid positive MD step evidence",
+                    "Conjugate relaxation diagnostics lack valid positive MD step evidence",
                     evidence={"md_steps": md_steps, "source": md_steps_source},
                 )
             )
@@ -818,7 +816,7 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
-                    "frozen_protein_relaxation_protein_rmsd",
+                    "conjugate_relaxation_protein_rmsd",
                     status,
                     "Stage B protein RMSD relative to Stage A exceeds tolerance",
                     evidence={"rmsd_angstrom": rmsd, "tolerance_angstrom": rmsd_limit},
@@ -830,7 +828,7 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
-                    "frozen_protein_relaxation_protein_max_displacement",
+                    "conjugate_relaxation_protein_max_displacement",
                     status,
                     "Stage B protein max displacement relative to Stage A exceeds tolerance",
                     evidence={
@@ -847,7 +845,7 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
-                    "frozen_protein_relaxation_linkage_distances",
+                    "conjugate_relaxation_linkage_distances",
                     status,
                     "Stage B linkage distance error exceeds tolerance",
                     evidence={
@@ -857,15 +855,19 @@ def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAu
                 )
             )
     if not checks:
-        checks.append(_check("openmm_smoke", status, "OpenMM smoke evidence passed audit"))
-    return OpenMMSmokeAuditReport(
+        checks.append(
+            _check("openmm_validation", status, "OpenMM validation evidence passed audit")
+        )
+    return OpenMMValidationAuditReport(
         status=status,
         checks=tuple(checks),
-        smoke_json_path=smoke_path if smoke_path.exists() else None,
-        diagnostics_json_path=diagnostics_path if diagnostics_path.exists() else None,
-        pre_smoke_geometry_json_path=pre_smoke_path if pre_smoke_path.exists() else None,
-        frozen_relaxation_diagnostics_json_path=(
-            frozen_diagnostics_path if frozen_diagnostics_path.exists() else None
+        validation_json_path=validation_path if validation_path.exists() else None,
+        diagnostics_json_path=None,
+        product_geometry_json_path=(
+            product_geometry_path if product_geometry_path.exists() else None
+        ),
+        relaxation_diagnostics_json_path=(
+            relaxation_diagnostics_path if relaxation_diagnostics_path.exists() else None
         ),
     )
 
