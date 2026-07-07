@@ -348,7 +348,7 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
         minimized.write_text("END\n", encoding="utf-8")
         construction = SimpleNamespace(
             crosslinked_pdb_path=crosslinked,
-            smoke=SimpleNamespace(minimized_pdb_path=minimized, equilibrated_pdb_path=None),
+            relaxation=SimpleNamespace(minimized_pdb_path=minimized, relaxed_pdb_path=minimized),
             local_minimization=None,
         )
         return construction, object()
@@ -435,7 +435,7 @@ def test_conjugation_result_collects_workflow_output_paths(tmp_path):
     assert result.config_path == tmp_path / "config.yaml"
     assert result.crosslinked_conjugate_pdb_path == tmp_path / "crosslinked.pdb"
     assert result.minimized_conjugate_pdb_path == tmp_path / "minimized.pdb"
-    assert result.equilibrated_conjugate_pdb_path == tmp_path / "equilibrated.pdb"
+    assert result.equilibrated_conjugate_pdb_path == tmp_path / "relaxed.pdb"
     assert result.relaxed_conjugate_pdb_path == tmp_path / "relaxed.pdb"
     assert result.solvated_pdb_path == tmp_path / "solvated.pdb"
     assert result.workflow_json_path == tmp_path / "workflow.json"
@@ -443,7 +443,7 @@ def test_conjugation_result_collects_workflow_output_paths(tmp_path):
     assert result.artifact_paths == {
         "crosslinked_conjugate_pdb": tmp_path / "crosslinked.pdb",
         "minimized_conjugate_pdb": tmp_path / "minimized.pdb",
-        "equilibrated_conjugate_pdb": tmp_path / "equilibrated.pdb",
+        "equilibrated_conjugate_pdb": tmp_path / "relaxed.pdb",
         "relaxed_conjugate_pdb": tmp_path / "relaxed.pdb",
         "solvated_pdb": tmp_path / "solvated.pdb",
         "workflow_json": tmp_path / "workflow.json",
@@ -525,9 +525,9 @@ def _workflow_result(tmp_path: Path) -> ConjugationResult:
         output_dir=tmp_path / "workflow-out",
         construction=SimpleNamespace(
             crosslinked_pdb_path=tmp_path / "crosslinked.pdb",
-            smoke=SimpleNamespace(
+            relaxation=SimpleNamespace(
                 minimized_pdb_path=tmp_path / "minimized.pdb",
-                equilibrated_pdb_path=tmp_path / "equilibrated.pdb",
+                relaxed_pdb_path=tmp_path / "relaxed.pdb",
             ),
         ),
         relaxed_conjugate_pdb_path=tmp_path / "relaxed.pdb",

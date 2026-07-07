@@ -21,7 +21,7 @@ _REFUSAL_MESSAGE = (
     "PolyzyMD refuses whole-conjugate AM1-BCC charge assignment for a polymer-protein "
     "conjugate. Final conjugated Interchange creation requires product-state Pablo "
     "residue/template provenance from the successful conjugate construction path. "
-    "Formal-charge smoke templates are not production charges."
+    "Formal-charge templates are not production partial charges."
 )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -123,15 +124,11 @@ def test_final_helper_rejects_unmarked_product_template_before_openff():
     assert captured == {}
 
 
-def test_final_helper_does_not_call_formal_charge_smoke_template(monkeypatch):
-    """Production final helper must not use smoke-only formal-charge templates."""
+def test_final_helper_has_no_formal_charge_template_export(monkeypatch):
+    """Production final helper must not expose formal-charge template builders."""
     import polyzymd.builders.conjugation.pablo.parameterization as parameterization_module
 
-    monkeypatch.setattr(
-        parameterization_module,
-        "build_formal_charge_smoke_template",
-        lambda molecule: (_ for _ in ()).throw(AssertionError("formal fallback called")),
-    )
+    assert not hasattr(parameterization_module, "build_formal_charge_smoke_template")
     builder = _Builder()
     monkeypatch.setattr(
         "polyzymd.builders.conjugation.final_interchange.build_conjugate_charge_templates",
@@ -148,6 +145,24 @@ def test_final_helper_does_not_call_formal_charge_smoke_template(monkeypatch):
     )
 
     assert result == "ok"
+
+
+def test_production_charge_modules_do_not_use_nonproduction_smoke_or_vacuum_terms():
+    """Production charge and relaxation modules should use production-safe wording."""
+    scoped_paths = [
+        "src/polyzymd/builders/conjugation/final_interchange.py",
+        "src/polyzymd/builders/conjugation/pablo/charge_templates.py",
+        "src/polyzymd/builders/conjugation/pablo/charge_bridge.py",
+        "src/polyzymd/builders/conjugation/pablo/product.py",
+    ]
+    scoped_paths.extend(
+        str(path) for path in Path("src/polyzymd/builders/conjugation/relaxation").rglob("*.py")
+    )
+    forbidden = ("smoke", "SMOKE", "vacuum", "Legacy chain-A atom indices")
+
+    for path in scoped_paths:
+        text = Path(path).read_text(encoding="utf-8")
+        assert not any(term in text for term in forbidden), path
 
 
 def test_final_helper_fails_before_parameterizer_when_bridge_fails():

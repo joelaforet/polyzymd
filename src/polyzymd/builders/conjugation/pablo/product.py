@@ -1466,7 +1466,7 @@ def _validate_no_whole_polymer_collapse(
     """Reject the old anti-pattern of describing all chain-C atoms as one POLY residue.
 
     Direct SMILES-moiety requests can legitimately contain a single chain-C
-    residue, such as one GlcNAc/NAG unit for an N-glycosylation smoke example.
+    residue, such as one GlcNAc/NAG unit for an N-glycosylation validation example.
     """
     if any(summary.residue_name == "POLY" for summary in summaries):
         raise ValueError("Product-state Pablo definitions must not collapse chain C to POLY")

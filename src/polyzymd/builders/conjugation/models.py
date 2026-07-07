@@ -113,7 +113,7 @@ class ConjugationResult(BaseModel):
     def populate_artifact_paths(self) -> "ConjugationResult":
         """Populate lightweight path fields from retained workflow objects."""
         construction = self.construction
-        smoke = getattr(construction, "smoke", None)
+        relaxation = getattr(construction, "relaxation", None)
         local_minimization = getattr(construction, "local_minimization", None)
         if self.crosslinked_conjugate_pdb_path is None:
             self.crosslinked_conjugate_pdb_path = _optional_path(
@@ -121,12 +121,12 @@ class ConjugationResult(BaseModel):
             )
         if self.minimized_conjugate_pdb_path is None:
             self.minimized_conjugate_pdb_path = _optional_path(
-                getattr(smoke, "minimized_pdb_path", None)
+                getattr(relaxation, "minimized_pdb_path", None)
                 or getattr(local_minimization, "relaxed_pdb_path", None)
             )
         if self.equilibrated_conjugate_pdb_path is None:
             self.equilibrated_conjugate_pdb_path = _optional_path(
-                getattr(smoke, "equilibrated_pdb_path", None)
+                getattr(relaxation, "relaxed_pdb_path", None)
             )
         paths = {
             "crosslinked_conjugate_pdb": self.crosslinked_conjugate_pdb_path,
@@ -172,14 +172,14 @@ class ConjugationResult(BaseModel):
             return workflow_result.model_copy(update={"config_path": _optional_path(config_path)})
 
         construction = getattr(workflow_result, "construction", None)
-        smoke = getattr(construction, "smoke", None)
+        relaxation = getattr(construction, "relaxation", None)
         local_minimization = getattr(construction, "local_minimization", None)
         crosslinked_path = _optional_path(getattr(construction, "crosslinked_pdb_path", None))
         minimized_path = _optional_path(
-            getattr(smoke, "minimized_pdb_path", None)
+            getattr(relaxation, "minimized_pdb_path", None)
             or getattr(local_minimization, "relaxed_pdb_path", None)
         )
-        equilibrated_path = _optional_path(getattr(smoke, "equilibrated_pdb_path", None))
+        equilibrated_path = _optional_path(getattr(relaxation, "relaxed_pdb_path", None))
         relaxed_path = _optional_path(getattr(workflow_result, "relaxed_conjugate_pdb_path", None))
         solvated_path = _optional_path(getattr(workflow_result, "solvated_pdb_path", None))
         workflow_path = _optional_path(getattr(workflow_result, "workflow_json_path", None))
