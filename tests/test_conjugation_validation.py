@@ -33,32 +33,12 @@ class FakeSystem:
         return self._particle_count
 
 
-class FakeInterchange:
-    """Fake Interchange exposing OpenMM system conversion."""
-
-    def __init__(self, particle_count: int) -> None:
-        """Initialize the fake interchange."""
-        self._particle_count = particle_count
+class RaisingInterchange:
+    """Fake Interchange that must not be converted during validation."""
 
     def to_openmm_system(self) -> FakeSystem:
-        """Return a fake OpenMM system."""
-        return FakeSystem(self._particle_count)
-
-
-class FailingBackendInterchange:
-    """Fake Interchange that raises an expected backend conversion error."""
-
-    def to_openmm_system(self) -> FakeSystem:
-        """Raise a backend-like conversion error."""
-        raise ValueError("missing parameter")
-
-
-class BuggyInterchange:
-    """Fake Interchange that raises an unexpected programming error."""
-
-    def to_openmm_system(self) -> FakeSystem:
-        """Raise an unexpected conversion implementation error."""
-        raise AttributeError("buggy object")
+        """Raise if validation attempts a validation-only OpenMM conversion."""
+        raise AssertionError("validation must not call to_openmm_system")
 
 
 def test_validation_report_serializes_json(tmp_path):
@@ -69,7 +49,7 @@ def test_validation_report_serializes_json(tmp_path):
         product_pdb_path=pdb_path,
         assembly=SimpleNamespace(added_conect_pairs=((1, 2),)),
         output_dir=tmp_path,
-        interchange=FakeInterchange(2),
+        openmm_system=FakeSystem(2),
         expected_particle_count=2,
         write=True,
     )
@@ -546,31 +526,32 @@ def test_validation_report_writes_strict_json_for_nonfinite_values(tmp_path):
 
 
 def test_parameter_coverage_pass_and_fail_with_fakes():
-    """Parameter coverage should use fake OpenMM objects without heavy imports."""
-    passed = audit_parameter_coverage(FakeInterchange(5), expected_particle_count=5)
-    failed = audit_parameter_coverage(FakeInterchange(4), expected_particle_count=5)
+    """Parameter coverage should use production OpenMM evidence without heavy imports."""
+    passed = audit_parameter_coverage(openmm_system=FakeSystem(5), expected_particle_count=5)
+    failed = audit_parameter_coverage(openmm_system=FakeSystem(4), expected_particle_count=5)
 
     assert passed.status == ValidationStatus.PASS
     assert failed.status == ValidationStatus.FAIL
     assert failed.observed_particle_count == 4
 
 
-def test_parameter_coverage_classifies_expected_backend_errors():
-    """Expected conversion errors should be reported as parameter coverage failures."""
-    report = audit_parameter_coverage(FailingBackendInterchange(), expected_particle_count=5)
+def test_parameter_coverage_skips_without_production_system_evidence():
+    """Parameter coverage should skip when production OpenMM evidence is unavailable."""
+    report = audit_parameter_coverage(expected_particle_count=5)
 
-    assert report.status == ValidationStatus.FAIL
-    assert report.checks[0].evidence["error"] == "missing parameter"
+    assert report.status == ValidationStatus.SKIPPED
+    assert "No production OpenMM System evidence" in report.checks[0].message
 
 
-def test_parameter_coverage_reraises_unexpected_errors():
-    """Unexpected programming errors should not be hidden as validation evidence."""
-    try:
-        audit_parameter_coverage(BuggyInterchange(), expected_particle_count=5)
-    except AttributeError as exc:
-        assert str(exc) == "buggy object"
-    else:  # pragma: no cover - explicit failure branch improves assertion message
-        raise AssertionError("Unexpected conversion errors should be re-raised")
+def test_parameter_coverage_does_not_convert_interchange_like_evidence():
+    """Validation reporting must not perform validation-only Interchange conversion."""
+    report = audit_parameter_coverage(
+        openmm_system=RaisingInterchange(),
+        expected_particle_count=5,
+    )
+
+    assert report.status == ValidationStatus.SKIPPED
+    assert "getNumParticles" in report.checks[0].message
 
 
 def test_linkage_geometry_warns_for_nonbonded_close_contacts():

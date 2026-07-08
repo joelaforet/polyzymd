@@ -268,7 +268,7 @@ def build_conjugate_validation_report(
     resolved_plans: tuple[Any, ...] = (),
     assembly: Any | None = None,
     output_dir: Path | str | None = None,
-    interchange: Any | None = None,
+    openmm_system: Any | None = None,
     expected_particle_count: int | None = None,
     write: bool = True,
 ) -> ConjugateValidationReport:
@@ -284,8 +284,8 @@ def build_conjugate_validation_report(
         Crosslinked PDB assembly result, by default ``None``.
     output_dir : Path, str, or None, optional
         Artifact directory that may contain charge and OpenMM relaxation evidence.
-    interchange : Any, optional
-        OpenFF Interchange-like object for particle-count coverage checks.
+    openmm_system : Any, optional
+        Production-created OpenMM System-like object for particle-count coverage checks.
     expected_particle_count : int or None, optional
         Expected OpenMM particle count, by default ``None``.
     write : bool, optional
@@ -310,7 +310,7 @@ def build_conjugate_validation_report(
         valence_sanity=validate_valence_sanity(expected_bonds, observed_bonds),
         charge_audit=audit_charge_reports(artifact_dir),
         parameter_coverage=audit_parameter_coverage(
-            interchange,
+            openmm_system=openmm_system,
             expected_particle_count=expected_particle_count,
         ),
         linkage_geometry=audit_linkage_geometry(atoms, expected_bonds, observed_bonds),
@@ -590,31 +590,38 @@ def audit_charge_reports(artifact_dir: Path | str | None) -> ChargeAuditReport:
 
 
 def audit_parameter_coverage(
-    interchange: Any | None,
     *,
+    openmm_system: Any | None = None,
     expected_particle_count: int | None = None,
 ) -> ParameterCoverageReport:
-    """Audit conservative parameter coverage with an OpenMM-system conversion."""
-    if interchange is None:
-        check = _skipped_check("parameter_coverage", "No final Interchange was available")
-        return ParameterCoverageReport(status=check.status, checks=(check,))
-    if not hasattr(interchange, "to_openmm_system"):
+    """Audit parameter coverage from production-created OpenMM System evidence.
+
+    Parameters
+    ----------
+    openmm_system : Any or None, optional
+        Production-created OpenMM System-like object exposing ``getNumParticles()``, by default
+        ``None``.
+    expected_particle_count : int or None, optional
+        Expected particle count from the product topology, by default ``None``.
+
+    Returns
+    -------
+    ParameterCoverageReport
+        Particle-count coverage report, or a skipped report when production evidence is unavailable.
+    """
+    if openmm_system is None:
         check = _skipped_check(
             "parameter_coverage",
-            "Final Interchange object does not expose to_openmm_system()",
+            "No production OpenMM System evidence was available",
         )
         return ParameterCoverageReport(status=check.status, checks=(check,))
-    try:
-        system = interchange.to_openmm_system()
-        observed_count = int(system.getNumParticles())
-    except _parameter_conversion_exceptions() as exc:
-        check = _check(
+    if not hasattr(openmm_system, "getNumParticles"):
+        check = _skipped_check(
             "parameter_coverage",
-            ValidationStatus.FAIL,
-            "Final Interchange could not be converted to an OpenMM system",
-            evidence={"error": str(exc)},
+            "Production OpenMM System evidence does not expose getNumParticles()",
         )
         return ParameterCoverageReport(status=check.status, checks=(check,))
+    observed_count = int(openmm_system.getNumParticles())
     if expected_particle_count is not None and observed_count != expected_particle_count:
         check = _check(
             "parameter_particle_count",
@@ -631,7 +638,7 @@ def audit_parameter_coverage(
     check = _check(
         "parameter_coverage",
         ValidationStatus.PASS,
-        "Final Interchange converted to an OpenMM system",
+        "Production OpenMM System particle count evidence is available",
         evidence={"observed_particle_count": observed_count},
     )
     return ParameterCoverageReport(
@@ -1213,20 +1220,6 @@ def _allows_product_remap(source: str, identity: AtomIdentity) -> bool:
 def _normalized_element(value: str) -> str:
     """Return a normalized element symbol for identity matching."""
     return value.strip().upper()
-
-
-def _parameter_conversion_exceptions() -> tuple[type[Exception], ...]:
-    """Return expected backend conversion exception classes.
-
-    OpenMM is imported lazily so validation remains importable in lightweight environments.
-    """
-    exceptions: list[type[Exception]] = [ValueError, RuntimeError, ImportError, OSError]
-    try:
-        from openmm import OpenMMException
-    except ImportError:
-        return tuple(exceptions)
-    exceptions.append(OpenMMException)
-    return tuple(exceptions)
 
 
 def _sanitize_for_strict_json(value: Any) -> Any:
