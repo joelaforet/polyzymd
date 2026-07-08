@@ -731,40 +731,44 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
     status = ValidationStatus.PASS
     if relaxation_diagnostics_path.exists():
         diagnostics = _read_json(relaxation_diagnostics_path)
-        if not bool(diagnostics.get("success", False)):
+        if diagnostics.get("success") is not True:
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
                     "conjugate_relaxation",
                     status,
                     "Conjugate relaxation diagnostics failed",
+                    evidence={"success": diagnostics.get("success")},
                 )
             )
-        if not bool(diagnostics.get("stage_a_success", False)):
+        if diagnostics.get("stage_a_success") is not True:
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
                     "conjugate_relaxation_stage_a",
                     status,
                     "Stage A full-system minimization did not report success",
+                    evidence={"stage_a_success": diagnostics.get("stage_a_success")},
                 )
             )
-        if not bool(diagnostics.get("stage_b_success", False)):
+        if diagnostics.get("stage_b_success") is not True:
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
                     "conjugate_relaxation_stage_b",
                     status,
                     "Stage B conjugate relaxation did not report success",
+                    evidence={"stage_b_success": diagnostics.get("stage_b_success")},
                 )
             )
-        if bool(diagnostics.get("barostat_used", False)):
+        if diagnostics.get("barostat_used") is not False:
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
                     "conjugate_relaxation_barostat",
                     status,
-                    "Conjugate relaxation diagnostics reported a barostat",
+                    "Conjugate relaxation diagnostics did not report barostat_used as false",
+                    evidence={"barostat_used": diagnostics.get("barostat_used")},
                 )
             )
         missing_or_nonfinite_energy_fields = _missing_or_nonfinite_fields(
