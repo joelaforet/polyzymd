@@ -25,6 +25,8 @@ from polyzymd.builders.substrate import SubstrateBuilder
 
 LOGGER = logging.getLogger(__name__)
 
+_ORIGINAL_RESIDUE_TOKEN_KEY = "_polyzymd_original_residue_token"
+
 
 class SystemBuilder:
     """Orchestrator for building complete simulation systems.
@@ -111,14 +113,30 @@ class SystemBuilder:
     def build_enzyme(self, pdb_path: Union[str, Path]) -> Topology:
         """Build the enzyme component.
 
-        Args:
-            pdb_path: Path to enzyme PDB file.
+        Parameters
+        ----------
+        pdb_path : str or Path
+            Path to enzyme PDB file.
 
-        Returns:
+        Returns
+        -------
+        Topology
             Enzyme topology.
+
+        Raises
+        ------
+        RuntimeError
+            If OpenFF loads the enzyme PDB without any molecules.
         """
         self._enzyme_topology = self._enzyme_builder.build(pdb_path)
-        self._n_enzyme_molecules = 1
+        self._n_enzyme_molecules = self._enzyme_topology.n_molecules
+        if self._n_enzyme_molecules <= 0:
+            raise RuntimeError("OpenFF enzyme topology contains no molecules")
+        if self._n_enzyme_molecules > 1:
+            LOGGER.info(
+                "Enzyme topology contains %d protein molecules; retaining all on chain A",
+                self._n_enzyme_molecules,
+            )
         return self._enzyme_topology
 
     def build_substrate(
@@ -219,11 +237,19 @@ class SystemBuilder:
     def combine_solutes(self) -> Topology:
         """Combine enzyme, substrate, and polymers into a single topology.
 
-        Returns:
+        All OpenFF enzyme topology molecules are retained in their original
+        order before substrate and polymer components are added. During export,
+        every enzyme molecule is assigned to PolyzyMD protein chain ``A``.
+
+        Returns
+        -------
+        Topology
             Combined topology ready for solvation.
 
-        Raises:
-            RuntimeError: If enzyme has not been built.
+        Raises
+        ------
+        RuntimeError
+            If enzyme has not been built or contains no molecules.
         """
         if self._enzyme_topology is None:
             raise RuntimeError("Enzyme must be built before combining solutes")
@@ -232,8 +258,13 @@ class SystemBuilder:
 
         from openff.toolkit import Topology
 
-        # Start with enzyme
-        molecules = [self._enzyme_topology.molecule(0)]
+        enzyme_molecule_count = self._enzyme_topology.n_molecules
+        if enzyme_molecule_count <= 0:
+            raise RuntimeError("OpenFF enzyme topology contains no molecules")
+        self._n_enzyme_molecules = enzyme_molecule_count
+
+        # Retain all enzyme molecules before substrate and polymers
+        molecules = [self._enzyme_topology.molecule(i) for i in range(self._n_enzyme_molecules)]
 
         # Add substrate if present
         if self._substrate_molecule is not None:
@@ -396,6 +427,10 @@ class SystemBuilder:
         from polyzymd.data.solvent_molecules import get_solvent_molecule
 
         LOGGER.info("Creating Interchange")
+
+        # Canonical metadata must be present before OpenFF serializes topology
+        # identifiers into downstream coordinate and topology exports
+        self._assign_pdb_identifiers()
 
         ff = ForceField(self._protein_ff, self._sm_ff)
 
@@ -594,7 +629,8 @@ class SystemBuilder:
         source of truth for what each molecule represents.
 
         Chain assignment uses FIXED letters regardless of component presence:
-        - Chain A: Protein (preserves original residue numbers from input PDB)
+
+        - Chain A: Protein/enzyme molecules (continuous residues across molecules)
         - Chain B: Substrate (residue 1; letter reserved even if no substrate)
         - Chain C: Polymers (preserves per-monomer residue numbers)
         - Chain D+: Solvent (overflow at 9999 residues per chain)
@@ -617,7 +653,7 @@ class SystemBuilder:
         CHAIN_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         mol_idx = 0
 
-        # Fixed chain letter assignments per component type.
+        # Fixed chain letter assignments per component type
         # A=protein, B=substrate, C=polymer, D+=solvent — regardless of whether
         # a component is present. This ensures downstream code (SystemComponentInfo,
         # AtomGroupResolver, from_topology()) always sees the expected chain IDs.
@@ -626,21 +662,27 @@ class SystemBuilder:
         POLYMER_CHAIN = "C"
         SOLVENT_START_IDX = 3  # index of 'D' in CHAIN_LETTERS
 
-        # 1. Protein: Always chain A, preserve original residue numbers
+        # Protein molecules always use chain A with continuous unique residues
         if self._n_enzyme_molecules > 0:
-            LOGGER.debug(f"Assigning chain {PROTEIN_CHAIN} to protein")
+            LOGGER.debug(
+                f"Assigning chain {PROTEIN_CHAIN} to "
+                f"{self._n_enzyme_molecules} protein molecule(s)"
+            )
 
+            protein_residue_num = 1
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
-                for atom in mol.atoms:
+                residue_map: dict[str, int] = {}
+                for atom_index, atom in enumerate(mol.atoms):
                     atom.metadata["chain_id"] = PROTEIN_CHAIN
-                    # Ensure residue_number is a string (PDB loader may store as int)
-                    # OpenMM's addResidue(id=...) expects a string
-                    if "residue_number" in atom.metadata:
-                        atom.metadata["residue_number"] = str(atom.metadata["residue_number"])
+                    residue_token = self._get_original_residue_token(atom, atom_index)
+                    if residue_token not in residue_map:
+                        residue_map[residue_token] = protein_residue_num
+                        protein_residue_num += 1
+                    atom.metadata["residue_number"] = str(residue_map[residue_token])
                 mol_idx += 1
 
-        # 2. Substrate: Always chain B, residue 1
+        # Substrate always uses chain B and residue 1
         if self._n_substrate_molecules > 0:
             LOGGER.debug(f"Assigning chain {SUBSTRATE_CHAIN} to substrate")
 
@@ -651,7 +693,7 @@ class SystemBuilder:
                     atom.metadata["residue_number"] = "1"
                 mol_idx += 1
 
-        # 3. Polymers: Always chain C, continue residue numbering across chains
+        # Polymers always use chain C and continue residue numbering across chains
         if self._n_polymer_chains > 0:
             LOGGER.debug(
                 f"Assigning chain {POLYMER_CHAIN} to {self._n_polymer_chains} polymer chain(s)"
@@ -685,7 +727,7 @@ class SystemBuilder:
                 polymer_residue_num += 1
                 mol_idx += 1
 
-        # 4. Solvent: Always starts at chain D (index 3)
+        # Solvent always starts at chain D
         self._assign_solvent_identifiers(
             start_mol_idx=mol_idx,
             start_chain_idx=SOLVENT_START_IDX,
@@ -697,6 +739,44 @@ class SystemBuilder:
             f"substrate={self._n_substrate_molecules}, polymers={self._n_polymer_chains}, "
             f"solvent molecules start at chain {CHAIN_LETTERS[SOLVENT_START_IDX]}"
         )
+
+    @staticmethod
+    def _get_original_residue_token(atom: Any, atom_index: int) -> str:
+        """Return a stable residue grouping token for a protein atom.
+
+        The first call stores source residue metadata before PolyzyMD writes
+        canonical output residue numbers. Later calls reuse that stored token so
+        protein residue numbering is idempotent and does not cascade from
+        already-renumbered output metadata.
+
+        Parameters
+        ----------
+        atom : Any
+            OpenFF-like atom with mutable ``metadata``.
+        atom_index : int
+            Atom index within the molecule, used only for deterministic fallback
+            metadata when residue fields are absent.
+
+        Returns
+        -------
+        str
+            Stable token identifying the atom's original residue group.
+        """
+        metadata = atom.metadata
+        residue_token = metadata.get(_ORIGINAL_RESIDUE_TOKEN_KEY)
+        if residue_token is not None:
+            return str(residue_token)
+
+        residue_number = metadata.get("residue_number")
+        residue_name = metadata.get("residue_name") or metadata.get("residue_name_3") or ""
+        insertion_code = metadata.get("insertion_code") or ""
+        if residue_number is None:
+            residue_token = f"missing-residue-metadata:{atom_index}"
+        else:
+            residue_token = f"{residue_number!s}|{residue_name!s}|{insertion_code!s}"
+
+        metadata[_ORIGINAL_RESIDUE_TOKEN_KEY] = residue_token
+        return residue_token
 
     def _assign_solvent_identifiers(
         self,
@@ -998,6 +1078,9 @@ class SystemBuilder:
             raise RuntimeError(
                 "Interchange not created. Call create_interchange() or build_from_config() first."
             )
+
+        if self._solvated_topology is not None:
+            self._assign_pdb_identifiers()
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
