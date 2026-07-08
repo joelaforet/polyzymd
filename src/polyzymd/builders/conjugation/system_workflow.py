@@ -896,11 +896,6 @@ def _construct_conjugate_from_specs(
         resolved_plans=resolved_plans,
         assembly=assembly_result,
         output_dir=artifact_dir,
-        interchange=(
-            parameterization_result.interchange
-            if hasattr(parameterization_result.interchange, "to_openmm_system")
-            else None
-        ),
         expected_particle_count=getattr(pablo_result.topology, "n_atoms", None),
         write=True,
     )

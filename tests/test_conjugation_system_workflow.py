@@ -1079,6 +1079,17 @@ def test_relaxation_receives_product_path_and_attachment_specs(
         calls["relaxation_attachment_specs"] = attachment_specs
         return SimpleNamespace(success=True, relaxed_pdb_path=Path(output_dir) / "relaxed.pdb")
 
+    class RaisingInterchange:
+        """Interchange fake that must not be converted by validation reporting."""
+
+        def to_openmm_system(self):
+            """Raise if validation attempts to create its own OpenMM system."""
+            raise AssertionError("validation must not call to_openmm_system")
+
+    def fake_validation_report(**kwargs):
+        calls["validation_kwargs"] = kwargs
+        return SimpleNamespace(report_path=Path(kwargs["output_dir"]) / "validation.json")
+
     monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
     monkeypatch.setattr(
         workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
@@ -1090,12 +1101,17 @@ def test_relaxation_receives_product_path_and_attachment_specs(
         "create_interchange_from_pablo_topology",
         lambda topology, **kwargs: InterchangeParameterizationResult(
             success=True,
-            interchange=object(),
+            interchange=RaisingInterchange(),
             force_field_names=("fake.offxml",),
             topology_type="FakeTopology",
         ),
     )
     monkeypatch.setattr(workflow_module, "relax_conjugate", fake_relax_conjugate)
+    monkeypatch.setattr(
+        workflow_module,
+        "build_conjugate_validation_report",
+        fake_validation_report,
+    )
 
     construction, _topology = workflow_module._construct_conjugate_from_specs(
         protein_pdb_path=tmp_path / "protein.pdb",
@@ -1122,6 +1138,7 @@ def test_relaxation_receives_product_path_and_attachment_specs(
     if expect_relaxation:
         assert calls["relaxation_product_pdb_path"] == construction.crosslinked_pdb_path
         assert calls["relaxation_attachment_specs"] == (spec,)
+    assert "interchange" not in calls["validation_kwargs"]
 
 
 def test_construction_final_interchange_uses_strict_charge_bridge(
