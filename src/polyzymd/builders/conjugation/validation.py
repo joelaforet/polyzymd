@@ -894,6 +894,7 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
         if linkage_limit_check is not None:
             status = ValidationStatus.FAIL
             checks.append(linkage_limit_check)
+        linkage_errors_valid = True
         if linkage_errors is None or not _is_finite_number_sequence(linkage_errors):
             status = ValidationStatus.FAIL
             checks.append(
@@ -905,7 +906,19 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
                 )
             )
             linkage_errors = ()
-        if not _is_nonnegative_number_sequence(linkage_errors):
+            linkage_errors_valid = False
+        elif not linkage_errors:
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "conjugate_relaxation_required_linkage_distances",
+                    status,
+                    "Conjugate relaxation diagnostics contain empty linkage distance evidence",
+                    evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
+                )
+            )
+            linkage_errors_valid = False
+        elif not _is_nonnegative_number_sequence(linkage_errors):
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
@@ -916,7 +929,8 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
                 )
             )
             linkage_errors = ()
-        if any(float(error) > linkage_limit for error in linkage_errors):
+            linkage_errors_valid = False
+        if linkage_errors_valid and any(float(error) > linkage_limit for error in linkage_errors):
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
