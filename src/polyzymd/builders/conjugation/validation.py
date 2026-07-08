@@ -727,222 +727,255 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
         )
         return RelaxationEvidenceReport(status=check.status, checks=(check,))
 
+    try:
+        diagnostics_payload = json.loads(relaxation_diagnostics_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        check = _check(
+            "conjugate_relaxation_json",
+            ValidationStatus.FAIL,
+            "Conjugate relaxation evidence JSON could not be read or parsed",
+            evidence={
+                "path": str(relaxation_diagnostics_path),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        return RelaxationEvidenceReport(
+            status=ValidationStatus.FAIL,
+            checks=(check,),
+            relaxation_diagnostics_json_path=relaxation_diagnostics_path,
+        )
+    if not isinstance(diagnostics_payload, dict):
+        check = _check(
+            "conjugate_relaxation_json",
+            ValidationStatus.FAIL,
+            "Conjugate relaxation evidence JSON must contain an object",
+            evidence={
+                "path": str(relaxation_diagnostics_path),
+                "payload_type": type(diagnostics_payload).__name__,
+            },
+        )
+        return RelaxationEvidenceReport(
+            status=ValidationStatus.FAIL,
+            checks=(check,),
+            relaxation_diagnostics_json_path=relaxation_diagnostics_path,
+        )
+
+    diagnostics = diagnostics_payload
     checks: list[ConjugateValidationCheck] = []
     status = ValidationStatus.PASS
-    if relaxation_diagnostics_path.exists():
-        diagnostics = _read_json(relaxation_diagnostics_path)
-        if diagnostics.get("success") is not True:
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation",
-                    status,
-                    "Conjugate relaxation diagnostics failed",
-                    evidence={"success": diagnostics.get("success")},
-                )
+    if diagnostics.get("success") is not True:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation",
+                status,
+                "Conjugate relaxation diagnostics failed",
+                evidence={"success": diagnostics.get("success")},
             )
-        if diagnostics.get("stage_a_success") is not True:
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_stage_a",
-                    status,
-                    "Stage A full-system minimization did not report success",
-                    evidence={"stage_a_success": diagnostics.get("stage_a_success")},
-                )
-            )
-        if diagnostics.get("stage_b_success") is not True:
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_stage_b",
-                    status,
-                    "Stage B conjugate relaxation did not report success",
-                    evidence={"stage_b_success": diagnostics.get("stage_b_success")},
-                )
-            )
-        if diagnostics.get("barostat_used") is not False:
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_barostat",
-                    status,
-                    "Conjugate relaxation diagnostics did not report barostat_used as false",
-                    evidence={"barostat_used": diagnostics.get("barostat_used")},
-                )
-            )
-        missing_or_nonfinite_energy_fields = _missing_or_nonfinite_fields(
-            diagnostics,
-            REQUIRED_RELAXATION_ENERGY_FIELDS,
         )
-        if missing_or_nonfinite_energy_fields:
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_required_energies",
-                    status,
-                    "Conjugate relaxation diagnostics lack required finite energy evidence",
-                    evidence={"fields": missing_or_nonfinite_energy_fields},
-                )
+    if diagnostics.get("stage_a_success") is not True:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_stage_a",
+                status,
+                "Stage A full-system minimization did not report success",
+                evidence={"stage_a_success": diagnostics.get("stage_a_success")},
             )
-        energy_values = [value for key, value in diagnostics.items() if key.endswith("_kj_mol")]
-        if any(not _is_finite_energy_evidence(value) for value in energy_values):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_energy",
-                    status,
-                    "Conjugate relaxation energy is non-finite",
-                )
-            )
-        missing_or_nonfinite_protein_fields = _missing_or_nonfinite_fields(
-            diagnostics,
-            REQUIRED_RELAXATION_PROTEIN_IMMOBILIZATION_FIELDS,
         )
-        if missing_or_nonfinite_protein_fields:
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_required_protein_immobilization",
-                    status,
-                    "Conjugate relaxation diagnostics lack required finite protein immobilization evidence",
-                    evidence={"fields": missing_or_nonfinite_protein_fields},
-                )
+    if diagnostics.get("stage_b_success") is not True:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_stage_b",
+                status,
+                "Stage B conjugate relaxation did not report success",
+                evidence={"stage_b_success": diagnostics.get("stage_b_success")},
             )
-        rmsd = diagnostics.get("stage_b_protein_rmsd_from_stage_a_angstrom")
-        max_displacement = diagnostics.get("stage_b_protein_max_displacement_from_stage_a_angstrom")
-        settings = (
-            diagnostics.get("settings", {}) if isinstance(diagnostics.get("settings"), dict) else {}
         )
-        rmsd_limit, rmsd_limit_check = _relaxation_tolerance(
-            settings,
-            "max_protein_rmsd_angstrom",
-            0.05,
+    if diagnostics.get("barostat_used") is not False:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_barostat",
+                status,
+                "Conjugate relaxation diagnostics did not report barostat_used as false",
+                evidence={"barostat_used": diagnostics.get("barostat_used")},
+            )
         )
-        displacement_limit, displacement_limit_check = _relaxation_tolerance(
-            settings,
-            "max_protein_displacement_angstrom",
-            0.25,
+    missing_or_nonfinite_energy_fields = _missing_or_nonfinite_fields(
+        diagnostics,
+        REQUIRED_RELAXATION_ENERGY_FIELDS,
+    )
+    if missing_or_nonfinite_energy_fields:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_energies",
+                status,
+                "Conjugate relaxation diagnostics lack required finite energy evidence",
+                evidence={"fields": missing_or_nonfinite_energy_fields},
+            )
         )
-        for tolerance_check in (rmsd_limit_check, displacement_limit_check):
-            if tolerance_check is not None:
-                status = ValidationStatus.FAIL
-                checks.append(tolerance_check)
-        if "md_steps" in settings:
-            md_steps = settings["md_steps"]
-            md_steps_source = "settings.md_steps"
-        else:
-            md_steps = diagnostics.get("md_steps")
-            md_steps_source = "md_steps"
-        if not _is_positive_integer(md_steps):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_md_steps",
-                    status,
-                    "Conjugate relaxation diagnostics lack valid positive MD step evidence",
-                    evidence={"md_steps": md_steps, "source": md_steps_source},
-                )
+    energy_values = [value for key, value in diagnostics.items() if key.endswith("_kj_mol")]
+    if any(not _is_finite_energy_evidence(value) for value in energy_values):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_energy",
+                status,
+                "Conjugate relaxation energy is non-finite",
             )
-        negative_protein_fields = _negative_fields(
-            diagnostics,
-            REQUIRED_RELAXATION_PROTEIN_IMMOBILIZATION_FIELDS,
         )
-        if negative_protein_fields:
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_required_protein_immobilization",
-                    status,
-                    "Conjugate relaxation diagnostics contain negative protein immobilization evidence",
-                    evidence={"fields": negative_protein_fields},
-                )
+    missing_or_nonfinite_protein_fields = _missing_or_nonfinite_fields(
+        diagnostics,
+        REQUIRED_RELAXATION_PROTEIN_IMMOBILIZATION_FIELDS,
+    )
+    if missing_or_nonfinite_protein_fields:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_protein_immobilization",
+                status,
+                "Conjugate relaxation diagnostics lack required finite protein immobilization evidence",
+                evidence={"fields": missing_or_nonfinite_protein_fields},
             )
-        if rmsd is not None and _is_finite_number(rmsd) and float(rmsd) > rmsd_limit:
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_protein_rmsd",
-                    status,
-                    "Stage B protein RMSD relative to Stage A exceeds tolerance",
-                    evidence={"rmsd_angstrom": rmsd, "tolerance_angstrom": rmsd_limit},
-                )
-            )
-        if (
-            max_displacement is not None
-            and _is_finite_number(max_displacement)
-            and float(max_displacement) > displacement_limit
-        ):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_protein_max_displacement",
-                    status,
-                    "Stage B protein max displacement relative to Stage A exceeds tolerance",
-                    evidence={
-                        "max_displacement_angstrom": max_displacement,
-                        "tolerance_angstrom": displacement_limit,
-                    },
-                )
-            )
-        linkage_errors = diagnostics.get(REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD)
-        linkage_limit, linkage_limit_check = _relaxation_tolerance(
-            settings,
-            "max_linkage_distance_error_angstrom",
-            0.35,
         )
-        if linkage_limit_check is not None:
+    rmsd = diagnostics.get("stage_b_protein_rmsd_from_stage_a_angstrom")
+    max_displacement = diagnostics.get("stage_b_protein_max_displacement_from_stage_a_angstrom")
+    settings = (
+        diagnostics.get("settings", {}) if isinstance(diagnostics.get("settings"), dict) else {}
+    )
+    rmsd_limit, rmsd_limit_check = _relaxation_tolerance(
+        settings,
+        "max_protein_rmsd_angstrom",
+        0.05,
+    )
+    displacement_limit, displacement_limit_check = _relaxation_tolerance(
+        settings,
+        "max_protein_displacement_angstrom",
+        0.25,
+    )
+    for tolerance_check in (rmsd_limit_check, displacement_limit_check):
+        if tolerance_check is not None:
             status = ValidationStatus.FAIL
-            checks.append(linkage_limit_check)
-        linkage_errors_valid = True
-        if linkage_errors is None or not _is_finite_number_sequence(linkage_errors):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_required_linkage_distances",
-                    status,
-                    "Conjugate relaxation diagnostics lack required finite linkage distance evidence",
-                    evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
-                )
+            checks.append(tolerance_check)
+    if "md_steps" in settings:
+        md_steps = settings["md_steps"]
+        md_steps_source = "settings.md_steps"
+    else:
+        md_steps = diagnostics.get("md_steps")
+        md_steps_source = "md_steps"
+    if not _is_positive_integer(md_steps):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_md_steps",
+                status,
+                "Conjugate relaxation diagnostics lack valid positive MD step evidence",
+                evidence={"md_steps": md_steps, "source": md_steps_source},
             )
-            linkage_errors = ()
-            linkage_errors_valid = False
-        elif not linkage_errors:
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_required_linkage_distances",
-                    status,
-                    "Conjugate relaxation diagnostics contain empty linkage distance evidence",
-                    evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
-                )
+        )
+    negative_protein_fields = _negative_fields(
+        diagnostics,
+        REQUIRED_RELAXATION_PROTEIN_IMMOBILIZATION_FIELDS,
+    )
+    if negative_protein_fields:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_protein_immobilization",
+                status,
+                "Conjugate relaxation diagnostics contain negative protein immobilization evidence",
+                evidence={"fields": negative_protein_fields},
             )
-            linkage_errors_valid = False
-        elif not _is_nonnegative_number_sequence(linkage_errors):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_required_linkage_distances",
-                    status,
-                    "Conjugate relaxation diagnostics contain negative linkage distance evidence",
-                    evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
-                )
+        )
+    if rmsd is not None and _is_finite_number(rmsd) and float(rmsd) > rmsd_limit:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_protein_rmsd",
+                status,
+                "Stage B protein RMSD relative to Stage A exceeds tolerance",
+                evidence={"rmsd_angstrom": rmsd, "tolerance_angstrom": rmsd_limit},
             )
-            linkage_errors = ()
-            linkage_errors_valid = False
-        if linkage_errors_valid and any(float(error) > linkage_limit for error in linkage_errors):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "conjugate_relaxation_linkage_distances",
-                    status,
-                    "Stage B linkage distance error exceeds tolerance",
-                    evidence={
-                        "errors_angstrom": linkage_errors,
-                        "tolerance_angstrom": linkage_limit,
-                    },
-                )
+        )
+    if (
+        max_displacement is not None
+        and _is_finite_number(max_displacement)
+        and float(max_displacement) > displacement_limit
+    ):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_protein_max_displacement",
+                status,
+                "Stage B protein max displacement relative to Stage A exceeds tolerance",
+                evidence={
+                    "max_displacement_angstrom": max_displacement,
+                    "tolerance_angstrom": displacement_limit,
+                },
             )
+        )
+    linkage_errors = diagnostics.get(REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD)
+    linkage_limit, linkage_limit_check = _relaxation_tolerance(
+        settings,
+        "max_linkage_distance_error_angstrom",
+        0.35,
+    )
+    if linkage_limit_check is not None:
+        status = ValidationStatus.FAIL
+        checks.append(linkage_limit_check)
+    linkage_errors_valid = True
+    if linkage_errors is None or not _is_finite_number_sequence(linkage_errors):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_linkage_distances",
+                status,
+                "Conjugate relaxation diagnostics lack required finite linkage distance evidence",
+                evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
+            )
+        )
+        linkage_errors = ()
+        linkage_errors_valid = False
+    elif not linkage_errors:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_linkage_distances",
+                status,
+                "Conjugate relaxation diagnostics contain empty linkage distance evidence",
+                evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
+            )
+        )
+        linkage_errors_valid = False
+    elif not _is_nonnegative_number_sequence(linkage_errors):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_linkage_distances",
+                status,
+                "Conjugate relaxation diagnostics contain negative linkage distance evidence",
+                evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
+            )
+        )
+        linkage_errors = ()
+        linkage_errors_valid = False
+    if linkage_errors_valid and any(float(error) > linkage_limit for error in linkage_errors):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_linkage_distances",
+                status,
+                "Stage B linkage distance error exceeds tolerance",
+                evidence={
+                    "errors_angstrom": linkage_errors,
+                    "tolerance_angstrom": linkage_limit,
+                },
+            )
+        )
     if not checks:
         checks.append(
             _check("relaxation_evidence", status, "OpenMM relaxation evidence passed audit")
