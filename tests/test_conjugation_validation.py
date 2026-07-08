@@ -614,6 +614,48 @@ def test_relaxation_evidence_audit_pass_fail_and_skipped(tmp_path):
     assert audit_relaxation_evidence(tmp_path).status == ValidationStatus.FAIL
 
 
+def test_relaxation_evidence_audit_rejects_malformed_json(tmp_path):
+    """Malformed relaxation JSON should return a structured failure report."""
+    diagnostics_path = tmp_path / "conjugate_relaxation.json"
+    diagnostics_path.write_text('{"success": true', encoding="utf-8")
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert report.relaxation_diagnostics_json_path == diagnostics_path
+    assert len(report.checks) == 1
+    check = report.checks[0]
+    assert check.name == "conjugate_relaxation_json"
+    assert check.status == ValidationStatus.FAIL
+    assert check.evidence["path"] == str(diagnostics_path)
+    assert check.evidence["error_type"] == "JSONDecodeError"
+    assert check.evidence["error"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "payload_type"),
+    (([], "list"), ("relaxed", "str"), (1, "int")),
+)
+def test_relaxation_evidence_audit_rejects_non_object_json(
+    tmp_path,
+    payload: object,
+    payload_type: str,
+):
+    """Non-object relaxation JSON should return a structured failure report."""
+    diagnostics_path = tmp_path / "conjugate_relaxation.json"
+    diagnostics_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert report.relaxation_diagnostics_json_path == diagnostics_path
+    assert len(report.checks) == 1
+    check = report.checks[0]
+    assert check.name == "conjugate_relaxation_json"
+    assert check.status == ValidationStatus.FAIL
+    assert check.evidence == {"path": str(diagnostics_path), "payload_type": payload_type}
+
+
 def test_relaxation_evidence_audit_ignores_legacy_validation_artifacts(tmp_path):
     """Legacy validation artifacts should not affect the new relaxation audit."""
     (tmp_path / "legacy_validation_evidence.json").write_text(
