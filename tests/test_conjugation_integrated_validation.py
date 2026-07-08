@@ -3,7 +3,7 @@
 This is the acceptance test for the real construction path: Polymerist recipe
 generation, Polymerist PDB parsing, Packmol placement, crosslinked PDB writing,
 Pablo ingestion with explicit LYX/NHX crosslink configuration, OpenFF
-Interchange parameterization, and restrained OpenMM product validation.
+Interchange parameterization, and conjugate OpenMM relaxation.
 
 Run on Blanca GPU resources with a command similar to::
 
@@ -45,10 +45,8 @@ from polyzymd.builders.conjugation.placement import (
 )
 from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.polymer.recipe import generate_multi_residue_molecule
-from polyzymd.builders.conjugation.relaxation.openmm import (
-    OpenMMValidationSettings,
-    validate_openmm_product,
-)
+from polyzymd.builders.conjugation.relaxation.models import ConjugateRelaxationSettings
+from polyzymd.builders.conjugation.relaxation.openmm import relax_conjugate
 from polyzymd.builders.conjugation.structure.pdb import (
     CrosslinkedPdbAssemblyOptions,
     PdbAtomRecord,
@@ -80,7 +78,7 @@ ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 @pytest.mark.slow
 @pytest.mark.conjugation_stack
 def test_opt_in_integrated_conjugation_physics_validation(tmp_path: Path):
-    """Run the real integrated conjugation construction and OpenMM validation."""
+    """Run the real integrated conjugation construction and OpenMM relaxation."""
     platform_name = _require_conjugation_stack_or_skip()
     artifact_dir = tmp_path / "conjugation-integrated-validation"
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -185,28 +183,35 @@ def test_opt_in_integrated_conjugation_physics_validation(tmp_path: Path):
             artifact_dir,
         )
 
-    restrained_indices = _protein_heavy_atom_indices(crosslinked_pdb)
-    validation_result = _run_stage(
-        "Restrained OpenMM product validation",
+    attachment_spec = SimpleNamespace(
+        attachment_id="integrated_validation",
+        attachment_index=1,
+        reaction_name="nhs_lys",
+        resolved_plan=resolved_plan,
+    )
+    relaxation_result = _run_stage(
+        "OpenMM conjugate relaxation",
         artifact_dir,
-        lambda: validate_openmm_product(
+        lambda: relax_conjugate(
             parameterization.interchange,
             artifact_dir,
-            protein_heavy_atom_indices=restrained_indices,
-            settings=OpenMMValidationSettings(
+            product_pdb_path=crosslinked_pdb,
+            attachment_specs=(attachment_spec,),
+            assembly=assembly,
+            settings=ConjugateRelaxationSettings(
                 minimization_max_iterations=_int_env(
                     VALIDATION_MINIMIZATION_ITERS_ENV_VAR,
                     default=5,
                 ),
-                nvt_steps=_int_env(VALIDATION_NVT_STEPS_ENV_VAR, default=2),
+                md_steps=max(1, _int_env(VALIDATION_NVT_STEPS_ENV_VAR, default=2)),
                 platform_name=platform_name,
             ),
         ),
     )
 
-    assert validation_result.success
-    assert validation_result.nvt_steps == _int_env(VALIDATION_NVT_STEPS_ENV_VAR, default=2)
-    assert validation_result.validation_json_path.exists()
+    assert relaxation_result.success
+    assert relaxation_result.md_steps == max(1, _int_env(VALIDATION_NVT_STEPS_ENV_VAR, default=2))
+    assert relaxation_result.diagnostics_json_path.exists()
 
 
 def _require_conjugation_stack_or_skip() -> str:
@@ -344,8 +349,8 @@ def _blocker_guidance(stage: str, exc: Exception) -> str:
         )
     if "openmm" in stage.lower():
         return (
-            "This means a parameterized system was built, but restrained OpenMM validation did "
-            "not complete with finite states. Inspect the minimized and validation JSON artifacts."
+            "This means a parameterized system was built, but restrained OpenMM relaxation did "
+            "not complete with finite states. Inspect the minimized and relaxation JSON artifacts."
         )
     return "This is a real workflow blocker, not a dependency guard skip."
 

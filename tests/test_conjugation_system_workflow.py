@@ -149,7 +149,6 @@ def test_system_workflow_settings_enable_public_product_state_defaults():
     assert settings.canonicalize_source_protein_hydrogens is True
     assert settings.use_product_state_pablo_library is True
     assert settings.run_relaxation is True
-    assert settings.run_openmm_validation is False
     assert settings.run_product_state_local_minimization is False
     assert settings.protein_canonicalization.ph == pytest.approx(7.0)
 
@@ -573,7 +572,6 @@ def test_nhs_lys_shim_uses_product_state_local_minimization(
     monkeypatch.setattr(
         workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
     )
-    monkeypatch.setattr(workflow_module, "validate_openmm_product", fake_validation)
     monkeypatch.setattr(
         workflow_module,
         "run_post_crosslink_local_minimization",
@@ -777,7 +775,6 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     monkeypatch.setattr(
         workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
     )
-    monkeypatch.setattr(workflow_module, "validate_openmm_product", fake_validation)
     monkeypatch.setattr(
         workflow_module,
         "run_post_crosslink_local_minimization",
@@ -952,7 +949,6 @@ def test_single_generic_local_minimization_request_runs_minimizer(
     monkeypatch.setattr(
         workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
     )
-    monkeypatch.setattr(workflow_module, "validate_openmm_product", fake_validation)
     monkeypatch.setattr(
         workflow_module,
         "run_post_crosslink_local_minimization",
@@ -999,14 +995,14 @@ def test_single_generic_local_minimization_request_runs_minimizer(
     ("run_relaxation", "use_conjugate_relaxation", "expect_relaxation"),
     ((False, False, False), (True, True, True)),
 )
-def test_openmm_validation_receives_product_path_and_attachment_specs(
+def test_relaxation_receives_product_path_and_attachment_specs(
     monkeypatch,
     tmp_path: Path,
     run_relaxation: bool,
     use_conjugate_relaxation: bool,
     expect_relaxation: bool,
 ):
-    """OpenMM validation should use the current product-aware signature."""
+    """Conjugate relaxation should use the current product-aware signature."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
     plan = _generic_resolved_plan(
@@ -1070,18 +1066,6 @@ def test_openmm_validation_receives_product_path_and_attachment_specs(
                 topology=SimpleNamespace(molecules=(object(),)),
             )
 
-    def fake_validation(
-        interchange,
-        output_dir,
-        *,
-        settings=None,
-        crosslinked_pdb_path=None,
-        attachment_specs=(),
-    ):
-        calls["crosslinked_pdb_path"] = crosslinked_pdb_path
-        calls["attachment_specs"] = attachment_specs
-        return SimpleNamespace(success=True)
-
     def fake_relax_conjugate(
         interchange,
         output_dir,
@@ -1111,7 +1095,6 @@ def test_openmm_validation_receives_product_path_and_attachment_specs(
             topology_type="FakeTopology",
         ),
     )
-    monkeypatch.setattr(workflow_module, "validate_openmm_product", fake_validation)
     monkeypatch.setattr(workflow_module, "relax_conjugate", fake_relax_conjugate)
 
     construction, _topology = workflow_module._construct_conjugate_from_specs(
@@ -1129,17 +1112,12 @@ def test_openmm_validation_receives_product_path_and_attachment_specs(
         ),
         output_dir=tmp_path / "construction",
         chain_policy=None,
-        settings=ModifierConstructionSettings(
-            run_relaxation=run_relaxation,
-            run_openmm_validation=True,
-        ),
+        settings=ModifierConstructionSettings(run_relaxation=run_relaxation),
         use_product_state_pablo_library=False,
         use_conjugate_relaxation=use_conjugate_relaxation,
         run_product_state_local_minimization=False,
     )
 
-    assert calls["crosslinked_pdb_path"] == construction.crosslinked_pdb_path
-    assert calls["attachment_specs"] == (spec,)
     assert ("relaxation_product_pdb_path" in calls) is expect_relaxation
     if expect_relaxation:
         assert calls["relaxation_product_pdb_path"] == construction.crosslinked_pdb_path

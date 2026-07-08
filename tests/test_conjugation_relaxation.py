@@ -1,4 +1,4 @@
-"""Tests for conjugate relaxation and OpenMM validation helpers."""
+"""Tests for conjugate relaxation helpers."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ import polyzymd.builders.conjugation.relaxation._openmm_workflows as relaxation_
 import polyzymd.builders.conjugation.relaxation.openmm as relaxation
 from polyzymd.builders.conjugation.relaxation._diagnostics import (
     _positions_to_numpy,
-    analyze_product_geometry,
     validate_finite_energy,
     validate_finite_positions,
 )
@@ -26,16 +25,12 @@ from polyzymd.builders.conjugation.relaxation._openmm_system import (
     _add_linkage_anchor_restraints,
     _freeze_protein_chain_masses,
     _remove_barostats,
-    _resolve_restrained_indices,
     _restore_particle_masses,
     _run_fixed_product_md,
 )
 from polyzymd.builders.conjugation.relaxation.models import (
     ConjugateRelaxationDiagnostics,
     ConjugateRelaxationSettings,
-    OpenMMValidationPhaseDiagnostics,
-    OpenMMValidationResult,
-    OpenMMValidationSettings,
     ProductLinkage,
 )
 from polyzymd.builders.conjugation.relaxation.openmm import relax_conjugate
@@ -104,7 +99,7 @@ def _topology_atom(
 
 
 def test_validate_finite_energy_accepts_finite_values():
-    """Finite energies should pass OpenMM validation."""
+    """Finite energies should pass OpenMM relaxation checks."""
     validate_finite_energy(-123.4, label="test_energy")
 
 
@@ -510,7 +505,7 @@ def test_validate_finite_energy_rejects_nonfinite_values(value: float):
 
 
 def test_validate_finite_positions_accepts_numpy_arrays():
-    """Finite coordinate arrays should pass OpenMM validation."""
+    """Finite coordinate arrays should pass OpenMM relaxation checks."""
     span_nm = validate_finite_positions(np.zeros((3, 3)), label="positions")
 
     assert span_nm == 0.0
@@ -570,168 +565,6 @@ def test_validate_finite_positions_rejects_unrealistic_span():
 
     with pytest.raises(RuntimeError, match="unrealistic coordinate span"):
         validate_finite_positions(positions, label="equilibrated_positions", max_span_nm=50.0)
-
-
-def test_openmm_validation_settings_require_positive_nvt_steps():
-    """OpenMM validation settings should allow minimization-only validation."""
-    assert OpenMMValidationSettings(nvt_steps=0).nvt_steps == 0
-
-
-def test_openmm_validation_settings_reject_negative_nvt_steps():
-    """OpenMM validation settings should reject negative MD step counts."""
-    with pytest.raises(ValidationError, match="greater than or equal to 0"):
-        OpenMMValidationSettings(nvt_steps=-1)
-
-
-def test_openmm_validation_settings_use_conservative_md_defaults():
-    """Default validation MD settings should be conservative for product validation."""
-    settings = OpenMMValidationSettings()
-
-    assert settings.nvt_steps > 0
-    assert settings.timestep_femtoseconds <= 0.25
-    assert settings.temperature_kelvin <= 50.0
-    assert settings.friction_per_picosecond >= 10.0
-    assert settings.restrain_all_heavy_atoms is True
-    assert settings.max_position_span_nm == 50.0
-
-
-def test_analyze_product_geometry_reports_contacts_and_bond_outliers():
-    """Product geometry diagnostics should identify close contacts and stretched bonds."""
-    topology = _TopologyDouble(
-        (
-            _AtomDouble(0, "C1", "C", "C"),
-            _AtomDouble(1, "C2", "C", "C"),
-            _AtomDouble(2, "H1", "H", "C"),
-            _AtomDouble(3, "O1", "O", "C"),
-        )
-    )
-    topology._bonds = ((topology._atoms[0], topology._atoms[3]),)
-    positions = np.array(
-        [
-            [0.00, 0.00, 0.00],
-            [0.10, 0.00, 0.00],
-            [0.02, 0.00, 0.00],
-            [0.40, 0.00, 0.00],
-        ]
-    )
-
-    diagnostics = analyze_product_geometry(topology, positions)
-
-    assert diagnostics.coordinate_span_nm == pytest.approx(0.40)
-    assert diagnostics.min_heavy_heavy_distance_nm == pytest.approx(0.10)
-    assert diagnostics.min_h_heavy_distance_nm == pytest.approx(0.02)
-    assert [pair.category for pair in diagnostics.close_contacts] == [
-        "h-heavy-close-contact",
-        "heavy-heavy-close-contact",
-    ]
-    assert diagnostics.bonded_distance_outliers[0].distance_nm == pytest.approx(0.40)
-
-
-def test_product_geometry_geometry_writes_json_sidecar(tmp_path):
-    """Product geometry geometry diagnostics should persist JSON artifacts."""
-    topology = _restraint_selection_topology()
-    diagnostics = analyze_product_geometry(topology, np.zeros((4, 3)))
-
-    path = diagnostics.write_json(tmp_path / "product_geometry_geometry.json")
-
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["atom_count"] == 4
-    assert payload["json_path"].endswith("product_geometry_geometry.json")
-
-
-def test_openmm_validation_failure_artifact_records_span_and_error(tmp_path):
-    """OpenMM validation failures should write the canonical schema before raising upstream."""
-    topology = _restraint_selection_topology()
-    analyze_product_geometry(
-        topology,
-        np.array([[0.0, 0.0, 0.0], [60.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 2.0, 0.0]]),
-    )
-    phase = OpenMMValidationPhaseDiagnostics(
-        phase="after_md",
-        coordinate_span_nm=60.0,
-        coordinates_are_finite=True,
-        has_nan=False,
-        has_inf=False,
-        potential_energy_kj_mol=-1.0,
-    )
-
-    output_path = tmp_path / "openmm_validation.json"
-    exc = RuntimeError("span validation failed")
-    result = OpenMMValidationResult(
-        success=False,
-        output_dir=tmp_path,
-        validation_json_path=output_path,
-        diagnostics_json_path=output_path,
-        platform_name="CPU",
-        restrained_atom_count=2,
-        settings=OpenMMValidationSettings(nvt_steps=0).model_dump(mode="json"),
-        phases=(phase,),
-        validation_segments=(),
-        first_invalid_phase="after_md",
-        error_type=type(exc).__name__,
-        error_message=str(exc),
-    )
-    path = result.write_json(output_path)
-
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["success"] is False
-    assert payload["error_message"] == "span validation failed"
-    assert payload["first_invalid_phase"] == "after_md"
-    assert payload["validation_json_path"].endswith("openmm_validation.json")
-    assert payload["diagnostics_json_path"].endswith("openmm_validation.json")
-    assert payload["phases"][0]["phase"] == "after_md"
-    assert "energy_after_min_kj_mol" in payload
-
-
-def test_resolve_restrained_indices_defaults_to_all_heavy_atoms():
-    """All-heavy mode should restrain non-protein conjugate atoms by default."""
-    topology = _restraint_selection_topology()
-
-    indices = _resolve_restrained_indices(
-        topology,
-        protein_heavy_atom_indices=None,
-        restrain_all_heavy_atoms=True,
-    )
-
-    assert indices == (0, 2)
-
-
-def test_resolve_restrained_indices_ignores_protein_only_selection_in_all_heavy_mode():
-    """Supplying chain-A atoms must not restrict all-heavy validation restraints."""
-    topology = _restraint_selection_topology()
-
-    indices = _resolve_restrained_indices(
-        topology,
-        protein_heavy_atom_indices=(0,),
-        restrain_all_heavy_atoms=True,
-    )
-
-    assert indices == (0, 2)
-
-
-def test_resolve_restrained_indices_allows_legacy_protein_only_mode():
-    """Protein-only restraints remain available when all-heavy mode is disabled."""
-    topology = _restraint_selection_topology()
-
-    indices = _resolve_restrained_indices(
-        topology,
-        protein_heavy_atom_indices=None,
-        restrain_all_heavy_atoms=False,
-    )
-
-    assert indices == (0,)
-
-
-def _restraint_selection_topology() -> _TopologyDouble:
-    """Build a small topology with protein, conjugate, and hydrogen atoms."""
-    return _TopologyDouble(
-        (
-            _AtomDouble(0, "CA", "C", "A"),
-            _AtomDouble(1, "HA", "H", "A"),
-            _AtomDouble(2, "C1", "C", "C"),
-            _AtomDouble(3, "H1", "H", "C"),
-        )
-    )
 
 
 class _RelaxationSystem:

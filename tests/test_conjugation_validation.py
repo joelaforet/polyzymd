@@ -13,8 +13,8 @@ from polyzymd.builders.conjugation.validation import (
     ValidationStatus,
     audit_charge_reports,
     audit_linkage_geometry,
-    audit_openmm_validation_reports,
     audit_parameter_coverage,
+    audit_relaxation_evidence,
     build_conjugate_validation_report,
     validate_atom_presence,
     validate_product_bond_graph,
@@ -588,27 +588,50 @@ def test_linkage_geometry_warns_for_nonbonded_close_contacts():
     assert any(check.name == "nonbonded_close_contacts" for check in report.checks)
 
 
-def test_openmm_validation_audit_pass_fail_and_skipped(tmp_path):
-    """OpenMM validation audit should consume fake JSON payloads."""
-    assert audit_openmm_validation_reports(tmp_path).status == ValidationStatus.SKIPPED
+def test_relaxation_evidence_audit_pass_fail_and_skipped(tmp_path):
+    """OpenMM relaxation audit should consume relaxation JSON payloads."""
+    assert audit_relaxation_evidence(tmp_path).status == ValidationStatus.SKIPPED
 
-    validation_path = tmp_path / "openmm_validation.json"
-    validation_path.write_text(
-        json.dumps({"success": True, "energy_after_min_kj_mol": -1.0}),
+    relaxation_path = tmp_path / "conjugate_relaxation.json"
+    relaxation_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "stage_a_success": True,
+                "stage_b_success": True,
+                "barostat_used": False,
+                "stage_a_energy_after_min_kj_mol": -1.0,
+                "stage_b_energy_after_md_kj_mol": -2.0,
+                "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
+                "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
+                "stage_b_linkage_distance_errors_angstrom": [0.1],
+                "settings": {"md_steps": 10},
+            }
+        ),
         encoding="utf-8",
     )
-    assert audit_openmm_validation_reports(tmp_path).status == ValidationStatus.PASS
+    assert audit_relaxation_evidence(tmp_path).status == ValidationStatus.PASS
 
-    validation_path.write_text(
-        json.dumps({"success": True, "energy_after_min_kj_mol": "nan"}),
+    relaxation_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "stage_a_success": True,
+                "stage_b_success": True,
+                "barostat_used": False,
+                "stage_a_energy_after_min_kj_mol": "nan",
+                "stage_b_energy_after_md_kj_mol": -2.0,
+                "settings": {"md_steps": 10},
+            }
+        ),
         encoding="utf-8",
     )
-    assert audit_openmm_validation_reports(tmp_path).status == ValidationStatus.FAIL
+    assert audit_relaxation_evidence(tmp_path).status == ValidationStatus.FAIL
 
 
-def test_openmm_validation_audit_ignores_legacy_validation_artifacts(tmp_path):
+def test_relaxation_evidence_audit_ignores_legacy_validation_artifacts(tmp_path):
     """Legacy validation artifacts should not affect the new relaxation audit."""
-    (tmp_path / "legacy_openmm_validation.json").write_text(
+    (tmp_path / "legacy_validation_evidence.json").write_text(
         json.dumps({"success": False}),
         encoding="utf-8",
     )
@@ -637,14 +660,14 @@ def test_openmm_validation_audit_ignores_legacy_validation_artifacts(tmp_path):
         encoding="utf-8",
     )
 
-    report = audit_openmm_validation_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.PASS
     assert report.relaxation_diagnostics_json_path == diagnostics_path
 
 
-def test_openmm_validation_audit_accepts_passing_conjugate_relaxation_evidence(tmp_path):
-    """Validation should pass when all present OpenMM validation evidence passes."""
+def test_relaxation_evidence_audit_accepts_passing_conjugate_relaxation(tmp_path):
+    """Validation should pass when all present OpenMM relaxation evidence passes."""
     diagnostics_path = tmp_path / "conjugate_relaxation.json"
     diagnostics_path.write_text(
         json.dumps(
@@ -670,13 +693,60 @@ def test_openmm_validation_audit_accepts_passing_conjugate_relaxation_evidence(t
         encoding="utf-8",
     )
 
-    report = audit_openmm_validation_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.PASS
     assert report.relaxation_diagnostics_json_path == diagnostics_path
 
 
-def test_openmm_validation_audit_rejects_stale_zero_step_conjugate_relaxation(tmp_path):
+def test_relaxation_evidence_audit_accepts_force_group_energy_maps(tmp_path):
+    """Validation should pass finite scalar and force-group relaxation energies."""
+    diagnostics_path = tmp_path / "conjugate_relaxation.json"
+    diagnostics_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "stage_a_success": True,
+                "stage_b_success": True,
+                "temporary_anchor_count": 2,
+                "barostat_used": False,
+                "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_after_md_kj_mol": -11.0,
+                "stage_a_force_group_energies_before_min_kj_mol": {
+                    "0": -9.0,
+                    "1": 0.5,
+                    "2": 1.5,
+                },
+                "stage_a_force_group_energies_after_min_kj_mol": {
+                    "bonded": -10.5,
+                    "nonbonded": -0.25,
+                },
+                "stage_b_force_group_energies_after_md_kj_mol": {
+                    "bonded": -11.25,
+                    "nonbonded": 0.25,
+                },
+                "relaxation_note": "finite force-group energies should not fail audit",
+                "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
+                "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
+                "stage_b_linkage_distance_errors_angstrom": [0.1, 0.2],
+                "settings": {
+                    "md_steps": 10,
+                    "max_protein_rmsd_angstrom": 0.05,
+                    "max_protein_displacement_angstrom": 0.25,
+                    "max_linkage_distance_error_angstrom": 0.35,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.PASS
+    assert report.relaxation_diagnostics_json_path == diagnostics_path
+
+
+def test_relaxation_evidence_audit_rejects_stale_zero_step_relaxation(tmp_path):
     """Validation should reject stale frozen diagnostics with no Stage B MD."""
     (tmp_path / "conjugate_relaxation.json").write_text(
         json.dumps(
@@ -696,13 +766,13 @@ def test_openmm_validation_audit_rejects_stale_zero_step_conjugate_relaxation(tm
         encoding="utf-8",
     )
 
-    report = audit_openmm_validation_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.FAIL
     assert any(check.name == "conjugate_relaxation_md_steps" for check in report.checks)
 
 
-def test_openmm_validation_audit_requires_conjugate_relaxation_md_steps(tmp_path):
+def test_relaxation_evidence_audit_requires_conjugate_relaxation_md_steps(tmp_path):
     """Validation should reject otherwise-passing frozen diagnostics without MD steps."""
     (tmp_path / "conjugate_relaxation.json").write_text(
         json.dumps(
@@ -726,13 +796,13 @@ def test_openmm_validation_audit_requires_conjugate_relaxation_md_steps(tmp_path
         encoding="utf-8",
     )
 
-    report = audit_openmm_validation_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.FAIL
     assert any(check.name == "conjugate_relaxation_md_steps" for check in report.checks)
 
 
-def test_openmm_validation_audit_accepts_top_level_conjugate_relaxation_md_steps(tmp_path):
+def test_relaxation_evidence_audit_accepts_top_level_relaxation_md_steps(tmp_path):
     """Validation should accept top-level MD steps when settings omit them."""
     (tmp_path / "conjugate_relaxation.json").write_text(
         json.dumps(
@@ -757,12 +827,12 @@ def test_openmm_validation_audit_accepts_top_level_conjugate_relaxation_md_steps
         encoding="utf-8",
     )
 
-    report = audit_openmm_validation_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.PASS
 
 
-def test_openmm_validation_audit_fails_unfixed_frozen_stage_b(tmp_path):
+def test_relaxation_evidence_audit_fails_unfixed_frozen_stage_b(tmp_path):
     """Validation should fail when Stage B does not keep protein fixed."""
     diagnostics_path = tmp_path / "conjugate_relaxation.json"
     diagnostics_path.write_text(
@@ -787,13 +857,13 @@ def test_openmm_validation_audit_fails_unfixed_frozen_stage_b(tmp_path):
         encoding="utf-8",
     )
 
-    report = audit_openmm_validation_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.FAIL
     assert any(check.name == "conjugate_relaxation_protein_rmsd" for check in report.checks)
 
 
-def test_openmm_validation_audit_requires_frozen_stage_a_success(tmp_path):
+def test_relaxation_evidence_audit_requires_frozen_stage_a_success(tmp_path):
     """Validation should fail when Stage A minimization is missing."""
     diagnostics_path = tmp_path / "conjugate_relaxation.json"
     diagnostics_path.write_text(
@@ -813,7 +883,7 @@ def test_openmm_validation_audit_requires_frozen_stage_a_success(tmp_path):
         encoding="utf-8",
     )
 
-    report = audit_openmm_validation_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.FAIL
     assert any(check.name == "conjugate_relaxation_stage_a" for check in report.checks)

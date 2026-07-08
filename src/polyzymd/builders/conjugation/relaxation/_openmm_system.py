@@ -244,7 +244,7 @@ def _openmm_positions_from_interchange(interchange: Any, openmm_unit: Any) -> An
         positions = topology.get_positions()
         if positions is not None:
             return _to_openmm_positions(positions, openmm_unit)
-    raise RuntimeError("Interchange object does not expose positions for OpenMM validation")
+    raise RuntimeError("Interchange object does not expose positions for OpenMM relaxation")
 
 
 def _to_openmm_positions(positions: Any, openmm_unit: Any) -> Any:
@@ -338,53 +338,12 @@ def _force_group_energies(
     return energies
 
 
-def _safe_write_failed_pdb(
-    openmm_app: Any,
-    topology: Any,
-    positions: Any,
-    output_path: Path,
-) -> None:
-    """Best-effort PDB writer used while handling validation failures."""
-    try:
-        _write_openmm_pdb(openmm_app, topology, positions, output_path)
-    except (OSError, AttributeError, TypeError, ValueError, RuntimeError) as exc:
-        LOGGER.warning("Could not write failed validation PDB %s: %s", output_path, exc)
-
-
 def _state_energy_kj_mol(state: Any, openmm_unit: Any) -> float:
     """Return potential energy from an OpenMM state in kJ/mol."""
     energy = state.getPotentialEnergy()
     if hasattr(energy, "value_in_unit"):
         return float(energy.value_in_unit(openmm_unit.kilojoule_per_mole))
     return float(energy)
-
-
-def _validation_settings_from_environment(
-    settings: OpenMMValidationSettings,
-) -> OpenMMValidationSettings:
-    """Apply internal environment-variable diagnostic overrides to validation settings."""
-    updates: dict[str, Any] = {}
-    if _truthy_environment("POLYZYMD_CONJUGATION_VALIDATION_MIN_ONLY"):
-        updates["nvt_steps"] = 0
-    nvt_steps = os.environ.get("POLYZYMD_CONJUGATION_VALIDATION_NVT_STEPS")
-    if nvt_steps not in (None, ""):
-        updates["nvt_steps"] = int(nvt_steps)
-    timestep_fs = os.environ.get("POLYZYMD_CONJUGATION_VALIDATION_TIMESTEP_FS")
-    if timestep_fs not in (None, ""):
-        updates["timestep_femtoseconds"] = float(timestep_fs)
-    temperature_kelvin = os.environ.get("POLYZYMD_CONJUGATION_VALIDATION_TEMPERATURE_K")
-    if temperature_kelvin not in (None, ""):
-        updates["temperature_kelvin"] = float(temperature_kelvin)
-    if not updates:
-        return settings
-    LOGGER.info("Applying restrained validation diagnostic environment overrides: %s", updates)
-    return settings.model_copy(update=updates)
-
-
-def _truthy_environment(name: str) -> bool:
-    """Return whether an environment variable contains a truthy diagnostic flag."""
-    value = os.environ.get(name)
-    return value is not None and value.strip().lower() not in {"", "0", "false", "no", "off"}
 
 
 def _add_positional_restraints(
@@ -408,46 +367,6 @@ def _add_positional_restraints(
         x_coord, y_coord, z_coord = reference_nm[atom_index]
         restraint.addParticle(atom_index, [float(x_coord), float(y_coord), float(z_coord)])
     system.addForce(restraint)
-
-
-def _resolve_restrained_indices(
-    topology: Any,
-    *,
-    protein_heavy_atom_indices: tuple[int, ...] | None,
-    restrain_all_heavy_atoms: bool,
-) -> tuple[int, ...]:
-    """Resolve restrained atom indices for a stable OpenMM validation."""
-    if restrain_all_heavy_atoms:
-        return _infer_heavy_indices(topology)
-    selected = set(protein_heavy_atom_indices or _infer_chain_a_heavy_indices(topology))
-    return tuple(sorted(selected))
-
-
-def _infer_heavy_indices(topology: Any) -> tuple[int, ...]:
-    """Infer all non-hydrogen atom indices from an OpenMM topology."""
-    indices: list[int] = []
-    for atom in topology.atoms():
-        if _is_heavy_atom(atom):
-            indices.append(atom.index)
-    return tuple(indices)
-
-
-def _infer_chain_a_heavy_indices(topology: Any) -> tuple[int, ...]:
-    """Infer protein heavy atoms from chain A in an OpenMM topology."""
-    indices: list[int] = []
-    for atom in topology.atoms():
-        chain_id = getattr(getattr(atom, "residue", None), "chain", None)
-        chain_id = getattr(chain_id, "id", None)
-        if chain_id == "A" and _is_heavy_atom(atom):
-            indices.append(atom.index)
-    return tuple(indices)
-
-
-def _is_heavy_atom(atom: Any) -> bool:
-    """Return whether an OpenMM atom-like object is not hydrogen."""
-    element_symbol = getattr(getattr(atom, "element", None), "symbol", "")
-    atom_name = getattr(atom, "name", "")
-    return element_symbol.upper() != "H" and not str(atom_name).upper().startswith("H")
 
 
 def _select_platform(openmm: Any, requested_platform: str | None) -> Any:

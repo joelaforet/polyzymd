@@ -20,7 +20,6 @@ from polyzymd.builders.conjugation.placement import (
 from polyzymd.builders.conjugation.relaxation import (
     ConjugateRelaxationResult,
     ConjugateRelaxationSettings,
-    OpenMMValidationSettings,
 )
 from polyzymd.builders.conjugation.structure.pdb import CrosslinkedPdbAssemblyResult
 
@@ -36,9 +35,7 @@ class ModifierConstructionSettings(BaseModel):
         default_factory=InterchangeParameterizationSettings
     )
     relaxation: ConjugateRelaxationSettings = Field(default_factory=ConjugateRelaxationSettings)
-    openmm_validation: OpenMMValidationSettings = Field(default_factory=OpenMMValidationSettings)
     run_relaxation: bool = True
-    run_openmm_validation: bool = False
 
 
 class ModifierConstructionResult(BaseModel):
