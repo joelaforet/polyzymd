@@ -1001,8 +1001,10 @@ def test_single_generic_local_minimization_request_runs_minimizer(
     ),
     (
         (False, False, False, ValidationStatus.PASS),
+        (False, False, False, ValidationStatus.SKIPPED),
         (True, True, True, ValidationStatus.PASS),
         (True, True, True, ValidationStatus.FAIL),
+        (True, True, True, ValidationStatus.SKIPPED),
     ),
 )
 def test_relaxation_receives_product_path_and_attachment_specs(
@@ -1148,8 +1150,8 @@ def test_relaxation_receives_product_path_and_attachment_specs(
         "run_product_state_local_minimization": False,
     }
 
-    if relaxation_evidence_status == ValidationStatus.FAIL:
-        with pytest.raises(RuntimeError, match="relaxation evidence failed"):
+    if expect_relaxation and relaxation_evidence_status != ValidationStatus.PASS:
+        with pytest.raises(RuntimeError, match="relaxation evidence did not pass"):
             workflow_module._construct_conjugate_from_specs(**construction_kwargs)
         assert ("relaxation_product_pdb_path" in calls) is expect_relaxation
         assert "interchange" not in calls["validation_kwargs"]
