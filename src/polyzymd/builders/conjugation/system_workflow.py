@@ -902,7 +902,14 @@ def _construct_conjugate_from_specs(
         expected_particle_count=getattr(pablo_result.topology, "n_atoms", None),
         write=True,
     )
-    if validation_report.relaxation_evidence.status == ValidationStatus.FAIL:
+    relaxation_was_requested = use_conjugate_relaxation and settings.run_relaxation
+    relaxation_evidence_status = validation_report.relaxation_evidence.status
+    if relaxation_was_requested and relaxation_evidence_status != ValidationStatus.PASS:
+        raise RuntimeError(
+            "Conjugate validation report relaxation evidence did not pass "
+            f"after requested relaxation: {relaxation_evidence_status.value}"
+        )
+    if not relaxation_was_requested and relaxation_evidence_status == ValidationStatus.FAIL:
         raise RuntimeError("Conjugate validation report relaxation evidence failed")
 
     return (
