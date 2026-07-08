@@ -7,6 +7,8 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.builders.conjugation.validation import (
     ConjugateValidationReport,
@@ -684,6 +686,52 @@ def test_relaxation_evidence_audit_accepts_passing_conjugate_relaxation(tmp_path
 
     assert report.status == ValidationStatus.PASS
     assert report.relaxation_diagnostics_json_path == diagnostics_path
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "check_name"),
+    (
+        ("success", "false", "conjugate_relaxation"),
+        ("stage_a_success", 1, "conjugate_relaxation_stage_a"),
+        ("stage_b_success", "yes", "conjugate_relaxation_stage_b"),
+    ),
+)
+def test_relaxation_evidence_audit_rejects_malformed_status_fields(
+    tmp_path,
+    field: str,
+    value: object,
+    check_name: str,
+):
+    """Validation should require status fields to be JSON boolean true."""
+    payload = _canonical_relaxation_payload()
+    payload[field] = value
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == check_name and check.evidence[field] == value for check in report.checks
+    )
+
+
+@pytest.mark.parametrize("value", ("false", 0, None))
+def test_relaxation_evidence_audit_rejects_malformed_barostat_used(tmp_path, value: object):
+    """Validation should require barostat_used to be JSON boolean false."""
+    payload = _canonical_relaxation_payload()
+    if value is None:
+        payload.pop("barostat_used")
+    else:
+        payload["barostat_used"] = value
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_barostat" and check.evidence["barostat_used"] == value
+        for check in report.checks
+    )
 
 
 def test_relaxation_evidence_audit_accepts_force_group_energy_maps(tmp_path):
