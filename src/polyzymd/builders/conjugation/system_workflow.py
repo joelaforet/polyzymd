@@ -84,7 +84,10 @@ from polyzymd.builders.conjugation.structure.preparation import (
     ProteinCanonicalizationSettings,
     canonicalize_protein_hydrogens,
 )
-from polyzymd.builders.conjugation.validation import build_conjugate_validation_report
+from polyzymd.builders.conjugation.validation import (
+    ValidationStatus,
+    build_conjugate_validation_report,
+)
 from polyzymd.builders.system_builder import SystemBuilder
 from polyzymd.config.schema import (
     ConjugationCcdCrosslinkConfig,
@@ -899,6 +902,8 @@ def _construct_conjugate_from_specs(
         expected_particle_count=getattr(pablo_result.topology, "n_atoms", None),
         write=True,
     )
+    if validation_report.relaxation_evidence.status == ValidationStatus.FAIL:
+        raise RuntimeError("Conjugate validation report relaxation evidence failed")
 
     return (
         ConjugateConstructionResult(
