@@ -175,6 +175,7 @@ class PolymerBuilder:
 
         # Validate dynamic mode requirements
         if self._generation_mode == "dynamic":
+            self._validate_dynamic_length()
             if not self._monomer_smiles:
                 raise ValueError("Dynamic generation mode requires monomer_smiles")
             if not self._monomer_names:
@@ -230,6 +231,9 @@ class PolymerBuilder:
         Raises:
             FileNotFoundError: If SDF file not found and generation not allowed.
         """
+        if self._generation_mode == "dynamic":
+            self._validate_dynamic_length()
+
         if seed is not None:
             random.seed(seed)
 
@@ -308,6 +312,9 @@ class PolymerBuilder:
         self._charger_type = config.charger.value
         self._max_retries = config.max_retries
 
+        if self._generation_mode == "dynamic":
+            self._validate_dynamic_length()
+
         # Extract monomer-related mappings for dynamic mode
         if config.generation_mode.value == "dynamic":
             # Build monomer_smiles: name -> SMILES
@@ -354,20 +361,29 @@ class PolymerBuilder:
         if sequence in self._loaded_molecules:
             return self._loaded_molecules[sequence]
 
-        # Try to load from SDF directory (checked first in ALL modes)
+        # User-provided dynamic SDFs are allowed only when they do not resemble cache artifacts
         if self._sdf_directory:
             sdf_path = self._get_sdf_path(sequence, self._sdf_directory)
             if sdf_path.exists():
-                return self._load_from_sdf(sdf_path)
+                if self._generation_mode == "dynamic" and self._is_dynamic_cache_like_sdf(
+                    sdf_path, sequence
+                ):
+                    if self._dynamic_sdf_metadata_matches(sdf_path, sequence):
+                        return self._load_from_sdf(sdf_path)
+                    LOGGER.info(
+                        "Regenerating dynamic SDF with missing or stale metadata: %s", sdf_path
+                    )
+                else:
+                    return self._load_from_sdf(sdf_path)
 
-        # Try to load from cache directory (checked in ALL modes)
+        # Dynamic cache entries need metadata validation before reuse
+        if self._generation_mode == "dynamic":
+            return self._generate_polymer(sequence)
+
+        # Try to load from cache directory in cached mode
         cache_path = self._get_sdf_path(sequence, self._cache_directory)
         if cache_path.exists():
             return self._load_from_sdf(cache_path)
-
-        # Dynamic mode: Generate polymers using FragmentGenerator and PolymerGenerator
-        if self._generation_mode == "dynamic":
-            return self._generate_polymer(sequence)
 
         # Generate if allowed (cached mode fallback)
         if self._allow_generation:
@@ -385,6 +401,20 @@ class PolymerBuilder:
             f"Set allow_generation=True to generate missing polymers."
         )
 
+    def _validate_dynamic_length(self) -> None:
+        """Validate the configured dynamic polymer length.
+
+        Raises
+        ------
+        ValueError
+            If dynamic generation is configured with a length below three.
+        """
+        if self._length < 3:
+            raise ValueError(
+                "Dynamic polymer generation requires length >= 3 because Polymerist requires "
+                "a non-empty middle sequence"
+            )
+
     def _get_sdf_path(self, sequence: str, directory: Path) -> Path:
         """Get the expected SDF file path for a sequence.
 
@@ -398,6 +428,103 @@ class PolymerBuilder:
         # Format: {type_prefix}_seq={sequence}_{length}-mer_charged.sdf
         filename = f"{self._type_prefix}_seq={sequence}_{self._length}-mer_charged.sdf"
         return directory / filename
+
+    def _is_dynamic_cache_like_sdf(self, sdf_path: Path, sequence: str) -> bool:
+        """Return whether an SDF path looks like a generated dynamic cache artifact.
+
+        Parameters
+        ----------
+        sdf_path : Path
+            Candidate SDF path.
+        sequence : str
+            Canonical polymer sequence.
+
+        Returns
+        -------
+        bool
+            True when the path should be routed through dynamic cache validation.
+        """
+        if self._same_directory(sdf_path.parent, self._cache_directory):
+            return True
+
+        if self._get_dynamic_cache_metadata_path(sdf_path).exists():
+            return True
+
+        return self._has_generated_dynamic_cache_name(sdf_path, sequence)
+
+    def _same_directory(self, path_a: Path, path_b: Path) -> bool:
+        """Return whether two paths identify the same directory.
+
+        Parameters
+        ----------
+        path_a : Path
+            First path.
+        path_b : Path
+            Second path.
+
+        Returns
+        -------
+        bool
+            True when both paths resolve to the same directory.
+        """
+        return path_a.resolve(strict=False) == path_b.resolve(strict=False)
+
+    def _dynamic_sdf_metadata_matches(self, sdf_path: Path, sequence: str) -> bool:
+        """Return whether a dynamic SDF sidecar matches current metadata.
+
+        Parameters
+        ----------
+        sdf_path : Path
+            Candidate generated-style SDF path.
+        sequence : str
+            Canonical polymer sequence.
+
+        Returns
+        -------
+        bool
+            True when the SDF may be loaded directly.
+        """
+        self._ensure_generators_initialized()
+        residue_names = self._residue_names if self._residue_names else None
+        return self._polymer_generator._dynamic_cache_metadata_matches(
+            sdf_path,
+            sequence,
+            self._monomer_names,
+            residue_names,
+        )
+
+    def _get_dynamic_cache_metadata_path(self, sdf_path: Path) -> Path:
+        """Get the dynamic cache metadata sidecar path for an SDF.
+
+        Parameters
+        ----------
+        sdf_path : Path
+            SDF path.
+
+        Returns
+        -------
+        Path
+            Expected metadata sidecar path.
+        """
+        return sdf_path.with_name(f"{sdf_path.name}.metadata.json")
+
+    def _has_generated_dynamic_cache_name(self, sdf_path: Path, sequence: str) -> bool:
+        """Return whether a filename follows the generated dynamic cache pattern.
+
+        Parameters
+        ----------
+        sdf_path : Path
+            Candidate SDF path.
+        sequence : str
+            Canonical polymer sequence.
+
+        Returns
+        -------
+        bool
+            True when the filename has PolyzyMD's generated dynamic cache shape.
+        """
+        suffix = f"_seq={sequence}_{self._length}-mer_charged.sdf"
+        return sdf_path.name.endswith(suffix) and len(sdf_path.name) > len(suffix)
 
     def _load_from_sdf(self, sdf_path: Path) -> Molecule:
         """Load a polymer molecule from an SDF file.
@@ -441,6 +568,8 @@ class PolymerBuilder:
                 f"Polymer generation not available in cached mode for sequence '{sequence}'. "
                 f"Either provide pre-built SDF files or switch to dynamic generation mode."
             )
+
+        self._validate_dynamic_length()
 
         # Ensure generators are initialized
         self._ensure_generators_initialized()

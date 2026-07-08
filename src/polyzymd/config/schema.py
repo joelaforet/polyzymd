@@ -421,6 +421,12 @@ class PolymerConfig(BaseModel):
             return self
 
         if self.generation_mode == PolymerGenerationMode.DYNAMIC:
+            if self.length < 3:
+                raise ValueError(
+                    "Dynamic generation mode requires 'length' >= 3 because Polymerist "
+                    "requires a non-empty middle sequence"
+                )
+
             # Dynamic mode requires SMILES for all monomers
             missing_smiles = [m.label for m in self.monomers if m.smiles is None]
             if missing_smiles:

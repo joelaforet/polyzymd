@@ -670,7 +670,7 @@ class SystemBuilder:
             )
 
             protein_residue_num = 1
-            
+
             # Sometimes, we have more than one unique protein molecule in the loaded pdb file
             # such as in loading a homodimer enzyme, as in https://www.rcsb.org/structure/1HXW
             # We must ensure all of the protein loads into polyzymd.
@@ -680,7 +680,7 @@ class SystemBuilder:
             # So if the chains are 100 AA long, monomer 1 will be
             # residues 1-101, and then monomer 2 will be RENUMBERED
             # to residues 102-202. Adjust your downstream analysis accordingly!!!
-            
+
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
                 residue_map: dict[str, int] = {}
