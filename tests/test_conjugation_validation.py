@@ -831,6 +831,22 @@ def test_relaxation_evidence_audit_requires_stage_b_linkage_distance_errors(tmp_
     )
 
 
+def test_relaxation_evidence_audit_rejects_empty_stage_b_linkage_distance_errors(tmp_path):
+    """Validation should reject successful diagnostics with empty linkage error evidence."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_linkage_distance_errors_angstrom"] = []
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_linkage_distances"
+        and check.evidence["field"] == "stage_b_linkage_distance_errors_angstrom"
+        for check in report.checks
+    )
+
+
 def test_relaxation_evidence_audit_requires_canonical_energy_fields(tmp_path):
     """Validation should reject successful diagnostics missing canonical energy fields."""
     required_fields = (
