@@ -394,6 +394,44 @@ def test_conjugate_relaxation_restores_masses_after_stage_b_error(monkeypatch, t
     assert interchange.systems[1].masses == [12.0, 16.0]
 
 
+def test_conjugate_relaxation_stage_b_tolerance_violation_fails(monkeypatch, tmp_path):
+    """Stage B tolerance violations should fail relaxation evidence."""
+    calls: list[tuple[str, str, tuple[float, ...]]] = []
+    _install_fake_openmm(monkeypatch, calls)
+    monkeypatch.setattr(
+        relaxation_workflows,
+        "_select_platform",
+        lambda *_args: SimpleNamespace(getName=lambda: "CPU"),
+    )
+    monkeypatch.setattr(relaxation_workflows, "_assign_force_groups", lambda _system: {})
+    monkeypatch.setattr(
+        relaxation_workflows, "_force_group_labels", lambda _system, *, existing_labels: {}
+    )
+    monkeypatch.setattr(relaxation_workflows, "_force_group_energies", lambda *_args: {})
+    monkeypatch.setattr(relaxation_workflows, "_add_linkage_anchor_restraints", lambda *_args: 0)
+    monkeypatch.setattr(relaxation_workflows, "_write_openmm_pdb", lambda *_args: None)
+
+    def moving_md(*_args, **_kwargs):
+        """Return final coordinates with an immobilized-protein displacement violation."""
+        return -1.0, -2.0, np.array([[0.1, 0.0, 0.0], [0.15, 0.0, 0.0]])
+
+    monkeypatch.setattr(relaxation_workflows, "_run_fixed_product_md", moving_md)
+
+    with pytest.raises(RuntimeError, match="Stage B protein RMSD"):
+        relax_conjugate(
+            _RelaxationInterchange(_relaxation_topology()),
+            tmp_path,
+            product_pdb_path=tmp_path / "product.pdb",
+            attachment_specs=(),
+            settings=ConjugateRelaxationSettings(md_steps=5, max_protein_rmsd_angstrom=0.05),
+        )
+
+    payload = json.loads((tmp_path / "conjugate_relaxation.json").read_text(encoding="utf-8"))
+    assert payload["success"] is False
+    assert payload["stage_b_success"] is False
+    assert any("Stage B protein RMSD" in warning for warning in payload["warnings"])
+
+
 def test_conjugate_relaxation_settings_reject_zero_md_steps():
     """Conjugate relaxation must run a real Stage B MD segment."""
     with pytest.raises(ValidationError, match="greater than 0"):

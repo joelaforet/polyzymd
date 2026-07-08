@@ -49,6 +49,58 @@ def _openmm_stage_errors(openmm: Any) -> tuple[type[BaseException], ...]:
     return (RuntimeError, ValueError, ArithmeticError, openmm_error)
 
 
+def _stage_b_tolerance_violations(
+    *,
+    stage_b_protein_rmsd: float,
+    stage_b_protein_max: float,
+    linkage_errors: tuple[float, ...],
+    settings: ConjugateRelaxationSettings,
+) -> tuple[str, ...]:
+    """Return Stage B evidence failures that must block production builds.
+
+    Parameters
+    ----------
+    stage_b_protein_rmsd : float
+        Protein RMSD relative to the Stage A minimized coordinates.
+    stage_b_protein_max : float
+        Maximum protein displacement relative to the Stage A minimized coordinates.
+    linkage_errors : tuple of float
+        Linkage distance errors relative to target bond lengths.
+    settings : ConjugateRelaxationSettings
+        Relaxation tolerance settings used for the run.
+
+    Returns
+    -------
+    tuple of str
+        Human-readable tolerance violations.
+    """
+    violations: list[str] = []
+    if not math.isfinite(stage_b_protein_rmsd):
+        violations.append("Stage B protein RMSD relative to Stage A is non-finite")
+    elif stage_b_protein_rmsd > settings.max_protein_rmsd_angstrom:
+        violations.append(
+            f"Stage B protein RMSD {stage_b_protein_rmsd:.4f} A relative to Stage A exceeds "
+            f"{settings.max_protein_rmsd_angstrom:.4f} A"
+        )
+    if not math.isfinite(stage_b_protein_max):
+        violations.append("Stage B protein max displacement relative to Stage A is non-finite")
+    elif stage_b_protein_max > settings.max_protein_displacement_angstrom:
+        violations.append(
+            f"Stage B protein max displacement {stage_b_protein_max:.4f} A relative to Stage A "
+            f"exceeds {settings.max_protein_displacement_angstrom:.4f} A"
+        )
+    nonfinite_errors = [error for error in linkage_errors if not math.isfinite(error)]
+    if nonfinite_errors:
+        violations.append("One or more linkage distance errors is non-finite")
+    elif any(error > settings.max_linkage_distance_error_angstrom for error in linkage_errors):
+        max_error = max(linkage_errors)
+        violations.append(
+            f"One or more linkage distances deviates from its target; max error "
+            f"{max_error:.4f} A exceeds {settings.max_linkage_distance_error_angstrom:.4f} A"
+        )
+    return tuple(violations)
+
+
 def run_conjugate_relaxation_workflow(
     interchange: Any,
     output_dir: Path | str,
@@ -244,19 +296,16 @@ def run_conjugate_relaxation_workflow(
             abs(distance - pair.target_bond_length_angstrom)
             for distance, pair in zip(distances, linkage_pairs, strict=True)
         )
-        if stage_b_protein_rmsd > relaxation_settings.max_protein_rmsd_angstrom:
-            warnings.append(
-                f"Stage B protein RMSD {stage_b_protein_rmsd:.4f} A relative to Stage A exceeds "
-                f"{relaxation_settings.max_protein_rmsd_angstrom:.4f} A"
-            )
-        if stage_b_protein_max > relaxation_settings.max_protein_displacement_angstrom:
-            warnings.append(
-                f"Stage B protein max displacement {stage_b_protein_max:.4f} A relative to Stage A "
-                "exceeds "
-                f"{relaxation_settings.max_protein_displacement_angstrom:.4f} A"
-            )
-        if any(error > relaxation_settings.max_linkage_distance_error_angstrom for error in errors):
-            warnings.append("One or more linkage distances deviates from its target")
+        violations = _stage_b_tolerance_violations(
+            stage_b_protein_rmsd=stage_b_protein_rmsd,
+            stage_b_protein_max=stage_b_protein_max,
+            linkage_errors=errors,
+            settings=relaxation_settings,
+        )
+        warnings.extend(violations)
+        if violations:
+            violation_text = "; ".join(violations)
+            raise RuntimeError(f"Conjugate relaxation Stage B evidence failed: {violation_text}")
     except _openmm_stage_errors(openmm) as exc:
         failure_path = artifact_dir / relaxation_settings.failure_json_name
         failure_payload = {
@@ -272,6 +321,8 @@ def run_conjugate_relaxation_workflow(
         failure_path.write_text(json.dumps(failure_payload, indent=2) + "\n", encoding="utf-8")
         diagnostics = ConjugateRelaxationDiagnostics(
             success=False,
+            stage_a_success=math.isfinite(energy_after_min),
+            stage_b_success=False,
             platform_name=platform_name,
             settings=relaxation_settings.model_dump(mode="json"),
             md_steps=relaxation_settings.md_steps,
@@ -287,7 +338,46 @@ def run_conjugate_relaxation_workflow(
             ),
             stage_a_force_group_energies_before_min_kj_mol=force_energies_before_min,
             stage_a_force_group_energies_after_min_kj_mol=force_energies_after_min,
+            stage_a_protein_rmsd_from_initial_angstrom=(
+                stage_a_protein_rmsd if math.isfinite(stage_a_protein_rmsd) else None
+            ),
+            stage_a_protein_max_displacement_from_initial_angstrom=(
+                stage_a_protein_max if math.isfinite(stage_a_protein_max) else None
+            ),
             stage_a_linkage_distances_angstrom=stage_a_distances,
+            stage_b_energy_before_md_kj_mol=(
+                float(energy_before_md) if math.isfinite(energy_before_md) else None
+            ),
+            stage_b_energy_after_md_kj_mol=(
+                float(energy_after_md) if math.isfinite(energy_after_md) else None
+            ),
+            stage_b_protein_rmsd_from_stage_a_angstrom=(
+                stage_b_protein_rmsd if math.isfinite(stage_b_protein_rmsd) else None
+            ),
+            stage_b_protein_max_displacement_from_stage_a_angstrom=(
+                stage_b_protein_max if math.isfinite(stage_b_protein_max) else None
+            ),
+            stage_b_protein_rmsd_from_initial_angstrom=(
+                initial_to_final_protein_rmsd
+                if math.isfinite(initial_to_final_protein_rmsd)
+                else None
+            ),
+            stage_b_protein_max_displacement_from_initial_angstrom=(
+                initial_to_final_protein_max
+                if math.isfinite(initial_to_final_protein_max)
+                else None
+            ),
+            stage_b_linkage_distances_angstrom=distances,
+            stage_b_linkage_distance_errors_angstrom=errors,
+            final_relaxed_pdb_path=relaxed_pdb if relaxed_pdb.exists() else None,
+            protein_rmsd_angstrom=(
+                stage_b_protein_rmsd if math.isfinite(stage_b_protein_rmsd) else None
+            ),
+            protein_max_displacement_angstrom=(
+                stage_b_protein_max if math.isfinite(stage_b_protein_max) else None
+            ),
+            linkage_distances_angstrom=distances,
+            linkage_distance_errors_angstrom=errors,
             linkage_pairs=tuple(linkage_pairs),
             warnings=tuple(warnings),
             error_type=type(exc).__name__,

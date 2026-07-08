@@ -49,6 +49,7 @@ from polyzymd.builders.conjugation.system_workflow import (
     _require_supported_coordinate_backend,
     _restore_pdb_atom_name_fields,
 )
+from polyzymd.builders.conjugation.validation import ValidationStatus
 from polyzymd.config.schema import (
     ConjugationCcdPabloPolicyConfig,
     ConjugationChainPolicyConfig,
@@ -992,8 +993,17 @@ def test_single_generic_local_minimization_request_runs_minimizer(
 
 
 @pytest.mark.parametrize(
-    ("run_relaxation", "use_conjugate_relaxation", "expect_relaxation"),
-    ((False, False, False), (True, True, True)),
+    (
+        "run_relaxation",
+        "use_conjugate_relaxation",
+        "expect_relaxation",
+        "relaxation_evidence_status",
+    ),
+    (
+        (False, False, False, ValidationStatus.PASS),
+        (True, True, True, ValidationStatus.PASS),
+        (True, True, True, ValidationStatus.FAIL),
+    ),
 )
 def test_relaxation_receives_product_path_and_attachment_specs(
     monkeypatch,
@@ -1001,6 +1011,7 @@ def test_relaxation_receives_product_path_and_attachment_specs(
     run_relaxation: bool,
     use_conjugate_relaxation: bool,
     expect_relaxation: bool,
+    relaxation_evidence_status: ValidationStatus,
 ):
     """Conjugate relaxation should use the current product-aware signature."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
@@ -1088,7 +1099,10 @@ def test_relaxation_receives_product_path_and_attachment_specs(
 
     def fake_validation_report(**kwargs):
         calls["validation_kwargs"] = kwargs
-        return SimpleNamespace(report_path=Path(kwargs["output_dir"]) / "validation.json")
+        return SimpleNamespace(
+            report_path=Path(kwargs["output_dir"]) / "validation.json",
+            relaxation_evidence=SimpleNamespace(status=relaxation_evidence_status),
+        )
 
     monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
     monkeypatch.setattr(
@@ -1113,10 +1127,10 @@ def test_relaxation_receives_product_path_and_attachment_specs(
         fake_validation_report,
     )
 
-    construction, _topology = workflow_module._construct_conjugate_from_specs(
-        protein_pdb_path=tmp_path / "protein.pdb",
-        specs=(spec,),
-        ccd_pablo_policy=ConjugationCcdPabloPolicyConfig(
+    construction_kwargs = {
+        "protein_pdb_path": tmp_path / "protein.pdb",
+        "specs": (spec,),
+        "ccd_pablo_policy": ConjugationCcdPabloPolicyConfig(
             crosslinks=[
                 {
                     "residues": ("ASX", "NAG"),
@@ -1126,13 +1140,22 @@ def test_relaxation_receives_product_path_and_attachment_specs(
                 }
             ]
         ),
-        output_dir=tmp_path / "construction",
-        chain_policy=None,
-        settings=ModifierConstructionSettings(run_relaxation=run_relaxation),
-        use_product_state_pablo_library=False,
-        use_conjugate_relaxation=use_conjugate_relaxation,
-        run_product_state_local_minimization=False,
-    )
+        "output_dir": tmp_path / "construction",
+        "chain_policy": None,
+        "settings": ModifierConstructionSettings(run_relaxation=run_relaxation),
+        "use_product_state_pablo_library": False,
+        "use_conjugate_relaxation": use_conjugate_relaxation,
+        "run_product_state_local_minimization": False,
+    }
+
+    if relaxation_evidence_status == ValidationStatus.FAIL:
+        with pytest.raises(RuntimeError, match="relaxation evidence failed"):
+            workflow_module._construct_conjugate_from_specs(**construction_kwargs)
+        assert ("relaxation_product_pdb_path" in calls) is expect_relaxation
+        assert "interchange" not in calls["validation_kwargs"]
+        return
+
+    construction, _topology = workflow_module._construct_conjugate_from_specs(**construction_kwargs)
 
     assert ("relaxation_product_pdb_path" in calls) is expect_relaxation
     if expect_relaxation:
