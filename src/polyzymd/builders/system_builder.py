@@ -662,7 +662,7 @@ class SystemBuilder:
         POLYMER_CHAIN = "C"
         SOLVENT_START_IDX = 3  # index of 'D' in CHAIN_LETTERS
 
-        # Protein molecules always use chain A with continuous unique residues
+        # 1. Protein molecules always use chain A with continuous unique residues
         if self._n_enzyme_molecules > 0:
             LOGGER.debug(
                 f"Assigning chain {PROTEIN_CHAIN} to "
@@ -670,6 +670,17 @@ class SystemBuilder:
             )
 
             protein_residue_num = 1
+            
+            # Sometimes, we have more than one unique protein molecule in the loaded pdb file
+            # such as in loading a homodimer enzyme, as in https://www.rcsb.org/structure/1HXW
+            # We must ensure all of the protein loads into polyzymd.
+            # Here, we enforce that unique protein chains
+            # monomer 1 == Chain A, monomer 2 == Chain B
+            # have unique residue labels.
+            # So if the chains are 100 AA long, monomer 1 will be
+            # residues 1-101, and then monomer 2 will be RENUMBERED
+            # to residues 102-202. Adjust your downstream analysis accordingly!!!
+            
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
                 residue_map: dict[str, int] = {}
@@ -682,7 +693,7 @@ class SystemBuilder:
                     atom.metadata["residue_number"] = str(residue_map[residue_token])
                 mol_idx += 1
 
-        # Substrate always uses chain B and residue 1
+        # 2. Substrate always uses chain B and residue 1
         if self._n_substrate_molecules > 0:
             LOGGER.debug(f"Assigning chain {SUBSTRATE_CHAIN} to substrate")
 
@@ -693,7 +704,7 @@ class SystemBuilder:
                     atom.metadata["residue_number"] = "1"
                 mol_idx += 1
 
-        # Polymers always use chain C and continue residue numbering across chains
+        # 3. Polymers always use chain C and continue residue numbering across chains
         if self._n_polymer_chains > 0:
             LOGGER.debug(
                 f"Assigning chain {POLYMER_CHAIN} to {self._n_polymer_chains} polymer chain(s)"
@@ -727,7 +738,7 @@ class SystemBuilder:
                 polymer_residue_num += 1
                 mol_idx += 1
 
-        # Solvent always starts at chain D
+        # 4. Solvent always starts at chain D
         self._assign_solvent_identifiers(
             start_mol_idx=mol_idx,
             start_chain_idx=SOLVENT_START_IDX,
