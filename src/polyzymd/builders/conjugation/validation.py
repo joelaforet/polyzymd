@@ -1247,11 +1247,11 @@ def _optional_float(value: Any) -> float | None:
     """Return a finite float value or ``None`` when unavailable or invalid."""
     if value is None:
         return None
+    if not _is_finite_number(value):
+        return None
     try:
         float_value = float(value)
     except (TypeError, ValueError):
-        return None
-    if not math.isfinite(float_value):
         return None
     return float_value
 
@@ -1281,6 +1281,8 @@ def _sanitize_for_strict_json(value: Any) -> Any:
 
 def _is_finite_number(value: Any) -> bool:
     """Return whether a value is numeric and finite."""
+    if isinstance(value, bool):
+        return False
     try:
         return math.isfinite(float(value))
     except (TypeError, ValueError):
