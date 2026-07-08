@@ -898,6 +898,72 @@ def test_relaxation_evidence_audit_accepts_top_level_relaxation_md_steps(tmp_pat
     assert report.status == ValidationStatus.PASS
 
 
+def test_relaxation_evidence_audit_fails_non_numeric_tolerance_setting(tmp_path):
+    """Validation should fail invalid tolerance settings without raising."""
+    payload = _canonical_relaxation_payload()
+    settings = payload["settings"]
+    assert isinstance(settings, dict)
+    settings["max_protein_rmsd_angstrom"] = "not-a-number"
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_tolerance_settings"
+        and check.evidence["field"] == "max_protein_rmsd_angstrom"
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_fails_negative_rmsd(tmp_path):
+    """Validation should reject negative Stage B protein RMSD evidence."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_protein_rmsd_from_stage_a_angstrom"] = -0.01
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_protein_immobilization"
+        and "stage_b_protein_rmsd_from_stage_a_angstrom" in check.evidence["fields"]
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_fails_negative_max_displacement(tmp_path):
+    """Validation should reject negative Stage B protein max displacement evidence."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_protein_max_displacement_from_stage_a_angstrom"] = -0.01
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_protein_immobilization"
+        and "stage_b_protein_max_displacement_from_stage_a_angstrom" in check.evidence["fields"]
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_fails_negative_linkage_error(tmp_path):
+    """Validation should reject negative linkage distance error evidence."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_linkage_distance_errors_angstrom"] = [0.1, -0.01]
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_linkage_distances"
+        and check.evidence["field"] == "stage_b_linkage_distance_errors_angstrom"
+        for check in report.checks
+    )
+
+
 def test_relaxation_evidence_audit_fails_unfixed_frozen_stage_b(tmp_path):
     """Validation should fail when Stage B does not keep protein fixed."""
     diagnostics_path = tmp_path / "conjugate_relaxation.json"

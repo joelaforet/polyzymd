@@ -810,8 +810,20 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
         settings = (
             diagnostics.get("settings", {}) if isinstance(diagnostics.get("settings"), dict) else {}
         )
-        rmsd_limit = float(settings.get("max_protein_rmsd_angstrom", 0.05))
-        displacement_limit = float(settings.get("max_protein_displacement_angstrom", 0.25))
+        rmsd_limit, rmsd_limit_check = _relaxation_tolerance(
+            settings,
+            "max_protein_rmsd_angstrom",
+            0.05,
+        )
+        displacement_limit, displacement_limit_check = _relaxation_tolerance(
+            settings,
+            "max_protein_displacement_angstrom",
+            0.25,
+        )
+        for tolerance_check in (rmsd_limit_check, displacement_limit_check):
+            if tolerance_check is not None:
+                status = ValidationStatus.FAIL
+                checks.append(tolerance_check)
         if "md_steps" in settings:
             md_steps = settings["md_steps"]
             md_steps_source = "settings.md_steps"
@@ -826,6 +838,20 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
                     status,
                     "Conjugate relaxation diagnostics lack valid positive MD step evidence",
                     evidence={"md_steps": md_steps, "source": md_steps_source},
+                )
+            )
+        negative_protein_fields = _negative_fields(
+            diagnostics,
+            REQUIRED_RELAXATION_PROTEIN_IMMOBILIZATION_FIELDS,
+        )
+        if negative_protein_fields:
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "conjugate_relaxation_required_protein_immobilization",
+                    status,
+                    "Conjugate relaxation diagnostics contain negative protein immobilization evidence",
+                    evidence={"fields": negative_protein_fields},
                 )
             )
         if rmsd is not None and _is_finite_number(rmsd) and float(rmsd) > rmsd_limit:
@@ -856,7 +882,14 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
                 )
             )
         linkage_errors = diagnostics.get(REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD)
-        linkage_limit = float(settings.get("max_linkage_distance_error_angstrom", 0.35))
+        linkage_limit, linkage_limit_check = _relaxation_tolerance(
+            settings,
+            "max_linkage_distance_error_angstrom",
+            0.35,
+        )
+        if linkage_limit_check is not None:
+            status = ValidationStatus.FAIL
+            checks.append(linkage_limit_check)
         if linkage_errors is None or not _is_finite_number_sequence(linkage_errors):
             status = ValidationStatus.FAIL
             checks.append(
@@ -864,6 +897,17 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
                     "conjugate_relaxation_required_linkage_distances",
                     status,
                     "Conjugate relaxation diagnostics lack required finite linkage distance evidence",
+                    evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
+                )
+            )
+            linkage_errors = ()
+        if not _is_nonnegative_number_sequence(linkage_errors):
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "conjugate_relaxation_required_linkage_distances",
+                    status,
+                    "Conjugate relaxation diagnostics contain negative linkage distance evidence",
                     evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
                 )
             )
@@ -1266,6 +1310,83 @@ def _missing_or_nonfinite_fields(
     )
 
 
+def _negative_fields(payload: Mapping[str, Any], fields: Sequence[str]) -> tuple[str, ...]:
+    """Return required numeric fields that carry negative values.
+
+    Parameters
+    ----------
+    payload : Mapping[str, Any]
+        Diagnostics payload to inspect.
+    fields : Sequence[str]
+        Required scalar field names.
+
+    Returns
+    -------
+    tuple of str
+        Field names carrying finite negative values.
+    """
+    return tuple(
+        field
+        for field in fields
+        if field in payload and _is_finite_number(payload[field]) and float(payload[field]) < 0.0
+    )
+
+
+def _relaxation_tolerance(
+    settings: Mapping[str, Any],
+    key: str,
+    default: float,
+) -> tuple[float, ConjugateValidationCheck | None]:
+    """Return a finite non-negative relaxation tolerance and any failure check.
+
+    Parameters
+    ----------
+    settings : Mapping[str, Any]
+        Relaxation settings from the diagnostics payload.
+    key : str
+        Tolerance setting name.
+    default : float
+        Default tolerance used when the setting is absent.
+
+    Returns
+    -------
+    tuple of float and ConjugateValidationCheck or None
+        Tolerance value to use and a structured failure check when the configured value is invalid.
+    """
+    if key not in settings:
+        return default, None
+    value = settings[key]
+    if not _is_finite_number(value):
+        return default, _invalid_relaxation_tolerance_check(key, value)
+    tolerance = float(value)
+    if tolerance < 0.0:
+        return default, _invalid_relaxation_tolerance_check(key, value)
+    return tolerance, None
+
+
+def _invalid_relaxation_tolerance_check(key: str, value: Any) -> ConjugateValidationCheck:
+    """Build a structured failure check for an invalid relaxation tolerance.
+
+    Parameters
+    ----------
+    key : str
+        Tolerance setting name.
+    value : Any
+        Invalid configured value.
+
+    Returns
+    -------
+    ConjugateValidationCheck
+        Failure check for the invalid tolerance.
+    """
+    return _check(
+        "conjugate_relaxation_tolerance_settings",
+        ValidationStatus.FAIL,
+        "Conjugate relaxation diagnostics contain invalid tolerance settings",
+        evidence={"field": key, "value": value},
+    )
+
+
 def _is_finite_number_sequence(value: Any) -> bool:
     """Return whether a value is an explicit finite numeric sequence.
 
@@ -1282,6 +1403,24 @@ def _is_finite_number_sequence(value: Any) -> bool:
     if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
         return False
     return all(_is_finite_number(item) for item in value)
+
+
+def _is_nonnegative_number_sequence(value: Any) -> bool:
+    """Return whether a value is an explicit finite non-negative numeric sequence.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate distance or error evidence.
+
+    Returns
+    -------
+    bool
+        Whether the value is a non-string sequence with only finite non-negative entries.
+    """
+    if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
+        return False
+    return all(_is_finite_number(item) and float(item) >= 0.0 for item in value)
 
 
 def _is_finite_energy_evidence(value: Any) -> bool:
