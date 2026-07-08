@@ -806,6 +806,43 @@ def test_relaxation_evidence_audit_requires_canonical_energy_fields(tmp_path):
         )
 
 
+def test_relaxation_evidence_audit_rejects_boolean_energy_value(tmp_path):
+    """Validation should reject boolean relaxation energy evidence."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_energy_after_md_kj_mol"] = True
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_energies"
+        and "stage_b_energy_after_md_kj_mol" in check.evidence["fields"]
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_rejects_boolean_scalar_immobilization(tmp_path):
+    """Validation should reject boolean Stage B RMSD and displacement evidence."""
+    fields = (
+        "stage_b_protein_rmsd_from_stage_a_angstrom",
+        "stage_b_protein_max_displacement_from_stage_a_angstrom",
+    )
+    for field in fields:
+        payload = _canonical_relaxation_payload()
+        payload[field] = False
+        _write_relaxation_diagnostics(tmp_path, payload)
+
+        report = audit_relaxation_evidence(tmp_path)
+
+        assert report.status == ValidationStatus.FAIL
+        assert any(
+            check.name == "conjugate_relaxation_required_protein_immobilization"
+            and field in check.evidence["fields"]
+            for check in report.checks
+        )
+
+
 def test_relaxation_evidence_audit_rejects_stale_zero_step_relaxation(tmp_path):
     """Validation should reject stale frozen diagnostics with no Stage B MD."""
     (tmp_path / "conjugate_relaxation.json").write_text(
@@ -916,6 +953,24 @@ def test_relaxation_evidence_audit_fails_non_numeric_tolerance_setting(tmp_path)
     )
 
 
+def test_relaxation_evidence_audit_fails_boolean_tolerance_setting(tmp_path):
+    """Validation should reject boolean tolerance settings."""
+    payload = _canonical_relaxation_payload()
+    settings = payload["settings"]
+    assert isinstance(settings, dict)
+    settings["max_protein_rmsd_angstrom"] = True
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_tolerance_settings"
+        and check.evidence["field"] == "max_protein_rmsd_angstrom"
+        for check in report.checks
+    )
+
+
 def test_relaxation_evidence_audit_fails_negative_rmsd(tmp_path):
     """Validation should reject negative Stage B protein RMSD evidence."""
     payload = _canonical_relaxation_payload()
@@ -952,6 +1007,22 @@ def test_relaxation_evidence_audit_fails_negative_linkage_error(tmp_path):
     """Validation should reject negative linkage distance error evidence."""
     payload = _canonical_relaxation_payload()
     payload["stage_b_linkage_distance_errors_angstrom"] = [0.1, -0.01]
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_linkage_distances"
+        and check.evidence["field"] == "stage_b_linkage_distance_errors_angstrom"
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_fails_boolean_linkage_error_element(tmp_path):
+    """Validation should reject boolean linkage distance error elements."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_linkage_distance_errors_angstrom"] = [0.1, False]
     _write_relaxation_diagnostics(tmp_path, payload)
 
     report = audit_relaxation_evidence(tmp_path)
