@@ -86,9 +86,6 @@ def test_opt_in_cuda_required_for_conjugation_solvation_full_build(tmp_path: Pat
     assert direct_result.linked_bond.conect_present is True
     assert direct_result.topology is not None
     assert direct_result.charge_template is not None
-    expected_restrained_atom_count = len(_all_heavy_atom_indices(direct_result.linked_pdb_path))
-    protein_heavy_atom_count = len(_protein_heavy_atom_indices(direct_result.linked_pdb_path))
-    assert expected_restrained_atom_count > protein_heavy_atom_count
 
     from openff.interchange.interop.openmm._positions import to_openmm_positions
 
@@ -96,40 +93,17 @@ def test_opt_in_cuda_required_for_conjugation_solvation_full_build(tmp_path: Pat
         create_interchange_from_openff_topology,
         set_topology_positions_from_pdb,
     )
-    from polyzymd.builders.conjugation.relaxation.openmm import (
-        OpenMMValidationSettings,
-        validate_openmm_product,
-    )
     from polyzymd.builders.solvent import SolventBuilder, SolventComposition
     from polyzymd.data.solvent_molecules import get_solvent_molecule
 
-    with _timed_stage("OpenMM validation parameterization"):
+    with _timed_stage("OpenMM health parameterization"):
         validation_parameterization = create_interchange_from_openff_topology(
             direct_result.topology,
             charge_from_molecules=(direct_result.charge_template,),
-            success_diagnostic="Direct linked conjugate was parameterized before validation",
+            success_diagnostic="Direct linked conjugate was parameterized before solvation",
             failure_subject="direct linked conjugate topology",
         )
     assert validation_parameterization.interchange is not None
-
-    with _timed_stage("short OpenMM product validation"):
-        validation_result = validate_openmm_product(
-            validation_parameterization.interchange,
-            artifact_dir / "openmm-validation",
-            protein_heavy_atom_indices=None,
-            settings=OpenMMValidationSettings(
-                minimization_max_iterations=_int_env(
-                    GPU_MINIMIZATION_ITERS_ENV_VAR,
-                    default=DEFAULT_GPU_MINIMIZATION_ITERS,
-                ),
-                nvt_steps=_positive_int_env(GPU_NVT_STEPS_ENV_VAR, default=2),
-                platform_name="CUDA",
-            ),
-        )
-    assert validation_result.success
-    assert validation_result.validation_json_path.exists()
-    assert validation_result.nvt_steps > 0, "Short OpenMM validation must run before solvation"
-    assert validation_result.restrained_atom_count == expected_restrained_atom_count
 
     with _timed_stage("relaxed position transfer"):
         relaxed_topology = set_topology_positions_from_pdb(
@@ -218,17 +192,19 @@ def test_gpu_solvation_smoke_source_avoids_openmm_modeller_solvation():
         assert token not in source
 
 
-def test_gpu_solvation_smoke_source_uses_all_heavy_validation_restraints():
-    """The GPU path should not pass a protein-only restraint selection."""
+def test_gpu_solvation_smoke_source_avoids_removed_legacy_path():
+    """The GPU path should not call the removed legacy API."""
     source = Path(__file__).read_text(encoding="utf-8")
-    protein_only_call = "protein_heavy_atom_indices=" + "_protein_heavy_atom_indices"
 
-    assert "protein_heavy_atom_indices=None" in source
-    assert protein_only_call not in source
+    removed_function = "validate" + "_openmm_product"
+    removed_settings = "OpenMM" + "ValidationSettings"
+
+    assert removed_function not in source
+    assert removed_settings not in source
 
 
 def test_gpu_solvation_nvt_steps_env_rejects_zero(monkeypatch: pytest.MonkeyPatch):
-    """The GPU solvation smoke must run short OpenMM validation before solvation."""
+    """The legacy validation step override should still reject zero for smoke settings."""
     monkeypatch.setenv(GPU_NVT_STEPS_ENV_VAR, "0")
 
     with pytest.raises(ValueError, match=f"{GPU_NVT_STEPS_ENV_VAR} must be positive"):
@@ -343,7 +319,7 @@ def _direct_artifact_from_env_or_generate(artifact_dir: Path):
         pytest.fail(
             "POLYZYMD_CONJUGATION_LINKED_PDB is no longer accepted for the GPU solvation smoke. "
             "The test must generate a direct artifact with an OpenFF topology and charge template "
-            "so it can run OpenMM product validation before solvation."
+            "so it can run OpenMM health checks before solvation."
         )
 
     from tests.test_conjugation_integrated_direct_smoke import build_direct_smoke_artifact

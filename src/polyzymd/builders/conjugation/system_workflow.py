@@ -65,9 +65,7 @@ from polyzymd.builders.conjugation.reactions._roles import (
 from polyzymd.builders.conjugation.reactions.library import get_reaction
 from polyzymd.builders.conjugation.relaxation import (
     ConjugateRelaxationSettings,
-    OpenMMValidationSettings,
     relax_conjugate,
-    validate_openmm_product,
 )
 from polyzymd.builders.conjugation.structure.parsing import (
     ATOM_RECORD_PREFIXES,
@@ -120,7 +118,6 @@ class ConjugatedPolymerSystemSettings(BaseModel):
     use_product_state_pablo_library: bool = True
     run_product_state_local_minimization: bool = False
     run_relaxation: bool = True
-    run_openmm_validation: bool = False
     direct_solvation_padding: float = Field(0.8, gt=0.0)
     direct_solvation_box_shape: str = "cube"
     protein_canonicalization: ProteinCanonicalizationSettings = Field(
@@ -134,7 +131,6 @@ class ConjugatedPolymerSystemSettings(BaseModel):
         default_factory=InterchangeParameterizationSettings
     )
     relaxation: ConjugateRelaxationSettings = Field(default_factory=ConjugateRelaxationSettings)
-    openmm_validation: OpenMMValidationSettings = Field(default_factory=OpenMMValidationSettings)
 
 
 class ConjugateConstructionResult(BaseModel):
@@ -240,9 +236,7 @@ def build_conjugated_polymer_system_from_config(
         placement=workflow_settings.placement,
         parameterization=workflow_settings.conjugate_parameterization,
         relaxation=workflow_settings.relaxation,
-        openmm_validation=workflow_settings.openmm_validation,
         run_relaxation=workflow_settings.run_relaxation,
-        run_openmm_validation=workflow_settings.run_openmm_validation,
     )
     construction, construction_topology = _construct_conjugate_from_specs(
         protein_pdb_path=protein_pdb_path,
@@ -382,9 +376,7 @@ def build_direct_moiety_conjugate(
         placement=workflow_settings.placement,
         parameterization=workflow_settings.conjugate_parameterization,
         relaxation=workflow_settings.relaxation,
-        openmm_validation=workflow_settings.openmm_validation,
         run_relaxation=workflow_settings.run_relaxation,
-        run_openmm_validation=workflow_settings.run_openmm_validation,
     )
 
     construction, construction_topology = _construct_conjugate_from_specs(
@@ -466,15 +458,6 @@ def topology_with_pdb_positions(
     if atom_name_template_pdb is not None:
         _apply_pdb_atom_names_to_topology(positioned_topology, atom_name_template_pdb)
     return positioned_topology
-
-
-def _protein_restrained_validation() -> OpenMMValidationSettings:
-    """Default short OpenMM validation that restrains protein heavy atoms only."""
-    return OpenMMValidationSettings(
-        minimization_max_iterations=100,
-        nvt_steps=10,
-        restrain_all_heavy_atoms=False,
-    )
 
 
 def _default_local_minimization_settings() -> Any:
@@ -907,18 +890,6 @@ def _construct_conjugate_from_specs(
         )
         if not relaxation_result.success:
             raise RuntimeError("Conjugate relaxation did not report success")
-
-    if settings.run_openmm_validation:
-        LOGGER.info("Running optional OpenMM product validation")
-        validation_result = validate_openmm_product(
-            parameterization_result.interchange,
-            artifact_dir,
-            settings=settings.openmm_validation,
-            crosslinked_pdb_path=crosslinked_pdb_path,
-            attachment_specs=specs,
-        )
-        if not validation_result.success:
-            raise RuntimeError("OpenMM product validation did not report success")
 
     validation_report = build_conjugate_validation_report(
         product_pdb_path=crosslinked_pdb_path,
