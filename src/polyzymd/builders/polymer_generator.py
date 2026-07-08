@@ -13,7 +13,6 @@ The workflow mirrors the notebook process:
 - Assign partial charges with NAGL, Espaloma, or AM1BCC
 - Cache the charged SDF with a validation sidecar
 
-Made by PolyzyMD, by Joseph R. Laforet Jr.
 """
 
 from __future__ import annotations
