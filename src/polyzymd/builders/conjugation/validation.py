@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -19,6 +19,17 @@ from polyzymd.builders.conjugation.structure.parsing import (
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 VALIDATION_REPORT_NAME = "conjugate_validation_report.json"
+REQUIRED_RELAXATION_ENERGY_FIELDS = (
+    "stage_a_energy_before_min_kj_mol",
+    "stage_a_energy_after_min_kj_mol",
+    "stage_b_energy_before_md_kj_mol",
+    "stage_b_energy_after_md_kj_mol",
+)
+REQUIRED_RELAXATION_PROTEIN_IMMOBILIZATION_FIELDS = (
+    "stage_b_protein_rmsd_from_stage_a_angstrom",
+    "stage_b_protein_max_displacement_from_stage_a_angstrom",
+)
+REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD = "stage_b_linkage_distance_errors_angstrom"
 
 
 class ValidationStatus(str, Enum):
@@ -749,6 +760,20 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
                     "Conjugate relaxation diagnostics reported a barostat",
                 )
             )
+        missing_or_nonfinite_energy_fields = _missing_or_nonfinite_fields(
+            diagnostics,
+            REQUIRED_RELAXATION_ENERGY_FIELDS,
+        )
+        if missing_or_nonfinite_energy_fields:
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "conjugate_relaxation_required_energies",
+                    status,
+                    "Conjugate relaxation diagnostics lack required finite energy evidence",
+                    evidence={"fields": missing_or_nonfinite_energy_fields},
+                )
+            )
         energy_values = [value for key, value in diagnostics.items() if key.endswith("_kj_mol")]
         if any(not _is_finite_energy_evidence(value) for value in energy_values):
             status = ValidationStatus.FAIL
@@ -757,6 +782,20 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
                     "conjugate_relaxation_energy",
                     status,
                     "Conjugate relaxation energy is non-finite",
+                )
+            )
+        missing_or_nonfinite_protein_fields = _missing_or_nonfinite_fields(
+            diagnostics,
+            REQUIRED_RELAXATION_PROTEIN_IMMOBILIZATION_FIELDS,
+        )
+        if missing_or_nonfinite_protein_fields:
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "conjugate_relaxation_required_protein_immobilization",
+                    status,
+                    "Conjugate relaxation diagnostics lack required finite protein immobilization evidence",
+                    evidence={"fields": missing_or_nonfinite_protein_fields},
                 )
             )
         rmsd = diagnostics.get("stage_b_protein_rmsd_from_stage_a_angstrom")
@@ -782,7 +821,7 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
                     evidence={"md_steps": md_steps, "source": md_steps_source},
                 )
             )
-        if rmsd is not None and (not _is_finite_number(rmsd) or float(rmsd) > rmsd_limit):
+        if rmsd is not None and _is_finite_number(rmsd) and float(rmsd) > rmsd_limit:
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
@@ -792,8 +831,10 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
                     evidence={"rmsd_angstrom": rmsd, "tolerance_angstrom": rmsd_limit},
                 )
             )
-        if max_displacement is not None and (
-            not _is_finite_number(max_displacement) or float(max_displacement) > displacement_limit
+        if (
+            max_displacement is not None
+            and _is_finite_number(max_displacement)
+            and float(max_displacement) > displacement_limit
         ):
             status = ValidationStatus.FAIL
             checks.append(
@@ -807,11 +848,20 @@ def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvid
                     },
                 )
             )
-        linkage_errors = diagnostics.get("stage_b_linkage_distance_errors_angstrom", ())
+        linkage_errors = diagnostics.get(REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD)
         linkage_limit = float(settings.get("max_linkage_distance_error_angstrom", 0.35))
-        if any(
-            not _is_finite_number(error) or float(error) > linkage_limit for error in linkage_errors
-        ):
+        if linkage_errors is None or not _is_finite_number_sequence(linkage_errors):
+            status = ValidationStatus.FAIL
+            checks.append(
+                _check(
+                    "conjugate_relaxation_required_linkage_distances",
+                    status,
+                    "Conjugate relaxation diagnostics lack required finite linkage distance evidence",
+                    evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
+                )
+            )
+            linkage_errors = ()
+        if any(float(error) > linkage_limit for error in linkage_errors):
             status = ValidationStatus.FAIL
             checks.append(
                 _check(
@@ -1198,6 +1248,47 @@ def _is_finite_number(value: Any) -> bool:
         return math.isfinite(float(value))
     except (TypeError, ValueError):
         return False
+
+
+def _missing_or_nonfinite_fields(
+    payload: Mapping[str, Any],
+    fields: Sequence[str],
+) -> tuple[str, ...]:
+    """Return required fields that are absent or not finite scalar numbers.
+
+    Parameters
+    ----------
+    payload : Mapping[str, Any]
+        Diagnostics payload to inspect.
+    fields : Sequence[str]
+        Required scalar field names.
+
+    Returns
+    -------
+    tuple of str
+        Field names missing from the payload or carrying non-finite values.
+    """
+    return tuple(
+        field for field in fields if field not in payload or not _is_finite_number(payload[field])
+    )
+
+
+def _is_finite_number_sequence(value: Any) -> bool:
+    """Return whether a value is an explicit finite numeric sequence.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate linkage error evidence.
+
+    Returns
+    -------
+    bool
+        Whether the value is a non-string sequence with only finite numeric entries.
+    """
+    if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
+        return False
+    return all(_is_finite_number(item) for item in value)
 
 
 def _is_finite_energy_evidence(value: Any) -> bool:

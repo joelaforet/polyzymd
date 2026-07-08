@@ -600,7 +600,9 @@ def test_relaxation_evidence_audit_pass_fail_and_skipped(tmp_path):
                 "stage_a_success": True,
                 "stage_b_success": True,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -0.5,
                 "stage_a_energy_after_min_kj_mol": -1.0,
+                "stage_b_energy_before_md_kj_mol": -1.5,
                 "stage_b_energy_after_md_kj_mol": -2.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -644,7 +646,9 @@ def test_relaxation_evidence_audit_ignores_legacy_validation_artifacts(tmp_path)
                 "stage_b_success": True,
                 "temporary_anchor_count": 2,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -677,7 +681,9 @@ def test_relaxation_evidence_audit_accepts_passing_conjugate_relaxation(tmp_path
                 "stage_b_success": True,
                 "temporary_anchor_count": 2,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -710,7 +716,9 @@ def test_relaxation_evidence_audit_accepts_force_group_energy_maps(tmp_path):
                 "stage_b_success": True,
                 "temporary_anchor_count": 2,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_a_force_group_energies_before_min_kj_mol": {
                     "0": -9.0,
@@ -746,6 +754,77 @@ def test_relaxation_evidence_audit_accepts_force_group_energy_maps(tmp_path):
     assert report.relaxation_diagnostics_json_path == diagnostics_path
 
 
+def test_relaxation_evidence_audit_requires_stage_b_rmsd(tmp_path):
+    """Validation should reject successful diagnostics missing Stage B protein RMSD."""
+    payload = _canonical_relaxation_payload()
+    payload.pop("stage_b_protein_rmsd_from_stage_a_angstrom")
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_protein_immobilization"
+        and "stage_b_protein_rmsd_from_stage_a_angstrom" in check.evidence["fields"]
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_requires_stage_b_max_displacement(tmp_path):
+    """Validation should reject successful diagnostics missing Stage B max displacement."""
+    payload = _canonical_relaxation_payload()
+    payload.pop("stage_b_protein_max_displacement_from_stage_a_angstrom")
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_protein_immobilization"
+        and "stage_b_protein_max_displacement_from_stage_a_angstrom" in check.evidence["fields"]
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_requires_stage_b_linkage_distance_errors(tmp_path):
+    """Validation should reject successful diagnostics missing linkage distance errors."""
+    payload = _canonical_relaxation_payload()
+    payload.pop("stage_b_linkage_distance_errors_angstrom")
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_linkage_distances"
+        and check.evidence["field"] == "stage_b_linkage_distance_errors_angstrom"
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_requires_canonical_energy_fields(tmp_path):
+    """Validation should reject successful diagnostics missing canonical energy fields."""
+    required_fields = (
+        "stage_a_energy_before_min_kj_mol",
+        "stage_a_energy_after_min_kj_mol",
+        "stage_b_energy_before_md_kj_mol",
+        "stage_b_energy_after_md_kj_mol",
+    )
+    for field in required_fields:
+        payload = _canonical_relaxation_payload()
+        payload.pop(field)
+        _write_relaxation_diagnostics(tmp_path, payload)
+
+        report = audit_relaxation_evidence(tmp_path)
+
+        assert report.status == ValidationStatus.FAIL
+        assert any(
+            check.name == "conjugate_relaxation_required_energies"
+            and field in check.evidence["fields"]
+            for check in report.checks
+        )
+
+
 def test_relaxation_evidence_audit_rejects_stale_zero_step_relaxation(tmp_path):
     """Validation should reject stale frozen diagnostics with no Stage B MD."""
     (tmp_path / "conjugate_relaxation.json").write_text(
@@ -755,7 +834,9 @@ def test_relaxation_evidence_audit_rejects_stale_zero_step_relaxation(tmp_path):
                 "stage_a_success": True,
                 "stage_b_success": True,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -781,7 +862,9 @@ def test_relaxation_evidence_audit_requires_conjugate_relaxation_md_steps(tmp_pa
                 "stage_a_success": True,
                 "stage_b_success": True,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -811,7 +894,9 @@ def test_relaxation_evidence_audit_accepts_top_level_relaxation_md_steps(tmp_pat
                 "stage_a_success": True,
                 "stage_b_success": True,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -842,7 +927,9 @@ def test_relaxation_evidence_audit_fails_unfixed_frozen_stage_b(tmp_path):
                 "stage_a_success": True,
                 "stage_b_success": True,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.2,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.5,
@@ -873,7 +960,9 @@ def test_relaxation_evidence_audit_requires_frozen_stage_a_success(tmp_path):
                 "stage_a_success": False,
                 "stage_b_success": True,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -941,3 +1030,34 @@ def _write_product_pdb(path: Path, *, include_link: bool) -> None:
         lines.extend(["CONECT    1    2\n", "CONECT    2    1\n"])
     lines.append("END\n")
     path.write_text("".join(lines), encoding="utf-8")
+
+
+def _canonical_relaxation_payload() -> dict[str, object]:
+    """Return otherwise-passing conjugate relaxation diagnostics."""
+    return {
+        "success": True,
+        "stage_a_success": True,
+        "stage_b_success": True,
+        "barostat_used": False,
+        "stage_a_energy_before_min_kj_mol": -9.0,
+        "stage_a_energy_after_min_kj_mol": -10.0,
+        "stage_b_energy_before_md_kj_mol": -10.5,
+        "stage_b_energy_after_md_kj_mol": -11.0,
+        "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
+        "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
+        "stage_b_linkage_distance_errors_angstrom": [0.1, 0.2],
+        "settings": {
+            "md_steps": 10,
+            "max_protein_rmsd_angstrom": 0.05,
+            "max_protein_displacement_angstrom": 0.25,
+            "max_linkage_distance_error_angstrom": 0.35,
+        },
+    }
+
+
+def _write_relaxation_diagnostics(tmp_path: Path, payload: dict[str, object]) -> None:
+    """Write conjugate relaxation diagnostics for validation tests."""
+    (tmp_path / "conjugate_relaxation.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
