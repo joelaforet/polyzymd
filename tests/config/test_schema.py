@@ -133,6 +133,44 @@ class TestConfigValidation:
         )
         assert len(config.monomers) == 2
 
+    @pytest.mark.parametrize("length", [1, 2])
+    def test_dynamic_polymer_length_requires_non_empty_middle_sequence(self, length: int):
+        """Dynamic polymer configuration should reject lengths below three."""
+        from polyzymd.config.schema import MonomerSpec, PolymerConfig, ReactionConfig
+
+        reactions = ReactionConfig(
+            initiation=Path("initiation.rxn"),
+            polymerization=Path("polymerization.rxn"),
+            termination=Path("termination.rxn"),
+        )
+
+        with pytest.raises(ValidationError, match="length.*>= 3"):
+            PolymerConfig(
+                type_prefix="TEST",
+                generation_mode="dynamic",
+                monomers=[
+                    MonomerSpec(label="A", probability=1.0, name="EGMA", smiles="C=C"),
+                ],
+                length=length,
+                count=1,
+                reactions=reactions,
+            )
+
+    def test_cached_polymer_length_one_is_accepted(self):
+        """Cached polymer configuration should allow single-monomer SDF inputs."""
+        from polyzymd.config.schema import MonomerSpec, PolymerConfig
+
+        config = PolymerConfig(
+            type_prefix="TEST",
+            generation_mode="cached",
+            monomers=[MonomerSpec(label="A", probability=1.0, name="EGMA")],
+            length=1,
+            count=1,
+            sdf_directory=Path("/tmp/test"),
+        )
+
+        assert config.length == 1
+
     def test_thermodynamics_config(self):
         """Test ThermodynamicsConfig validation and defaults."""
         from pydantic import ValidationError
