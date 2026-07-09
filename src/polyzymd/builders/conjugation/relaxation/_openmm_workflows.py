@@ -51,6 +51,162 @@ def _openmm_stage_errors(openmm: Any) -> tuple[type[BaseException], ...]:
     return (RuntimeError, ValueError, ArithmeticError, openmm_error)
 
 
+def _finite_or_none(value: float) -> float | None:
+    """Return a finite diagnostic value or ``None`` for JSON-safe output.
+
+    Parameters
+    ----------
+    value : float
+        Numeric diagnostic value that may be non-finite.
+
+    Returns
+    -------
+    float or None
+        ``float(value)`` when finite, otherwise ``None``.
+    """
+    return float(value) if math.isfinite(value) else None
+
+
+def _build_relaxation_diagnostics(
+    *,
+    success: bool,
+    platform_name: str,
+    relaxation_settings: ConjugateRelaxationSettings,
+    fixed_indices: tuple[int, ...],
+    anchor_count: int,
+    removed_barostats: int,
+    energy_before_min: float,
+    energy_after_min: float,
+    energy_before_md: float,
+    energy_after_md: float,
+    force_energies_before_min: dict[str, float],
+    force_energies_after_min: dict[str, float],
+    stage_a_protein_rmsd: float,
+    stage_a_protein_max: float,
+    stage_a_distances: tuple[float, ...],
+    stage_b_protein_rmsd: float,
+    stage_b_protein_max: float,
+    initial_to_final_protein_rmsd: float,
+    initial_to_final_protein_max: float,
+    distances: tuple[float, ...],
+    errors: tuple[float, ...],
+    relaxed_pdb: Path,
+    linkage_pairs: tuple[Any, ...],
+    warnings: list[str],
+    error_type: str | None = None,
+    error_message: str | None = None,
+    error_traceback: str | None = None,
+) -> ConjugateRelaxationDiagnostics:
+    """Build the relaxation diagnostics payload without changing schema.
+
+    Parameters
+    ----------
+    success : bool
+        Whether both relaxation stages completed successfully.
+    platform_name : str
+        Name of the OpenMM platform used for the workflow.
+    relaxation_settings : ConjugateRelaxationSettings
+        Settings used to run relaxation.
+    fixed_indices : tuple of int
+        Fixed protein atom indices from Stage B.
+    anchor_count : int
+        Number of temporary linkage anchor restraints.
+    removed_barostats : int
+        Number of removed barostat forces.
+    energy_before_min, energy_after_min, energy_before_md, energy_after_md : float
+        Stage energy diagnostics in kJ/mol.
+    force_energies_before_min, force_energies_after_min : dict of str to float
+        Stage A force-group energy diagnostics.
+    stage_a_protein_rmsd, stage_a_protein_max : float
+        Stage A protein displacement diagnostics.
+    stage_a_distances : tuple of float
+        Stage A linkage distances.
+    stage_b_protein_rmsd, stage_b_protein_max : float
+        Stage B protein displacement diagnostics relative to Stage A.
+    initial_to_final_protein_rmsd, initial_to_final_protein_max : float
+        Stage B protein displacement diagnostics relative to initial coordinates.
+    distances : tuple of float
+        Final linkage distances.
+    errors : tuple of float
+        Final linkage distance errors.
+    relaxed_pdb : pathlib.Path
+        Final relaxed PDB path.
+    linkage_pairs : tuple of Any
+        Resolved product linkage pairs.
+    warnings : list of str
+        Warning messages accumulated during relaxation.
+    error_type, error_message, error_traceback : str or None, optional
+        Failure diagnostics, by default ``None``.
+
+    Returns
+    -------
+    ConjugateRelaxationDiagnostics
+        Diagnostics model matching the existing JSON schema.
+    """
+    if success:
+        stage_a_energy_before = float(energy_before_min)
+        stage_a_energy_after = float(energy_after_min)
+        stage_b_energy_before = float(energy_before_md)
+        stage_b_energy_after = float(energy_after_md)
+        stage_a_rmsd = stage_a_protein_rmsd
+        stage_a_max = stage_a_protein_max
+        stage_b_rmsd = stage_b_protein_rmsd
+        stage_b_max = stage_b_protein_max
+        initial_to_final_rmsd = initial_to_final_protein_rmsd
+        initial_to_final_max = initial_to_final_protein_max
+        final_relaxed_pdb_path = relaxed_pdb
+    else:
+        stage_a_energy_before = _finite_or_none(energy_before_min)
+        stage_a_energy_after = _finite_or_none(energy_after_min)
+        stage_b_energy_before = _finite_or_none(energy_before_md)
+        stage_b_energy_after = _finite_or_none(energy_after_md)
+        stage_a_rmsd = _finite_or_none(stage_a_protein_rmsd)
+        stage_a_max = _finite_or_none(stage_a_protein_max)
+        stage_b_rmsd = _finite_or_none(stage_b_protein_rmsd)
+        stage_b_max = _finite_or_none(stage_b_protein_max)
+        initial_to_final_rmsd = _finite_or_none(initial_to_final_protein_rmsd)
+        initial_to_final_max = _finite_or_none(initial_to_final_protein_max)
+        final_relaxed_pdb_path = relaxed_pdb if relaxed_pdb.exists() else None
+
+    return ConjugateRelaxationDiagnostics(
+        success=success,
+        stage_a_success=success or math.isfinite(energy_after_min),
+        stage_b_success=success,
+        platform_name=platform_name,
+        settings=relaxation_settings.model_dump(mode="json"),
+        md_steps=relaxation_settings.md_steps,
+        fixed_atom_count=len(fixed_indices),
+        temporary_anchor_count=anchor_count,
+        removed_barostat_count=removed_barostats,
+        barostat_used=False,
+        stage_a_energy_before_min_kj_mol=stage_a_energy_before,
+        stage_a_energy_after_min_kj_mol=stage_a_energy_after,
+        stage_a_force_group_energies_before_min_kj_mol=force_energies_before_min,
+        stage_a_force_group_energies_after_min_kj_mol=force_energies_after_min,
+        stage_a_protein_rmsd_from_initial_angstrom=stage_a_rmsd,
+        stage_a_protein_max_displacement_from_initial_angstrom=stage_a_max,
+        stage_a_linkage_distances_angstrom=stage_a_distances,
+        stage_b_energy_before_md_kj_mol=stage_b_energy_before,
+        stage_b_energy_after_md_kj_mol=stage_b_energy_after,
+        stage_b_protein_rmsd_from_stage_a_angstrom=stage_b_rmsd,
+        stage_b_protein_max_displacement_from_stage_a_angstrom=stage_b_max,
+        stage_b_protein_rmsd_from_initial_angstrom=initial_to_final_rmsd,
+        stage_b_protein_max_displacement_from_initial_angstrom=initial_to_final_max,
+        stage_b_linkage_distances_angstrom=distances,
+        stage_b_linkage_distance_errors_angstrom=errors,
+        final_relaxed_pdb_path=final_relaxed_pdb_path,
+        protein_rmsd_angstrom=stage_b_rmsd,
+        protein_max_displacement_angstrom=stage_b_max,
+        linkage_distances_angstrom=distances,
+        linkage_distance_errors_angstrom=errors,
+        linkage_pairs=tuple(linkage_pairs),
+        warnings=tuple(warnings),
+        error_type=error_type,
+        error_message=error_message,
+        traceback=error_traceback,
+    )
+
+
 def _stage_b_tolerance_violations(
     *,
     stage_b_protein_rmsd: float,
@@ -310,118 +466,75 @@ def run_conjugate_relaxation_workflow(
             raise RuntimeError(f"Conjugate relaxation Stage B evidence failed: {violation_text}")
     except _openmm_stage_errors(openmm) as exc:
         failure_path = artifact_dir / relaxation_settings.failure_json_name
+        exc_traceback = traceback.format_exc()
         failure_payload = {
             "success": False,
             "error_type": type(exc).__name__,
             "error_message": str(exc),
-            "traceback": traceback.format_exc(),
+            "traceback": exc_traceback,
             "energy_before_min_kj_mol": energy_before_min,
             "energy_after_min_kj_mol": energy_after_min,
             "energy_before_md_kj_mol": energy_before_md,
             "energy_after_md_kj_mol": energy_after_md,
         }
         failure_path.write_text(json.dumps(failure_payload, indent=2) + "\n", encoding="utf-8")
-        diagnostics = ConjugateRelaxationDiagnostics(
+        diagnostics = _build_relaxation_diagnostics(
             success=False,
-            stage_a_success=math.isfinite(energy_after_min),
-            stage_b_success=False,
             platform_name=platform_name,
-            settings=relaxation_settings.model_dump(mode="json"),
-            md_steps=relaxation_settings.md_steps,
-            fixed_atom_count=len(fixed_indices),
-            temporary_anchor_count=anchor_count,
-            removed_barostat_count=removed_barostats,
-            barostat_used=False,
-            stage_a_energy_before_min_kj_mol=(
-                float(energy_before_min) if math.isfinite(energy_before_min) else None
-            ),
-            stage_a_energy_after_min_kj_mol=(
-                float(energy_after_min) if math.isfinite(energy_after_min) else None
-            ),
-            stage_a_force_group_energies_before_min_kj_mol=force_energies_before_min,
-            stage_a_force_group_energies_after_min_kj_mol=force_energies_after_min,
-            stage_a_protein_rmsd_from_initial_angstrom=(
-                stage_a_protein_rmsd if math.isfinite(stage_a_protein_rmsd) else None
-            ),
-            stage_a_protein_max_displacement_from_initial_angstrom=(
-                stage_a_protein_max if math.isfinite(stage_a_protein_max) else None
-            ),
-            stage_a_linkage_distances_angstrom=stage_a_distances,
-            stage_b_energy_before_md_kj_mol=(
-                float(energy_before_md) if math.isfinite(energy_before_md) else None
-            ),
-            stage_b_energy_after_md_kj_mol=(
-                float(energy_after_md) if math.isfinite(energy_after_md) else None
-            ),
-            stage_b_protein_rmsd_from_stage_a_angstrom=(
-                stage_b_protein_rmsd if math.isfinite(stage_b_protein_rmsd) else None
-            ),
-            stage_b_protein_max_displacement_from_stage_a_angstrom=(
-                stage_b_protein_max if math.isfinite(stage_b_protein_max) else None
-            ),
-            stage_b_protein_rmsd_from_initial_angstrom=(
-                initial_to_final_protein_rmsd
-                if math.isfinite(initial_to_final_protein_rmsd)
-                else None
-            ),
-            stage_b_protein_max_displacement_from_initial_angstrom=(
-                initial_to_final_protein_max
-                if math.isfinite(initial_to_final_protein_max)
-                else None
-            ),
-            stage_b_linkage_distances_angstrom=distances,
-            stage_b_linkage_distance_errors_angstrom=errors,
-            final_relaxed_pdb_path=relaxed_pdb if relaxed_pdb.exists() else None,
-            protein_rmsd_angstrom=(
-                stage_b_protein_rmsd if math.isfinite(stage_b_protein_rmsd) else None
-            ),
-            protein_max_displacement_angstrom=(
-                stage_b_protein_max if math.isfinite(stage_b_protein_max) else None
-            ),
-            linkage_distances_angstrom=distances,
-            linkage_distance_errors_angstrom=errors,
+            relaxation_settings=relaxation_settings,
+            fixed_indices=fixed_indices,
+            anchor_count=anchor_count,
+            removed_barostats=removed_barostats,
+            energy_before_min=energy_before_min,
+            energy_after_min=energy_after_min,
+            energy_before_md=energy_before_md,
+            energy_after_md=energy_after_md,
+            force_energies_before_min=force_energies_before_min,
+            force_energies_after_min=force_energies_after_min,
+            stage_a_protein_rmsd=stage_a_protein_rmsd,
+            stage_a_protein_max=stage_a_protein_max,
+            stage_a_distances=stage_a_distances,
+            stage_b_protein_rmsd=stage_b_protein_rmsd,
+            stage_b_protein_max=stage_b_protein_max,
+            initial_to_final_protein_rmsd=initial_to_final_protein_rmsd,
+            initial_to_final_protein_max=initial_to_final_protein_max,
+            distances=distances,
+            errors=errors,
+            relaxed_pdb=relaxed_pdb,
             linkage_pairs=tuple(linkage_pairs),
-            warnings=tuple(warnings),
+            warnings=warnings,
             error_type=type(exc).__name__,
             error_message=str(exc),
-            traceback=traceback.format_exc(),
+            error_traceback=exc_traceback,
         )
         diagnostics.write_json(diagnostics_path)
         raise
 
-    diagnostics = ConjugateRelaxationDiagnostics(
+    diagnostics = _build_relaxation_diagnostics(
         success=True,
-        stage_a_success=True,
-        stage_b_success=True,
         platform_name=platform_name,
-        settings=relaxation_settings.model_dump(mode="json"),
-        md_steps=relaxation_settings.md_steps,
-        fixed_atom_count=len(fixed_indices),
-        temporary_anchor_count=anchor_count,
-        removed_barostat_count=removed_barostats,
-        barostat_used=False,
-        stage_a_energy_before_min_kj_mol=float(energy_before_min),
-        stage_a_energy_after_min_kj_mol=float(energy_after_min),
-        stage_a_force_group_energies_before_min_kj_mol=force_energies_before_min,
-        stage_a_force_group_energies_after_min_kj_mol=force_energies_after_min,
-        stage_a_protein_rmsd_from_initial_angstrom=stage_a_protein_rmsd,
-        stage_a_protein_max_displacement_from_initial_angstrom=stage_a_protein_max,
-        stage_a_linkage_distances_angstrom=stage_a_distances,
-        stage_b_energy_before_md_kj_mol=float(energy_before_md),
-        stage_b_energy_after_md_kj_mol=float(energy_after_md),
-        stage_b_protein_rmsd_from_stage_a_angstrom=stage_b_protein_rmsd,
-        stage_b_protein_max_displacement_from_stage_a_angstrom=stage_b_protein_max,
-        stage_b_protein_rmsd_from_initial_angstrom=initial_to_final_protein_rmsd,
-        stage_b_protein_max_displacement_from_initial_angstrom=initial_to_final_protein_max,
-        stage_b_linkage_distances_angstrom=distances,
-        stage_b_linkage_distance_errors_angstrom=errors,
-        final_relaxed_pdb_path=relaxed_pdb,
-        protein_rmsd_angstrom=stage_b_protein_rmsd,
-        protein_max_displacement_angstrom=stage_b_protein_max,
-        linkage_distances_angstrom=distances,
-        linkage_distance_errors_angstrom=errors,
+        relaxation_settings=relaxation_settings,
+        fixed_indices=fixed_indices,
+        anchor_count=anchor_count,
+        removed_barostats=removed_barostats,
+        energy_before_min=energy_before_min,
+        energy_after_min=energy_after_min,
+        energy_before_md=energy_before_md,
+        energy_after_md=energy_after_md,
+        force_energies_before_min=force_energies_before_min,
+        force_energies_after_min=force_energies_after_min,
+        stage_a_protein_rmsd=stage_a_protein_rmsd,
+        stage_a_protein_max=stage_a_protein_max,
+        stage_a_distances=stage_a_distances,
+        stage_b_protein_rmsd=stage_b_protein_rmsd,
+        stage_b_protein_max=stage_b_protein_max,
+        initial_to_final_protein_rmsd=initial_to_final_protein_rmsd,
+        initial_to_final_protein_max=initial_to_final_protein_max,
+        distances=distances,
+        errors=errors,
+        relaxed_pdb=relaxed_pdb,
         linkage_pairs=tuple(linkage_pairs),
-        warnings=tuple(warnings),
+        warnings=warnings,
     )
     diagnostics.write_json(diagnostics_path)
     return ConjugateRelaxationResult(
