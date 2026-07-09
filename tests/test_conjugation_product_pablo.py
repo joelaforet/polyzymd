@@ -441,6 +441,40 @@ def test_product_state_pablo_library_uses_charged_sdf_formal_charges(tmp_path: P
     assert _definition_atom_charge(definitions[2], "OS3") == -1
 
 
+def test_product_state_pablo_library_maps_charged_sdf_by_atom_index(tmp_path: Path):
+    """Charged SDF formal charges should preserve atom-index mapping."""
+    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
+    neutral_atoms = tuple(
+        (atom_name, residue_name, residue_number, element, "")
+        for atom_name, residue_name, residue_number, element, _charge in fixture.atoms
+    )
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    raw_sdf = tmp_path / "polymer_raw.sdf"
+    charged_sdf = tmp_path / "polymer_charged.sdf"
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(_fixture_product_pdb(fixture, include_charges=False), encoding="utf-8")
+    raw_sdf.write_text(_sdf_from_atoms_and_bonds(neutral_atoms, fixture.bonds), encoding="utf-8")
+    charged_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
+    fragment = _generated_fragment_from_fixture(fixture, include_bond_orders=False)
+    fragment = fragment.model_copy(update={"atoms": tuple(reversed(fragment.atoms))})
+
+    library = build_product_state_pablo_library(
+        product,
+        source,
+        raw_sdf,
+        fragment,
+        _fixture_resolved_plan_like(),
+        charged_polymer_sdf=charged_sdf,
+    )
+
+    definitions = {
+        summary.residue_number: definition for summary, definition in _chain_c_definitions(library)
+    }
+    assert _definition_atom_charge(definitions[2], "NQA") == 1
+    assert _definition_atom_charge(definitions[2], "OS3") == -1
+
+
 def test_product_state_pablo_library_for_specs_scopes_repeated_polymer_residues(
     tmp_path: Path,
 ):
@@ -498,6 +532,29 @@ def test_product_state_pablo_library_rejects_under_specified_sdf(tmp_path: Path)
     polymer_sdf.write_text(_fixture_sdf(fixture, overrides={("CAA", "OAA"): 0}), encoding="utf-8")
 
     with pytest.raises(ValueError, match="under-specified zero/unknown bond orders"):
+        build_product_state_pablo_library(
+            product,
+            source,
+            polymer_sdf,
+            _generated_fragment_from_fixture(fixture),
+            _fixture_resolved_plan_like(),
+        )
+
+
+def test_product_state_pablo_library_rejects_sdf_element_order_mismatch(tmp_path: Path):
+    """SDF atom order should be validated before bond-order transfer."""
+    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    polymer_sdf = tmp_path / "polymer.sdf"
+    mismatched_atoms = ((fixture.atoms[0][0], *fixture.atoms[0][1:3], "O", ""), *fixture.atoms[1:])
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(_fixture_product_pdb(fixture), encoding="utf-8")
+    polymer_sdf.write_text(
+        _sdf_from_atoms_and_bonds(mismatched_atoms, fixture.bonds), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="element/order does not match"):
         build_product_state_pablo_library(
             product,
             source,
