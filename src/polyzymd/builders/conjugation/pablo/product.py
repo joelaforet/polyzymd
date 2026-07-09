@@ -20,6 +20,7 @@ from polyzymd.builders.conjugation.pablo.sdf import (
     read_sdf_molecules,
     sdf_bond_orders_by_atom_index,
     select_sdf_molecule,
+    validate_fragment_atom_indices,
 )
 from polyzymd.builders.conjugation.structure.parsing import parse_pdb_conect_pairs
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
@@ -626,22 +627,10 @@ def _polymer_sdf_bonds(
 
     molecules = read_sdf_molecules(sdf_path, source_label="Polymer SDF")
     fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
-    missing_index_atoms = tuple(
-        getattr(atom, "atom_name", "<unnamed>")
-        for atom in fragment_atoms
-        if getattr(atom, "atom_index", None) is None
+    atoms_by_index = validate_fragment_atom_indices(
+        fragment_atoms,
+        source_label="Generated polymer fragment atoms for SDF bond orders",
     )
-    if missing_index_atoms:
-        raise ValueError(
-            "Generated polymer fragment atoms require complete atom_index values before SDF bond "
-            "orders can be mapped onto product-state Pablo definitions. Missing atom_index for: "
-            f"{', '.join(str(name) for name in missing_index_atoms)}"
-        )
-    atoms_by_index = {
-        getattr(atom, "atom_index", None): atom
-        for atom in fragment_atoms
-        if getattr(atom, "atom_index", None) is not None
-    }
     if not atoms_by_index:
         raise ValueError(
             "Generated polymer fragment atoms do not carry atom_index values, so SDF bond "

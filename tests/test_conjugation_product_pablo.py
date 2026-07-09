@@ -588,6 +588,89 @@ def test_product_state_pablo_library_rejects_partial_fragment_atom_indices(tmp_p
         )
 
 
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    [
+        ({0: 1}, "Duplicate atom_index"),
+        ({0: -1}, "non-negative integer atom_index"),
+        ({0: len(_SBMA_EGPMA_NHS_CHEMISTRY.atoms)}, "out-of-range"),
+        ({0: len(_SBMA_EGPMA_NHS_CHEMISTRY.atoms), -1: 0}, "contiguous and exactly match"),
+    ],
+    ids=("duplicate", "negative", "out_of_range", "non_contiguous"),
+)
+def test_product_state_pablo_library_rejects_invalid_sdf_bond_atom_indices(
+    updates: dict[int, int],
+    message: str,
+    tmp_path: Path,
+):
+    """Bond-order SDF mapping should reject invalid generated-fragment atom indices."""
+    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    polymer_sdf = tmp_path / "polymer.sdf"
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(_fixture_product_pdb(fixture), encoding="utf-8")
+    polymer_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
+    fragment = _fragment_with_atom_index_updates(
+        _generated_fragment_from_fixture(fixture),
+        updates,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        build_product_state_pablo_library(
+            product,
+            source,
+            polymer_sdf,
+            fragment,
+            _fixture_resolved_plan_like(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    [
+        ({0: 1}, "Duplicate atom_index"),
+        ({0: -1}, "non-negative integer atom_index"),
+        ({0: len(_SBMA_EGPMA_NHS_CHEMISTRY.atoms)}, "out-of-range"),
+        ({0: len(_SBMA_EGPMA_NHS_CHEMISTRY.atoms), -1: 0}, "contiguous and exactly match"),
+    ],
+    ids=("duplicate", "negative", "out_of_range", "non_contiguous"),
+)
+def test_product_state_pablo_library_rejects_invalid_charged_sdf_atom_indices(
+    updates: dict[int, int],
+    message: str,
+    tmp_path: Path,
+):
+    """Charged/formal-charge SDF mapping should reject invalid atom indices."""
+    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
+    neutral_atoms = tuple(
+        (atom_name, residue_name, residue_number, element, "")
+        for atom_name, residue_name, residue_number, element, _charge in fixture.atoms
+    )
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    raw_sdf = tmp_path / "polymer_raw.sdf"
+    charged_sdf = tmp_path / "polymer_charged.sdf"
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(_fixture_product_pdb(fixture, include_charges=False), encoding="utf-8")
+    raw_sdf.write_text(_sdf_from_atoms_and_bonds(neutral_atoms, fixture.bonds), encoding="utf-8")
+    charged_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
+    fragment = _fragment_with_atom_index_updates(
+        _generated_fragment_from_fixture(fixture, include_bond_orders=False),
+        updates,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        build_product_state_pablo_library(
+            product,
+            source,
+            raw_sdf,
+            fragment,
+            _fixture_resolved_plan_like(),
+            charged_polymer_sdf=charged_sdf,
+        )
+
+
 def test_generated_fragment_from_polymerist_pdb_preserves_sdf_bond_orders(tmp_path: Path):
     """GeneratedPolymerFragment should carry explicit SDF orders from the sidecar."""
     pdb_path = tmp_path / "modifier.pdb"
@@ -681,6 +764,17 @@ def _generated_fragment_from_fixture(
         reactive_atom_name="CAA",
         name=fixture.name,
     )
+
+
+def _fragment_with_atom_index_updates(
+    fragment: GeneratedPolymerFragment,
+    updates: dict[int, int],
+) -> GeneratedPolymerFragment:
+    """Return a fragment copy with selected atom_index values changed."""
+    atoms = list(fragment.atoms)
+    for position, atom_index in updates.items():
+        atoms[position] = atoms[position].model_copy(update={"atom_index": atom_index})
+    return fragment.model_copy(update={"atoms": tuple(atoms)})
 
 
 def _fixture_product_pdb(
