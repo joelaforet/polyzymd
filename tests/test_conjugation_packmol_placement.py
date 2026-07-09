@@ -233,6 +233,32 @@ def test_minimum_distance_propagates_unexpected_mdanalysis_runtime_errors(monkey
         _minimum_distance(points_a, points_b)
 
 
+@pytest.mark.parametrize(
+    "message",
+    (
+        "failed to import coordinate shape regression",
+        "could not import malformed coordinate buffer",
+        "no module named coordinate buffer",
+    ),
+)
+def test_minimum_distance_propagates_generic_import_wording_runtime_errors(
+    monkeypatch,
+    message: str,
+):
+    """Generic import-wording RuntimeErrors should not trigger backend fallback."""
+    points_a = np.asarray([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
+    points_b = np.asarray([[2.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
+
+    def fake_distance_array(_points_a: np.ndarray, _points_b: np.ndarray) -> np.ndarray:
+        """Simulate a non-backend RuntimeError with import-like wording."""
+        raise RuntimeError(message)
+
+    _install_fake_mdanalysis_distance_array(monkeypatch, fake_distance_array)
+
+    with pytest.raises(RuntimeError, match=message):
+        _minimum_distance(points_a, points_b)
+
+
 def _install_fake_mdanalysis_distance_array(monkeypatch, distance_array) -> None:
     """Install a fake MDAnalysis distance module for placement helper tests."""
     mdanalysis_module = ModuleType("MDAnalysis")
