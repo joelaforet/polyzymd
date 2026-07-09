@@ -17,13 +17,9 @@ from polyzymd.builders.conjugation._linkage import (
 from polyzymd.builders.conjugation.pablo.sdf import (
     charged_sdf_formal_charges,
     explicit_bond_order,
-    fragment_atom_element,
-    fragment_atoms_in_sdf_order,
-    guess_element,
     read_sdf_molecules,
+    sdf_bond_orders_by_atom_index,
     select_sdf_molecule,
-    validate_sdf_atom_elements,
-    validate_sdf_bond_orders,
 )
 from polyzymd.builders.conjugation.structure.parsing import parse_pdb_conect_pairs
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
@@ -646,21 +642,26 @@ def _polymer_sdf_bonds(
         source_label="Polymer SDF sidecar",
         prefer_most_bonds=True,
     )
-    validate_sdf_bond_orders(mol, sdf_path, source_label="Polymer SDF sidecar")
+    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    sdf_bonds = sdf_bond_orders_by_atom_index(
+        mol,
+        fragment_atoms=fragment_atoms,
+        sdf_path=sdf_path,
+        source_label="Polymer SDF sidecar",
+    )
     unique_atom_names = _unique_fragment_atom_names(generated_fragment)
     bonds: list[tuple[Any, Any, int]] = []
-    for bond in mol.GetBonds():
-        order = explicit_bond_order(bond.GetBondTypeAsDouble(), source=f"SDF {sdf_path}")
+    for begin_index, end_index, order in sdf_bonds:
         atom1 = _fragment_atom_descriptor(
-            atoms_by_index.get(bond.GetBeginAtomIdx()), unique_atom_names=unique_atom_names
+            atoms_by_index.get(begin_index), unique_atom_names=unique_atom_names
         )
         atom2 = _fragment_atom_descriptor(
-            atoms_by_index.get(bond.GetEndAtomIdx()), unique_atom_names=unique_atom_names
+            atoms_by_index.get(end_index), unique_atom_names=unique_atom_names
         )
         if atom1 is None or atom2 is None:
             raise ValueError(
                 "Polymer SDF bond endpoint could not be mapped to a generated-fragment atom: "
-                f"SDF atoms {bond.GetBeginAtomIdx() + 1}-{bond.GetEndAtomIdx() + 1} in "
+                f"SDF atoms {begin_index + 1}-{end_index + 1} in "
                 f"{sdf_path}. Regenerate the polymer PDB/SDF pair from the same source molecule."
             )
         bonds.append((atom1, atom2, order))
@@ -759,7 +760,9 @@ def _product_formal_charges(
         source_residue_aliases=source_residue_aliases,
     )
     charges: dict[tuple[str, str, int, str], dict[str, int]] = defaultdict(dict)
-    for atom_index, atom in enumerate(getattr(generated_fragment, "atoms", ()) or ()):
+    for fallback_index, atom in enumerate(getattr(generated_fragment, "atoms", ()) or ()):
+        raw_atom_index = getattr(atom, "atom_index", None)
+        atom_index = int(raw_atom_index) if raw_atom_index is not None else fallback_index
         charge = charged_formal_charges.get(atom_index, getattr(atom, "formal_charge", None))
         if charge in (None, 0):
             continue
@@ -783,48 +786,6 @@ def _charged_sdf_formal_charges(
         return {}
     fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
     return charged_sdf_formal_charges(charged_polymer_sdf, fragment_atoms=fragment_atoms)
-
-
-def _select_sdf_molecule(molecules: list[Any], *, expected_atoms: int, sdf_path: Path) -> Any:
-    """Select the SDF molecule matching the generated-fragment atom count."""
-    return select_sdf_molecule(
-        molecules,
-        expected_atoms=expected_atoms,
-        sdf_path=sdf_path,
-        source_label="Polymer SDF sidecar",
-        prefer_most_bonds=True,
-    )
-
-
-def _validate_sdf_atom_elements(
-    mol: Any,
-    *,
-    fragment_atoms: tuple[Any, ...],
-    sdf_path: Path,
-    source_label: str,
-) -> None:
-    """Validate that an SDF atom sequence matches a generated fragment."""
-    validate_sdf_atom_elements(
-        mol,
-        fragment_atoms=fragment_atoms,
-        sdf_path=sdf_path,
-        source_label=source_label,
-    )
-
-
-def _fragment_atoms_in_sdf_order(fragment_atoms: tuple[Any, ...]) -> tuple[Any, ...]:
-    """Return fragment atoms in the atom-index order used by production SDF sidecars."""
-    return fragment_atoms_in_sdf_order(fragment_atoms)
-
-
-def _fragment_atom_element(atom: Any) -> str:
-    """Return a generated-fragment atom element symbol for sidecar validation."""
-    return fragment_atom_element(atom)
-
-
-def _validate_sdf_bond_orders(mol: Any, sdf_path: Path) -> None:
-    """Require explicit positive bond orders in an SDF source molecule."""
-    validate_sdf_bond_orders(mol, sdf_path, source_label="Polymer SDF sidecar")
 
 
 def _explicit_bond_order(value: Any, *, source: str) -> int:

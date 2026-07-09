@@ -135,6 +135,48 @@ def validate_sdf_bond_orders(mol: Any, sdf_path: Path, *, source_label: str) -> 
         )
 
 
+def sdf_bond_orders_by_atom_index(
+    mol: Any,
+    *,
+    fragment_atoms: Sequence[Any],
+    sdf_path: Path,
+    source_label: str,
+) -> tuple[tuple[int, int, int], ...]:
+    """Return validated SDF bond orders keyed by zero-based atom indices.
+
+    Parameters
+    ----------
+    mol : Any
+        RDKit molecule read from the SDF sidecar.
+    fragment_atoms : sequence of Any
+        Generated-fragment atoms whose order must match the SDF atoms.
+    sdf_path : pathlib.Path
+        Source SDF path for diagnostics.
+    source_label : str
+        Human-readable sidecar label for diagnostics.
+
+    Returns
+    -------
+    tuple of tuple of int
+        ``(begin_index, end_index, order)`` entries using RDKit zero-based atom indices.
+    """
+    validate_sdf_atom_elements(
+        mol,
+        fragment_atoms=fragment_atoms,
+        sdf_path=sdf_path,
+        source_label=source_label,
+    )
+    validate_sdf_bond_orders(mol, sdf_path, source_label=source_label)
+    return tuple(
+        (
+            int(bond.GetBeginAtomIdx()),
+            int(bond.GetEndAtomIdx()),
+            explicit_bond_order(bond.GetBondTypeAsDouble(), source=f"{source_label} {sdf_path}"),
+        )
+        for bond in mol.GetBonds()
+    )
+
+
 def explicit_bond_order(value: Any, *, source: str) -> int:
     """Return a supported integer bond order or raise an actionable error."""
     try:
@@ -153,6 +195,44 @@ def explicit_bond_order(value: Any, *, source: str) -> int:
             "Pablo definitions currently require explicit integer bond orders."
         )
     return int(rounded)
+
+
+def sdf_formal_charges_by_atom_index(
+    mol: Any,
+    *,
+    fragment_atoms: Sequence[Any],
+    sdf_path: Path,
+    source_label: str,
+) -> dict[int, int]:
+    """Return validated non-zero SDF formal charges keyed by zero-based atom index.
+
+    Parameters
+    ----------
+    mol : Any
+        RDKit molecule read from the charged SDF sidecar.
+    fragment_atoms : sequence of Any
+        Generated-fragment atoms whose order must match the SDF atoms.
+    sdf_path : pathlib.Path
+        Source SDF path for diagnostics.
+    source_label : str
+        Human-readable sidecar label for diagnostics.
+
+    Returns
+    -------
+    dict of int to int
+        Non-zero formal charges keyed by RDKit zero-based atom index.
+    """
+    validate_sdf_atom_elements(
+        mol,
+        fragment_atoms=fragment_atoms,
+        sdf_path=sdf_path,
+        source_label=source_label,
+    )
+    return {
+        int(atom.GetIdx()): int(atom.GetFormalCharge())
+        for atom in mol.GetAtoms()
+        if int(atom.GetFormalCharge())
+    }
 
 
 def validated_charged_sdf_molecule(
@@ -213,17 +293,20 @@ def charged_sdf_formal_charges(
     """Return non-zero formal charges from a validated charged SDF sidecar."""
     if not fragment_atoms:
         return {}
-    mol = validated_charged_sdf_molecule(
-        path,
-        fragment_atoms=fragment_atoms,
+    sdf_path = Path(path)
+    molecules = read_sdf_molecules(sdf_path, source_label="Charged polymer SDF")
+    mol = select_sdf_molecule(
+        molecules,
+        expected_atoms=len(fragment_atoms),
+        sdf_path=sdf_path,
         source_label="Charged polymer SDF",
     )
-    charges = {}
-    for atom in mol.GetAtoms():
-        formal_charge = int(atom.GetFormalCharge())
-        if formal_charge:
-            charges[int(atom.GetIdx())] = formal_charge
-    return charges
+    return sdf_formal_charges_by_atom_index(
+        mol,
+        fragment_atoms=fragment_atoms,
+        sdf_path=sdf_path,
+        source_label="Charged polymer SDF",
+    )
 
 
 def guess_element(atom_name: str) -> str:
