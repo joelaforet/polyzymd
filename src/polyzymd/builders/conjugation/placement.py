@@ -614,6 +614,16 @@ def _minimum_distance(points_a: np.ndarray, points_b: np.ndarray) -> float:
     """Return the minimum pairwise distance between two coordinate arrays."""
     if len(points_a) == 0 or len(points_b) == 0:
         return float("inf")
+    try:
+        from MDAnalysis.lib.distances import distance_array
+
+        return float(np.min(distance_array(points_a, points_b)))
+    except (ImportError, RuntimeError):
+        return _minimum_distance_numpy(points_a, points_b)
+
+
+def _minimum_distance_numpy(points_a: np.ndarray, points_b: np.ndarray) -> float:
+    """Return the minimum pairwise distance using NumPy broadcasting."""
     deltas = points_a[:, np.newaxis, :] - points_b[np.newaxis, :, :]
     distances = np.linalg.norm(deltas, axis=2)
     return float(np.min(distances))
