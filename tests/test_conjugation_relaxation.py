@@ -16,7 +16,6 @@ from pydantic import ValidationError
 import polyzymd.builders.conjugation.relaxation._openmm_workflows as relaxation_workflows
 import polyzymd.builders.conjugation.relaxation.openmm as relaxation
 from polyzymd.builders.conjugation.relaxation._diagnostics import (
-    _positions_to_numpy,
     validate_finite_energy,
     validate_finite_positions,
 )
@@ -28,6 +27,7 @@ from polyzymd.builders.conjugation.relaxation._openmm_system import (
     _restore_particle_masses,
     _run_fixed_product_md,
 )
+from polyzymd.builders.conjugation.relaxation.geometry import positions_to_numpy
 from polyzymd.builders.conjugation.relaxation.models import (
     ConjugateRelaxationDiagnostics,
     ConjugateRelaxationSettings,
@@ -566,7 +566,7 @@ def test_positions_to_numpy_logs_expected_conversion_fallback(caplog):
     unit_module = type("UnitModule", (), {"nanometer": "nanometer"})()
 
     with caplog.at_level("WARNING"):
-        array = _positions_to_numpy(RawArrayPositions(), unit_module)
+        array = positions_to_numpy(RawArrayPositions(), unit_module)
 
     np.testing.assert_allclose(array, [[0.0, 0.0, 0.0]])
     assert "Falling back to raw np.asarray()" in caplog.text

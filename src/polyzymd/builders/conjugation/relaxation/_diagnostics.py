@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import math
 from typing import Any
 
 import numpy as np
 
-LOGGER = logging.getLogger(__name__)
-_POSITION_CONVERSION_ERRORS = (AttributeError, TypeError, ValueError)
+from polyzymd.builders.conjugation.relaxation.geometry import positions_to_numpy
 
 
 def validate_finite_energy(value: float, *, label: str = "energy") -> None:
@@ -57,7 +55,7 @@ def validate_finite_positions(
     float
         Maximum per-axis coordinate span in nanometers.
     """
-    array = _positions_to_numpy(positions, unit_module)
+    array = positions_to_numpy(positions, unit_module)
     if array.size == 0:
         raise RuntimeError(f"OpenMM relaxation produced empty {label}")
     if not np.all(np.isfinite(array)):
@@ -72,39 +70,3 @@ def validate_finite_positions(
             "Refusing to continue with expanded post-relaxation coordinates."
         )
     return span_nm
-
-
-def _positions_to_numpy(positions: Any, unit_module: Any | None) -> np.ndarray:
-    """Convert coordinate containers to a NumPy array for finite checks.
-
-    Parameters
-    ----------
-    positions : Any
-        Coordinate container or unit-bearing quantity.
-    unit_module : Any or None
-        OpenMM unit module used for nanometer conversion when available.
-
-    Returns
-    -------
-    numpy.ndarray
-        Coordinate array as floating-point nanometer values.
-    """
-    conversion_error: Exception | None = None
-    if unit_module is not None and hasattr(positions, "value_in_unit"):
-        try:
-            return np.asarray(positions.value_in_unit(unit_module.nanometer), dtype=float)
-        except _POSITION_CONVERSION_ERRORS as exc:
-            conversion_error = exc
-    if hasattr(positions, "m_as"):
-        try:
-            return np.asarray(positions.m_as("nanometer"), dtype=float)
-        except _POSITION_CONVERSION_ERRORS as exc:
-            conversion_error = exc
-    if conversion_error is not None:
-        LOGGER.warning(
-            "Falling back to raw np.asarray() for positions of type %s after unit-aware "
-            "coordinate conversion failed: %s",
-            type(positions).__name__,
-            conversion_error,
-        )
-    return np.asarray(positions, dtype=float)

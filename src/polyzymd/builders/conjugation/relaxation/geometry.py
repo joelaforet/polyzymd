@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+LOGGER = logging.getLogger(__name__)
+_POSITION_CONVERSION_ERRORS = (AttributeError, TypeError, ValueError)
 
 
 def positions_to_numpy(positions: Any, unit_module: Any | None = None) -> np.ndarray:
@@ -23,10 +27,24 @@ def positions_to_numpy(positions: Any, unit_module: Any | None = None) -> np.nda
     numpy.ndarray
         Coordinate array in nanometers when units are available.
     """
+    conversion_error: Exception | None = None
     if unit_module is not None and hasattr(positions, "value_in_unit"):
-        return np.asarray(positions.value_in_unit(unit_module.nanometer), dtype=float)
+        try:
+            return np.asarray(positions.value_in_unit(unit_module.nanometer), dtype=float)
+        except _POSITION_CONVERSION_ERRORS as exc:
+            conversion_error = exc
     if hasattr(positions, "m_as"):
-        return np.asarray(positions.m_as("nanometer"), dtype=float)
+        try:
+            return np.asarray(positions.m_as("nanometer"), dtype=float)
+        except _POSITION_CONVERSION_ERRORS as exc:
+            conversion_error = exc
+    if conversion_error is not None:
+        LOGGER.warning(
+            "Falling back to raw np.asarray() for positions of type %s after unit-aware "
+            "coordinate conversion failed: %s",
+            type(positions).__name__,
+            conversion_error,
+        )
     return np.asarray(positions, dtype=float)
 
 

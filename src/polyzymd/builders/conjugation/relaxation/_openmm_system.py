@@ -11,7 +11,6 @@ from typing import Any
 import numpy as np
 
 from polyzymd.builders.conjugation.relaxation._diagnostics import (
-    _positions_to_numpy,
     validate_finite_energy,
     validate_finite_positions,
 )
@@ -21,7 +20,6 @@ from polyzymd.builders.conjugation.relaxation.models import (
 )
 
 LOGGER = logging.getLogger(__name__)
-_POSITION_CONVERSION_ERRORS = (AttributeError, TypeError, ValueError)
 
 
 def _freeze_protein_chain_masses(
@@ -83,6 +81,54 @@ def _set_zero_initial_velocities(context: Any, topology: Any, openmm_unit: Any) 
     context.setVelocities(velocities)
 
 
+def _create_relaxation_verlet_integrator(openmm: Any, openmm_unit: Any) -> Any:
+    """Create the Verlet integrator used for transient relaxation setup.
+
+    Parameters
+    ----------
+    openmm : Any
+        Imported OpenMM module or compatible test double.
+    openmm_unit : Any
+        Imported OpenMM unit module or compatible test double.
+
+    Returns
+    -------
+    Any
+        OpenMM Verlet integrator with the established relaxation timestep.
+    """
+    return openmm.VerletIntegrator(0.001 * openmm_unit.picoseconds)
+
+
+def _create_simulation(
+    topology: Any,
+    system: Any,
+    integrator: Any,
+    openmm_app: Any,
+    platform: Any,
+) -> Any:
+    """Create an OpenMM simulation with the selected platform.
+
+    Parameters
+    ----------
+    topology : Any
+        OpenMM-compatible topology.
+    system : Any
+        OpenMM-compatible system.
+    integrator : Any
+        OpenMM-compatible integrator.
+    openmm_app : Any
+        Imported ``openmm.app`` module or compatible test double.
+    platform : Any
+        Selected OpenMM platform.
+
+    Returns
+    -------
+    Any
+        OpenMM simulation object.
+    """
+    return openmm_app.Simulation(topology, system, integrator, platform)
+
+
 def _run_fixed_product_md(
     topology: Any,
     system: Any,
@@ -104,7 +150,7 @@ def _run_fixed_product_md(
                 settings.friction_per_picosecond / openmm_unit.picosecond,
                 timestep_fs * openmm_unit.femtosecond,
             )
-            simulation = openmm_app.Simulation(topology, system, integrator, platform)
+            simulation = _create_simulation(topology, system, integrator, openmm_app, platform)
             simulation.context.setPositions(positions)
             _set_zero_initial_velocities(simulation.context, topology, openmm_unit)
             energy_before = _state_energy_kj_mol(
@@ -346,29 +392,6 @@ def _state_energy_kj_mol(state: Any, openmm_unit: Any) -> float:
     return float(energy)
 
 
-def _add_positional_restraints(
-    system: Any,
-    positions: Any,
-    atom_indices: tuple[int, ...],
-    restraint_k: float,
-    openmm: Any,
-    openmm_unit: Any,
-) -> None:
-    """Add harmonic positional restraints for selected atoms."""
-    reference_nm = _positions_to_numpy(positions, openmm_unit)
-    restraint = openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
-    restraint.addGlobalParameter(
-        "k", restraint_k * openmm_unit.kilojoule_per_mole / openmm_unit.nanometer**2
-    )
-    restraint.addPerParticleParameter("x0")
-    restraint.addPerParticleParameter("y0")
-    restraint.addPerParticleParameter("z0")
-    for atom_index in atom_indices:
-        x_coord, y_coord, z_coord = reference_nm[atom_index]
-        restraint.addParticle(atom_index, [float(x_coord), float(y_coord), float(z_coord)])
-    system.addForce(restraint)
-
-
 def _select_platform(openmm: Any, requested_platform: str | None) -> Any:
     """Select a usable OpenMM platform, preferring accelerators when available."""
     requested = requested_platform or os.environ.get("POLYZYMD_CONJUGATION_VALIDATION_PLATFORM")
@@ -394,7 +417,7 @@ def _validate_platform_context(openmm: Any, platform: Any) -> None:
 
     system = openmm.System()
     system.addParticle(39.9)
-    integrator = openmm.VerletIntegrator(0.001 * openmm_unit.picoseconds)
+    integrator = _create_relaxation_verlet_integrator(openmm, openmm_unit)
     context = openmm.Context(system, integrator, platform)
     context.setPositions([[0.0, 0.0, 0.0]] * openmm_unit.nanometer)
     context.getState(getEnergy=True)
