@@ -20,6 +20,8 @@ from polyzymd.builders.conjugation.relaxation._linkages import (
 from polyzymd.builders.conjugation.relaxation._openmm_system import (
     _add_linkage_anchor_restraints,
     _assign_force_groups,
+    _create_relaxation_verlet_integrator,
+    _create_simulation,
     _force_group_energies,
     _force_group_labels,
     _freeze_protein_chain_masses,
@@ -208,8 +210,8 @@ def run_conjugate_relaxation_workflow(
             openmm_unit,
         )
         group_labels_min = _force_group_labels(system_min, existing_labels=group_labels_min)
-        integrator_min = openmm.VerletIntegrator(0.001 * openmm_unit.picoseconds)
-        simulation = openmm_app.Simulation(topology, system_min, integrator_min, platform)
+        integrator_min = _create_relaxation_verlet_integrator(openmm, openmm_unit)
+        simulation = _create_simulation(topology, system_min, integrator_min, openmm_app, platform)
         simulation.context.setPositions(initial_positions)
         energy_before_min = _state_energy_kj_mol(
             simulation.context.getState(getEnergy=True),
