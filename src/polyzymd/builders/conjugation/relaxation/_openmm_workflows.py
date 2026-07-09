@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from polyzymd.builders.conjugation.relaxation._diagnostics import (
-    _positions_to_numpy,
     validate_finite_energy,
     validate_finite_positions,
 )
@@ -34,6 +33,7 @@ from polyzymd.builders.conjugation.relaxation._openmm_system import (
     _state_energy_kj_mol,
     _write_openmm_pdb,
 )
+from polyzymd.builders.conjugation.relaxation.geometry import positions_to_numpy
 from polyzymd.builders.conjugation.relaxation.models import (
     ConjugateRelaxationDiagnostics,
     ConjugateRelaxationResult,
@@ -158,7 +158,7 @@ def run_conjugate_relaxation_workflow(
         openmm_unit,
         product_pdb_path,
     )
-    initial_coords_nm = _positions_to_numpy(initial_positions, openmm_unit)
+    initial_coords_nm = positions_to_numpy(initial_positions, openmm_unit)
     linkage_pairs = resolve_product_linkage_pairs(
         topology,
         product_pdb_path=product_pdb_path,
@@ -238,7 +238,7 @@ def run_conjugate_relaxation_workflow(
             group_labels_min,
             openmm_unit,
         )
-        minimized_coords_nm = _positions_to_numpy(minimized_positions, openmm_unit)
+        minimized_coords_nm = positions_to_numpy(minimized_positions, openmm_unit)
         stage_a_protein_rmsd, stage_a_protein_max = _protein_displacements_angstrom(
             initial_coords_nm,
             minimized_coords_nm,
@@ -278,7 +278,7 @@ def run_conjugate_relaxation_workflow(
             _restore_particle_masses(system_md, _original_masses)
 
         _write_openmm_pdb(openmm_app, topology, final_positions, relaxed_pdb)
-        final_coords_nm = _positions_to_numpy(final_positions, openmm_unit)
+        final_coords_nm = positions_to_numpy(final_positions, openmm_unit)
         stage_b_protein_rmsd, stage_b_protein_max = _protein_displacements_angstrom(
             minimized_coords_nm,
             final_coords_nm,
