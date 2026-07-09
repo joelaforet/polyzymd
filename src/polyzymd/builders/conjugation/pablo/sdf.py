@@ -77,9 +77,90 @@ def select_sdf_molecule(
 
 def fragment_atoms_in_sdf_order(fragment_atoms: Sequence[Any]) -> tuple[Any, ...]:
     """Return fragment atoms in the atom-index order used by production SDF sidecars."""
-    if all(getattr(atom, "atom_index", None) is not None for atom in fragment_atoms):
-        return tuple(sorted(fragment_atoms, key=lambda atom: int(atom.atom_index)))
-    return tuple(fragment_atoms)
+    atoms_by_index = validate_fragment_atom_indices(
+        fragment_atoms,
+        source_label="Generated fragment atom_index provenance",
+    )
+    return tuple(atoms_by_index[index] for index in range(len(fragment_atoms)))
+
+
+def validate_fragment_atom_indices(
+    fragment_atoms: Sequence[Any],
+    *,
+    source_label: str,
+) -> dict[int, Any]:
+    """Validate generated-fragment atom indices for identity-preserving SDF mapping.
+
+    Parameters
+    ----------
+    fragment_atoms : sequence of Any
+        Generated-fragment atoms that must carry zero-based atom indices.
+    source_label : str
+        Human-readable mapping path for diagnostics.
+
+    Returns
+    -------
+    dict of int to Any
+        Fragment atoms keyed by validated zero-based atom index.
+    """
+    missing = [
+        str(getattr(atom, "atom_name", None) or getattr(atom, "name", None) or index)
+        for index, atom in enumerate(fragment_atoms)
+        if getattr(atom, "atom_index", None) is None
+    ]
+    if missing:
+        raise ValueError(
+            f"{source_label} requires complete atom_index values before SDF atom-index "
+            "mapping can be used. Missing atom_index for: " + ", ".join(missing)
+        )
+
+    atoms_by_index: dict[int, Any] = {}
+    duplicates: list[int] = []
+    invalid: list[str] = []
+    for atom in fragment_atoms:
+        raw_index = getattr(atom, "atom_index", None)
+        try:
+            atom_index = int(raw_index)
+        except (TypeError, ValueError):
+            invalid.append(str(raw_index))
+            continue
+        if atom_index < 0:
+            invalid.append(str(atom_index))
+            continue
+        if atom_index in atoms_by_index:
+            duplicates.append(atom_index)
+            continue
+        atoms_by_index[atom_index] = atom
+
+    if invalid:
+        preview = ", ".join(invalid[:8])
+        raise ValueError(
+            f"{source_label} requires non-negative integer atom_index values before SDF "
+            f"atom-index mapping can be used. Invalid atom_index values: {preview}"
+        )
+    if duplicates:
+        preview = ", ".join(str(index) for index in sorted(set(duplicates))[:8])
+        raise ValueError(
+            f"{source_label} requires unique atom_index values before SDF atom-index mapping "
+            f"can be used. Duplicate atom_index values: {preview}"
+        )
+
+    expected = set(range(len(fragment_atoms)))
+    observed = set(atoms_by_index)
+    if observed != expected:
+        missing_indices = sorted(expected - observed)
+        out_of_range = sorted(observed - expected)
+        details: list[str] = []
+        if missing_indices:
+            details.append("missing " + ", ".join(str(index) for index in missing_indices[:8]))
+        if out_of_range:
+            details.append("out-of-range " + ", ".join(str(index) for index in out_of_range[:8]))
+        raise ValueError(
+            f"{source_label} requires atom_index values to be contiguous and exactly match "
+            f"0..{len(fragment_atoms) - 1} before SDF atom-index mapping can be used; "
+            + "; ".join(details)
+        )
+    return atoms_by_index
 
 
 def fragment_atom_element(atom: Any) -> str:

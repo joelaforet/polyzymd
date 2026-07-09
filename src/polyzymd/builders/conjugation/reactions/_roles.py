@@ -492,12 +492,13 @@ def _is_rdkit_parse_runtime_error(error: RuntimeError) -> bool:
     """Return whether an RDKit runtime error is an expected SMARTS parse failure."""
     message = str(error).lower()
     parse_markers = (
-        "parse",
-        "parser",
-        "smarts",
         "chemicalreactionparserexception",
-        "reaction parse",
-        "syntax error",
+        "smarts parse error",
+        "smiles parse error",
+        "failed parsing smarts",
+        "failed parsing smiles",
+        "syntax error in smarts",
+        "syntax error in smiles",
     )
     return any(marker in message for marker in parse_markers)
 

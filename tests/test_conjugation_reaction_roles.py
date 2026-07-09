@@ -156,6 +156,31 @@ def test_rdkit_reaction_from_smarts_unexpected_runtime_errors_propagate(monkeypa
         validate_mapped_smarts(("[N:1][H:2]",), ("[N:1]",))
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "unexpected smarts cache corruption",
+        "unexpected parser allocation failure",
+    ],
+)
+def test_rdkit_parser_runtime_classifier_rejects_generic_parse_words(message):
+    """Generic SMARTS or parser words should not mask unexpected RDKit failures."""
+    assert reaction_roles._is_rdkit_parse_runtime_error(RuntimeError(message)) is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "ChemicalReactionParserException: problems constructing product",
+        "SMARTS Parse Error: syntax error while parsing",
+        "Failed parsing SMARTS '[C' for input",
+    ],
+)
+def test_rdkit_parser_runtime_classifier_accepts_specific_parser_signatures(message):
+    """Known RDKit parser signatures should remain expected parse failures."""
+    assert reaction_roles._is_rdkit_parse_runtime_error(RuntimeError(message)) is True
+
+
 def test_resolve_reaction_roles_preserves_geometry_anchor_and_concrete_identities():
     """Role resolution should keep role labels and supplied PDB identities generic."""
     reaction = _nhs_like_reaction()
