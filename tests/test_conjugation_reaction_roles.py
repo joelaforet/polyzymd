@@ -60,6 +60,89 @@ def test_nhs_like_mapped_smarts_derives_added_removed_bonds_and_leaving_maps():
     assert changes.order_changes == ()
 
 
+def test_rdkit_reaction_parse_detects_missing_product_atom_maps():
+    """Native reaction parsing should retain missing-map diagnostics."""
+    pytest.importorskip("rdkit.Chem.rdChemReactions")
+
+    validation = validate_mapped_smarts(("[N:1]([H:2])",), ("[N:1]",))
+
+    assert validation.reactant_maps == (1, 2)
+    assert validation.product_maps == (1,)
+    assert validation.missing_product_maps == (2,)
+
+
+def test_bond_change_detection_matches_fallback_for_added_removed_and_order_changed(
+    monkeypatch,
+):
+    """RDKit-backed bond diagnostics should match the existing fallback behavior."""
+    reactants = ("[C:1]=[O:2].[N:3][H:4]",)
+    products = ("[O:2]-[C:1][N:3]",)
+    normal = derive_bond_changes(reactants, products)
+
+    def raise_value_error(smarts_entries):
+        raise ValueError("force fallback")
+
+    monkeypatch.setattr(reaction_roles, "_rdkit_mapped_bond_orders", raise_value_error)
+    fallback = derive_bond_changes(reactants, products)
+
+    assert normal.model_dump() == fallback.model_dump()
+    assert [change.atom_maps for change in normal.added_bonds] == [(1, 3)]
+    assert [change.atom_maps for change in normal.removed_bonds] == [(3, 4)]
+    assert [
+        (change.atom_maps, change.reactant_order, change.product_order)
+        for change in normal.order_changes
+    ] == [((1, 2), 2.0, 1.0)]
+
+
+def test_rdkit_reaction_parse_preserves_participant_indices_and_map_evidence_order():
+    """RDKit parsing should not mutate participant order or sorted map evidence."""
+    pytest.importorskip("rdkit.Chem.rdChemReactions")
+    reaction = AtomMappedReaction(
+        name="participant_order",
+        reactant_smarts=("[C:10]", "[N:1].[O:5]"),
+        product_smarts=("[N:1][C:10]=[O:5]",),
+        participants=(
+            ReactionParticipant(name="moiety", role="moiety", reactant_index=1),
+            ReactionParticipant(name="site", role="site", reactant_index=0),
+        ),
+    )
+
+    validation = validate_mapped_smarts(reaction.reactant_smarts, reaction.product_smarts)
+
+    assert [participant.reactant_index for participant in reaction.participants] == [1, 0]
+    assert validation.reactant_maps == (1, 5, 10)
+    assert validation.product_maps == (1, 5, 10)
+
+
+def test_mapped_smarts_validation_fallback_still_handles_expected_rdkit_parse_errors(
+    monkeypatch,
+):
+    """Expected RDKit reaction parse errors should fall back to text diagnostics."""
+
+    def raise_value_error(reactant_smarts, product_smarts):
+        raise ValueError("invalid reaction query")
+
+    monkeypatch.setattr(reaction_roles, "_rdkit_reaction_mapped_atom_numbers", raise_value_error)
+
+    validation = validate_mapped_smarts(("[N:1][H:2]",), ("[N:1]",))
+
+    assert validation.reactant_maps == (1, 2)
+    assert validation.product_maps == (1,)
+    assert validation.missing_product_maps == (2,)
+
+
+def test_mapped_smarts_validation_does_not_swallow_unexpected_runtime_errors(monkeypatch):
+    """Unexpected reaction parsing runtime errors should propagate."""
+
+    def raise_runtime_error(reactant_smarts, product_smarts):
+        raise RuntimeError("unexpected reaction parser failure")
+
+    monkeypatch.setattr(reaction_roles, "_rdkit_reaction_mapped_atom_numbers", raise_runtime_error)
+
+    with pytest.raises(RuntimeError, match="unexpected reaction parser failure"):
+        validate_mapped_smarts(("[N:1][H:2]",), ("[N:1]",))
+
+
 def test_resolve_reaction_roles_preserves_geometry_anchor_and_concrete_identities():
     """Role resolution should keep role labels and supplied PDB identities generic."""
     reaction = _nhs_like_reaction()
