@@ -238,8 +238,14 @@ def validate_mapped_smarts(
         generic POC path permits missing product maps so leaving groups can be
         represented explicitly, by default ``False``.
     """
-    reactant_maps = _mapped_atom_numbers(reactant_smarts)
-    product_maps = _mapped_atom_numbers(product_smarts)
+    try:
+        reactant_maps, product_maps = _rdkit_reaction_mapped_atom_numbers(
+            reactant_smarts,
+            product_smarts,
+        )
+    except (ImportError, ValueError):
+        reactant_maps = _mapped_atom_numbers(reactant_smarts)
+        product_maps = _mapped_atom_numbers(product_smarts)
     if not reactant_maps:
         raise ValueError("Reactant SMARTS must contain atom-map numbers")
     if not product_maps:
@@ -411,6 +417,41 @@ def _mapped_atom_numbers(smarts_entries: Sequence[str]) -> tuple[int, ...]:
     maps: set[int] = set()
     for smarts in smarts_entries:
         maps.update(int(match) for match in re.findall(r":(\d+)(?=[^\]]*\])", smarts))
+    return tuple(sorted(maps))
+
+
+def _rdkit_reaction_mapped_atom_numbers(
+    reactant_smarts: Sequence[str],
+    product_smarts: Sequence[str],
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Return mapped atom numbers from an RDKit reaction SMARTS parse.
+
+    RDKit is used only as a parser for full mapped reaction SMARTS. The parsed
+    reaction is not executed and no product generation or substructure matching is
+    performed.
+    """
+    from rdkit.Chem import rdChemReactions
+
+    reaction_smarts = f"{'.'.join(reactant_smarts)}>>{'.'.join(product_smarts)}"
+    try:
+        reaction = rdChemReactions.ReactionFromSmarts(reaction_smarts)
+    except RuntimeError as error:
+        raise ValueError(f"RDKit could not parse reaction SMARTS: {reaction_smarts}") from error
+    if reaction is None:
+        raise ValueError(f"RDKit could not parse reaction SMARTS: {reaction_smarts}")
+    return _rdkit_template_map_numbers(reaction.GetReactants()), _rdkit_template_map_numbers(
+        reaction.GetProducts()
+    )
+
+
+def _rdkit_template_map_numbers(templates: Sequence[Any]) -> tuple[int, ...]:
+    """Return sorted unique atom-map numbers from RDKit reaction templates."""
+    maps: set[int] = set()
+    for template in templates:
+        for atom in template.GetAtoms():
+            map_number = atom.GetAtomMapNum()
+            if map_number:
+                maps.add(int(map_number))
     return tuple(sorted(maps))
 
 
