@@ -9,7 +9,7 @@ Current validated vertical-slice support covers NHS-lysine polymer attachments.
 The active architecture is generic: a moiety provider resolves each source, a
 mechanism resolves a product-state attachment plan, and the workflow carries an
 attachment spec through shared assembly, Pablo/OpenFF parameterization, charge
-patching, and local minimization. Non-NHS mechanisms and generic explicit
+patching, conjugate relaxation, and validation. Non-NHS mechanisms and generic explicit
 linkages are executable development paths, but they remain experimental unless a
 mechanism-specific validation note says otherwise.
 
@@ -84,8 +84,8 @@ attachments:
 Internally, each enabled attachment becomes an attachment spec containing the
 resolved moiety source, resolved attachment plan, product residue mapping, and
 sidecar paths. Multi-attachment builds assemble all specs into one product PDB
-before product-state minimization runs, so shared validation and charge-patch
-logic sees the combined conjugate.
+before relaxation and validation run, so shared validation and charge-patch logic
+sees the combined conjugate.
 
 ## Site
 
@@ -271,7 +271,7 @@ AM1-BCC model. Its model choices are:
   charge.
 
 The final production Interchange path refuses whole-conjugate AM1-BCC,
-Gasteiger fallback, formal-charge smoke templates, and unmarked cached charges.
+Gasteiger fallback, charge templates without validation evidence, and unmarked cached charges.
 If any required atom cannot be mapped to one of the source classes above, the
 build fails with an explicit missing-identity message rather than inventing a
 fallback charge.
@@ -290,23 +290,18 @@ maps charges back only to real product atoms. If the mechanism metadata is not
 specific enough to build and cap the local graph, PolyzyMD fails clearly instead
 of falling back to hardcoded NHS-lysine atom names or raw sidecar charges.
 
-Product-state local minimization is active for generic resolved plans. It writes
-`local_minimization_result.json` and, on coordinate output,
-`crosslinked_relaxed.pdb`. Multi-attachment products are minimized once with all
-resolved linkages rather than independently relaxing each attachment.
-
 ## Support Levels and Validation Reports
 
 See {doc}`conjugation_support_matrix` for the current support matrix. In brief,
 the validated reliability milestone covers the opt-in config-driven and direct
 request NHS-lysine polymer vertical slice, including Pablo/OpenFF Interchange,
 ff14SB plus polymer templates, local NAGL patch charge bridge, local charge
-reconciliation, product-state local minimization, final solvation, and
+reconciliation, conjugate relaxation, final solvation, and
 `conjugate_validation_report.json`.
 
 The validation report audits product bond graph evidence, link atom presence,
 leaving atom absence, valence sanity, charge evidence, parameter coverage,
-linkage geometry, OpenMM smoke evidence, and paths to supporting sidecars.
+linkage geometry, OpenMM relaxation evidence, and paths to supporting sidecars.
 Validation is necessary but not sufficient: a passing report is an internal
 consistency audit, not a guarantee for arbitrary chemistry.
 

@@ -139,7 +139,7 @@ Every executable mechanism needs a parameterization decision.
 |--------|-----------------|
 | Curated residue template | Standard PTMs, glycans, production workflows. |
 | Custom force-field fragment | New residue names or custom linkers. |
-| Direct OpenFF fallback | Exploratory smoke tests with clear warnings. |
+| Direct OpenFF fallback | Exploratory validation runs with clear warnings. |
 | User-supplied charges | Advanced workflows with known charge models. |
 
 Diagnostics should explicitly state whether the build is exploratory or

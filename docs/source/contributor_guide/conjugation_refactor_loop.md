@@ -14,7 +14,7 @@ protein selection + modifier molecule + reaction template
 → resolved reaction plan
 → product-state structure
 → Pablo/OpenFF topology
-→ restrained local minimization
+→ conjugate relaxation and validation
 ```
 
 The working POC already proved the key scientific path for an NHS-lysine polymer
@@ -100,7 +100,7 @@ conjugation/
 │   ├── product.py           # product-state Pablo residue definitions
 │   ├── parameterization.py  # Interchange construction
 │   └── residue_library.py   # Pablo residue-library policy helpers
-└── local_minimization.py    # restrained OpenMM minimization
+└── relaxation/              # conjugate relaxation and validation evidence
 ```
 
 ## Public API target
@@ -149,8 +149,8 @@ still explicitly pending.
 
 The public API notebook/workflow should use `build_conjugate_from_config()` or
 `ConjugationEngine`. Internal helpers such as `system_workflow`, `structure`,
-`local_minimization`, and the `pablo` package remain direct module imports for
-maintainers, but they are not re-exported from `polyzymd.builders.conjugation`.
+`relaxation`, and the `pablo` package remain direct module imports for maintainers,
+but they are not re-exported from `polyzymd.builders.conjugation`.
 
 ## Core data model
 
@@ -208,7 +208,7 @@ belong in `reactions/nhs_lys.py`.
 | 0 | Complete | Current import behavior and POC-adjacent behavior are covered by focused conjugation tests. |
 | 1 | Complete | `api.py`, `engine.py`, public models, and the reaction package skeleton exist. |
 | 2 | Complete | Pablo/OpenFF boundaries live under the internal `pablo/` package; transitional top-level shims remain removed. |
-| 3 | Superseded | Protein preparation and minimization remain in direct modules; transitional shim packages were removed. |
+| 3 | Superseded | Protein preparation and relaxation remain in direct modules; transitional shim packages were removed. |
 | 4 | Complete, adapter-first | `NhsLysReaction` owns NHS-Lys defaults and reaction metadata, delegating to the proven implementation. |
 | 5 | Complete, conservative | `ConjugationEngine` centralizes public orchestration and delegates executable config builds to the existing system workflow. Direct OpenFF fallback is not silently enabled. |
 | 6 | Complete | Preserve old POC assets while keeping the package layout focused on the public API and direct internal modules. |
@@ -249,9 +249,9 @@ wrappers for the old `product_pablo.py`, `pablo_adapter.py`,
 ### Phase 3 — group structure helpers
 
 PDB inspection, clean-PDB normalization, product PDB assembly, and protein
-canonicalization live under `structure/`. Restrained minimization remains in
-`local_minimization.py`. Do not reintroduce transitional shim wrappers for old
-top-level structure paths.
+canonicalization live under `structure/`. Conjugate relaxation remains under
+`relaxation/`. Do not reintroduce transitional shim wrappers for old top-level
+structure paths.
 
 ### Phase 4 — introduce `NhsLysReaction`
 
@@ -329,7 +329,8 @@ Before each commit, verify:
 
 ## Known current scientific boundary
 
-The current working POC reaches local constrained minimization for the NHS-Lys
-polymer case. It does not yet claim production-quality charge assignment for all
-possible modifiers. Keep the local-minimization smoke path separate from the
-production parameterization/charge-template story until validated.
+The current production path uses product-state Pablo ingestion, production charge
+templates, OpenFF parameterization, and `relax_conjugate()` for restrained
+conjugate relaxation. It does not yet claim production-quality charge assignment
+for all possible modifiers; new chemistries still need explicit validation of
+their product-state templates, charge provenance, and relaxation evidence.

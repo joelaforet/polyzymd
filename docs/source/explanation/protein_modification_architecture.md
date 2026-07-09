@@ -166,7 +166,7 @@ snapping, and clear failure messages when no acceptable placement is found.
 
 ### Parameterization Layer
 
-The parameterization layer decides whether a result is suitable for smoke tests
+The parameterization layer decides whether a result is suitable for exploratory validation
 or production simulations. Some modifications can use generic OpenFF-style
 fallbacks for exploratory runs. Others, especially glycans and post-translational
 modifications with known residue templates, should require curated templates and

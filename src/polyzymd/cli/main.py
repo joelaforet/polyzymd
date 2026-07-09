@@ -286,9 +286,9 @@ def _print_conjugation_dry_run_file_summary() -> None:
     colored_echo("Files to Generate (Conjugation OpenMM):", phase="build")
     colored_echo("  Per replicate:", phase="build")
     colored_echo("    - conjugate-construction/assembled_crosslinked.pdb", phase="build")
-    colored_echo("    - conjugate-construction/assembled_minimized.pdb", phase="build")
-    colored_echo("    - conjugate-construction/assembled_equilibrated.pdb", phase="build")
-    colored_echo("    - conjugate-construction/relaxed_conjugate.pdb", phase="build")
+    colored_echo("    - conjugate-construction/conjugate_relaxation.json", phase="build")
+    colored_echo("    - conjugate-construction/conjugate_relaxed.pdb", phase="build")
+    colored_echo("    - conjugate-construction/conjugate_validation_report.json", phase="build")
     colored_echo("    - solvated_conjugate_free_polymers.pdb", phase="build")
     colored_echo("    - conjugated_polymer_system_workflow.json", phase="build")
     colored_echo("    - system.xml (OpenMM system with restraints)", phase="build")
@@ -311,15 +311,20 @@ def _print_conjugation_openmm_build_summary(result: Any, working_dir: Path) -> N
 
     key_paths = {
         "crosslinked_conjugate_pdb": getattr(result, "crosslinked_conjugate_pdb_path", None),
-        "minimized_conjugate_pdb": getattr(result, "minimized_conjugate_pdb_path", None),
-        "equilibrated_conjugate_pdb": getattr(result, "equilibrated_conjugate_pdb_path", None),
         "relaxed_conjugate_pdb": getattr(result, "relaxed_conjugate_pdb_path", None),
         "solvated_pdb": getattr(result, "solvated_pdb_path", None),
         "workflow_json": getattr(result, "workflow_json_path", None),
     }
+    current_artifact_labels = set(key_paths) | {"conjugate_validation_report"}
     artifact_paths = getattr(result, "artifact_paths", None)
     if isinstance(artifact_paths, dict):
-        key_paths.update(artifact_paths)
+        key_paths.update(
+            {
+                label: path
+                for label, path in artifact_paths.items()
+                if label in current_artifact_labels
+            }
+        )
 
     for label, path in key_paths.items():
         if path is not None:
