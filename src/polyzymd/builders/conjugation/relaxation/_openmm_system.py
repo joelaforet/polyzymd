@@ -11,17 +11,16 @@ from typing import Any
 import numpy as np
 
 from polyzymd.builders.conjugation.relaxation._diagnostics import (
-    _positions_to_numpy,
     validate_finite_energy,
     validate_finite_positions,
 )
+from polyzymd.builders.conjugation.relaxation.geometry import positions_to_numpy
 from polyzymd.builders.conjugation.relaxation.models import (
     ConjugateRelaxationSettings,
     ProductLinkage,
 )
 
 LOGGER = logging.getLogger(__name__)
-_POSITION_CONVERSION_ERRORS = (AttributeError, TypeError, ValueError)
 
 
 def _freeze_protein_chain_masses(
@@ -355,7 +354,7 @@ def _add_positional_restraints(
     openmm_unit: Any,
 ) -> None:
     """Add harmonic positional restraints for selected atoms."""
-    reference_nm = _positions_to_numpy(positions, openmm_unit)
+    reference_nm = positions_to_numpy(positions, openmm_unit)
     restraint = openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
     restraint.addGlobalParameter(
         "k", restraint_k * openmm_unit.kilojoule_per_mole / openmm_unit.nanometer**2
