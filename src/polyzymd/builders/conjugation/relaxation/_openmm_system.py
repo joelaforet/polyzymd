@@ -14,7 +14,6 @@ from polyzymd.builders.conjugation.relaxation._diagnostics import (
     validate_finite_energy,
     validate_finite_positions,
 )
-from polyzymd.builders.conjugation.relaxation.geometry import positions_to_numpy
 from polyzymd.builders.conjugation.relaxation.models import (
     ConjugateRelaxationSettings,
     ProductLinkage,
@@ -391,29 +390,6 @@ def _state_energy_kj_mol(state: Any, openmm_unit: Any) -> float:
     if hasattr(energy, "value_in_unit"):
         return float(energy.value_in_unit(openmm_unit.kilojoule_per_mole))
     return float(energy)
-
-
-def _add_positional_restraints(
-    system: Any,
-    positions: Any,
-    atom_indices: tuple[int, ...],
-    restraint_k: float,
-    openmm: Any,
-    openmm_unit: Any,
-) -> None:
-    """Add harmonic positional restraints for selected atoms."""
-    reference_nm = positions_to_numpy(positions, openmm_unit)
-    restraint = openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
-    restraint.addGlobalParameter(
-        "k", restraint_k * openmm_unit.kilojoule_per_mole / openmm_unit.nanometer**2
-    )
-    restraint.addPerParticleParameter("x0")
-    restraint.addPerParticleParameter("y0")
-    restraint.addPerParticleParameter("z0")
-    for atom_index in atom_indices:
-        x_coord, y_coord, z_coord = reference_nm[atom_index]
-        restraint.addParticle(atom_index, [float(x_coord), float(y_coord), float(z_coord)])
-    system.addForce(restraint)
 
 
 def _select_platform(openmm: Any, requested_platform: str | None) -> Any:
