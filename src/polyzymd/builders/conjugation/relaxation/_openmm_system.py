@@ -82,6 +82,54 @@ def _set_zero_initial_velocities(context: Any, topology: Any, openmm_unit: Any) 
     context.setVelocities(velocities)
 
 
+def _create_relaxation_verlet_integrator(openmm: Any, openmm_unit: Any) -> Any:
+    """Create the Verlet integrator used for transient relaxation setup.
+
+    Parameters
+    ----------
+    openmm : Any
+        Imported OpenMM module or compatible test double.
+    openmm_unit : Any
+        Imported OpenMM unit module or compatible test double.
+
+    Returns
+    -------
+    Any
+        OpenMM Verlet integrator with the established relaxation timestep.
+    """
+    return openmm.VerletIntegrator(0.001 * openmm_unit.picoseconds)
+
+
+def _create_simulation(
+    topology: Any,
+    system: Any,
+    integrator: Any,
+    openmm_app: Any,
+    platform: Any,
+) -> Any:
+    """Create an OpenMM simulation with the selected platform.
+
+    Parameters
+    ----------
+    topology : Any
+        OpenMM-compatible topology.
+    system : Any
+        OpenMM-compatible system.
+    integrator : Any
+        OpenMM-compatible integrator.
+    openmm_app : Any
+        Imported ``openmm.app`` module or compatible test double.
+    platform : Any
+        Selected OpenMM platform.
+
+    Returns
+    -------
+    Any
+        OpenMM simulation object.
+    """
+    return openmm_app.Simulation(topology, system, integrator, platform)
+
+
 def _run_fixed_product_md(
     topology: Any,
     system: Any,
@@ -103,7 +151,7 @@ def _run_fixed_product_md(
                 settings.friction_per_picosecond / openmm_unit.picosecond,
                 timestep_fs * openmm_unit.femtosecond,
             )
-            simulation = openmm_app.Simulation(topology, system, integrator, platform)
+            simulation = _create_simulation(topology, system, integrator, openmm_app, platform)
             simulation.context.setPositions(positions)
             _set_zero_initial_velocities(simulation.context, topology, openmm_unit)
             energy_before = _state_energy_kj_mol(
@@ -393,7 +441,7 @@ def _validate_platform_context(openmm: Any, platform: Any) -> None:
 
     system = openmm.System()
     system.addParticle(39.9)
-    integrator = openmm.VerletIntegrator(0.001 * openmm_unit.picoseconds)
+    integrator = _create_relaxation_verlet_integrator(openmm, openmm_unit)
     context = openmm.Context(system, integrator, platform)
     context.setPositions([[0.0, 0.0, 0.0]] * openmm_unit.nanometer)
     context.getState(getEnergy=True)
