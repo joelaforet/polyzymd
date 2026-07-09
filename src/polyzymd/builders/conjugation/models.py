@@ -84,8 +84,6 @@ class ConjugationResult(BaseModel):
     output_dir: Path | None = None
     config_path: Path | None = None
     crosslinked_conjugate_pdb_path: Path | None = None
-    minimized_conjugate_pdb_path: Path | None = None
-    equilibrated_conjugate_pdb_path: Path | None = None
     relaxed_conjugate_pdb_path: Path | None = None
     solvated_pdb_path: Path | None = None
     workflow_json_path: Path | None = None
@@ -113,25 +111,12 @@ class ConjugationResult(BaseModel):
     def populate_artifact_paths(self) -> "ConjugationResult":
         """Populate lightweight path fields from retained workflow objects."""
         construction = self.construction
-        smoke = getattr(construction, "smoke", None)
-        local_minimization = getattr(construction, "local_minimization", None)
         if self.crosslinked_conjugate_pdb_path is None:
             self.crosslinked_conjugate_pdb_path = _optional_path(
                 getattr(construction, "crosslinked_pdb_path", None)
             )
-        if self.minimized_conjugate_pdb_path is None:
-            self.minimized_conjugate_pdb_path = _optional_path(
-                getattr(smoke, "minimized_pdb_path", None)
-                or getattr(local_minimization, "relaxed_pdb_path", None)
-            )
-        if self.equilibrated_conjugate_pdb_path is None:
-            self.equilibrated_conjugate_pdb_path = _optional_path(
-                getattr(smoke, "equilibrated_pdb_path", None)
-            )
         paths = {
             "crosslinked_conjugate_pdb": self.crosslinked_conjugate_pdb_path,
-            "minimized_conjugate_pdb": self.minimized_conjugate_pdb_path,
-            "equilibrated_conjugate_pdb": self.equilibrated_conjugate_pdb_path,
             "relaxed_conjugate_pdb": self.relaxed_conjugate_pdb_path,
             "solvated_pdb": self.solvated_pdb_path,
             "workflow_json": self.workflow_json_path,
@@ -172,14 +157,7 @@ class ConjugationResult(BaseModel):
             return workflow_result.model_copy(update={"config_path": _optional_path(config_path)})
 
         construction = getattr(workflow_result, "construction", None)
-        smoke = getattr(construction, "smoke", None)
-        local_minimization = getattr(construction, "local_minimization", None)
         crosslinked_path = _optional_path(getattr(construction, "crosslinked_pdb_path", None))
-        minimized_path = _optional_path(
-            getattr(smoke, "minimized_pdb_path", None)
-            or getattr(local_minimization, "relaxed_pdb_path", None)
-        )
-        equilibrated_path = _optional_path(getattr(smoke, "equilibrated_pdb_path", None))
         relaxed_path = _optional_path(getattr(workflow_result, "relaxed_conjugate_pdb_path", None))
         solvated_path = _optional_path(getattr(workflow_result, "solvated_pdb_path", None))
         workflow_path = _optional_path(getattr(workflow_result, "workflow_json_path", None))
@@ -188,8 +166,6 @@ class ConjugationResult(BaseModel):
             name: path
             for name, path in {
                 "crosslinked_conjugate_pdb": crosslinked_path,
-                "minimized_conjugate_pdb": minimized_path,
-                "equilibrated_conjugate_pdb": equilibrated_path,
                 "relaxed_conjugate_pdb": relaxed_path,
                 "solvated_pdb": solvated_path,
                 "workflow_json": workflow_path,
@@ -202,8 +178,6 @@ class ConjugationResult(BaseModel):
             output_dir=_optional_path(getattr(workflow_result, "output_dir", None)),
             config_path=_optional_path(config_path),
             crosslinked_conjugate_pdb_path=crosslinked_path,
-            minimized_conjugate_pdb_path=minimized_path,
-            equilibrated_conjugate_pdb_path=equilibrated_path,
             relaxed_conjugate_pdb_path=relaxed_path,
             solvated_pdb_path=solvated_path,
             workflow_json_path=workflow_path,

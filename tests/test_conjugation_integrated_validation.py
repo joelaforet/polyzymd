@@ -1,17 +1,17 @@
-"""Opt-in integrated physics smoke test for conjugation construction.
+"""Opt-in integrated physics validation test for conjugation construction.
 
 This is the acceptance test for the real construction path: Polymerist recipe
 generation, Polymerist PDB parsing, Packmol placement, crosslinked PDB writing,
 Pablo ingestion with explicit LYX/NHX crosslink configuration, OpenFF
-Interchange parameterization, and restrained vacuum OpenMM minimization plus MD.
+Interchange parameterization, and conjugate OpenMM relaxation.
 
 Run on Blanca GPU resources with a command similar to::
 
     module load slurm/blanca
     salloc ...
-    PYTHONNOUSERSITE=1 POLYZYMD_RUN_CONJUGATION_PABLO_SMOKE=1 \
+    PYTHONNOUSERSITE=1 POLYZYMD_RUN_CONJUGATION_PABLO_VALIDATION=1 \
       pixi run -e sim-cuda-12-4 pytest \
-      tests/test_conjugation_integrated_smoke.py -v
+      tests/test_conjugation_integrated_validation.py -v
 
 When the opt-in environment variable is set, scientific or software blockers
 after workflow start are reported as hard failures with the artifact directory.
@@ -35,10 +35,6 @@ from polyzymd.builders.conjugation._linkage import (
     PabloCrosslinkRequirement,
     require_pablo_crosslink_requirement,
 )
-from polyzymd.builders.conjugation._relaxation import (
-    VacuumSmokeSettings,
-    run_restrained_vacuum_smoke,
-)
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestionResult, PabloIngestor
 from polyzymd.builders.conjugation.pablo.parameterization import (
     create_interchange_from_pablo_topology,
@@ -49,6 +45,8 @@ from polyzymd.builders.conjugation.placement import (
 )
 from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.polymer.recipe import generate_multi_residue_molecule
+from polyzymd.builders.conjugation.relaxation.models import ConjugateRelaxationSettings
+from polyzymd.builders.conjugation.relaxation.openmm import relax_conjugate
 from polyzymd.builders.conjugation.structure.pdb import (
     CrosslinkedPdbAssemblyOptions,
     PdbAtomRecord,
@@ -58,11 +56,11 @@ from tests._support.conjugation_polymer_recipes import sbma_egpma_nhs_recipe
 
 T = TypeVar("T")
 
-SMOKE_ENV_VAR = "POLYZYMD_RUN_CONJUGATION_PABLO_SMOKE"
-SMOKE_PLATFORM_ENV_VAR = "POLYZYMD_CONJUGATION_SMOKE_PLATFORM"
-SMOKE_MINIMIZATION_ITERS_ENV_VAR = "POLYZYMD_CONJUGATION_SMOKE_MIN_ITERS"
-SMOKE_NVT_STEPS_ENV_VAR = "POLYZYMD_CONJUGATION_SMOKE_NVT_STEPS"
-SMOKE_POLYMERIST_RETRIES_ENV_VAR = "POLYZYMD_CONJUGATION_SMOKE_POLYMERIST_RETRIES"
+VALIDATION_ENV_VAR = "POLYZYMD_RUN_CONJUGATION_PABLO_VALIDATION"
+VALIDATION_PLATFORM_ENV_VAR = "POLYZYMD_CONJUGATION_VALIDATION_PLATFORM"
+VALIDATION_MINIMIZATION_ITERS_ENV_VAR = "POLYZYMD_CONJUGATION_VALIDATION_MIN_ITERS"
+VALIDATION_NVT_STEPS_ENV_VAR = "POLYZYMD_CONJUGATION_VALIDATION_NVT_STEPS"
+VALIDATION_POLYMERIST_RETRIES_ENV_VAR = "POLYZYMD_CONJUGATION_VALIDATION_POLYMERIST_RETRIES"
 POC_PROTEIN_PATH = (
     Path(__file__).resolve().parents[1]
     / "src"
@@ -79,10 +77,10 @@ ATOM_RECORD_PREFIXES = ("ATOM", "HETATM")
 
 @pytest.mark.slow
 @pytest.mark.conjugation_stack
-def test_opt_in_integrated_conjugation_physics_smoke(tmp_path: Path):
-    """Run the real integrated conjugation construction and vacuum MD smoke."""
+def test_opt_in_integrated_conjugation_physics_validation(tmp_path: Path):
+    """Run the real integrated conjugation construction and OpenMM relaxation."""
     platform_name = _require_conjugation_stack_or_skip()
-    artifact_dir = tmp_path / "conjugation-integrated-smoke"
+    artifact_dir = tmp_path / "conjugation-integrated-validation"
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     if not POC_PROTEIN_PATH.exists():
@@ -96,7 +94,7 @@ def test_opt_in_integrated_conjugation_physics_smoke(tmp_path: Path):
             recipe,
             artifact_dir / "polymerist-cache",
             force_regenerate=True,
-            max_retries=_int_env(SMOKE_POLYMERIST_RETRIES_ENV_VAR, default=1),
+            max_retries=_int_env(VALIDATION_POLYMERIST_RETRIES_ENV_VAR, default=1),
         ),
     )
     if generation.pdb_path is None:
@@ -113,7 +111,7 @@ def test_opt_in_integrated_conjugation_physics_smoke(tmp_path: Path):
             generation.pdb_path,
             recipe=recipe,
             sequence=generation.sequence,
-            name="smoke-sbma-egpma-nhs",
+            name="validation-sbma-egpma-nhs",
         ),
     )
     linker = NhsLysModifierLinker(target_residue_number=TARGET_LYSINE_RESIDUE)
@@ -185,39 +183,41 @@ def test_opt_in_integrated_conjugation_physics_smoke(tmp_path: Path):
             artifact_dir,
         )
 
-    restrained_indices = _protein_heavy_atom_indices(crosslinked_pdb)
-    smoke_result = _run_stage(
-        "Restrained vacuum OpenMM minimization and MD",
+    attachment_spec = SimpleNamespace(
+        attachment_id="integrated_validation",
+        attachment_index=1,
+        reaction_name="nhs_lys",
+        resolved_plan=resolved_plan,
+    )
+    relaxation_result = _run_stage(
+        "OpenMM conjugate relaxation",
         artifact_dir,
-        lambda: run_restrained_vacuum_smoke(
+        lambda: relax_conjugate(
             parameterization.interchange,
             artifact_dir,
-            protein_heavy_atom_indices=restrained_indices,
-            settings=VacuumSmokeSettings(
+            product_pdb_path=crosslinked_pdb,
+            attachment_specs=(attachment_spec,),
+            assembly=assembly,
+            settings=ConjugateRelaxationSettings(
                 minimization_max_iterations=_int_env(
-                    SMOKE_MINIMIZATION_ITERS_ENV_VAR,
+                    VALIDATION_MINIMIZATION_ITERS_ENV_VAR,
                     default=5,
                 ),
-                nvt_steps=_int_env(SMOKE_NVT_STEPS_ENV_VAR, default=2),
+                md_steps=max(1, _int_env(VALIDATION_NVT_STEPS_ENV_VAR, default=2)),
                 platform_name=platform_name,
             ),
         ),
     )
 
-    assert smoke_result.success
-    assert smoke_result.nvt_steps == _int_env(SMOKE_NVT_STEPS_ENV_VAR, default=2)
-    assert smoke_result.smoke_json_path.exists()
-    assert smoke_result.minimized_pdb_path is not None and smoke_result.minimized_pdb_path.exists()
-    assert (
-        smoke_result.equilibrated_pdb_path is not None
-        and smoke_result.equilibrated_pdb_path.exists()
-    )
+    assert relaxation_result.success
+    assert relaxation_result.md_steps == max(1, _int_env(VALIDATION_NVT_STEPS_ENV_VAR, default=2))
+    assert relaxation_result.diagnostics_json_path.exists()
 
 
 def _require_conjugation_stack_or_skip() -> str:
     """Skip unless the opt-in chemistry stack and OpenMM platform are available."""
-    if os.environ.get(SMOKE_ENV_VAR) != "1":
-        pytest.skip(f"Set {SMOKE_ENV_VAR}=1 to run the Pablo conjugation physics smoke")
+    if os.environ.get(VALIDATION_ENV_VAR) != "1":
+        pytest.skip(f"Set {VALIDATION_ENV_VAR}=1 to run the Pablo conjugation physics validation")
     if shutil.which("packmol") is None:
         pytest.skip("Packmol binary is not available on PATH")
 
@@ -239,7 +239,7 @@ def _select_usable_openmm_platform_or_skip() -> str:
         openmm.Platform.getPlatform(index).getName()
         for index in range(openmm.Platform.getNumPlatforms())
     }
-    requested = os.environ.get(SMOKE_PLATFORM_ENV_VAR)
+    requested = os.environ.get(VALIDATION_PLATFORM_ENV_VAR)
     candidates = (requested,) if requested else ("CUDA", "OpenCL", "CPU", "Reference")
     errors: list[str] = []
     for platform_name in candidates:
@@ -253,7 +253,7 @@ def _select_usable_openmm_platform_or_skip() -> str:
         return platform_name
 
     details = "; ".join(errors) if errors else "no requested platform is registered"
-    pytest.skip(f"No usable OpenMM platform for conjugation smoke: {details}")
+    pytest.skip(f"No usable OpenMM platform for conjugation validation: {details}")
 
 
 def _validate_openmm_platform_context(openmm: object, unit: object, platform_name: str) -> None:
@@ -290,18 +290,18 @@ def _explicit_lyx_nhx_policy(requirement: PabloCrosslinkRequirement) -> SimpleNa
 def _run_stage(stage: str, artifact_dir: Path, func: Callable[[], T]) -> T:
     """Run one real workflow stage and fail with an actionable artifact pointer."""
     start = time.monotonic()
-    print(f"[conjugation-smoke] START {stage}", flush=True)
+    print(f"[conjugation-validation] START {stage}", flush=True)
     try:
         result = func()
     except Exception as exc:  # noqa: BLE001 - third-party stack errors need normalized context
         _fail_blocker(stage, exc, artifact_dir)
     elapsed = time.monotonic() - start
-    print(f"[conjugation-smoke] DONE  {stage} ({elapsed:.1f} s)", flush=True)
+    print(f"[conjugation-validation] DONE  {stage} ({elapsed:.1f} s)", flush=True)
     return result
 
 
 def _int_env(name: str, *, default: int) -> int:
-    """Read a positive integer environment setting for the opt-in smoke."""
+    """Read a positive integer environment setting for the opt-in validation."""
     value = os.environ.get(name)
     if value is None or value == "":
         return default
@@ -312,9 +312,9 @@ def _int_env(name: str, *, default: int) -> int:
 
 
 def _fail_blocker(stage: str, exc: Exception, artifact_dir: Path) -> None:
-    """Fail the opt-in smoke with explicit blocker guidance and saved artifacts."""
+    """Fail the opt-in validation with explicit blocker guidance and saved artifacts."""
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    report_path = artifact_dir / "conjugation_smoke_failure.txt"
+    report_path = artifact_dir / "conjugation_validation_failure.txt"
     report_path.write_text(
         f"Stage: {stage}\n"
         f"Artifact directory: {artifact_dir}\n"
@@ -324,7 +324,7 @@ def _fail_blocker(stage: str, exc: Exception, artifact_dir: Path) -> None:
         encoding="utf-8",
     )
     pytest.fail(
-        f"Integrated conjugation physics smoke failed during {stage}. "
+        f"Integrated conjugation physics validation failed during {stage}. "
         f"{_blocker_guidance(stage, exc)} Artifacts were left under {artifact_dir}. "
         f"Failure report: {report_path}. Original error: {type(exc).__name__}: {exc}"
     )
@@ -345,12 +345,12 @@ def _blocker_guidance(stage: str, exc: Exception) -> str:
         return (
             "This means the Pablo topology reached parameterization, but OpenFF force field "
             "coverage is incomplete. Add templates, charges, and bonded parameters for the "
-            "LYX/NHX product residues before claiming a full physics smoke."
+            "LYX/NHX product residues before claiming a full physics validation."
         )
-    if "openmm" in stage.lower() or "vacuum" in stage.lower():
+    if "openmm" in stage.lower():
         return (
-            "This means a parameterized system was built, but restrained vacuum EM/MD did "
-            "not complete with finite states. Inspect the minimized and smoke JSON artifacts."
+            "This means a parameterized system was built, but restrained OpenMM relaxation did "
+            "not complete with finite states. Inspect the minimized and relaxation JSON artifacts."
         )
     return "This is a real workflow blocker, not a dependency guard skip."
 

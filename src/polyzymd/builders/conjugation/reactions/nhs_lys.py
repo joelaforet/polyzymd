@@ -64,10 +64,6 @@ class NhsLysReactionSettings(BaseModel):
         True,
         description="Hint that source lysine hydrogens should be canonicalized before linking",
     )
-    minimize_product_junction: bool = Field(
-        True,
-        description="Hint that the NHS-Lys junction should be locally minimized after assembly",
-    )
 
     @field_validator(
         "source_site_residue_name",
@@ -162,7 +158,6 @@ class NhsLysReaction(ReactionTemplate):
             ),
             max_nz_hydrogens_to_remove=defaults.max_nz_hydrogens_to_remove,
             canonicalize_site_hydrogens=defaults.canonicalize_site_hydrogens,
-            minimize_product_junction=defaults.minimize_product_junction,
         )
 
     @classmethod

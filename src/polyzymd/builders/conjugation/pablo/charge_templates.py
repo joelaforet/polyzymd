@@ -17,7 +17,7 @@ _PROVENANCE_KEYS = (
     "charge_provenance",
     "partial_charge_provenance",
 )
-_FORMAL_SOURCE_TOKENS = ("formal", "smoke", "pdb_formal", "atomdefinition.charge")
+_FORMAL_SOURCE_TOKENS = ("formal", "pdb_formal", "atomdefinition.charge")
 
 
 @dataclass(frozen=True)
@@ -120,8 +120,8 @@ def _partial_charge_source(product_state_pablo_library: Any) -> _PartialChargeSo
     if templates:
         raise ValueError(
             "Product-state Pablo library contains molecule charge_templates, but none are marked as "
-            "production partial-charge provenance. Refusing to treat cached, formal-charge, or "
-            "smoke templates as final conjugate charges. Expected a template property such as "
+            "production partial-charge provenance. Refusing to treat cached or formal-charge "
+            "templates as final conjugate charges. Expected a template property such as "
             "polyzymd_charge_provenance='production:...'."
         )
 

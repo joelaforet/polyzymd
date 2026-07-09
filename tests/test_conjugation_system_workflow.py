@@ -43,12 +43,12 @@ from polyzymd.builders.conjugation.system_workflow import (
     _apply_pdb_atom_names_to_topology,
     _build_direct_solvated_system,
     _build_solvated_system,
-    _local_minimization_settings_for_product,
     _policy_with_resolved_crosslink,
     _prepared_protein_pdb_path,
     _require_supported_coordinate_backend,
     _restore_pdb_atom_name_fields,
 )
+from polyzymd.builders.conjugation.validation import ValidationStatus
 from polyzymd.config.schema import (
     ConjugationCcdPabloPolicyConfig,
     ConjugationChainPolicyConfig,
@@ -141,31 +141,29 @@ def test_policy_with_resolved_crosslink_uses_product_state_leaving_atoms():
 
 
 def test_system_workflow_settings_enable_public_product_state_defaults():
-    """Public workflow defaults should use the generic frozen-protein protocol."""
+    """Public workflow defaults should use the generic conjugate protocol."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
     settings = workflow_module.ConjugatedPolymerSystemSettings()
 
     assert settings.canonicalize_source_protein_hydrogens is True
     assert settings.use_product_state_pablo_library is True
-    assert settings.run_frozen_protein_product_relaxation is True
-    assert settings.run_product_state_local_minimization is True
+    assert settings.run_relaxation is True
     assert settings.protein_canonicalization.ph == pytest.approx(7.0)
 
 
-def test_relaxed_conjugate_pdb_prefers_final_frozen_relaxation_artifact(tmp_path):
+def test_relaxed_conjugate_pdb_prefers_final_conjugate_relaxation_artifact(tmp_path):
     """Downstream solvation should consume the Stage B relaxed PDB."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
-    minimized = tmp_path / "assembled_frozen_protein_minimized.pdb"
-    relaxed = tmp_path / "assembled_frozen_protein_relaxed.pdb"
+    minimized = tmp_path / "conjugate_minimized.pdb"
+    relaxed = tmp_path / "conjugate_relaxed.pdb"
     minimized.write_text("END\n", encoding="utf-8")
     relaxed.write_text("END\n", encoding="utf-8")
     construction = SimpleNamespace(
-        local_minimization=None,
-        smoke=SimpleNamespace(
+        relaxation=SimpleNamespace(
             minimized_pdb_path=minimized,
-            equilibrated_pdb_path=relaxed,
+            relaxed_pdb_path=relaxed,
         ),
     )
 
@@ -297,345 +295,6 @@ def test_prepared_protein_path_canonicalizes_to_construction_dir(monkeypatch, tm
     assert prepared_path.with_suffix(".canonicalization.json").exists()
 
 
-def test_local_minimization_settings_use_product_atom_identities(tmp_path: Path):
-    """Local minimization selectors should use generic product link atoms."""
-    from polyzymd.builders.conjugation._relaxation import LocalMinimizationSettings
-
-    product = tmp_path / "product.pdb"
-    product.write_text(
-        "".join(
-            [
-                _pdb_line(10, " NZ ", "LYX", "A", 23, element="N"),
-                _pdb_line(20, "C047", "NHX", "C", 5, element="C"),
-                _pdb_line(21, "OX1 ", "NHX", "C", 5, element="O"),
-                _pdb_line(22, "OY2 ", "NHX", "C", 5, element="O"),
-                "CONECT   10   20\n",
-                "CONECT   20   21\n",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    requirement = PabloCrosslinkRequirement(
-        residues=("LYX", "NHX"),
-        linking_atoms=("NZ", "C047"),
-        leaving_atoms=(("H11",), ("O021",)),
-        bond_order=1,
-    )
-
-    settings = _local_minimization_settings_for_product(
-        product,
-        base_settings=LocalMinimizationSettings(),
-        requirements=(requirement,),
-    )
-
-    linkage = settings.linkages[0]
-    assert linkage.protein_link_selector.serial is None
-    assert linkage.protein_link_selector.chain_id == "A"
-    assert linkage.protein_link_selector.residue_name == "LYX"
-    assert linkage.protein_link_selector.residue_number == 23
-    assert linkage.modifier_link_selector.chain_id == "C"
-    assert linkage.modifier_link_selector.residue_number == 5
-    assert linkage.modifier_link_selector.atom_name == "C047"
-
-
-def test_local_minimization_settings_preserve_explicit_selectors(tmp_path: Path):
-    """Explicit local minimization selectors should override product-state inference."""
-    from polyzymd.builders.conjugation._relaxation import (
-        LocalLinkageAtomSelector,
-        LocalLinkageSelectors,
-        LocalMinimizationSettings,
-    )
-
-    settings = LocalMinimizationSettings(
-        linkages=(
-            LocalLinkageSelectors(
-                protein_link_selector=LocalLinkageAtomSelector(
-                    chain_id="A",
-                    residue_name="LYX",
-                    residue_number=23,
-                    atom_name="NZ",
-                ),
-                modifier_link_selector=LocalLinkageAtomSelector(
-                    chain_id="C",
-                    residue_name="NHX",
-                    residue_number=5,
-                    atom_name="USER",
-                ),
-                target_bond_length_angstrom=1.33,
-            ),
-        ),
-    )
-    requirement = PabloCrosslinkRequirement(
-        residues=("LYX", "NHX"),
-        linking_atoms=("NZ", "C047"),
-        leaving_atoms=(("H11",), ("O021",)),
-        bond_order=1,
-    )
-
-    derived = _local_minimization_settings_for_product(
-        tmp_path / "missing-product.pdb",
-        base_settings=settings,
-        requirements=(requirement,),
-    )
-
-    assert derived is settings
-    assert derived.linkages[0].modifier_link_selector.atom_name == "USER"
-
-
-def test_local_minimization_settings_do_not_require_modifier_oxygen_anchor(tmp_path: Path):
-    """Generic local minimization should not require an auxiliary oxygen anchor."""
-    from polyzymd.builders.conjugation._relaxation import LocalMinimizationSettings
-
-    product = tmp_path / "product.pdb"
-    product.write_text(
-        "".join(
-            [
-                _pdb_line(10, " NZ ", "LYX", "A", 23, element="N"),
-                _pdb_line(20, "C047", "NHX", "C", 5, element="C"),
-                _pdb_line(21, "ODEF", "NHX", "C", 5, element="O"),
-            ]
-        ),
-        encoding="utf-8",
-    )
-    requirement = PabloCrosslinkRequirement(
-        residues=("LYX", "NHX"),
-        linking_atoms=("NZ", "C047"),
-        leaving_atoms=(("H11",), ("O021",)),
-        bond_order=1,
-    )
-
-    settings = _local_minimization_settings_for_product(
-        product,
-        base_settings=LocalMinimizationSettings(),
-        requirements=(requirement,),
-        product_state_pablo_library=SimpleNamespace(definitions=()),
-    )
-
-    assert settings.linkages[0].modifier_link_selector.atom_name == "C047"
-
-
-def test_nhs_lys_shim_uses_product_state_local_minimization(
-    monkeypatch,
-    tmp_path: Path,
-):
-    """The legacy NHS-Lys shim should preserve single-site local minimization."""
-    import polyzymd.builders.conjugation.pablo.product as product_pablo_module
-    import polyzymd.builders.conjugation.system_workflow as workflow_module
-
-    requirement = PabloCrosslinkRequirement(
-        residues=("LYX", "NHX"),
-        linking_atoms=("NZ", "C047"),
-        leaving_atoms=(("H11",), ("O020",)),
-        bond_order=1,
-    )
-    resolved_plan = _resolved_plan(requirement)
-    product_library = SimpleNamespace(residue_library=object())
-    calls = {}
-
-    placed = PlacedPolymerFragment(
-        atoms=(
-            PdbAtomRecord(
-                serial=2,
-                atom_name="C047",
-                residue_name="NHX",
-                chain_id="C",
-                residue_number=5,
-                x=1,
-                y=0,
-                z=0,
-            ),
-        ),
-        reactive_atom_name="C047",
-    )
-    placement = PackmolModifierPlacementResult(
-        placed_modifier=placed,
-        packmol_input_path=tmp_path / "packmol.inp",
-        packmol_output_path=tmp_path / "packmol.pdb",
-        protein_sterics_pdb_path=tmp_path / "protein.pdb",
-        modifier_pdb_path=tmp_path / "modifier.pdb",
-        packmol_input_text="",
-        target_bond_length_angstrom=1.33,
-        placed_bond_length_angstrom=1.33,
-        min_modifier_protein_distance_angstrom=2.0,
-    )
-
-    def fake_place(protein_pdb_path, modifiers, plans, output_dir, *, settings=None):
-        calls["placed_protein_path"] = Path(protein_pdb_path)
-        calls["modifier_count"] = len(modifiers)
-        calls["plan_count"] = len(plans)
-        return (placement,)
-
-    def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
-        calls["assembly_protein_path"] = Path(protein_pdb_path)
-        Path(output_path).write_text(
-            "".join(
-                [
-                    _pdb_line(10, " NZ ", "LYX", "A", 23, element="N"),
-                    _pdb_line(20, "C047", "NHX", "C", 5, element="C"),
-                    _pdb_line(21, "OX1 ", "NHX", "C", 5, element="O"),
-                    "CONECT   10   20\n",
-                    "CONECT   20   21\n",
-                ]
-            ),
-            encoding="utf-8",
-        )
-        return CrosslinkedPdbAssemblyResult(
-            output_path=Path(output_path),
-            protein_atom_count=1,
-            polymer_atom_count=2,
-            removed_protein_atom_count=1,
-            removed_polymer_atom_count=1,
-            removed_atom_serials=(11, 21),
-            removed_atom_names=("H11", "O020"),
-            added_conect_pair=(10, 20),
-        )
-
-    def fake_product_library(**kwargs):
-        calls["product_pdb"] = Path(kwargs["product_pdb"])
-        calls["source_protein_pdb"] = Path(kwargs["source_protein_pdb"])
-        calls["polymer_sdf"] = Path(kwargs["polymer_sdf"])
-        return product_library
-
-    class FakeIngestor:
-        def __init__(self, policy):
-            self.policy = policy
-
-        def ingest_structure(
-            self, path, *, chain_policy=None, output_dir=None, residue_library=None
-        ):
-            calls["residue_library"] = residue_library
-            return PabloIngestionResult(
-                success=True,
-                path=Path(path),
-                suffix=".pdb",
-                pablo=PabloAvailability(available=True),
-                topology=SimpleNamespace(molecules=(object(),)),
-            )
-
-    def fake_parameterize(topology, *, settings=None, charge_from_molecules=None):
-        calls["charge_template_count"] = len(charge_from_molecules or ())
-        return InterchangeParameterizationResult(
-            success=True,
-            interchange=object(),
-            force_field_names=("fake.offxml",),
-            topology_type="FakeTopology",
-        )
-
-    def fake_smoke(
-        interchange,
-        output_dir,
-        *,
-        settings=None,
-        crosslinked_pdb_path=None,
-        attachment_specs=(),
-    ):
-        calls["smoke"] = calls.get("smoke", 0) + 1
-        calls["smoke_crosslinked_pdb_path"] = crosslinked_pdb_path
-        calls["smoke_attachment_specs"] = attachment_specs
-        minimized = Path(output_dir) / "minimized.pdb"
-        minimized.write_text("END\n", encoding="utf-8")
-        return SimpleNamespace(
-            success=True, minimized_pdb_path=minimized, equilibrated_pdb_path=None
-        )
-
-    def fake_local_minimization(pdb_path, output_dir, **kwargs):
-        calls["local_minimization"] = calls.get("local_minimization", 0) + 1
-        calls["local_settings"] = kwargs["settings"]
-        calls["local_policy"] = kwargs["pablo_policy"]
-        calls["local_product_library"] = kwargs["product_state_pablo_library"]
-        relaxed = Path(output_dir) / "local-relaxed.pdb"
-        relaxed.write_text("END\n", encoding="utf-8")
-        return SimpleNamespace(
-            success=False,
-            relaxed_pdb_path=relaxed,
-            blocker=None,
-        )
-
-    monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
-    monkeypatch.setattr(
-        workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
-    )
-    monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
-    monkeypatch.setattr(
-        product_pablo_module, "build_product_state_pablo_library", fake_product_library
-    )
-    monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
-    monkeypatch.setattr(
-        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
-    )
-    monkeypatch.setattr(
-        workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
-    )
-    monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
-    monkeypatch.setattr(
-        workflow_module,
-        "run_post_crosslink_local_minimization",
-        fake_local_minimization,
-    )
-
-    policy = ConjugationCcdPabloPolicyConfig(
-        crosslinks=[
-            {
-                "residues": ("LYX", "NHX"),
-                "linking_atoms": ("NZ", "C047"),
-                "leaving_atoms": ((), ()),
-                "bond_order": 1,
-            }
-        ]
-    )
-    prepared_protein = tmp_path / "canonical.pdb"
-    prepared_protein.write_text("END\n", encoding="utf-8")
-    polymer_sdf = tmp_path / "polymer.sdf"
-    polymer_sdf.write_text("", encoding="utf-8")
-
-    spec = SimpleNamespace(
-        attachment_id="nhs_lys_attachment_01",
-        attachment_index=1,
-        reaction_name="nhs_lys",
-        generated_fragment=object(),
-        resolved_plan=resolved_plan,
-        source_sidecars={"sdf": polymer_sdf},
-        fragment=SimpleNamespace(source_kind="polymer"),
-    )
-
-    construction, topology = workflow_module._construct_conjugate_from_specs(
-        protein_pdb_path=prepared_protein,
-        specs=(spec,),
-        ccd_pablo_policy=policy,
-        chain_policy=None,
-        output_dir=tmp_path / "construction",
-        settings=ModifierConstructionSettings(run_smoke=True),
-        use_product_state_pablo_library=True,
-        use_frozen_protein_product_relaxation=False,
-        run_product_state_local_minimization=True,
-        local_minimization_settings=workflow_module._default_local_minimization_settings(),
-    )
-
-    assert topology is not None
-    assert construction.local_minimization is not None
-    assert construction.local_minimization.relaxed_pdb_path.name == "local-relaxed.pdb"
-    assert construction.local_minimization.success is False
-    assert construction.smoke is None
-    assert calls["placed_protein_path"] == prepared_protein
-    assert calls["modifier_count"] == 1
-    assert calls["plan_count"] == 1
-    assert calls["assembly_protein_path"] == prepared_protein
-    assert calls["source_protein_pdb"] == prepared_protein
-    assert calls["polymer_sdf"] == polymer_sdf
-    assert calls["residue_library"] is product_library.residue_library
-    assert calls["charge_template_count"] == 1
-    assert calls.get("smoke", 0) == 0
-    assert calls["local_minimization"] == 1
-    assert calls["local_settings"].linkages[0].protein_link_selector.residue_name == "LYX"
-    assert calls["local_settings"].linkages[0].modifier_link_selector.residue_name == "NHX"
-    assert calls["local_policy"].crosslinks[0].leaving_atoms == ((), ())
-    assert calls["local_product_library"] is product_library
-    assert any(
-        "local minimization completed and wrote a relaxed PDB" in item
-        for item in construction.diagnostics
-    )
-
-
 def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     monkeypatch,
     tmp_path: Path,
@@ -653,7 +312,7 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     moieties = tuple(
         _moiety_fragment(residue_name="NAG", residue_number=index + 1) for index in range(2)
     )
-    calls = {"placements": 0, "parameterize": 0, "smoke": 0, "local_minimization": 0}
+    calls = {"placements": 0, "parameterize": 0, "validation": 0}
 
     def fake_place(protein_pdb_path, modifiers_arg, plans_arg, output_dir, *, settings=None):
         calls["placements"] += 1
@@ -723,8 +382,15 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
                 topology=SimpleNamespace(molecules=(object(),)),
             )
 
-    def fake_parameterize(topology, *, settings=None, charge_from_molecules=None):
+    def fake_parameterize(
+        topology,
+        *,
+        settings=None,
+        charge_from_molecules=None,
+        require_charge_templates=False,
+    ):
         calls["parameterize"] += 1
+        calls["require_charge_templates"] = require_charge_templates
         return InterchangeParameterizationResult(
             success=True,
             interchange=object(),
@@ -732,7 +398,7 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
             topology_type="FakeTopology",
         )
 
-    def fake_smoke(
+    def fake_validation(
         interchange,
         output_dir,
         *,
@@ -740,22 +406,10 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
         crosslinked_pdb_path=None,
         attachment_specs=(),
     ):
-        calls["smoke"] += 1
-        calls["smoke_crosslinked_pdb_path"] = crosslinked_pdb_path
-        calls["smoke_attachment_specs"] = attachment_specs
-        minimized = Path(output_dir) / "minimized.pdb"
-        minimized.write_text("END\n", encoding="utf-8")
-        return SimpleNamespace(
-            success=True, minimized_pdb_path=minimized, equilibrated_pdb_path=None
-        )
-
-    def fake_local_minimization(pdb_path, output_dir, **kwargs):
-        calls["local_minimization"] += 1
-        calls["local_linkage_count"] = len(kwargs["settings"].linkages)
-        calls["local_settings"] = kwargs["settings"]
-        relaxed = Path(output_dir) / "local-relaxed.pdb"
-        relaxed.write_text("END\n", encoding="utf-8")
-        return SimpleNamespace(success=True, relaxed_pdb_path=relaxed, blocker=None)
+        calls["validation"] += 1
+        calls["validation_crosslinked_pdb_path"] = crosslinked_pdb_path
+        calls["validation_attachment_specs"] = attachment_specs
+        return SimpleNamespace(success=True)
 
     monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
     monkeypatch.setattr(
@@ -764,16 +418,7 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
     monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
     monkeypatch.setattr(
-        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
-    )
-    monkeypatch.setattr(
         workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
-    )
-    monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
-    monkeypatch.setattr(
-        workflow_module,
-        "run_post_crosslink_local_minimization",
-        fake_local_minimization,
     )
 
     policy = ConjugationCcdPabloPolicyConfig(
@@ -810,10 +455,8 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
         ccd_pablo_policy=policy,
         output_dir=tmp_path / "construction",
         chain_policy=None,
-        settings=ModifierConstructionSettings(run_smoke=False),
+        settings=ModifierConstructionSettings(run_relaxation=False),
         use_product_state_pablo_library=False,
-        run_product_state_local_minimization=True,
-        local_minimization_settings=object(),
     )
 
     assert topology is not None
@@ -825,172 +468,33 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     assert calls["attachment_count"] == 2
     assert calls["protein_products"] == ("ASX", "ASX")
     assert calls["parameterize"] == 1
-    assert calls["local_minimization"] == 1
-    assert calls["local_linkage_count"] == 2
-    assert calls["local_settings"].linkages[0].protein_link_selector.residue_name == "ASX"
-    assert calls["local_settings"].linkages[1].modifier_link_selector.residue_name == "NAG"
-    assert calls["smoke"] == 0
-    assert construction.local_minimization is not None
+    assert calls["validation"] == 0
 
 
-def test_single_generic_local_minimization_request_runs_minimizer(
+@pytest.mark.parametrize(
+    (
+        "run_relaxation",
+        "use_conjugate_relaxation",
+        "expect_relaxation",
+        "relaxation_evidence_status",
+    ),
+    (
+        (False, False, False, ValidationStatus.PASS),
+        (False, False, False, ValidationStatus.SKIPPED),
+        (True, True, True, ValidationStatus.PASS),
+        (True, True, True, ValidationStatus.FAIL),
+        (True, True, True, ValidationStatus.SKIPPED),
+    ),
+)
+def test_relaxation_receives_product_path_and_attachment_specs(
     monkeypatch,
     tmp_path: Path,
+    run_relaxation: bool,
+    use_conjugate_relaxation: bool,
+    expect_relaxation: bool,
+    relaxation_evidence_status: ValidationStatus,
 ):
-    """Single non-NHS attachments should use the generic local minimization path."""
-    import polyzymd.builders.conjugation.system_workflow as workflow_module
-
-    plan = _generic_resolved_plan(
-        residue_number=42,
-        modifier_residue_number=1,
-        modifier_atom="C001",
-    )
-    modifier = _generated_fragment(residue_name="NAG", residue_number=1)
-    spec = SimpleNamespace(
-        attachment_id="n_gly_attachment_01",
-        attachment_index=1,
-        reaction_name="n_glycosylation",
-        generated_fragment=modifier,
-        resolved_plan=plan,
-        source_sidecars={},
-        fragment=SimpleNamespace(source_kind="moiety"),
-    )
-    calls = {"smoke": 0, "local_minimization": 0}
-
-    def fake_place(protein_pdb_path, modifiers_arg, plans_arg, output_dir, *, settings=None):
-        return (
-            PackmolModifierPlacementResult(
-                placed_modifier=modifiers_arg[0].to_placed_fragment(),
-                packmol_input_path=Path(output_dir) / "packmol.inp",
-                packmol_output_path=Path(output_dir) / "packmol.pdb",
-                protein_sterics_pdb_path=Path(output_dir) / "protein.pdb",
-                modifier_pdb_path=Path(output_dir) / "modifier.pdb",
-                packmol_input_text="",
-                target_bond_length_angstrom=plan.target_bond_length_angstrom,
-                placed_bond_length_angstrom=plan.target_bond_length_angstrom,
-                min_modifier_protein_distance_angstrom=2.0,
-            ),
-        )
-
-    def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
-        Path(output_path).write_text("END\n", encoding="utf-8")
-        return CrosslinkedPdbAssemblyResult(
-            output_path=Path(output_path),
-            protein_atom_count=10,
-            polymer_atom_count=1,
-            removed_protein_atom_count=1,
-            removed_polymer_atom_count=0,
-            removed_atom_serials=(),
-            removed_atom_names=(),
-            added_conect_pair=(1, 2),
-            added_conect_pairs=((1, 2),),
-        )
-
-    class FakeIngestor:
-        def __init__(self, policy):
-            self.policy = policy
-
-        def ingest_structure(
-            self, path, *, chain_policy=None, output_dir=None, residue_library=None
-        ):
-            return PabloIngestionResult(
-                success=True,
-                path=Path(path),
-                suffix=".pdb",
-                pablo=PabloAvailability(available=True),
-                topology=SimpleNamespace(molecules=(object(),)),
-            )
-
-    def fake_parameterize(topology, *, settings=None, charge_from_molecules=None):
-        return InterchangeParameterizationResult(
-            success=True,
-            interchange=object(),
-            force_field_names=("fake.offxml",),
-            topology_type="FakeTopology",
-        )
-
-    def fake_smoke(
-        interchange,
-        output_dir,
-        *,
-        settings=None,
-        crosslinked_pdb_path=None,
-        attachment_specs=(),
-    ):
-        calls["smoke"] += 1
-        calls["smoke_crosslinked_pdb_path"] = crosslinked_pdb_path
-        calls["smoke_attachment_specs"] = attachment_specs
-        minimized = Path(output_dir) / "minimized.pdb"
-        minimized.write_text("END\n", encoding="utf-8")
-        return SimpleNamespace(
-            success=True,
-            minimized_pdb_path=minimized,
-            equilibrated_pdb_path=None,
-        )
-
-    def fake_local_minimization(*args, **kwargs):
-        calls["local_minimization"] += 1
-        relaxed = tmp_path / "local-relaxed.pdb"
-        relaxed.write_text("END\n", encoding="utf-8")
-        return SimpleNamespace(success=True, relaxed_pdb_path=relaxed)
-
-    monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
-    monkeypatch.setattr(
-        workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
-    )
-    monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
-    monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
-    monkeypatch.setattr(
-        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
-    )
-    monkeypatch.setattr(
-        workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
-    )
-    monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
-    monkeypatch.setattr(
-        workflow_module,
-        "run_post_crosslink_local_minimization",
-        fake_local_minimization,
-    )
-    monkeypatch.setattr(
-        workflow_module,
-        "_local_minimization_settings_for_product",
-        lambda *args, **kwargs: object(),
-    )
-
-    policy = ConjugationCcdPabloPolicyConfig(
-        crosslinks=[
-            {
-                "residues": ("ASX", "NAG"),
-                "linking_atoms": ("ND2", "C001"),
-                "leaving_atoms": ((), ()),
-                "bond_order": 1,
-            }
-        ]
-    )
-
-    construction, topology = workflow_module._construct_conjugate_from_specs(
-        protein_pdb_path=tmp_path / "protein.pdb",
-        specs=(spec,),
-        ccd_pablo_policy=policy,
-        output_dir=tmp_path / "construction",
-        chain_policy=None,
-        settings=ModifierConstructionSettings(run_smoke=False),
-        use_product_state_pablo_library=False,
-        use_frozen_protein_product_relaxation=False,
-        run_product_state_local_minimization=True,
-        local_minimization_settings=object(),
-    )
-
-    assert topology is not None
-    assert construction.local_minimization is not None
-    assert construction.smoke is None
-    assert calls["local_minimization"] == 1
-    assert calls["smoke"] == 0
-
-
-def test_combined_smoke_receives_product_path_and_attachment_specs(monkeypatch, tmp_path: Path):
-    """Combined smoke relaxation should use the current product-aware signature."""
+    """Conjugate relaxation should use the current product-aware signature."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
     plan = _generic_resolved_plan(
@@ -1054,20 +558,31 @@ def test_combined_smoke_receives_product_path_and_attachment_specs(monkeypatch, 
                 topology=SimpleNamespace(molecules=(object(),)),
             )
 
-    def fake_smoke(
+    def fake_relax_conjugate(
         interchange,
         output_dir,
         *,
-        settings=None,
-        crosslinked_pdb_path=None,
+        product_pdb_path=None,
         attachment_specs=(),
+        assembly=None,
+        settings=None,
     ):
-        calls["crosslinked_pdb_path"] = crosslinked_pdb_path
-        calls["attachment_specs"] = attachment_specs
-        minimized = Path(output_dir) / "minimized.pdb"
-        minimized.write_text("END\n", encoding="utf-8")
+        calls["relaxation_product_pdb_path"] = product_pdb_path
+        calls["relaxation_attachment_specs"] = attachment_specs
+        return SimpleNamespace(success=True, relaxed_pdb_path=Path(output_dir) / "relaxed.pdb")
+
+    class RaisingInterchange:
+        """Interchange fake that must not be converted by validation reporting."""
+
+        def to_openmm_system(self):
+            """Raise if validation attempts to create its own OpenMM system."""
+            raise AssertionError("validation must not call to_openmm_system")
+
+    def fake_validation_report(**kwargs):
+        calls["validation_kwargs"] = kwargs
         return SimpleNamespace(
-            success=True, minimized_pdb_path=minimized, equilibrated_pdb_path=None
+            report_path=Path(kwargs["output_dir"]) / "validation.json",
+            relaxation_evidence=SimpleNamespace(status=relaxation_evidence_status),
         )
 
     monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
@@ -1077,24 +592,26 @@ def test_combined_smoke_receives_product_path_and_attachment_specs(monkeypatch, 
     monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
     monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
     monkeypatch.setattr(
-        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
-    )
-    monkeypatch.setattr(
         workflow_module,
         "create_interchange_from_pablo_topology",
         lambda topology, **kwargs: InterchangeParameterizationResult(
             success=True,
-            interchange=object(),
+            interchange=RaisingInterchange(),
             force_field_names=("fake.offxml",),
             topology_type="FakeTopology",
         ),
     )
-    monkeypatch.setattr(workflow_module, "run_restrained_vacuum_smoke", fake_smoke)
+    monkeypatch.setattr(workflow_module, "relax_conjugate", fake_relax_conjugate)
+    monkeypatch.setattr(
+        workflow_module,
+        "build_conjugate_validation_report",
+        fake_validation_report,
+    )
 
-    construction, _topology = workflow_module._construct_conjugate_from_specs(
-        protein_pdb_path=tmp_path / "protein.pdb",
-        specs=(spec,),
-        ccd_pablo_policy=ConjugationCcdPabloPolicyConfig(
+    construction_kwargs = {
+        "protein_pdb_path": tmp_path / "protein.pdb",
+        "specs": (spec,),
+        "ccd_pablo_policy": ConjugationCcdPabloPolicyConfig(
             crosslinks=[
                 {
                     "residues": ("ASX", "NAG"),
@@ -1104,16 +621,27 @@ def test_combined_smoke_receives_product_path_and_attachment_specs(monkeypatch, 
                 }
             ]
         ),
-        output_dir=tmp_path / "construction",
-        chain_policy=None,
-        settings=ModifierConstructionSettings(run_smoke=True),
-        use_product_state_pablo_library=False,
-        use_frozen_protein_product_relaxation=False,
-        run_product_state_local_minimization=False,
-    )
+        "output_dir": tmp_path / "construction",
+        "chain_policy": None,
+        "settings": ModifierConstructionSettings(run_relaxation=run_relaxation),
+        "use_product_state_pablo_library": False,
+        "use_conjugate_relaxation": use_conjugate_relaxation,
+    }
 
-    assert calls["crosslinked_pdb_path"] == construction.crosslinked_pdb_path
-    assert calls["attachment_specs"] == (spec,)
+    if expect_relaxation and relaxation_evidence_status != ValidationStatus.PASS:
+        with pytest.raises(RuntimeError, match="relaxation evidence did not pass"):
+            workflow_module._construct_conjugate_from_specs(**construction_kwargs)
+        assert ("relaxation_product_pdb_path" in calls) is expect_relaxation
+        assert "interchange" not in calls["validation_kwargs"]
+        return
+
+    construction, _topology = workflow_module._construct_conjugate_from_specs(**construction_kwargs)
+
+    assert ("relaxation_product_pdb_path" in calls) is expect_relaxation
+    if expect_relaxation:
+        assert calls["relaxation_product_pdb_path"] == construction.crosslinked_pdb_path
+        assert calls["relaxation_attachment_specs"] == (spec,)
+    assert "interchange" not in calls["validation_kwargs"]
 
 
 def test_construction_final_interchange_uses_strict_charge_bridge(
@@ -1195,7 +723,17 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
                 topology=SimpleNamespace(molecules=(product_template,)),
             )
 
-    def fake_parameterize(topology, *, settings=None, charge_from_molecules=None):
+    intermediate = {}
+
+    def fake_parameterize(
+        topology,
+        *,
+        settings=None,
+        charge_from_molecules=None,
+        require_charge_templates=False,
+    ):
+        intermediate["charge_from_molecules"] = tuple(charge_from_molecules or ())
+        intermediate["require_charge_templates"] = require_charge_templates
         return InterchangeParameterizationResult(
             success=True,
             interchange=object(),
@@ -1220,9 +758,6 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
         lambda **kwargs: kwargs["product_state_pablo_library"],
     )
     monkeypatch.setattr(
-        workflow_module, "build_formal_charge_smoke_template", lambda molecule: object()
-    )
-    monkeypatch.setattr(
         workflow_module, "create_interchange_from_pablo_topology", fake_parameterize
     )
 
@@ -1241,9 +776,8 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
         ),
         output_dir=tmp_path / "construction",
         chain_policy=None,
-        settings=ModifierConstructionSettings(run_smoke=False),
+        settings=ModifierConstructionSettings(run_relaxation=False),
         use_product_state_pablo_library=True,
-        run_product_state_local_minimization=False,
     )
     captured = {}
     builder = SimpleNamespace(
@@ -1264,6 +798,9 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
 
     templates = tuple(captured["kwargs"]["charge_from_molecules"])
     assert construction.product_state_pablo_library.charge_templates == (product_template,)
+    assert len(intermediate["charge_from_molecules"]) == 1
+    assert intermediate["charge_from_molecules"][0] is not product_template
+    assert intermediate["require_charge_templates"] is True
     assert len(templates) == 2
     assert templates[0] is not product_template
     assert templates[1] is standard_template
@@ -1304,11 +841,9 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
         calls["spec_count"] = len(kwargs["specs"])
         calls["attachment_specs"] = kwargs["specs"]
         calls["resolved_plan_count"] = len([spec.resolved_plan for spec in kwargs["specs"]])
-        calls["run_local_minimization"] = kwargs["run_product_state_local_minimization"]
-        calls["local_minimization_settings"] = kwargs["local_minimization_settings"]
         return (
             SimpleNamespace(
-                smoke=SimpleNamespace(minimized_pdb_path=relaxed, equilibrated_pdb_path=None),
+                relaxation=SimpleNamespace(minimized_pdb_path=relaxed, relaxed_pdb_path=relaxed),
                 crosslinked_pdb_path=tmp_path / "crosslinked.pdb",
                 diagnostics=("fake construction",),
             ),
@@ -1358,7 +893,6 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
         protein_pdb_path=source,
         attachments=attachments,
         output_dir=tmp_path / "out",
-        settings=workflow_module.ConjugatedPolymerSystemSettings(),
     )
 
     assert len(built_specs) == 2
@@ -1366,8 +900,6 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
     assert calls["spec_count"] == 2
     assert calls["resolved_plan_count"] == 2
     assert calls["attachment_specs"] == tuple(built_specs)
-    assert calls["run_local_minimization"] is True
-    assert calls["local_minimization_settings"] is not None
     assert result.workflow_json_path.exists()
     payload = json.loads(result.workflow_json_path.read_text(encoding="utf-8"))
     assert payload["workflow_json_path"] == str(result.workflow_json_path)
@@ -1444,9 +976,12 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     def fake_construct(**kwargs):
         calls["construct_spec_count"] = len(built_specs)
         calls["specs"] = kwargs["specs"]
-        calls["run_local_minimization"] = kwargs["run_product_state_local_minimization"]
-        calls["local_minimization_settings"] = kwargs["local_minimization_settings"]
-        return SimpleNamespace(smoke=SimpleNamespace(minimized_pdb_path=relaxed)), object()
+        return (
+            SimpleNamespace(
+                relaxation=SimpleNamespace(minimized_pdb_path=relaxed, relaxed_pdb_path=relaxed)
+            ),
+            object(),
+        )
 
     monkeypatch.setattr(workflow_module, "get_reaction", lambda name: FakeReaction())
     monkeypatch.setattr(
@@ -1495,8 +1030,6 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     assert len(built_specs) == 2
     assert calls["construct_spec_count"] == 2
     assert calls["specs"] == tuple(built_specs)
-    assert calls["run_local_minimization"] is True
-    assert calls["local_minimization_settings"] is settings.local_minimization
     assert result.generated_sequences == ("AA", "AA")
     assert result.reactive_sequence_indices == (0, 0)
     assert result.modifiers == tuple(spec.generated_fragment for spec in built_specs)
@@ -1580,7 +1113,9 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
         workflow_module,
         "_construct_conjugate_from_specs",
         lambda **kwargs: (
-            SimpleNamespace(smoke=SimpleNamespace(minimized_pdb_path=relaxed)),
+            SimpleNamespace(
+                relaxation=SimpleNamespace(minimized_pdb_path=relaxed, relaxed_pdb_path=relaxed)
+            ),
             object(),
         ),
     )

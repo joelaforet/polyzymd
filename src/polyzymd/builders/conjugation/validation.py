@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -18,6 +19,17 @@ from polyzymd.builders.conjugation.structure.parsing import (
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 VALIDATION_REPORT_NAME = "conjugate_validation_report.json"
+REQUIRED_RELAXATION_ENERGY_FIELDS = (
+    "stage_a_energy_before_min_kj_mol",
+    "stage_a_energy_after_min_kj_mol",
+    "stage_b_energy_before_md_kj_mol",
+    "stage_b_energy_after_md_kj_mol",
+)
+REQUIRED_RELAXATION_PROTEIN_IMMOBILIZATION_FIELDS = (
+    "stage_b_protein_rmsd_from_stage_a_angstrom",
+    "stage_b_protein_max_displacement_from_stage_a_angstrom",
+)
+REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD = "stage_b_linkage_distance_errors_angstrom"
 
 
 class ValidationStatus(str, Enum):
@@ -170,7 +182,7 @@ class ChargeAuditReport(BaseModel):
 
 
 class ParameterCoverageReport(BaseModel):
-    """Parameter coverage smoke audit for the final product interchange."""
+    """Parameter coverage audit for the final product interchange."""
 
     status: ValidationStatus
     checks: tuple[ConjugateValidationCheck, ...] = Field(default_factory=tuple)
@@ -187,15 +199,12 @@ class LinkageGeometryReport(BaseModel):
     close_contact_count: int = 0
 
 
-class OpenMMSmokeAuditReport(BaseModel):
-    """OpenMM smoke and pre-smoke evidence summary."""
+class RelaxationEvidenceReport(BaseModel):
+    """OpenMM relaxation evidence summary."""
 
     status: ValidationStatus
     checks: tuple[ConjugateValidationCheck, ...] = Field(default_factory=tuple)
-    smoke_json_path: Path | None = None
-    diagnostics_json_path: Path | None = None
-    pre_smoke_geometry_json_path: Path | None = None
-    frozen_relaxation_diagnostics_json_path: Path | None = None
+    relaxation_diagnostics_json_path: Path | None = None
 
 
 class ConjugateValidationReport(BaseModel):
@@ -209,7 +218,7 @@ class ConjugateValidationReport(BaseModel):
     charge_audit: ChargeAuditReport
     parameter_coverage: ParameterCoverageReport
     linkage_geometry: LinkageGeometryReport
-    openmm_smoke: OpenMMSmokeAuditReport
+    relaxation_evidence: RelaxationEvidenceReport
     report_path: Path | None = None
     notes: tuple[str, ...] = Field(default_factory=tuple)
 
@@ -223,7 +232,7 @@ class ConjugateValidationReport(BaseModel):
             self.charge_audit.status,
             self.parameter_coverage.status,
             self.linkage_geometry.status,
-            self.openmm_smoke.status,
+            self.relaxation_evidence.status,
         )
         self.status = _aggregate_status(statuses)
         return self
@@ -259,7 +268,7 @@ def build_conjugate_validation_report(
     resolved_plans: tuple[Any, ...] = (),
     assembly: Any | None = None,
     output_dir: Path | str | None = None,
-    interchange: Any | None = None,
+    openmm_system: Any | None = None,
     expected_particle_count: int | None = None,
     write: bool = True,
 ) -> ConjugateValidationReport:
@@ -274,9 +283,9 @@ def build_conjugate_validation_report(
     assembly : Any, optional
         Crosslinked PDB assembly result, by default ``None``.
     output_dir : Path, str, or None, optional
-        Artifact directory that may contain charge and smoke JSON evidence.
-    interchange : Any, optional
-        OpenFF Interchange-like object for particle-count coverage checks.
+        Artifact directory that may contain charge and OpenMM relaxation evidence.
+    openmm_system : Any, optional
+        Production-created OpenMM System-like object for particle-count coverage checks.
     expected_particle_count : int or None, optional
         Expected OpenMM particle count, by default ``None``.
     write : bool, optional
@@ -301,11 +310,11 @@ def build_conjugate_validation_report(
         valence_sanity=validate_valence_sanity(expected_bonds, observed_bonds),
         charge_audit=audit_charge_reports(artifact_dir),
         parameter_coverage=audit_parameter_coverage(
-            interchange,
+            openmm_system=openmm_system,
             expected_particle_count=expected_particle_count,
         ),
         linkage_geometry=audit_linkage_geometry(atoms, expected_bonds, observed_bonds),
-        openmm_smoke=audit_openmm_smoke_reports(artifact_dir),
+        relaxation_evidence=audit_relaxation_evidence(artifact_dir),
     )
     if write and artifact_dir is not None:
         report.write_json(artifact_dir / VALIDATION_REPORT_NAME)
@@ -581,31 +590,38 @@ def audit_charge_reports(artifact_dir: Path | str | None) -> ChargeAuditReport:
 
 
 def audit_parameter_coverage(
-    interchange: Any | None,
     *,
+    openmm_system: Any | None = None,
     expected_particle_count: int | None = None,
 ) -> ParameterCoverageReport:
-    """Audit conservative parameter coverage with an OpenMM-system conversion."""
-    if interchange is None:
-        check = _skipped_check("parameter_coverage", "No final Interchange was available")
-        return ParameterCoverageReport(status=check.status, checks=(check,))
-    if not hasattr(interchange, "to_openmm_system"):
+    """Audit parameter coverage from production-created OpenMM System evidence.
+
+    Parameters
+    ----------
+    openmm_system : Any or None, optional
+        Production-created OpenMM System-like object exposing ``getNumParticles()``, by default
+        ``None``.
+    expected_particle_count : int or None, optional
+        Expected particle count from the product topology, by default ``None``.
+
+    Returns
+    -------
+    ParameterCoverageReport
+        Particle-count coverage report, or a skipped report when production evidence is unavailable.
+    """
+    if openmm_system is None:
         check = _skipped_check(
             "parameter_coverage",
-            "Final Interchange object does not expose to_openmm_system()",
+            "No production OpenMM System evidence was available",
         )
         return ParameterCoverageReport(status=check.status, checks=(check,))
-    try:
-        system = interchange.to_openmm_system()
-        observed_count = int(system.getNumParticles())
-    except _parameter_conversion_exceptions() as exc:
-        check = _check(
+    if not hasattr(openmm_system, "getNumParticles"):
+        check = _skipped_check(
             "parameter_coverage",
-            ValidationStatus.FAIL,
-            "Final Interchange could not be converted to an OpenMM system",
-            evidence={"error": str(exc)},
+            "Production OpenMM System evidence does not expose getNumParticles()",
         )
         return ParameterCoverageReport(status=check.status, checks=(check,))
+    observed_count = int(openmm_system.getNumParticles())
     if expected_particle_count is not None and observed_count != expected_particle_count:
         check = _check(
             "parameter_particle_count",
@@ -622,7 +638,7 @@ def audit_parameter_coverage(
     check = _check(
         "parameter_coverage",
         ValidationStatus.PASS,
-        "Final Interchange converted to an OpenMM system",
+        "Production OpenMM System particle count evidence is available",
         evidence={"observed_particle_count": observed_count},
     )
     return ParameterCoverageReport(
@@ -698,174 +714,277 @@ def audit_linkage_geometry(
     )
 
 
-def audit_openmm_smoke_reports(artifact_dir: Path | str | None) -> OpenMMSmokeAuditReport:
-    """Audit OpenMM smoke JSON evidence without importing OpenMM."""
+def audit_relaxation_evidence(artifact_dir: Path | str | None) -> RelaxationEvidenceReport:
+    """Audit conjugate relaxation JSON evidence without importing OpenMM."""
     if artifact_dir is None:
-        check = _skipped_check("openmm_smoke", "No artifact directory was available")
-        return OpenMMSmokeAuditReport(status=check.status, checks=(check,))
+        check = _skipped_check("relaxation_evidence", "No artifact directory was available")
+        return RelaxationEvidenceReport(status=check.status, checks=(check,))
     root = Path(artifact_dir)
-    smoke_path = root / "vacuum_smoke.json"
-    diagnostics_path = root / "restrained_smoke_diagnostics.json"
-    pre_smoke_path = root / "pre_smoke_geometry.json"
-    frozen_diagnostics_path = root / "frozen_protein_relaxation_diagnostics.json"
-    if not any(
-        path.exists()
-        for path in (smoke_path, diagnostics_path, pre_smoke_path, frozen_diagnostics_path)
-    ):
-        check = _skipped_check("openmm_smoke", "No OpenMM smoke evidence JSON was available")
-        return OpenMMSmokeAuditReport(status=check.status, checks=(check,))
+    relaxation_diagnostics_path = root / "conjugate_relaxation.json"
+    if not relaxation_diagnostics_path.exists():
+        check = _skipped_check(
+            "relaxation_evidence", "No OpenMM relaxation evidence JSON was available"
+        )
+        return RelaxationEvidenceReport(status=check.status, checks=(check,))
 
+    try:
+        diagnostics_payload = json.loads(relaxation_diagnostics_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        check = _check(
+            "conjugate_relaxation_json",
+            ValidationStatus.FAIL,
+            "Conjugate relaxation evidence JSON could not be read or parsed",
+            evidence={
+                "path": str(relaxation_diagnostics_path),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        return RelaxationEvidenceReport(
+            status=ValidationStatus.FAIL,
+            checks=(check,),
+            relaxation_diagnostics_json_path=relaxation_diagnostics_path,
+        )
+    if not isinstance(diagnostics_payload, dict):
+        check = _check(
+            "conjugate_relaxation_json",
+            ValidationStatus.FAIL,
+            "Conjugate relaxation evidence JSON must contain an object",
+            evidence={
+                "path": str(relaxation_diagnostics_path),
+                "payload_type": type(diagnostics_payload).__name__,
+            },
+        )
+        return RelaxationEvidenceReport(
+            status=ValidationStatus.FAIL,
+            checks=(check,),
+            relaxation_diagnostics_json_path=relaxation_diagnostics_path,
+        )
+
+    diagnostics = diagnostics_payload
     checks: list[ConjugateValidationCheck] = []
     status = ValidationStatus.PASS
-    if smoke_path.exists():
-        smoke = _read_json(smoke_path)
-        if not bool(smoke.get("success", False)):
-            status = ValidationStatus.FAIL
-            checks.append(_check("vacuum_smoke_success", status, "Vacuum smoke reported failure"))
-        energy_values = [value for key, value in smoke.items() if key.endswith("_kj_mol")]
-        if any(not _is_finite_number(value) for value in energy_values):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check("vacuum_smoke_energy", status, "Vacuum smoke energy is non-finite")
+    if diagnostics.get("success") is not True:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation",
+                status,
+                "Conjugate relaxation diagnostics failed",
+                evidence={"success": diagnostics.get("success")},
             )
-    if diagnostics_path.exists():
-        diagnostics = _read_json(diagnostics_path)
-        if not bool(diagnostics.get("success", False)):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "restrained_smoke_diagnostics", status, "Restrained smoke diagnostics failed"
-                )
-            )
-    if pre_smoke_path.exists():
-        pre_smoke = _read_json(pre_smoke_path)
-        span = pre_smoke.get("coordinate_span_nm")
-        if span is not None and not _is_finite_number(span):
-            status = ValidationStatus.FAIL
-            checks.append(_check("pre_smoke_geometry", status, "Pre-smoke span is non-finite"))
-    if frozen_diagnostics_path.exists():
-        diagnostics = _read_json(frozen_diagnostics_path)
-        if not bool(diagnostics.get("success", False)):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "frozen_protein_relaxation",
-                    status,
-                    "Frozen-protein relaxation diagnostics failed",
-                )
-            )
-        if not bool(diagnostics.get("stage_a_success", False)):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "frozen_protein_relaxation_stage_a",
-                    status,
-                    "Stage A full-system minimization did not report success",
-                )
-            )
-        if not bool(diagnostics.get("stage_b_success", False)):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "frozen_protein_relaxation_stage_b",
-                    status,
-                    "Stage B frozen-protein relaxation did not report success",
-                )
-            )
-        if bool(diagnostics.get("barostat_used", False)):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "frozen_protein_relaxation_barostat",
-                    status,
-                    "Frozen-protein relaxation diagnostics reported a barostat",
-                )
-            )
-        energy_values = [value for key, value in diagnostics.items() if key.endswith("_kj_mol")]
-        if any(not _is_finite_number(value) for value in energy_values):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "frozen_protein_relaxation_energy",
-                    status,
-                    "Frozen-protein relaxation energy is non-finite",
-                )
-            )
-        rmsd = diagnostics.get("stage_b_protein_rmsd_from_stage_a_angstrom")
-        max_displacement = diagnostics.get("stage_b_protein_max_displacement_from_stage_a_angstrom")
-        settings = (
-            diagnostics.get("settings", {}) if isinstance(diagnostics.get("settings"), dict) else {}
         )
-        rmsd_limit = float(settings.get("max_protein_rmsd_angstrom", 0.05))
-        displacement_limit = float(settings.get("max_protein_displacement_angstrom", 0.25))
-        if "md_steps" in settings:
-            md_steps = settings["md_steps"]
-            md_steps_source = "settings.md_steps"
-        else:
-            md_steps = diagnostics.get("md_steps")
-            md_steps_source = "md_steps"
-        if not _is_positive_integer(md_steps):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "frozen_protein_relaxation_md_steps",
-                    status,
-                    "Frozen-protein relaxation diagnostics lack valid positive MD step evidence",
-                    evidence={"md_steps": md_steps, "source": md_steps_source},
-                )
+    if diagnostics.get("stage_a_success") is not True:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_stage_a",
+                status,
+                "Stage A full-system minimization did not report success",
+                evidence={"stage_a_success": diagnostics.get("stage_a_success")},
             )
-        if rmsd is not None and (not _is_finite_number(rmsd) or float(rmsd) > rmsd_limit):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "frozen_protein_relaxation_protein_rmsd",
-                    status,
-                    "Stage B protein RMSD relative to Stage A exceeds tolerance",
-                    evidence={"rmsd_angstrom": rmsd, "tolerance_angstrom": rmsd_limit},
-                )
+        )
+    if diagnostics.get("stage_b_success") is not True:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_stage_b",
+                status,
+                "Stage B conjugate relaxation did not report success",
+                evidence={"stage_b_success": diagnostics.get("stage_b_success")},
             )
-        if max_displacement is not None and (
-            not _is_finite_number(max_displacement) or float(max_displacement) > displacement_limit
-        ):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "frozen_protein_relaxation_protein_max_displacement",
-                    status,
-                    "Stage B protein max displacement relative to Stage A exceeds tolerance",
-                    evidence={
-                        "max_displacement_angstrom": max_displacement,
-                        "tolerance_angstrom": displacement_limit,
-                    },
-                )
+        )
+    if diagnostics.get("barostat_used") is not False:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_barostat",
+                status,
+                "Conjugate relaxation diagnostics did not report barostat_used as false",
+                evidence={"barostat_used": diagnostics.get("barostat_used")},
             )
-        linkage_errors = diagnostics.get("stage_b_linkage_distance_errors_angstrom", ())
-        linkage_limit = float(settings.get("max_linkage_distance_error_angstrom", 0.35))
-        if any(
-            not _is_finite_number(error) or float(error) > linkage_limit for error in linkage_errors
-        ):
-            status = ValidationStatus.FAIL
-            checks.append(
-                _check(
-                    "frozen_protein_relaxation_linkage_distances",
-                    status,
-                    "Stage B linkage distance error exceeds tolerance",
-                    evidence={
-                        "errors_angstrom": linkage_errors,
-                        "tolerance_angstrom": linkage_limit,
-                    },
-                )
+        )
+    missing_or_nonfinite_energy_fields = _missing_or_nonfinite_fields(
+        diagnostics,
+        REQUIRED_RELAXATION_ENERGY_FIELDS,
+    )
+    if missing_or_nonfinite_energy_fields:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_energies",
+                status,
+                "Conjugate relaxation diagnostics lack required finite energy evidence",
+                evidence={"fields": missing_or_nonfinite_energy_fields},
             )
+        )
+    energy_values = [value for key, value in diagnostics.items() if key.endswith("_kj_mol")]
+    if any(not _is_finite_energy_evidence(value) for value in energy_values):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_energy",
+                status,
+                "Conjugate relaxation energy is non-finite",
+            )
+        )
+    missing_or_nonfinite_protein_fields = _missing_or_nonfinite_fields(
+        diagnostics,
+        REQUIRED_RELAXATION_PROTEIN_IMMOBILIZATION_FIELDS,
+    )
+    if missing_or_nonfinite_protein_fields:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_protein_immobilization",
+                status,
+                "Conjugate relaxation diagnostics lack required finite protein immobilization evidence",
+                evidence={"fields": missing_or_nonfinite_protein_fields},
+            )
+        )
+    rmsd = diagnostics.get("stage_b_protein_rmsd_from_stage_a_angstrom")
+    max_displacement = diagnostics.get("stage_b_protein_max_displacement_from_stage_a_angstrom")
+    settings = (
+        diagnostics.get("settings", {}) if isinstance(diagnostics.get("settings"), dict) else {}
+    )
+    rmsd_limit, rmsd_limit_check = _relaxation_tolerance(
+        settings,
+        "max_protein_rmsd_angstrom",
+        0.05,
+    )
+    displacement_limit, displacement_limit_check = _relaxation_tolerance(
+        settings,
+        "max_protein_displacement_angstrom",
+        0.25,
+    )
+    for tolerance_check in (rmsd_limit_check, displacement_limit_check):
+        if tolerance_check is not None:
+            status = ValidationStatus.FAIL
+            checks.append(tolerance_check)
+    if "md_steps" in settings:
+        md_steps = settings["md_steps"]
+        md_steps_source = "settings.md_steps"
+    else:
+        md_steps = diagnostics.get("md_steps")
+        md_steps_source = "md_steps"
+    if not _is_positive_integer(md_steps):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_md_steps",
+                status,
+                "Conjugate relaxation diagnostics lack valid positive MD step evidence",
+                evidence={"md_steps": md_steps, "source": md_steps_source},
+            )
+        )
+    negative_protein_fields = _negative_fields(
+        diagnostics,
+        REQUIRED_RELAXATION_PROTEIN_IMMOBILIZATION_FIELDS,
+    )
+    if negative_protein_fields:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_protein_immobilization",
+                status,
+                "Conjugate relaxation diagnostics contain negative protein immobilization evidence",
+                evidence={"fields": negative_protein_fields},
+            )
+        )
+    if rmsd is not None and _is_finite_number(rmsd) and float(rmsd) > rmsd_limit:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_protein_rmsd",
+                status,
+                "Stage B protein RMSD relative to Stage A exceeds tolerance",
+                evidence={"rmsd_angstrom": rmsd, "tolerance_angstrom": rmsd_limit},
+            )
+        )
+    if (
+        max_displacement is not None
+        and _is_finite_number(max_displacement)
+        and float(max_displacement) > displacement_limit
+    ):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_protein_max_displacement",
+                status,
+                "Stage B protein max displacement relative to Stage A exceeds tolerance",
+                evidence={
+                    "max_displacement_angstrom": max_displacement,
+                    "tolerance_angstrom": displacement_limit,
+                },
+            )
+        )
+    linkage_errors = diagnostics.get(REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD)
+    linkage_limit, linkage_limit_check = _relaxation_tolerance(
+        settings,
+        "max_linkage_distance_error_angstrom",
+        0.35,
+    )
+    if linkage_limit_check is not None:
+        status = ValidationStatus.FAIL
+        checks.append(linkage_limit_check)
+    linkage_errors_valid = True
+    if linkage_errors is None or not _is_finite_number_sequence(linkage_errors):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_linkage_distances",
+                status,
+                "Conjugate relaxation diagnostics lack required finite linkage distance evidence",
+                evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
+            )
+        )
+        linkage_errors = ()
+        linkage_errors_valid = False
+    elif not linkage_errors:
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_linkage_distances",
+                status,
+                "Conjugate relaxation diagnostics contain empty linkage distance evidence",
+                evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
+            )
+        )
+        linkage_errors_valid = False
+    elif not _is_nonnegative_number_sequence(linkage_errors):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_required_linkage_distances",
+                status,
+                "Conjugate relaxation diagnostics contain negative linkage distance evidence",
+                evidence={"field": REQUIRED_RELAXATION_LINKAGE_ERROR_FIELD},
+            )
+        )
+        linkage_errors = ()
+        linkage_errors_valid = False
+    if linkage_errors_valid and any(float(error) > linkage_limit for error in linkage_errors):
+        status = ValidationStatus.FAIL
+        checks.append(
+            _check(
+                "conjugate_relaxation_linkage_distances",
+                status,
+                "Stage B linkage distance error exceeds tolerance",
+                evidence={
+                    "errors_angstrom": linkage_errors,
+                    "tolerance_angstrom": linkage_limit,
+                },
+            )
+        )
     if not checks:
-        checks.append(_check("openmm_smoke", status, "OpenMM smoke evidence passed audit"))
-    return OpenMMSmokeAuditReport(
+        checks.append(
+            _check("relaxation_evidence", status, "OpenMM relaxation evidence passed audit")
+        )
+    return RelaxationEvidenceReport(
         status=status,
         checks=tuple(checks),
-        smoke_json_path=smoke_path if smoke_path.exists() else None,
-        diagnostics_json_path=diagnostics_path if diagnostics_path.exists() else None,
-        pre_smoke_geometry_json_path=pre_smoke_path if pre_smoke_path.exists() else None,
-        frozen_relaxation_diagnostics_json_path=(
-            frozen_diagnostics_path if frozen_diagnostics_path.exists() else None
+        relaxation_diagnostics_json_path=(
+            relaxation_diagnostics_path if relaxation_diagnostics_path.exists() else None
         ),
     )
 
@@ -1179,11 +1298,11 @@ def _optional_float(value: Any) -> float | None:
     """Return a finite float value or ``None`` when unavailable or invalid."""
     if value is None:
         return None
+    if not _is_finite_number(value):
+        return None
     try:
         float_value = float(value)
     except (TypeError, ValueError):
-        return None
-    if not math.isfinite(float_value):
         return None
     return float_value
 
@@ -1196,20 +1315,6 @@ def _allows_product_remap(source: str, identity: AtomIdentity) -> bool:
 def _normalized_element(value: str) -> str:
     """Return a normalized element symbol for identity matching."""
     return value.strip().upper()
-
-
-def _parameter_conversion_exceptions() -> tuple[type[Exception], ...]:
-    """Return expected backend conversion exception classes.
-
-    OpenMM is imported lazily so validation remains importable in lightweight environments.
-    """
-    exceptions: list[type[Exception]] = [ValueError, RuntimeError, ImportError, OSError]
-    try:
-        from openmm import OpenMMException
-    except ImportError:
-        return tuple(exceptions)
-    exceptions.append(OpenMMException)
-    return tuple(exceptions)
 
 
 def _sanitize_for_strict_json(value: Any) -> Any:
@@ -1227,10 +1332,168 @@ def _sanitize_for_strict_json(value: Any) -> Any:
 
 def _is_finite_number(value: Any) -> bool:
     """Return whether a value is numeric and finite."""
+    if isinstance(value, bool):
+        return False
     try:
         return math.isfinite(float(value))
     except (TypeError, ValueError):
         return False
+
+
+def _missing_or_nonfinite_fields(
+    payload: Mapping[str, Any],
+    fields: Sequence[str],
+) -> tuple[str, ...]:
+    """Return required fields that are absent or not finite scalar numbers.
+
+    Parameters
+    ----------
+    payload : Mapping[str, Any]
+        Diagnostics payload to inspect.
+    fields : Sequence[str]
+        Required scalar field names.
+
+    Returns
+    -------
+    tuple of str
+        Field names missing from the payload or carrying non-finite values.
+    """
+    return tuple(
+        field for field in fields if field not in payload or not _is_finite_number(payload[field])
+    )
+
+
+def _negative_fields(payload: Mapping[str, Any], fields: Sequence[str]) -> tuple[str, ...]:
+    """Return required numeric fields that carry negative values.
+
+    Parameters
+    ----------
+    payload : Mapping[str, Any]
+        Diagnostics payload to inspect.
+    fields : Sequence[str]
+        Required scalar field names.
+
+    Returns
+    -------
+    tuple of str
+        Field names carrying finite negative values.
+    """
+    return tuple(
+        field
+        for field in fields
+        if field in payload and _is_finite_number(payload[field]) and float(payload[field]) < 0.0
+    )
+
+
+def _relaxation_tolerance(
+    settings: Mapping[str, Any],
+    key: str,
+    default: float,
+) -> tuple[float, ConjugateValidationCheck | None]:
+    """Return a finite non-negative relaxation tolerance and any failure check.
+
+    Parameters
+    ----------
+    settings : Mapping[str, Any]
+        Relaxation settings from the diagnostics payload.
+    key : str
+        Tolerance setting name.
+    default : float
+        Default tolerance used when the setting is absent.
+
+    Returns
+    -------
+    tuple of float and ConjugateValidationCheck or None
+        Tolerance value to use and a structured failure check when the configured value is invalid.
+    """
+    if key not in settings:
+        return default, None
+    value = settings[key]
+    if not _is_finite_number(value):
+        return default, _invalid_relaxation_tolerance_check(key, value)
+    tolerance = float(value)
+    if tolerance < 0.0:
+        return default, _invalid_relaxation_tolerance_check(key, value)
+    return tolerance, None
+
+
+def _invalid_relaxation_tolerance_check(key: str, value: Any) -> ConjugateValidationCheck:
+    """Build a structured failure check for an invalid relaxation tolerance.
+
+    Parameters
+    ----------
+    key : str
+        Tolerance setting name.
+    value : Any
+        Invalid configured value.
+
+    Returns
+    -------
+    ConjugateValidationCheck
+        Failure check for the invalid tolerance.
+    """
+    return _check(
+        "conjugate_relaxation_tolerance_settings",
+        ValidationStatus.FAIL,
+        "Conjugate relaxation diagnostics contain invalid tolerance settings",
+        evidence={"field": key, "value": value},
+    )
+
+
+def _is_finite_number_sequence(value: Any) -> bool:
+    """Return whether a value is an explicit finite numeric sequence.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate linkage error evidence.
+
+    Returns
+    -------
+    bool
+        Whether the value is a non-string sequence with only finite numeric entries.
+    """
+    if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
+        return False
+    return all(_is_finite_number(item) for item in value)
+
+
+def _is_nonnegative_number_sequence(value: Any) -> bool:
+    """Return whether a value is an explicit finite non-negative numeric sequence.
+
+    Parameters
+    ----------
+    value : Any
+        Candidate distance or error evidence.
+
+    Returns
+    -------
+    bool
+        Whether the value is a non-string sequence with only finite non-negative entries.
+    """
+    if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
+        return False
+    return all(_is_finite_number(item) and float(item) >= 0.0 for item in value)
+
+
+def _is_finite_energy_evidence(value: Any) -> bool:
+    """Return whether scalar or mapped energy evidence is finite.
+
+    Parameters
+    ----------
+    value : Any
+        Scalar energy value or nested energy mapping/list from relaxation diagnostics.
+
+    Returns
+    -------
+    bool
+        Whether all energy entries are finite numeric values.
+    """
+    if isinstance(value, Mapping):
+        return all(_is_finite_energy_evidence(item) for item in value.values())
+    if isinstance(value, list | tuple):
+        return all(_is_finite_energy_evidence(item) for item in value)
+    return _is_finite_number(value)
 
 
 def _is_positive_integer(value: Any) -> bool:
