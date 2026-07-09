@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import copy
 import logging
-import math
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -245,35 +243,6 @@ def deduplicate_charge_templates(charge_templates: Sequence[Any]) -> tuple[Any, 
         seen_keys.add(key)
         deduplicated.append(template)
     return tuple(deduplicated)
-
-
-def build_formal_charge_smoke_template(molecule: Any) -> Any:
-    """Build a smoke-only charged template from formal charges.
-
-    This helper is intentionally conservative: it never runs AM1-BCC or any
-    other quantum-derived charge method. The resulting template is only for
-    opt-in construction smokes that need to exercise topology, solvation, and
-    CUDA context creation without claiming production-quality charges.
-
-    Parameters
-    ----------
-    molecule : Any
-        OpenFF molecule-like object with formal charges on atoms.
-
-    Returns
-    -------
-    Any
-        Deep-copied molecule with ``partial_charges`` populated from formal
-        charges.
-    """
-    from openff.units import Quantity
-
-    template = copy.deepcopy(molecule)
-    charges = [_formal_charge_value(atom.formal_charge) for atom in template.atoms]
-    if not all(math.isfinite(charge) for charge in charges):
-        raise ValueError("Cannot build a smoke charge template from non-finite formal charges")
-    template.partial_charges = Quantity(charges, "elementary_charge")
-    return template
 
 
 def set_topology_positions_from_pdb(topology: Any, pdb_path: Path | str) -> Any:

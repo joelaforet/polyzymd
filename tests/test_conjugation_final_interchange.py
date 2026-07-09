@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -123,15 +124,11 @@ def test_final_helper_rejects_unmarked_product_template_before_openff():
     assert captured == {}
 
 
-def test_final_helper_does_not_call_formal_charge_smoke_template(monkeypatch):
-    """Production final helper must not use smoke-only formal-charge templates."""
+def test_final_helper_has_no_formal_charge_template_export(monkeypatch):
+    """Production final helper must not expose formal-charge template builders."""
     import polyzymd.builders.conjugation.pablo.parameterization as parameterization_module
 
-    monkeypatch.setattr(
-        parameterization_module,
-        "build_formal_charge_smoke_template",
-        lambda molecule: (_ for _ in ()).throw(AssertionError("formal fallback called")),
-    )
+    assert not hasattr(parameterization_module, "build_formal_charge_smoke_template")
     builder = _Builder()
     monkeypatch.setattr(
         "polyzymd.builders.conjugation.final_interchange.build_conjugate_charge_templates",
@@ -148,7 +145,6 @@ def test_final_helper_does_not_call_formal_charge_smoke_template(monkeypatch):
     )
 
     assert result == "ok"
-
 
 def test_final_helper_fails_before_parameterizer_when_bridge_fails():
     """A charge bridge failure should prevent OpenFF parameterization."""

@@ -7,14 +7,16 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.builders.conjugation.validation import (
     ConjugateValidationReport,
     ValidationStatus,
     audit_charge_reports,
     audit_linkage_geometry,
-    audit_openmm_smoke_reports,
     audit_parameter_coverage,
+    audit_relaxation_evidence,
     build_conjugate_validation_report,
     validate_atom_presence,
     validate_product_bond_graph,
@@ -33,32 +35,12 @@ class FakeSystem:
         return self._particle_count
 
 
-class FakeInterchange:
-    """Fake Interchange exposing OpenMM system conversion."""
-
-    def __init__(self, particle_count: int) -> None:
-        """Initialize the fake interchange."""
-        self._particle_count = particle_count
+class RaisingInterchange:
+    """Fake Interchange that must not be converted during validation."""
 
     def to_openmm_system(self) -> FakeSystem:
-        """Return a fake OpenMM system."""
-        return FakeSystem(self._particle_count)
-
-
-class FailingBackendInterchange:
-    """Fake Interchange that raises an expected backend conversion error."""
-
-    def to_openmm_system(self) -> FakeSystem:
-        """Raise a backend-like conversion error."""
-        raise ValueError("missing parameter")
-
-
-class BuggyInterchange:
-    """Fake Interchange that raises an unexpected programming error."""
-
-    def to_openmm_system(self) -> FakeSystem:
-        """Raise an unexpected conversion implementation error."""
-        raise AttributeError("buggy object")
+        """Raise if validation attempts a validation-only OpenMM conversion."""
+        raise AssertionError("validation must not call to_openmm_system")
 
 
 def test_validation_report_serializes_json(tmp_path):
@@ -69,7 +51,7 @@ def test_validation_report_serializes_json(tmp_path):
         product_pdb_path=pdb_path,
         assembly=SimpleNamespace(added_conect_pairs=((1, 2),)),
         output_dir=tmp_path,
-        interchange=FakeInterchange(2),
+        openmm_system=FakeSystem(2),
         expected_particle_count=2,
         write=True,
     )
@@ -546,31 +528,32 @@ def test_validation_report_writes_strict_json_for_nonfinite_values(tmp_path):
 
 
 def test_parameter_coverage_pass_and_fail_with_fakes():
-    """Parameter coverage should use fake OpenMM objects without heavy imports."""
-    passed = audit_parameter_coverage(FakeInterchange(5), expected_particle_count=5)
-    failed = audit_parameter_coverage(FakeInterchange(4), expected_particle_count=5)
+    """Parameter coverage should use production OpenMM evidence without heavy imports."""
+    passed = audit_parameter_coverage(openmm_system=FakeSystem(5), expected_particle_count=5)
+    failed = audit_parameter_coverage(openmm_system=FakeSystem(4), expected_particle_count=5)
 
     assert passed.status == ValidationStatus.PASS
     assert failed.status == ValidationStatus.FAIL
     assert failed.observed_particle_count == 4
 
 
-def test_parameter_coverage_classifies_expected_backend_errors():
-    """Expected conversion errors should be reported as parameter coverage failures."""
-    report = audit_parameter_coverage(FailingBackendInterchange(), expected_particle_count=5)
+def test_parameter_coverage_skips_without_production_system_evidence():
+    """Parameter coverage should skip when production OpenMM evidence is unavailable."""
+    report = audit_parameter_coverage(expected_particle_count=5)
 
-    assert report.status == ValidationStatus.FAIL
-    assert report.checks[0].evidence["error"] == "missing parameter"
+    assert report.status == ValidationStatus.SKIPPED
+    assert "No production OpenMM System evidence" in report.checks[0].message
 
 
-def test_parameter_coverage_reraises_unexpected_errors():
-    """Unexpected programming errors should not be hidden as validation evidence."""
-    try:
-        audit_parameter_coverage(BuggyInterchange(), expected_particle_count=5)
-    except AttributeError as exc:
-        assert str(exc) == "buggy object"
-    else:  # pragma: no cover - explicit failure branch improves assertion message
-        raise AssertionError("Unexpected conversion errors should be re-raised")
+def test_parameter_coverage_does_not_convert_interchange_like_evidence():
+    """Validation reporting must not perform validation-only Interchange conversion."""
+    report = audit_parameter_coverage(
+        openmm_system=RaisingInterchange(),
+        expected_particle_count=5,
+    )
+
+    assert report.status == ValidationStatus.SKIPPED
+    assert "getNumParticles" in report.checks[0].message
 
 
 def test_linkage_geometry_warns_for_nonbonded_close_contacts():
@@ -588,31 +571,98 @@ def test_linkage_geometry_warns_for_nonbonded_close_contacts():
     assert any(check.name == "nonbonded_close_contacts" for check in report.checks)
 
 
-def test_smoke_audit_pass_fail_and_skipped(tmp_path):
-    """Smoke audit should consume fake JSON payloads."""
-    assert audit_openmm_smoke_reports(tmp_path).status == ValidationStatus.SKIPPED
+def test_relaxation_evidence_audit_pass_fail_and_skipped(tmp_path):
+    """OpenMM relaxation audit should consume relaxation JSON payloads."""
+    assert audit_relaxation_evidence(tmp_path).status == ValidationStatus.SKIPPED
 
-    smoke_path = tmp_path / "vacuum_smoke.json"
-    smoke_path.write_text(
-        json.dumps({"success": True, "energy_after_min_kj_mol": -1.0}),
+    relaxation_path = tmp_path / "conjugate_relaxation.json"
+    relaxation_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "stage_a_success": True,
+                "stage_b_success": True,
+                "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -0.5,
+                "stage_a_energy_after_min_kj_mol": -1.0,
+                "stage_b_energy_before_md_kj_mol": -1.5,
+                "stage_b_energy_after_md_kj_mol": -2.0,
+                "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
+                "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
+                "stage_b_linkage_distance_errors_angstrom": [0.1],
+                "settings": {"md_steps": 10},
+            }
+        ),
         encoding="utf-8",
     )
-    assert audit_openmm_smoke_reports(tmp_path).status == ValidationStatus.PASS
+    assert audit_relaxation_evidence(tmp_path).status == ValidationStatus.PASS
 
-    smoke_path.write_text(
-        json.dumps({"success": True, "energy_after_min_kj_mol": "nan"}),
+    relaxation_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "stage_a_success": True,
+                "stage_b_success": True,
+                "barostat_used": False,
+                "stage_a_energy_after_min_kj_mol": "nan",
+                "stage_b_energy_after_md_kj_mol": -2.0,
+                "settings": {"md_steps": 10},
+            }
+        ),
         encoding="utf-8",
     )
-    assert audit_openmm_smoke_reports(tmp_path).status == ValidationStatus.FAIL
+    assert audit_relaxation_evidence(tmp_path).status == ValidationStatus.FAIL
 
 
-def test_smoke_audit_does_not_mask_failed_legacy_smoke_with_frozen_evidence(tmp_path):
-    """Frozen relaxation evidence must not suppress failed legacy smoke artifacts."""
-    (tmp_path / "restrained_smoke_diagnostics.json").write_text(
+def test_relaxation_evidence_audit_rejects_malformed_json(tmp_path):
+    """Malformed relaxation JSON should return a structured failure report."""
+    diagnostics_path = tmp_path / "conjugate_relaxation.json"
+    diagnostics_path.write_text('{"success": true', encoding="utf-8")
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert report.relaxation_diagnostics_json_path == diagnostics_path
+    assert len(report.checks) == 1
+    check = report.checks[0]
+    assert check.name == "conjugate_relaxation_json"
+    assert check.status == ValidationStatus.FAIL
+    assert check.evidence["path"] == str(diagnostics_path)
+    assert check.evidence["error_type"] == "JSONDecodeError"
+    assert check.evidence["error"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "payload_type"),
+    (([], "list"), ("relaxed", "str"), (1, "int")),
+)
+def test_relaxation_evidence_audit_rejects_non_object_json(
+    tmp_path,
+    payload: object,
+    payload_type: str,
+):
+    """Non-object relaxation JSON should return a structured failure report."""
+    diagnostics_path = tmp_path / "conjugate_relaxation.json"
+    diagnostics_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert report.relaxation_diagnostics_json_path == diagnostics_path
+    assert len(report.checks) == 1
+    check = report.checks[0]
+    assert check.name == "conjugate_relaxation_json"
+    assert check.status == ValidationStatus.FAIL
+    assert check.evidence == {"path": str(diagnostics_path), "payload_type": payload_type}
+
+
+def test_relaxation_evidence_audit_ignores_legacy_validation_artifacts(tmp_path):
+    """Legacy validation artifacts should not affect the new relaxation audit."""
+    (tmp_path / "legacy_validation_evidence.json").write_text(
         json.dumps({"success": False}),
         encoding="utf-8",
     )
-    diagnostics_path = tmp_path / "frozen_protein_relaxation_diagnostics.json"
+    diagnostics_path = tmp_path / "conjugate_relaxation.json"
     diagnostics_path.write_text(
         json.dumps(
             {
@@ -621,7 +671,9 @@ def test_smoke_audit_does_not_mask_failed_legacy_smoke_with_frozen_evidence(tmp_
                 "stage_b_success": True,
                 "temporary_anchor_count": 2,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -637,56 +689,278 @@ def test_smoke_audit_does_not_mask_failed_legacy_smoke_with_frozen_evidence(tmp_
         encoding="utf-8",
     )
 
-    report = audit_openmm_smoke_reports(tmp_path)
-
-    assert report.status == ValidationStatus.FAIL
-    assert report.frozen_relaxation_diagnostics_json_path == diagnostics_path
-    assert any(check.name == "restrained_smoke_diagnostics" for check in report.checks)
-
-
-def test_smoke_audit_accepts_passing_frozen_relaxation_evidence(tmp_path):
-    """Validation should pass when all present OpenMM smoke evidence passes."""
-    diagnostics_path = tmp_path / "frozen_protein_relaxation_diagnostics.json"
-    diagnostics_path.write_text(
-        json.dumps(
-            {
-                "success": True,
-                "stage_a_success": True,
-                "stage_b_success": True,
-                "temporary_anchor_count": 2,
-                "barostat_used": False,
-                "stage_a_energy_after_min_kj_mol": -10.0,
-                "stage_b_energy_after_md_kj_mol": -11.0,
-                "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
-                "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
-                "stage_b_linkage_distance_errors_angstrom": [0.1, 0.2],
-                "settings": {
-                    "md_steps": 10,
-                    "max_protein_rmsd_angstrom": 0.05,
-                    "max_protein_displacement_angstrom": 0.25,
-                    "max_linkage_distance_error_angstrom": 0.35,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    report = audit_openmm_smoke_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.PASS
-    assert report.frozen_relaxation_diagnostics_json_path == diagnostics_path
+    assert report.relaxation_diagnostics_json_path == diagnostics_path
 
 
-def test_smoke_audit_rejects_stale_zero_step_frozen_relaxation(tmp_path):
+def test_relaxation_evidence_audit_accepts_passing_conjugate_relaxation(tmp_path):
+    """Validation should pass when all present OpenMM relaxation evidence passes."""
+    diagnostics_path = tmp_path / "conjugate_relaxation.json"
+    diagnostics_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "stage_a_success": True,
+                "stage_b_success": True,
+                "temporary_anchor_count": 2,
+                "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
+                "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
+                "stage_b_energy_after_md_kj_mol": -11.0,
+                "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
+                "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
+                "stage_b_linkage_distance_errors_angstrom": [0.1, 0.2],
+                "settings": {
+                    "md_steps": 10,
+                    "max_protein_rmsd_angstrom": 0.05,
+                    "max_protein_displacement_angstrom": 0.25,
+                    "max_linkage_distance_error_angstrom": 0.35,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.PASS
+    assert report.relaxation_diagnostics_json_path == diagnostics_path
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "check_name"),
+    (
+        ("success", "false", "conjugate_relaxation"),
+        ("stage_a_success", 1, "conjugate_relaxation_stage_a"),
+        ("stage_b_success", "yes", "conjugate_relaxation_stage_b"),
+    ),
+)
+def test_relaxation_evidence_audit_rejects_malformed_status_fields(
+    tmp_path,
+    field: str,
+    value: object,
+    check_name: str,
+):
+    """Validation should require status fields to be JSON boolean true."""
+    payload = _canonical_relaxation_payload()
+    payload[field] = value
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == check_name and check.evidence[field] == value for check in report.checks
+    )
+
+
+@pytest.mark.parametrize("value", ("false", 0, None))
+def test_relaxation_evidence_audit_rejects_malformed_barostat_used(tmp_path, value: object):
+    """Validation should require barostat_used to be JSON boolean false."""
+    payload = _canonical_relaxation_payload()
+    if value is None:
+        payload.pop("barostat_used")
+    else:
+        payload["barostat_used"] = value
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_barostat" and check.evidence["barostat_used"] == value
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_accepts_force_group_energy_maps(tmp_path):
+    """Validation should pass finite scalar and force-group relaxation energies."""
+    diagnostics_path = tmp_path / "conjugate_relaxation.json"
+    diagnostics_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "stage_a_success": True,
+                "stage_b_success": True,
+                "temporary_anchor_count": 2,
+                "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
+                "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
+                "stage_b_energy_after_md_kj_mol": -11.0,
+                "stage_a_force_group_energies_before_min_kj_mol": {
+                    "0": -9.0,
+                    "1": 0.5,
+                    "2": 1.5,
+                },
+                "stage_a_force_group_energies_after_min_kj_mol": {
+                    "bonded": -10.5,
+                    "nonbonded": -0.25,
+                },
+                "stage_b_force_group_energies_after_md_kj_mol": {
+                    "bonded": -11.25,
+                    "nonbonded": 0.25,
+                },
+                "relaxation_note": "finite force-group energies should not fail audit",
+                "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
+                "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
+                "stage_b_linkage_distance_errors_angstrom": [0.1, 0.2],
+                "settings": {
+                    "md_steps": 10,
+                    "max_protein_rmsd_angstrom": 0.05,
+                    "max_protein_displacement_angstrom": 0.25,
+                    "max_linkage_distance_error_angstrom": 0.35,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.PASS
+    assert report.relaxation_diagnostics_json_path == diagnostics_path
+
+
+def test_relaxation_evidence_audit_requires_stage_b_rmsd(tmp_path):
+    """Validation should reject successful diagnostics missing Stage B protein RMSD."""
+    payload = _canonical_relaxation_payload()
+    payload.pop("stage_b_protein_rmsd_from_stage_a_angstrom")
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_protein_immobilization"
+        and "stage_b_protein_rmsd_from_stage_a_angstrom" in check.evidence["fields"]
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_requires_stage_b_max_displacement(tmp_path):
+    """Validation should reject successful diagnostics missing Stage B max displacement."""
+    payload = _canonical_relaxation_payload()
+    payload.pop("stage_b_protein_max_displacement_from_stage_a_angstrom")
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_protein_immobilization"
+        and "stage_b_protein_max_displacement_from_stage_a_angstrom" in check.evidence["fields"]
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_requires_stage_b_linkage_distance_errors(tmp_path):
+    """Validation should reject successful diagnostics missing linkage distance errors."""
+    payload = _canonical_relaxation_payload()
+    payload.pop("stage_b_linkage_distance_errors_angstrom")
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_linkage_distances"
+        and check.evidence["field"] == "stage_b_linkage_distance_errors_angstrom"
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_rejects_empty_stage_b_linkage_distance_errors(tmp_path):
+    """Validation should reject successful diagnostics with empty linkage error evidence."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_linkage_distance_errors_angstrom"] = []
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_linkage_distances"
+        and check.evidence["field"] == "stage_b_linkage_distance_errors_angstrom"
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_requires_canonical_energy_fields(tmp_path):
+    """Validation should reject successful diagnostics missing canonical energy fields."""
+    required_fields = (
+        "stage_a_energy_before_min_kj_mol",
+        "stage_a_energy_after_min_kj_mol",
+        "stage_b_energy_before_md_kj_mol",
+        "stage_b_energy_after_md_kj_mol",
+    )
+    for field in required_fields:
+        payload = _canonical_relaxation_payload()
+        payload.pop(field)
+        _write_relaxation_diagnostics(tmp_path, payload)
+
+        report = audit_relaxation_evidence(tmp_path)
+
+        assert report.status == ValidationStatus.FAIL
+        assert any(
+            check.name == "conjugate_relaxation_required_energies"
+            and field in check.evidence["fields"]
+            for check in report.checks
+        )
+
+
+def test_relaxation_evidence_audit_rejects_boolean_energy_value(tmp_path):
+    """Validation should reject boolean relaxation energy evidence."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_energy_after_md_kj_mol"] = True
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_energies"
+        and "stage_b_energy_after_md_kj_mol" in check.evidence["fields"]
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_rejects_boolean_scalar_immobilization(tmp_path):
+    """Validation should reject boolean Stage B RMSD and displacement evidence."""
+    fields = (
+        "stage_b_protein_rmsd_from_stage_a_angstrom",
+        "stage_b_protein_max_displacement_from_stage_a_angstrom",
+    )
+    for field in fields:
+        payload = _canonical_relaxation_payload()
+        payload[field] = False
+        _write_relaxation_diagnostics(tmp_path, payload)
+
+        report = audit_relaxation_evidence(tmp_path)
+
+        assert report.status == ValidationStatus.FAIL
+        assert any(
+            check.name == "conjugate_relaxation_required_protein_immobilization"
+            and field in check.evidence["fields"]
+            for check in report.checks
+        )
+
+
+def test_relaxation_evidence_audit_rejects_stale_zero_step_relaxation(tmp_path):
     """Validation should reject stale frozen diagnostics with no Stage B MD."""
-    (tmp_path / "frozen_protein_relaxation_diagnostics.json").write_text(
+    (tmp_path / "conjugate_relaxation.json").write_text(
         json.dumps(
             {
                 "success": True,
                 "stage_a_success": True,
                 "stage_b_success": True,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -697,22 +971,24 @@ def test_smoke_audit_rejects_stale_zero_step_frozen_relaxation(tmp_path):
         encoding="utf-8",
     )
 
-    report = audit_openmm_smoke_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.FAIL
-    assert any(check.name == "frozen_protein_relaxation_md_steps" for check in report.checks)
+    assert any(check.name == "conjugate_relaxation_md_steps" for check in report.checks)
 
 
-def test_smoke_audit_requires_frozen_relaxation_md_steps(tmp_path):
+def test_relaxation_evidence_audit_requires_conjugate_relaxation_md_steps(tmp_path):
     """Validation should reject otherwise-passing frozen diagnostics without MD steps."""
-    (tmp_path / "frozen_protein_relaxation_diagnostics.json").write_text(
+    (tmp_path / "conjugate_relaxation.json").write_text(
         json.dumps(
             {
                 "success": True,
                 "stage_a_success": True,
                 "stage_b_success": True,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -727,22 +1003,24 @@ def test_smoke_audit_requires_frozen_relaxation_md_steps(tmp_path):
         encoding="utf-8",
     )
 
-    report = audit_openmm_smoke_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.FAIL
-    assert any(check.name == "frozen_protein_relaxation_md_steps" for check in report.checks)
+    assert any(check.name == "conjugate_relaxation_md_steps" for check in report.checks)
 
 
-def test_smoke_audit_accepts_top_level_frozen_relaxation_md_steps(tmp_path):
+def test_relaxation_evidence_audit_accepts_top_level_relaxation_md_steps(tmp_path):
     """Validation should accept top-level MD steps when settings omit them."""
-    (tmp_path / "frozen_protein_relaxation_diagnostics.json").write_text(
+    (tmp_path / "conjugate_relaxation.json").write_text(
         json.dumps(
             {
                 "success": True,
                 "stage_a_success": True,
                 "stage_b_success": True,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -758,14 +1036,114 @@ def test_smoke_audit_accepts_top_level_frozen_relaxation_md_steps(tmp_path):
         encoding="utf-8",
     )
 
-    report = audit_openmm_smoke_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.PASS
 
 
-def test_smoke_audit_fails_unfixed_frozen_stage_b(tmp_path):
+def test_relaxation_evidence_audit_fails_non_numeric_tolerance_setting(tmp_path):
+    """Validation should fail invalid tolerance settings without raising."""
+    payload = _canonical_relaxation_payload()
+    settings = payload["settings"]
+    assert isinstance(settings, dict)
+    settings["max_protein_rmsd_angstrom"] = "not-a-number"
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_tolerance_settings"
+        and check.evidence["field"] == "max_protein_rmsd_angstrom"
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_fails_boolean_tolerance_setting(tmp_path):
+    """Validation should reject boolean tolerance settings."""
+    payload = _canonical_relaxation_payload()
+    settings = payload["settings"]
+    assert isinstance(settings, dict)
+    settings["max_protein_rmsd_angstrom"] = True
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_tolerance_settings"
+        and check.evidence["field"] == "max_protein_rmsd_angstrom"
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_fails_negative_rmsd(tmp_path):
+    """Validation should reject negative Stage B protein RMSD evidence."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_protein_rmsd_from_stage_a_angstrom"] = -0.01
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_protein_immobilization"
+        and "stage_b_protein_rmsd_from_stage_a_angstrom" in check.evidence["fields"]
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_fails_negative_max_displacement(tmp_path):
+    """Validation should reject negative Stage B protein max displacement evidence."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_protein_max_displacement_from_stage_a_angstrom"] = -0.01
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_protein_immobilization"
+        and "stage_b_protein_max_displacement_from_stage_a_angstrom" in check.evidence["fields"]
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_fails_negative_linkage_error(tmp_path):
+    """Validation should reject negative linkage distance error evidence."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_linkage_distance_errors_angstrom"] = [0.1, -0.01]
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_linkage_distances"
+        and check.evidence["field"] == "stage_b_linkage_distance_errors_angstrom"
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_fails_boolean_linkage_error_element(tmp_path):
+    """Validation should reject boolean linkage distance error elements."""
+    payload = _canonical_relaxation_payload()
+    payload["stage_b_linkage_distance_errors_angstrom"] = [0.1, False]
+    _write_relaxation_diagnostics(tmp_path, payload)
+
+    report = audit_relaxation_evidence(tmp_path)
+
+    assert report.status == ValidationStatus.FAIL
+    assert any(
+        check.name == "conjugate_relaxation_required_linkage_distances"
+        and check.evidence["field"] == "stage_b_linkage_distance_errors_angstrom"
+        for check in report.checks
+    )
+
+
+def test_relaxation_evidence_audit_fails_unfixed_frozen_stage_b(tmp_path):
     """Validation should fail when Stage B does not keep protein fixed."""
-    diagnostics_path = tmp_path / "frozen_protein_relaxation_diagnostics.json"
+    diagnostics_path = tmp_path / "conjugate_relaxation.json"
     diagnostics_path.write_text(
         json.dumps(
             {
@@ -773,7 +1151,9 @@ def test_smoke_audit_fails_unfixed_frozen_stage_b(tmp_path):
                 "stage_a_success": True,
                 "stage_b_success": True,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.2,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.5,
@@ -788,15 +1168,15 @@ def test_smoke_audit_fails_unfixed_frozen_stage_b(tmp_path):
         encoding="utf-8",
     )
 
-    report = audit_openmm_smoke_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.FAIL
-    assert any(check.name == "frozen_protein_relaxation_protein_rmsd" for check in report.checks)
+    assert any(check.name == "conjugate_relaxation_protein_rmsd" for check in report.checks)
 
 
-def test_smoke_audit_requires_frozen_stage_a_success(tmp_path):
+def test_relaxation_evidence_audit_requires_frozen_stage_a_success(tmp_path):
     """Validation should fail when Stage A minimization is missing."""
-    diagnostics_path = tmp_path / "frozen_protein_relaxation_diagnostics.json"
+    diagnostics_path = tmp_path / "conjugate_relaxation.json"
     diagnostics_path.write_text(
         json.dumps(
             {
@@ -804,7 +1184,9 @@ def test_smoke_audit_requires_frozen_stage_a_success(tmp_path):
                 "stage_a_success": False,
                 "stage_b_success": True,
                 "barostat_used": False,
+                "stage_a_energy_before_min_kj_mol": -9.0,
                 "stage_a_energy_after_min_kj_mol": -10.0,
+                "stage_b_energy_before_md_kj_mol": -10.5,
                 "stage_b_energy_after_md_kj_mol": -11.0,
                 "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
                 "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
@@ -814,10 +1196,10 @@ def test_smoke_audit_requires_frozen_stage_a_success(tmp_path):
         encoding="utf-8",
     )
 
-    report = audit_openmm_smoke_reports(tmp_path)
+    report = audit_relaxation_evidence(tmp_path)
 
     assert report.status == ValidationStatus.FAIL
-    assert any(check.name == "frozen_protein_relaxation_stage_a" for check in report.checks)
+    assert any(check.name == "conjugate_relaxation_stage_a" for check in report.checks)
 
 
 def test_validation_report_status_aggregation(tmp_path):
@@ -872,3 +1254,34 @@ def _write_product_pdb(path: Path, *, include_link: bool) -> None:
         lines.extend(["CONECT    1    2\n", "CONECT    2    1\n"])
     lines.append("END\n")
     path.write_text("".join(lines), encoding="utf-8")
+
+
+def _canonical_relaxation_payload() -> dict[str, object]:
+    """Return otherwise-passing conjugate relaxation diagnostics."""
+    return {
+        "success": True,
+        "stage_a_success": True,
+        "stage_b_success": True,
+        "barostat_used": False,
+        "stage_a_energy_before_min_kj_mol": -9.0,
+        "stage_a_energy_after_min_kj_mol": -10.0,
+        "stage_b_energy_before_md_kj_mol": -10.5,
+        "stage_b_energy_after_md_kj_mol": -11.0,
+        "stage_b_protein_rmsd_from_stage_a_angstrom": 0.0,
+        "stage_b_protein_max_displacement_from_stage_a_angstrom": 0.0,
+        "stage_b_linkage_distance_errors_angstrom": [0.1, 0.2],
+        "settings": {
+            "md_steps": 10,
+            "max_protein_rmsd_angstrom": 0.05,
+            "max_protein_displacement_angstrom": 0.25,
+            "max_linkage_distance_error_angstrom": 0.35,
+        },
+    }
+
+
+def _write_relaxation_diagnostics(tmp_path: Path, payload: dict[str, object]) -> None:
+    """Write conjugate relaxation diagnostics for validation tests."""
+    (tmp_path / "conjugate_relaxation.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )

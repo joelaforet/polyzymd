@@ -226,16 +226,18 @@ A successful build writes artifacts similar to:
 
 ```text
 artifacts/lysine-polymer-conjugate/
-|- conjugation_diagnostics.json
-|- conjugation_metadata.json
 |- conjugate-construction/
+|  |- assembled_crosslinked.pdb
+|  |- conjugate_relaxation.json
+|  |- conjugate_relaxed.pdb
 |  `- conjugate_validation_report.json
-|- relaxed_conjugate.pdb
+|- conjugated_polymer_system_workflow.json
+|- system.xml
 `- solvated_conjugate_free_polymers.pdb
 ```
 
 Exact filenames can vary by workflow branch and export options, but the result
-object records the crosslinked, minimized, relaxed, solvated, and export paths
+object records the crosslinked, relaxed, solvated, validation, and export paths
 that were created.
 
 ## What Works Today

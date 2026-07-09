@@ -13,9 +13,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from polyzymd.builders.conjugation._linkage import (
-    PabloCrosslinkRequirement,
     ResolvedAttachmentPlan,
-    parse_pdb_atom_records,
     placed_fragment_from_resolved_plan,
     require_pablo_crosslink_requirement,
 )
@@ -23,14 +21,6 @@ from polyzymd.builders.conjugation._moiety_provider import (
     generated_fragment_for_resolved_source,
     resolve_moiety_source,
     validate_moiety_source_config,
-)
-from polyzymd.builders.conjugation._relaxation import (
-    FrozenProteinRelaxationSettings,
-    LocalMinimizationSettings,
-    VacuumSmokeSettings,
-    run_frozen_protein_product_relaxation,
-    run_post_crosslink_local_minimization,
-    run_restrained_vacuum_smoke,
 )
 from polyzymd.builders.conjugation._specs import (
     AttachmentBuildSpec,
@@ -42,10 +32,12 @@ from polyzymd.builders.conjugation.construction import (
 )
 from polyzymd.builders.conjugation.final_interchange import create_final_conjugated_interchange
 from polyzymd.builders.conjugation.models import ConjugationResult
+from polyzymd.builders.conjugation.pablo.charge_templates import (
+    build_conjugate_charge_templates,
+)
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestor
 from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationSettings,
-    build_formal_charge_smoke_template,
     create_interchange_from_pablo_topology,
 )
 from polyzymd.builders.conjugation.pablo.product_state import (
@@ -65,6 +57,10 @@ from polyzymd.builders.conjugation.reactions._roles import (
     resolve_reaction_roles_from_identity_map,
 )
 from polyzymd.builders.conjugation.reactions.library import get_reaction
+from polyzymd.builders.conjugation.relaxation import (
+    ConjugateRelaxationSettings,
+    relax_conjugate,
+)
 from polyzymd.builders.conjugation.structure.parsing import (
     ATOM_RECORD_PREFIXES,
     pdb_coordinates,
@@ -82,7 +78,10 @@ from polyzymd.builders.conjugation.structure.preparation import (
     ProteinCanonicalizationSettings,
     canonicalize_protein_hydrogens,
 )
-from polyzymd.builders.conjugation.validation import build_conjugate_validation_report
+from polyzymd.builders.conjugation.validation import (
+    ValidationStatus,
+    build_conjugate_validation_report,
+)
 from polyzymd.builders.system_builder import SystemBuilder
 from polyzymd.config.schema import (
     ConjugationCcdCrosslinkConfig,
@@ -114,28 +113,23 @@ class ConjugatedPolymerSystemSettings(BaseModel):
     preserve_reference_atom_names: bool = True
     canonicalize_source_protein_hydrogens: bool = True
     use_product_state_pablo_library: bool = True
-    run_product_state_local_minimization: bool = True
-    run_frozen_protein_product_relaxation: bool = True
+    run_relaxation: bool = True
     direct_solvation_padding: float = Field(0.8, gt=0.0)
     direct_solvation_box_shape: str = "cube"
     protein_canonicalization: ProteinCanonicalizationSettings = Field(
         default_factory=ProteinCanonicalizationSettings
     )
-    local_minimization: LocalMinimizationSettings = Field(default_factory=LocalMinimizationSettings)
     placement: PackmolModifierPlacementSettings = Field(
         default_factory=PackmolModifierPlacementSettings
     )
     conjugate_parameterization: InterchangeParameterizationSettings = Field(
         default_factory=InterchangeParameterizationSettings
     )
-    vacuum_smoke: VacuumSmokeSettings = Field(default_factory=lambda: _protein_restrained_smoke())
-    frozen_protein_relaxation: FrozenProteinRelaxationSettings = Field(
-        default_factory=FrozenProteinRelaxationSettings
-    )
+    relaxation: ConjugateRelaxationSettings = Field(default_factory=ConjugateRelaxationSettings)
 
 
 class ConjugateConstructionResult(BaseModel):
-    """Specs-first construction result with singular compatibility fields."""
+    """Specs-first construction result for product-state conjugation."""
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -150,8 +144,7 @@ class ConjugateConstructionResult(BaseModel):
     assembly: Any
     pablo: Any
     parameterization: Any
-    smoke: Any | None = None
-    local_minimization: Any | None = None
+    relaxation: Any | None = None
     product_state_pablo_library: Any | None = Field(default=None, exclude=True)
     crosslinked_pdb_path: Path
     validation_report_path: Path | None = None
@@ -236,9 +229,8 @@ def build_conjugated_polymer_system_from_config(
     construction_settings = ModifierConstructionSettings(
         placement=workflow_settings.placement,
         parameterization=workflow_settings.conjugate_parameterization,
-        smoke=workflow_settings.vacuum_smoke,
-        frozen_protein_relaxation=workflow_settings.frozen_protein_relaxation,
-        run_smoke=True,
+        relaxation=workflow_settings.relaxation,
+        run_relaxation=workflow_settings.run_relaxation,
     )
     construction, construction_topology = _construct_conjugate_from_specs(
         protein_pdb_path=protein_pdb_path,
@@ -248,16 +240,10 @@ def build_conjugated_polymer_system_from_config(
         chain_policy=config.conjugation.chain_policy,
         settings=construction_settings,
         use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
-        use_frozen_protein_product_relaxation=(
-            workflow_settings.run_frozen_protein_product_relaxation
-        ),
-        run_product_state_local_minimization=(
-            workflow_settings.run_product_state_local_minimization
-        ),
-        local_minimization_settings=workflow_settings.local_minimization,
+        use_conjugate_relaxation=workflow_settings.run_relaxation,
     )
     if workflow_settings.preserve_reference_atom_names:
-        _restore_smoke_pdb_atom_names(construction, construction.crosslinked_pdb_path)
+        _restore_relaxed_pdb_atom_names(construction, construction.crosslinked_pdb_path)
 
     LOGGER.info("Preparing relaxed conjugate topology")
     relaxed_pdb = _relaxed_conjugate_pdb(construction)
@@ -379,9 +365,8 @@ def build_direct_moiety_conjugate(
     construction_settings = ModifierConstructionSettings(
         placement=workflow_settings.placement,
         parameterization=workflow_settings.conjugate_parameterization,
-        smoke=workflow_settings.vacuum_smoke,
-        frozen_protein_relaxation=workflow_settings.frozen_protein_relaxation,
-        run_smoke=True,
+        relaxation=workflow_settings.relaxation,
+        run_relaxation=workflow_settings.run_relaxation,
     )
 
     construction, construction_topology = _construct_conjugate_from_specs(
@@ -392,13 +377,7 @@ def build_direct_moiety_conjugate(
         chain_policy=chain_assignment,
         settings=construction_settings,
         use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
-        use_frozen_protein_product_relaxation=(
-            workflow_settings.run_frozen_protein_product_relaxation
-        ),
-        run_product_state_local_minimization=(
-            workflow_settings.run_product_state_local_minimization
-        ),
-        local_minimization_settings=workflow_settings.local_minimization,
+        use_conjugate_relaxation=workflow_settings.run_relaxation,
     )
 
     LOGGER.info("Preparing relaxed conjugate topology")
@@ -465,20 +444,6 @@ def topology_with_pdb_positions(
     if atom_name_template_pdb is not None:
         _apply_pdb_atom_names_to_topology(positioned_topology, atom_name_template_pdb)
     return positioned_topology
-
-
-def _protein_restrained_smoke() -> VacuumSmokeSettings:
-    """Default short vacuum run that restrains protein heavy atoms only."""
-    return VacuumSmokeSettings(
-        minimization_max_iterations=100,
-        nvt_steps=10,
-        restrain_all_heavy_atoms=False,
-    )
-
-
-def _default_local_minimization_settings() -> Any:
-    """Build default post-crosslink local minimization settings lazily."""
-    return LocalMinimizationSettings()
 
 
 def _prepared_protein_pdb_path(
@@ -750,9 +715,7 @@ def _construct_conjugate_from_specs(
     chain_policy: Any | None,
     settings: ModifierConstructionSettings,
     use_product_state_pablo_library: bool,
-    use_frozen_protein_product_relaxation: bool = True,
-    run_product_state_local_minimization: bool = False,
-    local_minimization_settings: Any | None = None,
+    use_conjugate_relaxation: bool = True,
 ) -> tuple[Any, Any]:
     """Construct, parameterize, and relax a conjugate from resolved attachment specs."""
     if not specs:
@@ -804,7 +767,6 @@ def _construct_conjugate_from_specs(
         specs,
         assembly_result=assembly_result,
     )
-    product_state_resolved_plans = tuple(spec.resolved_plan for spec in product_state_specs)
 
     product_state_pablo_library = None
     product_state_residue_library = None
@@ -842,11 +804,16 @@ def _construct_conjugate_from_specs(
             pablo_result.topology,
         )
 
+    charge_templates, require_charge_templates = _intermediate_conjugate_charge_templates(
+        pablo_result.topology,
+        product_state_pablo_library,
+    )
     LOGGER.info("Parameterizing conjugate with OpenFF Interchange")
     parameterization_result = create_interchange_from_pablo_topology(
         pablo_result.topology,
         settings=settings.parameterization,
-        charge_from_molecules=_formal_charge_templates_from_topology(pablo_result.topology),
+        charge_from_molecules=charge_templates,
+        require_charge_templates=require_charge_templates,
     )
     if not parameterization_result.success or parameterization_result.interchange is None:
         raise RuntimeError("OpenFF Interchange parameterization did not produce an interchange")
@@ -855,88 +822,37 @@ def _construct_conjugate_from_specs(
     diagnostics = [
         f"Conjugate construction completed ({len(resolved_plans)} attachment {site_label})",
     ]
-    smoke_result = None
-    local_minimization_result = None
-    run_combined_smoke_relaxation = False
-    if run_product_state_local_minimization:
-        local_settings = _local_minimization_settings_for_product(
-            crosslinked_pdb_path,
-            base_settings=local_minimization_settings or _default_local_minimization_settings(),
-            requirements=tuple(
-                plan.pablo_crosslink_requirement for plan in product_state_resolved_plans
-            ),
-            resolved_plans=product_state_resolved_plans,
-            product_state_pablo_library=product_state_pablo_library,
-        )
-        LOGGER.info(
-            "Running product-state local minimization for %d linkage(s)",
-            len(resolved_plans),
-        )
-        local_minimization_result = run_post_crosslink_local_minimization(
-            crosslinked_pdb_path,
-            artifact_dir,
-            settings=local_settings,
-            pablo_policy=ccd_pablo_policy,
-            product_state_pablo_library=product_state_pablo_library,
-        )
-        if not local_minimization_result.success:
-            blocker = getattr(local_minimization_result, "blocker", None)
-            relaxed_path = getattr(local_minimization_result, "relaxed_pdb_path", None)
-            if blocker is not None or relaxed_path is None:
-                detail = blocker or "local minimization did not produce a relaxed PDB"
-                raise RuntimeError(f"Product-state local minimization failed: {detail}")
-            diagnostics.append(
-                "Product-state local minimization completed and wrote a relaxed PDB, "
-                "but post-minimization geometry validation did not pass. Continuing with "
-                "the local-minimized artifact without falling back to smoke relaxation."
-            )
-    if (
-        local_minimization_result is None
-        and not run_combined_smoke_relaxation
-        and use_frozen_protein_product_relaxation
-        and settings.run_smoke
-    ):
-        LOGGER.info("Running generic frozen-protein product relaxation")
-        smoke_result = run_frozen_protein_product_relaxation(
+    relaxation_result = None
+    if use_conjugate_relaxation and settings.run_relaxation:
+        LOGGER.info("Running conjugate relaxation")
+        relaxation_result = relax_conjugate(
             parameterization_result.interchange,
             artifact_dir,
             product_pdb_path=crosslinked_pdb_path,
             attachment_specs=specs,
             assembly=assembly_result,
-            settings=settings.frozen_protein_relaxation,
+            settings=settings.relaxation,
         )
-        if not smoke_result.success:
-            raise RuntimeError("Frozen-protein product relaxation did not report success")
-
-    if (
-        local_minimization_result is None
-        and smoke_result is None
-        and (settings.run_smoke or run_combined_smoke_relaxation)
-    ):
-        LOGGER.info("Running combined restrained vacuum smoke relaxation")
-        smoke_result = run_restrained_vacuum_smoke(
-            parameterization_result.interchange,
-            artifact_dir,
-            settings=settings.smoke,
-            crosslinked_pdb_path=crosslinked_pdb_path,
-            attachment_specs=specs,
-        )
-        if not smoke_result.success:
-            raise RuntimeError("OpenMM restrained vacuum smoke did not report success")
+        if not relaxation_result.success:
+            raise RuntimeError("Conjugate relaxation did not report success")
 
     validation_report = build_conjugate_validation_report(
         product_pdb_path=crosslinked_pdb_path,
         resolved_plans=resolved_plans,
         assembly=assembly_result,
         output_dir=artifact_dir,
-        interchange=(
-            parameterization_result.interchange
-            if hasattr(parameterization_result.interchange, "to_openmm_system")
-            else None
-        ),
         expected_particle_count=getattr(pablo_result.topology, "n_atoms", None),
         write=True,
     )
+    relaxation_was_requested = use_conjugate_relaxation and settings.run_relaxation
+    relaxation_evidence_status = validation_report.relaxation_evidence.status
+    if relaxation_was_requested and relaxation_evidence_status != ValidationStatus.PASS:
+        raise RuntimeError(
+            "Conjugate validation report relaxation evidence did not pass "
+            f"after requested relaxation: {relaxation_evidence_status.value}"
+        )
+    if not relaxation_was_requested and relaxation_evidence_status == ValidationStatus.FAIL:
+        raise RuntimeError("Conjugate validation report relaxation evidence failed")
 
     return (
         ConjugateConstructionResult(
@@ -951,8 +867,7 @@ def _construct_conjugate_from_specs(
             assembly=assembly_result,
             pablo=pablo_result,
             parameterization=parameterization_result,
-            smoke=smoke_result,
-            local_minimization=local_minimization_result,
+            relaxation=relaxation_result,
             product_state_pablo_library=product_state_pablo_library,
             crosslinked_pdb_path=crosslinked_pdb_path,
             validation_report_path=validation_report.report_path,
@@ -1089,24 +1004,14 @@ def _pablo_failure_message(result: Any) -> str:
 
 
 def _relaxed_conjugate_pdb(construction: ModifierConstructionResult) -> Path:
-    local_minimization = getattr(construction, "local_minimization", None)
-    if local_minimization is not None:
-        relaxed_path = getattr(local_minimization, "relaxed_pdb_path", None)
-        if relaxed_path is not None:
-            return relaxed_path
-    if construction.smoke is None:
-        raise RuntimeError("protein-restrained vacuum smoke did not run")
-    if construction.smoke.equilibrated_pdb_path is not None:
-        return construction.smoke.equilibrated_pdb_path
-    if construction.smoke.minimized_pdb_path is not None:
-        return construction.smoke.minimized_pdb_path
-    raise RuntimeError("protein-restrained vacuum smoke did not write a relaxed PDB")
-
-
-def _formal_charge_templates_from_topology(topology: Any) -> tuple[Any, ...]:
-    """Build smoke-only formal-charge templates for product-state parameterization."""
-    molecules = tuple(getattr(topology, "molecules", ()) or ())
-    return tuple(build_formal_charge_smoke_template(molecule) for molecule in molecules)
+    relaxation = getattr(construction, "relaxation", None)
+    if relaxation is not None:
+        if relaxation.relaxed_pdb_path is not None:
+            return relaxation.relaxed_pdb_path
+    crosslinked = getattr(construction, "crosslinked_pdb_path", None)
+    if crosslinked is not None:
+        return crosslinked
+    raise RuntimeError("Conjugate construction did not produce a downstream-ready PDB")
 
 
 def _product_state_library_with_charge_templates(
@@ -1122,6 +1027,45 @@ def _product_state_library_with_charge_templates(
         return product_state_pablo_library.model_copy(update={"charge_templates": templates})
     product_state_pablo_library.charge_templates = templates
     return product_state_pablo_library
+
+
+def _intermediate_conjugate_charge_templates(
+    topology: Any,
+    product_state_pablo_library: Any | None,
+) -> tuple[tuple[Any, ...], bool]:
+    """Build production charge templates for intermediate conjugate parameterization.
+
+    Parameters
+    ----------
+    topology : Any
+        Current product-state Pablo topology to parameterize.
+    product_state_pablo_library : Any or None
+        Product-state Pablo library carrying production partial-charge provenance.
+
+    Returns
+    -------
+    tuple of tuple of Any and bool
+        Charged molecule templates and whether OpenFF parameterization must
+        reject empty templates before implicit charge assignment can occur.
+
+    Raises
+    ------
+    RuntimeError
+        If product-state provenance is active but production charge templates
+        cannot be built.
+    """
+    if product_state_pablo_library is None:
+        return (), False
+
+    try:
+        templates = build_conjugate_charge_templates(topology, product_state_pablo_library)
+    except ValueError as exc:
+        raise RuntimeError(
+            "Product-state conjugate parameterization requires production charge templates from "
+            "the product-state Pablo library. Refusing to let OpenFF fall back to whole-conjugate "
+            f"implicit charge assignment. Original error: {exc}"
+        ) from exc
+    return templates, True
 
 
 def _product_state_library_with_charge_bridge(
@@ -1191,119 +1135,6 @@ def _molecule_has_product_residue(molecule: Any, product_names: set[str]) -> boo
 def _metadata_residue_name(metadata: Any) -> str:
     """Return an uppercase residue name from atom or molecule metadata."""
     return metadata_residue_name(metadata)
-
-
-def _local_minimization_settings_for_product(
-    product_pdb_path: Path,
-    *,
-    base_settings: Any,
-    requirements: tuple[PabloCrosslinkRequirement, ...] | None = None,
-    resolved_plans: tuple[ResolvedAttachmentPlan, ...] = (),
-    product_state_pablo_library: Any | None = None,
-) -> Any:
-    """Build local minimization selectors from emitted product atom identities."""
-    _ = product_state_pablo_library
-    from polyzymd.builders.conjugation._relaxation import (
-        LocalLinkageAtomSelector,
-        LocalLinkageSelectors,
-    )
-
-    explicit_fields = set(getattr(base_settings, "model_fields_set", set()))
-    if "linkages" in explicit_fields:
-        return base_settings
-    if not hasattr(base_settings, "model_copy"):
-        base_settings = _default_local_minimization_settings()
-
-    atoms = parse_pdb_atom_records(product_pdb_path)
-    if requirements is None:
-        requirements = tuple(plan.pablo_crosslink_requirement for plan in resolved_plans)
-    if not requirements:
-        raise RuntimeError("Local minimization requires at least one resolved crosslink")
-
-    linkages = []
-    for index, requirement in enumerate(requirements, start=1):
-        plan = resolved_plans[index - 1] if index <= len(resolved_plans) else None
-        protein_atom = _product_link_atom(
-            atoms,
-            requirement=requirement,
-            participant="protein",
-            plan=plan,
-        )
-        modifier_atom = _product_link_atom(
-            atoms,
-            requirement=requirement,
-            participant="modifier",
-            plan=plan,
-        )
-        target = float(getattr(plan, "target_bond_length_angstrom", 1.33) if plan else 1.33)
-        linkages.append(
-            LocalLinkageSelectors(
-                protein_link_selector=_local_selector(protein_atom, LocalLinkageAtomSelector),
-                modifier_link_selector=_local_selector(modifier_atom, LocalLinkageAtomSelector),
-                target_bond_length_angstrom=target,
-                label=f"linkage_{index}",
-            )
-        )
-
-    return base_settings.model_copy(update={"linkages": tuple(linkages)})
-
-
-def _local_selector(atom: PdbAtomRecord, selector_cls: Any) -> Any:
-    return selector_cls(
-        serial=None,
-        chain_id=atom.chain_id,
-        residue_name=atom.residue_name,
-        residue_number=atom.residue_number,
-        atom_name=atom.atom_name,
-    )
-
-
-def _product_link_atom(
-    atoms: tuple[PdbAtomRecord, ...],
-    *,
-    requirement: PabloCrosslinkRequirement,
-    participant: str,
-    plan: ResolvedAttachmentPlan | None,
-) -> PdbAtomRecord:
-    """Resolve one product link atom without requiring auxiliary anchor atoms."""
-    side = 0 if participant == "protein" else 1
-    plan_atom = None
-    if plan is not None:
-        plan_atom = plan.protein_link_atom if participant == "protein" else plan.modifier_link_atom
-    return _unique_product_atom(
-        atoms,
-        residue_name=requirement.residues[side],
-        atom_name=requirement.linking_atoms[side],
-        same_residue_as=plan_atom,
-    )
-
-
-def _unique_product_atom(
-    atoms: tuple[PdbAtomRecord, ...],
-    *,
-    residue_name: str,
-    atom_name: str,
-    same_residue_as: PdbAtomRecord | None = None,
-) -> PdbAtomRecord:
-    matches = [
-        atom
-        for atom in atoms
-        if atom.residue_name.upper() == residue_name.upper()
-        and atom.atom_name.upper() == atom_name.upper()
-    ]
-    if same_residue_as is not None:
-        matches = [
-            atom
-            for atom in matches
-            if atom.chain_id == same_residue_as.chain_id
-            and atom.residue_number == same_residue_as.residue_number
-            and atom.insertion_code == same_residue_as.insertion_code
-        ]
-    if len(matches) != 1:
-        raise RuntimeError(
-            f"Expected exactly one product atom {residue_name}:{atom_name}, found {len(matches)}"
-        )
-    return matches[0]
 
 
 def _build_solvated_system(
@@ -1440,17 +1271,15 @@ def _pdb_coordinates_angstrom(path: Path) -> np.ndarray:
     return np.asarray(pdb_coordinates(path), dtype=float)
 
 
-def _restore_smoke_pdb_atom_names(
+def _restore_relaxed_pdb_atom_names(
     construction: ModifierConstructionResult,
     atom_name_template_pdb: Path | str,
 ) -> None:
-    """Restore reference atom-name fields on smoke PDB artifacts when present."""
-    if construction.smoke is None:
+    """Restore reference atom-name fields on relaxed PDB artifacts when present."""
+    relaxation = getattr(construction, "relaxation", None)
+    if relaxation is None:
         return
-    for pdb_path in (
-        construction.smoke.minimized_pdb_path,
-        construction.smoke.equilibrated_pdb_path,
-    ):
+    for pdb_path in (getattr(relaxation, "relaxed_pdb_path", None),):
         if pdb_path is not None:
             _restore_pdb_atom_name_fields(pdb_path, atom_name_template_pdb)
 

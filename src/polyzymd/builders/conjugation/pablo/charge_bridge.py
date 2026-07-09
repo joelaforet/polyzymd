@@ -246,7 +246,7 @@ def build_product_state_charge_bridge(
             "Covalent junction atoms are overridden by a local product-state NAGL/AshGC patch.",
             "Any bridge-local charge residual is reconciled only over real local patch atoms.",
             "The complete covalent conjugate is emitted as one charged OpenFF Molecule template.",
-            "This bridge is not whole-conjugate AM1-BCC and does not use Gasteiger or formal smoke charges.",
+            "This bridge is not whole-conjugate AM1-BCC and does not use Gasteiger or formal charges.",
         ),
     )
     report_path = report.write_json(artifact_dir / "product_state_charge_bridge.json")

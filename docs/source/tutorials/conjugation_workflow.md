@@ -106,7 +106,7 @@ result = build_conjugate_from_config(
 
 print(result.status)
 print(result.crosslinked_conjugate_pdb_path)
-print(result.minimized_conjugate_pdb_path)
+print(result.relaxed_conjugate_pdb_path)
 print(result.solvated_pdb_path)
 ```
 
@@ -136,14 +136,13 @@ Common paths include:
 | Field | What to inspect |
 |-------|-----------------|
 | `crosslinked_conjugate_pdb_path` | Product-state PDB after covalent assembly. |
-| `minimized_conjugate_pdb_path` | OpenMM-relaxed product from the construction smoke workflow, when written. |
-| `relaxed_conjugate_pdb_path` | Relaxed conjugate path from workflows that expose a separate relaxed product. |
+| `relaxed_conjugate_pdb_path` | Restrained OpenMM-relaxed conjugate from `relax_conjugate()`. |
 | `solvated_pdb_path` | Solvated system PDB after the conjugate is placed in a box. |
 | `workflow_json_path` | JSON sidecar describing the workflow and assumptions. |
-| `artifact_paths["conjugate_validation_report"]` | Canonical validation report for product connectivity, atom presence, charge evidence, parameter coverage, linkage geometry, and OpenMM smoke evidence. |
+| `artifact_paths["conjugate_validation_report"]` | Canonical validation report for product connectivity, atom presence, charge evidence, parameter coverage, linkage geometry, and relaxation evidence. |
 
 Some fields can be `None` depending on the mechanism and settings. A useful
-first success check is that the crosslinked and minimized PDB paths exist, and
+first success check is that the crosslinked and relaxed PDB paths exist, and
 that the modified residue names and new linkage are visible in a molecular
 viewer.
 

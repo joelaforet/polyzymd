@@ -255,14 +255,13 @@ pixi run -e build pytest tests/test_conjugation_system_workflow.py -v</code></pr
     <p><strong>Objective:</strong> Break up <code>_relaxation.py</code> without changing behavior.</p>
     <h3>To-do</h3>
     <ul class="checklist">
-      <li><input type="checkbox"> <span>Create <code>relaxation/</code> package with focused modules: settings, geometry, local minimization, vacuum smoke, frozen protein, OpenMM utilities, reporting.</span></li>
+      <li><input type="checkbox"> <span>Create <code>relaxation/</code> package with focused modules: settings, geometry, validation, frozen protein, OpenMM utilities, reporting.</span></li>
       <li><input type="checkbox"> <span>Keep <code>_relaxation.py</code> as a thin facade temporarily if internal imports still use it.</span></li>
       <li><input type="checkbox"> <span>Move code mechanically first; avoid semantic redesign.</span></li>
       <li><input type="checkbox"> <span>Use shared parser from Phase 3 for any PDB coordinate/record reads.</span></li>
     </ul>
     <h3>Tests</h3>
-    <pre><code>pixi run -e build pytest tests/test_conjugation_local_minimization.py -v
-pixi run -e build pytest tests/test_conjugation_vacuum_smoke.py -v
+    <pre><code>pixi run -e build pytest tests/test_conjugation_validation.py -v
 pixi run -e build pytest tests/test_conjugation_system_workflow.py -v</code></pre>
     <p><strong>Commit:</strong> <code>refactor(conjugation): split relaxation workflow modules</code></p>
     <p><strong>Risk:</strong> <span class="risk-med">Medium</span>. Keep this phase mechanical to avoid OpenMM behavior changes.</p>
@@ -279,8 +278,7 @@ pixi run -e build pytest tests/test_conjugation_system_workflow.py -v</code></pr
       <li><input type="checkbox"> <span>Remove unused fallback branches proven unreachable by tests and checkpoint config.</span></li>
     </ul>
     <h3>Tests</h3>
-    <pre><code>pixi run -e build pytest tests/test_conjugation_local_minimization.py -v
-pixi run -e build pytest tests/test_conjugation_vacuum_smoke.py -v
+    <pre><code>pixi run -e build pytest tests/test_conjugation_relaxation.py -v
 pixi run -e build pytest tests/test_conjugation_validation.py -v</code></pre>
     <p><strong>Commits:</strong> small commits such as <code>refactor(conjugation): deduplicate relaxation geometry helpers</code>.</p>
     <p><strong>Risk:</strong> <span class="risk-med">Medium/High</span>. Validate the known config after each semantic cleanup.</p>
