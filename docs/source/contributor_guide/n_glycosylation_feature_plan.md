@@ -116,8 +116,8 @@ rules:
   `reactions/n_glycosylation.py`. Generic engine code must not hardcode Asn or
   glycan atom names.
 - Reuse the generic Packmol placement strategy developed for NHS-Lys.
-- Build all attachments into one product structure, then run one final restrained
-  local minimization.
+- Build all attachments into one product structure, then run conjugate relaxation
+  and validation.
 - Keep heavy dependencies lazy: RDKit, OpenMM, OpenFF, Pablo, and Packmol-related
   imports belong inside functions or methods.
 - Keep product-state residue naming explicit and deterministic.
@@ -367,12 +367,12 @@ Conflict checks should include:
 - Ensure repeated use of the same SMILES creates independent residue instances.
 - Add conflict detection before writing product files.
 
-### Phase 7 — parameterization and minimization smoke path
+### Phase 7 — parameterization and validation path
 
 - Route the product through Pablo/OpenFF boundaries.
 - Use OpenFF Sage for the glycan moiety in the first implementation.
-- Run one final restrained local minimization after all attachments.
-- Record minimization and parameterization diagnostics in `ConjugationResult`.
+- Run conjugate relaxation and validation after all attachments.
+- Record relaxation and parameterization diagnostics in `ConjugationResult`.
 
 ### Phase 8 — validation and user-facing docs
 

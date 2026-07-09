@@ -15,9 +15,9 @@ The short version is:
 
 :::{important}
 `polyzymd build` for conjugated systems is now a full-stack workflow. It creates
-OpenFF Interchange objects and runs OpenMM restrained minimization plus vacuum
-smoke MD before solvation. A lean simulation-only environment is therefore not
-enough for full conjugation builds.
+OpenFF Interchange objects and runs `relax_conjugate()` to produce
+`conjugate_relaxation.json` relaxation evidence before solvation. A lean
+simulation-only environment is therefore not enough for full conjugation builds.
 :::
 
 ## Choose the right environment
@@ -50,7 +50,7 @@ environment.
 Keep these concerns separate:
 
 - **Build stack:** chemistry perception, OpenFF Interchange creation,
-  conjugation, restrained minimization, vacuum smoke MD, solvation, export.
+  conjugation, `relax_conjugate()` relaxation evidence, solvation, export.
 - **Simulation runtime:** load an already prepared simulation artifact, create
   or load the OpenMM objects needed for production, and run on the cluster GPU.
 
@@ -68,8 +68,8 @@ pixi run -e build polyzymd validate -c config.yaml
 pixi run -e build polyzymd build -c config.yaml
 ```
 
-Local CUDA 12.6 preparation, when you want OpenMM CUDA available during the
-build-time minimization and smoke-MD checks:
+Local CUDA 12.6 preparation, when you want OpenMM CUDA available while producing
+the `conjugate_relaxation.json` relaxation evidence artifact:
 
 ```bash
 pixi run -e build-cuda-12-6 polyzymd validate -c config.yaml
@@ -148,7 +148,7 @@ submitting production jobs.
 Production configs and CLI workflows should select the intended OpenMM platform
 explicitly and fail early when CUDA is not available or not compatible with the
 driver. Use `python -m openmm.testInstallation` as the first diagnostic, then
-run a short PolyzyMD validation or smoke job before submitting many replicates.
+run a short PolyzyMD validation or short trial job before submitting many replicates.
 
 For SLURM workflows, start with a short generated or submitted test:
 

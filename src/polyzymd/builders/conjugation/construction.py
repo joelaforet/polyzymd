@@ -51,7 +51,6 @@ class ModifierConstructionResult(BaseModel):
     pablo: PabloIngestionResult
     parameterization: InterchangeParameterizationResult
     relaxation: ConjugateRelaxationResult | None = None
-    local_minimization: Any | None = None
     product_state_pablo_library: Any | None = Field(default=None, exclude=True)
     crosslinked_pdb_path: Path
     validation_report_path: Path | None = None

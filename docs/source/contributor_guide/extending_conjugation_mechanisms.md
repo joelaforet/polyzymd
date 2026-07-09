@@ -39,7 +39,7 @@ New mechanisms must define or derive the following pieces.
 | Product-state residue definitions | Pablo/CCD residue definitions or generated product-state libraries needed for ingestion. |
 | Charge patch expectations | Which atoms keep source/template charges, which local neighborhood is patched, and what reconciliation tolerance is expected. |
 | Parameter expectations | Which force fields or templates cover the final product and how missing coverage should fail. |
-| Geometry expectations | Expected linkage distance range and any known local minimization needs. |
+| Geometry expectations | Expected linkage distance range and any known relaxation or validation needs. |
 | Evidence paths | JSON sidecars the validation report can audit. |
 
 ## Validation checklist
@@ -54,11 +54,11 @@ the canonical validation report:
   counts.
 - `charge_audit` records the charge bridge path, local reconciliation path,
   total/formal charge, and normalization corrections.
-- `parameter_coverage` proves that the final Interchange converts to an OpenMM
-  system and has the expected particle count when known.
+- `parameter_coverage` records production OpenMM system particle-count evidence
+  when available.
 - `linkage_geometry` records linkage distances and close-contact warnings.
-- `openmm_smoke` records smoke, restrained smoke diagnostics, and pre-smoke
-  geometry evidence when the workflow runs those checks.
+- `relaxation_evidence` records `conjugate_relaxation.json` success, finite
+  energies, restrained protein displacement, and linkage distance errors.
 
 Tests should include at least one passing product and one targeted failing case
 for each mechanism-specific identity or leaving-atom rule. Prefer small unit

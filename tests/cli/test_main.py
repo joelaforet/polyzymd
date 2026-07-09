@@ -457,9 +457,7 @@ class TestBuildCommandConjugationRouting:
         result = SimpleNamespace(
             system_builder=system_builder,
             crosslinked_conjugate_pdb_path=working_dir / "crosslinked_conjugate.pdb",
-            minimized_conjugate_pdb_path=None,
-            equilibrated_conjugate_pdb_path=None,
-            relaxed_conjugate_pdb_path=working_dir / "relaxed_conjugate.pdb",
+            relaxed_conjugate_pdb_path=working_dir / "conjugate_relaxed.pdb",
             solvated_pdb_path=working_dir / "solvated_conjugate_free_polymers.pdb",
             workflow_json_path=working_dir / "conjugation_workflow.json",
             artifact_paths={
@@ -557,11 +555,15 @@ class TestBuildCommandConjugationRouting:
         assert "Conjugation workflow" in result.output
         assert "Files to Generate (Conjugation OpenMM)" in result.output
         assert "assembled_crosslinked.pdb" in result.output
-        assert "assembled_minimized.pdb" in result.output
-        assert "assembled_equilibrated.pdb" in result.output
+        assert "conjugate_relaxation.json" in result.output
+        assert "conjugate_relaxed.pdb" in result.output
+        assert "conjugate_validation_report.json" in result.output
         assert "solvated_conjugate_free_polymers.pdb" in result.output
         assert "conjugated_polymer_system_workflow.json" in result.output
         assert "system.xml" in result.output
+        assert "assembled_minimized.pdb" not in result.output
+        assert "assembled_equilibrated.pdb" not in result.output
+        assert "relaxed_conjugate.pdb" not in result.output
         assert "solvated_system.pdb" not in result.output
 
 

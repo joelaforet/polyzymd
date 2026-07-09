@@ -13,9 +13,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from polyzymd.builders.conjugation._linkage import (
-    PabloCrosslinkRequirement,
     ResolvedAttachmentPlan,
-    parse_pdb_atom_records,
     placed_fragment_from_resolved_plan,
     require_pablo_crosslink_requirement,
 )
@@ -33,10 +31,6 @@ from polyzymd.builders.conjugation.construction import (
     ModifierConstructionSettings,
 )
 from polyzymd.builders.conjugation.final_interchange import create_final_conjugated_interchange
-from polyzymd.builders.conjugation.local_minimization import (
-    LocalMinimizationSettings,
-    run_post_crosslink_local_minimization,
-)
 from polyzymd.builders.conjugation.models import ConjugationResult
 from polyzymd.builders.conjugation.pablo.charge_templates import (
     build_conjugate_charge_templates,
@@ -119,14 +113,12 @@ class ConjugatedPolymerSystemSettings(BaseModel):
     preserve_reference_atom_names: bool = True
     canonicalize_source_protein_hydrogens: bool = True
     use_product_state_pablo_library: bool = True
-    run_product_state_local_minimization: bool = False
     run_relaxation: bool = True
     direct_solvation_padding: float = Field(0.8, gt=0.0)
     direct_solvation_box_shape: str = "cube"
     protein_canonicalization: ProteinCanonicalizationSettings = Field(
         default_factory=ProteinCanonicalizationSettings
     )
-    local_minimization: LocalMinimizationSettings = Field(default_factory=LocalMinimizationSettings)
     placement: PackmolModifierPlacementSettings = Field(
         default_factory=PackmolModifierPlacementSettings
     )
@@ -153,7 +145,6 @@ class ConjugateConstructionResult(BaseModel):
     pablo: Any
     parameterization: Any
     relaxation: Any | None = None
-    local_minimization: Any | None = None
     product_state_pablo_library: Any | None = Field(default=None, exclude=True)
     crosslinked_pdb_path: Path
     validation_report_path: Path | None = None
@@ -250,10 +241,6 @@ def build_conjugated_polymer_system_from_config(
         settings=construction_settings,
         use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
         use_conjugate_relaxation=workflow_settings.run_relaxation,
-        run_product_state_local_minimization=(
-            workflow_settings.run_product_state_local_minimization
-        ),
-        local_minimization_settings=workflow_settings.local_minimization,
     )
     if workflow_settings.preserve_reference_atom_names:
         _restore_relaxed_pdb_atom_names(construction, construction.crosslinked_pdb_path)
@@ -391,10 +378,6 @@ def build_direct_moiety_conjugate(
         settings=construction_settings,
         use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
         use_conjugate_relaxation=workflow_settings.run_relaxation,
-        run_product_state_local_minimization=(
-            workflow_settings.run_product_state_local_minimization
-        ),
-        local_minimization_settings=workflow_settings.local_minimization,
     )
 
     LOGGER.info("Preparing relaxed conjugate topology")
@@ -461,11 +444,6 @@ def topology_with_pdb_positions(
     if atom_name_template_pdb is not None:
         _apply_pdb_atom_names_to_topology(positioned_topology, atom_name_template_pdb)
     return positioned_topology
-
-
-def _default_local_minimization_settings() -> Any:
-    """Build default post-crosslink local minimization settings lazily."""
-    return LocalMinimizationSettings()
 
 
 def _prepared_protein_pdb_path(
@@ -738,8 +716,6 @@ def _construct_conjugate_from_specs(
     settings: ModifierConstructionSettings,
     use_product_state_pablo_library: bool,
     use_conjugate_relaxation: bool = True,
-    run_product_state_local_minimization: bool = False,
-    local_minimization_settings: Any | None = None,
 ) -> tuple[Any, Any]:
     """Construct, parameterize, and relax a conjugate from resolved attachment specs."""
     if not specs:
@@ -791,7 +767,6 @@ def _construct_conjugate_from_specs(
         specs,
         assembly_result=assembly_result,
     )
-    product_state_resolved_plans = tuple(spec.resolved_plan for spec in product_state_specs)
 
     product_state_pablo_library = None
     product_state_residue_library = None
@@ -848,39 +823,6 @@ def _construct_conjugate_from_specs(
         f"Conjugate construction completed ({len(resolved_plans)} attachment {site_label})",
     ]
     relaxation_result = None
-    local_minimization_result = None
-    if run_product_state_local_minimization:
-        local_settings = _local_minimization_settings_for_product(
-            crosslinked_pdb_path,
-            base_settings=local_minimization_settings or _default_local_minimization_settings(),
-            requirements=tuple(
-                plan.pablo_crosslink_requirement for plan in product_state_resolved_plans
-            ),
-            resolved_plans=product_state_resolved_plans,
-            product_state_pablo_library=product_state_pablo_library,
-        )
-        LOGGER.info(
-            "Running product-state local minimization for %d linkage(s)",
-            len(resolved_plans),
-        )
-        local_minimization_result = run_post_crosslink_local_minimization(
-            crosslinked_pdb_path,
-            artifact_dir,
-            settings=local_settings,
-            pablo_policy=ccd_pablo_policy,
-            product_state_pablo_library=product_state_pablo_library,
-        )
-        if not local_minimization_result.success:
-            blocker = getattr(local_minimization_result, "blocker", None)
-            relaxed_path = getattr(local_minimization_result, "relaxed_pdb_path", None)
-            if blocker is not None or relaxed_path is None:
-                detail = blocker or "local minimization did not produce a relaxed PDB"
-                raise RuntimeError(f"Product-state local minimization failed: {detail}")
-            diagnostics.append(
-                "Product-state local minimization completed and wrote a relaxed PDB, "
-                "but post-minimization geometry validation did not pass. Continuing with "
-                "the configured conjugate relaxation path."
-            )
     if use_conjugate_relaxation and settings.run_relaxation:
         LOGGER.info("Running conjugate relaxation")
         relaxation_result = relax_conjugate(
@@ -926,7 +868,6 @@ def _construct_conjugate_from_specs(
             pablo=pablo_result,
             parameterization=parameterization_result,
             relaxation=relaxation_result,
-            local_minimization=local_minimization_result,
             product_state_pablo_library=product_state_pablo_library,
             crosslinked_pdb_path=crosslinked_pdb_path,
             validation_report_path=validation_report.report_path,
@@ -1067,11 +1008,6 @@ def _relaxed_conjugate_pdb(construction: ModifierConstructionResult) -> Path:
     if relaxation is not None:
         if relaxation.relaxed_pdb_path is not None:
             return relaxation.relaxed_pdb_path
-    local_minimization = getattr(construction, "local_minimization", None)
-    if local_minimization is not None:
-        relaxed_path = getattr(local_minimization, "relaxed_pdb_path", None)
-        if relaxed_path is not None:
-            return relaxed_path
     crosslinked = getattr(construction, "crosslinked_pdb_path", None)
     if crosslinked is not None:
         return crosslinked
@@ -1199,119 +1135,6 @@ def _molecule_has_product_residue(molecule: Any, product_names: set[str]) -> boo
 def _metadata_residue_name(metadata: Any) -> str:
     """Return an uppercase residue name from atom or molecule metadata."""
     return metadata_residue_name(metadata)
-
-
-def _local_minimization_settings_for_product(
-    product_pdb_path: Path,
-    *,
-    base_settings: Any,
-    requirements: tuple[PabloCrosslinkRequirement, ...] | None = None,
-    resolved_plans: tuple[ResolvedAttachmentPlan, ...] = (),
-    product_state_pablo_library: Any | None = None,
-) -> Any:
-    """Build local minimization selectors from emitted product atom identities."""
-    _ = product_state_pablo_library
-    from polyzymd.builders.conjugation.local_minimization import (
-        LocalLinkageAtomSelector,
-        LocalLinkageSelectors,
-    )
-
-    explicit_fields = set(getattr(base_settings, "model_fields_set", set()))
-    if "linkages" in explicit_fields:
-        return base_settings
-    if not hasattr(base_settings, "model_copy"):
-        base_settings = _default_local_minimization_settings()
-
-    atoms = parse_pdb_atom_records(product_pdb_path)
-    if requirements is None:
-        requirements = tuple(plan.pablo_crosslink_requirement for plan in resolved_plans)
-    if not requirements:
-        raise RuntimeError("Local minimization requires at least one resolved crosslink")
-
-    linkages = []
-    for index, requirement in enumerate(requirements, start=1):
-        plan = resolved_plans[index - 1] if index <= len(resolved_plans) else None
-        protein_atom = _product_link_atom(
-            atoms,
-            requirement=requirement,
-            participant="protein",
-            plan=plan,
-        )
-        modifier_atom = _product_link_atom(
-            atoms,
-            requirement=requirement,
-            participant="modifier",
-            plan=plan,
-        )
-        target = float(getattr(plan, "target_bond_length_angstrom", 1.33) if plan else 1.33)
-        linkages.append(
-            LocalLinkageSelectors(
-                protein_link_selector=_local_selector(protein_atom, LocalLinkageAtomSelector),
-                modifier_link_selector=_local_selector(modifier_atom, LocalLinkageAtomSelector),
-                target_bond_length_angstrom=target,
-                label=f"linkage_{index}",
-            )
-        )
-
-    return base_settings.model_copy(update={"linkages": tuple(linkages)})
-
-
-def _local_selector(atom: PdbAtomRecord, selector_cls: Any) -> Any:
-    return selector_cls(
-        serial=None,
-        chain_id=atom.chain_id,
-        residue_name=atom.residue_name,
-        residue_number=atom.residue_number,
-        atom_name=atom.atom_name,
-    )
-
-
-def _product_link_atom(
-    atoms: tuple[PdbAtomRecord, ...],
-    *,
-    requirement: PabloCrosslinkRequirement,
-    participant: str,
-    plan: ResolvedAttachmentPlan | None,
-) -> PdbAtomRecord:
-    """Resolve one product link atom without requiring auxiliary anchor atoms."""
-    side = 0 if participant == "protein" else 1
-    plan_atom = None
-    if plan is not None:
-        plan_atom = plan.protein_link_atom if participant == "protein" else plan.modifier_link_atom
-    return _unique_product_atom(
-        atoms,
-        residue_name=requirement.residues[side],
-        atom_name=requirement.linking_atoms[side],
-        same_residue_as=plan_atom,
-    )
-
-
-def _unique_product_atom(
-    atoms: tuple[PdbAtomRecord, ...],
-    *,
-    residue_name: str,
-    atom_name: str,
-    same_residue_as: PdbAtomRecord | None = None,
-) -> PdbAtomRecord:
-    matches = [
-        atom
-        for atom in atoms
-        if atom.residue_name.upper() == residue_name.upper()
-        and atom.atom_name.upper() == atom_name.upper()
-    ]
-    if same_residue_as is not None:
-        matches = [
-            atom
-            for atom in matches
-            if atom.chain_id == same_residue_as.chain_id
-            and atom.residue_number == same_residue_as.residue_number
-            and atom.insertion_code == same_residue_as.insertion_code
-        ]
-    if len(matches) != 1:
-        raise RuntimeError(
-            f"Expected exactly one product atom {residue_name}:{atom_name}, found {len(matches)}"
-        )
-    return matches[0]
 
 
 def _build_solvated_system(

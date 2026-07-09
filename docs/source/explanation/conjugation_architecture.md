@@ -13,7 +13,7 @@ Accepted for the current conjugation reliability milestone.
 
 PolyzyMD needs to build enzyme-polymer conjugates that can pass through protein
 preparation, product-state residue handling, OpenFF Interchange creation,
-OpenMM smoke checks, solvation, and downstream simulation setup. The hard part is
+OpenMM relaxation, solvation, and downstream simulation setup. The hard part is
 not only drawing a new bond. A reliable conjugation workflow must also account
 for atom identity, leaving atoms, product residue definitions, charge provenance,
 parameter coverage, and geometry.
@@ -23,7 +23,7 @@ slice. It starts from an unmodified protein, attaches an NHS-activated polymer t
 lysine, ingests the product state through Pablo/OpenFF Interchange, combines
 ff14SB protein treatment with polymer templates, applies a local NAGL patch
 charge bridge near the linkage, reconciles local charge evidence, runs restrained
-OpenMM smoke evidence, and finishes with final solvation.
+OpenMM relaxation, and finishes with final solvation.
 
 The N-glycosylation path and multi-site attachment paths share some mechanism
 and validation infrastructure. Their support level differs by scope; see
@@ -43,7 +43,7 @@ assuming success from a completed build. The report audits:
 - charge bridge and local reconciliation evidence;
 - OpenFF Interchange to OpenMM parameter coverage;
 - linkage geometry and severe close contacts;
-- restrained OpenMM smoke and pre-smoke evidence paths.
+- restrained OpenMM relaxation evidence.
 
 This gives users and reviewers a single artifact to inspect while keeping the
 implementation honest about which evidence was available, passed, warned, failed,
@@ -61,7 +61,8 @@ The design has several consequences:
   chemistry.
 - Pablo/OpenFF Interchange remains the product-state ingestion and
   parameterization bridge. Failures should surface as missing residue, atom,
-  charge, parameter, geometry, or smoke evidence rather than silent fallbacks.
+  charge, parameterization, geometry, or relaxation evidence rather than silent
+  fallbacks.
 - The CUDA 12.4 simulation-only handoff remains implementation-dependent. The
   build stack and simulation runtime may need separate pixi environments until a
   stable export/reload path is documented.
@@ -75,23 +76,23 @@ The design has several consequences:
 This would make configuration look flexible, but it would hide unsupported work.
 SMARTS can describe atom roles, but it does not provide coordinate placement,
 product residue definitions, force-field templates, charge patches, or OpenMM
-smoke evidence. PolyzyMD therefore treats custom SMARTS as mechanism-development
-input, not as a stable public plugin API.
+relaxation evidence. PolyzyMD therefore treats custom SMARTS as
+mechanism-development input, not as a stable public plugin API.
 
 ### Rely on successful Interchange creation alone
 
 Interchange creation is necessary, but it does not explicitly answer whether the
 expected product bond is present, leaving atoms were removed, charge provenance is
-acceptable, or smoke evidence exists. The validation report keeps these questions
-separate and inspectable.
+acceptable, or relaxation evidence exists. The validation report keeps these
+questions separate and inspectable.
 
 ### Use whole-conjugate fallback charges
 
-Whole-conjugate AM1-BCC, Gasteiger fallback, formal-charge smoke templates, or
-unmarked cached charges would make builds appear more permissive than the
-evidence supports. The current bridge uses mapped source charges plus a local
-NAGL/AshGC patch around the linkage and fails when required atom identities are
-missing.
+Whole-conjugate AM1-BCC, Gasteiger fallback, unvalidated formal-charge
+parameterization evidence, or unmarked cached charges would make builds appear
+more permissive than the evidence supports. The current bridge uses mapped source
+charges plus a local NAGL/AshGC patch around the linkage and fails when required
+atom identities are missing.
 
 ## Extension boundary
 

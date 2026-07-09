@@ -58,7 +58,7 @@ or analysis policy.
 
 ### Simulation and workflow execute the study
 
-`simulation/` runs local minimization, equilibration, checkpointing,
+`simulation/` runs energy relaxation, equilibration, checkpointing,
 continuation, and production segments. `workflow/` handles orchestration around
 those runs, especially SLURM job generation, resubmission, and recovery flows.
 

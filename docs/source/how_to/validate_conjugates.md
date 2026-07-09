@@ -6,9 +6,10 @@ carry forward into simulation setup.
 
 Validation is a reliability check, not a scientific guarantee. A passing report
 means PolyzyMD found the expected product connectivity, charge evidence,
-parameterization evidence, and smoke-test evidence for the current supported
-workflow. It does not prove that an arbitrary chemistry, force field choice, or
-production protocol is physically correct.
+parameterization evidence, and `relaxation_evidence` backed by
+`conjugate_relaxation.json` for the current supported workflow. It does not
+prove that an arbitrary chemistry, force field choice, or production protocol is
+physically correct.
 
 ## Before you start
 
@@ -22,7 +23,7 @@ NHS-lysine polymer vertical slice:
 - ff14SB protein parameters plus polymer templates;
 - local NAGL patch charge bridge around the linkage;
 - local charge reconciliation;
-- restrained OpenMM smoke/minimization evidence;
+- restrained OpenMM relaxation evidence;
 - final solvation.
 
 The N-glycosylation path is wired for mechanism tests and exploratory workflow
@@ -63,9 +64,8 @@ print(report_path)
 The report lives with the conjugate construction artifacts. In current
 config-driven builds, related evidence sidecars include files such as
 `product_state_charge_bridge.json`,
-`product_state_charge_bridge_local_reconciliation.json`, `vacuum_smoke.json`,
-`restrained_smoke_diagnostics.json`, and `pre_smoke_geometry.json` when those
-checks ran.
+`product_state_charge_bridge_local_reconciliation.json`, and
+`conjugate_relaxation.json` when relaxation ran.
 
 ## Read the top-level status
 
@@ -109,9 +109,9 @@ The report is organized into named audit sections. For each section, inspect
 | `atom_presence` | Required link atoms remain present and declared leaving atoms are absent. | `present_atoms`, `missing_atoms`, `lingering_leaving_atoms`. |
 | `valence_sanity` | Conservative bond-count sanity near linkage atoms. | `bond_counts` and any high-count warning evidence. |
 | `charge_audit` | Product-state charge bridge, total/formal charge reconciliation, and local reconciliation sidecar status. | `bridge_report_path`, `reconciliation_report_path`, `total_charge_e`, `formal_charge_e`, correction fields. |
-| `parameter_coverage` | Final OpenFF Interchange can be converted to an OpenMM system and, when known, has the expected particle count. | `expected_particle_count`, `observed_particle_count`. |
+| `parameter_coverage` | Production OpenMM system evidence has the expected particle count when available. | `expected_particle_count`, `observed_particle_count`. |
 | `linkage_geometry` | Linkage distances and severe nonbonded close contacts in the product coordinates. | `linkage_distances_angstrom`, `close_contact_count`. |
-| `openmm_smoke` | OpenMM smoke and pre-smoke JSON evidence report success and finite diagnostics. | `smoke_json_path`, `diagnostics_json_path`, `pre_smoke_geometry_json_path`. |
+| `relaxation_evidence` | `conjugate_relaxation.json` reports successful restrained OpenMM relaxation with finite energies, stable restrained protein atoms, and checked linkage distances. | `relaxation_diagnostics_json_path`. |
 
 For quick triage, print any non-passing sections:
 
@@ -130,7 +130,7 @@ for section, payload in report.items():
   disabled or bypassed that part of the workflow.
 - If charge or parameter coverage fails, inspect the charge bridge and Pablo or
   Interchange diagnostics before rerunning expensive simulations.
-- If geometry or smoke fails, inspect the crosslinked and minimized PDBs in a
+- If geometry or relaxation evidence fails, inspect the crosslinked and relaxed PDBs in a
   molecular viewer before changing simulation settings.
 
 ## Known limits
