@@ -436,6 +436,8 @@ def _rdkit_reaction_mapped_atom_numbers(
     try:
         reaction = rdChemReactions.ReactionFromSmarts(reaction_smarts)
     except RuntimeError as error:
+        if not _is_rdkit_parse_runtime_error(error):
+            raise
         raise ValueError(f"RDKit could not parse reaction SMARTS: {reaction_smarts}") from error
     if reaction is None:
         raise ValueError(f"RDKit could not parse reaction SMARTS: {reaction_smarts}")
@@ -472,6 +474,8 @@ def _rdkit_mapped_bond_orders(smarts_entries: Sequence[str]) -> dict[tuple[int, 
         try:
             mol = Chem.MolFromSmarts(smarts)
         except RuntimeError as error:
+            if not _is_rdkit_parse_runtime_error(error):
+                raise
             raise ValueError(f"RDKit could not parse SMARTS: {smarts}") from error
         if mol is None:
             raise ValueError(f"RDKit could not parse SMARTS: {smarts}")
@@ -482,6 +486,20 @@ def _rdkit_mapped_bond_orders(smarts_entries: Sequence[str]) -> dict[tuple[int, 
                 key = tuple(sorted((int(begin), int(end))))
                 bonds[key] = _rdkit_bond_order(bond)
     return bonds
+
+
+def _is_rdkit_parse_runtime_error(error: RuntimeError) -> bool:
+    """Return whether an RDKit runtime error is an expected SMARTS parse failure."""
+    message = str(error).lower()
+    parse_markers = (
+        "parse",
+        "parser",
+        "smarts",
+        "chemicalreactionparserexception",
+        "reaction parse",
+        "syntax error",
+    )
+    return any(marker in message for marker in parse_markers)
 
 
 def _rdkit_bond_order(bond: Any) -> float:

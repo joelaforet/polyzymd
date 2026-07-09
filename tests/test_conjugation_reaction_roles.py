@@ -143,6 +143,19 @@ def test_mapped_smarts_validation_does_not_swallow_unexpected_runtime_errors(mon
         validate_mapped_smarts(("[N:1][H:2]",), ("[N:1]",))
 
 
+def test_rdkit_reaction_from_smarts_unexpected_runtime_errors_propagate(monkeypatch):
+    """Unexpected RDKit reaction constructor runtime errors should not fall back."""
+    rdchem_reactions = pytest.importorskip("rdkit.Chem.rdChemReactions")
+
+    def raise_runtime_error(_reaction_smarts):
+        raise RuntimeError("unexpected RDKit allocator failure")
+
+    monkeypatch.setattr(rdchem_reactions, "ReactionFromSmarts", raise_runtime_error)
+
+    with pytest.raises(RuntimeError, match="unexpected RDKit allocator failure"):
+        validate_mapped_smarts(("[N:1][H:2]",), ("[N:1]",))
+
+
 def test_resolve_reaction_roles_preserves_geometry_anchor_and_concrete_identities():
     """Role resolution should keep role labels and supplied PDB identities generic."""
     reaction = _nhs_like_reaction()
@@ -244,6 +257,19 @@ def test_mapped_bond_order_fallback_does_not_swallow_runtime_errors(monkeypatch)
     monkeypatch.setattr(reaction_roles, "_rdkit_mapped_bond_orders", raise_runtime_error)
 
     with pytest.raises(RuntimeError, match="unexpected helper failure"):
+        reaction_roles._mapped_bond_orders(("[N:1][C:2]",))
+
+
+def test_rdkit_mol_from_smarts_unexpected_runtime_errors_propagate(monkeypatch):
+    """Unexpected RDKit molecule parser runtime errors should not fall back."""
+    chem = pytest.importorskip("rdkit.Chem")
+
+    def raise_runtime_error(_smarts):
+        raise RuntimeError("unexpected RDKit molecule allocator failure")
+
+    monkeypatch.setattr(chem, "MolFromSmarts", raise_runtime_error)
+
+    with pytest.raises(RuntimeError, match="unexpected RDKit molecule allocator failure"):
         reaction_roles._mapped_bond_orders(("[N:1][C:2]",))
 
 

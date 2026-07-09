@@ -7,6 +7,7 @@ from pathlib import Path
 from types import ModuleType
 
 import numpy as np
+import pytest
 
 from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
@@ -215,6 +216,21 @@ def test_minimum_distance_falls_back_when_mdanalysis_distance_array_errors(monke
     _install_fake_mdanalysis_distance_array(monkeypatch, fake_distance_array)
 
     assert _minimum_distance(points_a, points_b) == 2.0
+
+
+def test_minimum_distance_propagates_unexpected_mdanalysis_runtime_errors(monkeypatch):
+    """Unexpected MDAnalysis runtime errors should not silently use NumPy fallback."""
+    points_a = np.asarray([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
+    points_b = np.asarray([[2.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
+
+    def fake_distance_array(_points_a: np.ndarray, _points_b: np.ndarray) -> np.ndarray:
+        """Simulate an unexpected MDAnalysis runtime failure."""
+        raise RuntimeError("unexpected coordinate shape regression")
+
+    _install_fake_mdanalysis_distance_array(monkeypatch, fake_distance_array)
+
+    with pytest.raises(RuntimeError, match="unexpected coordinate shape regression"):
+        _minimum_distance(points_a, points_b)
 
 
 def _install_fake_mdanalysis_distance_array(monkeypatch, distance_array) -> None:
