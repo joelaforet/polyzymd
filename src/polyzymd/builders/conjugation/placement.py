@@ -618,8 +618,29 @@ def _minimum_distance(points_a: np.ndarray, points_b: np.ndarray) -> float:
         from MDAnalysis.lib.distances import distance_array
 
         return float(np.min(distance_array(points_a, points_b)))
-    except (ImportError, RuntimeError):
+    except ImportError:
         return _minimum_distance_numpy(points_a, points_b)
+    except RuntimeError as error:
+        if not _is_mdanalysis_distance_backend_unavailable(error):
+            raise
+        return _minimum_distance_numpy(points_a, points_b)
+
+
+def _is_mdanalysis_distance_backend_unavailable(error: RuntimeError) -> bool:
+    """Return whether an MDAnalysis distance error is an expected backend failure."""
+    message = str(error).lower()
+    expected_markers = (
+        "backend unavailable",
+        "backend is unavailable",
+        "distance backend unavailable",
+        "serial backend unavailable",
+        "openmp backend unavailable",
+        "distopia backend unavailable",
+        "failed to import",
+        "could not import",
+        "no module named",
+    )
+    return any(marker in message for marker in expected_markers)
 
 
 def _minimum_distance_numpy(points_a: np.ndarray, points_b: np.ndarray) -> float:

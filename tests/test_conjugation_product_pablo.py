@@ -564,6 +564,30 @@ def test_product_state_pablo_library_rejects_sdf_element_order_mismatch(tmp_path
         )
 
 
+def test_product_state_pablo_library_rejects_partial_fragment_atom_indices(tmp_path: Path):
+    """SDF mapping should require every generated-fragment atom to carry atom_index."""
+    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    polymer_sdf = tmp_path / "polymer.sdf"
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(_fixture_product_pdb(fixture), encoding="utf-8")
+    polymer_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
+    fragment = _generated_fragment_from_fixture(fixture)
+    atoms = list(fragment.atoms)
+    atoms[3] = atoms[3].model_copy(update={"atom_index": None})
+    fragment = fragment.model_copy(update={"atoms": tuple(atoms)})
+
+    with pytest.raises(ValueError, match="complete atom_index values"):
+        build_product_state_pablo_library(
+            product,
+            source,
+            polymer_sdf,
+            fragment,
+            _fixture_resolved_plan_like(),
+        )
+
+
 def test_generated_fragment_from_polymerist_pdb_preserves_sdf_bond_orders(tmp_path: Path):
     """GeneratedPolymerFragment should carry explicit SDF orders from the sidecar."""
     pdb_path = tmp_path / "modifier.pdb"

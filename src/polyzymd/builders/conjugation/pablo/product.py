@@ -625,9 +625,21 @@ def _polymer_sdf_bonds(
         raise ValueError(f"Polymer SDF sidecar does not exist: {sdf_path}")
 
     molecules = read_sdf_molecules(sdf_path, source_label="Polymer SDF")
+    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    missing_index_atoms = tuple(
+        getattr(atom, "atom_name", "<unnamed>")
+        for atom in fragment_atoms
+        if getattr(atom, "atom_index", None) is None
+    )
+    if missing_index_atoms:
+        raise ValueError(
+            "Generated polymer fragment atoms require complete atom_index values before SDF bond "
+            "orders can be mapped onto product-state Pablo definitions. Missing atom_index for: "
+            f"{', '.join(str(name) for name in missing_index_atoms)}"
+        )
     atoms_by_index = {
         getattr(atom, "atom_index", None): atom
-        for atom in getattr(generated_fragment, "atoms", ()) or ()
+        for atom in fragment_atoms
         if getattr(atom, "atom_index", None) is not None
     }
     if not atoms_by_index:
@@ -637,12 +649,11 @@ def _polymer_sdf_bonds(
         )
     mol = select_sdf_molecule(
         molecules,
-        expected_atoms=len(atoms_by_index),
+        expected_atoms=len(fragment_atoms),
         sdf_path=sdf_path,
         source_label="Polymer SDF sidecar",
         prefer_most_bonds=True,
     )
-    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
     sdf_bonds = sdf_bond_orders_by_atom_index(
         mol,
         fragment_atoms=fragment_atoms,
