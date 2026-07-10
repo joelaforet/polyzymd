@@ -614,6 +614,52 @@ def _minimum_distance(points_a: np.ndarray, points_b: np.ndarray) -> float:
     """Return the minimum pairwise distance between two coordinate arrays."""
     if len(points_a) == 0 or len(points_b) == 0:
         return float("inf")
+    try:
+        from MDAnalysis.lib.distances import distance_array
+
+        return float(np.min(distance_array(points_a, points_b)))
+    except ImportError:
+        return _minimum_distance_numpy(points_a, points_b)
+    except RuntimeError as error:
+        if not _is_mdanalysis_distance_backend_unavailable(error):
+            raise
+        return _minimum_distance_numpy(points_a, points_b)
+
+
+def _is_mdanalysis_distance_backend_unavailable(error: RuntimeError) -> bool:
+    """Return whether an MDAnalysis distance error is an expected backend failure."""
+    message = str(error).lower()
+    backend_unavailable_markers = (
+        "mdanalysis distance backend unavailable",
+        "mdanalysis distance backend is unavailable",
+        "distance backend unavailable",
+        "distance backend is unavailable",
+        "serial backend unavailable",
+        "serial backend is unavailable",
+        "openmp backend unavailable",
+        "openmp backend is unavailable",
+        "distopia backend unavailable",
+        "distopia backend is unavailable",
+    )
+    if any(marker in message for marker in backend_unavailable_markers):
+        return True
+
+    import_failure_markers = ("failed to import", "could not import", "no module named")
+    backend_context_markers = (
+        "mdanalysis.lib.distances",
+        "mdanalysis distance",
+        "distance backend",
+        "distopia",
+        "openmp backend",
+        "serial backend",
+    )
+    return any(marker in message for marker in import_failure_markers) and any(
+        marker in message for marker in backend_context_markers
+    )
+
+
+def _minimum_distance_numpy(points_a: np.ndarray, points_b: np.ndarray) -> float:
+    """Return the minimum pairwise distance using NumPy broadcasting."""
     deltas = points_a[:, np.newaxis, :] - points_b[np.newaxis, :, :]
     distances = np.linalg.norm(deltas, axis=2)
     return float(np.min(distances))
