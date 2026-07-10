@@ -238,8 +238,14 @@ def validate_mapped_smarts(
         generic POC path permits missing product maps so leaving groups can be
         represented explicitly, by default ``False``.
     """
-    reactant_maps = _mapped_atom_numbers(reactant_smarts)
-    product_maps = _mapped_atom_numbers(product_smarts)
+    try:
+        reactant_maps, product_maps = _rdkit_reaction_mapped_atom_numbers(
+            reactant_smarts,
+            product_smarts,
+        )
+    except (ImportError, ValueError):
+        reactant_maps = _mapped_atom_numbers(reactant_smarts)
+        product_maps = _mapped_atom_numbers(product_smarts)
     if not reactant_maps:
         raise ValueError("Reactant SMARTS must contain atom-map numbers")
     if not product_maps:
@@ -414,6 +420,43 @@ def _mapped_atom_numbers(smarts_entries: Sequence[str]) -> tuple[int, ...]:
     return tuple(sorted(maps))
 
 
+def _rdkit_reaction_mapped_atom_numbers(
+    reactant_smarts: Sequence[str],
+    product_smarts: Sequence[str],
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Return mapped atom numbers from an RDKit reaction SMARTS parse.
+
+    RDKit is used only as a parser for full mapped reaction SMARTS. The parsed
+    reaction is not executed and no product generation or substructure matching is
+    performed.
+    """
+    from rdkit.Chem import rdChemReactions
+
+    reaction_smarts = f"{'.'.join(reactant_smarts)}>>{'.'.join(product_smarts)}"
+    try:
+        reaction = rdChemReactions.ReactionFromSmarts(reaction_smarts)
+    except RuntimeError as error:
+        if not _is_rdkit_parse_runtime_error(error):
+            raise
+        raise ValueError(f"RDKit could not parse reaction SMARTS: {reaction_smarts}") from error
+    if reaction is None:
+        raise ValueError(f"RDKit could not parse reaction SMARTS: {reaction_smarts}")
+    return _rdkit_template_map_numbers(reaction.GetReactants()), _rdkit_template_map_numbers(
+        reaction.GetProducts()
+    )
+
+
+def _rdkit_template_map_numbers(templates: Sequence[Any]) -> tuple[int, ...]:
+    """Return sorted unique atom-map numbers from RDKit reaction templates."""
+    maps: set[int] = set()
+    for template in templates:
+        for atom in template.GetAtoms():
+            map_number = atom.GetAtomMapNum()
+            if map_number:
+                maps.add(int(map_number))
+    return tuple(sorted(maps))
+
+
 def _mapped_bond_orders(smarts_entries: Sequence[str]) -> dict[tuple[int, int], float]:
     """Return mapped bond orders, preferring RDKit and falling back to a light parser."""
     try:
@@ -431,6 +474,8 @@ def _rdkit_mapped_bond_orders(smarts_entries: Sequence[str]) -> dict[tuple[int, 
         try:
             mol = Chem.MolFromSmarts(smarts)
         except RuntimeError as error:
+            if not _is_rdkit_parse_runtime_error(error):
+                raise
             raise ValueError(f"RDKit could not parse SMARTS: {smarts}") from error
         if mol is None:
             raise ValueError(f"RDKit could not parse SMARTS: {smarts}")
@@ -441,6 +486,21 @@ def _rdkit_mapped_bond_orders(smarts_entries: Sequence[str]) -> dict[tuple[int, 
                 key = tuple(sorted((int(begin), int(end))))
                 bonds[key] = _rdkit_bond_order(bond)
     return bonds
+
+
+def _is_rdkit_parse_runtime_error(error: RuntimeError) -> bool:
+    """Return whether an RDKit runtime error is an expected SMARTS parse failure."""
+    message = str(error).lower()
+    parse_markers = (
+        "chemicalreactionparserexception",
+        "smarts parse error",
+        "smiles parse error",
+        "failed parsing smarts",
+        "failed parsing smiles",
+        "syntax error in smarts",
+        "syntax error in smiles",
+    )
+    return any(marker in message for marker in parse_markers)
 
 
 def _rdkit_bond_order(bond: Any) -> float:

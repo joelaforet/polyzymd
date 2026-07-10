@@ -146,6 +146,7 @@ def test_final_helper_has_no_formal_charge_template_export(monkeypatch):
 
     assert result == "ok"
 
+
 def test_final_helper_fails_before_parameterizer_when_bridge_fails():
     """A charge bridge failure should prevent OpenFF parameterization."""
     captured = {}

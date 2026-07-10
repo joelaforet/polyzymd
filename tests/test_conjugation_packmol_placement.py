@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import ModuleType
+
+import numpy as np
+import pytest
 
 from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
@@ -13,6 +18,7 @@ from polyzymd.builders.conjugation._linkage import (
     resolve_explicit_linkage_contract,
 )
 from polyzymd.builders.conjugation.placement import (
+    _minimum_distance,
     place_modifier_with_packmol,
     place_modifier_with_resolved_plan,
     place_modifiers_with_resolved_plans,
@@ -177,6 +183,94 @@ def test_joint_resolved_plan_placement_uses_one_packmol_run_for_two_fragments(
     assert input_text.count("structure ") == 3
     assert input_text.count("inside sphere") == 2
     assert all(abs(result.placed_bond_length_angstrom - 1.45) < 1.0e-6 for result in results)
+
+
+def test_minimum_distance_uses_mdanalysis_distance_array(monkeypatch):
+    """Minimum distance should use MDAnalysis distance utilities when available."""
+    points_a = np.asarray([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
+    points_b = np.asarray([[2.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
+    calls = {"distance_array": 0}
+
+    def fake_distance_array(observed_a: np.ndarray, observed_b: np.ndarray) -> np.ndarray:
+        """Return NumPy-equivalent distances for the fake MDAnalysis module."""
+        calls["distance_array"] += 1
+        np.testing.assert_array_equal(observed_a, points_a)
+        np.testing.assert_array_equal(observed_b, points_b)
+        return np.linalg.norm(observed_a[:, np.newaxis, :] - observed_b[np.newaxis, :, :], axis=2)
+
+    _install_fake_mdanalysis_distance_array(monkeypatch, fake_distance_array)
+
+    assert _minimum_distance(points_a, points_b) == 2.0
+    assert calls["distance_array"] == 1
+
+
+def test_minimum_distance_falls_back_when_mdanalysis_distance_array_errors(monkeypatch):
+    """Minimum distance should preserve NumPy behavior when MDAnalysis cannot run."""
+    points_a = np.asarray([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
+    points_b = np.asarray([[2.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
+
+    def fake_distance_array(_points_a: np.ndarray, _points_b: np.ndarray) -> np.ndarray:
+        """Simulate an expected MDAnalysis runtime failure."""
+        raise RuntimeError("MDAnalysis distance backend unavailable")
+
+    _install_fake_mdanalysis_distance_array(monkeypatch, fake_distance_array)
+
+    assert _minimum_distance(points_a, points_b) == 2.0
+
+
+def test_minimum_distance_propagates_unexpected_mdanalysis_runtime_errors(monkeypatch):
+    """Unexpected MDAnalysis runtime errors should not silently use NumPy fallback."""
+    points_a = np.asarray([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
+    points_b = np.asarray([[2.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
+
+    def fake_distance_array(_points_a: np.ndarray, _points_b: np.ndarray) -> np.ndarray:
+        """Simulate an unexpected MDAnalysis runtime failure."""
+        raise RuntimeError("unexpected coordinate shape regression")
+
+    _install_fake_mdanalysis_distance_array(monkeypatch, fake_distance_array)
+
+    with pytest.raises(RuntimeError, match="unexpected coordinate shape regression"):
+        _minimum_distance(points_a, points_b)
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "failed to import coordinate shape regression",
+        "could not import malformed coordinate buffer",
+        "no module named coordinate buffer",
+    ),
+)
+def test_minimum_distance_propagates_generic_import_wording_runtime_errors(
+    monkeypatch,
+    message: str,
+):
+    """Generic import-wording RuntimeErrors should not trigger backend fallback."""
+    points_a = np.asarray([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
+    points_b = np.asarray([[2.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
+
+    def fake_distance_array(_points_a: np.ndarray, _points_b: np.ndarray) -> np.ndarray:
+        """Simulate a non-backend RuntimeError with import-like wording."""
+        raise RuntimeError(message)
+
+    _install_fake_mdanalysis_distance_array(monkeypatch, fake_distance_array)
+
+    with pytest.raises(RuntimeError, match=message):
+        _minimum_distance(points_a, points_b)
+
+
+def _install_fake_mdanalysis_distance_array(monkeypatch, distance_array) -> None:
+    """Install a fake MDAnalysis distance module for placement helper tests."""
+    mdanalysis_module = ModuleType("MDAnalysis")
+    lib_module = ModuleType("MDAnalysis.lib")
+    distances_module = ModuleType("MDAnalysis.lib.distances")
+    distances_module.distance_array = distance_array
+    lib_module.distances = distances_module
+    mdanalysis_module.lib = lib_module
+
+    monkeypatch.setitem(sys.modules, "MDAnalysis", mdanalysis_module)
+    monkeypatch.setitem(sys.modules, "MDAnalysis.lib", lib_module)
+    monkeypatch.setitem(sys.modules, "MDAnalysis.lib.distances", distances_module)
 
 
 def _explicit_contract(*, target_bond_length: float) -> ExplicitLinkageContract:
