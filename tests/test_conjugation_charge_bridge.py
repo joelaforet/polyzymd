@@ -372,6 +372,48 @@ def test_polymer_records_refine_duplicate_atom_names_by_residue_mapping(monkeypa
     assert records[0].charge_e == pytest.approx(0.125)
 
 
+def test_polymer_records_assign_charged_sdf_charges_by_atom_index(monkeypatch, tmp_path):
+    """Polymer template charges should follow atom_index order, not tuple order."""
+    charged_sdf = tmp_path / "polymer_charged.sdf"
+    charged_sdf.write_text("", encoding="utf-8")
+    fragment = SimpleNamespace(
+        atoms=(
+            SimpleNamespace(
+                atom_index=1,
+                atom_name="O001",
+                element="O",
+                residue_name="NHX",
+                residue_number=1,
+                insertion_code="",
+            ),
+            SimpleNamespace(
+                atom_index=0,
+                atom_name="C001",
+                element="C",
+                residue_name="NHX",
+                residue_number=1,
+                insertion_code="",
+            ),
+        ),
+        leaving_atom_names=(),
+    )
+    spec = SimpleNamespace(
+        source_sidecars={"charged_sdf": charged_sdf},
+        generated_fragment=fragment,
+        product_residue_mappings={},
+    )
+    monkeypatch.setattr(
+        charge_bridge,
+        "_charged_sdf_atom_charges",
+        lambda *_args, **_kwargs: (0.25, -0.5),
+    )
+
+    records = charge_bridge._polymer_template_records((spec,))
+
+    charges_by_atom_name = {record.atom_name: record.charge_e for record in records}
+    assert charges_by_atom_name == pytest.approx({"C001": 0.25, "O001": -0.5})
+
+
 def test_bridge_validates_charged_sdf_atom_order(tmp_path):
     """Charged SDF sources must match generated-fragment atom order."""
     charged_sdf = tmp_path / "polymer_charged.sdf"

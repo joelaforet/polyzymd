@@ -946,6 +946,7 @@ def _polymer_template_records(
                 "Attached polymer charged SDF atom count does not match generated fragment: "
                 f"{len(template_charges)} charges vs {len(fragment_atoms)} atom(s) for {sidecar}"
             )
+        fragment_atoms_by_sdf_order = fragment_atoms_in_sdf_order(fragment_atoms)
         mappings = getattr(spec, "product_residue_mappings", {}) or {}
         leaving_names = {
             str(name).strip() for name in getattr(generated_fragment, "leaving_atom_names", ())
@@ -956,7 +957,7 @@ def _polymer_template_records(
         leaving_total = 0.0
         residue_totals: dict[tuple[str, int | None], float] = {}
         mapped_product_count = 0
-        for atom, charge in zip(fragment_atoms, template_charges, strict=True):
+        for atom, charge in zip(fragment_atoms_by_sdf_order, template_charges, strict=True):
             atom_name = str(getattr(atom, "atom_name", "") or getattr(atom, "name", "")).strip()
             if atom_name in leaving_names:
                 leaving_count += 1
