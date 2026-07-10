@@ -343,7 +343,13 @@ def validated_charged_sdf_molecule(
 def charged_sdf_partial_charges(
     path: Path | str, *, fragment_atoms: Sequence[Any]
 ) -> tuple[float, ...]:
-    """Read per-atom partial charges from a validated production charged SDF."""
+    """Read per-atom partial charges from a validated production charged SDF.
+
+    Returns
+    -------
+    tuple of float
+        Partial charges in validated SDF atom-index order.
+    """
     if not fragment_atoms:
         raise ValueError("Attached polymer charge transfer requires generated-fragment atoms")
     sdf_path = Path(path)
