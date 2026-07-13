@@ -152,7 +152,8 @@
     </div>
     <div class="callout success">
       <strong>Hard invariant:</strong> existing working conjugation behavior must be preserved.
-      The known checkpoint is mandatory for semantic phases:
+      After Phase 10, the standard semantic-phase checkpoint is the committed fast multi-point
+      E2E workflow. The external production checkpoint remains mandatory for high-risk gates only:
       <pre><code>/home/joelaforet/Shirts-Lab-Linux/Conjugation_Tests/constant_200_conjugation_configs/config_005_linkages.yaml</code></pre>
     </div>
     <div class="callout">
@@ -168,6 +169,7 @@
     <ol>
       <li><a href="#executive-decisions">Executive decisions</a></li>
       <li><a href="#known-good">Current known-good behavior</a></li>
+      <li><a href="#fast-e2e-checkpoint">Fast multi-point E2E checkpoint policy</a></li>
       <li><a href="#responsibility-matrix">Responsibility matrix</a></li>
       <li><a href="#data-flow">Target data flow</a></li>
       <li><a href="#core-contracts">Core contracts</a></li>
@@ -207,7 +209,8 @@
     <p>
       The current opt-in conjugation path is successful and must remain the behavioral reference.
       The convergence work may change implementation boundaries, names, and internal data models, but
-      it must not regress the build represented by the known checkpoint configuration.
+      it must not regress the build represented by the known checkpoint configuration or the
+      fast multi-point E2E workflow captured in Phase 10.
     </p>
     <div class="grid">
       <div class="mini-card">
@@ -217,14 +220,71 @@
       </div>
       <div class="mini-card">
         <h3>Checkpoint</h3>
-        <p>The real checkpoint can be expensive and needs sufficient timeout. It is still mandatory
-        for every semantic phase, not optional smoke coverage.</p>
+        <p>The new fast multi-point E2E workflow becomes the standard semantic-phase checkpoint
+        after Phase 10 implements committed fixtures, runner, and assertions. The production LipA
+        checkpoint remains mandatory for high-risk gates.</p>
       </div>
       <div class="mini-card">
         <h3>Review policy</h3>
         <p>Every phase has an explicit user-review gate before merge into the integration branch.</p>
       </div>
     </div>
+  </section>
+
+  <section id="fast-e2e-checkpoint">
+    <h2>Fast multi-point E2E checkpoint policy</h2>
+    <p>
+      A newly validated external CUDA experiment should be captured in Phase 10 as a committed,
+      reproducible, fast multi-point end-to-end checkpoint. It is a build/export/stability guard,
+      not scientific equilibration, and timing is informational until the committed runner has
+      enough baseline data to justify hard thresholds.
+    </p>
+    <div class="callout success">
+      <strong>Validated external evidence:</strong> cleaned 1UBQ from
+      <code>examples/conjugation/1UBQ_testProtein.pdb</code>; two attachments on one protein at
+      chain A <code>LYS6 NZ</code> and <code>LYS48 NZ</code>; each attachment used a distinct deterministic
+      terminal-reactive ABC 3-mer with C reactive at index 2; one free deterministic SBMA 3-mer
+      with count 1; free-polymer packing padding 2.0 nm; TIP3P solvent with 0.55 nm padding,
+      neutralization, zero added salt, and no substrate/cosolvent; ff14SB + Sage 2.3.0 with the
+      composite charge strategy; CUDA conjugate relaxation with 5000 minimization max iterations
+      and 100 MD steps; final system 21,992 atoms.
+    </div>
+    <table>
+      <thead><tr><th>Observed external result</th><th>Value to record</th></tr></thead>
+      <tbody>
+        <tr><td>Build/export timing</td><td>~79.9 s total: config 0.01 s, conjugation/SystemBuilder 65.1 s, OpenMM export 6.0 s, GROMACS export 6.0 s.</td></tr>
+        <tr><td>200 ps CUDA NVT</td><td>100,000 steps at 2 fs, ~73.1 s, mixed precision, 100/100 finite checks passed.</td></tr>
+        <tr><td>Total fast workflow</td><td>~153 s on local CUDA GPU.</td></tr>
+        <tr><td>Final linkage distances</td><td>Lys6 ~1.401 Å; Lys48 ~1.376 Å.</td></tr>
+        <tr><td>OpenMM artifacts</td><td><code>system.xml</code>, final PDB, state, checkpoint, trajectory.</td></tr>
+        <tr><td>GROMACS artifacts</td><td><code>.gro</code>, <code>.top</code>, <code>.itp</code>, <code>.mdp</code>, and run script.</td></tr>
+      </tbody>
+    </table>
+    <h3>Known findings to encode honestly</h3>
+    <ul>
+      <li>The current validation report falsely flags retained LYS NZ after the product residue is renamed <code>LYX</code>. Phase 10 must fix this identity bookkeeping before the checkpoint becomes a passing gate.</li>
+      <li>Current placement can begin with high finite nonbonded energy and substantial Stage A displacement. The checkpoint must record pre/post clash metrics and require no non-linkage heavy-atom contact below 0.8 Å, post-relax no severe clashes, finite energies/coordinates, linkage tolerances, and successful 200 ps stability.</li>
+      <li>The relaxed PDB may rewrite attached polymer chain C as B. The identity-ledger phase must resolve order/chain metadata mapping, but the baseline should record current behavior.</li>
+      <li>Packmol may warn about shell thickness; the validated run completed. Record this as a warning, not a failure, unless placement quality assertions fail.</li>
+    </ul>
+    <h3>Checkpoint policy</h3>
+    <ul>
+      <li>Run the fast multi-point workflow after every semantic phase once Phase 10 lands.</li>
+      <li>Run the full production LipA checkpoint for the Pablo production switch, charge/force-field changes, major placement/identity changes, and final integration.</li>
+      <li>Documentation-only phases require the docs build and diff review, not heavy E2E.</li>
+      <li>The exact external experiment path is historical evidence only. Committed Phase 10 assets must live under <code>tests/data/</code> and <code>tests/</code> and must not depend on external paths.</li>
+      <li>The primary checkpoint should eventually use committed synchronized fixtures where supported. Polymerist source generation may remain a focused provider checkpoint, but Phase 10 must start from the current working API and preserve real multi-residue generation/conjugation.</li>
+      <li>Do not commit trajectories, solvated PDBs, <code>system.xml</code>, or large generated outputs.</li>
+    </ul>
+    <h3>Artifact and assertion checklist</h3>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Committed small protein and deterministic polymer fixtures/configs reproduce two LYS attachments plus one free SBMA 3-mer without external paths.</span></li>
+      <li><input type="checkbox"> <span>CUDA gate is opt-in; CPU build/export fallback is allowed if CUDA is unavailable, but the 200 ps stability stage only gates when explicitly enabled on CUDA.</span></li>
+      <li><input type="checkbox"> <span>OpenMM export produces expected files; GROMACS export produces <code>gro/top/itp/mdp/run</code> artifacts.</span></li>
+      <li><input type="checkbox"> <span>Validation records atom count, attachment identities, chain/residue mapping, linkage distances, finite energies, finite coordinates, pre/post clash metrics, and Stage A displacement metrics; the external baseline atom count was 21,992 atoms and the committed fixture should define its own exact expected count.</span></li>
+      <li><input type="checkbox"> <span>No non-linkage heavy contact is below 0.8 Å; post-relax severe clashes are absent; both linkages remain within tolerance around the validated ~1.4 Å bond length.</span></li>
+      <li><input type="checkbox"> <span>200 ps CUDA NVT reaches 100,000 steps at 2 fs with all finite checks passing; timing is logged but not initially hard-fail.</span></li>
+    </ul>
   </section>
 
   <section id="responsibility-matrix">
@@ -476,24 +536,28 @@ class ProductAssembly(BaseModel):
       <li><input type="checkbox"> <span>For each phase, create one work branch from the integration branch and open one PR back into the integration branch.</span></li>
       <li><input type="checkbox"> <span>Use explicit staging only. Never stage unrelated dirty files, POC notebooks, temp files, <code>test_files</code>, or local experiment outputs.</span></li>
       <li><input type="checkbox"> <span>Before commit, inspect <code>git status --short</code>, <code>git diff</code>, and <code>git log --oneline -10</code>.</span></li>
-      <li><input type="checkbox"> <span>Every semantic phase runs targeted tests, the conjugation subset, Ruff, Black, and the real checkpoint with sufficient timeout.</span></li>
+      <li><input type="checkbox"> <span>Every semantic phase runs targeted tests, the conjugation subset, Ruff, Black, and—after Phase 10—the fast multi-point E2E checkpoint.</span></li>
+      <li><input type="checkbox"> <span>Run the full production LipA checkpoint for high-risk gates: Pablo production switch, charge/force-field changes, major placement/identity changes, and final integration.</span></li>
       <li><input type="checkbox"> <span>No compatibility shims. Implement parity, switch production, and delete only the old code whose complete dependency set has parity in that phase; shared/manual Pablo definition logic remains until both NHS-Lys and multi-residue polymer parity pass.</span></li>
       <li><input type="checkbox"> <span>Each PR includes a user-review gate with checkpoint output paths and known deviations.</span></li>
       <li><input type="checkbox"> <span>Final merge to <code>refactor/conjugation-engine</code> occurs only after all convergence phases pass.</span></li>
     </ul>
     <h3>Standard semantic-phase commands</h3>
-    <pre><code>CONFIG=/home/joelaforet/Shirts-Lab-Linux/Conjugation_Tests/constant_200_conjugation_configs/config_005_linkages.yaml
-CHECK=/tmp/polyzymd-conjugation-convergence/phase-N
+    <pre><code>CHECK=/tmp/polyzymd-conjugation-convergence/phase-N
 
 # Targeted tests vary by phase; examples are listed below per phase.
 pixi run -e build pytest tests/ -v -k "conjugation"
 pixi run -e build ruff check src/ tests/
 pixi run -e build black src/ tests/ --check
 
-# Real checkpoint: expensive, mandatory for semantic phases, use sufficient timeout.
+# Standard checkpoint after Phase 10: use the committed fast E2E runner/config.
+pixi run -e build pytest tests/ -v -k "fast_e2e and conjugation"
+
+# High-risk gates only: production LipA checkpoint, use sufficient timeout.
+CONFIG=/home/joelaforet/Shirts-Lab-Linux/Conjugation_Tests/constant_200_conjugation_configs/config_005_linkages.yaml
 pixi run -e build polyzymd build --config "$CONFIG" --replicates 1 \
-  --scratch-dir "$CHECK/scratch" \
-  --projects-dir "$CHECK/projects"</code></pre>
+  --scratch-dir "$CHECK/production-scratch" \
+  --projects-dir "$CHECK/production-projects"</code></pre>
   </section>
 
   <section id="phases">
@@ -519,8 +583,31 @@ git diff -- docs/conjugation_pablo_convergence_plan.html</code></pre>
     </section>
 
     <section class="phase" id="phase-10">
-      <h3>Phase 10 — Reaction serialization/schema and canonical reaction contract</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-10-reactions</code></p>
+      <h3>Phase 10 — Implement and persist fast multi-point E2E checkpoint</h3>
+      <p><strong>Branch:</strong> <code>conjugation-engine-refactor-phase-10-fast-e2e</code></p>
+      <p><strong>Objective:</strong> Convert the validated external 1UBQ multi-point conjugation success into a committed, opt-in fast checkpoint that runs after every later semantic phase.</p>
+      <p><strong>Likely files:</strong> dedicated small fixtures and configs under <code>tests/data/</code>, focused runner/checkpoint utilities under <code>tests/</code>, and validation tests matching existing conjugation E2E patterns. Do not modify production architecture beyond the validation bookkeeping fix needed for the gate to pass.</p>
+      <p><strong>Deletions:</strong> None expected. Do not commit trajectories, solvated PDBs, <code>system.xml</code>, or large generated outputs.</p>
+      <ul class="checklist">
+        <li><input type="checkbox"> <span>Reproduce the external success first, then commit synchronized small fixtures/configs that no longer depend on external paths.</span></li>
+        <li><input type="checkbox"> <span>Preserve the real multi-residue generation/conjugation path: cleaned 1UBQ, two LYS attachments, deterministic ABC 3-mers, one free SBMA 3-mer, TIP3P solvent, ff14SB + Sage 2.3.0, and composite charges.</span></li>
+        <li><input type="checkbox"> <span>Fix validation identity bookkeeping so renamed <code>LYX</code> product residues do not falsely report retained LYS NZ.</span></li>
+        <li><input type="checkbox"> <span>Add pre/post clash metrics, linkage-distance assertions, finite energy/coordinate checks, and 200 ps CUDA NVT stability assertions.</span></li>
+        <li><input type="checkbox"> <span>Make CUDA stability opt-in; allow CPU build/export fallback if useful. Timing is recorded as informational, not hard-fail.</span></li>
+        <li><input type="checkbox"> <span>Record current chain rewrite behavior, where relaxed attached polymer chain C may appear as B, for the later identity-ledger phase.</span></li>
+      </ul>
+      <p><strong>Targeted tests:</strong></p>
+      <pre><code>pixi run -e build pytest tests/ -v -k "fast_e2e and conjugation"
+pixi run -e build pytest tests/ -v -k "conjugation and validation"
+pixi run -e build pytest tests/ -v -k "export and conjugation"</code></pre>
+      <p><strong>Checkpoint:</strong> The Phase 10 PR must include output from the new runner, the artifact/assertion checklist, and the known deviations above. Once accepted, this fast E2E workflow is the standard semantic-phase checkpoint.</p>
+      <p><strong>Risk:</strong> <span class="risk-med">Medium</span>. This phase should add a durable gate, not redesign production architecture.</p>
+      <p><strong>User review gate:</strong> User reviews fixture provenance, commands, assertion thresholds, output artifact list, timing log, and confirms no large generated outputs were committed.</p>
+    </section>
+
+    <section class="phase" id="phase-11">
+      <h3>Phase 11 — Reaction serialization/schema and canonical reaction contract</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-11-reactions</code></p>
       <p><strong>Objective:</strong> Replace hardcoded Python reaction drift with explicit data-file reaction input and one canonical resolver contract.</p>
       <p><strong>Likely files:</strong> <code>src/polyzymd/config/schema.py</code>, <code>src/polyzymd/builders/conjugation/reactions/</code>, reaction parsing/resolution modules, tests under <code>tests/</code> matching existing conjugation reaction tests.</p>
       <p><strong>Deletions:</strong> Remove obsolete <code>resolve_attachment</code>/<code>resolve_plan</code> split after <code>resolve(...)</code> parity; delete stale graph diagnostics only if replaced by contract tests.</p>
@@ -535,14 +622,14 @@ git diff -- docs/conjugation_pablo_convergence_plan.html</code></pre>
       <pre><code>pixi run -e build pytest tests/config/test_schema.py -v
 pixi run -e build pytest tests/ -v -k "conjugation and reaction"
 pixi run -e build pytest tests/ -v -k "nhs_lys or linkage or attachment"</code></pre>
-      <p><strong>Checkpoint:</strong> Run known checkpoint with sufficient timeout; archive config, command, and output directory in PR notes.</p>
+      <p><strong>Checkpoint:</strong> Run the fast multi-point E2E checkpoint; archive command, output directory, validation report, and known deviations in PR notes.</p>
       <p><strong>Risk:</strong> <span class="risk-high">High</span>. Incorrect graph delta or role matching can silently corrupt chemistry.</p>
       <p><strong>User review gate:</strong> Review accepted and rejected reaction examples, error messages, and checkpoint parity before merge.</p>
     </section>
 
-    <section class="phase" id="phase-11">
-      <h3>Phase 11 — Normalized moiety sources and synchronized file support</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-11-moiety</code></p>
+    <section class="phase" id="phase-12">
+      <h3>Phase 12 — Normalized moiety sources and synchronized file support</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-12-moiety</code></p>
       <p><strong>Objective:</strong> Route SMILES, Polymerist recipe, synchronized PDB + charged SDF, and constrained PDB-only inputs into one <code>Moiety</code> contract.</p>
       <p><strong>Likely files:</strong> moiety/provider modules, polymer recipe adapters, file-input loaders, config schema, charge provenance helpers, corresponding tests.</p>
       <p><strong>Deletions:</strong> Delete duplicate provider/spec adapters after all production callers consume <code>Moiety</code>.</p>
@@ -557,14 +644,14 @@ pixi run -e build pytest tests/ -v -k "nhs_lys or linkage or attachment"</code><
       <pre><code>pixi run -e build pytest tests/ -v -k "conjugation and moiety"
 pixi run -e build pytest tests/ -v -k "polymerist or polymer_recipe or polymerist_pdb"
 pixi run -e build pytest tests/ -v -k "charge and conjugation"</code></pre>
-      <p><strong>Checkpoint:</strong> Mandatory known checkpoint; compare moiety charge totals and persisted charge provenance.</p>
+      <p><strong>Checkpoint:</strong> Run the fast multi-point E2E checkpoint; compare moiety charge totals and persisted charge provenance.</p>
       <p><strong>Risk:</strong> <span class="risk-high">High</span>. Identity/order/charge mismatches can invalidate later topology and force-field steps.</p>
       <p><strong>User review gate:</strong> User reviews the normalized source matrix, file-source validation failures, and checkpoint output.</p>
     </section>
 
-    <section class="phase" id="phase-12">
-      <h3>Phase 12 — Identity ledger and <code>pdb_index</code> coordinate mapping</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-12-identity-ledger</code></p>
+    <section class="phase" id="phase-13">
+      <h3>Phase 13 — Identity ledger and <code>pdb_index</code> coordinate mapping</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-13-identity-ledger</code></p>
       <p><strong>Objective:</strong> Replace order-only assumptions with identity-ledger mapping from product assembly through Pablo topology ingestion before any production switch to Pablo-ingested topology.</p>
       <p><strong>Likely files:</strong> product assembly, PDB/CONECT helpers, Pablo bridge, coordinate mapping utilities, validation tests.</p>
       <p><strong>Deletions:</strong> Delete order-only coordinate and atom matching paths once all callers use unique <code>pdb_index</code>/identity mapping.</p>
@@ -578,17 +665,17 @@ pixi run -e build pytest tests/ -v -k "charge and conjugation"</code></pre>
       <pre><code>pixi run -e build pytest tests/ -v -k "conjugation and identity"
 pixi run -e build pytest tests/ -v -k "pdb_index or coordinate or order"
 pixi run -e build pytest tests/ -v -k "pablo and conjugation"</code></pre>
-      <p><strong>Checkpoint:</strong> Mandatory known checkpoint; inspect coordinate RMS/identity mapping report rather than order parity alone.</p>
+      <p><strong>Checkpoint:</strong> Run the fast multi-point E2E checkpoint and the full production LipA checkpoint because this is a major placement/identity gate; inspect coordinate RMS/identity mapping report rather than order parity alone.</p>
       <p><strong>Risk:</strong> <span class="risk-high">High</span>. This is the main protection against subtle coordinate/topology corruption.</p>
       <p><strong>User review gate:</strong> User reviews identity ledger examples and confirms order-only paths were deleted, not retained as fallback shims.</p>
     </section>
 
-    <section class="phase" id="phase-13">
-      <h3>Phase 13 — Pablo precursor definitions and <code>with_crosslink</code> parity for NHS-Lys</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-13-pablo-nhs-lys</code></p>
-      <p><strong>Objective:</strong> Establish public Pablo precursor/crosslink parity for NHS-Lys on top of the Phase 12 identity ledger. Any production switch to Pablo-ingested topology is allowed only after identity mapping is in place.</p>
+    <section class="phase" id="phase-14">
+      <h3>Phase 14 — Pablo precursor definitions and <code>with_crosslink</code> parity for NHS-Lys</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-14-pablo-nhs-lys</code></p>
+      <p><strong>Objective:</strong> Establish public Pablo precursor/crosslink parity for NHS-Lys on top of the Phase 13 identity ledger. Any production switch to Pablo-ingested topology is allowed only after identity mapping is in place.</p>
       <p><strong>Likely files:</strong> <code>src/polyzymd/builders/conjugation/pablo/</code>, product/topology bridge modules, NHS-Lys reaction modules, relevant tests.</p>
-      <p><strong>Deletions:</strong> Do not delete shared/manual Pablo definition logic in this phase because multi-residue polymer parity still depends on it. Delete only narrowly NHS-Lys-only scaffolding if it is proven unused by polymer paths; otherwise defer all deletion to Phase 14.</p>
+      <p><strong>Deletions:</strong> Do not delete shared/manual Pablo definition logic in this phase because multi-residue polymer parity still depends on it. Delete only narrowly NHS-Lys-only scaffolding if it is proven unused by polymer paths; otherwise defer all deletion to Phase 15.</p>
       <ul class="checklist">
         <li><input type="checkbox"> <span>Pin/test Pablo 0.2.2 behavior for <code>topology_from_pdb(...)</code> and <code>STD_CCD_CACHE.with_crosslink(...)</code>.</span></li>
         <li><input type="checkbox"> <span>Build precursor definitions using <code>ResidueDefinition.from_*</code> public APIs.</span></li>
@@ -600,14 +687,14 @@ pixi run -e build pytest tests/ -v -k "pablo and conjugation"</code></pre>
       <pre><code>pixi run -e build pytest tests/ -v -k "conjugation and pablo"
 pixi run -e build pytest tests/ -v -k "nhs_lys or lys or crosslink"
 pixi run -e build pytest tests/ -v -k "product and conjugation"</code></pre>
-      <p><strong>Checkpoint:</strong> Mandatory known checkpoint; verify product PDB CONECT, leaving atom omission, identity-ledger mapping, and Pablo-ingested topology.</p>
+      <p><strong>Checkpoint:</strong> Run the fast multi-point E2E checkpoint and the full production LipA checkpoint before any Pablo production switch; verify product PDB CONECT, leaving atom omission, identity-ledger mapping, and Pablo-ingested topology.</p>
       <p><strong>Risk:</strong> <span class="risk-high">High</span>. Public Pablo semantics may differ from current manual assumptions.</p>
       <p><strong>User review gate:</strong> User reviews the Pablo library plan, checkpoint parity, and any precisely scoped NHS-only deletions.</p>
     </section>
 
-    <section class="phase" id="phase-14">
-      <h3>Phase 14 — Multi-residue polymer definitions and <code>linking_bond</code> parity</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-14-polymer-linking</code></p>
+    <section class="phase" id="phase-15">
+      <h3>Phase 15 — Multi-residue polymer definitions and <code>linking_bond</code> parity</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-15-polymer-linking</code></p>
       <p><strong>Objective:</strong> Extend the public Pablo definition path to multi-residue polymer/moiety cases while preserving current linking behavior.</p>
       <p><strong>Likely files:</strong> polymer/moiety residue definition planning modules, Pablo bridge, product assembly, polymer recipe tests.</p>
       <p><strong>Deletions:</strong> After both NHS-Lys parity and multi-residue polymer parity pass, remove the shared/manual Pablo definition logic and any remaining single-residue-only special cases or duplicate multi-residue placement/definition code in the same PR.</p>
@@ -621,14 +708,14 @@ pixi run -e build pytest tests/ -v -k "product and conjugation"</code></pre>
       <pre><code>pixi run -e build pytest tests/ -v -k "conjugation and polymer"
 pixi run -e build pytest tests/ -v -k "polymerist or multi_residue or linking_bond"
 pixi run -e build pytest tests/ -v -k "conjugation"</code></pre>
-      <p><strong>Checkpoint:</strong> Mandatory known checkpoint plus any available multi-residue polymer subset.</p>
+      <p><strong>Checkpoint:</strong> Run the fast multi-point E2E checkpoint plus any available multi-residue Polymerist/provider subset.</p>
       <p><strong>Risk:</strong> <span class="risk-med">Medium/High</span>. Multi-residue identity and CONECT evidence can drift if placement and definition planning are separated incorrectly.</p>
       <p><strong>User review gate:</strong> User reviews multi-residue parity outputs, capability-limit errors, and the final deletion of shared/manual Pablo definition logic before merge.</p>
     </section>
 
-    <section class="phase" id="phase-15">
-      <h3>Phase 15 — Shared force-field loader, Sage 2.3.0 default, ordered OFFXML, and concise audit</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-15-force-fields</code></p>
+    <section class="phase" id="phase-16">
+      <h3>Phase 16 — Shared force-field loader, Sage 2.3.0 default, ordered OFFXML, and concise audit</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-16-force-fields</code></p>
       <p><strong>Objective:</strong> Introduce a small shared force-field loader/manifest/audit utility and switch project defaults to ff14SB + Sage 2.3.0 while preserving existing component charging behavior.</p>
       <p><strong>Likely files:</strong> force-field utility module, config defaults/schema, conjugation parameterization bridge, SystemBuilder force-field call sites, audit tests.</p>
       <p><strong>Deletions:</strong> Delete duplicate local force-field source assembly in conjugation once shared utility is production. Do not delete charge bridge internals speculatively.</p>
@@ -643,14 +730,14 @@ pixi run -e build pytest tests/ -v -k "conjugation"</code></pre>
       <pre><code>pixi run -e build pytest tests/ -v -k "forcefield or force_field or offxml"
 pixi run -e build pytest tests/ -v -k "conjugation and parameter"
 pixi run -e build pytest tests/ -v -k "system_builder or builder"</code></pre>
-      <p><strong>Checkpoint:</strong> Mandatory known checkpoint; attach audit summary with handler/source assignments and charge reconciliation.</p>
+      <p><strong>Checkpoint:</strong> Run the fast multi-point E2E checkpoint and the full production LipA checkpoint because this phase changes charge/force-field defaults; attach audit summary with handler/source assignments and charge reconciliation.</p>
       <p><strong>Risk:</strong> <span class="risk-high">High</span>. Default force-field changes can alter energies even when topology is correct.</p>
       <p><strong>User review gate:</strong> User reviews manifest defaults, override semantics, audit sample, and confirms no component-charging rewrite occurred.</p>
     </section>
 
-    <section class="phase" id="phase-16">
-      <h3>Phase 16 — Contract, placement, and workflow consolidation with real LOC deletion</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-16-consolidation</code></p>
+    <section class="phase" id="phase-17">
+      <h3>Phase 17 — Contract, placement, and workflow consolidation with real LOC deletion</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-17-consolidation</code></p>
       <p><strong>Objective:</strong> Collapse duplicate placement/workflow paths around <code>Moiety</code>, <code>ResolvedReaction</code>, and <code>ProductAssembly</code> now that parity has been proven.</p>
       <p><strong>Likely files:</strong> system workflow, placement modules, moiety adapters, reaction bridge, Pablo product bridge, tests that reference deleted private helpers.</p>
       <p><strong>Deletions:</strong> Remove duplicate single/multi placement paths, obsolete adapters, obsolete graph diagnostics, and dead workflow glue. Preserve identity/provenance and contract tests.</p>
@@ -664,21 +751,21 @@ pixi run -e build pytest tests/ -v -k "system_builder or builder"</code></pre>
       <pre><code>pixi run -e build pytest tests/ -v -k "conjugation"
 pixi run -e build pytest tests/config/test_schema.py -v
 pixi run -e build pytest tests/ -v -k "workflow or system_workflow or placement"</code></pre>
-      <p><strong>Checkpoint:</strong> Mandatory known checkpoint; compare artifact presence and validation reports to baseline.</p>
+      <p><strong>Checkpoint:</strong> Run the fast multi-point E2E checkpoint and the full production LipA checkpoint because this is a major placement/workflow identity consolidation gate; compare artifact presence and validation reports to baseline.</p>
       <p><strong>Risk:</strong> <span class="risk-med">Medium</span>. Deletion can uncover hidden test dependencies, but production behavior should already be covered.</p>
       <p><strong>User review gate:</strong> User reviews deletion summary, kept/removed tests, and confirms no shims remain.</p>
     </section>
 
-    <section class="phase" id="phase-17">
-      <h3>Phase 17 — Final full audit and integration</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-17-final-audit</code></p>
+    <section class="phase" id="phase-18">
+      <h3>Phase 18 — Final full audit and integration</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-18-final-audit</code></p>
       <p><strong>Objective:</strong> Run complete integration validation, close documentation gaps, and prepare merge from <code>conjugation-engine-refactor</code> to <code>refactor/conjugation-engine</code>.</p>
       <p><strong>Likely files:</strong> Only targeted fixes discovered by audit; release notes or docs if explicitly requested.</p>
       <p><strong>Deletions:</strong> Any final dead code proven unreachable by tests and checkpoint; no speculative cleanup.</p>
       <ul class="checklist">
         <li><input type="checkbox"> <span>Run targeted conjugation suite and broader relevant builder/config tests.</span></li>
         <li><input type="checkbox"> <span>Run Ruff and Black.</span></li>
-        <li><input type="checkbox"> <span>Run the real checkpoint with sufficient timeout.</span></li>
+        <li><input type="checkbox"> <span>Run the fast multi-point E2E checkpoint and the full production LipA checkpoint with sufficient timeout.</span></li>
         <li><input type="checkbox"> <span>Verify no private Pablo APIs, no compatibility shims, no old/new duplicate paths, no POC file changes.</span></li>
         <li><input type="checkbox"> <span>Prepare final PR summary with phase links, test evidence, checkpoint outputs, and known limitations.</span></li>
       </ul>
@@ -688,7 +775,7 @@ pixi run -e build pytest tests/config/test_schema.py -v
 pixi run -e build pytest tests/ -v -k "builder or system_builder or workflow"
 pixi run -e build ruff check src/ tests/
 pixi run -e build black src/ tests/ --check</code></pre>
-      <p><strong>Checkpoint:</strong> Mandatory known checkpoint and any additional user-provided conjugation configs.</p>
+      <p><strong>Checkpoint:</strong> Run the fast multi-point E2E checkpoint, the full production LipA checkpoint, and any additional user-provided conjugation configs.</p>
       <p><strong>Risk:</strong> <span class="risk-med">Medium</span>. Integration defects may appear only when the whole pipeline is exercised.</p>
       <p><strong>User review gate:</strong> User approves final merge into <code>refactor/conjugation-engine</code>.</p>
     </section>
@@ -697,22 +784,24 @@ pixi run -e build black src/ tests/ --check</code></pre>
   <section id="test-matrix">
     <h2>Test and checkpoint matrix</h2>
     <table>
-      <thead><tr><th>Phase</th><th>Primary targeted tests</th><th>Standard commands</th><th>Real checkpoint</th></tr></thead>
+      <thead><tr><th>Phase</th><th>Primary targeted tests</th><th>Standard commands</th><th>Checkpoint policy</th></tr></thead>
       <tbody>
         <tr><td>9</td><td>None unless requested; inspect doc diff only.</td><td><code>git status --short</code>, <code>git diff -- docs/conjugation_pablo_convergence_plan.html</code></td><td>Not required; no production change.</td></tr>
-        <tr><td>10</td><td><code>-k "conjugation and reaction"</code>, schema tests, NHS-Lys/linkage tests.</td><td rowspan="8"><code>pixi run -e build ruff check src/ tests/</code><br><code>pixi run -e build black src/ tests/ --check</code><br><code>pixi run -e build pytest tests/ -v -k "conjugation"</code></td><td>Mandatory, sufficient timeout.</td></tr>
-        <tr><td>11</td><td><code>-k "conjugation and moiety"</code>, Polymerist/source/charge tests.</td><td>Mandatory, validate charge provenance.</td></tr>
-        <tr><td>12</td><td><code>-k "conjugation and identity"</code>, <code>pdb_index</code>/coordinate/order tests.</td><td>Mandatory, inspect identity ledger.</td></tr>
-        <tr><td>13</td><td><code>-k "conjugation and pablo"</code>, NHS-Lys/crosslink/product tests.</td><td>Mandatory, inspect CONECT, topology, and identity mapping.</td></tr>
-        <tr><td>14</td><td><code>-k "conjugation and polymer"</code>, multi-residue/linking tests.</td><td>Mandatory, plus multi-residue subset if available.</td></tr>
-        <tr><td>15</td><td>Force-field/OFFXML, parameterization, SystemBuilder loader tests.</td><td>Mandatory, attach assignment audit.</td></tr>
-        <tr><td>16</td><td>Conjugation, schema, workflow/placement tests.</td><td>Mandatory, compare artifacts to baseline.</td></tr>
-        <tr><td>17</td><td>Full conjugation subset plus builder/config/workflow coverage.</td><td>Mandatory, final approval evidence.</td></tr>
+        <tr><td>10</td><td><code>-k "fast_e2e and conjugation"</code>, validation/export tests.</td><td rowspan="9"><code>pixi run -e build ruff check src/ tests/</code><br><code>pixi run -e build black src/ tests/ --check</code><br><code>pixi run -e build pytest tests/ -v -k "conjugation"</code><br><code>pixi run -e build pytest tests/ -v -k "fast_e2e and conjugation"</code></td><td>Establishes the standard fast checkpoint; CUDA stability opt-in; no large outputs committed.</td></tr>
+        <tr><td>11</td><td><code>-k "conjugation and reaction"</code>, schema tests, NHS-Lys/linkage tests.</td><td>Fast checkpoint mandatory.</td></tr>
+        <tr><td>12</td><td><code>-k "conjugation and moiety"</code>, Polymerist/source/charge tests.</td><td>Fast checkpoint mandatory; validate charge provenance.</td></tr>
+        <tr><td>13</td><td><code>-k "conjugation and identity"</code>, <code>pdb_index</code>/coordinate/order tests.</td><td>Fast checkpoint + full production LipA checkpoint; inspect identity ledger.</td></tr>
+        <tr><td>14</td><td><code>-k "conjugation and pablo"</code>, NHS-Lys/crosslink/product tests.</td><td>Fast checkpoint + full production LipA checkpoint before production switch.</td></tr>
+        <tr><td>15</td><td><code>-k "conjugation and polymer"</code>, multi-residue/linking tests.</td><td>Fast checkpoint mandatory; plus multi-residue provider subset if available.</td></tr>
+        <tr><td>16</td><td>Force-field/OFFXML, parameterization, SystemBuilder loader tests.</td><td>Fast checkpoint + full production LipA checkpoint; attach assignment audit.</td></tr>
+        <tr><td>17</td><td>Conjugation, schema, workflow/placement tests.</td><td>Fast checkpoint + full production LipA checkpoint; compare artifacts to baseline.</td></tr>
+        <tr><td>18</td><td>Full conjugation subset plus builder/config/workflow coverage.</td><td>Fast checkpoint + full production LipA checkpoint; final approval evidence.</td></tr>
       </tbody>
     </table>
     <div class="callout warning">
-      <strong>Checkpoint timing:</strong> the real known-good configuration can be expensive. Use sufficient timeout
-      and do not replace it with lightweight unit tests for semantic phases.
+      <strong>Checkpoint timing:</strong> the fast workflow's ~153 s local CUDA timing is informational
+      initially, not hard-fail. The production LipA checkpoint can be expensive; use sufficient
+      timeout when a high-risk gate requires it.
     </div>
   </section>
 
@@ -761,7 +850,7 @@ pixi run -e build black src/ tests/ --check</code></pre>
         <tr><td>Pablo public API capacity is exceeded.</td><td><span class="risk-med">Medium</span></td><td>Encode one linking bond + one crosslink slot limit and fail clearly before assembly.</td></tr>
         <tr><td>Partial charges drift or mismatch atom identities.</td><td><span class="risk-high">High</span></td><td>Strict charge count/finite/total validation and persisted provenance for every generated or user-supplied charged source.</td></tr>
         <tr><td>Force-field default change alters parameter assignments unexpectedly.</td><td><span class="risk-high">High</span></td><td>Ordered manifest, strict conjugation audit, public <code>label_molecules()</code> inspection, user override path.</td></tr>
-        <tr><td>LOC deletion removes hidden behavior used by the checkpoint.</td><td><span class="risk-med">Medium</span></td><td>Delete only after the relevant parity scope is complete; shared/manual Pablo definition logic waits for both NHS-Lys and polymer parity, targeted tests, conjugation subset, and real checkpoint.</td></tr>
+        <tr><td>LOC deletion removes hidden behavior used by the checkpoint.</td><td><span class="risk-med">Medium</span></td><td>Delete only after the relevant parity scope is complete; shared/manual Pablo definition logic waits for both NHS-Lys and polymer parity, targeted tests, conjugation subset, fast checkpoint, and production checkpoint where required.</td></tr>
         <tr><td>Subagents stage unrelated dirty files.</td><td><span class="risk-med">Medium</span></td><td>Explicit staging only; require status/diff review; never touch POC notebooks/temp/test_files.</td></tr>
       </tbody>
     </table>
@@ -770,7 +859,7 @@ pixi run -e build black src/ tests/ --check</code></pre>
   <section id="definition-done">
     <h2>Definition of done</h2>
     <ul class="checklist">
-      <li><input type="checkbox"> <span>The known checkpoint configuration succeeds after every semantic phase and after final integration.</span></li>
+      <li><input type="checkbox"> <span>The fast multi-point E2E checkpoint succeeds after every semantic phase after Phase 10; the full production LipA checkpoint succeeds for high-risk gates and final integration.</span></li>
       <li><input type="checkbox"> <span>MVP reaction definitions are RDKit-readable mapped MDL <code>.rxn</code> files with explicit config paths and no Python package/plugin requirement.</span></li>
       <li><input type="checkbox"> <span>All moiety sources normalize into the <code>Moiety</code> contract with strict identity, coordinate, charge, and provenance validation.</span></li>
       <li><input type="checkbox"> <span>Public Pablo APIs ingest product topology; no private helpers are used.</span></li>
@@ -779,7 +868,7 @@ pixi run -e build black src/ tests/ --check</code></pre>
       <li><input type="checkbox"> <span>Final parameterization uses ordered OFFXML sources with ff14SB + Sage 2.3.0 defaults and concise assignment audit.</span></li>
       <li><input type="checkbox"> <span>Old paths are deleted after complete relevant parity; no compatibility facades or duplicate production paths remain.</span></li>
       <li><input type="checkbox"> <span>POC notebooks, temp files, unrelated dirty files, and unrelated tests are untouched.</span></li>
-      <li><input type="checkbox"> <span>Final merge to <code>refactor/conjugation-engine</code> is user-approved after Phase 17 audit.</span></li>
+      <li><input type="checkbox"> <span>Final merge to <code>refactor/conjugation-engine</code> is user-approved after Phase 18 audit.</span></li>
     </ul>
   </section>
 
@@ -788,7 +877,9 @@ pixi run -e build black src/ tests/ --check</code></pre>
     <table>
       <thead><tr><th>Decision</th><th>Approved choice</th><th>Rationale</th></tr></thead>
       <tbody>
-        <tr><td>Behavioral invariant</td><td>Preserve current opt-in successful workflow and checkpoint.</td><td>Architecture convergence must not regress working science.</td></tr>
+        <tr><td>Behavioral invariant</td><td>Preserve current opt-in successful workflow and checkpoint behavior.</td><td>Architecture convergence must not regress working science.</td></tr>
+        <tr><td>Standard checkpoint</td><td>After Phase 10, run the committed fast multi-point E2E workflow after every semantic phase.</td><td>Provides a practical recurrent gate with real multi-residue generation/conjugation, export, relaxation, and 200 ps stability.</td></tr>
+        <tr><td>Production checkpoint</td><td>Run the full LipA checkpoint for Pablo production switch, charge/force-field changes, major placement/identity changes, and final integration.</td><td>Keeps expensive validation focused on the gates most likely to affect production behavior.</td></tr>
         <tr><td>Branching</td><td>Integrate through <code>conjugation-engine-refactor</code>; final merge to <code>refactor/conjugation-engine</code>.</td><td>Supports many small reviewed subagent PRs without destabilizing the final target branch.</td></tr>
         <tr><td>Reaction extension</td><td>MVP data files are RDKit-readable mapped MDL <code>.rxn</code>; portable mapped representations are future/deferred; no Python plugins.</td><td>Avoids core registries while keeping MVP input narrow and RDKit-validated.</td></tr>
         <tr><td>Reaction contract</td><td>One canonical <code>resolve(...)</code> method.</td><td>Prevents resolver drift and duplicate production paths.</td></tr>
