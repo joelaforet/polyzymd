@@ -232,15 +232,16 @@
   </section>
 
   <section id="fast-e2e-checkpoint">
-    <h2>Fast multi-point E2E checkpoint policy</h2>
+    <h2>Fast mixed polymer/glycan E2E checkpoint policy</h2>
     <p>
       A newly validated external CUDA experiment should be captured in Phase 10 as a committed,
-      reproducible, fast multi-point end-to-end checkpoint. It is a build/export/stability guard,
+      reproducible, fast mixed polymer/glycan end-to-end checkpoint. It is a
+      build/export/stability guard,
       not scientific equilibration, and timing is informational until the committed runner has
       enough baseline data to justify hard thresholds.
     </p>
     <div class="callout success">
-      <strong>Validated external evidence:</strong> cleaned 1UBQ from
+      <strong>Validated polymer-only external evidence:</strong> cleaned 1UBQ from
       <code>examples/conjugation/1UBQ_testProtein.pdb</code>; two attachments on one protein at
       chain A <code>LYS6 NZ</code> and <code>LYS48 NZ</code>; each attachment used a distinct deterministic
       terminal-reactive ABC 3-mer with C reactive at index 2; one free deterministic SBMA 3-mer
@@ -249,8 +250,24 @@
       composite charge strategy; CUDA conjugate relaxation with 5000 minimization max iterations
       and 100 MD steps; final system 21,992 atoms.
     </div>
+    <div class="callout info">
+      <strong>Minimum mixed checkpoint:</strong> the recurring fast gate should test one attached
+      polymer and one attached glycan in the same solvated protein system. The validated external
+      target is cleaned 1UBQ with an NHS-Lys ABC 3-mer on chain A <code>LYS63 NZ</code>, a single
+      validated three-branch glycan on exposed chain A <code>ASN60 ND2</code>, and one free SBMA 3-mer
+      in TIP3P water. This is the glycosylation smoke test; it is not an all-three-glycan stress
+      test. ASN60 is noncanonical for biological N-glycosylation, but acceptable for
+      chemistry-engine testing because it gives an exposed Asn side chain for reaction planning
+      and coordinate assembly.
+    </div>
+    <div class="callout warning">
+      <strong>Glycan modeling scope:</strong> the publication gate demonstrates covalent attachment,
+      coordinate assembly, export, and short-MD stability for a glycan-like moiety. It does not
+      claim residue-resolved GLYCAM/CHARMM glycoprotein parameterization. Residue-preserving
+      multi-sugar export is a future interoperability bridge, not a blocker for this checkpoint.
+    </div>
     <table>
-      <thead><tr><th>Observed external result</th><th>Value to record</th></tr></thead>
+      <thead><tr><th>Observed polymer-only external result</th><th>Value to record</th></tr></thead>
       <tbody>
         <tr><td>Build/export timing</td><td>~79.9 s total: config 0.01 s, conjugation/SystemBuilder 65.1 s, OpenMM export 6.0 s, GROMACS export 6.0 s.</td></tr>
         <tr><td>200 ps CUDA NVT</td><td>100,000 steps at 2 fs, ~73.1 s, mixed precision, 100/100 finite checks passed.</td></tr>
@@ -258,6 +275,18 @@
         <tr><td>Final linkage distances</td><td>Lys6 ~1.401 Å; Lys48 ~1.376 Å.</td></tr>
         <tr><td>OpenMM artifacts</td><td><code>system.xml</code>, final PDB, state, checkpoint, trajectory.</td></tr>
         <tr><td>GROMACS artifacts</td><td><code>.gro</code>, <code>.top</code>, <code>.itp</code>, <code>.mdp</code>, and run script.</td></tr>
+      </tbody>
+    </table>
+    <table>
+      <thead><tr><th>Observed mixed polymer/glycan external result</th><th>Value to record</th></tr></thead>
+      <tbody>
+        <tr><td>External workspace</td><td><code>/home/joelaforet/Shirts-Lab-Linux/Conjugation_Tests/fast_e2e_1ubq_lys63_asn60_threebranch</code>.</td></tr>
+        <tr><td>Attachments</td><td>One NHS-Lys ABC 3-mer on chain A <code>LYS63 NZ</code>; one three-branch N-glycan on chain A <code>ASN60 ND2</code>.</td></tr>
+        <tr><td>Free polymer/solvent</td><td>One free SBMA 3-mer; TIP3P water; neutralized; ff14SB + Sage 2.3.0; CUDA mixed precision.</td></tr>
+        <tr><td>Build/export timing</td><td>Conjugation/SystemBuilder 61.78 s; OpenMM XML export 10.63 s; GROMACS export 8.31 s.</td></tr>
+        <tr><td>Final system size</td><td>30,293 atoms in the solvated PDB.</td></tr>
+        <tr><td>200 ps CUDA NVT</td><td>100,000 steps at 2 fs, 91.79 s wall time, finite energies and coordinates, final temperature 300.30 K.</td></tr>
+        <tr><td>OpenMM artifacts</td><td><code>system.xml</code>, <code>solvated_system.pdb</code>, <code>openmm_200ps_stability/trajectory.dcd</code>, and <code>openmm_200ps_stability/stability_summary.json</code>.</td></tr>
       </tbody>
     </table>
     <h3>Known findings to encode honestly</h3>
@@ -269,7 +298,7 @@
     </ul>
     <h3>Checkpoint policy</h3>
     <ul>
-      <li>Run the fast multi-point workflow after every semantic phase once Phase 10 lands.</li>
+      <li>Run the fast mixed polymer/glycan workflow after every semantic phase once Phase 10 lands.</li>
       <li>Run the full production LipA checkpoint for the Pablo production switch, charge/force-field changes, major placement/identity changes, and final integration.</li>
       <li>Documentation-only phases require the docs build and diff review, not heavy E2E.</li>
       <li>The exact external experiment path is historical evidence only. Committed Phase 10 assets must live under <code>tests/data/</code> and <code>tests/</code> and must not depend on external paths.</li>
@@ -278,11 +307,11 @@
     </ul>
     <h3>Artifact and assertion checklist</h3>
     <ul class="checklist">
-      <li><input type="checkbox"> <span>Committed small protein and deterministic polymer fixtures/configs reproduce two LYS attachments plus one free SBMA 3-mer without external paths.</span></li>
+      <li><input type="checkbox"> <span>Committed small protein and deterministic fixtures/configs reproduce the minimum mixed system: one LYS polymer attachment, one ASN60 three-branch glycan attachment, and one free SBMA 3-mer without external paths.</span></li>
       <li><input type="checkbox"> <span>CUDA gate is opt-in; CPU build/export fallback is allowed if CUDA is unavailable, but the 200 ps stability stage only gates when explicitly enabled on CUDA.</span></li>
       <li><input type="checkbox"> <span>OpenMM export produces expected files; GROMACS export produces <code>gro/top/itp/mdp/run</code> artifacts.</span></li>
-      <li><input type="checkbox"> <span>Validation records atom count, attachment identities, chain/residue mapping, linkage distances, finite energies, finite coordinates, pre/post clash metrics, and Stage A displacement metrics; the external baseline atom count was 21,992 atoms and the committed fixture should define its own exact expected count.</span></li>
-      <li><input type="checkbox"> <span>No non-linkage heavy contact is below 0.8 Å; post-relax severe clashes are absent; both linkages remain within tolerance around the validated ~1.4 Å bond length.</span></li>
+      <li><input type="checkbox"> <span>Validation records atom count, attachment identities, chain/residue mapping, polymer and glycan linkage distances, finite energies, finite coordinates, pre/post clash metrics, and Stage A displacement metrics; the mixed external baseline atom count was 30,293 atoms and the committed fixture should define its own exact expected count.</span></li>
+      <li><input type="checkbox"> <span>No non-linkage heavy contact is below 0.8 Å; post-relax severe clashes are absent; polymer and glycan linkages remain within chemically reasonable bond-length tolerances.</span></li>
       <li><input type="checkbox"> <span>200 ps CUDA NVT reaches 100,000 steps at 2 fs with all finite checks passing; timing is logged but not initially hard-fail.</span></li>
     </ul>
   </section>
@@ -583,14 +612,14 @@ git diff -- docs/conjugation_pablo_convergence_plan.html</code></pre>
     </section>
 
     <section class="phase" id="phase-10">
-      <h3>Phase 10 — Implement and persist fast multi-point E2E checkpoint</h3>
+      <h3>Phase 10 — Implement and persist fast mixed polymer/glycan E2E checkpoint</h3>
       <p><strong>Branch:</strong> <code>conjugation-engine-refactor-phase-10-fast-e2e</code></p>
-      <p><strong>Objective:</strong> Convert the validated external 1UBQ multi-point conjugation success into a committed, opt-in fast checkpoint that runs after every later semantic phase.</p>
+      <p><strong>Objective:</strong> Convert the validated external 1UBQ mixed polymer/glycan success into a committed, opt-in fast checkpoint that runs after every later semantic phase.</p>
       <p><strong>Likely files:</strong> dedicated small fixtures and configs under <code>tests/data/</code>, focused runner/checkpoint utilities under <code>tests/</code>, and validation tests matching existing conjugation E2E patterns. Do not modify production architecture beyond the validation bookkeeping fix needed for the gate to pass.</p>
       <p><strong>Deletions:</strong> None expected. Do not commit trajectories, solvated PDBs, <code>system.xml</code>, or large generated outputs.</p>
       <ul class="checklist">
         <li><input type="checkbox"> <span>Reproduce the external success first, then commit synchronized small fixtures/configs that no longer depend on external paths.</span></li>
-        <li><input type="checkbox"> <span>Preserve the real multi-residue generation/conjugation path: cleaned 1UBQ, two LYS attachments, deterministic ABC 3-mers, one free SBMA 3-mer, TIP3P solvent, ff14SB + Sage 2.3.0, and composite charges.</span></li>
+        <li><input type="checkbox"> <span>Preserve the real generation/conjugation path: cleaned 1UBQ, one LYS ABC 3-mer attachment, one ASN60 three-branch glycan attachment, one free SBMA 3-mer, TIP3P solvent, ff14SB + Sage 2.3.0, and composite charges.</span></li>
         <li><input type="checkbox"> <span>Fix validation identity bookkeeping so renamed <code>LYX</code> product residues do not falsely report retained LYS NZ.</span></li>
         <li><input type="checkbox"> <span>Add pre/post clash metrics, linkage-distance assertions, finite energy/coordinate checks, and 200 ps CUDA NVT stability assertions.</span></li>
         <li><input type="checkbox"> <span>Make CUDA stability opt-in; allow CPU build/export fallback if useful. Timing is recorded as informational, not hard-fail.</span></li>
@@ -600,7 +629,7 @@ git diff -- docs/conjugation_pablo_convergence_plan.html</code></pre>
       <pre><code>pixi run -e build pytest tests/ -v -k "fast_e2e and conjugation"
 pixi run -e build pytest tests/ -v -k "conjugation and validation"
 pixi run -e build pytest tests/ -v -k "export and conjugation"</code></pre>
-      <p><strong>Checkpoint:</strong> The Phase 10 PR must include output from the new runner, the artifact/assertion checklist, and the known deviations above. Once accepted, this fast E2E workflow is the standard semantic-phase checkpoint.</p>
+      <p><strong>Checkpoint:</strong> The Phase 10 PR must include output from the new runner, the artifact/assertion checklist, and the known deviations above. Once accepted, this fast mixed polymer/glycan E2E workflow is the standard semantic-phase checkpoint.</p>
       <p><strong>Risk:</strong> <span class="risk-med">Medium</span>. This phase should add a durable gate, not redesign production architecture.</p>
       <p><strong>User review gate:</strong> User reviews fixture provenance, commands, assertion thresholds, output artifact list, timing log, and confirms no large generated outputs were committed.</p>
     </section>
