@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PolyzyMD Conjugation Pablo Convergence Plan</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --ink: #172033;
+      --muted: #667085;
+      --accent: #1d4ed8;
+      --accent-2: #0f766e;
+      --warn: #b45309;
+      --danger: #b91c1c;
+      --ok: #15803d;
+      --border: #d0d5dd;
+      --soft: #eef4ff;
+      --code-bg: #0f172a;
+      --code-ink: #e5e7eb;
+      --shadow: 0 12px 30px rgb(16 24 40 / 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b1120;
+        --card: #111827;
+        --ink: #f8fafc;
+        --muted: #cbd5e1;
+        --accent: #60a5fa;
+        --accent-2: #5eead4;
+        --warn: #fbbf24;
+        --danger: #f87171;
+        --ok: #86efac;
+        --border: #334155;
+        --soft: #172554;
+        --shadow: 0 12px 30px rgb(0 0 0 / 0.35);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 14%, transparent), transparent 30rem), var(--bg);
+      color: var(--ink);
+      line-height: 1.6;
+    }
+
+    main {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 2rem 1rem 5rem;
+    }
+
+    header, section {
+      background: color-mix(in srgb, var(--card) 94%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      margin: 1rem 0;
+      padding: 1.35rem 1.5rem;
+    }
+
+    header { padding: 2rem; }
+
+    h1, h2, h3, h4 { line-height: 1.2; }
+    h1 { font-size: clamp(2rem, 4vw, 3.3rem); margin: 0 0 0.6rem; }
+    h2 { color: var(--accent); font-size: 1.65rem; margin: 0 0 0.75rem; }
+    h3 { color: var(--accent-2); margin: 1.2rem 0 0.4rem; }
+    h4 { margin-bottom: 0.25rem; }
+
+    a { color: var(--accent); }
+    code { background: var(--soft); border-radius: 0.35rem; padding: 0.08rem 0.35rem; }
+    pre {
+      background: var(--code-bg);
+      color: var(--code-ink);
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      overflow-x: auto;
+      padding: 1rem;
+      white-space: pre;
+    }
+    pre code { background: transparent; color: inherit; padding: 0; }
+
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    th, td { border: 1px solid var(--border); padding: 0.65rem 0.75rem; vertical-align: top; }
+    th { background: color-mix(in srgb, var(--accent) 13%, transparent); text-align: left; }
+    tbody tr:nth-child(even) { background: color-mix(in srgb, var(--soft) 38%, transparent); }
+
+    .lede { color: var(--muted); font-size: 1.08rem; max-width: 90ch; }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+    .pill {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.32rem 0.7rem;
+      background: var(--soft);
+      color: var(--ink);
+      font-size: 0.92rem;
+    }
+    .callout {
+      border-left: 5px solid var(--accent);
+      background: color-mix(in srgb, var(--soft) 65%, transparent);
+      border-radius: 12px;
+      padding: 0.85rem 1rem;
+      margin: 1rem 0;
+    }
+    .warning { border-left-color: var(--warn); }
+    .danger { border-left-color: var(--danger); }
+    .success { border-left-color: var(--ok); }
+    .phase { border-left: 6px solid var(--accent); }
+    .phase h3 { color: var(--ink); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+    .mini-card { border: 1px solid var(--border); border-radius: 14px; padding: 1rem; background: color-mix(in srgb, var(--card) 90%, var(--soft)); }
+    .muted { color: var(--muted); }
+    .risk-low { color: var(--ok); font-weight: 700; }
+    .risk-med { color: var(--warn); font-weight: 700; }
+    .risk-high { color: var(--danger); font-weight: 700; }
+    .checklist { list-style: none; padding-left: 0; }
+    .checklist li { display: flex; gap: 0.65rem; margin: 0.38rem 0; align-items: flex-start; }
+    .checklist input { margin-top: 0.35rem; transform: scale(1.08); }
+    .toc ol { columns: 2; column-gap: 2rem; }
+    .toc li { break-inside: avoid; margin-bottom: 0.2rem; }
+    .nowrap { white-space: nowrap; }
+
+    @media (max-width: 760px) {
+      header, section { padding: 1rem; border-radius: 14px; }
+      .toc ol { columns: 1; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header id="top">
+    <h1>PolyzyMD Conjugation Pablo Convergence Plan</h1>
+    <p class="lede">
+      Standalone architecture and implementation plan for preserving the current successful
+      opt-in PolyzyMD conjugation workflow while converging on a clean Pablo-centered topology
+      ingestion path, normalized moiety contract, serialized reaction definitions, composite
+      charges, and final ff14SB + Sage 2.3.0 parameterization.
+    </p>
+    <div class="pill-row">
+      <span class="pill">Supplement to <code>docs/conjugation_engine_refactor_plan.html</code></span>
+      <span class="pill">Integration branch: <code>conjugation-engine-refactor</code></span>
+      <span class="pill">Final target branch: <code>refactor/conjugation-engine</code></span>
+      <span class="pill">No compatibility shims</span>
+      <span class="pill">One phase branch, one PR</span>
+    </div>
+    <div class="callout success">
+      <strong>Hard invariant:</strong> existing working conjugation behavior must be preserved.
+      The known checkpoint is mandatory for semantic phases:
+      <pre><code>/home/joelaforet/Shirts-Lab-Linux/Conjugation_Tests/constant_200_conjugation_configs/config_005_linkages.yaml</code></pre>
+    </div>
+    <div class="callout">
+      <strong>Relationship to the refactor plan:</strong> this standalone plan supplements and
+      continues <code>docs/conjugation_engine_refactor_plan.html</code>. It does not replace,
+      obsolete, or supersede that plan; it narrows the remaining Pablo convergence work and
+      records additional sequencing constraints discovered during review.
+    </div>
+  </header>
+
+  <section class="toc" aria-labelledby="contents">
+    <h2 id="contents">Contents</h2>
+    <ol>
+      <li><a href="#executive-decisions">Executive decisions</a></li>
+      <li><a href="#known-good">Current known-good behavior</a></li>
+      <li><a href="#responsibility-matrix">Responsibility matrix</a></li>
+      <li><a href="#data-flow">Target data flow</a></li>
+      <li><a href="#core-contracts">Core contracts</a></li>
+      <li><a href="#reaction-definitions">Serialized reaction definitions</a></li>
+      <li><a href="#moiety-contract">Moiety source contract</a></li>
+      <li><a href="#pablo-api">Pablo 0.2.2 public API findings</a></li>
+      <li><a href="#force-fields">Force-field semantics and audit</a></li>
+      <li><a href="#workflow-rules">Branch and PR workflow</a></li>
+      <li><a href="#phases">Phased implementation checklist</a></li>
+      <li><a href="#test-matrix">Test and checkpoint matrix</a></li>
+      <li><a href="#loc-goals">LOC goals</a></li>
+      <li><a href="#non-goals">Non-goals</a></li>
+      <li><a href="#risks">Risks</a></li>
+      <li><a href="#definition-done">Definition of done</a></li>
+      <li><a href="#decision-log">Decision log</a></li>
+    </ol>
+  </section>
+
+  <section id="executive-decisions">
+    <h2>Executive decisions</h2>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Preserve the opt-in production conjugation workflow exactly until a replacement path reaches parity and all consumers of the replaced code are covered. Shared code is deleted only after every dependent path has parity.</span></li>
+      <li><input type="checkbox"> <span>Use Pablo for topology ingestion of product PDB/connectivity evidence. PolyzyMD remains responsible for reactions, coordinate assembly, charge composition, and OpenFF parameterization.</span></li>
+      <li><input type="checkbox"> <span>Pin and test Pablo 0.2.2. Use public APIs only: <code>topology_from_pdb(...)</code>, <code>ResidueDefinition.from_smiles</code>, <code>from_molecule</code>, <code>from_capped_molecule</code>, <code>react(...)</code>, and <code>STD_CCD_CACHE.with_crosslink(...)</code>.</span></li>
+      <li><input type="checkbox"> <span>Represent MVP custom chemistry as explicit RDKit-readable mapped MDL <code>.rxn</code> files. Portable mapped reaction representations are future/deferred and are not part of the MVP. No Python reaction plugin packages and no directory auto-discovery.</span></li>
+      <li><input type="checkbox"> <span>Normalize all moiety inputs into one <code>Moiety</code> artifact/model with molecule, coordinates, identities, residue definitions, charge evidence, and provenance.</span></li>
+      <li><input type="checkbox"> <span>Default force fields become ff14SB for canonical protein and Sage 2.3.0 for final connected SMIRNOFF parameterization. Users may override ordered sources explicitly.</span></li>
+      <li><input type="checkbox"> <span>Retain the current composite charge strategy: canonical protein charges, validated moiety/polymer template charges, local NAGL/AshGC junction patch, reconciliation, and explicit charge templates.</span></li>
+      <li><input type="checkbox"> <span>Do not perform fragment parameter transplantation or manual Interchange surgery. Parameterize the final connected topology once using ordered OFFXML sources.</span></li>
+      <li><input type="checkbox"> <span>Coordinate mapping must use unique <code>pdb_index</code>/identity ledger information. Never rely on Pablo atom order because crosslinked molecules may be reordered.</span></li>
+      <li><input type="checkbox"> <span>Keep the design KISS: no registries that require core edits for data reactions, no compatibility facades, no duplicate old/new paths after parity, no broad SystemBuilder redesign, and no POC file changes.</span></li>
+    </ul>
+  </section>
+
+  <section id="known-good">
+    <h2>Current known-good behavior</h2>
+    <p>
+      The current opt-in conjugation path is successful and must remain the behavioral reference.
+      The convergence work may change implementation boundaries, names, and internal data models, but
+      it must not regress the build represented by the known checkpoint configuration.
+    </p>
+    <div class="grid">
+      <div class="mini-card">
+        <h3>Invariant</h3>
+        <p>Protein site selection, NHS-Lys conjugation, polymer/moiety placement, charge handling,
+        final parameterization, and SystemBuilder integration remain functional.</p>
+      </div>
+      <div class="mini-card">
+        <h3>Checkpoint</h3>
+        <p>The real checkpoint can be expensive and needs sufficient timeout. It is still mandatory
+        for every semantic phase, not optional smoke coverage.</p>
+      </div>
+      <div class="mini-card">
+        <h3>Review policy</h3>
+        <p>Every phase has an explicit user-review gate before merge into the integration branch.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="responsibility-matrix">
+    <h2>Corrected responsibility matrix</h2>
+    <table>
+      <thead>
+        <tr><th>Component</th><th>Owns</th><th>Does not own</th><th>Convergence rule</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>PolyzyMD</td>
+          <td>Configuration, protein site selection, moiety normalization, reaction graph-delta resolution, Packmol product assembly, identity ledger, charge composition, final workflow integration, validation.</td>
+          <td>Pablo internals, private helpers, broad SystemBuilder redesign, arbitrary parameter transplantation.</td>
+          <td>Derive Pablo plans from user chemistry and product evidence; expose clean contracts only.</td>
+        </tr>
+        <tr>
+          <td>Pablo 0.2.2</td>
+          <td>PDB topology ingestion through <code>topology_from_pdb(...)</code>; residue definitions; graph matching of existing product connectivity; CCD/crosslink-ready definitions.</td>
+          <td>Reactions, coordinate assembly, partial charging, final parameterization, product PDB editing.</td>
+          <td>Use only public APIs and fail clearly when Pablo capacity is exceeded.</td>
+        </tr>
+        <tr>
+          <td>OpenFF Toolkit</td>
+          <td>Molecule representation, charge/template evidence, Sage 2.3.0 and ordered OFFXML parameter assignment, <code>ForceField.label_molecules()</code> audit.</td>
+          <td>Protein-specific residue semantics by residue name; reaction execution; coordinate placement.</td>
+          <td>Remember SMIRNOFF matches graph substructures, not residue names; later hierarchy matters.</td>
+        </tr>
+        <tr>
+          <td>Packmol</td>
+          <td>Coordinate placement for moiety/product assembly under PolyzyMD constraints.</td>
+          <td>Chemical bond order, formal charge, stereo, partial charges, topology authority.</td>
+          <td>Use placement output as coordinates plus identity evidence, not chemistry authority.</td>
+        </tr>
+        <tr>
+          <td>RDKit</td>
+          <td>Reading mapped reaction files, graph deltas, role matching, bond/formal-charge/stereo validation, molecule operations where appropriate.</td>
+          <td>OpenMM/OpenFF parameter assignment or Pablo topology ingestion.</td>
+          <td>Reject ambiguous maps, unsupported deltas, and nonmatching roles early.</td>
+        </tr>
+        <tr>
+          <td>Polymerist</td>
+          <td>Recipe-based moiety/polymer generation when selected, with coordinates and charge provenance persisted by PolyzyMD.</td>
+          <td>General product topology authority for arbitrary conjugates.</td>
+          <td>Feed the normalized <code>Moiety</code> contract; do not leak recipe/provider variants downstream.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="data-flow">
+    <h2>Target data flow</h2>
+    <pre><code>request/config
+  -> prepare protein
+  -> resolve moiety
+       [SMILES | Polymerist recipe | synchronized PDB + charged SDF | constrained PDB-only]
+  -> load/resolve reaction
+        [RDKit-readable mapped MDL .rxn for MVP; portable mapped representation deferred]
+  -> Packmol/product assembly
+       [product PDB + CONECT + identity ledger + removed atoms + added bonds]
+  -> Pablo precursor definitions and crosslink/product plan
+       [ResidueDefinition.from_* | STD_CCD_CACHE.with_crosslink | react when appropriate]
+  -> topology_from_pdb(...)
+  -> coordinate mapping by unique pdb_index/identity ledger
+  -> composite charges
+       [ff14SB canonical protein + charged moiety templates + junction patch + reconciliation]
+  -> final Interchange
+       [ordered OFFXML sources, Sage 2.3.0 default, audit through label_molecules]
+  -> relaxation
+  -> validation
+  -> solvation/export
+  -> downstream SystemBuilder integration</code></pre>
+    <div class="callout">
+      <strong>Topology authority boundary:</strong> before Pablo, product chemistry is represented by residue library
+      definitions, product PDB/CONECT, and identity ledger evidence. After <code>topology_from_pdb(...)</code>, the
+      Pablo-ingested topology is authoritative for downstream parameterization only when the unique
+      <code>pdb_index</code>/identity-ledger coordinate mapping is present and validated.
+    </div>
+  </section>
+
+  <section id="core-contracts">
+    <h2>Core contracts</h2>
+    <p>Favor minimal models and delete redundant adapters once parity exists.</p>
+    <table>
+      <thead><tr><th>Contract</th><th>Fields and evidence</th><th>Rules</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>Moiety</code></td>
+          <td>OpenFF/RDKit molecule, coordinates, atom identities, residue definitions, charge evidence, source provenance.</td>
+          <td>All source paths normalize here. Validate identity/order/charge count/finite values/total charge.</td>
+        </tr>
+        <tr>
+          <td><code>ResolvedReaction</code></td>
+          <td>Selected protein site, moiety role, leaving atoms, added product bond, product residue policy, Pablo library plan.</td>
+          <td>Use one canonical method, preferably <code>resolve(...)</code>. Remove <code>resolve_attachment</code> versus <code>resolve_plan</code> drift.</td>
+        </tr>
+        <tr>
+          <td><code>ProductAssembly</code></td>
+          <td>Product PDB, CONECT, identity ledger, removed atoms, added bonds, coordinate provenance.</td>
+          <td>Packmol and graph-delta outputs are explicit evidence. Do not infer by order.</td>
+        </tr>
+        <tr>
+          <td>Charge artifacts</td>
+          <td>Persisted charged SDF, explicit charge templates, junction patch records, reconciliation report.</td>
+          <td>Only model/persist where evidence requires it. Retain production composite strategy.</td>
+        </tr>
+        <tr>
+          <td>Parameterization artifacts</td>
+          <td>Final Interchange, ordered force-field manifest, assignment audit report.</td>
+          <td>No fragment parameter transplantation. Use final connected topology once.</td>
+        </tr>
+      </tbody>
+    </table>
+    <h3>Illustrative contract sketch</h3>
+    <pre><code>class Moiety(BaseModel):
+    molecule: OpenFFOrRDKitMolecule
+    coordinates: CoordinateArray
+    atom_identities: tuple[AtomIdentity, ...]
+    residue_definitions: tuple[ResidueDefinitionRef, ...]
+    charge_source: ChargeSource | None
+    provenance: MoietyProvenance
+
+class ResolvedReaction(BaseModel):
+    site: ProteinSite
+    moiety: Moiety
+    leaving_atoms: tuple[AtomIdentity, ...]
+    product_bond: ProductBond
+    product_residue_policy: ProductResiduePolicy
+    pablo_library_plan: PabloLibraryPlan
+
+class ProductAssembly(BaseModel):
+    product_pdb: Path
+    identity_ledger: IdentityLedger
+    removed_atoms: tuple[AtomIdentity, ...]
+    added_bonds: tuple[ProductBond, ...]</code></pre>
+  </section>
+
+  <section id="reaction-definitions">
+    <h2>Serialized reaction definitions</h2>
+    <ul>
+      <li>Users extend reactions through data files, not Python packages.</li>
+      <li>MVP input is an RDKit-readable mapped MDL <code>.rxn</code> file, like <code>atrp.rxn</code>.</li>
+      <li>A portable mapped reaction representation is explicitly future/deferred and must not be treated as MVP scope.</li>
+      <li>Configuration uses explicit paths only. There is no directory auto-discovery.</li>
+      <li>PolyzyMD derives linking atoms, leaving atoms, added/removed bonds, bond-order changes, and formal-charge changes from mapped reactant/product graph delta.</li>
+      <li>Protein versus moiety role is assigned by matching the selected protein neighborhood and the moiety graph. Ambiguous or nonmatching assignments fail.</li>
+      <li>Users do not configure Pablo internals.</li>
+    </ul>
+    <h3>MVP constraints</h3>
+    <table>
+      <thead><tr><th>Constraint</th><th>Required behavior</th></tr></thead>
+      <tbody>
+        <tr><td>Reactants/products</td><td>Exactly 2 reactants and 1 product.</td></tr>
+        <tr><td>Product bond</td><td>Exactly one added protein-moiety bond.</td></tr>
+        <tr><td>Atom maps</td><td>Complete and unique maps; no atom creation.</td></tr>
+        <tr><td>Leaving atoms</td><td>Declared or derivable leaving fragments only.</td></tr>
+        <tr><td>Bond orders</td><td>Integer bond order support only in MVP.</td></tr>
+        <tr><td>Formal charge/stereo</td><td>Only supported, validated changes accepted; fail on unsupported semantics.</td></tr>
+        <tr><td>Pablo capacity</td><td>Within one <code>linking_bond</code> and one crosslink slot per <code>ResidueDefinition</code>.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="moiety-contract">
+    <h2>Moiety source contract</h2>
+    <table>
+      <thead><tr><th>Source</th><th>Accepted evidence</th><th>Charge rule</th><th>Validation</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>SMILES</td>
+          <td>RDKit/OpenFF molecule; PolyzyMD-generated coordinates if needed; provenance.</td>
+          <td>PolyzyMD generates partial charges and persists charged SDF plus provenance.</td>
+          <td>Identity, order, finite charge values, total charge, and coordinate count.</td>
+        </tr>
+        <tr>
+          <td>Polymerist recipe</td>
+          <td>Generated molecule/polymer, coordinates, residue definition plan, provenance.</td>
+          <td>PolyzyMD/Polymerist-generated structures always get partial charges and persisted charged SDF provenance.</td>
+          <td>Recipe output must normalize to one <code>Moiety</code>; provider details do not leak downstream.</td>
+        </tr>
+        <tr>
+          <td>Synchronized PDB + charged SDF</td>
+          <td>PDB coordinates plus charged SDF chemistry/charges with a strict identity map.</td>
+          <td>User file sources require precomputed partial charges.</td>
+          <td>Strict identity/order/charge count/finite/total-charge validation.</td>
+        </tr>
+        <tr>
+          <td>PDB-only</td>
+          <td>Coordinates and CONECT only.</td>
+          <td>Accepted only when all chemistry is Pablo/CCD-resolvable and CONECT defines external/crosslinks.</td>
+          <td>Reject arbitrary chemistry because PDB alone does not generally define bond orders, formal charges, stereo, or partial charges.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="pablo-api">
+    <h2>Pablo 0.2.2 public API findings</h2>
+    <ul>
+      <li>Pin and test Pablo 0.2.2.</li>
+      <li><code>topology_from_pdb(...)</code> is the loader.</li>
+      <li><code>ResidueDefinition.from_smiles</code>, <code>from_molecule</code>, and <code>from_capped_molecule</code> create custom precursor definitions.</li>
+      <li><code>ResidueDefinition.react(...)</code> generates product definitions from mapped SMARTS but does not modify coordinates or PDB files.</li>
+      <li><code>STD_CCD_CACHE.with_crosslink(...)</code> derives crosslink-ready definitions retaining leaving atoms; product PDB omits leaving atoms and includes CONECT.</li>
+      <li><code>additional_definitions</code> graph-match existing product connectivity but do not create bonds.</li>
+      <li>Pablo does not perform reactions, coordinate assembly, partial charging, or parameterization.</li>
+      <li>Pablo can reorder atoms for crosslinked molecules; use unique <code>pdb_index</code>/identity mapping, never order assumptions.</li>
+      <li>One <code>linking_bond</code> plus one crosslink slot per <code>ResidueDefinition</code>; fail clearly beyond capability.</li>
+      <li>Use public APIs only. Do not use private helpers such as <code>_anon_from_smarts</code>.</li>
+    </ul>
+  </section>
+
+  <section id="force-fields">
+    <h2>Force-field semantics and audit</h2>
+    <div class="callout">
+      <strong>Production default:</strong> retain the composite strategy: ff14SB-derived canonical
+      protein charges + validated charged moiety/polymer templates + local NAGL/AshGC junction patch
+      + reconciliation + explicit charge templates.
+    </div>
+    <ul>
+      <li>Project-wide defaults change to ff14SB + Sage 2.3.0. Users may override.</li>
+      <li>Rosemary whole-product NAGL is future/experimental only.</li>
+      <li>No GLYCAM support now; future validated specialized OFFXML support is possible.</li>
+      <li>No fragment parameter transplantation and no manual Interchange surgery.</li>
+      <li>Ordered OFFXML sources parameterize the final connected topology once.</li>
+      <li>SMIRNOFF matches graph substructures, not residue names. Later matching parameter hierarchy matters.</li>
+      <li>Add a small shared force-field loader/manifest/audit utility.</li>
+      <li>Use public <code>ForceField.label_molecules()</code> for assignment inspection.</li>
+      <li>Audit records handler, topology key/atom identities, parameter id/SMIRKS, likely source, ambiguity, and expected scope.</li>
+      <li>Conjugation uses strict audit. Existing SystemBuilder can share the loader with audit disabled or report-only initially.</li>
+      <li>Do not rewrite existing ligand/polymer/solvent charging behavior.</li>
+    </ul>
+    <h3>Audit record shape</h3>
+    <pre><code>{
+  "handler": "Bonds",
+  "topology_key": "molecule:0 atoms:(12,35)",
+  "atom_identities": ["protein:A:LYS:42:NZ", "moiety:C:PEG:1:C1"],
+  "parameter_id": "b87",
+  "smirks": "[#6X4:1]-[#7X3:2]",
+  "likely_source": "openff-2.3.0.offxml",
+  "ambiguity": false,
+  "expected_scope": "junction"
+}</code></pre>
+  </section>
+
+  <section id="workflow-rules">
+    <h2>Branch and PR workflow</h2>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>Create or update the integration branch <code>conjugation-engine-refactor</code>.</span></li>
+      <li><input type="checkbox"> <span>For each phase, create one work branch from the integration branch and open one PR back into the integration branch.</span></li>
+      <li><input type="checkbox"> <span>Use explicit staging only. Never stage unrelated dirty files, POC notebooks, temp files, <code>test_files</code>, or local experiment outputs.</span></li>
+      <li><input type="checkbox"> <span>Before commit, inspect <code>git status --short</code>, <code>git diff</code>, and <code>git log --oneline -10</code>.</span></li>
+      <li><input type="checkbox"> <span>Every semantic phase runs targeted tests, the conjugation subset, Ruff, Black, and the real checkpoint with sufficient timeout.</span></li>
+      <li><input type="checkbox"> <span>No compatibility shims. Implement parity, switch production, and delete only the old code whose complete dependency set has parity in that phase; shared/manual Pablo definition logic remains until both NHS-Lys and multi-residue polymer parity pass.</span></li>
+      <li><input type="checkbox"> <span>Each PR includes a user-review gate with checkpoint output paths and known deviations.</span></li>
+      <li><input type="checkbox"> <span>Final merge to <code>refactor/conjugation-engine</code> occurs only after all convergence phases pass.</span></li>
+    </ul>
+    <h3>Standard semantic-phase commands</h3>
+    <pre><code>CONFIG=/home/joelaforet/Shirts-Lab-Linux/Conjugation_Tests/constant_200_conjugation_configs/config_005_linkages.yaml
+CHECK=/tmp/polyzymd-conjugation-convergence/phase-N
+
+# Targeted tests vary by phase; examples are listed below per phase.
+pixi run -e build pytest tests/ -v -k "conjugation"
+pixi run -e build ruff check src/ tests/
+pixi run -e build black src/ tests/ --check
+
+# Real checkpoint: expensive, mandatory for semantic phases, use sufficient timeout.
+pixi run -e build polyzymd build --config "$CONFIG" --replicates 1 \
+  --scratch-dir "$CHECK/scratch" \
+  --projects-dir "$CHECK/projects"</code></pre>
+  </section>
+
+  <section id="phases">
+    <h2>Phased implementation checklist</h2>
+    <p>
+      The phases below start at Phase 9 because this artifact continues the previous refactor plan.
+      Phase names are intentionally narrow. If a phase grows beyond reviewable size, split it while
+      preserving the same invariants and user-review gate.
+    </p>
+
+    <section class="phase" id="phase-9">
+      <h3>Phase 9 — Design artifact and convergence baseline</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-09-plan</code></p>
+      <p><strong>Objective:</strong> Add this standalone plan and establish the checkpoint procedure without modifying production code.</p>
+      <p><strong>Files:</strong> <code>docs/conjugation_pablo_convergence_plan.html</code> only.</p>
+      <p><strong>Deletions:</strong> None.</p>
+      <p><strong>Targeted tests:</strong> Not required for this documentation-only phase unless user requests; do not modify Sphinx toctrees.</p>
+      <pre><code>git status --short
+git diff -- docs/conjugation_pablo_convergence_plan.html</code></pre>
+      <p><strong>Checkpoint:</strong> Not required for Phase 9 because it changes no production behavior.</p>
+      <p><strong>Risk:</strong> <span class="risk-low">Low</span>. Main risk is encoding incorrect decisions; user review is mandatory.</p>
+      <p><strong>User review gate:</strong> User approves this plan as the supplemental governing artifact for remaining Pablo convergence subagent rounds.</p>
+    </section>
+
+    <section class="phase" id="phase-10">
+      <h3>Phase 10 — Reaction serialization/schema and canonical reaction contract</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-10-reactions</code></p>
+      <p><strong>Objective:</strong> Replace hardcoded Python reaction drift with explicit data-file reaction input and one canonical resolver contract.</p>
+      <p><strong>Likely files:</strong> <code>src/polyzymd/config/schema.py</code>, <code>src/polyzymd/builders/conjugation/reactions/</code>, reaction parsing/resolution modules, tests under <code>tests/</code> matching existing conjugation reaction tests.</p>
+      <p><strong>Deletions:</strong> Remove obsolete <code>resolve_attachment</code>/<code>resolve_plan</code> split after <code>resolve(...)</code> parity; delete stale graph diagnostics only if replaced by contract tests.</p>
+      <ul class="checklist">
+        <li><input type="checkbox"> <span>Add config fields for explicit RDKit-readable mapped MDL <code>.rxn</code> reaction file paths.</span></li>
+        <li><input type="checkbox"> <span>Parse RDKit-readable mapped MDL <code>.rxn</code> files.</span></li>
+        <li><input type="checkbox"> <span>Derive atom maps, role assignment, leaving atoms, added/removed bonds, bond-order changes, formal-charge changes, and one product bond.</span></li>
+        <li><input type="checkbox"> <span>Enforce MVP constraints and fail clearly on ambiguity or Pablo capacity overflow.</span></li>
+        <li><input type="checkbox"> <span>Switch production callers to <code>resolve(...)</code> and delete the replaced path in the same PR.</span></li>
+      </ul>
+      <p><strong>Targeted tests:</strong></p>
+      <pre><code>pixi run -e build pytest tests/config/test_schema.py -v
+pixi run -e build pytest tests/ -v -k "conjugation and reaction"
+pixi run -e build pytest tests/ -v -k "nhs_lys or linkage or attachment"</code></pre>
+      <p><strong>Checkpoint:</strong> Run known checkpoint with sufficient timeout; archive config, command, and output directory in PR notes.</p>
+      <p><strong>Risk:</strong> <span class="risk-high">High</span>. Incorrect graph delta or role matching can silently corrupt chemistry.</p>
+      <p><strong>User review gate:</strong> Review accepted and rejected reaction examples, error messages, and checkpoint parity before merge.</p>
+    </section>
+
+    <section class="phase" id="phase-11">
+      <h3>Phase 11 — Normalized moiety sources and synchronized file support</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-11-moiety</code></p>
+      <p><strong>Objective:</strong> Route SMILES, Polymerist recipe, synchronized PDB + charged SDF, and constrained PDB-only inputs into one <code>Moiety</code> contract.</p>
+      <p><strong>Likely files:</strong> moiety/provider modules, polymer recipe adapters, file-input loaders, config schema, charge provenance helpers, corresponding tests.</p>
+      <p><strong>Deletions:</strong> Delete duplicate provider/spec adapters after all production callers consume <code>Moiety</code>.</p>
+      <ul class="checklist">
+        <li><input type="checkbox"> <span>Define the minimal <code>Moiety</code> model and provenance records.</span></li>
+        <li><input type="checkbox"> <span>Implement SMILES source normalization with charge generation and persisted charged SDF.</span></li>
+        <li><input type="checkbox"> <span>Implement Polymerist recipe normalization without downstream provider leakage.</span></li>
+        <li><input type="checkbox"> <span>Implement synchronized PDB + charged SDF validation for user file sources.</span></li>
+        <li><input type="checkbox"> <span>Restrict PDB-only input to Pablo/CCD-resolvable chemistry with CONECT-defined external/crosslinks.</span></li>
+      </ul>
+      <p><strong>Targeted tests:</strong></p>
+      <pre><code>pixi run -e build pytest tests/ -v -k "conjugation and moiety"
+pixi run -e build pytest tests/ -v -k "polymerist or polymer_recipe or polymerist_pdb"
+pixi run -e build pytest tests/ -v -k "charge and conjugation"</code></pre>
+      <p><strong>Checkpoint:</strong> Mandatory known checkpoint; compare moiety charge totals and persisted charge provenance.</p>
+      <p><strong>Risk:</strong> <span class="risk-high">High</span>. Identity/order/charge mismatches can invalidate later topology and force-field steps.</p>
+      <p><strong>User review gate:</strong> User reviews the normalized source matrix, file-source validation failures, and checkpoint output.</p>
+    </section>
+
+    <section class="phase" id="phase-12">
+      <h3>Phase 12 — Identity ledger and <code>pdb_index</code> coordinate mapping</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-12-identity-ledger</code></p>
+      <p><strong>Objective:</strong> Replace order-only assumptions with identity-ledger mapping from product assembly through Pablo topology ingestion before any production switch to Pablo-ingested topology.</p>
+      <p><strong>Likely files:</strong> product assembly, PDB/CONECT helpers, Pablo bridge, coordinate mapping utilities, validation tests.</p>
+      <p><strong>Deletions:</strong> Delete order-only coordinate and atom matching paths once all callers use unique <code>pdb_index</code>/identity mapping.</p>
+      <ul class="checklist">
+        <li><input type="checkbox"> <span>Define identity ledger records for protein atoms, moiety atoms, removed atoms, added bonds, and final Pablo atoms.</span></li>
+        <li><input type="checkbox"> <span>Require unique <code>pdb_index</code> or equivalent stable identity evidence.</span></li>
+        <li><input type="checkbox"> <span>Map coordinates after <code>topology_from_pdb(...)</code> by identity, not atom order.</span></li>
+        <li><input type="checkbox"> <span>Add regression tests for Pablo reordering.</span></li>
+      </ul>
+      <p><strong>Targeted tests:</strong></p>
+      <pre><code>pixi run -e build pytest tests/ -v -k "conjugation and identity"
+pixi run -e build pytest tests/ -v -k "pdb_index or coordinate or order"
+pixi run -e build pytest tests/ -v -k "pablo and conjugation"</code></pre>
+      <p><strong>Checkpoint:</strong> Mandatory known checkpoint; inspect coordinate RMS/identity mapping report rather than order parity alone.</p>
+      <p><strong>Risk:</strong> <span class="risk-high">High</span>. This is the main protection against subtle coordinate/topology corruption.</p>
+      <p><strong>User review gate:</strong> User reviews identity ledger examples and confirms order-only paths were deleted, not retained as fallback shims.</p>
+    </section>
+
+    <section class="phase" id="phase-13">
+      <h3>Phase 13 — Pablo precursor definitions and <code>with_crosslink</code> parity for NHS-Lys</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-13-pablo-nhs-lys</code></p>
+      <p><strong>Objective:</strong> Establish public Pablo precursor/crosslink parity for NHS-Lys on top of the Phase 12 identity ledger. Any production switch to Pablo-ingested topology is allowed only after identity mapping is in place.</p>
+      <p><strong>Likely files:</strong> <code>src/polyzymd/builders/conjugation/pablo/</code>, product/topology bridge modules, NHS-Lys reaction modules, relevant tests.</p>
+      <p><strong>Deletions:</strong> Do not delete shared/manual Pablo definition logic in this phase because multi-residue polymer parity still depends on it. Delete only narrowly NHS-Lys-only scaffolding if it is proven unused by polymer paths; otherwise defer all deletion to Phase 14.</p>
+      <ul class="checklist">
+        <li><input type="checkbox"> <span>Pin/test Pablo 0.2.2 behavior for <code>topology_from_pdb(...)</code> and <code>STD_CCD_CACHE.with_crosslink(...)</code>.</span></li>
+        <li><input type="checkbox"> <span>Build precursor definitions using <code>ResidueDefinition.from_*</code> public APIs.</span></li>
+        <li><input type="checkbox"> <span>Use <code>with_crosslink</code> for crosslink-ready definitions retaining leaving atoms while product PDB omits leaving atoms and includes CONECT.</span></li>
+        <li><input type="checkbox"> <span>Fail clearly beyond one linking bond and one crosslink slot per definition.</span></li>
+        <li><input type="checkbox"> <span>Prove NHS-Lys checkpoint parity without deleting shared manual definition code that polymer parity still needs.</span></li>
+      </ul>
+      <p><strong>Targeted tests:</strong></p>
+      <pre><code>pixi run -e build pytest tests/ -v -k "conjugation and pablo"
+pixi run -e build pytest tests/ -v -k "nhs_lys or lys or crosslink"
+pixi run -e build pytest tests/ -v -k "product and conjugation"</code></pre>
+      <p><strong>Checkpoint:</strong> Mandatory known checkpoint; verify product PDB CONECT, leaving atom omission, identity-ledger mapping, and Pablo-ingested topology.</p>
+      <p><strong>Risk:</strong> <span class="risk-high">High</span>. Public Pablo semantics may differ from current manual assumptions.</p>
+      <p><strong>User review gate:</strong> User reviews the Pablo library plan, checkpoint parity, and any precisely scoped NHS-only deletions.</p>
+    </section>
+
+    <section class="phase" id="phase-14">
+      <h3>Phase 14 — Multi-residue polymer definitions and <code>linking_bond</code> parity</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-14-polymer-linking</code></p>
+      <p><strong>Objective:</strong> Extend the public Pablo definition path to multi-residue polymer/moiety cases while preserving current linking behavior.</p>
+      <p><strong>Likely files:</strong> polymer/moiety residue definition planning modules, Pablo bridge, product assembly, polymer recipe tests.</p>
+      <p><strong>Deletions:</strong> After both NHS-Lys parity and multi-residue polymer parity pass, remove the shared/manual Pablo definition logic and any remaining single-residue-only special cases or duplicate multi-residue placement/definition code in the same PR.</p>
+      <ul class="checklist">
+        <li><input type="checkbox"> <span>Represent multi-residue residue definitions in the <code>Moiety</code> and Pablo plan.</span></li>
+        <li><input type="checkbox"> <span>Preserve one-linking-bond capability constraints and explicit failures.</span></li>
+        <li><input type="checkbox"> <span>Validate CONECT and identity ledger for multi-residue products.</span></li>
+        <li><input type="checkbox"> <span>Switch production polymer cases to the unified path and delete old duplicative code only after both NHS-Lys and polymer parity pass.</span></li>
+      </ul>
+      <p><strong>Targeted tests:</strong></p>
+      <pre><code>pixi run -e build pytest tests/ -v -k "conjugation and polymer"
+pixi run -e build pytest tests/ -v -k "polymerist or multi_residue or linking_bond"
+pixi run -e build pytest tests/ -v -k "conjugation"</code></pre>
+      <p><strong>Checkpoint:</strong> Mandatory known checkpoint plus any available multi-residue polymer subset.</p>
+      <p><strong>Risk:</strong> <span class="risk-med">Medium/High</span>. Multi-residue identity and CONECT evidence can drift if placement and definition planning are separated incorrectly.</p>
+      <p><strong>User review gate:</strong> User reviews multi-residue parity outputs, capability-limit errors, and the final deletion of shared/manual Pablo definition logic before merge.</p>
+    </section>
+
+    <section class="phase" id="phase-15">
+      <h3>Phase 15 — Shared force-field loader, Sage 2.3.0 default, ordered OFFXML, and concise audit</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-15-force-fields</code></p>
+      <p><strong>Objective:</strong> Introduce a small shared force-field loader/manifest/audit utility and switch project defaults to ff14SB + Sage 2.3.0 while preserving existing component charging behavior.</p>
+      <p><strong>Likely files:</strong> force-field utility module, config defaults/schema, conjugation parameterization bridge, SystemBuilder force-field call sites, audit tests.</p>
+      <p><strong>Deletions:</strong> Delete duplicate local force-field source assembly in conjugation once shared utility is production. Do not delete charge bridge internals speculatively.</p>
+      <ul class="checklist">
+        <li><input type="checkbox"> <span>Add ordered source manifest for ff14SB, Sage 2.3.0, and user extras.</span></li>
+        <li><input type="checkbox"> <span>Keep ligand/polymer/solvent charging behavior unchanged.</span></li>
+        <li><input type="checkbox"> <span>Use <code>ForceField.label_molecules()</code> for strict conjugation assignment audit.</span></li>
+        <li><input type="checkbox"> <span>Allow existing SystemBuilder to share the loader with audit disabled or report-only initially.</span></li>
+        <li><input type="checkbox"> <span>Reject fragment parameter transplantation and manual Interchange mutation.</span></li>
+      </ul>
+      <p><strong>Targeted tests:</strong></p>
+      <pre><code>pixi run -e build pytest tests/ -v -k "forcefield or force_field or offxml"
+pixi run -e build pytest tests/ -v -k "conjugation and parameter"
+pixi run -e build pytest tests/ -v -k "system_builder or builder"</code></pre>
+      <p><strong>Checkpoint:</strong> Mandatory known checkpoint; attach audit summary with handler/source assignments and charge reconciliation.</p>
+      <p><strong>Risk:</strong> <span class="risk-high">High</span>. Default force-field changes can alter energies even when topology is correct.</p>
+      <p><strong>User review gate:</strong> User reviews manifest defaults, override semantics, audit sample, and confirms no component-charging rewrite occurred.</p>
+    </section>
+
+    <section class="phase" id="phase-16">
+      <h3>Phase 16 — Contract, placement, and workflow consolidation with real LOC deletion</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-16-consolidation</code></p>
+      <p><strong>Objective:</strong> Collapse duplicate placement/workflow paths around <code>Moiety</code>, <code>ResolvedReaction</code>, and <code>ProductAssembly</code> now that parity has been proven.</p>
+      <p><strong>Likely files:</strong> system workflow, placement modules, moiety adapters, reaction bridge, Pablo product bridge, tests that reference deleted private helpers.</p>
+      <p><strong>Deletions:</strong> Remove duplicate single/multi placement paths, obsolete adapters, obsolete graph diagnostics, and dead workflow glue. Preserve identity/provenance and contract tests.</p>
+      <ul class="checklist">
+        <li><input type="checkbox"> <span>Replace duplicate call graphs with the canonical pipeline.</span></li>
+        <li><input type="checkbox"> <span>Delete old paths in the same PR rather than keeping compatibility facades.</span></li>
+        <li><input type="checkbox"> <span>Keep tests focused on public contracts, identity/provenance, and end-to-end behavior rather than private helper overfitting.</span></li>
+        <li><input type="checkbox"> <span>Document any LOC changes honestly; moves do not count as simplification.</span></li>
+      </ul>
+      <p><strong>Targeted tests:</strong></p>
+      <pre><code>pixi run -e build pytest tests/ -v -k "conjugation"
+pixi run -e build pytest tests/config/test_schema.py -v
+pixi run -e build pytest tests/ -v -k "workflow or system_workflow or placement"</code></pre>
+      <p><strong>Checkpoint:</strong> Mandatory known checkpoint; compare artifact presence and validation reports to baseline.</p>
+      <p><strong>Risk:</strong> <span class="risk-med">Medium</span>. Deletion can uncover hidden test dependencies, but production behavior should already be covered.</p>
+      <p><strong>User review gate:</strong> User reviews deletion summary, kept/removed tests, and confirms no shims remain.</p>
+    </section>
+
+    <section class="phase" id="phase-17">
+      <h3>Phase 17 — Final full audit and integration</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-17-final-audit</code></p>
+      <p><strong>Objective:</strong> Run complete integration validation, close documentation gaps, and prepare merge from <code>conjugation-engine-refactor</code> to <code>refactor/conjugation-engine</code>.</p>
+      <p><strong>Likely files:</strong> Only targeted fixes discovered by audit; release notes or docs if explicitly requested.</p>
+      <p><strong>Deletions:</strong> Any final dead code proven unreachable by tests and checkpoint; no speculative cleanup.</p>
+      <ul class="checklist">
+        <li><input type="checkbox"> <span>Run targeted conjugation suite and broader relevant builder/config tests.</span></li>
+        <li><input type="checkbox"> <span>Run Ruff and Black.</span></li>
+        <li><input type="checkbox"> <span>Run the real checkpoint with sufficient timeout.</span></li>
+        <li><input type="checkbox"> <span>Verify no private Pablo APIs, no compatibility shims, no old/new duplicate paths, no POC file changes.</span></li>
+        <li><input type="checkbox"> <span>Prepare final PR summary with phase links, test evidence, checkpoint outputs, and known limitations.</span></li>
+      </ul>
+      <p><strong>Targeted tests:</strong></p>
+      <pre><code>pixi run -e build pytest tests/ -v -k "conjugation"
+pixi run -e build pytest tests/config/test_schema.py -v
+pixi run -e build pytest tests/ -v -k "builder or system_builder or workflow"
+pixi run -e build ruff check src/ tests/
+pixi run -e build black src/ tests/ --check</code></pre>
+      <p><strong>Checkpoint:</strong> Mandatory known checkpoint and any additional user-provided conjugation configs.</p>
+      <p><strong>Risk:</strong> <span class="risk-med">Medium</span>. Integration defects may appear only when the whole pipeline is exercised.</p>
+      <p><strong>User review gate:</strong> User approves final merge into <code>refactor/conjugation-engine</code>.</p>
+    </section>
+  </section>
+
+  <section id="test-matrix">
+    <h2>Test and checkpoint matrix</h2>
+    <table>
+      <thead><tr><th>Phase</th><th>Primary targeted tests</th><th>Standard commands</th><th>Real checkpoint</th></tr></thead>
+      <tbody>
+        <tr><td>9</td><td>None unless requested; inspect doc diff only.</td><td><code>git status --short</code>, <code>git diff -- docs/conjugation_pablo_convergence_plan.html</code></td><td>Not required; no production change.</td></tr>
+        <tr><td>10</td><td><code>-k "conjugation and reaction"</code>, schema tests, NHS-Lys/linkage tests.</td><td rowspan="8"><code>pixi run -e build ruff check src/ tests/</code><br><code>pixi run -e build black src/ tests/ --check</code><br><code>pixi run -e build pytest tests/ -v -k "conjugation"</code></td><td>Mandatory, sufficient timeout.</td></tr>
+        <tr><td>11</td><td><code>-k "conjugation and moiety"</code>, Polymerist/source/charge tests.</td><td>Mandatory, validate charge provenance.</td></tr>
+        <tr><td>12</td><td><code>-k "conjugation and identity"</code>, <code>pdb_index</code>/coordinate/order tests.</td><td>Mandatory, inspect identity ledger.</td></tr>
+        <tr><td>13</td><td><code>-k "conjugation and pablo"</code>, NHS-Lys/crosslink/product tests.</td><td>Mandatory, inspect CONECT, topology, and identity mapping.</td></tr>
+        <tr><td>14</td><td><code>-k "conjugation and polymer"</code>, multi-residue/linking tests.</td><td>Mandatory, plus multi-residue subset if available.</td></tr>
+        <tr><td>15</td><td>Force-field/OFFXML, parameterization, SystemBuilder loader tests.</td><td>Mandatory, attach assignment audit.</td></tr>
+        <tr><td>16</td><td>Conjugation, schema, workflow/placement tests.</td><td>Mandatory, compare artifacts to baseline.</td></tr>
+        <tr><td>17</td><td>Full conjugation subset plus builder/config/workflow coverage.</td><td>Mandatory, final approval evidence.</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warning">
+      <strong>Checkpoint timing:</strong> the real known-good configuration can be expensive. Use sufficient timeout
+      and do not replace it with lightweight unit tests for semantic phases.
+    </div>
+  </section>
+
+  <section id="loc-goals">
+    <h2>LOC goals</h2>
+    <p>
+      LOC reduction is a secondary outcome. Correctness, provenance, identity mapping, and clear contracts
+      are primary. Moves do not reduce complexity by themselves, and identity/provenance tests are not bloat.
+    </p>
+    <table>
+      <thead><tr><th>Candidate</th><th>Likely reduction</th><th>Honest constraint</th></tr></thead>
+      <tbody>
+        <tr><td><code>pablo/product.py</code> manual definition logic</td><td>High after public Pablo parity.</td><td>Delete only after NHS-Lys and polymer cases pass public API checkpoint parity.</td></tr>
+        <tr><td>Duplicate moiety/provider/spec adapters</td><td>Medium/High.</td><td>Normalization to <code>Moiety</code> may first add code; deletion must follow in same phase once production switches.</td></tr>
+        <tr><td>Single/multi placement duplication</td><td>Medium.</td><td>Do not collapse until identity ledger and multi-residue parity are proven.</td></tr>
+        <tr><td>Reaction contract drift and obsolete graph diagnostics</td><td>Medium.</td><td>Keep contract tests and clear diagnostics; delete obsolete private-helper tests only.</td></tr>
+        <tr><td><code>system_workflow</code></td><td>Medium, but late.</td><td>Only shrinks after real deletion of old call paths; no broad redesign.</td></tr>
+        <tr><td>Charge bridge</td><td>Low.</td><td>Retain production behavior behind a clean boundary; no speculative deletion.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="non-goals">
+    <h2>Non-goals</h2>
+    <ul>
+      <li>No registries requiring core edits for data reactions.</li>
+      <li>No Python plugin packages for reactions.</li>
+      <li>No compatibility facades or duplicate old/new paths after parity.</li>
+      <li>No parameter transplantation.</li>
+      <li>No broad SystemBuilder redesign.</li>
+      <li>No changes to POC notebooks, temp files, or unrelated <code>test_files</code>.</li>
+      <li>No private Pablo APIs.</li>
+      <li>No rewrite of ligand/polymer/solvent charging behavior.</li>
+      <li>No GLYCAM support now.</li>
+      <li>No overfitted tests for private helpers when public contract, identity, provenance, and checkpoint tests are the durable guarantees.</li>
+    </ul>
+  </section>
+
+  <section id="risks">
+    <h2>Risks</h2>
+    <table>
+      <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr></thead>
+      <tbody>
+        <tr><td>Mapped reaction role assignment is ambiguous or silently wrong.</td><td><span class="risk-high">High</span></td><td>Require complete unique maps; match protein neighborhood and moiety graph; fail on ambiguity; add negative tests.</td></tr>
+        <tr><td>Pablo reorders atoms after crosslink ingestion.</td><td><span class="risk-high">High</span></td><td>Use unique <code>pdb_index</code>/identity ledger mapping only; add reordering regression tests.</td></tr>
+        <tr><td>Pablo public API capacity is exceeded.</td><td><span class="risk-med">Medium</span></td><td>Encode one linking bond + one crosslink slot limit and fail clearly before assembly.</td></tr>
+        <tr><td>Partial charges drift or mismatch atom identities.</td><td><span class="risk-high">High</span></td><td>Strict charge count/finite/total validation and persisted provenance for every generated or user-supplied charged source.</td></tr>
+        <tr><td>Force-field default change alters parameter assignments unexpectedly.</td><td><span class="risk-high">High</span></td><td>Ordered manifest, strict conjugation audit, public <code>label_molecules()</code> inspection, user override path.</td></tr>
+        <tr><td>LOC deletion removes hidden behavior used by the checkpoint.</td><td><span class="risk-med">Medium</span></td><td>Delete only after the relevant parity scope is complete; shared/manual Pablo definition logic waits for both NHS-Lys and polymer parity, targeted tests, conjugation subset, and real checkpoint.</td></tr>
+        <tr><td>Subagents stage unrelated dirty files.</td><td><span class="risk-med">Medium</span></td><td>Explicit staging only; require status/diff review; never touch POC notebooks/temp/test_files.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="definition-done">
+    <h2>Definition of done</h2>
+    <ul class="checklist">
+      <li><input type="checkbox"> <span>The known checkpoint configuration succeeds after every semantic phase and after final integration.</span></li>
+      <li><input type="checkbox"> <span>MVP reaction definitions are RDKit-readable mapped MDL <code>.rxn</code> files with explicit config paths and no Python package/plugin requirement.</span></li>
+      <li><input type="checkbox"> <span>All moiety sources normalize into the <code>Moiety</code> contract with strict identity, coordinate, charge, and provenance validation.</span></li>
+      <li><input type="checkbox"> <span>Public Pablo APIs ingest product topology; no private helpers are used.</span></li>
+      <li><input type="checkbox"> <span>Coordinate mapping after Pablo uses unique identity/<code>pdb_index</code> evidence, not atom order.</span></li>
+      <li><input type="checkbox"> <span>Composite charges remain production default and are reconciled with explicit evidence.</span></li>
+      <li><input type="checkbox"> <span>Final parameterization uses ordered OFFXML sources with ff14SB + Sage 2.3.0 defaults and concise assignment audit.</span></li>
+      <li><input type="checkbox"> <span>Old paths are deleted after complete relevant parity; no compatibility facades or duplicate production paths remain.</span></li>
+      <li><input type="checkbox"> <span>POC notebooks, temp files, unrelated dirty files, and unrelated tests are untouched.</span></li>
+      <li><input type="checkbox"> <span>Final merge to <code>refactor/conjugation-engine</code> is user-approved after Phase 17 audit.</span></li>
+    </ul>
+  </section>
+
+  <section id="decision-log">
+    <h2>Decision log</h2>
+    <table>
+      <thead><tr><th>Decision</th><th>Approved choice</th><th>Rationale</th></tr></thead>
+      <tbody>
+        <tr><td>Behavioral invariant</td><td>Preserve current opt-in successful workflow and checkpoint.</td><td>Architecture convergence must not regress working science.</td></tr>
+        <tr><td>Branching</td><td>Integrate through <code>conjugation-engine-refactor</code>; final merge to <code>refactor/conjugation-engine</code>.</td><td>Supports many small reviewed subagent PRs without destabilizing the final target branch.</td></tr>
+        <tr><td>Reaction extension</td><td>MVP data files are RDKit-readable mapped MDL <code>.rxn</code>; portable mapped representations are future/deferred; no Python plugins.</td><td>Avoids core registries while keeping MVP input narrow and RDKit-validated.</td></tr>
+        <tr><td>Reaction contract</td><td>One canonical <code>resolve(...)</code> method.</td><td>Prevents resolver drift and duplicate production paths.</td></tr>
+        <tr><td>Moiety inputs</td><td>Normalize all sources into <code>Moiety</code>.</td><td>Prevents provider-specific downstream logic.</td></tr>
+        <tr><td>Pablo boundary</td><td>Pablo ingests topology from product evidence; PolyzyMD does reactions/assembly/charges/parameterization.</td><td>Matches Pablo 0.2.2 public API responsibilities.</td></tr>
+        <tr><td>Pablo API use</td><td>Public APIs only; no <code>_anon_from_smarts</code>.</td><td>Protects against private API instability.</td></tr>
+        <tr><td>Coordinate mapping</td><td>Use unique <code>pdb_index</code>/identity ledger, never order assumptions.</td><td>Pablo can reorder crosslinked molecules.</td></tr>
+        <tr><td>Force-field defaults</td><td>ff14SB + Sage 2.3.0 with ordered user extras.</td><td>Aligns final connected topology parameterization with current OpenFF practice while retaining protein charge strategy.</td></tr>
+        <tr><td>Charges</td><td>Retain composite strategy; Rosemary whole-product NAGL future/experimental only.</td><td>Avoids destabilizing proven charge behavior.</td></tr>
+        <tr><td>Parameterization</td><td>No fragment parameter transplantation or manual Interchange surgery.</td><td>Final connected topology should be parameterized coherently once.</td></tr>
+        <tr><td>SystemBuilder</td><td>No broad redesign; share force-field loader carefully.</td><td>Keeps convergence scoped to conjugation architecture.</td></tr>
+        <tr><td>POC files</td><td>Do not modify POC notebooks/temp/test_files.</td><td>Prevents unrelated dirty-file contamination.</td></tr>
+        <tr><td>GLYCAM</td><td>No support now; future specialized OFFXML possible.</td><td>Avoids unvalidated carbohydrate force-field scope creep.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="muted">
+    <p>Document path: <code>docs/conjugation_pablo_convergence_plan.html</code>. This file is intentionally standalone and is not added to the Sphinx toctree.</p>
+  </footer>
+</main>
+</body>
+</html>
