@@ -205,7 +205,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
     )
     assert (
         result.charge_bridge_report.source
-        == "production:product-state-peptide-capped-nagl-charge-bridge"
+        == "preproduction-nagl:product-state-peptide-capped-charge-bridge"
     )
     assert result.charge_bridge_report.order_preserving_atom_records is True
     assert (tmp_path / "product_state_charge_bridge.json").is_file()

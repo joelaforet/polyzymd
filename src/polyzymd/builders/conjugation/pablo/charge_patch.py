@@ -11,7 +11,7 @@ from typing import Any
 from polyzymd.builders.conjugation.pablo.charge_records import AtomPartialChargeRecord
 
 DEFAULT_PATCH_NAGL_MODEL = "openff-gnn-am1bcc-0.1.0-rc.3.pt"
-PATCH_SOURCE = "production:product-state-peptide-capped-nagl-charge-bridge"
+PATCH_SOURCE = "preproduction-nagl:product-state-peptide-capped-charge-bridge"
 CAP_FLANK_TOTAL_TOLERANCE_E = 0.02
 CAP_FLANK_PER_ATOM_TOLERANCE_E = 0.005
 LOGGER = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ def build_local_product_charge_patch_records(
     Returns
     -------
     tuple of tuple and str
-        Product atom charge records and the production NAGL model name.
+        Product atom charge records and the pre-production NAGL model name.
     """
     _validate_supported_spec(spec, product_atoms=product_atoms)
     reference = _build_reference_product(spec, product_atoms=tuple(product_atoms))
@@ -395,7 +395,7 @@ def _records_with_cap_closure(
 
 
 def _charge_with_nagl(molecule: Any, *, model_name: str) -> Any:
-    """Assign production NAGL charges to the peptide-capped reference."""
+    """Assign pre-production NAGL charges to the peptide-capped reference."""
     from openff.toolkit import Molecule
 
     from polyzymd.utils.charging import NAGLCharger
@@ -455,7 +455,10 @@ def _log_patch_diagnostics(
         "reaction": getattr(getattr(plan, "contract", None), "mechanism_name", None),
         "cap_model": "ACE-GLY-modified-residue(moiety)-GLY-NME",
         "nagl_model": DEFAULT_PATCH_NAGL_MODEL,
-        "nagl_version": "production NAGLCharger default",
+        "nagl_version": "pre-production NAGLCharger default",
+        "nagl_provenance": (
+            f"OpenFF NAGL model {DEFAULT_PATCH_NAGL_MODEL}; not GLYCAM, CHARMM, or AshGC"
+        ),
         "product_atom_count": reference.product_atom_count,
         "reference_atom_count": reference.reference_atom_count,
         "mapped_atom_count": len(reference.mapped_atoms),

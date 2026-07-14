@@ -41,7 +41,7 @@ from polyzymd.builders.conjugation.pablo.sdf import (
 
 LOGGER = logging.getLogger(__name__)
 
-_BRIDGE_SOURCE = "production:product-state-peptide-capped-nagl-charge-bridge"
+_BRIDGE_SOURCE = "preproduction-nagl:product-state-peptide-capped-charge-bridge"
 _TOTAL_CHARGE_RECONCILIATION_TRIGGER_E = 1.0e-4
 _LOCAL_RECONCILIATION_TOTAL_FAIL_E = 0.02
 _LOCAL_RECONCILIATION_PER_ATOM_FAIL_E = 0.005
