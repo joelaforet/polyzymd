@@ -149,11 +149,13 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
     ) -> None:
         nonlocal map_number
         atom = Chem.Atom(element or "C")
-        atom.SetNoImplicit(False)
         if mapped is not None:
+            atom.SetNoImplicit(True)
             atom.SetAtomMapNum(map_number)
             mapped_atoms[map_number] = mapped
             map_number += 1
+        else:
+            atom.SetNoImplicit(False)
         rd_indices[key] = rwmol.AddAtom(atom)
 
     _add_cap_and_flank_atoms(add_atom)
