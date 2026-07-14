@@ -412,22 +412,31 @@ def validate_atom_presence(
         for attr_name in ("protein_link_atom", "modifier_link_atom"):
             atom = getattr(plan, attr_name, None)
             if atom is not None:
+                identity = _product_state_identity(
+                    AtomIdentity.from_pdb_atom(atom),
+                    source=attr_name,
+                    plan=plan,
+                )
                 expected_present.append(
-                    _ExpectedAtomPresence(
-                        AtomIdentity.from_pdb_atom(atom), attr_name, plan, plan_index
-                    )
+                    _ExpectedAtomPresence(identity, attr_name, plan, plan_index)
                 )
         for atom in tuple(getattr(plan, "protein_leaving_atoms", ()) or ()):
+            identity = _product_state_identity(
+                AtomIdentity.from_pdb_atom(atom),
+                source="protein_leaving_atoms",
+                plan=plan,
+            )
             expected_absent.append(
-                _ExpectedAtomPresence(
-                    AtomIdentity.from_pdb_atom(atom), "protein_leaving_atoms", plan, plan_index
-                )
+                _ExpectedAtomPresence(identity, "protein_leaving_atoms", plan, plan_index)
             )
         for atom in tuple(getattr(plan, "modifier_leaving_atoms", ()) or ()):
+            identity = _product_state_identity(
+                AtomIdentity.from_pdb_atom(atom),
+                source="modifier_leaving_atoms",
+                plan=plan,
+            )
             expected_absent.append(
-                _ExpectedAtomPresence(
-                    AtomIdentity.from_pdb_atom(atom), "modifier_leaving_atoms", plan, plan_index
-                )
+                _ExpectedAtomPresence(identity, "modifier_leaving_atoms", plan, plan_index)
             )
 
     match_context = _ProductAtomMatchContext(atoms=atoms, assembly=assembly)
@@ -1229,6 +1238,29 @@ def _product_residue_name_for_source(source: str, plan: Any) -> str | None:
     if value is None or not str(value).strip():
         return None
     return str(value)
+
+
+def _product_state_identity(identity: AtomIdentity, *, source: str, plan: Any) -> AtomIdentity:
+    """Return the expected identity after product-state residue renaming.
+
+    Parameters
+    ----------
+    identity : AtomIdentity
+        Reactant-state identity resolved from the attachment plan.
+    source : str
+        Attachment-plan role for the identity.
+    plan : Any
+        Resolved attachment plan carrying product residue names.
+
+    Returns
+    -------
+    AtomIdentity
+        Identity with the product-state residue name when the plan declares one.
+    """
+    product_residue_name = _product_residue_name_for_source(source, plan)
+    if product_residue_name is None:
+        return identity
+    return identity.model_copy(update={"residue_name": product_residue_name.strip().upper()})
 
 
 def _assembly_residue_mappings(assembly: Any, *, plan_index: int | None = None) -> tuple[Any, ...]:
