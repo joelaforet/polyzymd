@@ -64,6 +64,15 @@ def test_fast_mixed_summary_validation_checks_cuda_when_requested():
     validate_fast_mixed_summary(summary, require_cuda=True)
 
 
+def test_fast_mixed_summary_validation_rejects_missing_polymer_charge_coverage():
+    """Checkpoint validation should require authoritative polymer charge coverage."""
+    summary = _summary_payload()
+    summary["charge_bridge"]["patch_owned_polymer_atom_count"] = 299
+
+    with pytest.raises(AssertionError):
+        validate_fast_mixed_summary(summary)
+
+
 def _summary_payload() -> dict[str, object]:
     """Return a minimal passing fast mixed checkpoint summary."""
     return {
@@ -110,9 +119,18 @@ def _summary_payload() -> dict[str, object]:
         },
         "charge_bridge": {
             "success": True,
-            "ff14sb_atom_count": 1_100,
-            "polymer_template_atom_count": 3,
-            "local_nagl_patch_atom_count": 2,
+            "ff14sb_atom_count": 1_198,
+            "polymer_template_atom_count": 0,
+            "local_nagl_patch_atom_count": 302,
+            "source_role_atom_count": 1_500,
+            "polymer_atom_count": 300,
+            "polymer_source_coverage_count": 300,
+            "patch_owned_polymer_atom_count": 300,
+            "polymer_template_mapped_product_atom_count": 3,
+            "polymer_template_overwrite_count": 3,
+            "polymer_template_coverage_count": 3,
+            "unmodified_polymer_template_atom_count": 0,
+            "invalid_polymer_template_source_count": 0,
             "total_charge_e": 0.0,
             "formal_charge_e": 0.0,
             "normalization_correction_e": 0.0,

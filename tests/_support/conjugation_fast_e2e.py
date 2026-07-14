@@ -111,8 +111,21 @@ def validate_fast_mixed_summary(summary: dict[str, Any], *, require_cuda: bool =
     charge_bridge = summary["charge_bridge"]
     assert charge_bridge["success"] is True
     assert charge_bridge["ff14sb_atom_count"] > 1_000
-    assert charge_bridge["polymer_template_atom_count"] > 0
     assert charge_bridge["local_nagl_patch_atom_count"] > 0
+    assert charge_bridge["source_role_atom_count"] == summary["crosslinked_atom_count"]
+    assert charge_bridge["polymer_atom_count"] > 0
+    assert charge_bridge["polymer_source_coverage_count"] == charge_bridge["polymer_atom_count"]
+    assert charge_bridge["patch_owned_polymer_atom_count"] == charge_bridge["polymer_atom_count"]
+    assert (
+        charge_bridge["polymer_template_coverage_count"]
+        == charge_bridge["polymer_template_mapped_product_atom_count"]
+    )
+    assert (
+        charge_bridge["polymer_template_atom_count"]
+        == charge_bridge["unmodified_polymer_template_atom_count"]
+    )
+    assert charge_bridge["polymer_template_overwrite_count"] > 0
+    assert charge_bridge["invalid_polymer_template_source_count"] == 0
     assert charge_bridge["total_charge_e"] == pytest.approx(charge_bridge["formal_charge_e"])
     assert abs(charge_bridge["normalization_correction_e"] or 0.0) <= 0.02
     assert abs(charge_bridge["max_per_atom_correction_e"] or 0.0) <= 0.005
@@ -174,7 +187,7 @@ def _build_summary(
         "product_glycan": _product_glycan_evidence(crosslinked_atoms),
         "n_glycosylation_linkage": _n_glycosylation_linkage_evidence(resolved, crosslinked_atoms),
         "validation": _validation_summary(validation),
-        "charge_bridge": _charge_bridge_summary(charge_bridge),
+        "charge_bridge": _charge_bridge_summary(charge_bridge, crosslinked_atoms),
         "relaxation": _relaxation_summary(relaxation),
         "exports": {name: str(path) for name, path in export_paths.items()},
         "export_exists": {name: path.exists() for name, path in export_paths.items()},
@@ -319,9 +332,11 @@ def _validation_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _charge_bridge_summary(payload: dict[str, Any]) -> dict[str, Any]:
+def _charge_bridge_summary(
+    payload: dict[str, Any], crosslinked_atoms: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     """Extract lightweight charge bridge fields for assertions."""
-    return {
+    summary = {
         key: payload.get(key)
         for key in (
             "success",
@@ -334,6 +349,58 @@ def _charge_bridge_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "max_per_atom_correction_e",
         )
     }
+    diagnostics = payload.get("diagnostic_details", {}) or {}
+    patch_ledgers = diagnostics.get("patch_ledgers", []) or []
+    patch_overwrites = diagnostics.get("patch_overwrites", []) or []
+    polymer_ledgers = diagnostics.get("polymer_ledgers", []) or []
+    polymer_template_count = int(payload.get("polymer_template_atom_count") or 0)
+    polymer_template_overwrite_count = sum(
+        1 for entry in patch_overwrites if entry.get("old_source_role") == "polymer_template"
+    )
+    mapped_template_count = sum(
+        int(entry.get("mapped_product_atom_count") or 0) for entry in polymer_ledgers
+    )
+    patch_owned_polymer_identities = {
+        identity
+        for ledger in patch_ledgers
+        for identity in ledger.get("affected_atom_identities", []) or []
+        if str(identity).startswith("chain C ")
+    }
+    polymer_atom_count = sum(1 for atom in crosslinked_atoms or [] if atom.get("chain_id") == "C")
+    source_role_atom_count = sum(
+        int(payload.get(key) or 0)
+        for key in (
+            "ff14sb_atom_count",
+            "polymer_template_atom_count",
+            "local_nagl_patch_atom_count",
+        )
+    )
+    summary.update(
+        {
+            "source_role_atom_count": source_role_atom_count,
+            "polymer_atom_count": polymer_atom_count,
+            "patch_owned_polymer_atom_count": len(patch_owned_polymer_identities),
+            "polymer_source_coverage_count": len(patch_owned_polymer_identities)
+            + polymer_template_count,
+            "polymer_template_mapped_product_atom_count": mapped_template_count,
+            "polymer_template_overwrite_count": polymer_template_overwrite_count,
+            "polymer_template_coverage_count": polymer_template_overwrite_count
+            + polymer_template_count,
+            "unmodified_polymer_template_atom_count": max(
+                0,
+                mapped_template_count - polymer_template_overwrite_count,
+            ),
+            "invalid_polymer_template_source_count": _invalid_polymer_template_source_count(
+                polymer_ledgers
+            ),
+        }
+    )
+    return summary
+
+
+def _invalid_polymer_template_source_count(polymer_ledgers: list[dict[str, Any]]) -> int:
+    """Return polymer template ledgers without charged SDF provenance."""
+    return sum(1 for ledger in polymer_ledgers if not ledger.get("charged_sdf"))
 
 
 def _relaxation_summary(payload: dict[str, Any]) -> dict[str, Any]:
