@@ -188,6 +188,22 @@ class TestConfigValidation:
         assert "pool" not in description
         assert "Additional" not in description
 
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("local_junction_patching", False),
+            ("patch_radius_bonds", 2),
+            ("preserve_total_charge", False),
+            ("integer_tolerance", 1.0e-3),
+        ],
+    )
+    def test_conjugation_rejects_removed_product_charge_knobs(self, field, value):
+        """Conjugation config should expose no product charge tuning knobs."""
+        from polyzymd.config.schema import ConjugationConfig
+
+        with pytest.raises(ValidationError, match="charge"):
+            ConjugationConfig(charge={field: value})
+
 
 class TestConjugationReactionSmartsConfig:
     """Tests for generic atom-mapped reaction metadata in conjugation config."""
