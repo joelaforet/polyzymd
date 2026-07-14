@@ -24,7 +24,7 @@ class ResolvedMoietySource(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    fragment: GeneratedPolymerFragment = Field(exclude=True)
+    fragment: GeneratedPolymerFragment | None = Field(default=None, exclude=True)
     source_fragment: Any | None = Field(default=None, exclude=True)
     source_kind: Literal["polymer", "smiles"]
     sidecars: dict[str, Path] = Field(default_factory=dict)
@@ -200,34 +200,13 @@ def _resolve_smiles_source(
         output_dir=output_dir / f"{attachment_index:02d}_{_safe_attachment_token(attachment.name)}",
         random_seed=random_seed,
     )
-    fragment = _generated_fragment_from_moiety_plan_placeholder(source_fragment)
     sidecars = _moiety_sidecars(source_fragment)
     return ResolvedMoietySource(
-        fragment=fragment,
+        fragment=None,
         source_fragment=source_fragment,
         source_kind="smiles",
         sidecars=sidecars,
         diagnostics=("Resolved SMILES moiety source",),
-    )
-
-
-def _generated_fragment_from_moiety_plan_placeholder(
-    fragment: GeneratedMoietyFragment,
-) -> GeneratedPolymerFragment:
-    """Adapt a moiety before the final resolved plan is available."""
-    return GeneratedPolymerFragment(
-        atoms=fragment.atoms,
-        bonds=fragment.bonds,
-        bond_orders=fragment.bond_orders,
-        residues=fragment.residues,
-        sequence=None,
-        reactive_atom_serial=None,
-        reactive_atom_index=None,
-        reactive_atom_name=None,
-        leaving_atom_serials=(),
-        leaving_atom_indices=(),
-        leaving_atom_names=(),
-        name=fragment.name,
     )
 
 
@@ -238,6 +217,8 @@ def generated_fragment_for_resolved_source(
     """Return the construction fragment updated with resolved reactive atoms."""
     if isinstance(source.source_fragment, GeneratedMoietyFragment):
         return _generated_fragment_from_moiety_plan(source.source_fragment, plan)
+    if source.fragment is None:
+        raise RuntimeError("Resolved moiety source is missing a construction fragment")
     return source.fragment
 
 

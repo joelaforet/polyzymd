@@ -449,6 +449,177 @@ def test_atom_presence_keeps_duplicate_modifier_identities_plan_scoped():
     assert missing_modifier_identity.atom_name == "C7"
 
 
+@pytest.mark.parametrize(
+    ("source_residue_name", "product_residue_name", "link_atom_name", "leaving_atom_name"),
+    (("LYS", "LYX", "NZ", "HZ2"), ("ASN", "ASX", "ND2", "HD21")),
+)
+def test_atom_presence_uses_product_protein_residue_identity(
+    source_residue_name: str,
+    product_residue_name: str,
+    link_atom_name: str,
+    leaving_atom_name: str,
+):
+    """Protein-side link atoms should be matched after product residue renaming."""
+    source_link_atom = _atom(
+        serial=1,
+        atom_name=link_atom_name,
+        residue_name=source_residue_name,
+        residue_number=60,
+        chain_id="A",
+    )
+    source_leaving_atom = _atom(
+        serial=2,
+        atom_name=leaving_atom_name,
+        residue_name=source_residue_name,
+        residue_number=60,
+        chain_id="A",
+    )
+    product_link_atom = source_link_atom.model_copy(update={"residue_name": product_residue_name})
+    modifier_link_atom = _atom(serial=3, atom_name="C1", residue_name="NAG", residue_number=1)
+    plan = SimpleNamespace(
+        protein_link_atom=source_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(source_leaving_atom,),
+        modifier_leaving_atoms=(),
+        protein_product_residue_name=product_residue_name,
+        modifier_product_residue_name="NAG",
+    )
+
+    report = validate_atom_presence(
+        (product_link_atom, modifier_link_atom),
+        resolved_plans=(plan,),
+    )
+
+    assert report.status == ValidationStatus.PASS
+    assert report.missing_atoms == ()
+    assert report.lingering_leaving_atoms == ()
+    assert report.present_atoms[0].residue_name == product_residue_name
+
+
+@pytest.mark.parametrize(
+    ("source_residue_name", "product_residue_name", "link_atom_name", "leaving_atom_name"),
+    (("LYS", "LYX", "NZ", "HZ2"), ("ASN", "ASX", "ND2", "HD21")),
+)
+def test_atom_presence_detects_product_protein_leaving_atom(
+    source_residue_name: str,
+    product_residue_name: str,
+    link_atom_name: str,
+    leaving_atom_name: str,
+):
+    """Protein-side leaving atoms should still fail after product residue renaming."""
+    source_link_atom = _atom(
+        serial=1,
+        atom_name=link_atom_name,
+        residue_name=source_residue_name,
+        residue_number=60,
+        chain_id="A",
+    )
+    source_leaving_atom = _atom(
+        serial=2,
+        atom_name=leaving_atom_name,
+        residue_name=source_residue_name,
+        residue_number=60,
+        chain_id="A",
+    )
+    product_link_atom = source_link_atom.model_copy(update={"residue_name": product_residue_name})
+    lingering_leaving_atom = source_leaving_atom.model_copy(
+        update={"residue_name": product_residue_name}
+    )
+    modifier_link_atom = _atom(serial=3, atom_name="C1", residue_name="NAG", residue_number=1)
+    plan = SimpleNamespace(
+        protein_link_atom=source_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(source_leaving_atom,),
+        modifier_leaving_atoms=(),
+        protein_product_residue_name=product_residue_name,
+        modifier_product_residue_name="NAG",
+    )
+
+    report = validate_atom_presence(
+        (product_link_atom, lingering_leaving_atom, modifier_link_atom),
+        resolved_plans=(plan,),
+    )
+
+    assert report.status == ValidationStatus.FAIL
+    assert report.missing_atoms == ()
+    assert len(report.lingering_leaving_atoms) == 1
+    assert report.lingering_leaving_atoms[0].residue_name == product_residue_name
+
+
+def test_atom_presence_allows_product_protein_link_atom_renumbering():
+    """Protein-side product matching should tolerate serial shifts from leaving removal."""
+    source_link_atom = _atom(
+        serial=1016,
+        atom_name="NZ",
+        residue_name="LYS",
+        residue_number=63,
+        chain_id="A",
+    )
+    source_leaving_atom = _atom(
+        serial=1017,
+        atom_name="HZ2",
+        residue_name="LYS",
+        residue_number=63,
+        chain_id="A",
+    )
+    product_link_atom = source_link_atom.model_copy(
+        update={"serial": 1015, "atom_index": 1014, "residue_name": "LYX"}
+    )
+    retained_product_hydrogen = _atom(
+        serial=1016,
+        atom_name="HZ1",
+        residue_name="LYX",
+        residue_number=63,
+        chain_id="A",
+    )
+    modifier_link_atom = _atom(serial=1274, atom_name="C003", residue_name="NHX", residue_number=1)
+    plan = SimpleNamespace(
+        protein_link_atom=source_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(source_leaving_atom,),
+        modifier_leaving_atoms=(),
+        protein_product_residue_name="LYX",
+        modifier_product_residue_name="NHX",
+    )
+
+    report = validate_atom_presence(
+        (product_link_atom, retained_product_hydrogen, modifier_link_atom),
+        resolved_plans=(plan,),
+    )
+
+    assert report.status == ValidationStatus.PASS
+    assert report.missing_atoms == ()
+    assert report.lingering_leaving_atoms == ()
+    assert report.present_atoms[0].serial is None
+
+
+def test_atom_presence_does_not_accept_protein_renaming_without_plan_product_name():
+    """Protein remapping should remain plan-scoped instead of globally relaxed."""
+    source_link_atom = _atom(
+        serial=1,
+        atom_name="ND2",
+        residue_name="ASN",
+        residue_number=60,
+        chain_id="A",
+    )
+    product_link_atom = source_link_atom.model_copy(update={"residue_name": "ASX"})
+    modifier_link_atom = _atom(serial=2, atom_name="C1", residue_name="NAG", residue_number=1)
+    plan = SimpleNamespace(
+        protein_link_atom=source_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(),
+        modifier_leaving_atoms=(),
+    )
+
+    report = validate_atom_presence(
+        (product_link_atom, modifier_link_atom),
+        resolved_plans=(plan,),
+    )
+
+    assert report.status == ValidationStatus.FAIL
+    assert report.missing_atoms[0].residue_name == "ASN"
+
+
 def test_charge_audit_pass_warn_and_fail(tmp_path):
     """Charge audit should summarize fake bridge payloads."""
     bridge_path = tmp_path / "product_state_charge_bridge.json"
@@ -569,6 +740,42 @@ def test_linkage_geometry_warns_for_nonbonded_close_contacts():
     assert report.status == ValidationStatus.WARN
     assert report.close_contact_count == 1
     assert any(check.name == "nonbonded_close_contacts" for check in report.checks)
+
+
+def test_linkage_geometry_ignores_hydrogen_and_near_neighbor_contacts():
+    """Close-contact auditing should target severe nonbonded heavy atom clashes."""
+    atoms = (
+        _atom(serial=1, atom_name="N1", residue_name="LYS", residue_number=10),
+        _atom(serial=2, atom_name="C1", residue_name="MOD", residue_number=1, x=1.0),
+        _atom(serial=3, atom_name="C2", residue_name="MOD", residue_number=1, x=0.2),
+        _atom(serial=4, atom_name="H1", residue_name="MOD", residue_number=1, x=0.1),
+    )
+
+    report = audit_linkage_geometry(atoms, ((1, 2),), ((1, 2), (2, 3)))
+
+    assert report.status == ValidationStatus.PASS
+    assert report.close_contact_count == 0
+
+
+def test_validation_report_uses_successful_relaxed_coordinates_for_geometry(tmp_path):
+    """Post-relax geometry validation should not audit stale pre-relax contacts."""
+    crosslinked = tmp_path / "assembled_crosslinked.pdb"
+    relaxed = tmp_path / "conjugate_relaxed.pdb"
+    _write_geometry_pdb(crosslinked, modifier_x=0.5)
+    _write_geometry_pdb(relaxed, modifier_x=3.0)
+    payload = _canonical_relaxation_payload()
+    payload.update({"success": True, "final_relaxed_pdb_path": str(relaxed)})
+    (tmp_path / "conjugate_relaxation.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    report = build_conjugate_validation_report(
+        product_pdb_path=crosslinked,
+        assembly=SimpleNamespace(added_conect_pairs=((1, 2),)),
+        output_dir=tmp_path,
+        write=False,
+    )
+
+    assert report.product_pdb_path == crosslinked
+    assert report.linkage_geometry.close_contact_count == 0
 
 
 def test_relaxation_evidence_audit_pass_fail_and_skipped(tmp_path):
@@ -1240,7 +1447,7 @@ def _atom(
         y=0.0,
         z=0.0,
         element=atom_name[0],
-        record_name="ATOM" if residue_name == "LYS" else "HETATM",
+        record_name="ATOM" if residue_name in {"ASN", "ASX", "LYS", "LYX"} else "HETATM",
     )
 
 
@@ -1253,6 +1460,19 @@ def _write_product_pdb(path: Path, *, include_link: bool) -> None:
     if include_link:
         lines.extend(["CONECT    1    2\n", "CONECT    2    1\n"])
     lines.append("END\n")
+    path.write_text("".join(lines), encoding="utf-8")
+
+
+def _write_geometry_pdb(path: Path, *, modifier_x: float) -> None:
+    """Write a tiny linked product with a variable nonbonded heavy atom distance."""
+    lines = [
+        "ATOM      1  NZ  LYS A  10       0.000   0.000   0.000  1.00  0.00           N\n",
+        "HETATM    2  C1  LIG C   1       1.400   0.000   0.000  1.00  0.00           C\n",
+        f"HETATM    3  C2  LIG C   1       {modifier_x:5.3f}   0.000   0.000  1.00  0.00           C\n",
+        "CONECT    1    2\n",
+        "CONECT    2    1\n",
+        "END\n",
+    ]
     path.write_text("".join(lines), encoding="utf-8")
 
 

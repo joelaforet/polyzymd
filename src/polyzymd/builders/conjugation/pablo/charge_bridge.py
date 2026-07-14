@@ -1,4 +1,4 @@
-"""Production charge bridge for final product-state conjugate templates."""
+"""Validated charge bridge for final product-state conjugate templates."""
 
 from __future__ import annotations
 
@@ -41,13 +41,10 @@ from polyzymd.builders.conjugation.pablo.sdf import (
 
 LOGGER = logging.getLogger(__name__)
 
-_BRIDGE_SOURCE = "production:product-state-local-nagl-charge-bridge"
-_LOCAL_RECONCILIATION_PER_LINKAGE_ACCEPT_E = 0.05
-_LOCAL_RECONCILIATION_PER_LINKAGE_WARN_E = 0.10
-_LOCAL_RECONCILIATION_PER_LINKAGE_FAIL_E = 0.20
-_LOCAL_RECONCILIATION_PER_ATOM_ACCEPT_E = 0.01
-_LOCAL_RECONCILIATION_PER_ATOM_WARN_E = 0.03
-_LOCAL_RECONCILIATION_PER_ATOM_FAIL_E = 0.05
+_BRIDGE_SOURCE = "preproduction-nagl:product-state-peptide-capped-charge-bridge"
+_TOTAL_CHARGE_RECONCILIATION_TRIGGER_E = 1.0e-4
+_LOCAL_RECONCILIATION_TOTAL_FAIL_E = 0.02
+_LOCAL_RECONCILIATION_PER_ATOM_FAIL_E = 0.005
 
 
 def build_product_state_charge_bridge(
@@ -59,13 +56,15 @@ def build_product_state_charge_bridge(
     specs: Sequence[Any],
     output_dir: Path | str,
     settings: InterchangeParameterizationSettings | None = None,
-    total_charge_tolerance: float = 1.0e-4,
 ) -> Any:
-    """Attach production partial-charge records to a product-state Pablo library.
+    """Attach validated partial-charge records to a product-state Pablo library.
 
     The bridge keeps the OpenFF charge template at molecule scope while assigning
-    atom charges from local source classes: ff14SB protein atoms, charged polymer
-    source templates, and a local NAGL product-state linkage patch.
+    atom charges from local source classes: prepared-source ff14SB protein atoms,
+    charged polymer source templates, and a pre-production local peptide-capped
+    NAGL product-state linkage patch.
+    Residual charge reconciliation uses fixed private safety limits and is not
+    caller-configurable.
 
     Parameters
     ----------
@@ -83,17 +82,12 @@ def build_product_state_charge_bridge(
         Conjugate construction artifact directory.
     settings : InterchangeParameterizationSettings or None, optional
         Force-field settings for ff14SB source extraction, by default ``None``.
-    total_charge_tolerance : float, optional
-        Allowed total-charge mismatch before local reconciliation, by default ``1e-4``.
-
     Returns
     -------
     Any
         A copied product-state Pablo library with ``residue_partial_charges``,
         ``charge_bridge_report``, and ``charge_bridge_report_path`` fields set.
     """
-    if total_charge_tolerance < 0:
-        raise ValueError("total_charge_tolerance must be non-negative")
     if not specs:
         raise ValueError("Product-state charge bridge requires at least one attachment spec")
 
@@ -159,7 +153,7 @@ def build_product_state_charge_bridge(
         preview = "; ".join(_format_identity(identity) for identity in missing[:12])
         suffix = "" if len(missing) <= 12 else f"; ... {len(missing) - 12} more"
         raise ValueError(
-            "Product-state charge bridge could not assign production charges for final "
+            "Product-state charge bridge could not assign validated bridge charges for final "
             f"conjugate atom(s): {preview}{suffix}"
         )
 
@@ -181,7 +175,7 @@ def build_product_state_charge_bridge(
     )
     correction_atom_identities: tuple[str, ...] = ()
     max_per_atom_correction = 0.0
-    if abs(correction) > total_charge_tolerance:
+    if abs(correction) > _TOTAL_CHARGE_RECONCILIATION_TRIGGER_E:
         local_reconciliation = _apply_local_patch_reconciliation(
             records,
             target_record_keys=target_record_keys,
@@ -204,8 +198,8 @@ def build_product_state_charge_bridge(
                 "thresholds. Inspect product_state_charge_bridge_local_reconciliation.json."
             )
         diagnostics.append(
-            "Applied a local patch charge reconciliation over "
-            f"{local_reconciliation['corrected_atom_count']} local NAGL patch atom(s): "
+            "Applied strict peptide-capped residual closure over "
+            f"{local_reconciliation['corrected_atom_count']} modified product residue atom(s): "
             f"{correction:.8f} e total, "
             f"{local_reconciliation['per_atom_correction_e']:.8f} e per atom"
         )
@@ -243,8 +237,8 @@ def build_product_state_charge_bridge(
         assumptions=(
             "Canonical protein atoms retain ff14SB-style charges from the prepared source protein.",
             "Attached polymer atoms retain existing charged polymer/template charges when mapping is stable.",
-            "Covalent junction atoms are overridden by a local product-state NAGL/AshGC patch.",
-            "Any bridge-local charge residual is reconciled only over real local patch atoms.",
+            "Modified residue and moiety atoms are overridden by peptide-capped product-state NAGL charges.",
+            "Any bridge-local charge residual is reconciled only over modified product residue atoms within strict first-release thresholds.",
             "The complete covalent conjugate is emitted as one charged OpenFF Molecule template.",
             "This bridge is not whole-conjugate AM1-BCC and does not use Gasteiger or formal charges.",
         ),
@@ -313,16 +307,16 @@ def _apply_local_patch_reconciliation(
     correction: float,
     linkage_count: int,
 ) -> dict[str, Any]:
-    """Distribute bridge residual charge over real local NAGL patch atoms."""
+    """Distribute a strict residual over modified product residue atoms only."""
     correction_keys = tuple(
         key
         for key in target_record_keys
-        if key in records and records[key].source_role == "local_nagl_patch"
+        if key in records and records[key].source_role == "local_nagl_patch" and key[0] == "A"
     )
     if not correction_keys:
         raise ValueError(
-            "Product-state charge bridge has no real local NAGL patch atoms available for "
-            f"local charge reconciliation of {correction:.8f} e"
+            "Product-state charge bridge has no mapped modified-protein product residue atoms "
+            f"available for strict charge reconciliation of {correction:.8f} e"
         )
 
     per_linkage = _per_linkage_residual(correction, linkage_count)
@@ -344,35 +338,16 @@ def _apply_local_patch_reconciliation(
     }
     if status == "fail":
         LOGGER.warning(
-            "CHARGE_LEDGER local reconciliation failed thresholds total=%.8f e "
-            "per_linkage=%.8f e per_atom=%.8f e atom_count=%d",
+            "CHARGE_LEDGER strict reconciliation failed thresholds total=%.8f e "
+            "per_atom=%.8f e atom_count=%d",
             correction,
-            per_linkage,
             per_atom,
             len(correction_keys),
         )
         return diagnostic
-    if status == "strong_warning":
-        LOGGER.warning(
-            "CHARGE_LEDGER local reconciliation strong warning total=%.8f e "
-            "per_linkage=%.8f e per_atom=%.8f e atom_count=%d",
-            correction,
-            per_linkage,
-            per_atom,
-            len(correction_keys),
-        )
-    elif status == "warning":
-        LOGGER.warning(
-            "CHARGE_LEDGER local reconciliation warning total=%.8f e per_linkage=%.8f e "
-            "per_atom=%.8f e atom_count=%d",
-            correction,
-            per_linkage,
-            per_atom,
-            len(correction_keys),
-        )
 
     corrected_atoms: list[dict[str, Any]] = []
-    for key in correction_keys:
+    for key in sorted(correction_keys):
         record = records[key]
         old_charge = record.charge_e
         new_charge = old_charge + per_atom
@@ -395,7 +370,7 @@ def _apply_local_patch_reconciliation(
         records[identity].charge_e for identity in target_record_keys
     )
     LOGGER.warning(
-        "CHARGE_LEDGER local reconciliation applied total=%.8f e corrected_atom_count=%d "
+        "CHARGE_LEDGER strict reconciliation applied total=%.8f e corrected_atom_count=%d "
         "per_atom=%.8f e status=%s",
         correction,
         len(correction_keys),
@@ -411,35 +386,19 @@ def _per_linkage_residual(correction: float, linkage_count: int) -> float:
 
 
 def _local_reconciliation_status(*, per_linkage: float, per_atom: float) -> str:
-    """Classify local reconciliation against charge-safety thresholds."""
-    abs_linkage = abs(per_linkage)
-    abs_atom = abs(per_atom)
+    """Classify local reconciliation against strict charge-safety thresholds."""
     if (
-        abs_linkage > _LOCAL_RECONCILIATION_PER_LINKAGE_FAIL_E
-        or abs_atom > _LOCAL_RECONCILIATION_PER_ATOM_FAIL_E
+        abs(per_linkage) > _LOCAL_RECONCILIATION_TOTAL_FAIL_E
+        or abs(per_atom) > _LOCAL_RECONCILIATION_PER_ATOM_FAIL_E
     ):
         return "fail"
-    if (
-        abs_linkage > _LOCAL_RECONCILIATION_PER_LINKAGE_WARN_E
-        or abs_atom > _LOCAL_RECONCILIATION_PER_ATOM_WARN_E
-    ):
-        return "strong_warning"
-    if (
-        abs_linkage > _LOCAL_RECONCILIATION_PER_LINKAGE_ACCEPT_E
-        or abs_atom > _LOCAL_RECONCILIATION_PER_ATOM_ACCEPT_E
-    ):
-        return "warning"
     return "accept"
 
 
 def _local_reconciliation_thresholds() -> dict[str, float]:
     """Return local reconciliation charge thresholds in elementary charges."""
     return {
-        "per_linkage_accept": _LOCAL_RECONCILIATION_PER_LINKAGE_ACCEPT_E,
-        "per_linkage_warn": _LOCAL_RECONCILIATION_PER_LINKAGE_WARN_E,
-        "per_linkage_fail": _LOCAL_RECONCILIATION_PER_LINKAGE_FAIL_E,
-        "per_atom_accept": _LOCAL_RECONCILIATION_PER_ATOM_ACCEPT_E,
-        "per_atom_warn": _LOCAL_RECONCILIATION_PER_ATOM_WARN_E,
+        "total_fail": _LOCAL_RECONCILIATION_TOTAL_FAIL_E,
         "per_atom_fail": _LOCAL_RECONCILIATION_PER_ATOM_FAIL_E,
     }
 
@@ -547,7 +506,7 @@ def _protein_ff14sb_records(
                 insertion_code=insertion_code,
                 atom_name=atom_name,
                 charge_e=charge,
-                source="production:ff14SB-prepared-source-protein",
+                source="prepared-source:ff14sb-protein",
                 source_role="protein_ff14sb",
             )
         )
@@ -995,7 +954,7 @@ def _polymer_template_records(
                     insertion_code=str(mapped.get("insertion_code", "")),
                     atom_name=atom_name,
                     charge_e=charge,
-                    source=f"production:attached-polymer-template:{sidecar}",
+                    source=f"attached-polymer-template:{sidecar}",
                     source_role="polymer_template",
                 )
             )
@@ -1090,7 +1049,7 @@ def _local_nagl_patch_records(
     product_atoms: Sequence[Any] = (),
     diagnostic_ledgers: list[dict[str, Any]] | None = None,
 ) -> tuple[tuple[AtomPartialChargeRecord, ...], str]:
-    """Generate generic local product-state NAGL patch charges."""
+    """Generate pre-production local product-state NAGL patch charges."""
     records: list[AtomPartialChargeRecord] = []
     model_name = DEFAULT_PATCH_NAGL_MODEL
     for spec in specs:
@@ -1104,7 +1063,9 @@ def _local_nagl_patch_records(
 
 
 def _source_sdf_path(spec: Any) -> Path | None:
-    """Return the production charged SDF path from an attachment spec."""
+    """Return the validated charged SDF path from an attachment spec."""
+    if getattr(getattr(spec, "fragment", None), "source_kind", None) == "moiety":
+        return None
     sidecars = getattr(spec, "source_sidecars", {}) or {}
     if not isinstance(sidecars, Mapping):
         return None
@@ -1114,14 +1075,14 @@ def _source_sdf_path(spec: Any) -> Path | None:
     raw_path = sidecars.get("bond_sdf") or sidecars.get("sdf")
     if raw_path is not None:
         raise ValueError(
-            "Attached polymer production charge transfer requires source_sidecars['charged_sdf']; "
+            "Attached polymer validated charge transfer requires source_sidecars['charged_sdf']; "
             f"refusing raw bond/geometry SDF {raw_path} as a partial-charge source"
         )
     return None
 
 
 def _charged_sdf_atom_charges(path: Path, *, generated_fragment: Any) -> tuple[float, ...]:
-    """Read partial charges from a validated production charged SDF."""
+    """Read partial charges from a validated charged SDF."""
     fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
     return charged_sdf_partial_charges(path, fragment_atoms=fragment_atoms)
 

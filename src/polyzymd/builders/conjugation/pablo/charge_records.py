@@ -154,7 +154,7 @@ class ChargeBridgeReport(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     success: bool
-    source: str = "production:product-state-charge-bridge"
+    source: str = "charge-bridge:product-state"
     order_preserving_atom_records: bool = False
     nagl_model: str | None = None
     ff14sb_atom_count: int = 0

@@ -921,26 +921,6 @@ class ConjugationAttachmentConfig(BaseModel):
         return self
 
 
-class ConjugationChargeConfig(BaseModel):
-    """Charge patching policy for product-state covalent junction workflows."""
-
-    local_junction_patching: bool = Field(
-        True,
-        description="Enable local product-state charge patching around covalent junctions",
-    )
-    patch_radius_bonds: int = Field(
-        3,
-        ge=0,
-        description="Bond radius for local product-state junction charge patches",
-    )
-    preserve_total_charge: bool = Field(True, description="Preserve integer total system charge")
-    integer_tolerance: float = Field(
-        1.0e-4,
-        gt=0.0,
-        description="Tolerance for integer-charge diagnostics after local patching",
-    )
-
-
 class ConjugationDiagnosticsConfig(BaseModel):
     """Diagnostics policy for covalent modification workflows."""
 
@@ -982,7 +962,6 @@ class ConjugationConfig(BaseModel):
         default_factory=list,
         description="Requested covalent attachments; at least one must be enabled when enabled=true",
     )
-    charge: ConjugationChargeConfig = Field(default_factory=ConjugationChargeConfig)
     diagnostics: ConjugationDiagnosticsConfig = Field(
         default_factory=ConjugationDiagnosticsConfig,
         description="Diagnostics output policy",

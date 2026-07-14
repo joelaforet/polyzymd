@@ -14,11 +14,20 @@ from polyzymd.builders.conjugation.reactions import (
     get_reaction,
     list_reactions,
 )
+from polyzymd.builders.conjugation.reactions.n_glycosylation import detect_glycan_anomeric_group
 from polyzymd.config.schema import ConjugationAttachmentConfig
 
 pytest.importorskip("rdkit")
 
 BRANCHED_GLCNAC_SMILES = "CC(=O)N[C@@H]1[C@@H](O)[C@H](O)[C@@H](CO)O[C@H]1O"
+THREE_BRANCH_GLYCAN_SMILES = (
+    "CC(=O)N[C@@H]1[C@H]([C@@H]([C@H](O[C@H]1O)CO)O[C@H]2[C@@H]([C@H]"
+    "([C@@H]([C@H](O2)CO)O[C@H]3[C@H]([C@H]([C@@H]([C@H](O3)CO[C@@H]4"
+    "[C@H]([C@H]([C@@H]([C@H](O4)CO[C@@H]5[C@H]([C@H]([C@@H]([C@H](O5)CO)O)O)O)O)"
+    "O[C@@H]6[C@H]([C@H]([C@@H]([C@H](O6)CO)O)O)O[C@@H]7[C@H]([C@H]([C@@H]([C@H](O7)CO)O)O)O)O)O)"
+    "O[C@@H]8[C@H]([C@H]([C@@H]([C@H](O8)CO)O)O)O[C@@H]9[C@H]([C@H]([C@@H]([C@H](O9)CO)O)O)"
+    "O[C@@H]1[C@H]([C@H]([C@@H]([C@H](O1)CO)O)O)O)O)O)NC(=O)C)O"
+)
 
 
 def test_registry_exposes_n_glycosylation_template_and_aliases():
@@ -79,6 +88,28 @@ def test_detects_anomeric_carbon_and_hydroxyl_leaving_atoms_in_branched_glycan(
     assert atoms_by_index[group.reactive_carbon_index].atom_name not in {
         atoms_by_index[index].atom_name for index in group.leaving_atom_indices
     }
+
+
+def test_detects_validated_three_branch_glycan_checkpoint():
+    """The fast E2E glycan must be the validated three-branch input, not mono-NAG."""
+    from rdkit import Chem
+    from rdkit.Chem import rdMolDescriptors
+
+    heavy_mol = Chem.MolFromSmiles(THREE_BRANCH_GLYCAN_SMILES)
+    assert heavy_mol is not None
+    mol = Chem.AddHs(heavy_mol)
+
+    group = detect_glycan_anomeric_group(mol)
+
+    assert heavy_mol.GetNumAtoms() == 117
+    assert mol.GetNumAtoms() == 225
+    assert rdMolDescriptors.CalcMolFormula(mol) == "C64H108N2O51"
+    assert Chem.GetFormalCharge(mol) == 0
+    assert mol.GetRingInfo().NumRings() == 10
+    assert group.reactive_carbon_index == 9
+    assert group.hydroxyl_oxygen_index == 10
+    assert group.ring_oxygen_index == 8
+    assert group.leaving_atom_indices == (10, 126)
 
 
 def test_resolve_plan_builds_asx_to_user_glycan_residue_linkage(tmp_path: Path):

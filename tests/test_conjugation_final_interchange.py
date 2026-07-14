@@ -89,14 +89,14 @@ def test_final_helper_refuses_missing_product_state_provenance(product_library):
 
 
 def test_final_helper_requires_conjugate_charge_templates():
-    """Product-state provenance must include production partial charges."""
+    """Product-state provenance must include validated/explicit partial charges."""
     captured = {}
 
     def fake_parameterizer(topology, **kwargs):
         captured["kwargs"] = kwargs
         return SimpleNamespace(success=True, interchange=object())
 
-    with pytest.raises(ValueError, match="no production partial-charge provenance"):
+    with pytest.raises(ValueError, match="no validated/explicit partial-charge provenance"):
         create_final_conjugated_interchange(
             _Builder(standard_templates=(_template("water"),)),
             product_state_pablo_library=_product_library(),
@@ -113,7 +113,7 @@ def test_final_helper_rejects_unmarked_product_template_before_openff():
         captured["kwargs"] = kwargs
         return SimpleNamespace(success=True, interchange=object())
 
-    with pytest.raises(ValueError, match="none are marked as production partial-charge provenance"):
+    with pytest.raises(ValueError, match="none are marked with validated/explicit"):
         create_final_conjugated_interchange(
             _Builder(),
             product_state_pablo_library=_product_library(
@@ -160,7 +160,7 @@ def test_final_helper_fails_before_parameterizer_when_bridge_fails():
         captured["kwargs"] = kwargs
         return SimpleNamespace(success=True, interchange="ok")
 
-    with pytest.raises(ValueError, match="no production partial-charge provenance"):
+    with pytest.raises(ValueError, match="no validated/explicit partial-charge provenance"):
         create_final_conjugated_interchange(
             builder,
             product_state_pablo_library=_product_library(),
@@ -182,7 +182,7 @@ def test_final_helper_receives_real_openff_standard_template_charges(monkeypatch
         [0.0] * conjugate_template.n_atoms,
         "elementary_charge",
     )
-    conjugate_template.properties["polyzymd_charge_provenance"] = "production:test-fixture"
+    conjugate_template.properties["polyzymd_charge_provenance"] = "charge-bridge:test-fixture"
     water_template = Molecule.from_smiles("O")
     water_template.name = "TIP3P_STANDARD_TEMPLATE"
     water_template.partial_charges = Quantity(

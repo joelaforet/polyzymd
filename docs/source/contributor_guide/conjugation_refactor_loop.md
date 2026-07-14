@@ -329,7 +329,7 @@ Before each commit, verify:
 
 ## Known current scientific boundary
 
-The current production path uses product-state Pablo ingestion, production charge
+The current production path uses product-state Pablo ingestion, validated charge
 templates, OpenFF parameterization, and `relax_conjugate()` for restrained
 conjugate relaxation. It does not yet claim production-quality charge assignment
 for all possible modifiers; new chemistries still need explicit validation of
