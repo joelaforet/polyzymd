@@ -21,7 +21,7 @@ _REFUSAL_MESSAGE = (
     "PolyzyMD refuses whole-conjugate AM1-BCC charge assignment for a polymer-protein "
     "conjugate. Final conjugated Interchange creation requires product-state Pablo "
     "residue/template provenance from the successful conjugate construction path. "
-    "Formal-charge templates are not production partial charges."
+    "Formal-charge templates are not validated/explicit partial charges."
 )
 
 
@@ -40,7 +40,7 @@ def create_final_conjugated_interchange(
         Prepared ``SystemBuilder`` with a solvated topology.
     product_state_pablo_library : Any
         Product-state Pablo library created during conjugate construction. The
-        library must provide residue definitions and explicit production
+        library must provide residue definitions and validated/explicit
         partial-charge provenance for the final conjugate molecule template.
     settings : InterchangeParameterizationSettings or None, optional
         Conjugation parameterization settings, by default ``None``.

@@ -43,7 +43,8 @@ The validated current path is:
 5. Build a crosslinked product PDB with expected linkage `CONECT` records.
 6. Ingest the product state with Pablo and build the final OpenFF Interchange.
 7. Combine ff14SB-style protein treatment, polymer template charges/parameters,
-   and a local NAGL/AshGC patch charge bridge near the linkage.
+   and a local patch charge bridge near the linkage using the pre-production
+   OpenFF NAGL model `openff-gnn-am1bcc-0.1.0-rc.3.pt`. 
 8. Reconcile local charge evidence instead of falling back to whole-conjugate
    AM1-BCC or unmarked cached charges.
 9. Run conjugate relaxation and collect restrained OpenMM relaxation evidence when

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from types import SimpleNamespace
 
@@ -13,6 +14,7 @@ from polyzymd.builders.conjugation.pablo.charge_records import (
     ResiduePartialChargeRecord,
     validate_unique_atom_records,
 )
+from polyzymd.builders.conjugation.pablo.product_state import target_identities_from_molecule
 
 
 def test_residue_records_group_atom_records():
@@ -24,7 +26,7 @@ def test_residue_records_group_atom_records():
             residue_number=10,
             atom_name="NZ",
             charge_e=-0.2,
-            source="production:ff14SB",
+            source="prepared-source:ff14sb-protein",
             source_role="protein_ff14sb",
         ),
         AtomPartialChargeRecord(
@@ -33,7 +35,7 @@ def test_residue_records_group_atom_records():
             residue_number=10,
             atom_name="CE",
             charge_e=0.2,
-            source="production:ff14SB",
+            source="prepared-source:ff14sb-protein",
             source_role="protein_ff14sb",
         ),
     )
@@ -53,7 +55,7 @@ def test_residue_records_preserve_ordered_atom_records():
             residue_number=10,
             atom_name="NZ",
             charge_e=-0.4,
-            source="production:ff14SB",
+            source="prepared-source:ff14sb-protein",
             source_role="protein_ff14sb",
         ),
         AtomPartialChargeRecord(
@@ -62,7 +64,7 @@ def test_residue_records_preserve_ordered_atom_records():
             residue_number=1,
             atom_name="C047",
             charge_e=0.1,
-            source="production:polymer",
+            source="attached-polymer-template:test-sidecar",
             source_role="polymer_template",
         ),
         AtomPartialChargeRecord(
@@ -71,7 +73,7 @@ def test_residue_records_preserve_ordered_atom_records():
             residue_number=10,
             atom_name="CE",
             charge_e=0.3,
-            source="production:ff14SB",
+            source="prepared-source:ff14sb-protein",
             source_role="protein_ff14sb",
         ),
     )
@@ -98,7 +100,7 @@ def test_validate_unique_atom_records_rejects_duplicate_identity():
         residue_number=10,
         atom_name="NZ",
         charge_e=-0.2,
-        source="production:ff14SB",
+        source="prepared-source:ff14sb-protein",
         source_role="protein_ff14sb",
     )
 
@@ -129,7 +131,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
                 residue_number=10,
                 atom_name="NZ",
                 charge_e=-0.1,
-                source="production:ff14SB",
+                source="prepared-source:ff14sb-protein",
                 source_role="protein_ff14sb",
             ),
         ),
@@ -144,7 +146,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
                 residue_number=1,
                 atom_name="C047",
                 charge_e=0.25,
-                source="production:polymer",
+                source="attached-polymer-template:test-sidecar",
                 source_role="polymer_template",
             ),
             AtomPartialChargeRecord(
@@ -153,7 +155,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
                 residue_number=1,
                 atom_name="O020",
                 charge_e=-0.3,
-                source="production:polymer",
+                source="attached-polymer-template:test-sidecar",
                 source_role="polymer_template",
             ),
             AtomPartialChargeRecord(
@@ -162,7 +164,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
                 residue_number=1,
                 atom_name="C001",
                 charge_e=0.3,
-                source="production:polymer",
+                source="attached-polymer-template:test-sidecar",
                 source_role="polymer_template",
             ),
         ),
@@ -178,7 +180,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
                     residue_number=10,
                     atom_name="NZ",
                     charge_e=-0.25,
-                    source="production:nagl",
+                    source="preproduction-nagl:local-product-state-patch",
                     source_role="local_nagl_patch",
                 ),
             ),
@@ -201,7 +203,10 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
     assert result.charge_bridge_report.total_partial_charge_before_correction_e == pytest.approx(
         0.0
     )
-    assert result.charge_bridge_report.source == "production:product-state-local-nagl-charge-bridge"
+    assert (
+        result.charge_bridge_report.source
+        == "preproduction-nagl:product-state-peptide-capped-charge-bridge"
+    )
     assert result.charge_bridge_report.order_preserving_atom_records is True
     assert (tmp_path / "product_state_charge_bridge.json").is_file()
     assert len(result.residue_partial_charges) == target.n_atoms
@@ -219,6 +224,84 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
     assert charges[("LYX", "NZ")] == pytest.approx(-0.25)
 
 
+def test_build_product_state_charge_bridge_has_no_public_total_charge_tolerance():
+    """Strict bridge reconciliation should not expose a caller-relaxed tolerance."""
+    signature = inspect.signature(charge_bridge.build_product_state_charge_bridge)
+
+    assert "total_charge_tolerance" not in signature.parameters
+
+
+def test_build_product_state_charge_bridge_rejects_caller_total_charge_tolerance(tmp_path):
+    """Callers should not be able to bypass fixed bridge reconciliation limits."""
+    with pytest.raises(TypeError, match="total_charge_tolerance"):
+        charge_bridge.build_product_state_charge_bridge(
+            product_state_pablo_library=SimpleNamespace(residue_names=("LYX",), definitions=()),
+            product_topology=SimpleNamespace(molecules=()),
+            product_pdb=tmp_path / "product.pdb",
+            source_protein_pdb=tmp_path / "source.pdb",
+            specs=(SimpleNamespace(),),
+            output_dir=tmp_path,
+            total_charge_tolerance=1.0,
+        )
+
+
+def test_target_identities_validate_product_pdb_metadata():
+    """Product-state target identities should accept same-order PDB metadata."""
+    product_atoms = (_product_atom(1, 0, "A", "LYX", 10, "NZ"),)
+    target = _molecule([_atom_from_product_atom(product_atoms[0])])
+
+    identities = target_identities_from_molecule(target, product_atoms=product_atoms)
+
+    assert identities == (("A", "LYX", 10, "", "NZ"),)
+
+
+def test_target_identities_reject_complete_stale_product_metadata():
+    """Complete but stale atom metadata should not drive charge transfer."""
+    product_atoms = (_product_atom(1, 0, "A", "LYX", 10, "NZ"),)
+    stale_atom = _atom_from_product_atom(_product_atom(99, 0, "C", "NHX", 1, "C001"))
+    target = _molecule([stale_atom])
+
+    with pytest.raises(ValueError, match="stale or reordered metadata"):
+        target_identities_from_molecule(target, product_atoms=product_atoms)
+
+
+def test_target_identities_reject_product_atom_count_mismatch():
+    """Topology and product PDB atom counts must agree before charge transfer."""
+    product_atoms = (
+        _product_atom(1, 0, "A", "LYX", 10, "NZ"),
+        _product_atom(2, 1, "A", "LYX", 10, "CE"),
+    )
+    target = _molecule([_atom_from_product_atom(product_atoms[0])])
+
+    with pytest.raises(ValueError, match="atom-count mismatch"):
+        target_identities_from_molecule(target, product_atoms=product_atoms)
+
+
+def test_target_identities_reject_product_atom_order_mismatch():
+    """Product charge transfer should fail when metadata order is swapped."""
+    product_atoms = (
+        _product_atom(1, 0, "A", "LYX", 10, "NZ"),
+        _product_atom(2, 1, "A", "LYX", 10, "CE"),
+    )
+    target = _molecule(
+        [_atom_from_product_atom(product_atoms[1]), _atom_from_product_atom(product_atoms[0])]
+    )
+
+    with pytest.raises(ValueError, match="stale or reordered metadata"):
+        target_identities_from_molecule(target, product_atoms=product_atoms)
+
+
+def test_target_identities_reject_serial_renumbering_for_charge_transfer():
+    """Serial renumbering should not be accepted during product charge transfer."""
+    product_atom = _product_atom(1, 0, "A", "LYX", 10, "NZ")
+    target_atom = _atom_from_product_atom(product_atom)
+    target_atom.metadata["product_atom_serial"] = 101
+    target = _molecule([target_atom])
+
+    with pytest.raises(ValueError, match="product_atom_serial"):
+        target_identities_from_molecule(target, product_atoms=(product_atom,))
+
+
 def test_bridge_rejects_reconciliation_without_local_patch_atoms(monkeypatch, tmp_path):
     """Charge residuals should not be hidden on unrelated polymer atoms."""
     target = _molecule([_atom("C", "NHX", 1, "C001", 0)])
@@ -229,7 +312,7 @@ def test_bridge_rejects_reconciliation_without_local_patch_atoms(monkeypatch, tm
         residue_number=1,
         atom_name="C001",
         charge_e=-1.2,
-        source="production:polymer",
+        source="attached-polymer-template:test-sidecar",
         source_role="polymer_template",
     )
     monkeypatch.setattr(charge_bridge, "_protein_ff14sb_records", lambda **_: ())
@@ -237,7 +320,7 @@ def test_bridge_rejects_reconciliation_without_local_patch_atoms(monkeypatch, tm
     monkeypatch.setattr(charge_bridge, "_local_nagl_patch_records", lambda _, **__: ((), None))
     monkeypatch.setattr(charge_bridge, "parse_pdb_atom_records", lambda _: ())
 
-    with pytest.raises(ValueError, match="no real local NAGL patch atoms"):
+    with pytest.raises(ValueError, match="no mapped modified-protein product residue atoms"):
         charge_bridge.build_product_state_charge_bridge(
             product_state_pablo_library=library,
             product_topology=SimpleNamespace(molecules=(target,)),
@@ -252,7 +335,7 @@ def test_bridge_rejects_reconciliation_without_local_patch_atoms(monkeypatch, tm
 
 def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tmp_path):
     """Small residuals should be auditable and local to NAGL patch atoms."""
-    target = _molecule([_atom("C", "NHX", 1, "C001", 0), _atom("C", "NHX", 1, "N001", 0)])
+    target = _molecule([_atom("A", "LYX", 10, "NZ", 0), _atom("C", "NHX", 1, "C001", 0)])
     library = SimpleNamespace(residue_names=("NHX",), definitions=())
     polymer_record = AtomPartialChargeRecord(
         chain_id="C",
@@ -260,16 +343,16 @@ def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tm
         residue_number=1,
         atom_name="C001",
         charge_e=-0.10,
-        source="production:polymer",
+        source="attached-polymer-template:test-sidecar",
         source_role="polymer_template",
     )
     patch_record = AtomPartialChargeRecord(
-        chain_id="C",
-        residue_name="NHX",
-        residue_number=1,
-        atom_name="N001",
-        charge_e=0.08,
-        source="production:nagl-patch",
+        chain_id="A",
+        residue_name="LYX",
+        residue_number=10,
+        atom_name="NZ",
+        charge_e=0.096,
+        source="preproduction-nagl:local-product-state-patch",
         source_role="local_nagl_patch",
     )
     monkeypatch.setattr(charge_bridge, "_protein_ff14sb_records", lambda **_: ())
@@ -293,9 +376,9 @@ def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tm
     )
 
     report = result.charge_bridge_report
-    assert report.normalization_correction_e == pytest.approx(0.02)
-    assert report.max_per_atom_correction_e == pytest.approx(0.02)
-    assert report.correction_atom_identities == ("chain C residue NHX 1 atom N001",)
+    assert report.normalization_correction_e == pytest.approx(0.004)
+    assert report.max_per_atom_correction_e == pytest.approx(0.004)
+    assert report.correction_atom_identities == ("chain A residue LYX 10 atom NZ",)
     diagnostic = json.loads(
         (tmp_path / "product_state_charge_bridge_local_reconciliation.json").read_text(
             encoding="utf-8"
@@ -304,11 +387,11 @@ def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tm
     reconciliation = diagnostic["local_reconciliation"]
     assert reconciliation["success"] is True
     assert reconciliation["corrected_atom_count"] == 1
-    assert reconciliation["per_atom_correction_e"] == pytest.approx(0.02)
+    assert reconciliation["per_atom_correction_e"] == pytest.approx(0.004)
 
 
-def test_bridge_refuses_raw_sdf_as_production_charge_source(tmp_path):
-    """Raw bond SDF sidecars should not be accepted as production charges."""
+def test_bridge_refuses_raw_sdf_as_validated_charge_source(tmp_path):
+    """Raw bond SDF sidecars should not be accepted as validated charges."""
     raw_sdf = tmp_path / "polymer.sdf"
     raw_sdf.write_text("", encoding="utf-8")
     spec = SimpleNamespace(source_sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf})
@@ -317,8 +400,20 @@ def test_bridge_refuses_raw_sdf_as_production_charge_source(tmp_path):
         charge_bridge._source_sdf_path(spec)
 
 
+def test_bridge_skips_raw_sdf_for_smiles_moiety_patch(tmp_path):
+    """SMILES moieties should be charged by product patch, not raw SDF transfer."""
+    raw_sdf = tmp_path / "glycan.sdf"
+    raw_sdf.write_text("", encoding="utf-8")
+    spec = SimpleNamespace(
+        fragment=SimpleNamespace(source_kind="moiety"),
+        source_sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf},
+    )
+
+    assert charge_bridge._source_sdf_path(spec) is None
+
+
 def test_bridge_prefers_charged_sdf_source(tmp_path):
-    """Charged SDF sidecars should be selected for production charge transfer."""
+    """Charged SDF sidecars should be selected for validated charge transfer."""
     raw_sdf = tmp_path / "polymer.sdf"
     charged_sdf = tmp_path / "polymer_charged.sdf"
     spec = SimpleNamespace(
@@ -462,6 +557,47 @@ def _atom(
             "atom_name": atom_name,
         },
     )
+
+
+def _product_atom(
+    serial: int,
+    atom_index: int,
+    chain_id: str,
+    residue_name: str,
+    residue_number: int,
+    atom_name: str,
+) -> SimpleNamespace:
+    """Build a product PDB atom-record double."""
+    return SimpleNamespace(
+        serial=serial,
+        atom_index=atom_index,
+        chain_id=chain_id,
+        residue_name=residue_name,
+        residue_number=residue_number,
+        insertion_code="",
+        atom_name=atom_name,
+    )
+
+
+def _atom_from_product_atom(product_atom: SimpleNamespace) -> SimpleNamespace:
+    """Build an OpenFF-like atom double with product PDB metadata."""
+    atom = _atom(
+        product_atom.chain_id,
+        product_atom.residue_name,
+        product_atom.residue_number,
+        product_atom.atom_name,
+        0,
+    )
+    atom.metadata.update(
+        {
+            "product_identity_source": "product_pdb",
+            "product_atom_index": product_atom.atom_index,
+            "serial": product_atom.serial,
+            "product_atom_serial": product_atom.serial,
+            "insertion_code": product_atom.insertion_code,
+        }
+    )
+    return atom
 
 
 def _mini_sdf(elements: tuple[str, ...]) -> str:

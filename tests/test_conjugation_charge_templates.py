@@ -2,25 +2,30 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
 
 from polyzymd.builders.conjugation.pablo.charge_templates import (
+    _charge_values as _template_charge_values,
+)
+from polyzymd.builders.conjugation.pablo.charge_templates import (
+    _formal_charge_value,
     _source_from_residue_records,
     build_conjugate_charge_templates,
 )
 
 
 def test_build_conjugate_charge_templates_transfers_marked_template_charges():
-    """Production-marked template charges should transfer by residue atom identity."""
+    """Explicitly marked template charges should transfer by residue atom identity."""
     source = _molecule(
         "source",
         [
             _atom("A", "LYX", 10, "NZ", 0, -0.3),
             _atom("C", "NHX", 1, "C047", 0, 0.3),
         ],
-        properties={"polyzymd_charge_provenance": "production:resp-fragment-fit"},
+        properties={"polyzymd_charge_provenance": "prepared-source:resp-fragment-fit"},
     )
     target = _molecule(
         "target",
@@ -42,11 +47,11 @@ def test_build_conjugate_charge_templates_transfers_marked_template_charges():
 
 
 def test_build_conjugate_charge_templates_refuses_unmarked_cached_templates():
-    """Cached molecule charges are not trusted unless marked as production provenance."""
+    """Cached molecule charges are not trusted unless marked with explicit provenance."""
     target = _molecule("target", [_atom("A", "LYX", 10, "NZ", 0)])
     cached = _molecule("cached", [_atom("A", "LYX", 10, "NZ", 0, 0.0)])
 
-    with pytest.raises(ValueError, match="none are marked as production partial-charge provenance"):
+    with pytest.raises(ValueError, match="none are marked with validated/explicit"):
         build_conjugate_charge_templates(
             SimpleNamespace(molecules=(target,)),
             _library(charge_templates=(cached,)),
@@ -54,7 +59,7 @@ def test_build_conjugate_charge_templates_refuses_unmarked_cached_templates():
 
 
 def test_build_conjugate_charge_templates_refuses_formal_record_sources():
-    """Formal charge records should not be reinterpreted as production partial charges."""
+    """Formal charge records should not be reinterpreted as explicit partial charges."""
     target = _molecule("target", [_atom("A", "LYX", 10, "NZ", 0)])
     records = (
         {
@@ -87,7 +92,7 @@ def test_build_conjugate_charge_templates_reports_missing_atoms():
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:resp-fragment-fit",
+            "source": "prepared-source:resp-fragment-fit",
             "atom_charges": {"NZ": 0.0},
         },
     )
@@ -107,7 +112,7 @@ def test_build_conjugate_charge_templates_validates_total_charge():
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:resp-fragment-fit",
+            "source": "prepared-source:resp-fragment-fit",
             "atom_charges": {"NZ": 0.0},
         },
     )
@@ -119,35 +124,70 @@ def test_build_conjugate_charge_templates_validates_total_charge():
         )
 
 
-def test_ordered_residue_records_preserve_metadata_missing_fallback_order():
-    """Metadata-missing fallback should use proven one-atom bridge record order."""
+def test_build_conjugate_charge_templates_has_no_public_total_charge_tolerance():
+    """Template charge acceptance should not expose a caller-relaxed tolerance."""
+    signature = inspect.signature(build_conjugate_charge_templates)
+
+    assert "total_charge_tolerance" not in signature.parameters
+
+
+def test_build_conjugate_charge_templates_rejects_caller_total_charge_tolerance():
+    """Callers should not be able to relax final charge acceptance."""
+    target = _molecule("target", [_atom("A", "LYX", 10, "NZ", 0)])
     records = (
         {
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:ff14SB",
+            "source": "prepared-source:resp-fragment-fit",
+            "atom_charges": {"NZ": 0.0},
+        },
+    )
+
+    with pytest.raises(TypeError, match="total_charge_tolerance"):
+        build_conjugate_charge_templates(
+            SimpleNamespace(molecules=(target,)),
+            _library(residue_partial_charges=records),
+            total_charge_tolerance=1.0,
+        )
+
+
+def test_source_from_residue_records_has_no_ordered_fallback_context_argument():
+    """Internal charge sources should not retain metadata-stripped fallback controls."""
+    signature = inspect.signature(_source_from_residue_records)
+
+    assert tuple(signature.parameters) == ("records",)
+
+
+def test_ordered_residue_records_do_not_enable_metadata_missing_fallback():
+    """Metadata-stripped targets should fail even with ordered bridge records."""
+    records = (
+        {
+            "chain_id": "A",
+            "residue_name": "LYX",
+            "residue_number": 10,
+            "source": "prepared-source:ff14SB",
             "atom_charges": {"NZ": -0.4},
         },
         {
             "chain_id": "C",
             "residue_name": "NHX",
             "residue_number": 1,
-            "source": "production:polymer",
+            "source": "attached-polymer-template",
             "atom_charges": {"C047": 0.1},
         },
         {
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:ff14SB",
+            "source": "prepared-source:ff14SB",
             "atom_charges": {"CE": 0.3},
         },
         {
             "chain_id": "C",
             "residue_name": "NHX",
             "residue_number": 1,
-            "source": "production:polymer",
+            "source": "attached-polymer-template",
             "atom_charges": {"O020": 0.0},
         },
     )
@@ -155,22 +195,16 @@ def test_ordered_residue_records_preserve_metadata_missing_fallback_order():
     library = _library(
         residue_partial_charges=records,
         charge_bridge_report=SimpleNamespace(
-            source="production:product-state-local-nagl-charge-bridge",
+            source="preproduction-nagl:product-state-peptide-capped-charge-bridge",
             success=True,
             order_preserving_atom_records=True,
         ),
     )
 
-    source = _source_from_residue_records(records, library)
-    templates = build_conjugate_charge_templates(
-        SimpleNamespace(molecules=(target,)),
-        library,
-    )
-
-    expected = (-0.4, 0.1, 0.3, 0.0)
-    assert source.ordered_charges == pytest.approx(expected)
-    assert _charge_values(templates[0].partial_charges) == pytest.approx(expected)
-    assert _charge_values(templates[0].partial_charges) != pytest.approx((-0.4, 0.3, 0.1, 0.0))
+    source = _source_from_residue_records(records)
+    assert not hasattr(source, "ordered_charges")
+    with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
+        build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
 
 
 def test_grouped_residue_records_do_not_enable_metadata_missing_fallback():
@@ -180,7 +214,7 @@ def test_grouped_residue_records_do_not_enable_metadata_missing_fallback():
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:ff14SB",
+            "source": "prepared-source:ff14SB",
             "source_role": "protein_ff14sb",
             "atom_charges": {"NZ": -0.4, "CE": 0.3},
         },
@@ -188,7 +222,7 @@ def test_grouped_residue_records_do_not_enable_metadata_missing_fallback():
             "chain_id": "C",
             "residue_name": "NHX",
             "residue_number": 1,
-            "source": "production:polymer",
+            "source": "attached-polymer-template",
             "source_role": "polymer_template",
             "atom_charges": {"C047": 0.1, "O020": 0.0},
         },
@@ -197,14 +231,14 @@ def test_grouped_residue_records_do_not_enable_metadata_missing_fallback():
     library = _library(
         residue_partial_charges=records,
         charge_bridge_report=SimpleNamespace(
-            source="production:product-state-local-nagl-charge-bridge",
+            source="preproduction-nagl:product-state-peptide-capped-charge-bridge",
             success=True,
             order_preserving_atom_records=True,
         ),
     )
 
-    source = _source_from_residue_records(records, library)
-    assert source.ordered_charges == ()
+    source = _source_from_residue_records(records)
+    assert not hasattr(source, "ordered_charges")
     with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
         build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
 
@@ -216,15 +250,15 @@ def test_one_atom_records_without_bridge_provenance_do_not_enable_ordered_fallba
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:ff14SB",
+            "source": "prepared-source:ff14SB",
             "atom_charges": {"NZ": 0.0},
         },
     )
     target = _metadata_free_molecule("metadata-free-target", atom_count=1)
     library = _library(residue_partial_charges=records)
 
-    source = _source_from_residue_records(records, library)
-    assert source.ordered_charges == ()
+    source = _source_from_residue_records(records)
+    assert not hasattr(source, "ordered_charges")
     with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
         build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
 
@@ -236,7 +270,7 @@ def test_generic_bridge_source_without_order_marker_does_not_enable_ordered_fall
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:ff14SB",
+            "source": "prepared-source:ff14SB",
             "atom_charges": {"NZ": 0.0},
         },
     )
@@ -244,15 +278,43 @@ def test_generic_bridge_source_without_order_marker_does_not_enable_ordered_fall
     library = _library(
         residue_partial_charges=records,
         charge_bridge_report=SimpleNamespace(
-            source="production:product-state-charge-bridge",
+            source="charge-bridge:product-state",
             success=True,
         ),
     )
 
-    source = _source_from_residue_records(records, library)
-    assert source.ordered_charges == ()
+    source = _source_from_residue_records(records)
+    assert not hasattr(source, "ordered_charges")
     with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
         build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
+
+
+def test_quantity_conversion_does_not_swallow_unexpected_charge_errors():
+    """Unexpected quantity conversion failures should surface to callers."""
+
+    class BrokenQuantity:
+        """Quantity double with an unexpected OpenMM conversion failure."""
+
+        def value_in_unit(self, _unit):
+            """Raise a non-conversion API error."""
+            raise RuntimeError("unexpected charge conversion failure")
+
+    with pytest.raises(RuntimeError, match="unexpected charge conversion failure"):
+        _template_charge_values(BrokenQuantity())
+
+
+def test_formal_quantity_conversion_does_not_swallow_unexpected_errors():
+    """Unexpected formal-charge conversion failures should surface to callers."""
+
+    class BrokenQuantity:
+        """Quantity double with an unexpected OpenMM conversion failure."""
+
+        def value_in_unit(self, _unit):
+            """Raise a non-conversion API error."""
+            raise RuntimeError("unexpected formal conversion failure")
+
+    with pytest.raises(RuntimeError, match="unexpected formal conversion failure"):
+        _formal_charge_value(BrokenQuantity())
 
 
 def _library(**updates):
