@@ -323,7 +323,7 @@ def test_product_state_pablo_library_preserves_fixture_bond_orders_and_valence(
     assert _definition_atom_charge(definitions[2], "NQA") == 1
     assert _definition_atom_charge(definitions[2], "OS3") == -1
     assert library.residue_partial_charges == ()
-    with pytest.raises(ValueError, match="no production partial-charge provenance"):
+    with pytest.raises(ValueError, match="no validated/explicit partial-charge provenance"):
         build_conjugate_charge_templates(SimpleNamespace(molecules=()), library)
 
 

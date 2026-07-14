@@ -180,7 +180,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
                     residue_number=10,
                     atom_name="NZ",
                     charge_e=-0.25,
-                    source="production:nagl",
+                    source="preproduction-nagl:local-product-state-patch",
                     source_role="local_nagl_patch",
                 ),
             ),
@@ -352,7 +352,7 @@ def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tm
         residue_number=10,
         atom_name="NZ",
         charge_e=0.096,
-        source="production:nagl-patch",
+        source="preproduction-nagl:local-product-state-patch",
         source_role="local_nagl_patch",
     )
     monkeypatch.setattr(charge_bridge, "_protein_ff14sb_records", lambda **_: ())
@@ -390,8 +390,8 @@ def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tm
     assert reconciliation["per_atom_correction_e"] == pytest.approx(0.004)
 
 
-def test_bridge_refuses_raw_sdf_as_production_charge_source(tmp_path):
-    """Raw bond SDF sidecars should not be accepted as production charges."""
+def test_bridge_refuses_raw_sdf_as_validated_charge_source(tmp_path):
+    """Raw bond SDF sidecars should not be accepted as validated charges."""
     raw_sdf = tmp_path / "polymer.sdf"
     raw_sdf.write_text("", encoding="utf-8")
     spec = SimpleNamespace(source_sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf})
@@ -413,7 +413,7 @@ def test_bridge_skips_raw_sdf_for_smiles_moiety_patch(tmp_path):
 
 
 def test_bridge_prefers_charged_sdf_source(tmp_path):
-    """Charged SDF sidecars should be selected for production charge transfer."""
+    """Charged SDF sidecars should be selected for validated charge transfer."""
     raw_sdf = tmp_path / "polymer.sdf"
     charged_sdf = tmp_path / "polymer_charged.sdf"
     spec = SimpleNamespace(

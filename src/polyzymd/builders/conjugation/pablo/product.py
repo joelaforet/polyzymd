@@ -318,7 +318,7 @@ def _spec_sdf_path(spec: Any) -> Path | None:
 
 
 def _spec_charged_sdf_path(spec: Any) -> Path | None:
-    """Return the production charged SDF sidecar recorded on a resolved spec."""
+    """Return the validated charged SDF sidecar recorded on a resolved spec."""
     for sidecars in (
         getattr(spec, "source_sidecars", None),
         getattr(getattr(spec, "fragment", None), "sidecars", None),
