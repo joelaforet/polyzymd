@@ -73,13 +73,33 @@ def validate_fast_mixed_summary(summary: dict[str, Any], *, require_cuda: bool =
     assert summary["fixture_glycan"]["formula"] == "C64H108N2O51"
     assert summary["fixture_glycan"]["anomeric_carbon_index"] == 9
     assert summary["fixture_glycan"]["leaving_atom_indices"] == [10, 126]
+    assert summary["fixture_glycan"]["leaving_atom_count"] == 2
     assert summary["final_interchange_created"] is True
     assert summary["resolved_attachment_count"] == 2
     assert summary["solvated_atom_count"] > summary["crosslinked_atom_count"] > 1_000
     assert summary["finite_coordinates"] is True
     assert summary["residue_counts"]["LYX"] > 0
     assert summary["residue_counts"]["ASX"] > 0
-    assert summary["residue_counts"]["NAG"] >= 225
+    assert summary["residue_counts"]["NAG"] == 223
+    assert summary["product_glycan"]["residue_name"] == "NAG"
+    assert summary["product_glycan"]["source_atom_count"] == 225
+    assert summary["product_glycan"]["leaving_atom_count"] == 2
+    assert summary["product_glycan"]["retained_atom_count"] == 223
+    assert summary["product_glycan"]["retained_atom_count"] == (
+        summary["product_glycan"]["source_atom_count"]
+        - summary["product_glycan"]["leaving_atom_count"]
+    )
+    n_glycan = summary["n_glycosylation_linkage"]
+    assert n_glycan["mechanism_name"] == "n_glycosylation"
+    assert n_glycan["site_residue_number"] == 60
+    assert n_glycan["protein_product_residue_name"] == "ASX"
+    assert n_glycan["modifier_product_residue_name"] == "NAG"
+    assert n_glycan["protein_link_atom_name"] == "ND2"
+    assert n_glycan["product_asn60_nd2_present"] is True
+    assert n_glycan["protein_leaving_atom_names"] == ["HD21"]
+    assert n_glycan["modifier_leaving_atom_count"] == 2
+    assert n_glycan["crosslink_residues"] == ["ASX", "NAG"]
+    assert n_glycan["crosslink_linking_atoms"][0] == "ND2"
     assert all(summary["export_exists"].values())
     validation = summary["validation"]
     assert validation["bond_graph_status"] == "pass"
@@ -151,6 +171,8 @@ def _build_summary(
         "resolved_attachment_count": len(resolved),
         "resolved_plans": resolved,
         "residue_counts": _residue_counts(crosslinked_atoms),
+        "product_glycan": _product_glycan_evidence(crosslinked_atoms),
+        "n_glycosylation_linkage": _n_glycosylation_linkage_evidence(resolved, crosslinked_atoms),
         "validation": _validation_summary(validation),
         "charge_bridge": _charge_bridge_summary(charge_bridge),
         "relaxation": _relaxation_summary(relaxation),
@@ -179,7 +201,67 @@ def _glycan_fixture_evidence() -> dict[str, Any]:
         "formula": rdMolDescriptors.CalcMolFormula(mol),
         "anomeric_carbon_index": group.reactive_carbon_index,
         "leaving_atom_indices": list(group.leaving_atom_indices),
+        "leaving_atom_count": len(group.leaving_atom_indices),
     }
+
+
+def _product_glycan_evidence(atoms: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return retained product glycan atom-count evidence from the product PDB."""
+    fixture = _glycan_fixture_evidence()
+    residue_name = "NAG"
+    retained_atom_count = sum(1 for atom in atoms if atom["residue_name"] == residue_name)
+    leaving_atom_count = int(fixture["leaving_atom_count"])
+    return {
+        "residue_name": residue_name,
+        "source_atom_count": fixture["hydrogenated_atom_count"],
+        "leaving_atom_count": leaving_atom_count,
+        "retained_atom_count": retained_atom_count,
+    }
+
+
+def _n_glycosylation_linkage_evidence(
+    resolved_plans: list[dict[str, Any]], atoms: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Return ASN60/ND2 and resolved N-glycosylation linkage evidence."""
+    plan = _find_resolved_plan(resolved_plans, "n_glycosylation")
+    protein_link = plan["protein_link_atom"]
+    requirement = plan["pablo_crosslink_requirement"]
+    return {
+        "mechanism_name": plan["contract"]["mechanism_name"],
+        "site_residue_number": protein_link["residue_number"],
+        "protein_product_residue_name": plan["protein_product_residue_name"],
+        "modifier_product_residue_name": plan["modifier_product_residue_name"],
+        "protein_link_atom_name": protein_link["atom_name"],
+        "product_asn60_nd2_present": _has_product_atom(atoms, "ASX", 60, "ND2"),
+        "protein_leaving_atom_names": [
+            atom["atom_name"] for atom in plan.get("protein_leaving_atoms", [])
+        ],
+        "modifier_leaving_atom_count": len(plan.get("modifier_leaving_atoms", [])),
+        "crosslink_residues": list(requirement["residues"]),
+        "crosslink_linking_atoms": list(requirement["linking_atoms"]),
+    }
+
+
+def _find_resolved_plan(
+    resolved_plans: list[dict[str, Any]], mechanism_name: str
+) -> dict[str, Any]:
+    """Find the resolved attachment plan for a named reaction mechanism."""
+    for plan in resolved_plans:
+        if plan.get("contract", {}).get("mechanism_name") == mechanism_name:
+            return plan
+    raise AssertionError(f"No resolved attachment plan for mechanism {mechanism_name!r}")
+
+
+def _has_product_atom(
+    atoms: list[dict[str, Any]], residue_name: str, residue_number: int, atom_name: str
+) -> bool:
+    """Return whether the product PDB contains a specific residue atom."""
+    return any(
+        atom["residue_name"] == residue_name
+        and atom["residue_number"] == residue_number
+        and atom["atom_name"] == atom_name
+        for atom in atoms
+    )
 
 
 def _run_cuda_smoke(interchange: Any, output_dir: Path, steps: int) -> dict[str, Any]:
