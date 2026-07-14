@@ -30,10 +30,59 @@ def test_peptide_capped_records_apply_strict_cap_closure(monkeypatch):
 
     charges = {record.atom_name: record.charge_e for record in records}
     assert model_name == charge_patch.DEFAULT_PATCH_NAGL_MODEL
-    assert charges["CA"] == pytest.approx(0.10 - 0.01 / 3.0)
-    assert charges["CB"] == pytest.approx(-0.05 - 0.01 / 3.0)
-    assert charges["NZ"] == pytest.approx(0.20 - 0.01 / 3.0)
+    assert charges["CA"] == pytest.approx(0.10 + 0.01 / 3.0)
+    assert charges["CB"] == pytest.approx(-0.05 + 0.01 / 3.0)
+    assert charges["NZ"] == pytest.approx(0.20 + 0.01 / 3.0)
     assert charges["C001"] == pytest.approx(-0.10)
+
+
+def test_peptide_capped_records_keep_unmapped_cap_charges_distinct(monkeypatch):
+    """Unmapped cap atoms should not collide with mapped product atom numbers."""
+    spec = _spec()
+    reference = _reference_build()
+    molecule = SimpleNamespace(
+        atoms=(
+            SimpleNamespace(metadata={}),
+            SimpleNamespace(metadata={"atom_map": 1}),
+            SimpleNamespace(metadata={"atom_map": 2}),
+            SimpleNamespace(metadata={"atom_map": 3}),
+            SimpleNamespace(metadata={"atom_map": 4}),
+        ),
+        partial_charges=[0.01, 0.10, -0.05, 0.20, -0.10],
+    )
+
+    monkeypatch.setattr(
+        charge_patch, "_build_reference_product", lambda *_args, **_kwargs: reference
+    )
+    monkeypatch.setattr(charge_patch, "_charge_with_nagl", lambda *_args, **_kwargs: molecule)
+
+    records, _model_name = charge_patch.build_local_product_charge_patch_records(
+        spec,
+        product_atoms=_product_atoms(),
+    )
+
+    charges = {record.atom_name: record.charge_e for record in records}
+    assert charges["CA"] == pytest.approx(0.10 + 0.01 / 3.0)
+    assert charges["CB"] == pytest.approx(-0.05 + 0.01 / 3.0)
+    assert charges["NZ"] == pytest.approx(0.20 + 0.01 / 3.0)
+    assert charges["C001"] == pytest.approx(-0.10)
+
+
+def test_partial_charges_assign_negative_keys_to_unmapped_reference_atoms():
+    """Unmapped cap and flank atoms should retain charge without stealing product maps."""
+    molecule = SimpleNamespace(
+        atoms=(
+            SimpleNamespace(metadata={}),
+            SimpleNamespace(metadata={"atom_map": 1}),
+            SimpleNamespace(metadata={}),
+            SimpleNamespace(metadata={"atom_map": 2}),
+        ),
+        partial_charges=[0.25, -0.10, 0.05, -0.20],
+    )
+
+    charges = charge_patch._partial_charges(molecule)
+
+    assert charges == {-1: 0.25, 1: -0.10, -3: 0.05, 2: -0.20}
 
 
 def test_peptide_capped_records_reject_large_cap_residual(monkeypatch):

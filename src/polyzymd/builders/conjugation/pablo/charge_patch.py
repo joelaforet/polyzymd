@@ -354,7 +354,7 @@ def _records_with_cap_closure(
     raw_total = sum(charges.values())
     cap_residual = raw_total - mapped_total
     closure_count = len(reference.closure_map_numbers)
-    per_atom = -cap_residual / closure_count if closure_count else 0.0
+    per_atom = cap_residual / closure_count if closure_count else 0.0
     if (
         not closure_count
         or abs(cap_residual) > CAP_FLANK_TOTAL_TOLERANCE_E
@@ -427,7 +427,13 @@ def _partial_charges(molecule: Any) -> dict[int, float]:
     ):
         if not math.isfinite(charge):
             raise LocalChargePatchError("NAGL returned a non-finite product-state charge")
-        map_number = int((getattr(atom, "metadata", None) or {}).get("atom_map") or index)
+        metadata = getattr(atom, "metadata", None) or {}
+        raw_map_number = metadata.get("atom_map")
+        map_number = int(raw_map_number) if raw_map_number else -index
+        if map_number in charges:
+            raise LocalChargePatchError(
+                f"NAGL returned duplicate product-state atom map {map_number!r}"
+            )
         charges[map_number] = charge
     return charges
 
