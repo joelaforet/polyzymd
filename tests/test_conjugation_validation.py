@@ -546,6 +546,53 @@ def test_atom_presence_detects_product_protein_leaving_atom(
     assert report.lingering_leaving_atoms[0].residue_name == product_residue_name
 
 
+def test_atom_presence_allows_product_protein_link_atom_renumbering():
+    """Protein-side product matching should tolerate serial shifts from leaving removal."""
+    source_link_atom = _atom(
+        serial=1016,
+        atom_name="NZ",
+        residue_name="LYS",
+        residue_number=63,
+        chain_id="A",
+    )
+    source_leaving_atom = _atom(
+        serial=1017,
+        atom_name="HZ2",
+        residue_name="LYS",
+        residue_number=63,
+        chain_id="A",
+    )
+    product_link_atom = source_link_atom.model_copy(
+        update={"serial": 1015, "atom_index": 1014, "residue_name": "LYX"}
+    )
+    retained_product_hydrogen = _atom(
+        serial=1016,
+        atom_name="HZ1",
+        residue_name="LYX",
+        residue_number=63,
+        chain_id="A",
+    )
+    modifier_link_atom = _atom(serial=1274, atom_name="C003", residue_name="NHX", residue_number=1)
+    plan = SimpleNamespace(
+        protein_link_atom=source_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(source_leaving_atom,),
+        modifier_leaving_atoms=(),
+        protein_product_residue_name="LYX",
+        modifier_product_residue_name="NHX",
+    )
+
+    report = validate_atom_presence(
+        (product_link_atom, retained_product_hydrogen, modifier_link_atom),
+        resolved_plans=(plan,),
+    )
+
+    assert report.status == ValidationStatus.PASS
+    assert report.missing_atoms == ()
+    assert report.lingering_leaving_atoms == ()
+    assert report.present_atoms[0].serial is None
+
+
 def test_atom_presence_does_not_accept_protein_renaming_without_plan_product_name():
     """Protein remapping should remain plan-scoped instead of globally relaxed."""
     source_link_atom = _atom(

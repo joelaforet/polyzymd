@@ -1243,6 +1243,11 @@ def _product_residue_name_for_source(source: str, plan: Any) -> str | None:
 def _product_state_identity(identity: AtomIdentity, *, source: str, plan: Any) -> AtomIdentity:
     """Return the expected identity after product-state residue renaming.
 
+    Product writers may renumber protein atoms after removing leaving groups.
+    When a declared product protein residue name changes the source residue
+    identity, matching should use residue, chain, atom name, and element rather
+    than stale source serials.
+
     Parameters
     ----------
     identity : AtomIdentity
@@ -1260,7 +1265,14 @@ def _product_state_identity(identity: AtomIdentity, *, source: str, plan: Any) -
     product_residue_name = _product_residue_name_for_source(source, plan)
     if product_residue_name is None:
         return identity
-    return identity.model_copy(update={"residue_name": product_residue_name.strip().upper()})
+    normalized_product_name = product_residue_name.strip().upper()
+    updates: dict[str, Any] = {"residue_name": normalized_product_name}
+    if (
+        source.startswith("protein_")
+        and normalized_product_name != identity.residue_name.strip().upper()
+    ):
+        updates.update({"serial": None, "atom_index": None})
+    return identity.model_copy(update=updates)
 
 
 def _assembly_residue_mappings(assembly: Any, *, plan_index: int | None = None) -> tuple[Any, ...]:
