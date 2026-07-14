@@ -722,7 +722,7 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
         fragment=SimpleNamespace(source_kind="moiety"),
     )
     product_template = _charged_molecule_like("product", residue_name="NAG")
-    product_template.properties = {"polyzymd_charge_provenance": "production:test"}
+    product_template.properties = {"polyzymd_charge_provenance": "charge-bridge:test"}
     standard_template = _charged_molecule_like("water", residue_name="HOH")
     product_library = SimpleNamespace(
         definitions=(SimpleNamespace(residue_name="NAG"),),

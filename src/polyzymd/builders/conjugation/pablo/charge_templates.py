@@ -304,12 +304,13 @@ def _charge_values(partial_charges: Any) -> tuple[float, ...]:
     if hasattr(partial_charges, "m_as"):
         return tuple(float(value) for value in partial_charges.m_as("elementary_charge"))
     if hasattr(partial_charges, "value_in_unit"):
-        try:
-            from openff.units.openmm import to_openmm
-            from openmm import unit
+        from openmm import unit
 
+        try:
             converted = partial_charges.value_in_unit(unit.elementary_charge)
-        except Exception:  # noqa: BLE001 - support multiple quantity implementations
+        except TypeError:
+            from openff.units.openmm import to_openmm
+
             converted = to_openmm(partial_charges).value_in_unit(unit.elementary_charge)
         return tuple(float(value) for value in converted)
     return tuple(float(value) for value in partial_charges)
@@ -348,12 +349,13 @@ def _formal_charge_value(formal_charge: Any) -> float:
     if hasattr(formal_charge, "m_as"):
         return float(formal_charge.m_as("elementary_charge"))
     if hasattr(formal_charge, "value_in_unit"):
-        try:
-            from openff.units.openmm import to_openmm
-            from openmm import unit
+        from openmm import unit
 
+        try:
             return float(formal_charge.value_in_unit(unit.elementary_charge))
-        except Exception:  # noqa: BLE001 - support multiple quantity implementations
+        except TypeError:
+            from openff.units.openmm import to_openmm
+
             return float(to_openmm(formal_charge).value_in_unit(unit.elementary_charge))
     return float(formal_charge)
 

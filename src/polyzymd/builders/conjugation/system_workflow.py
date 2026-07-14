@@ -791,7 +791,7 @@ def _construct_conjugate_from_specs(
         raise RuntimeError(_pablo_failure_message(pablo_result))
     if product_state_pablo_library is not None:
         _apply_pdb_atom_identity_to_topology(pablo_result.topology, crosslinked_pdb_path)
-        LOGGER.info("Building production product-state charge bridge")
+        LOGGER.info("Building preproduction product-state charge bridge")
         product_state_pablo_library = _product_state_library_with_charge_bridge(
             product_state_pablo_library,
             product_topology=pablo_result.topology,

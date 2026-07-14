@@ -8,6 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from polyzymd.builders.conjugation.pablo.charge_templates import (
+    _charge_values as _template_charge_values,
+)
+from polyzymd.builders.conjugation.pablo.charge_templates import (
+    _formal_charge_value,
     _source_from_residue_records,
     build_conjugate_charge_templates,
 )
@@ -21,7 +25,7 @@ def test_build_conjugate_charge_templates_transfers_marked_template_charges():
             _atom("A", "LYX", 10, "NZ", 0, -0.3),
             _atom("C", "NHX", 1, "C047", 0, 0.3),
         ],
-        properties={"polyzymd_charge_provenance": "production:resp-fragment-fit"},
+        properties={"polyzymd_charge_provenance": "prepared-source:resp-fragment-fit"},
     )
     target = _molecule(
         "target",
@@ -88,7 +92,7 @@ def test_build_conjugate_charge_templates_reports_missing_atoms():
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:resp-fragment-fit",
+            "source": "prepared-source:resp-fragment-fit",
             "atom_charges": {"NZ": 0.0},
         },
     )
@@ -108,7 +112,7 @@ def test_build_conjugate_charge_templates_validates_total_charge():
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:resp-fragment-fit",
+            "source": "prepared-source:resp-fragment-fit",
             "atom_charges": {"NZ": 0.0},
         },
     )
@@ -135,7 +139,7 @@ def test_build_conjugate_charge_templates_rejects_caller_total_charge_tolerance(
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:resp-fragment-fit",
+            "source": "prepared-source:resp-fragment-fit",
             "atom_charges": {"NZ": 0.0},
         },
     )
@@ -162,28 +166,28 @@ def test_ordered_residue_records_do_not_enable_metadata_missing_fallback():
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:ff14SB",
+            "source": "prepared-source:ff14SB",
             "atom_charges": {"NZ": -0.4},
         },
         {
             "chain_id": "C",
             "residue_name": "NHX",
             "residue_number": 1,
-            "source": "production:polymer",
+            "source": "attached-polymer-template",
             "atom_charges": {"C047": 0.1},
         },
         {
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:ff14SB",
+            "source": "prepared-source:ff14SB",
             "atom_charges": {"CE": 0.3},
         },
         {
             "chain_id": "C",
             "residue_name": "NHX",
             "residue_number": 1,
-            "source": "production:polymer",
+            "source": "attached-polymer-template",
             "atom_charges": {"O020": 0.0},
         },
     )
@@ -210,7 +214,7 @@ def test_grouped_residue_records_do_not_enable_metadata_missing_fallback():
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:ff14SB",
+            "source": "prepared-source:ff14SB",
             "source_role": "protein_ff14sb",
             "atom_charges": {"NZ": -0.4, "CE": 0.3},
         },
@@ -218,7 +222,7 @@ def test_grouped_residue_records_do_not_enable_metadata_missing_fallback():
             "chain_id": "C",
             "residue_name": "NHX",
             "residue_number": 1,
-            "source": "production:polymer",
+            "source": "attached-polymer-template",
             "source_role": "polymer_template",
             "atom_charges": {"C047": 0.1, "O020": 0.0},
         },
@@ -246,7 +250,7 @@ def test_one_atom_records_without_bridge_provenance_do_not_enable_ordered_fallba
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:ff14SB",
+            "source": "prepared-source:ff14SB",
             "atom_charges": {"NZ": 0.0},
         },
     )
@@ -266,7 +270,7 @@ def test_generic_bridge_source_without_order_marker_does_not_enable_ordered_fall
             "chain_id": "A",
             "residue_name": "LYX",
             "residue_number": 10,
-            "source": "production:ff14SB",
+            "source": "prepared-source:ff14SB",
             "atom_charges": {"NZ": 0.0},
         },
     )
@@ -283,6 +287,34 @@ def test_generic_bridge_source_without_order_marker_does_not_enable_ordered_fall
     assert not hasattr(source, "ordered_charges")
     with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
         build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
+
+
+def test_quantity_conversion_does_not_swallow_unexpected_charge_errors():
+    """Unexpected quantity conversion failures should surface to callers."""
+
+    class BrokenQuantity:
+        """Quantity double with an unexpected OpenMM conversion failure."""
+
+        def value_in_unit(self, _unit):
+            """Raise a non-conversion API error."""
+            raise RuntimeError("unexpected charge conversion failure")
+
+    with pytest.raises(RuntimeError, match="unexpected charge conversion failure"):
+        _template_charge_values(BrokenQuantity())
+
+
+def test_formal_quantity_conversion_does_not_swallow_unexpected_errors():
+    """Unexpected formal-charge conversion failures should surface to callers."""
+
+    class BrokenQuantity:
+        """Quantity double with an unexpected OpenMM conversion failure."""
+
+        def value_in_unit(self, _unit):
+            """Raise a non-conversion API error."""
+            raise RuntimeError("unexpected formal conversion failure")
+
+    with pytest.raises(RuntimeError, match="unexpected formal conversion failure"):
+        _formal_charge_value(BrokenQuantity())
 
 
 def _library(**updates):
