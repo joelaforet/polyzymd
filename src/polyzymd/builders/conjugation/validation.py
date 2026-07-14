@@ -296,10 +296,13 @@ def build_conjugate_validation_report(
     ConjugateValidationReport
         Populated validation report.
     """
-    product_path = Path(product_pdb_path) if product_pdb_path is not None else None
     artifact_dir = Path(output_dir) if output_dir is not None else None
+    product_path = Path(product_pdb_path) if product_pdb_path is not None else None
+    geometry_path = _preferred_geometry_pdb_path(product_path, artifact_dir)
     atoms = _read_product_atoms(product_path)
     observed_bonds = parse_pdb_conect_bonds(product_path) if product_path is not None else ()
+    close_contact_atoms = _read_product_atoms(geometry_path)
+    close_contact_bonds = parse_pdb_conect_bonds(geometry_path) if geometry_path is not None else ()
     expected_bonds = expected_linkage_bonds(assembly=assembly)
     report = ConjugateValidationReport(
         product_pdb_path=product_path,
@@ -313,12 +316,48 @@ def build_conjugate_validation_report(
             openmm_system=openmm_system,
             expected_particle_count=expected_particle_count,
         ),
-        linkage_geometry=audit_linkage_geometry(atoms, expected_bonds, observed_bonds),
+        linkage_geometry=audit_linkage_geometry(
+            atoms,
+            expected_bonds,
+            observed_bonds,
+            close_contact_atoms=close_contact_atoms,
+            close_contact_bonds=close_contact_bonds,
+        ),
         relaxation_evidence=audit_relaxation_evidence(artifact_dir),
     )
     if write and artifact_dir is not None:
         report.write_json(artifact_dir / VALIDATION_REPORT_NAME)
     return report
+
+
+def _preferred_geometry_pdb_path(
+    product_path: Path | None, artifact_dir: Path | None
+) -> Path | None:
+    """Return the PDB path whose coordinates should be geometry-audited.
+
+    Relaxation is the last coordinate-cleanup stage for constructed conjugates, so geometry
+    validation should use the relaxed PDB when successful relaxation evidence points to one.
+    """
+    if artifact_dir is None:
+        return product_path
+    relaxation_path = artifact_dir / "conjugate_relaxation.json"
+    if not relaxation_path.exists():
+        return product_path
+    try:
+        payload = json.loads(relaxation_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return product_path
+    if payload.get("success") is not True:
+        return product_path
+    relaxed_path = payload.get("final_relaxed_pdb_path")
+    if isinstance(relaxed_path, str):
+        candidate = Path(relaxed_path)
+        if candidate.exists():
+            return candidate
+    fallback = artifact_dir / "conjugate_relaxed.pdb"
+    if fallback.exists():
+        return fallback
+    return product_path
 
 
 def expected_linkage_bonds(*, assembly: Any | None = None) -> tuple[tuple[int, int], ...]:
@@ -662,6 +701,9 @@ def audit_linkage_geometry(
     atoms: tuple[PdbAtomRecord, ...],
     expected_bonds: tuple[tuple[int, int], ...],
     observed_bonds: tuple[tuple[int, int], ...],
+    *,
+    close_contact_atoms: tuple[PdbAtomRecord, ...] | None = None,
+    close_contact_bonds: tuple[tuple[int, int], ...] | None = None,
 ) -> LinkageGeometryReport:
     """Audit linkage bond lengths and obvious coordinate blockers."""
     if not atoms:
@@ -685,7 +727,9 @@ def audit_linkage_geometry(
         if atom_left is None or atom_right is None:
             continue
         distances.append(_distance_angstrom(atom_left, atom_right))
-    close_contact_count = _close_contact_count(atoms, observed_bonds)
+    contact_atoms = atoms if close_contact_atoms is None else close_contact_atoms
+    contact_bonds = observed_bonds if close_contact_bonds is None else close_contact_bonds
+    close_contact_count = _close_contact_count(contact_atoms, contact_bonds)
     if len(distances) != len(expected_bonds):
         status = ValidationStatus.WARN
         message = "One or more expected linkage distances could not be measured"
@@ -697,7 +741,7 @@ def audit_linkage_geometry(
         message = "One or more linkage distances is outside a conservative covalent range"
     if close_contact_count and status is not ValidationStatus.FAIL:
         status = ValidationStatus.WARN
-        message = "Product geometry contains severe nonbonded close contacts"
+        message = "Product geometry contains severe nonbonded heavy atom close contacts"
     checks = [
         _check(
             "linkage_geometry",
@@ -711,7 +755,7 @@ def audit_linkage_geometry(
             _check(
                 "nonbonded_close_contacts",
                 ValidationStatus.WARN,
-                "Product geometry contains nonbonded atom pairs closer than 0.7 Å",
+                "Product geometry contains nonbonded heavy atom pairs closer than 0.8 Å",
                 evidence={"close_contact_count": close_contact_count},
             )
         )
@@ -1559,15 +1603,62 @@ def _close_contact_count(
     atoms: tuple[PdbAtomRecord, ...],
     observed_bonds: tuple[tuple[int, int], ...],
 ) -> int:
-    """Return a simple nonbonded close-contact count."""
+    """Return the severe nonbonded heavy atom close-contact count."""
     bonded = set(observed_bonds)
+    neighbors = _bond_adjacency(observed_bonds)
     count = 0
     for index, left in enumerate(atoms):
+        if _is_hydrogen_atom(left):
+            continue
         for right in atoms[index + 1 :]:
+            if _is_hydrogen_atom(right):
+                continue
             if left.serial is not None and right.serial is not None:
                 pair = tuple(sorted((left.serial, right.serial)))
                 if pair in bonded:
                     continue
-            if _distance_angstrom(left, right) < 0.7:
+                if (
+                    _bond_graph_distance(left.serial, right.serial, neighbors, max_depth=3)
+                    is not None
+                ):
+                    continue
+            if _distance_angstrom(left, right) < 0.8:
                 count += 1
     return count
+
+
+def _is_hydrogen_atom(atom: PdbAtomRecord) -> bool:
+    """Return whether a PDB atom record represents hydrogen."""
+    element = (atom.element or "").strip().upper()
+    return element == "H" or atom.atom_name.strip().upper().startswith("H")
+
+
+def _bond_adjacency(observed_bonds: tuple[tuple[int, int], ...]) -> dict[int, set[int]]:
+    """Return an undirected adjacency map from observed PDB bonds."""
+    neighbors: dict[int, set[int]] = {}
+    for left, right in observed_bonds:
+        neighbors.setdefault(left, set()).add(right)
+        neighbors.setdefault(right, set()).add(left)
+    return neighbors
+
+
+def _bond_graph_distance(
+    source: int,
+    target: int,
+    neighbors: Mapping[int, set[int]],
+    *,
+    max_depth: int,
+) -> int | None:
+    """Return graph distance between atoms up to a bounded depth."""
+    seen = {source}
+    queue = [(source, 0)]
+    for node, depth in queue:
+        if depth >= max_depth:
+            continue
+        for neighbor in neighbors.get(node, set()):
+            if neighbor == target:
+                return depth + 1
+            if neighbor not in seen:
+                seen.add(neighbor)
+                queue.append((neighbor, depth + 1))
+    return None
