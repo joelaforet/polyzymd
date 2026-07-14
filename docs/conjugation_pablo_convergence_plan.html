@@ -199,7 +199,7 @@
       <li><input type="checkbox"> <span>Represent MVP custom chemistry as explicit RDKit-readable mapped MDL <code>.rxn</code> files. Portable mapped reaction representations are future/deferred and are not part of the MVP. No Python reaction plugin packages and no directory auto-discovery.</span></li>
       <li><input type="checkbox"> <span>Normalize all moiety inputs into one <code>Moiety</code> artifact/model with molecule, coordinates, identities, residue definitions, charge evidence, and provenance.</span></li>
       <li><input type="checkbox"> <span>Default force fields become ff14SB for canonical protein and Sage 2.3.0 for final connected SMIRNOFF parameterization. Users may override ordered sources explicitly.</span></li>
-      <li><input type="checkbox"> <span>Retain the current composite charge strategy: canonical protein charges, validated moiety/polymer template charges, local NAGL/AshGC junction patch, reconciliation, and explicit charge templates.</span></li>
+      <li><input type="checkbox"> <span>Retain the current composite charge strategy: canonical protein charges, validated moiety/polymer template charges, local pre-production OpenFF NAGL junction patch (<code>openff-gnn-am1bcc-0.1.0-rc.3.pt</code>; not GLYCAM, CHARMM, or AshGC), reconciliation, and explicit charge templates.</span></li>
       <li><input type="checkbox"> <span>Do not perform fragment parameter transplantation or manual Interchange surgery. Parameterize the final connected topology once using ordered OFFXML sources.</span></li>
       <li><input type="checkbox"> <span>Coordinate mapping must use unique <code>pdb_index</code>/identity ledger information. Never rely on Pablo atom order because crosslinked molecules may be reordered.</span></li>
       <li><input type="checkbox"> <span>Keep the design KISS: no registries that require core edits for data reactions, no compatibility facades, no duplicate old/new paths after parity, no broad SystemBuilder redesign, and no POC file changes.</span></li>
@@ -505,7 +505,8 @@ class ProductAssembly(BaseModel):
     <h2>Force-field semantics and audit</h2>
     <div class="callout">
       <strong>Production default:</strong> retain the composite strategy: ff14SB-derived canonical
-      protein charges + validated charged moiety/polymer templates + local NAGL/AshGC junction patch
+      protein charges + validated charged moiety/polymer templates + local pre-production OpenFF NAGL
+      junction patch (<code>openff-gnn-am1bcc-0.1.0-rc.3.pt</code>; not GLYCAM, CHARMM, or AshGC)
       + reconciliation + explicit charge templates.
     </div>
     <ul>

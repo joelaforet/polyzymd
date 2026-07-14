@@ -262,11 +262,14 @@ a residue-resolved GLYCAM or CHARMM conjugate-template workflow. Its model choic
   standard charged-template path.
 - Attached polymer or moiety atoms are included in a private product patch when
   they are part of the modified residue context. The final conjugate template is
-  accepted only when every atom has explicit production charge provenance.
+  accepted only when every atom has explicit charge provenance.
 - Modified-residue and moiety atoms are charged through a private peptide-capped
   product patch: ACE--GLY--modified residue with the attached moiety--GLY--NME.
   PolyzyMD builds this bounded patch internally, charges it with the bundled
-  NAGL/AshGC model, and maps charges back only to real product atoms.
+  OpenFF NAGL model `openff-gnn-am1bcc-0.1.0-rc.3.pt`, and maps charges back
+  only to real product atoms. This NAGL model is a pre-production default; it is
+  not GLYCAM, CHARMM, or AshGC, and the bridge does not claim those validation
+  scopes.
 - Any residual total-charge closure is applied only over real mapped local patch
   atoms and only within fixed internal safety bounds. Users cannot relax or tune
   the reconciliation threshold from configuration, environment variables, or API
@@ -279,15 +282,17 @@ build fails with an explicit missing-identity message rather than inventing a
 fallback charge.
 
 The bridge writes `conjugate-construction/product_state_charge_bridge.json`.
-Inspect this sidecar to confirm the NAGL model, ff14SB atom count, local patch
-atom count, total charge, formal charge, and any normalization correction.
+Inspect this sidecar to confirm the pre-production NAGL model, ff14SB atom
+count, local patch atom count, total charge, formal charge, and any
+normalization correction.
 
 The local patch builder uses `ResolvedAttachmentPlan`, attachment specs, the
 Pablo crosslink requirement, product residue mappings, generated-fragment atom and
 bond-order metadata, and leaving-atom metadata. It removes leaving atoms, builds
 the fixed peptide-capped ACE--GLY--modified-residue(moiety)--GLY--NME product
-patch, charges that local product-state molecule with the bundled NAGL/AshGC
-model, and maps charges back only to real product atoms. If the mechanism
+patch, charges that local product-state molecule with OpenFF NAGL
+`openff-gnn-am1bcc-0.1.0-rc.3.pt`, and maps charges back only to real product
+atoms. This is not an AshGC, GLYCAM, or CHARMM charge assignment. If the mechanism
 metadata is not specific enough to build the product patch or if final topology
 atom identities are missing, PolyzyMD fails clearly instead of falling back to
 hardcoded NHS-lysine atom names, raw sidecar charges, or count-only ordered charge
@@ -298,8 +303,8 @@ transfer.
 See {doc}`conjugation_support_matrix` for the current support matrix. In brief,
 the validated reliability milestone covers the opt-in config-driven and direct
 request NHS-lysine polymer vertical slice, including Pablo/OpenFF Interchange,
-ff14SB plus polymer templates, local NAGL patch charge bridge, local charge
-reconciliation, conjugate relaxation, final solvation, and
+ff14SB plus polymer templates, local pre-production NAGL patch charge bridge,
+local charge reconciliation, conjugate relaxation, final solvation, and
 `conjugate_validation_report.json`.
 
 The validation report audits product bond graph evidence, link atom presence,
