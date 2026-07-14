@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 AtomIdentityTuple = tuple[str, str, int | None, str, str]
@@ -78,7 +78,7 @@ def product_state_library_has_provenance(product_state_pablo_library: Any) -> bo
 def metadata_value(metadata: Any, *names: str, default: Any = None) -> Any:
     """Return the first populated metadata value for a set of field names."""
     for name in names:
-        if isinstance(metadata, dict):
+        if isinstance(metadata, Mapping):
             value = metadata.get(name)
         else:
             value = getattr(metadata, name, None)
@@ -130,11 +130,6 @@ def product_conjugate_molecule(
     for molecule in tuple(getattr(product_topology, "molecules", ()) or ()):
         if molecule_contains_product_residue(molecule, product_names):
             return molecule
-    molecules = tuple(getattr(product_topology, "molecules", ()) or ())
-    if len(molecules) == 1 and any(
-        atom.residue_name.upper() in product_names for atom in product_atoms
-    ):
-        return molecules[0]
     raise ValueError("Could not locate the product-state conjugate molecule in the Pablo topology")
 
 
@@ -143,23 +138,21 @@ def target_identities_from_molecule(
     *,
     product_atoms: tuple[Any, ...],
 ) -> tuple[AtomIdentityTuple, ...]:
-    """Return target atom identities, falling back to product PDB order."""
+    """Return target atom identities from topology atom metadata."""
     atoms = tuple(getattr(target_molecule, "atoms", ()) or ())
     identities = tuple(atom_identity_tuple(atom) for atom in atoms)
     if all(identity[1] and identity[4] for identity in identities):
         return identities
-    if len(atoms) == len(product_atoms):
-        return tuple(
-            (
-                atom.chain_id.strip(),
-                atom.residue_name.strip().upper(),
-                atom.residue_number,
-                atom.insertion_code.strip(),
-                atom.atom_name.strip(),
-            )
-            for atom in product_atoms
-        )
-    return identities
+    missing = [
+        index for index, identity in enumerate(identities) if not identity[1] or not identity[4]
+    ]
+    preview = ", ".join(str(index) for index in missing[:12])
+    suffix = "" if len(missing) <= 12 else f", ... {len(missing) - 12} more"
+    raise ValueError(
+        "Product-state topology atoms are missing residue_name or atom_name identity metadata; "
+        f"metadata-free topology atom index(es): {preview}{suffix}. Attach authoritative "
+        "product PDB identity metadata before charge template transfer."
+    )
 
 
 def optional_int(value: Any) -> int | None:

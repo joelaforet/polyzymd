@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+from collections.abc import MutableMapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -789,6 +790,7 @@ def _construct_conjugate_from_specs(
     if not pablo_result.success or pablo_result.topology is None:
         raise RuntimeError(_pablo_failure_message(pablo_result))
     if product_state_pablo_library is not None:
+        _apply_pdb_atom_identity_to_topology(pablo_result.topology, crosslinked_pdb_path)
         LOGGER.info("Building production product-state charge bridge")
         product_state_pablo_library = _product_state_library_with_charge_bridge(
             product_state_pablo_library,
@@ -1321,18 +1323,91 @@ def _restore_pdb_atom_name_fields(
 
 def _apply_pdb_atom_names_to_topology(topology: Any, template_pdb_path: Path | str) -> None:
     """Set OpenFF atom names from a same-order PDB template."""
+    _apply_pdb_atom_identity_to_topology(topology, template_pdb_path)
+
+
+def _apply_pdb_atom_identity_to_topology(topology: Any, template_pdb_path: Path | str) -> None:
+    """Attach authoritative product PDB identity metadata to topology atoms.
+
+    Parameters
+    ----------
+    topology : Any
+        OpenFF-like topology whose atom order matches the product PDB.
+    template_pdb_path : pathlib.Path or str
+        Product PDB containing serial, chain, residue, and atom-name identity.
+
+    Raises
+    ------
+    ValueError
+        If the topology and PDB atom counts differ or any PDB atom lacks the
+        identity fields required for deterministic charge transfer.
+    """
     template_atoms = _pdb_atom_records(Path(template_pdb_path))
     topology_atoms = list(_iter_openff_topology_atoms(topology))
     if len(topology_atoms) != len(template_atoms):
         raise ValueError(
-            "Topology atom count does not match atom-name template count: "
+            "Topology atom count does not match product identity template count: "
             f"topology={len(topology_atoms)}, template={len(template_atoms)}"
         )
     for topology_atom, pdb_atom in zip(topology_atoms, template_atoms, strict=True):
+        _validate_pdb_atom_identity(pdb_atom, template_pdb_path)
         topology_atom.name = pdb_atom.atom_name
-        metadata = getattr(topology_atom, "metadata", None)
-        if isinstance(metadata, dict):
-            metadata["atom_name"] = pdb_atom.atom_name
+        _update_atom_metadata(topology_atom, _pdb_atom_identity_metadata(pdb_atom))
+
+
+def _update_atom_metadata(atom: Any, values: dict[str, int | str]) -> None:
+    """Update OpenFF atom metadata across mutable and property-backed atoms."""
+    metadata = getattr(atom, "metadata", None)
+    if isinstance(metadata, MutableMapping):
+        metadata.update(values)
+        return
+    private_metadata = getattr(atom, "_metadata", None)
+    if isinstance(private_metadata, dict):
+        private_metadata.update(values)
+        return
+    try:
+        atom.metadata = dict(values)
+    except AttributeError as exc:
+        raise ValueError(
+            "Could not attach product PDB identity metadata to topology atom; "
+            f"atom type {type(atom).__name__} exposes no mutable metadata mapping"
+        ) from exc
+
+
+def _pdb_atom_identity_metadata(atom: PdbAtomRecord) -> dict[str, int | str]:
+    """Return product PDB atom identity metadata for charge transfer."""
+    metadata: dict[str, int | str] = {
+        "chain_id": atom.chain_id.strip(),
+        "residue_name": atom.residue_name.strip().upper(),
+        "residue_number": int(atom.residue_number),
+        "insertion_code": atom.insertion_code.strip(),
+        "atom_name": atom.atom_name.strip(),
+        "product_identity_source": "product_pdb",
+    }
+    if atom.atom_index is not None:
+        metadata["product_atom_index"] = int(atom.atom_index)
+    if atom.serial is not None:
+        metadata["serial"] = int(atom.serial)
+        metadata["product_atom_serial"] = int(atom.serial)
+    return metadata
+
+
+def _validate_pdb_atom_identity(atom: PdbAtomRecord, source_path: Path | str) -> None:
+    """Fail clearly when a product PDB atom cannot identify a charge target."""
+    missing = []
+    if not atom.atom_name.strip():
+        missing.append("atom_name")
+    if not atom.residue_name.strip():
+        missing.append("residue_name")
+    if atom.residue_number is None:
+        missing.append("residue_number")
+    if atom.serial is None:
+        missing.append("serial")
+    if missing:
+        raise ValueError(
+            "Product PDB atom identity metadata is incomplete for charge template transfer: "
+            f"serial={atom.serial} missing {', '.join(missing)} in {source_path}"
+        )
 
 
 def _pdb_atom_records(path: Path) -> tuple[PdbAtomRecord, ...]:
@@ -1359,13 +1434,14 @@ def _replace_pdb_atom_name_field(line: str, atom_name_field: str) -> str:
 
 
 def _iter_openff_topology_atoms(topology: Any) -> tuple[Any, ...]:
-    if hasattr(topology, "atoms"):
-        atoms_attr = topology.atoms
-        atoms = atoms_attr() if callable(atoms_attr) else atoms_attr
-        return tuple(atoms)
     atoms: list[Any] = []
     for molecule in getattr(topology, "molecules", ()):
         atoms.extend(getattr(molecule, "atoms", ()))
+    if atoms:
+        return tuple(atoms)
+    if hasattr(topology, "atoms"):
+        atoms_attr = topology.atoms
+        atoms = list(atoms_attr() if callable(atoms_attr) else atoms_attr)
     return tuple(atoms)
 
 
