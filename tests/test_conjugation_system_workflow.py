@@ -40,6 +40,7 @@ from polyzymd.builders.conjugation.structure.preparation import (
     ProteinCanonicalizationSettings,
 )
 from polyzymd.builders.conjugation.system_workflow import (
+    _apply_pdb_atom_identity_to_topology,
     _apply_pdb_atom_names_to_topology,
     _build_direct_solvated_system,
     _build_solvated_system,
@@ -120,6 +121,53 @@ def test_apply_pdb_atom_names_to_topology_uses_same_order_template(tmp_path: Pat
 
     assert [atom.name for atom in atoms] == ["N", "CA"]
     assert [atom.metadata["atom_name"] for atom in atoms] == ["N", "CA"]
+
+
+def test_apply_pdb_atom_identity_to_metadata_free_pablo_topology(tmp_path: Path):
+    """Intermediate Pablo topology atoms should regain product PDB identity metadata."""
+    product_pdb = tmp_path / "crosslinked_product.pdb"
+    product_pdb.write_text(
+        "".join(
+            [
+                _pdb_line(101, " ND2", "ASX", "A", 60),
+                _pdb_line(102, " C1 ", "NAG", "C", 1),
+                _pdb_line(103, " NZ ", "LYX", "A", 63),
+                _pdb_line(104, " C00", "NHX", "C", 2),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    atoms = [_AtomDouble(f"X{index}") for index in range(4)]
+    topology = _TopologyDouble(atoms)
+
+    _apply_pdb_atom_identity_to_topology(topology, product_pdb)
+
+    assert [atom.name for atom in atoms] == ["ND2", "C1", "NZ", "C00"]
+    assert atoms[0].metadata == {
+        "chain_id": "A",
+        "residue_name": "ASX",
+        "residue_number": 60,
+        "insertion_code": "",
+        "atom_name": "ND2",
+        "product_atom_index": 0,
+        "product_identity_source": "product_pdb",
+        "serial": 101,
+        "product_atom_serial": 101,
+    }
+    assert atoms[1].metadata["chain_id"] == "C"
+    assert atoms[1].metadata["residue_name"] == "NAG"
+    assert atoms[1].metadata["product_atom_serial"] == 102
+
+
+def test_apply_pdb_atom_identity_rejects_count_mismatch(tmp_path: Path):
+    """Product identity propagation should not fall back to count-only matching."""
+    product_pdb = tmp_path / "crosslinked_product.pdb"
+    product_pdb.write_text(_pdb_line(101, " ND2", "ASX", "A", 60), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="product identity template count"):
+        _apply_pdb_atom_identity_to_topology(
+            _TopologyDouble([_AtomDouble("ND2"), _AtomDouble("C1")]), product_pdb
+        )
 
 
 def test_policy_with_resolved_crosslink_uses_product_state_leaving_atoms():
@@ -530,7 +578,10 @@ def test_relaxation_receives_product_path_and_attachment_specs(
         )
 
     def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
-        Path(output_path).write_text("END\n", encoding="utf-8")
+        Path(output_path).write_text(
+            _pdb_line(1, "C001", "NAG", "C", 1, element="C") + "END\n",
+            encoding="utf-8",
+        )
         return CrosslinkedPdbAssemblyResult(
             output_path=Path(output_path),
             protein_atom_count=10,
@@ -695,7 +746,10 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
         )
 
     def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
-        Path(output_path).write_text("END\n", encoding="utf-8")
+        Path(output_path).write_text(
+            _pdb_line(1, "C001", "NAG", "C", 1, element="C") + "END\n",
+            encoding="utf-8",
+        )
         return CrosslinkedPdbAssemblyResult(
             output_path=Path(output_path),
             protein_atom_count=10,
