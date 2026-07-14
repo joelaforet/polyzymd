@@ -182,7 +182,7 @@ def test_final_helper_receives_real_openff_standard_template_charges(monkeypatch
         [0.0] * conjugate_template.n_atoms,
         "elementary_charge",
     )
-    conjugate_template.properties["polyzymd_charge_provenance"] = "production:test-fixture"
+    conjugate_template.properties["polyzymd_charge_provenance"] = "charge-bridge:test-fixture"
     water_template = Molecule.from_smiles("O")
     water_template.name = "TIP3P_STANDARD_TEMPLATE"
     water_template.partial_charges = Quantity(

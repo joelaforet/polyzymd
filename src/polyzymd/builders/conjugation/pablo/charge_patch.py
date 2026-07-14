@@ -456,9 +456,7 @@ def _log_patch_diagnostics(
         "cap_model": "ACE-GLY-modified-residue(moiety)-GLY-NME",
         "nagl_model": DEFAULT_PATCH_NAGL_MODEL,
         "nagl_version": "pre-production NAGLCharger default",
-        "nagl_provenance": (
-            f"OpenFF NAGL model {DEFAULT_PATCH_NAGL_MODEL}; not GLYCAM, CHARMM, or AshGC"
-        ),
+        "nagl_provenance": f"OpenFF NAGL model {DEFAULT_PATCH_NAGL_MODEL}",
         "product_atom_count": reference.product_atom_count,
         "reference_atom_count": reference.reference_atom_count,
         "mapped_atom_count": len(reference.mapped_atoms),
