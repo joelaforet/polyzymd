@@ -33,6 +33,7 @@ class _MappedAtom:
     residue_number: int | None
     insertion_code: str
     source_role: str
+    formal_charge: int = 0
 
 
 @dataclass(frozen=True)
@@ -149,6 +150,8 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
     ) -> None:
         nonlocal map_number
         atom = Chem.Atom(element or "C")
+        if mapped is not None:
+            atom.SetFormalCharge(int(mapped.formal_charge))
         if mapped is not None:
             atom.SetNoImplicit(True)
             atom.SetAtomMapNum(map_number)
@@ -483,6 +486,7 @@ def _retained_modifier_atoms(
                     residue_number=identity["residue_number"],
                     insertion_code=identity["insertion_code"],
                     source_role="moiety_product",
+                    formal_charge=int(getattr(atom, "formal_charge", 0) or 0),
                 ),
             )
         )
@@ -659,6 +663,7 @@ def _mapped_atom(atom: Any, *, key: tuple[str, int | None, str], source_role: st
         residue_number=getattr(atom, "residue_number", None),
         insertion_code=str(getattr(atom, "insertion_code", "") or ""),
         source_role=source_role,
+        formal_charge=int(getattr(atom, "formal_charge", 0) or 0),
     )
 
 
