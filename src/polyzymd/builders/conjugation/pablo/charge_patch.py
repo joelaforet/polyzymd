@@ -189,6 +189,21 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
     cap_map_numbers = tuple(
         int(atom.GetAtomMapNum()) for atom in mol.GetAtoms() if int(atom.GetAtomMapNum()) == 0
     )
+    closure_map_numbers = tuple(
+        sorted(
+            map_number
+            for map_number, atom in mapped_atoms.items()
+            if atom.source_role == "modified_protein_product"
+        )
+    )
+    return _ReferenceBuild(
+        molecule=mol,
+        mapped_atoms=mapped_atoms,
+        closure_map_numbers=closure_map_numbers,
+        cap_map_numbers=cap_map_numbers,
+        product_atom_count=len(residue_atoms) + len(modifier_atoms),
+        reference_atom_count=mol.GetNumAtoms(),
+    )
 
 
 def _modifier_link_key(
@@ -206,21 +221,6 @@ def _modifier_link_key(
         return matches[0]
     raise LocalChargePatchError(
         "Resolved Pablo modifier link atom is missing from the retained product graph"
-    )
-    closure_map_numbers = tuple(
-        sorted(
-            map_number
-            for map_number, atom in mapped_atoms.items()
-            if atom.source_role == "modified_protein_product"
-        )
-    )
-    return _ReferenceBuild(
-        molecule=mol,
-        mapped_atoms=mapped_atoms,
-        closure_map_numbers=closure_map_numbers,
-        cap_map_numbers=cap_map_numbers,
-        product_atom_count=len(residue_atoms) + len(modifier_atoms),
-        reference_atom_count=mol.GetNumAtoms(),
     )
 
 
