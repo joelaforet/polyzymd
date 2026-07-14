@@ -18,6 +18,7 @@ _PROVENANCE_KEYS = (
     "partial_charge_provenance",
 )
 _FORMAL_SOURCE_TOKENS = ("formal", "pdb_formal", "atomdefinition.charge")
+_TOTAL_CHARGE_TOLERANCE_E = 1.0e-4
 
 
 @dataclass(frozen=True)
@@ -37,14 +38,11 @@ class _PartialChargeSource:
 
     charges: dict[_AtomIdentity, float]
     source: str
-    ordered_charges: tuple[float, ...] = ()
 
 
 def build_conjugate_charge_templates(
     topology: Any,
     product_state_pablo_library: Any,
-    *,
-    total_charge_tolerance: float = 1e-4,
 ) -> tuple[Any, ...]:
     """Build molecule-level charge templates for product-state conjugate molecules.
 
@@ -55,9 +53,6 @@ def build_conjugate_charge_templates(
     product_state_pablo_library : Any
         Product-state Pablo library with explicit production partial-charge
         provenance in excluded in-memory fields.
-    total_charge_tolerance : float, optional
-        Allowed absolute difference between assigned partial-charge total and
-        formal charge total, by default ``1e-4``.
 
     Returns
     -------
@@ -72,8 +67,6 @@ def build_conjugate_charge_templates(
     """
     if product_state_pablo_library is None:
         raise ValueError("Product-state Pablo library is required for conjugate charge templates")
-    if total_charge_tolerance < 0:
-        raise ValueError("total_charge_tolerance must be non-negative")
 
     product_names = _product_residue_names(product_state_pablo_library)
     if not product_names:
@@ -86,8 +79,6 @@ def build_conjugate_charge_templates(
         if _molecule_contains_product_residue(molecule, product_names)
     )
     if not target_molecules:
-        target_molecules = _fallback_target_molecules_by_charge_count(topology, source)
-    if not target_molecules:
         names = ", ".join(sorted(product_names))
         raise ValueError(
             "Final topology contains no molecule with product-state residues "
@@ -96,13 +87,7 @@ def build_conjugate_charge_templates(
 
     templates = []
     for molecule in target_molecules:
-        templates.append(
-            _charged_template_from_source(
-                molecule,
-                source,
-                total_charge_tolerance=total_charge_tolerance,
-            )
-        )
+        templates.append(_charged_template_from_source(molecule, source))
     return tuple(templates)
 
 
@@ -110,7 +95,7 @@ def _partial_charge_source(product_state_pablo_library: Any) -> _PartialChargeSo
     """Resolve production partial-charge provenance from a product library."""
     records = tuple(getattr(product_state_pablo_library, "residue_partial_charges", ()) or ())
     if records:
-        return _source_from_residue_records(records, product_state_pablo_library)
+        return _source_from_residue_records(records)
 
     templates = tuple(getattr(product_state_pablo_library, "charge_templates", ()) or ())
     marked_templates = tuple(template for template in templates if _has_production_marker(template))
@@ -133,24 +118,17 @@ def _partial_charge_source(product_state_pablo_library: Any) -> _PartialChargeSo
     )
 
 
-def _source_from_residue_records(
-    records: tuple[Any, ...], product_state_pablo_library: Any | None = None
-) -> _PartialChargeSource:
+def _source_from_residue_records(records: tuple[Any, ...]) -> _PartialChargeSource:
     """Build an atom charge map from explicit residue records.
 
     Parameters
     ----------
     records : tuple of Any
         Residue-level partial-charge records from a product-state Pablo library.
-    product_state_pablo_library : Any or None, optional
-        Library carrying optional charge-bridge provenance used to decide whether
-        metadata-free ordered fallback is safe, by default ``None``.
-
     Returns
     -------
     _PartialChargeSource
-        Identity-keyed charges plus ordered charges only when bridge provenance
-        and one-atom record shape prove that input order is meaningful.
+        Identity-keyed charges with production provenance.
     """
     charges: dict[_AtomIdentity, float] = {}
     sources: set[str] = set()
@@ -181,61 +159,7 @@ def _source_from_residue_records(
             charges[identity] = _finite_charge(charge, identity)
     if not charges:
         raise ValueError("Residue partial-charge records did not contain any atom charges")
-    ordered_charges = ()
-    if _records_support_ordered_charge_fallback(records, product_state_pablo_library):
-        ordered_charges = tuple(charges.values())
-    return _PartialChargeSource(
-        charges=charges,
-        source=", ".join(sorted(sources)),
-        ordered_charges=ordered_charges,
-    )
-
-
-def _records_support_ordered_charge_fallback(
-    records: tuple[Any, ...], product_state_pablo_library: Any | None
-) -> bool:
-    """Return whether residue records prove atom-order-preserving bridge provenance.
-
-    Parameters
-    ----------
-    records : tuple of Any
-        Residue-level partial-charge records to inspect.
-    product_state_pablo_library : Any or None
-        Library expected to carry an explicit product-state charge-bridge report.
-
-    Returns
-    -------
-    bool
-        ``True`` when ordered fallback can be enabled safely.
-    """
-    if not records or not _has_product_state_bridge_provenance(product_state_pablo_library):
-        return False
-    return all(
-        len(dict(_record_value(record, "atom_charges", {}) or {})) == 1 for record in records
-    )
-
-
-def _has_product_state_bridge_provenance(product_state_pablo_library: Any | None) -> bool:
-    """Return whether the bridge explicitly preserves atom record order.
-
-    Parameters
-    ----------
-    product_state_pablo_library : Any or None
-        Product-state Pablo library with an optional ``charge_bridge_report``.
-
-    Returns
-    -------
-    bool
-        ``True`` when the report marks atom records as order-preserving and any
-        available success flag is ``True``.
-    """
-    report = getattr(product_state_pablo_library, "charge_bridge_report", None)
-    if report is None:
-        return False
-    if _record_value(report, "order_preserving_atom_records", False) is not True:
-        return False
-    success = _record_value(report, "success", None)
-    return success is None or success is True
+    return _PartialChargeSource(charges=charges, source=", ".join(sorted(sources)))
 
 
 def _source_from_marked_templates(templates: tuple[Any, ...]) -> _PartialChargeSource:
@@ -270,24 +194,15 @@ def _source_from_marked_templates(templates: tuple[Any, ...]) -> _PartialChargeS
     return _PartialChargeSource(
         charges=charges,
         source=", ".join(sorted(sources)),
-        ordered_charges=tuple(charges.values()),
     )
 
 
 def _charged_template_from_source(
     molecule: Any,
     source: _PartialChargeSource,
-    *,
-    total_charge_tolerance: float,
 ) -> Any:
     """Copy a molecule and assign source partial charges by atom identity."""
     atoms = tuple(getattr(molecule, "atoms", ()) or ())
-    if _requires_ordered_charge_transfer(atoms, source):
-        return _charged_template_from_ordered_source(
-            molecule,
-            source,
-            total_charge_tolerance=total_charge_tolerance,
-        )
     missing: list[_AtomIdentity] = []
     charges: list[float] = []
     for atom in atoms:
@@ -308,57 +223,13 @@ def _charged_template_from_source(
 
     formal_total = sum(_formal_charge_value(getattr(atom, "formal_charge", 0)) for atom in atoms)
     partial_total = sum(charges)
-    if abs(partial_total - formal_total) > total_charge_tolerance:
+    if abs(partial_total - formal_total) > _TOTAL_CHARGE_TOLERANCE_E:
         raise ValueError(
             "Final conjugate partial charges do not sum to the molecule formal charge: "
             f"partial total {partial_total:.8f} e vs formal total {formal_total:.8f} e "
             f"for {_molecule_label(molecule)}"
         )
 
-    template = copy.deepcopy(molecule)
-    template.partial_charges = _as_openff_quantity(charges)
-    return template
-
-
-def _fallback_target_molecules_by_charge_count(
-    topology: Any,
-    source: _PartialChargeSource,
-) -> tuple[Any, ...]:
-    """Select the conjugate molecule by charge-vector length when metadata is stripped."""
-    if not source.ordered_charges:
-        return ()
-    matches = tuple(
-        molecule
-        for molecule in tuple(getattr(topology, "molecules", ()) or ())
-        if len(tuple(getattr(molecule, "atoms", ()) or ())) == len(source.ordered_charges)
-    )
-    return matches if len(matches) == 1 else ()
-
-
-def _requires_ordered_charge_transfer(atoms: tuple[Any, ...], source: _PartialChargeSource) -> bool:
-    """Return whether atom metadata is unavailable but order is compatible."""
-    if not source.ordered_charges or len(atoms) != len(source.ordered_charges):
-        return False
-    return not any(_atom_identity(atom).residue_name for atom in atoms)
-
-
-def _charged_template_from_ordered_source(
-    molecule: Any,
-    source: _PartialChargeSource,
-    *,
-    total_charge_tolerance: float,
-) -> Any:
-    """Copy a molecule and assign source partial charges by preserved atom order."""
-    atoms = tuple(getattr(molecule, "atoms", ()) or ())
-    charges = list(source.ordered_charges)
-    formal_total = sum(_formal_charge_value(getattr(atom, "formal_charge", 0)) for atom in atoms)
-    partial_total = sum(charges)
-    if abs(partial_total - formal_total) > total_charge_tolerance:
-        raise ValueError(
-            "Final conjugate ordered partial charges do not sum to the molecule formal charge: "
-            f"partial total {partial_total:.8f} e vs formal total {formal_total:.8f} e "
-            f"for {_molecule_label(molecule)}"
-        )
     template = copy.deepcopy(molecule)
     template.partial_charges = _as_openff_quantity(charges)
     return template

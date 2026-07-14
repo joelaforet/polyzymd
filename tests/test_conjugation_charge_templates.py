@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -119,8 +120,43 @@ def test_build_conjugate_charge_templates_validates_total_charge():
         )
 
 
-def test_ordered_residue_records_preserve_metadata_missing_fallback_order():
-    """Metadata-missing fallback should use proven one-atom bridge record order."""
+def test_build_conjugate_charge_templates_has_no_public_total_charge_tolerance():
+    """Template charge acceptance should not expose a caller-relaxed tolerance."""
+    signature = inspect.signature(build_conjugate_charge_templates)
+
+    assert "total_charge_tolerance" not in signature.parameters
+
+
+def test_build_conjugate_charge_templates_rejects_caller_total_charge_tolerance():
+    """Callers should not be able to relax final charge acceptance."""
+    target = _molecule("target", [_atom("A", "LYX", 10, "NZ", 0)])
+    records = (
+        {
+            "chain_id": "A",
+            "residue_name": "LYX",
+            "residue_number": 10,
+            "source": "production:resp-fragment-fit",
+            "atom_charges": {"NZ": 0.0},
+        },
+    )
+
+    with pytest.raises(TypeError, match="total_charge_tolerance"):
+        build_conjugate_charge_templates(
+            SimpleNamespace(molecules=(target,)),
+            _library(residue_partial_charges=records),
+            total_charge_tolerance=1.0,
+        )
+
+
+def test_source_from_residue_records_has_no_ordered_fallback_context_argument():
+    """Internal charge sources should not retain metadata-stripped fallback controls."""
+    signature = inspect.signature(_source_from_residue_records)
+
+    assert tuple(signature.parameters) == ("records",)
+
+
+def test_ordered_residue_records_do_not_enable_metadata_missing_fallback():
+    """Metadata-stripped targets should fail even with ordered bridge records."""
     records = (
         {
             "chain_id": "A",
@@ -161,16 +197,10 @@ def test_ordered_residue_records_preserve_metadata_missing_fallback_order():
         ),
     )
 
-    source = _source_from_residue_records(records, library)
-    templates = build_conjugate_charge_templates(
-        SimpleNamespace(molecules=(target,)),
-        library,
-    )
-
-    expected = (-0.4, 0.1, 0.3, 0.0)
-    assert source.ordered_charges == pytest.approx(expected)
-    assert _charge_values(templates[0].partial_charges) == pytest.approx(expected)
-    assert _charge_values(templates[0].partial_charges) != pytest.approx((-0.4, 0.3, 0.1, 0.0))
+    source = _source_from_residue_records(records)
+    assert not hasattr(source, "ordered_charges")
+    with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
+        build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
 
 
 def test_grouped_residue_records_do_not_enable_metadata_missing_fallback():
@@ -203,8 +233,8 @@ def test_grouped_residue_records_do_not_enable_metadata_missing_fallback():
         ),
     )
 
-    source = _source_from_residue_records(records, library)
-    assert source.ordered_charges == ()
+    source = _source_from_residue_records(records)
+    assert not hasattr(source, "ordered_charges")
     with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
         build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
 
@@ -223,8 +253,8 @@ def test_one_atom_records_without_bridge_provenance_do_not_enable_ordered_fallba
     target = _metadata_free_molecule("metadata-free-target", atom_count=1)
     library = _library(residue_partial_charges=records)
 
-    source = _source_from_residue_records(records, library)
-    assert source.ordered_charges == ()
+    source = _source_from_residue_records(records)
+    assert not hasattr(source, "ordered_charges")
     with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
         build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
 
@@ -249,8 +279,8 @@ def test_generic_bridge_source_without_order_marker_does_not_enable_ordered_fall
         ),
     )
 
-    source = _source_from_residue_records(records, library)
-    assert source.ordered_charges == ()
+    source = _source_from_residue_records(records)
+    assert not hasattr(source, "ordered_charges")
     with pytest.raises(ValueError, match="contains no molecule with product-state residues"):
         build_conjugate_charge_templates(SimpleNamespace(molecules=(target,)), library)
 

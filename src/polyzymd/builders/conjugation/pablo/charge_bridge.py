@@ -42,6 +42,7 @@ from polyzymd.builders.conjugation.pablo.sdf import (
 LOGGER = logging.getLogger(__name__)
 
 _BRIDGE_SOURCE = "production:product-state-peptide-capped-nagl-charge-bridge"
+_TOTAL_CHARGE_RECONCILIATION_TRIGGER_E = 1.0e-4
 _LOCAL_RECONCILIATION_TOTAL_FAIL_E = 0.02
 _LOCAL_RECONCILIATION_PER_ATOM_FAIL_E = 0.005
 
@@ -55,13 +56,14 @@ def build_product_state_charge_bridge(
     specs: Sequence[Any],
     output_dir: Path | str,
     settings: InterchangeParameterizationSettings | None = None,
-    total_charge_tolerance: float = 1.0e-4,
 ) -> Any:
     """Attach production partial-charge records to a product-state Pablo library.
 
     The bridge keeps the OpenFF charge template at molecule scope while assigning
     atom charges from local source classes: ff14SB protein atoms, charged polymer
-    source templates, and a local NAGL product-state linkage patch.
+    source templates, and a local peptide-capped NAGL product-state linkage patch.
+    Residual charge reconciliation uses fixed private safety limits and is not
+    caller-configurable.
 
     Parameters
     ----------
@@ -79,17 +81,12 @@ def build_product_state_charge_bridge(
         Conjugate construction artifact directory.
     settings : InterchangeParameterizationSettings or None, optional
         Force-field settings for ff14SB source extraction, by default ``None``.
-    total_charge_tolerance : float, optional
-        Allowed total-charge mismatch before local reconciliation, by default ``1e-4``.
-
     Returns
     -------
     Any
         A copied product-state Pablo library with ``residue_partial_charges``,
         ``charge_bridge_report``, and ``charge_bridge_report_path`` fields set.
     """
-    if total_charge_tolerance < 0:
-        raise ValueError("total_charge_tolerance must be non-negative")
     if not specs:
         raise ValueError("Product-state charge bridge requires at least one attachment spec")
 
@@ -177,7 +174,7 @@ def build_product_state_charge_bridge(
     )
     correction_atom_identities: tuple[str, ...] = ()
     max_per_atom_correction = 0.0
-    if abs(correction) > total_charge_tolerance:
+    if abs(correction) > _TOTAL_CHARGE_RECONCILIATION_TRIGGER_E:
         local_reconciliation = _apply_local_patch_reconciliation(
             records,
             target_record_keys=target_record_keys,
