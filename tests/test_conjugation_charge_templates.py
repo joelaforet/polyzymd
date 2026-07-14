@@ -274,7 +274,7 @@ def test_generic_bridge_source_without_order_marker_does_not_enable_ordered_fall
     library = _library(
         residue_partial_charges=records,
         charge_bridge_report=SimpleNamespace(
-            source="production:product-state-charge-bridge",
+            source="charge-bridge:product-state",
             success=True,
         ),
     )
