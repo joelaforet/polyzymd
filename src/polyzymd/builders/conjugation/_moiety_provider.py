@@ -24,7 +24,7 @@ class ResolvedMoietySource(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    fragment: GeneratedPolymerFragment = Field(exclude=True)
+    fragment: GeneratedPolymerFragment | None = Field(default=None, exclude=True)
     source_fragment: Any | None = Field(default=None, exclude=True)
     source_kind: Literal["polymer", "smiles"]
     sidecars: dict[str, Path] = Field(default_factory=dict)
