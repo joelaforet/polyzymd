@@ -155,6 +155,15 @@ def _embed_conformer(mol: Any, *, random_seed: int | None) -> None:
         params.randomSeed = int(random_seed)
     status = AllChem.EmbedMolecule(mol, params)
     if status != 0 or mol.GetNumConformers() == 0:
+        status = AllChem.EmbedMolecule(
+            mol,
+            maxAttempts=100,
+            randomSeed=int(random_seed) if random_seed is not None else -1,
+            useRandomCoords=True,
+            useExpTorsionAnglePrefs=True,
+            useBasicKnowledge=True,
+        )
+    if status != 0 or mol.GetNumConformers() == 0:
         raise ValueError("RDKit failed to generate a 3D conformer for the moiety SMILES")
 
 
