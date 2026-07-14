@@ -107,7 +107,7 @@ def validate_fast_mixed_summary(summary: dict[str, Any], *, require_cuda: bool =
     assert validation["charge_audit_status"] == "pass"
     assert validation["relaxation_evidence_status"] == "pass"
     assert len(validation["linkage_distances_angstrom"]) == 2
-    assert validation["close_contact_count"] <= 10
+    assert validation["close_contact_count"] == 0
     charge_bridge = summary["charge_bridge"]
     assert charge_bridge["success"] is True
     assert charge_bridge["ff14sb_atom_count"] > 1_000
