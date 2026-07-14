@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from types import SimpleNamespace
 
@@ -220,6 +221,27 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
         for atom_name, charge in record.atom_charges.items()
     }
     assert charges[("LYX", "NZ")] == pytest.approx(-0.25)
+
+
+def test_build_product_state_charge_bridge_has_no_public_total_charge_tolerance():
+    """Strict bridge reconciliation should not expose a caller-relaxed tolerance."""
+    signature = inspect.signature(charge_bridge.build_product_state_charge_bridge)
+
+    assert "total_charge_tolerance" not in signature.parameters
+
+
+def test_build_product_state_charge_bridge_rejects_caller_total_charge_tolerance(tmp_path):
+    """Callers should not be able to bypass fixed bridge reconciliation limits."""
+    with pytest.raises(TypeError, match="total_charge_tolerance"):
+        charge_bridge.build_product_state_charge_bridge(
+            product_state_pablo_library=SimpleNamespace(residue_names=("LYX",), definitions=()),
+            product_topology=SimpleNamespace(molecules=()),
+            product_pdb=tmp_path / "product.pdb",
+            source_protein_pdb=tmp_path / "source.pdb",
+            specs=(SimpleNamespace(),),
+            output_dir=tmp_path,
+            total_charge_tolerance=1.0,
+        )
 
 
 def test_bridge_rejects_reconciliation_without_local_patch_atoms(monkeypatch, tmp_path):
