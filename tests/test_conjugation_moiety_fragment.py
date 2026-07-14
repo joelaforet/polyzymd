@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from polyzymd.builders.conjugation._moiety_provider import (
+    _generated_fragment_from_moiety_plan_placeholder,
+)
 from polyzymd.builders.conjugation.polymer import (
     GeneratedMoietyFragment,
     build_smiles_moiety_fragment,
@@ -34,8 +37,10 @@ def test_builds_neutral_smiles_moiety_fragment(tmp_path: Path):
     assert len(fragment.atoms) == 9
     assert fragment.pdb_path == tmp_path / "ethanol.pdb"
     assert fragment.sdf_path == tmp_path / "ethanol.sdf"
+    assert fragment.charged_sdf_path == tmp_path / "ethanol_charged.sdf"
     assert fragment.pdb_path.exists()
     assert fragment.sdf_path.exists()
+    assert fragment.charged_sdf_path.exists()
 
 
 def test_builds_charged_smiles_moiety_fragment():
@@ -79,6 +84,26 @@ def test_sidecar_atom_counts_align(tmp_path: Path):
     assert sdf_mols[0].GetNumAtoms() == len(fragment.atoms)
 
 
+def test_charged_sidecar_preserves_atom_order_and_partial_charges(tmp_path: Path):
+    """SMILES moieties should emit production charged SDF sidecars for charge transfer."""
+    fragment = build_smiles_moiety_fragment(
+        "C(=O)[O-]",
+        "ACE",
+        output_dir=tmp_path,
+        random_seed=12,
+    )
+    assert fragment.charged_sdf_path is not None
+
+    supplier = Chem.SDMolSupplier(str(fragment.charged_sdf_path), removeHs=False, sanitize=False)
+    mol = next(mol for mol in supplier if mol is not None)
+
+    assert mol.GetNumAtoms() == len(fragment.atoms)
+    assert all(atom.HasProp("PartialCharge") for atom in mol.GetAtoms())
+    assert [atom.GetSymbol().upper() for atom in mol.GetAtoms()] == [
+        atom.element for atom in fragment.atoms
+    ]
+
+
 def test_preserves_bond_orders_and_formal_charges():
     """Fragments should retain RDKit bond orders and non-zero formal charges."""
     fragment = build_smiles_moiety_fragment("C(=O)[O-]", "ACE", random_seed=23)
@@ -98,3 +123,14 @@ def test_atom_naming_is_deterministic_with_seed():
     assert len(first_names) == len(set(first_names))
     assert all(1 <= len(atom_name) <= 4 for atom_name in first_names)
     assert any(atom_name.startswith("C") and atom_name != "C" for atom_name in first_names)
+
+
+def test_smiles_moiety_placeholder_has_temporary_reactive_selector(tmp_path: Path):
+    """SMILES moiety placeholders should satisfy fragment validation before planning."""
+    fragment = build_smiles_moiety_fragment("CO", "MEO", output_dir=tmp_path, random_seed=11)
+
+    placeholder = _generated_fragment_from_moiety_plan_placeholder(fragment)
+
+    assert placeholder.reactive_atom_index == fragment.atoms[0].atom_index
+    assert placeholder.reactive_atom_name == fragment.atoms[0].atom_name
+    assert placeholder.residues[0].residue_name == "MEO"

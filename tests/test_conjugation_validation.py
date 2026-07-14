@@ -131,6 +131,41 @@ def test_atom_presence_allows_remapped_modifier_link_atom():
     assert report.missing_atoms == ()
 
 
+def test_atom_presence_allows_remapped_protein_product_link_atom():
+    """Protein link atom matching should use product residue identity such as LYX."""
+    source_link_atom = _atom(
+        serial=1,
+        atom_name="NZ",
+        residue_name="LYS",
+        residue_number=63,
+        chain_id="A",
+    )
+    product_link_atom = _atom(
+        serial=1,
+        atom_name="NZ",
+        residue_name="LYX",
+        residue_number=63,
+        chain_id="A",
+    )
+    modifier_link_atom = _atom(serial=2, atom_name="C1", residue_name="NHX", residue_number=1)
+    plan = SimpleNamespace(
+        protein_link_atom=source_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_product_residue_name="LYX",
+        modifier_product_residue_name="NHX",
+        protein_leaving_atoms=(),
+        modifier_leaving_atoms=(),
+    )
+
+    report = validate_atom_presence(
+        (product_link_atom, modifier_link_atom),
+        resolved_plans=(plan,),
+    )
+
+    assert report.status == ValidationStatus.PASS
+    assert report.missing_atoms == ()
+
+
 def test_atom_presence_detects_remapped_modifier_leaving_atom():
     """Modifier leaving atoms should be found after product residue remapping."""
     protein_link_atom = _atom(

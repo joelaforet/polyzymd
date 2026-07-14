@@ -307,6 +307,48 @@ def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tm
     assert reconciliation["per_atom_correction_e"] == pytest.approx(0.02)
 
 
+def test_bridge_allows_mixed_multi_linkage_local_reconciliation(monkeypatch, tmp_path):
+    """Mixed multi-linkage bridges may use the narrow audited reconciliation window."""
+    atoms = [_atom("C", "NHX", 1, f"C{index:03d}", 0) for index in range(9)]
+    atoms[0].formal_charge = -1
+    target = _molecule(atoms)
+    library = SimpleNamespace(residue_names=("NHX",), definitions=())
+    patch_records = tuple(
+        AtomPartialChargeRecord(
+            chain_id="C",
+            residue_name="NHX",
+            residue_number=1,
+            atom_name=atom.name,
+            charge_e=-0.18,
+            source="production:nagl-patch",
+            source_role="local_nagl_patch",
+        )
+        for atom in atoms
+    )
+    monkeypatch.setattr(charge_bridge, "_protein_ff14sb_records", lambda **_: ())
+    monkeypatch.setattr(charge_bridge, "_polymer_template_records", lambda _, **__: ())
+    monkeypatch.setattr(
+        charge_bridge,
+        "_local_nagl_patch_records",
+        lambda _, **__: (patch_records, "nagl-test"),
+    )
+    monkeypatch.setattr(charge_bridge, "parse_pdb_atom_records", lambda _: ())
+
+    result = charge_bridge.build_product_state_charge_bridge(
+        product_state_pablo_library=library,
+        product_topology=SimpleNamespace(molecules=(target,)),
+        product_pdb=tmp_path / "product.pdb",
+        source_protein_pdb=tmp_path / "source.pdb",
+        specs=(SimpleNamespace(), SimpleNamespace()),
+        output_dir=tmp_path,
+    )
+
+    report = result.charge_bridge_report
+    assert report.normalization_correction_e == pytest.approx(0.62)
+    assert report.max_per_atom_correction_e == pytest.approx(0.62 / 9)
+    assert report.total_charge_e == pytest.approx(-1.0)
+
+
 def test_bridge_refuses_raw_sdf_as_production_charge_source(tmp_path):
     """Raw bond SDF sidecars should not be accepted as production charges."""
     raw_sdf = tmp_path / "polymer.sdf"
@@ -370,6 +412,104 @@ def test_polymer_records_refine_duplicate_atom_names_by_residue_mapping(monkeypa
     assert records[0].residue_number == 6
     assert records[0].atom_name == "C060"
     assert records[0].charge_e == pytest.approx(0.125)
+
+
+def test_polymer_records_do_not_unique_name_remap_known_residue(monkeypatch, tmp_path):
+    """Known residue mappings should not collide with unrelated unique atom names."""
+    charged_sdf = tmp_path / "glycan_charged.sdf"
+    charged_sdf.write_text("", encoding="utf-8")
+    fragment = SimpleNamespace(
+        atoms=(
+            SimpleNamespace(
+                atom_index=0,
+                atom_name="H030",
+                element="H",
+                residue_name="NAG",
+                residue_number=1,
+                insertion_code="",
+            ),
+        ),
+        leaving_atom_names=(),
+    )
+    spec = SimpleNamespace(
+        source_sidecars={"charged_sdf": charged_sdf},
+        generated_fragment=fragment,
+        product_residue_mappings={
+            "1": {
+                "target_chain": "C",
+                "target_residue_name": "NAG",
+                "target_residue_number": 4,
+            },
+        },
+    )
+    product_atoms = (
+        SimpleNamespace(chain_id="C", residue_name="EG1", residue_number=3, atom_name="H030"),
+    )
+    monkeypatch.setattr(
+        charge_bridge,
+        "_charged_sdf_atom_charges",
+        lambda *_args, **_kwargs: (-0.02,),
+    )
+
+    records = charge_bridge._polymer_template_records((spec,), product_atoms=product_atoms)
+
+    assert len(records) == 1
+    assert records[0].residue_name == "NAG"
+    assert records[0].residue_number == 4
+    assert records[0].atom_name == "H030"
+
+
+def test_polymer_records_skip_moiety_leaving_atoms_by_index(monkeypatch, tmp_path):
+    """SMILES moiety charge transfer should omit resolved leaving atoms without names."""
+    charged_sdf = tmp_path / "glycan_charged.sdf"
+    charged_sdf.write_text("", encoding="utf-8")
+    fragment = SimpleNamespace(
+        atoms=(
+            SimpleNamespace(
+                atom_index=0,
+                serial=1,
+                atom_name="C001",
+                element="C",
+                residue_name="NAG",
+                residue_number=1,
+                insertion_code="",
+            ),
+            SimpleNamespace(
+                atom_index=1,
+                serial=2,
+                atom_name="O002",
+                element="O",
+                residue_name="NAG",
+                residue_number=1,
+                insertion_code="",
+            ),
+        ),
+        leaving_atom_names=(),
+        leaving_atom_indices=(1,),
+        leaving_atom_serials=(),
+    )
+    spec = SimpleNamespace(
+        source_sidecars={"charged_sdf": charged_sdf},
+        generated_fragment=fragment,
+        product_residue_mappings={
+            "1": {
+                "target_chain": "C",
+                "target_residue_name": "NAG",
+                "target_residue_number": 4,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        charge_bridge,
+        "_charged_sdf_atom_charges",
+        lambda *_args, **_kwargs: (0.3, -0.3),
+    )
+
+    records = charge_bridge._polymer_template_records((spec,))
+
+    assert len(records) == 1
+    assert records[0].atom_name == "C001"
+    assert records[0].charge_e == pytest.approx(0.3)
 
 
 def test_polymer_records_assign_charged_sdf_charges_by_atom_index(monkeypatch, tmp_path):

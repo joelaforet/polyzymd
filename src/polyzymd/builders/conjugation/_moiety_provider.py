@@ -214,16 +214,23 @@ def _resolve_smiles_source(
 def _generated_fragment_from_moiety_plan_placeholder(
     fragment: GeneratedMoietyFragment,
 ) -> GeneratedPolymerFragment:
-    """Adapt a moiety before the final resolved plan is available."""
+    """Adapt a moiety before the final resolved plan is available.
+
+    The placeholder is used only to satisfy the provider model before the
+    reaction template identifies the true reactive and leaving atoms. It is
+    replaced by :func:`generated_fragment_for_resolved_source` before coordinate
+    assembly, so the selector only needs to be valid for the current fragment.
+    """
+    first_atom = fragment.atoms[0]
     return GeneratedPolymerFragment(
         atoms=fragment.atoms,
         bonds=fragment.bonds,
         bond_orders=fragment.bond_orders,
         residues=fragment.residues,
         sequence=None,
-        reactive_atom_serial=None,
-        reactive_atom_index=None,
-        reactive_atom_name=None,
+        reactive_atom_serial=first_atom.serial,
+        reactive_atom_index=first_atom.atom_index,
+        reactive_atom_name=first_atom.atom_name,
         leaving_atom_serials=(),
         leaving_atom_indices=(),
         leaving_atom_names=(),
@@ -248,6 +255,8 @@ def _moiety_sidecars(fragment: GeneratedMoietyFragment) -> dict[str, Path]:
         sidecars["pdb"] = fragment.pdb_path
     if fragment.sdf_path is not None:
         sidecars["sdf"] = fragment.sdf_path
+    if fragment.charged_sdf_path is not None:
+        sidecars["charged_sdf"] = fragment.charged_sdf_path
     return sidecars
 
 

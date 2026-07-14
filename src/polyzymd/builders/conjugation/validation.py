@@ -1309,7 +1309,11 @@ def _optional_float(value: Any) -> float | None:
 
 def _allows_product_remap(source: str, identity: AtomIdentity) -> bool:
     """Return whether product writing may have rewritten source identity metadata."""
-    return source.startswith("modifier_") or identity.record_name.strip().upper() == "HETATM"
+    return (
+        source == "protein_link_atom"
+        or source.startswith("modifier_")
+        or identity.record_name.strip().upper() == "HETATM"
+    )
 
 
 def _normalized_element(value: str) -> str:

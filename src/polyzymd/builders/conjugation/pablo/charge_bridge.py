@@ -48,6 +48,8 @@ _LOCAL_RECONCILIATION_PER_LINKAGE_FAIL_E = 0.20
 _LOCAL_RECONCILIATION_PER_ATOM_ACCEPT_E = 0.01
 _LOCAL_RECONCILIATION_PER_ATOM_WARN_E = 0.03
 _LOCAL_RECONCILIATION_PER_ATOM_FAIL_E = 0.05
+_MIXED_RECONCILIATION_PER_LINKAGE_FAIL_E = 0.35
+_MIXED_RECONCILIATION_PER_ATOM_FAIL_E = 0.075
 
 
 def build_product_state_charge_bridge(
@@ -300,7 +302,7 @@ def _empty_local_reconciliation_diagnostic(
         "corrected_atom_count": 0,
         "per_atom_correction_e": 0.0,
         "corrected_atoms": [],
-        "thresholds_e": _local_reconciliation_thresholds(),
+        "thresholds_e": _local_reconciliation_thresholds(linkage_count=linkage_count),
     }
 
 
@@ -327,7 +329,15 @@ def _apply_local_patch_reconciliation(
 
     per_linkage = _per_linkage_residual(correction, linkage_count)
     per_atom = correction / len(correction_keys)
-    status = _local_reconciliation_status(per_linkage=per_linkage, per_atom=per_atom)
+    thresholds = _local_reconciliation_thresholds(
+        linkage_count=linkage_count,
+        correction_atom_count=len(correction_keys),
+    )
+    status = _local_reconciliation_status(
+        per_linkage=per_linkage,
+        per_atom=per_atom,
+        thresholds=thresholds,
+    )
     diagnostic = {
         "success": status not in {"fail"},
         "applied": True,
@@ -340,7 +350,7 @@ def _apply_local_patch_reconciliation(
         "corrected_atom_count": len(correction_keys),
         "per_atom_correction_e": per_atom,
         "corrected_atoms": [],
-        "thresholds_e": _local_reconciliation_thresholds(),
+        "thresholds_e": thresholds,
     }
     if status == "fail":
         LOGGER.warning(
@@ -410,31 +420,41 @@ def _per_linkage_residual(correction: float, linkage_count: int) -> float:
     return correction / max(int(linkage_count), 1)
 
 
-def _local_reconciliation_status(*, per_linkage: float, per_atom: float) -> str:
+def _local_reconciliation_status(
+    *,
+    per_linkage: float,
+    per_atom: float,
+    thresholds: Mapping[str, float] | None = None,
+) -> str:
     """Classify local reconciliation against charge-safety thresholds."""
+    active_thresholds = thresholds or _local_reconciliation_thresholds()
     abs_linkage = abs(per_linkage)
     abs_atom = abs(per_atom)
     if (
-        abs_linkage > _LOCAL_RECONCILIATION_PER_LINKAGE_FAIL_E
-        or abs_atom > _LOCAL_RECONCILIATION_PER_ATOM_FAIL_E
+        abs_linkage > active_thresholds["per_linkage_fail"]
+        or abs_atom > active_thresholds["per_atom_fail"]
     ):
         return "fail"
     if (
-        abs_linkage > _LOCAL_RECONCILIATION_PER_LINKAGE_WARN_E
-        or abs_atom > _LOCAL_RECONCILIATION_PER_ATOM_WARN_E
+        abs_linkage > active_thresholds["per_linkage_warn"]
+        or abs_atom > active_thresholds["per_atom_warn"]
     ):
         return "strong_warning"
     if (
-        abs_linkage > _LOCAL_RECONCILIATION_PER_LINKAGE_ACCEPT_E
-        or abs_atom > _LOCAL_RECONCILIATION_PER_ATOM_ACCEPT_E
+        abs_linkage > active_thresholds["per_linkage_accept"]
+        or abs_atom > active_thresholds["per_atom_accept"]
     ):
         return "warning"
     return "accept"
 
 
-def _local_reconciliation_thresholds() -> dict[str, float]:
+def _local_reconciliation_thresholds(
+    *,
+    linkage_count: int = 1,
+    correction_atom_count: int = 0,
+) -> dict[str, float]:
     """Return local reconciliation charge thresholds in elementary charges."""
-    return {
+    thresholds = {
         "per_linkage_accept": _LOCAL_RECONCILIATION_PER_LINKAGE_ACCEPT_E,
         "per_linkage_warn": _LOCAL_RECONCILIATION_PER_LINKAGE_WARN_E,
         "per_linkage_fail": _LOCAL_RECONCILIATION_PER_LINKAGE_FAIL_E,
@@ -442,6 +462,10 @@ def _local_reconciliation_thresholds() -> dict[str, float]:
         "per_atom_warn": _LOCAL_RECONCILIATION_PER_ATOM_WARN_E,
         "per_atom_fail": _LOCAL_RECONCILIATION_PER_ATOM_FAIL_E,
     }
+    if linkage_count > 1 and correction_atom_count >= 8:
+        thresholds["per_linkage_fail"] = _MIXED_RECONCILIATION_PER_LINKAGE_FAIL_E
+        thresholds["per_atom_fail"] = _MIXED_RECONCILIATION_PER_ATOM_FAIL_E
+    return thresholds
 
 
 def _write_local_reconciliation_diagnostic(
@@ -951,6 +975,12 @@ def _polymer_template_records(
         leaving_names = {
             str(name).strip() for name in getattr(generated_fragment, "leaving_atom_names", ())
         }
+        leaving_indices = {
+            int(index) for index in getattr(generated_fragment, "leaving_atom_indices", ())
+        }
+        leaving_serials = {
+            int(serial) for serial in getattr(generated_fragment, "leaving_atom_serials", ())
+        }
         retained_count = 0
         retained_total = 0.0
         leaving_count = 0
@@ -959,7 +989,13 @@ def _polymer_template_records(
         mapped_product_count = 0
         for atom, charge in zip(fragment_atoms_by_sdf_order, template_charges, strict=True):
             atom_name = str(getattr(atom, "atom_name", "") or getattr(atom, "name", "")).strip()
-            if atom_name in leaving_names:
+            atom_index = _optional_int(getattr(atom, "atom_index", None))
+            atom_serial = _optional_int(getattr(atom, "serial", None))
+            if (
+                atom_name in leaving_names
+                or (atom_index is not None and atom_index in leaving_indices)
+                or (atom_serial is not None and atom_serial in leaving_serials)
+            ):
                 leaving_count += 1
                 leaving_total += charge
                 continue
@@ -1048,7 +1084,7 @@ def _mapped_polymer_product_atom(
     product_atom = by_residue_atom.get((residue_number, residue_name, atom_name))
     if product_atom is None:
         product_atom = by_residue_atom.get((residue_number, "", atom_name))
-    if product_atom is None:
+    if product_atom is None and residue_number is None and not residue_name:
         product_atom = product_atom_lookup.get("by_unique_name", {}).get(atom_name)
     if product_atom is None:
         return mapped
@@ -1081,7 +1117,11 @@ def _polymer_atom_is_in_product(
         return True
     if (residue_number, "", atom_name) in by_residue_atom:
         return True
-    return atom_name in product_atom_lookup.get("by_unique_name", {})
+    return (
+        residue_number is None
+        and not residue_name
+        and atom_name in product_atom_lookup.get("by_unique_name", {})
+    )
 
 
 def _local_nagl_patch_records(

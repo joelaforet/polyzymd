@@ -28,6 +28,7 @@ class GeneratedMoietyFragment(BaseModel):
     name: str = "moiety"
     pdb_path: Path | None = None
     sdf_path: Path | None = None
+    charged_sdf_path: Path | None = None
 
     @model_validator(mode="after")
     def validate_fragment_identity(self) -> GeneratedMoietyFragment:
@@ -98,13 +99,16 @@ def build_smiles_moiety_fragment(
 
     pdb_path = None
     sdf_path = None
+    charged_sdf_path = None
     if output_dir is not None:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         stem = _safe_file_stem(fragment_name)
         pdb_path = output_path / f"{stem}.pdb"
         sdf_path = output_path / f"{stem}.sdf"
+        charged_sdf_path = output_path / f"{stem}_charged.sdf"
         _write_aligned_sidecars(mol, pdb_path=pdb_path, sdf_path=sdf_path)
+        _write_charged_sdf_sidecar(mol, charged_sdf_path=charged_sdf_path)
 
     atoms = _fragment_atoms_from_mol(mol, atom_names=atom_names, residue_name=residue)
     return GeneratedMoietyFragment(
@@ -123,6 +127,7 @@ def build_smiles_moiety_fragment(
         name=fragment_name,
         pdb_path=pdb_path,
         sdf_path=sdf_path,
+        charged_sdf_path=charged_sdf_path,
     )
 
 
@@ -223,6 +228,59 @@ def _write_aligned_sidecars(mol: Any, *, pdb_path: Path, sdf_path: Path) -> None
         raise ValueError(f"RDKit did not create the moiety PDB sidecar at {pdb_path}")
     if not sdf_path.exists():
         raise ValueError(f"RDKit did not create the moiety SDF sidecar at {sdf_path}")
+
+
+def _write_charged_sdf_sidecar(mol: Any, *, charged_sdf_path: Path) -> None:
+    """Write a NAGL-charged SDF sidecar preserving RDKit atom order.
+
+    Parameters
+    ----------
+    mol : Any
+        RDKit molecule carrying the final atom order and conformer.
+    charged_sdf_path : pathlib.Path
+        Output SDF path whose atoms receive ``PartialCharge`` properties.
+
+    Raises
+    ------
+    RuntimeError
+        If OpenFF/NAGL charging fails or returns incomplete charges.
+    """
+    from rdkit import Chem
+
+    from polyzymd.utils.charging import NAGLCharger
+
+    try:
+        from openff.toolkit import Molecule
+    except ImportError as exc:  # pragma: no cover - exercised only outside the pixi env
+        raise ImportError(
+            "OpenFF Toolkit is required to write charged SMILES moiety sidecars"
+        ) from exc
+
+    rdkit_mol = Chem.Mol(mol)
+    openff_mol = Molecule.from_rdkit(
+        Chem.Mol(rdkit_mol),
+        allow_undefined_stereo=True,
+        hydrogens_are_explicit=True,
+    )
+    charged = NAGLCharger().charge_molecule(openff_mol)
+    partial_charges = getattr(charged, "partial_charges", None)
+    if partial_charges is None or len(partial_charges) != rdkit_mol.GetNumAtoms():
+        raise RuntimeError("NAGL did not return one partial charge per SMILES moiety atom")
+
+    charges = partial_charges.m_as("elementary_charge")
+    for atom, charge in zip(rdkit_mol.GetAtoms(), charges, strict=True):
+        atom.SetDoubleProp("PartialCharge", float(charge))
+    rdkit_mol.SetProp(
+        "atom.dprop.PartialCharge",
+        " ".join(f"{float(charge):.16g}" for charge in charges),
+    )
+    writer = Chem.SDWriter(str(charged_sdf_path))
+    try:
+        writer.write(rdkit_mol)
+    finally:
+        writer.close()
+    if not charged_sdf_path.exists():
+        raise ValueError(f"RDKit did not create the charged moiety SDF at {charged_sdf_path}")
 
 
 def _fragment_atoms_from_mol(
