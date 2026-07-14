@@ -14,6 +14,7 @@ from polyzymd.builders.conjugation.pablo.charge_records import (
     ResiduePartialChargeRecord,
     validate_unique_atom_records,
 )
+from polyzymd.builders.conjugation.pablo.product_state import target_identities_from_molecule
 
 
 def test_residue_records_group_atom_records():
@@ -242,6 +243,63 @@ def test_build_product_state_charge_bridge_rejects_caller_total_charge_tolerance
             output_dir=tmp_path,
             total_charge_tolerance=1.0,
         )
+
+
+def test_target_identities_validate_product_pdb_metadata():
+    """Product-state target identities should accept same-order PDB metadata."""
+    product_atoms = (_product_atom(1, 0, "A", "LYX", 10, "NZ"),)
+    target = _molecule([_atom_from_product_atom(product_atoms[0])])
+
+    identities = target_identities_from_molecule(target, product_atoms=product_atoms)
+
+    assert identities == (("A", "LYX", 10, "", "NZ"),)
+
+
+def test_target_identities_reject_complete_stale_product_metadata():
+    """Complete but stale atom metadata should not drive charge transfer."""
+    product_atoms = (_product_atom(1, 0, "A", "LYX", 10, "NZ"),)
+    stale_atom = _atom_from_product_atom(_product_atom(99, 0, "C", "NHX", 1, "C001"))
+    target = _molecule([stale_atom])
+
+    with pytest.raises(ValueError, match="stale or reordered metadata"):
+        target_identities_from_molecule(target, product_atoms=product_atoms)
+
+
+def test_target_identities_reject_product_atom_count_mismatch():
+    """Topology and product PDB atom counts must agree before charge transfer."""
+    product_atoms = (
+        _product_atom(1, 0, "A", "LYX", 10, "NZ"),
+        _product_atom(2, 1, "A", "LYX", 10, "CE"),
+    )
+    target = _molecule([_atom_from_product_atom(product_atoms[0])])
+
+    with pytest.raises(ValueError, match="atom-count mismatch"):
+        target_identities_from_molecule(target, product_atoms=product_atoms)
+
+
+def test_target_identities_reject_product_atom_order_mismatch():
+    """Product charge transfer should fail when metadata order is swapped."""
+    product_atoms = (
+        _product_atom(1, 0, "A", "LYX", 10, "NZ"),
+        _product_atom(2, 1, "A", "LYX", 10, "CE"),
+    )
+    target = _molecule(
+        [_atom_from_product_atom(product_atoms[1]), _atom_from_product_atom(product_atoms[0])]
+    )
+
+    with pytest.raises(ValueError, match="stale or reordered metadata"):
+        target_identities_from_molecule(target, product_atoms=product_atoms)
+
+
+def test_target_identities_reject_serial_renumbering_for_charge_transfer():
+    """Serial renumbering should not be accepted during product charge transfer."""
+    product_atom = _product_atom(1, 0, "A", "LYX", 10, "NZ")
+    target_atom = _atom_from_product_atom(product_atom)
+    target_atom.metadata["product_atom_serial"] = 101
+    target = _molecule([target_atom])
+
+    with pytest.raises(ValueError, match="product_atom_serial"):
+        target_identities_from_molecule(target, product_atoms=(product_atom,))
 
 
 def test_bridge_rejects_reconciliation_without_local_patch_atoms(monkeypatch, tmp_path):
@@ -499,6 +557,47 @@ def _atom(
             "atom_name": atom_name,
         },
     )
+
+
+def _product_atom(
+    serial: int,
+    atom_index: int,
+    chain_id: str,
+    residue_name: str,
+    residue_number: int,
+    atom_name: str,
+) -> SimpleNamespace:
+    """Build a product PDB atom-record double."""
+    return SimpleNamespace(
+        serial=serial,
+        atom_index=atom_index,
+        chain_id=chain_id,
+        residue_name=residue_name,
+        residue_number=residue_number,
+        insertion_code="",
+        atom_name=atom_name,
+    )
+
+
+def _atom_from_product_atom(product_atom: SimpleNamespace) -> SimpleNamespace:
+    """Build an OpenFF-like atom double with product PDB metadata."""
+    atom = _atom(
+        product_atom.chain_id,
+        product_atom.residue_name,
+        product_atom.residue_number,
+        product_atom.atom_name,
+        0,
+    )
+    atom.metadata.update(
+        {
+            "product_identity_source": "product_pdb",
+            "product_atom_index": product_atom.atom_index,
+            "serial": product_atom.serial,
+            "product_atom_serial": product_atom.serial,
+            "insertion_code": product_atom.insertion_code,
+        }
+    )
+    return atom
 
 
 def _mini_sdf(elements: tuple[str, ...]) -> str:
