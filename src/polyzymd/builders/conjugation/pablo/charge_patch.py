@@ -289,6 +289,10 @@ def _add_product_hydrogen_bonds(
 def _hydrogen_parent_name(name: str, heavy_names: Sequence[str]) -> str | None:
     """Infer a PDB hydrogen parent from common residue atom naming."""
     candidates = []
+    if name.startswith("HD2"):
+        candidates.append("ND2")
+    if len(name) >= 2 and name[1].isalpha():
+        candidates.append(f"N{name[1]}" if name[1] in {"D", "Z"} else f"C{name[1]}")
     stripped = name[1:]
     if stripped:
         candidates.append(stripped.rstrip("123"))
