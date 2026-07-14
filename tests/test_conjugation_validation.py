@@ -449,6 +449,130 @@ def test_atom_presence_keeps_duplicate_modifier_identities_plan_scoped():
     assert missing_modifier_identity.atom_name == "C7"
 
 
+@pytest.mark.parametrize(
+    ("source_residue_name", "product_residue_name", "link_atom_name", "leaving_atom_name"),
+    (("LYS", "LYX", "NZ", "HZ2"), ("ASN", "ASX", "ND2", "HD21")),
+)
+def test_atom_presence_uses_product_protein_residue_identity(
+    source_residue_name: str,
+    product_residue_name: str,
+    link_atom_name: str,
+    leaving_atom_name: str,
+):
+    """Protein-side link atoms should be matched after product residue renaming."""
+    source_link_atom = _atom(
+        serial=1,
+        atom_name=link_atom_name,
+        residue_name=source_residue_name,
+        residue_number=60,
+        chain_id="A",
+    )
+    source_leaving_atom = _atom(
+        serial=2,
+        atom_name=leaving_atom_name,
+        residue_name=source_residue_name,
+        residue_number=60,
+        chain_id="A",
+    )
+    product_link_atom = source_link_atom.model_copy(update={"residue_name": product_residue_name})
+    modifier_link_atom = _atom(serial=3, atom_name="C1", residue_name="NAG", residue_number=1)
+    plan = SimpleNamespace(
+        protein_link_atom=source_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(source_leaving_atom,),
+        modifier_leaving_atoms=(),
+        protein_product_residue_name=product_residue_name,
+        modifier_product_residue_name="NAG",
+    )
+
+    report = validate_atom_presence(
+        (product_link_atom, modifier_link_atom),
+        resolved_plans=(plan,),
+    )
+
+    assert report.status == ValidationStatus.PASS
+    assert report.missing_atoms == ()
+    assert report.lingering_leaving_atoms == ()
+    assert report.present_atoms[0].residue_name == product_residue_name
+
+
+@pytest.mark.parametrize(
+    ("source_residue_name", "product_residue_name", "link_atom_name", "leaving_atom_name"),
+    (("LYS", "LYX", "NZ", "HZ2"), ("ASN", "ASX", "ND2", "HD21")),
+)
+def test_atom_presence_detects_product_protein_leaving_atom(
+    source_residue_name: str,
+    product_residue_name: str,
+    link_atom_name: str,
+    leaving_atom_name: str,
+):
+    """Protein-side leaving atoms should still fail after product residue renaming."""
+    source_link_atom = _atom(
+        serial=1,
+        atom_name=link_atom_name,
+        residue_name=source_residue_name,
+        residue_number=60,
+        chain_id="A",
+    )
+    source_leaving_atom = _atom(
+        serial=2,
+        atom_name=leaving_atom_name,
+        residue_name=source_residue_name,
+        residue_number=60,
+        chain_id="A",
+    )
+    product_link_atom = source_link_atom.model_copy(update={"residue_name": product_residue_name})
+    lingering_leaving_atom = source_leaving_atom.model_copy(
+        update={"residue_name": product_residue_name}
+    )
+    modifier_link_atom = _atom(serial=3, atom_name="C1", residue_name="NAG", residue_number=1)
+    plan = SimpleNamespace(
+        protein_link_atom=source_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(source_leaving_atom,),
+        modifier_leaving_atoms=(),
+        protein_product_residue_name=product_residue_name,
+        modifier_product_residue_name="NAG",
+    )
+
+    report = validate_atom_presence(
+        (product_link_atom, lingering_leaving_atom, modifier_link_atom),
+        resolved_plans=(plan,),
+    )
+
+    assert report.status == ValidationStatus.FAIL
+    assert report.missing_atoms == ()
+    assert len(report.lingering_leaving_atoms) == 1
+    assert report.lingering_leaving_atoms[0].residue_name == product_residue_name
+
+
+def test_atom_presence_does_not_accept_protein_renaming_without_plan_product_name():
+    """Protein remapping should remain plan-scoped instead of globally relaxed."""
+    source_link_atom = _atom(
+        serial=1,
+        atom_name="ND2",
+        residue_name="ASN",
+        residue_number=60,
+        chain_id="A",
+    )
+    product_link_atom = source_link_atom.model_copy(update={"residue_name": "ASX"})
+    modifier_link_atom = _atom(serial=2, atom_name="C1", residue_name="NAG", residue_number=1)
+    plan = SimpleNamespace(
+        protein_link_atom=source_link_atom,
+        modifier_link_atom=modifier_link_atom,
+        protein_leaving_atoms=(),
+        modifier_leaving_atoms=(),
+    )
+
+    report = validate_atom_presence(
+        (product_link_atom, modifier_link_atom),
+        resolved_plans=(plan,),
+    )
+
+    assert report.status == ValidationStatus.FAIL
+    assert report.missing_atoms[0].residue_name == "ASN"
+
+
 def test_charge_audit_pass_warn_and_fail(tmp_path):
     """Charge audit should summarize fake bridge payloads."""
     bridge_path = tmp_path / "product_state_charge_bridge.json"
@@ -1240,7 +1364,7 @@ def _atom(
         y=0.0,
         z=0.0,
         element=atom_name[0],
-        record_name="ATOM" if residue_name == "LYS" else "HETATM",
+        record_name="ATOM" if residue_name in {"ASN", "ASX", "LYS", "LYX"} else "HETATM",
     )
 
 
