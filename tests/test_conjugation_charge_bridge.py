@@ -201,7 +201,10 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
     assert result.charge_bridge_report.total_partial_charge_before_correction_e == pytest.approx(
         0.0
     )
-    assert result.charge_bridge_report.source == "production:product-state-local-nagl-charge-bridge"
+    assert (
+        result.charge_bridge_report.source
+        == "production:product-state-peptide-capped-nagl-charge-bridge"
+    )
     assert result.charge_bridge_report.order_preserving_atom_records is True
     assert (tmp_path / "product_state_charge_bridge.json").is_file()
     assert len(result.residue_partial_charges) == target.n_atoms
@@ -237,7 +240,7 @@ def test_bridge_rejects_reconciliation_without_local_patch_atoms(monkeypatch, tm
     monkeypatch.setattr(charge_bridge, "_local_nagl_patch_records", lambda _, **__: ((), None))
     monkeypatch.setattr(charge_bridge, "parse_pdb_atom_records", lambda _: ())
 
-    with pytest.raises(ValueError, match="no real local NAGL patch atoms"):
+    with pytest.raises(ValueError, match="no mapped modified-protein product residue atoms"):
         charge_bridge.build_product_state_charge_bridge(
             product_state_pablo_library=library,
             product_topology=SimpleNamespace(molecules=(target,)),
@@ -252,7 +255,7 @@ def test_bridge_rejects_reconciliation_without_local_patch_atoms(monkeypatch, tm
 
 def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tmp_path):
     """Small residuals should be auditable and local to NAGL patch atoms."""
-    target = _molecule([_atom("C", "NHX", 1, "C001", 0), _atom("C", "NHX", 1, "N001", 0)])
+    target = _molecule([_atom("A", "LYX", 10, "NZ", 0), _atom("C", "NHX", 1, "C001", 0)])
     library = SimpleNamespace(residue_names=("NHX",), definitions=())
     polymer_record = AtomPartialChargeRecord(
         chain_id="C",
@@ -264,11 +267,11 @@ def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tm
         source_role="polymer_template",
     )
     patch_record = AtomPartialChargeRecord(
-        chain_id="C",
-        residue_name="NHX",
-        residue_number=1,
-        atom_name="N001",
-        charge_e=0.08,
+        chain_id="A",
+        residue_name="LYX",
+        residue_number=10,
+        atom_name="NZ",
+        charge_e=0.096,
         source="production:nagl-patch",
         source_role="local_nagl_patch",
     )
@@ -293,9 +296,9 @@ def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tm
     )
 
     report = result.charge_bridge_report
-    assert report.normalization_correction_e == pytest.approx(0.02)
-    assert report.max_per_atom_correction_e == pytest.approx(0.02)
-    assert report.correction_atom_identities == ("chain C residue NHX 1 atom N001",)
+    assert report.normalization_correction_e == pytest.approx(0.004)
+    assert report.max_per_atom_correction_e == pytest.approx(0.004)
+    assert report.correction_atom_identities == ("chain A residue LYX 10 atom NZ",)
     diagnostic = json.loads(
         (tmp_path / "product_state_charge_bridge_local_reconciliation.json").read_text(
             encoding="utf-8"
@@ -304,7 +307,7 @@ def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tm
     reconciliation = diagnostic["local_reconciliation"]
     assert reconciliation["success"] is True
     assert reconciliation["corrected_atom_count"] == 1
-    assert reconciliation["per_atom_correction_e"] == pytest.approx(0.02)
+    assert reconciliation["per_atom_correction_e"] == pytest.approx(0.004)
 
 
 def test_bridge_refuses_raw_sdf_as_production_charge_source(tmp_path):
