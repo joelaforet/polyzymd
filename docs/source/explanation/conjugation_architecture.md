@@ -93,7 +93,7 @@ parameterization evidence, or unmarked cached charges would make builds appear
 more permissive than the evidence supports. The current bridge uses mapped source
 charges plus a local patch around the linkage using the pre-production OpenFF
 NAGL model `openff-gnn-am1bcc-0.1.0-rc.3.pt`, then fails when required atom
-identities are missing. It is not a GLYCAM, CHARMM, or AshGC workflow.
+identities are missing.
 
 ## Extension boundary
 
