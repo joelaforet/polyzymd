@@ -320,6 +320,18 @@ def test_bridge_refuses_raw_sdf_as_production_charge_source(tmp_path):
         charge_bridge._source_sdf_path(spec)
 
 
+def test_bridge_skips_raw_sdf_for_smiles_moiety_patch(tmp_path):
+    """SMILES moieties should be charged by product patch, not raw SDF transfer."""
+    raw_sdf = tmp_path / "glycan.sdf"
+    raw_sdf.write_text("", encoding="utf-8")
+    spec = SimpleNamespace(
+        fragment=SimpleNamespace(source_kind="moiety"),
+        source_sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf},
+    )
+
+    assert charge_bridge._source_sdf_path(spec) is None
+
+
 def test_bridge_prefers_charged_sdf_source(tmp_path):
     """Charged SDF sidecars should be selected for production charge transfer."""
     raw_sdf = tmp_path / "polymer.sdf"

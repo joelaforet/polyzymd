@@ -1066,6 +1066,8 @@ def _local_nagl_patch_records(
 
 def _source_sdf_path(spec: Any) -> Path | None:
     """Return the production charged SDF path from an attachment spec."""
+    if getattr(getattr(spec, "fragment", None), "source_kind", None) == "moiety":
+        return None
     sidecars = getattr(spec, "source_sidecars", {}) or {}
     if not isinstance(sidecars, Mapping):
         return None
