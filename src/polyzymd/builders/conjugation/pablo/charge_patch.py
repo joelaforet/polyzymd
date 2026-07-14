@@ -179,7 +179,7 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
         rwmol,
         rd_indices,
         _product_key(protein_link, role="protein"),
-        _product_key(modifier_link, role="modifier"),
+        _modifier_link_key(modifier_link, rd_indices),
         int(round(float(getattr(plan.pablo_crosslink_requirement, "bond_order", 1)))),
     )
     mol = rwmol.GetMol()
@@ -188,6 +188,24 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
     mol = Chem.AddHs(mol, addCoords=True)
     cap_map_numbers = tuple(
         int(atom.GetAtomMapNum()) for atom in mol.GetAtoms() if int(atom.GetAtomMapNum()) == 0
+    )
+
+
+def _modifier_link_key(
+    modifier_link: Any, indices: Mapping[tuple[str, int | None, str], int]
+) -> tuple[str, int | None, str]:
+    """Return the retained modifier key for the resolved link atom."""
+    key = _product_key(modifier_link, role="modifier")
+    if key in indices:
+        return key
+    name = _atom_name(modifier_link).upper()
+    matches = [
+        candidate for candidate in indices if candidate[0] == "modifier" and candidate[2] == name
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    raise LocalChargePatchError(
+        "Resolved Pablo modifier link atom is missing from the retained product graph"
     )
     closure_map_numbers = tuple(
         sorted(
