@@ -178,7 +178,7 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
     _add_bond(
         rwmol,
         rd_indices,
-        _product_key(protein_link, role="protein"),
+        _mapped_link_key(protein_link, rd_indices, role="protein"),
         _modifier_link_key(modifier_link, rd_indices),
         int(round(float(getattr(plan.pablo_crosslink_requirement, "bond_order", 1)))),
     )
@@ -213,14 +213,22 @@ def _modifier_link_key(
     key = _product_key(modifier_link, role="modifier")
     if key in indices:
         return key
-    name = _atom_name(modifier_link).upper()
-    matches = [
-        candidate for candidate in indices if candidate[0] == "modifier" and candidate[2] == name
-    ]
+    return _mapped_link_key(modifier_link, indices, role="modifier")
+
+
+def _mapped_link_key(
+    atom: Any, indices: Mapping[tuple[str, int | None, str], int], *, role: str
+) -> tuple[str, int | None, str]:
+    """Return the retained mapped key for a resolved Pablo link atom."""
+    key = _product_key(atom, role=role)
+    if key in indices:
+        return key
+    name = _atom_name(atom).upper()
+    matches = [candidate for candidate in indices if candidate[0] == role and candidate[2] == name]
     if len(matches) == 1:
         return matches[0]
     raise LocalChargePatchError(
-        "Resolved Pablo modifier link atom is missing from the retained product graph"
+        f"Resolved Pablo {role} link atom is missing from the retained product graph"
     )
 
 
