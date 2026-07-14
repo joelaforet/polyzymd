@@ -26,7 +26,7 @@ def test_residue_records_group_atom_records():
             residue_number=10,
             atom_name="NZ",
             charge_e=-0.2,
-            source="production:ff14SB",
+            source="prepared-source:ff14sb-protein",
             source_role="protein_ff14sb",
         ),
         AtomPartialChargeRecord(
@@ -35,7 +35,7 @@ def test_residue_records_group_atom_records():
             residue_number=10,
             atom_name="CE",
             charge_e=0.2,
-            source="production:ff14SB",
+            source="prepared-source:ff14sb-protein",
             source_role="protein_ff14sb",
         ),
     )
@@ -55,7 +55,7 @@ def test_residue_records_preserve_ordered_atom_records():
             residue_number=10,
             atom_name="NZ",
             charge_e=-0.4,
-            source="production:ff14SB",
+            source="prepared-source:ff14sb-protein",
             source_role="protein_ff14sb",
         ),
         AtomPartialChargeRecord(
@@ -64,7 +64,7 @@ def test_residue_records_preserve_ordered_atom_records():
             residue_number=1,
             atom_name="C047",
             charge_e=0.1,
-            source="production:polymer",
+            source="attached-polymer-template:test-sidecar",
             source_role="polymer_template",
         ),
         AtomPartialChargeRecord(
@@ -73,7 +73,7 @@ def test_residue_records_preserve_ordered_atom_records():
             residue_number=10,
             atom_name="CE",
             charge_e=0.3,
-            source="production:ff14SB",
+            source="prepared-source:ff14sb-protein",
             source_role="protein_ff14sb",
         ),
     )
@@ -100,7 +100,7 @@ def test_validate_unique_atom_records_rejects_duplicate_identity():
         residue_number=10,
         atom_name="NZ",
         charge_e=-0.2,
-        source="production:ff14SB",
+        source="prepared-source:ff14sb-protein",
         source_role="protein_ff14sb",
     )
 
@@ -131,7 +131,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
                 residue_number=10,
                 atom_name="NZ",
                 charge_e=-0.1,
-                source="production:ff14SB",
+                source="prepared-source:ff14sb-protein",
                 source_role="protein_ff14sb",
             ),
         ),
@@ -146,7 +146,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
                 residue_number=1,
                 atom_name="C047",
                 charge_e=0.25,
-                source="production:polymer",
+                source="attached-polymer-template:test-sidecar",
                 source_role="polymer_template",
             ),
             AtomPartialChargeRecord(
@@ -155,7 +155,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
                 residue_number=1,
                 atom_name="O020",
                 charge_e=-0.3,
-                source="production:polymer",
+                source="attached-polymer-template:test-sidecar",
                 source_role="polymer_template",
             ),
             AtomPartialChargeRecord(
@@ -164,7 +164,7 @@ def test_build_product_state_charge_bridge_combines_sources(monkeypatch, tmp_pat
                 residue_number=1,
                 atom_name="C001",
                 charge_e=0.3,
-                source="production:polymer",
+                source="attached-polymer-template:test-sidecar",
                 source_role="polymer_template",
             ),
         ),
@@ -312,7 +312,7 @@ def test_bridge_rejects_reconciliation_without_local_patch_atoms(monkeypatch, tm
         residue_number=1,
         atom_name="C001",
         charge_e=-1.2,
-        source="production:polymer",
+        source="attached-polymer-template:test-sidecar",
         source_role="polymer_template",
     )
     monkeypatch.setattr(charge_bridge, "_protein_ff14sb_records", lambda **_: ())
@@ -343,7 +343,7 @@ def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tm
         residue_number=1,
         atom_name="C001",
         charge_e=-0.10,
-        source="production:polymer",
+        source="attached-polymer-template:test-sidecar",
         source_role="polymer_template",
     )
     patch_record = AtomPartialChargeRecord(

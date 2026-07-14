@@ -60,7 +60,7 @@ def build_product_state_charge_bridge(
     """Attach validated partial-charge records to a product-state Pablo library.
 
     The bridge keeps the OpenFF charge template at molecule scope while assigning
-    atom charges from local source classes: production ff14SB protein atoms,
+    atom charges from local source classes: prepared-source ff14SB protein atoms,
     charged polymer source templates, and a pre-production local peptide-capped
     NAGL product-state linkage patch.
     Residual charge reconciliation uses fixed private safety limits and is not
@@ -506,7 +506,7 @@ def _protein_ff14sb_records(
                 insertion_code=insertion_code,
                 atom_name=atom_name,
                 charge_e=charge,
-                source="production:ff14SB-prepared-source-protein",
+                source="prepared-source:ff14sb-protein",
                 source_role="protein_ff14sb",
             )
         )
@@ -954,7 +954,7 @@ def _polymer_template_records(
                     insertion_code=str(mapped.get("insertion_code", "")),
                     atom_name=atom_name,
                     charge_e=charge,
-                    source=f"production:attached-polymer-template:{sidecar}",
+                    source=f"attached-polymer-template:{sidecar}",
                     source_role="polymer_template",
                 )
             )
