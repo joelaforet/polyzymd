@@ -343,7 +343,7 @@ def validated_charged_sdf_molecule(
 def charged_sdf_partial_charges(
     path: Path | str, *, fragment_atoms: Sequence[Any]
 ) -> tuple[float, ...]:
-    """Read per-atom partial charges from a validated production charged SDF.
+    """Read per-atom partial charges from a validated charged SDF.
 
     Returns
     -------

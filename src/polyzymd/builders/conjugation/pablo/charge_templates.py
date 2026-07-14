@@ -51,7 +51,7 @@ def build_conjugate_charge_templates(
     topology : Any
         OpenFF topology containing final solvated molecules.
     product_state_pablo_library : Any
-        Product-state Pablo library with explicit production partial-charge
+        Product-state Pablo library with validated/explicit partial-charge
         provenance in excluded in-memory fields.
 
     Returns
@@ -62,7 +62,7 @@ def build_conjugate_charge_templates(
     Raises
     ------
     ValueError
-        If no production partial-charge provenance exists or any atom cannot be
+        If no validated/explicit partial-charge provenance exists or any atom cannot be
         charged deterministically.
     """
     if product_state_pablo_library is None:
@@ -92,28 +92,28 @@ def build_conjugate_charge_templates(
 
 
 def _partial_charge_source(product_state_pablo_library: Any) -> _PartialChargeSource:
-    """Resolve production partial-charge provenance from a product library."""
+    """Resolve validated/explicit partial-charge provenance from a product library."""
     records = tuple(getattr(product_state_pablo_library, "residue_partial_charges", ()) or ())
     if records:
         return _source_from_residue_records(records)
 
     templates = tuple(getattr(product_state_pablo_library, "charge_templates", ()) or ())
-    marked_templates = tuple(template for template in templates if _has_production_marker(template))
+    marked_templates = tuple(template for template in templates if _has_explicit_marker(template))
     if marked_templates:
         return _source_from_marked_templates(marked_templates)
 
     if templates:
         raise ValueError(
-            "Product-state Pablo library contains molecule charge_templates, but none are marked as "
-            "production partial-charge provenance. Refusing to treat cached or formal-charge "
+            "Product-state Pablo library contains molecule charge_templates, but none are marked with "
+            "validated/explicit partial-charge provenance. Refusing to treat cached or formal-charge "
             "templates as final conjugate charges. Expected a template property such as "
-            "polyzymd_charge_provenance='production:...'."
+            "polyzymd_charge_provenance='<validated-source>:...'."
         )
 
     raise ValueError(
-        "Product-state Pablo library has no production partial-charge provenance for the final "
+        "Product-state Pablo library has no validated/explicit partial-charge provenance for the final "
         "conjugate. Pablo AtomDefinition.charge values are formal charges, not partial charges. "
-        "Provide validated residue_partial_charges or production-marked charged templates before "
+        "Provide validated residue_partial_charges or explicitly marked charged templates before "
         "creating final Interchange."
     )
 
@@ -128,7 +128,7 @@ def _source_from_residue_records(records: tuple[Any, ...]) -> _PartialChargeSour
     Returns
     -------
     _PartialChargeSource
-        Identity-keyed charges with production provenance.
+        Identity-keyed charges with validated/explicit provenance.
     """
     charges: dict[_AtomIdentity, float] = {}
     sources: set[str] = set()
@@ -136,7 +136,7 @@ def _source_from_residue_records(records: tuple[Any, ...]) -> _PartialChargeSour
         source = str(_record_value(record, "source", "") or "").strip()
         if not source or _is_formal_source(source):
             raise ValueError(
-                "Residue partial-charge records must identify a production source; "
+                "Residue partial-charge records must identify a validated/explicit source; "
                 f"refusing source {source!r}"
             )
         sources.add(source)
@@ -154,7 +154,7 @@ def _source_from_residue_records(records: tuple[Any, ...]) -> _PartialChargeSour
             _validate_charge_identity(identity, source)
             if identity in charges:
                 raise ValueError(
-                    f"Duplicate production partial charge for {_format_identity(identity)}"
+                    f"Duplicate validated/explicit partial charge for {_format_identity(identity)}"
                 )
             charges[identity] = _finite_charge(charge, identity)
     if not charges:
@@ -163,22 +163,22 @@ def _source_from_residue_records(records: tuple[Any, ...]) -> _PartialChargeSour
 
 
 def _source_from_marked_templates(templates: tuple[Any, ...]) -> _PartialChargeSource:
-    """Build an atom charge map from production-marked molecule templates."""
+    """Build an atom charge map from explicitly marked molecule templates."""
     charges: dict[_AtomIdentity, float] = {}
     sources: set[str] = set()
     for template in templates:
-        source = _production_marker(template)
+        source = _explicit_marker(template)
         if _is_formal_source(source):
             raise ValueError(f"Refusing formal-only charge template source {source!r}")
         sources.add(source)
         partial_charges = getattr(template, "partial_charges", None)
         if partial_charges is None:
-            raise ValueError("Production-marked charge template is missing partial_charges")
+            raise ValueError("Explicitly marked charge template is missing partial_charges")
         values = _charge_values(partial_charges)
         atoms = tuple(getattr(template, "atoms", ()) or ())
         if len(values) != len(atoms):
             raise ValueError(
-                "Production-marked charge template atom count does not match partial_charges "
+                "Explicitly marked charge template atom count does not match partial_charges "
                 f"length: {len(atoms)} atoms vs {len(values)} charges"
             )
         for atom, charge in zip(atoms, values, strict=True):
@@ -186,11 +186,11 @@ def _source_from_marked_templates(templates: tuple[Any, ...]) -> _PartialChargeS
             _validate_charge_identity(identity, source)
             if identity in charges:
                 raise ValueError(
-                    f"Duplicate production partial charge for {_format_identity(identity)}"
+                    f"Duplicate validated/explicit partial charge for {_format_identity(identity)}"
                 )
             charges[identity] = _finite_charge(charge, identity)
     if not charges:
-        raise ValueError("Production-marked charge templates did not contain any atom charges")
+        raise ValueError("Explicitly marked charge templates did not contain any atom charges")
     return _PartialChargeSource(
         charges=charges,
         source=", ".join(sorted(sources)),
@@ -217,7 +217,7 @@ def _charged_template_from_source(
         preview = "; ".join(_format_identity(identity) for identity in missing[:12])
         suffix = "" if len(missing) <= 12 else f"; ... {len(missing) - 12} more"
         raise ValueError(
-            "Missing production partial charges for final conjugate atoms from source "
+            "Missing validated/explicit partial charges for final conjugate atoms from source "
             f"{source.source}: {preview}{suffix}"
         )
 
@@ -278,13 +278,13 @@ def _record_value(record: Any, name: str, default: Any) -> Any:
     return getattr(record, name, default)
 
 
-def _has_production_marker(template: Any) -> bool:
-    """Return whether a template explicitly identifies production charge provenance."""
-    return bool(_production_marker(template))
+def _has_explicit_marker(template: Any) -> bool:
+    """Return whether a template explicitly identifies validated charge provenance."""
+    return bool(_explicit_marker(template))
 
 
-def _production_marker(template: Any) -> str:
-    """Return production charge provenance marker from molecule properties."""
+def _explicit_marker(template: Any) -> str:
+    """Return validated/explicit charge provenance marker from molecule properties."""
     properties = getattr(template, "properties", None) or {}
     for key in _PROVENANCE_KEYS:
         value = _metadata_value(properties, key, default=None)
@@ -336,7 +336,7 @@ def _validate_charge_identity(identity: _AtomIdentity, source: str) -> None:
     """Validate identity fields needed for deterministic charge transfer."""
     if not identity.residue_name or not identity.atom_name:
         raise ValueError(
-            "Production partial charges require residue_name and atom_name metadata; "
+            "Validated/explicit partial charges require residue_name and atom_name metadata; "
             f"source {source} yielded {_format_identity(identity)}"
         )
 

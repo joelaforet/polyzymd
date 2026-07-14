@@ -1,4 +1,4 @@
-"""Production charge bridge for final product-state conjugate templates."""
+"""Validated charge bridge for final product-state conjugate templates."""
 
 from __future__ import annotations
 
@@ -57,11 +57,12 @@ def build_product_state_charge_bridge(
     output_dir: Path | str,
     settings: InterchangeParameterizationSettings | None = None,
 ) -> Any:
-    """Attach production partial-charge records to a product-state Pablo library.
+    """Attach validated partial-charge records to a product-state Pablo library.
 
     The bridge keeps the OpenFF charge template at molecule scope while assigning
-    atom charges from local source classes: ff14SB protein atoms, charged polymer
-    source templates, and a local peptide-capped NAGL product-state linkage patch.
+    atom charges from local source classes: production ff14SB protein atoms,
+    charged polymer source templates, and a pre-production local peptide-capped
+    NAGL product-state linkage patch.
     Residual charge reconciliation uses fixed private safety limits and is not
     caller-configurable.
 
@@ -152,7 +153,7 @@ def build_product_state_charge_bridge(
         preview = "; ".join(_format_identity(identity) for identity in missing[:12])
         suffix = "" if len(missing) <= 12 else f"; ... {len(missing) - 12} more"
         raise ValueError(
-            "Product-state charge bridge could not assign production charges for final "
+            "Product-state charge bridge could not assign validated bridge charges for final "
             f"conjugate atom(s): {preview}{suffix}"
         )
 
@@ -1048,7 +1049,7 @@ def _local_nagl_patch_records(
     product_atoms: Sequence[Any] = (),
     diagnostic_ledgers: list[dict[str, Any]] | None = None,
 ) -> tuple[tuple[AtomPartialChargeRecord, ...], str]:
-    """Generate generic local product-state NAGL patch charges."""
+    """Generate pre-production local product-state NAGL patch charges."""
     records: list[AtomPartialChargeRecord] = []
     model_name = DEFAULT_PATCH_NAGL_MODEL
     for spec in specs:
@@ -1062,7 +1063,7 @@ def _local_nagl_patch_records(
 
 
 def _source_sdf_path(spec: Any) -> Path | None:
-    """Return the production charged SDF path from an attachment spec."""
+    """Return the validated charged SDF path from an attachment spec."""
     if getattr(getattr(spec, "fragment", None), "source_kind", None) == "moiety":
         return None
     sidecars = getattr(spec, "source_sidecars", {}) or {}
@@ -1074,14 +1075,14 @@ def _source_sdf_path(spec: Any) -> Path | None:
     raw_path = sidecars.get("bond_sdf") or sidecars.get("sdf")
     if raw_path is not None:
         raise ValueError(
-            "Attached polymer production charge transfer requires source_sidecars['charged_sdf']; "
+            "Attached polymer validated charge transfer requires source_sidecars['charged_sdf']; "
             f"refusing raw bond/geometry SDF {raw_path} as a partial-charge source"
         )
     return None
 
 
 def _charged_sdf_atom_charges(path: Path, *, generated_fragment: Any) -> tuple[float, ...]:
-    """Read partial charges from a validated production charged SDF."""
+    """Read partial charges from a validated charged SDF."""
     fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
     return charged_sdf_partial_charges(path, fragment_atoms=fragment_atoms)
 

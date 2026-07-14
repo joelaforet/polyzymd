@@ -1035,14 +1035,14 @@ def _intermediate_conjugate_charge_templates(
     topology: Any,
     product_state_pablo_library: Any | None,
 ) -> tuple[tuple[Any, ...], bool]:
-    """Build production charge templates for intermediate conjugate parameterization.
+    """Build validated charge templates for intermediate conjugate parameterization.
 
     Parameters
     ----------
     topology : Any
         Current product-state Pablo topology to parameterize.
     product_state_pablo_library : Any or None
-        Product-state Pablo library carrying production partial-charge provenance.
+        Product-state Pablo library carrying validated/explicit partial-charge provenance.
 
     Returns
     -------
@@ -1053,7 +1053,7 @@ def _intermediate_conjugate_charge_templates(
     Raises
     ------
     RuntimeError
-        If product-state provenance is active but production charge templates
+        If product-state provenance is active but validated charge templates
         cannot be built.
     """
     if product_state_pablo_library is None:
@@ -1063,7 +1063,7 @@ def _intermediate_conjugate_charge_templates(
         templates = build_conjugate_charge_templates(topology, product_state_pablo_library)
     except ValueError as exc:
         raise RuntimeError(
-            "Product-state conjugate parameterization requires production charge templates from "
+            "Product-state conjugate parameterization requires validated charge templates from "
             "the product-state Pablo library. Refusing to let OpenFF fall back to whole-conjugate "
             f"implicit charge assignment. Original error: {exc}"
         ) from exc
@@ -1080,7 +1080,7 @@ def _product_state_library_with_charge_bridge(
     output_dir: Path,
     settings: InterchangeParameterizationSettings,
 ) -> Any:
-    """Attach production partial-charge bridge records to the product library."""
+    """Attach validated/explicit partial-charge bridge records to the product library."""
     if not _supports_charge_bridge(specs, product_state_pablo_library):
         return product_state_pablo_library
     from polyzymd.builders.conjugation.pablo.charge_bridge import (

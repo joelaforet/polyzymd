@@ -14,7 +14,7 @@ from polyzymd.builders.conjugation.pablo.charge_templates import (
 
 
 def test_build_conjugate_charge_templates_transfers_marked_template_charges():
-    """Production-marked template charges should transfer by residue atom identity."""
+    """Explicitly marked template charges should transfer by residue atom identity."""
     source = _molecule(
         "source",
         [
@@ -43,11 +43,11 @@ def test_build_conjugate_charge_templates_transfers_marked_template_charges():
 
 
 def test_build_conjugate_charge_templates_refuses_unmarked_cached_templates():
-    """Cached molecule charges are not trusted unless marked as production provenance."""
+    """Cached molecule charges are not trusted unless marked with explicit provenance."""
     target = _molecule("target", [_atom("A", "LYX", 10, "NZ", 0)])
     cached = _molecule("cached", [_atom("A", "LYX", 10, "NZ", 0, 0.0)])
 
-    with pytest.raises(ValueError, match="none are marked as production partial-charge provenance"):
+    with pytest.raises(ValueError, match="none are marked with validated/explicit"):
         build_conjugate_charge_templates(
             SimpleNamespace(molecules=(target,)),
             _library(charge_templates=(cached,)),
@@ -55,7 +55,7 @@ def test_build_conjugate_charge_templates_refuses_unmarked_cached_templates():
 
 
 def test_build_conjugate_charge_templates_refuses_formal_record_sources():
-    """Formal charge records should not be reinterpreted as production partial charges."""
+    """Formal charge records should not be reinterpreted as explicit partial charges."""
     target = _molecule("target", [_atom("A", "LYX", 10, "NZ", 0)])
     records = (
         {
@@ -191,7 +191,7 @@ def test_ordered_residue_records_do_not_enable_metadata_missing_fallback():
     library = _library(
         residue_partial_charges=records,
         charge_bridge_report=SimpleNamespace(
-            source="production:product-state-local-nagl-charge-bridge",
+            source="preproduction-nagl:product-state-peptide-capped-charge-bridge",
             success=True,
             order_preserving_atom_records=True,
         ),
@@ -227,7 +227,7 @@ def test_grouped_residue_records_do_not_enable_metadata_missing_fallback():
     library = _library(
         residue_partial_charges=records,
         charge_bridge_report=SimpleNamespace(
-            source="production:product-state-local-nagl-charge-bridge",
+            source="preproduction-nagl:product-state-peptide-capped-charge-bridge",
             success=True,
             order_preserving_atom_records=True,
         ),
