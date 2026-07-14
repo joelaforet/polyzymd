@@ -4,7 +4,6 @@ from polyzymd.builders.conjugation.pablo.charge_bridge import (
     build_product_state_charge_bridge,
 )
 from polyzymd.builders.conjugation.pablo.charge_patch import (
-    ConjugationChargeConfig,
     LocalChargePatchError,
     build_local_product_charge_patch_records,
 )
@@ -69,7 +68,6 @@ __all__ = [
     "ProductStatePabloLibrary",
     "AtomPartialChargeRecord",
     "ChargeBridgeReport",
-    "ConjugationChargeConfig",
     "LocalChargePatchError",
     "ResiduePartialChargeRecord",
     "build_conjugate_charge_templates",

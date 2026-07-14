@@ -41,13 +41,9 @@ from polyzymd.builders.conjugation.pablo.sdf import (
 
 LOGGER = logging.getLogger(__name__)
 
-_BRIDGE_SOURCE = "production:product-state-local-nagl-charge-bridge"
-_LOCAL_RECONCILIATION_PER_LINKAGE_ACCEPT_E = 0.05
-_LOCAL_RECONCILIATION_PER_LINKAGE_WARN_E = 0.10
-_LOCAL_RECONCILIATION_PER_LINKAGE_FAIL_E = 0.20
-_LOCAL_RECONCILIATION_PER_ATOM_ACCEPT_E = 0.01
-_LOCAL_RECONCILIATION_PER_ATOM_WARN_E = 0.03
-_LOCAL_RECONCILIATION_PER_ATOM_FAIL_E = 0.05
+_BRIDGE_SOURCE = "production:product-state-peptide-capped-nagl-charge-bridge"
+_LOCAL_RECONCILIATION_TOTAL_FAIL_E = 0.02
+_LOCAL_RECONCILIATION_PER_ATOM_FAIL_E = 0.005
 
 
 def build_product_state_charge_bridge(
@@ -204,8 +200,8 @@ def build_product_state_charge_bridge(
                 "thresholds. Inspect product_state_charge_bridge_local_reconciliation.json."
             )
         diagnostics.append(
-            "Applied a local patch charge reconciliation over "
-            f"{local_reconciliation['corrected_atom_count']} local NAGL patch atom(s): "
+            "Applied strict peptide-capped residual closure over "
+            f"{local_reconciliation['corrected_atom_count']} modified product residue atom(s): "
             f"{correction:.8f} e total, "
             f"{local_reconciliation['per_atom_correction_e']:.8f} e per atom"
         )
@@ -243,8 +239,8 @@ def build_product_state_charge_bridge(
         assumptions=(
             "Canonical protein atoms retain ff14SB-style charges from the prepared source protein.",
             "Attached polymer atoms retain existing charged polymer/template charges when mapping is stable.",
-            "Covalent junction atoms are overridden by a local product-state NAGL/AshGC patch.",
-            "Any bridge-local charge residual is reconciled only over real local patch atoms.",
+            "Modified residue and moiety atoms are overridden by peptide-capped product-state NAGL charges.",
+            "Any bridge-local charge residual is reconciled only over modified product residue atoms within strict first-release thresholds.",
             "The complete covalent conjugate is emitted as one charged OpenFF Molecule template.",
             "This bridge is not whole-conjugate AM1-BCC and does not use Gasteiger or formal charges.",
         ),
@@ -313,16 +309,16 @@ def _apply_local_patch_reconciliation(
     correction: float,
     linkage_count: int,
 ) -> dict[str, Any]:
-    """Distribute bridge residual charge over real local NAGL patch atoms."""
+    """Distribute a strict residual over modified product residue atoms only."""
     correction_keys = tuple(
         key
         for key in target_record_keys
-        if key in records and records[key].source_role == "local_nagl_patch"
+        if key in records and records[key].source_role == "local_nagl_patch" and key[0] == "A"
     )
     if not correction_keys:
         raise ValueError(
-            "Product-state charge bridge has no real local NAGL patch atoms available for "
-            f"local charge reconciliation of {correction:.8f} e"
+            "Product-state charge bridge has no mapped modified-protein product residue atoms "
+            f"available for strict charge reconciliation of {correction:.8f} e"
         )
 
     per_linkage = _per_linkage_residual(correction, linkage_count)
@@ -344,35 +340,16 @@ def _apply_local_patch_reconciliation(
     }
     if status == "fail":
         LOGGER.warning(
-            "CHARGE_LEDGER local reconciliation failed thresholds total=%.8f e "
-            "per_linkage=%.8f e per_atom=%.8f e atom_count=%d",
+            "CHARGE_LEDGER strict reconciliation failed thresholds total=%.8f e "
+            "per_atom=%.8f e atom_count=%d",
             correction,
-            per_linkage,
             per_atom,
             len(correction_keys),
         )
         return diagnostic
-    if status == "strong_warning":
-        LOGGER.warning(
-            "CHARGE_LEDGER local reconciliation strong warning total=%.8f e "
-            "per_linkage=%.8f e per_atom=%.8f e atom_count=%d",
-            correction,
-            per_linkage,
-            per_atom,
-            len(correction_keys),
-        )
-    elif status == "warning":
-        LOGGER.warning(
-            "CHARGE_LEDGER local reconciliation warning total=%.8f e per_linkage=%.8f e "
-            "per_atom=%.8f e atom_count=%d",
-            correction,
-            per_linkage,
-            per_atom,
-            len(correction_keys),
-        )
 
     corrected_atoms: list[dict[str, Any]] = []
-    for key in correction_keys:
+    for key in sorted(correction_keys):
         record = records[key]
         old_charge = record.charge_e
         new_charge = old_charge + per_atom
@@ -395,7 +372,7 @@ def _apply_local_patch_reconciliation(
         records[identity].charge_e for identity in target_record_keys
     )
     LOGGER.warning(
-        "CHARGE_LEDGER local reconciliation applied total=%.8f e corrected_atom_count=%d "
+        "CHARGE_LEDGER strict reconciliation applied total=%.8f e corrected_atom_count=%d "
         "per_atom=%.8f e status=%s",
         correction,
         len(correction_keys),
@@ -411,35 +388,19 @@ def _per_linkage_residual(correction: float, linkage_count: int) -> float:
 
 
 def _local_reconciliation_status(*, per_linkage: float, per_atom: float) -> str:
-    """Classify local reconciliation against charge-safety thresholds."""
-    abs_linkage = abs(per_linkage)
-    abs_atom = abs(per_atom)
+    """Classify local reconciliation against strict charge-safety thresholds."""
     if (
-        abs_linkage > _LOCAL_RECONCILIATION_PER_LINKAGE_FAIL_E
-        or abs_atom > _LOCAL_RECONCILIATION_PER_ATOM_FAIL_E
+        abs(per_linkage) > _LOCAL_RECONCILIATION_TOTAL_FAIL_E
+        or abs(per_atom) > _LOCAL_RECONCILIATION_PER_ATOM_FAIL_E
     ):
         return "fail"
-    if (
-        abs_linkage > _LOCAL_RECONCILIATION_PER_LINKAGE_WARN_E
-        or abs_atom > _LOCAL_RECONCILIATION_PER_ATOM_WARN_E
-    ):
-        return "strong_warning"
-    if (
-        abs_linkage > _LOCAL_RECONCILIATION_PER_LINKAGE_ACCEPT_E
-        or abs_atom > _LOCAL_RECONCILIATION_PER_ATOM_ACCEPT_E
-    ):
-        return "warning"
     return "accept"
 
 
 def _local_reconciliation_thresholds() -> dict[str, float]:
     """Return local reconciliation charge thresholds in elementary charges."""
     return {
-        "per_linkage_accept": _LOCAL_RECONCILIATION_PER_LINKAGE_ACCEPT_E,
-        "per_linkage_warn": _LOCAL_RECONCILIATION_PER_LINKAGE_WARN_E,
-        "per_linkage_fail": _LOCAL_RECONCILIATION_PER_LINKAGE_FAIL_E,
-        "per_atom_accept": _LOCAL_RECONCILIATION_PER_ATOM_ACCEPT_E,
-        "per_atom_warn": _LOCAL_RECONCILIATION_PER_ATOM_WARN_E,
+        "total_fail": _LOCAL_RECONCILIATION_TOTAL_FAIL_E,
         "per_atom_fail": _LOCAL_RECONCILIATION_PER_ATOM_FAIL_E,
     }
 
