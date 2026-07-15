@@ -98,6 +98,7 @@ class ReactiveEndpoint(BaseModel):
     product_residue_name: str = Field(..., min_length=1, max_length=4)
     leaving_atom_selectors: tuple[PdbAtomSelector, ...] = Field(default_factory=tuple)
     leaving_atom_names: tuple[str, ...] = Field(default_factory=tuple)
+    allow_external_leaving_residue: bool = False
 
     @field_validator("product_residue_name")
     @classmethod
@@ -118,6 +119,8 @@ class ReactiveEndpoint(BaseModel):
         """Validate that explicit leaving selectors remain in endpoint scope."""
         for selector in self.leaving_atom_selectors:
             if not _same_residue_selector(selector, self.selector):
+                if self.allow_external_leaving_residue and selector.residue_name == "ROH":
+                    continue
                 raise ValueError(
                     "Leaving atom selectors must use the same chain, residue name, "
                     "residue number, and insertion code as the endpoint selector"

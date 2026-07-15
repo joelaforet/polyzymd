@@ -8,7 +8,7 @@ import logging
 from collections.abc import MutableMapping
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -19,6 +19,7 @@ from polyzymd.builders.conjugation._linkage import (
     require_pablo_crosslink_requirement,
 )
 from polyzymd.builders.conjugation._moiety_provider import (
+    attachment_uses_glygen_pdb,
     generated_fragment_for_resolved_source,
     resolve_moiety_source,
     validate_moiety_source_config,
@@ -127,6 +128,7 @@ class ConjugatedPolymerSystemSettings(BaseModel):
         default_factory=InterchangeParameterizationSettings
     )
     relaxation: ConjugateRelaxationSettings = Field(default_factory=ConjugateRelaxationSettings)
+    glygen_pdb_output_mode: Literal["coordinate_only", "experimental_pablo"] = "coordinate_only"
 
 
 class ConjugateConstructionResult(BaseModel):
@@ -222,6 +224,38 @@ def build_conjugated_polymer_system_from_config(
     reactive_selectors = tuple(payload[3] for payload in spec_payloads)
     modifiers = tuple(spec.generated_fragment for spec in specs)
     resolved_plans = tuple(spec.resolved_plan for spec in specs)
+    if (
+        _uses_glygen_pdb_sources(attachments)
+        and workflow_settings.glygen_pdb_output_mode == "coordinate_only"
+    ):
+        result = _build_glygen_coordinate_only_result(
+            protein_pdb_path=protein_pdb_path,
+            specs=specs,
+            output_dir=artifact_dir,
+            construction_dir=construction_dir,
+            protein_canonicalization=protein_canonicalization,
+        )
+        workflow_path = artifact_dir / workflow_settings.workflow_json_name
+        result.workflow_json_path = workflow_path
+        result.artifact_paths["workflow_json"] = workflow_path
+        result.save(workflow_path)
+        LOGGER.info("Saved coordinate-only GlyGen conjugation workflow JSON to %s", workflow_path)
+        return result
+    if _uses_glygen_pdb_sources(attachments):
+        if len(specs) != 1:
+            raise ValueError("GlyGen PDB ingestion MVP supports exactly one glycan attachment")
+        glygen_coordinate_artifact_path, _ = _write_glygen_coordinate_artifact(
+            protein_pdb_path=protein_pdb_path,
+            spec=specs[0],
+            construction_dir=construction_dir,
+        )
+        LOGGER.warning(
+            "Continuing GlyGen PDB input into experimental Pablo/OpenFF mode; "
+            "coordinate-only artifact path is %s",
+            glygen_coordinate_artifact_path,
+        )
+    else:
+        glygen_coordinate_artifact_path = None
     ccd_pablo_policy = _policy_with_resolved_crosslinks(
         config.conjugation.ccd_pablo,
         resolved_plans,
@@ -233,16 +267,24 @@ def build_conjugated_polymer_system_from_config(
         relaxation=workflow_settings.relaxation,
         run_relaxation=workflow_settings.run_relaxation,
     )
-    construction, construction_topology = _construct_conjugate_from_specs(
-        protein_pdb_path=protein_pdb_path,
-        specs=specs,
-        ccd_pablo_policy=ccd_pablo_policy,
-        output_dir=construction_dir,
-        chain_policy=config.conjugation.chain_policy,
-        settings=construction_settings,
-        use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
-        use_conjugate_relaxation=workflow_settings.run_relaxation,
-    )
+    try:
+        construction, construction_topology = _construct_conjugate_from_specs(
+            protein_pdb_path=protein_pdb_path,
+            specs=specs,
+            ccd_pablo_policy=ccd_pablo_policy,
+            output_dir=construction_dir,
+            chain_policy=config.conjugation.chain_policy,
+            settings=construction_settings,
+            use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
+            use_conjugate_relaxation=workflow_settings.run_relaxation,
+        )
+    except Exception as exc:
+        if glygen_coordinate_artifact_path is not None:
+            raise RuntimeError(
+                "Experimental GlyGen Pablo/OpenFF continuation failed after coordinate-only "
+                f"artifact was written to {glygen_coordinate_artifact_path}"
+            ) from exc
+        raise
     if workflow_settings.preserve_reference_atom_names:
         _restore_relaxed_pdb_atom_names(construction, construction.crosslinked_pdb_path)
 
@@ -561,8 +603,126 @@ def _enabled_supported_attachments(
         raise ValueError("conjugated polymer workflow requires at least one enabled attachment")
     for attachment in attachments:
         _require_supported_coordinate_backend(attachment)
-        validate_moiety_source_config(getattr(attachment, "moiety", None))
+        validate_moiety_source_config(
+            getattr(attachment, "moiety", None),
+            mechanism_name=getattr(getattr(attachment, "mechanism", None), "name", None),
+        )
+    if any(attachment_uses_glygen_pdb(attachment) for attachment in attachments) and not all(
+        attachment_uses_glygen_pdb(attachment) for attachment in attachments
+    ):
+        raise ValueError("GlyGen PDB input attachments cannot be mixed with other moiety sources")
     return attachments
+
+
+def _uses_glygen_pdb_sources(attachments: tuple[Any, ...]) -> bool:
+    """Return whether any enabled attachment uses GlyGen PDB input."""
+    return any(attachment_uses_glygen_pdb(attachment) for attachment in attachments)
+
+
+def _build_glygen_coordinate_only_result(
+    *,
+    protein_pdb_path: Path | str,
+    specs: tuple[AttachmentBuildSpec, ...],
+    output_dir: Path,
+    construction_dir: Path,
+    protein_canonicalization: ProteinCanonicalizationResult | None,
+) -> ConjugationResult:
+    """Write a coordinate-only residue-resolved GlyGen conjugate artifact."""
+    if len(specs) != 1:
+        raise ValueError("GlyGen coordinate-only MVP supports exactly one glycan attachment")
+    spec = specs[0]
+    output_path, assembly = _write_glygen_coordinate_artifact(
+        protein_pdb_path=protein_pdb_path,
+        spec=spec,
+        construction_dir=construction_dir,
+    )
+    sidecars = dict(spec.source_sidecars)
+    sidecar_path = sidecars.get("glygen_ingestion")
+    if sidecar_path is not None:
+        _annotate_glygen_sidecar(sidecar_path, coordinate_artifact_path=output_path)
+    construction = SimpleNamespace(
+        crosslinked_pdb_path=output_path,
+        validation_report_path=None,
+        assembly=assembly,
+        pablo=None,
+        parameterization=None,
+        relaxation=None,
+        diagnostics=("Coordinate-only GlyGen PDB artifact; Pablo/OpenFF not run",),
+    )
+    result = ConjugationResult(
+        status="coordinate_only",
+        output_dir=output_dir,
+        crosslinked_conjugate_pdb_path=output_path,
+        construction=construction,
+        attachment_specs=specs,
+        generated_sequence=spec.generated_fragment.sequence,
+        reactive_sequence_index=0,
+        reactive_residue_selector={
+            "chain_id": "C",
+            "atom_serial": spec.generated_fragment.reactive_atom_serial or 0,
+            "atom_index": spec.generated_fragment.reactive_atom_index or 0,
+            "atom_name": spec.generated_fragment.reactive_atom_name or "C1",
+        },
+        generated_sequences=tuple(
+            fragment.sequence
+            for fragment in (spec.generated_fragment,)
+            if fragment.sequence is not None
+        ),
+        reactive_sequence_indices=(0,),
+        reactive_residue_selectors=(
+            {
+                "chain_id": "C",
+                "atom_serial": spec.generated_fragment.reactive_atom_serial or 0,
+                "atom_index": spec.generated_fragment.reactive_atom_index or 0,
+                "atom_name": spec.generated_fragment.reactive_atom_name or "C1",
+            },
+        ),
+        conjugate_generations=(),
+        protein_canonicalization=protein_canonicalization,
+        modifier=spec.generated_fragment,
+        modifiers=(spec.generated_fragment,),
+        final_interchange_created=False,
+    )
+    result.artifact_paths.update(
+        {
+            "crosslinked_conjugate_pdb": output_path,
+            "glygen_coordinate_only_pdb": output_path,
+            **{f"glygen_{name}": path for name, path in sidecars.items()},
+        }
+    )
+    return result
+
+
+def _write_glygen_coordinate_artifact(
+    *,
+    protein_pdb_path: Path | str,
+    spec: AttachmentBuildSpec,
+    construction_dir: Path,
+) -> tuple[Path, Any]:
+    """Write the residue-preserved GlyGen coordinate artifact and sidecar annotation."""
+    output_path = construction_dir / "glygen_coordinate_only_conjugate.pdb"
+    assembly = write_crosslinked_pdb(
+        protein_pdb_path,
+        spec.generated_fragment.to_placed_fragment(name=spec.attachment_id),
+        spec.resolved_plan.to_pdb_linkage_attachment(),
+        output_path,
+        CrosslinkedPdbAssemblyOptions(
+            protein_chain="A",
+            polymer_chain="C",
+            include_link_records=True,
+        ),
+    )
+    sidecar_path = spec.source_sidecars.get("glygen_ingestion")
+    if sidecar_path is not None:
+        _annotate_glygen_sidecar(sidecar_path, coordinate_artifact_path=output_path)
+    return output_path, assembly
+
+
+def _annotate_glygen_sidecar(sidecar_path: Path, *, coordinate_artifact_path: Path) -> None:
+    """Add the coordinate-only artifact path to an existing GlyGen sidecar."""
+    payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    payload["coordinate_artifact_path"] = str(coordinate_artifact_path)
+    sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _log_attachment_additions(attachments: tuple[Any, ...]) -> None:
