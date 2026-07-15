@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -197,6 +197,28 @@ class LinkageGeometryReport(BaseModel):
     checks: tuple[ConjugateValidationCheck, ...] = Field(default_factory=tuple)
     linkage_distances_angstrom: tuple[float, ...] = Field(default_factory=tuple)
     close_contact_count: int = 0
+
+
+class NonbondedHeavyContact(BaseModel):
+    """One graph-distance-filtered heavy atom contact."""
+
+    left_serial: int | None
+    right_serial: int | None
+    left_identity: str
+    right_identity: str
+    distance_angstrom: float
+    bond_path_length: int | None = None
+
+
+class NonbondedHeavyClashSummary(BaseModel):
+    """Summary of true nonbonded heavy atom contacts after graph filtering."""
+
+    cutoff_angstrom: float
+    excluded_bond_depth: int
+    contact_count: int
+    min_distance_angstrom: float | None = None
+    min_contact: NonbondedHeavyContact | None = None
+    contacts: tuple[NonbondedHeavyContact, ...] = ()
 
 
 class RelaxationEvidenceReport(BaseModel):
@@ -1599,32 +1621,127 @@ def _distance_angstrom(left: PdbAtomRecord, right: PdbAtomRecord) -> float:
     return math.sqrt((left.x - right.x) ** 2 + (left.y - right.y) ** 2 + (left.z - right.z) ** 2)
 
 
-def _close_contact_count(
+def summarize_nonbonded_heavy_clashes(
     atoms: tuple[PdbAtomRecord, ...],
     observed_bonds: tuple[tuple[int, int], ...],
-) -> int:
-    """Return the severe nonbonded heavy atom close-contact count."""
-    bonded = set(observed_bonds)
+    *,
+    cutoff_angstrom: float,
+    excluded_bond_depth: int = 3,
+    include_pair: Callable[[PdbAtomRecord, PdbAtomRecord], bool] | None = None,
+) -> NonbondedHeavyClashSummary:
+    """Summarize graph-distance-aware nonbonded heavy atom close contacts.
+
+    Heavy atom pairs connected through the observed bond graph within
+    ``excluded_bond_depth`` bonds are treated as bonded-neighbor geometry rather
+    than true nonbonded clashes. Pairs beyond that depth, disconnected pairs,
+    and pairs lacking serial graph evidence are evaluated by distance.
+
+    Parameters
+    ----------
+    atoms : tuple[PdbAtomRecord, ...]
+        Atom records with final coordinates and serials.
+    observed_bonds : tuple[tuple[int, int], ...]
+        Undirected final-product bond graph as PDB serial pairs.
+    cutoff_angstrom : float
+        Distance threshold used to count true nonbonded contacts.
+    excluded_bond_depth : int, optional
+        Maximum bond path length to exclude from nonbonded evaluation, by default 3.
+    include_pair : callable or None, optional
+        Optional predicate limiting which atom pairs are evaluated, by default ``None``.
+
+    Returns
+    -------
+    NonbondedHeavyClashSummary
+        Minimum true nonbonded heavy distance and contacts below the cutoff.
+    """
     neighbors = _bond_adjacency(observed_bonds)
-    count = 0
+    contacts: list[NonbondedHeavyContact] = []
+    min_contact: NonbondedHeavyContact | None = None
     for index, left in enumerate(atoms):
         if _is_hydrogen_atom(left):
             continue
         for right in atoms[index + 1 :]:
             if _is_hydrogen_atom(right):
                 continue
+            if include_pair is not None and not include_pair(left, right):
+                continue
+            path_length = None
             if left.serial is not None and right.serial is not None:
-                pair = tuple(sorted((left.serial, right.serial)))
-                if pair in bonded:
+                path_length = _bond_graph_distance(
+                    left.serial,
+                    right.serial,
+                    neighbors,
+                    max_depth=excluded_bond_depth,
+                )
+                if path_length is not None:
                     continue
-                if (
-                    _bond_graph_distance(left.serial, right.serial, neighbors, max_depth=3)
-                    is not None
-                ):
-                    continue
-            if _distance_angstrom(left, right) < 0.8:
-                count += 1
-    return count
+            distance = _distance_angstrom(left, right)
+            contact = NonbondedHeavyContact(
+                left_serial=left.serial,
+                right_serial=right.serial,
+                left_identity=_atom_contact_identity(left),
+                right_identity=_atom_contact_identity(right),
+                distance_angstrom=distance,
+                bond_path_length=path_length,
+            )
+            if min_contact is None or distance < min_contact.distance_angstrom:
+                min_contact = contact
+            if distance < cutoff_angstrom:
+                contacts.append(contact)
+    return NonbondedHeavyClashSummary(
+        cutoff_angstrom=cutoff_angstrom,
+        excluded_bond_depth=excluded_bond_depth,
+        contact_count=len(contacts),
+        min_distance_angstrom=None if min_contact is None else min_contact.distance_angstrom,
+        min_contact=min_contact,
+        contacts=tuple(contacts),
+    )
+
+
+def _close_contact_count(
+    atoms: tuple[PdbAtomRecord, ...],
+    observed_bonds: tuple[tuple[int, int], ...],
+) -> int:
+    """Return the severe nonbonded heavy atom close-contact count."""
+    return summarize_nonbonded_heavy_clashes(
+        atoms,
+        observed_bonds,
+        cutoff_angstrom=0.8,
+        excluded_bond_depth=3,
+    ).contact_count
+
+
+def _atom_contact_identity(atom: PdbAtomRecord) -> str:
+    """Return a readable atom identity for contact diagnostics."""
+    insertion = atom.insertion_code.strip() if atom.insertion_code else ""
+    return (
+        f"{atom.chain_id}:{atom.residue_name}{atom.residue_number}{insertion}:"
+        f"{atom.atom_name}#{atom.serial}"
+    )
+
+
+def classify_bond_path_length(
+    left_serial: int,
+    right_serial: int,
+    observed_bonds: tuple[tuple[int, int], ...],
+    *,
+    max_depth: int = 8,
+) -> int | None:
+    """Return the final graph path length between two atom serials."""
+    return _bond_graph_distance(
+        left_serial,
+        right_serial,
+        _bond_adjacency(observed_bonds),
+        max_depth=max_depth,
+    )
+
+
+def validate_conect_graph(
+    atoms: tuple[PdbAtomRecord, ...], bonds: tuple[tuple[int, int], ...]
+) -> bool:
+    """Return whether all CONECT endpoints are present in the atom records."""
+    serials = {atom.serial for atom in atoms if atom.serial is not None}
+    return all(left in serials and right in serials for left, right in bonds)
 
 
 def _is_hydrogen_atom(atom: PdbAtomRecord) -> bool:

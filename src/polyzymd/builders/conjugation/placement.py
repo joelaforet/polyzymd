@@ -52,6 +52,11 @@ class PackmolModifierPlacementResult(BaseModel):
     placed_bond_length_angstrom: float
     min_modifier_protein_distance_angstrom: float
     excluded_protein_atom_names: tuple[str, ...] = Field(default_factory=tuple)
+    min_true_nonbonded_heavy_distance_angstrom: float | None = None
+    min_true_nonbonded_heavy_pair: str | None = None
+    true_nonbonded_heavy_contact_count_below_2_angstrom: int | None = None
+    final_conect_graph_valid: bool | None = None
+    packmol_exit_status: str | None = None
 
 
 def place_modifier_with_packmol(
@@ -237,6 +242,7 @@ def place_modifier_with_resolved_plan(
         placed_bond_length_angstrom=placed_bond_length,
         min_modifier_protein_distance_angstrom=min_distance,
         excluded_protein_atom_names=excluded_names,
+        packmol_exit_status=_packmol_exit_status(work_dir),
     )
 
 
@@ -394,6 +400,7 @@ def place_modifiers_with_resolved_plans(
                 placed_bond_length_angstrom=placed_bond_length,
                 min_modifier_protein_distance_angstrom=min_distance,
                 excluded_protein_atom_names=excluded_names,
+                packmol_exit_status=_packmol_exit_status(work_dir),
             )
         )
 
@@ -698,6 +705,17 @@ def _minimum_distance_numpy(points_a: np.ndarray, points_b: np.ndarray) -> float
     deltas = points_a[:, np.newaxis, :] - points_b[np.newaxis, :, :]
     distances = np.linalg.norm(deltas, axis=2)
     return float(np.min(distances))
+
+
+def _packmol_exit_status(work_dir: Path) -> str:
+    """Return the accepted Packmol exit status from retained Packmol artifacts."""
+    error_log_path = work_dir / "packmol_error.log"
+    if not error_log_path.exists():
+        return "0_success"
+    text = error_log_path.read_text(encoding="utf-8", errors="replace")
+    if "173" in text:
+        return "173_imperfect_accepted"
+    return "nonzero_accepted_output"
 
 
 def _same_atom(atom_a: PdbAtomRecord, atom_b: PdbAtomRecord) -> bool:
