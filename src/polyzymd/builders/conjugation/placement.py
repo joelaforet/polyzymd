@@ -25,6 +25,7 @@ from polyzymd.builders.conjugation.structure.pdb import (
 
 _SHIFT_PADDING_ANGSTROM = 10.0
 _BOX_PADDING_ANGSTROM = 30.0
+_REACTIVE_BOND_SHELL_HALF_WIDTH_ANGSTROM = 0.05
 
 
 class PackmolModifierPlacementSettings(BaseModel):
@@ -171,15 +172,13 @@ def place_modifier_with_resolved_plan(
 
     reactive_local_index = _retained_local_index(retained_modifier_atoms, reactive_atom)
     structure_extra_lines = [
-        [
-            f"atoms {reactive_local_index + 1}",
-            (
-                "inside sphere "
-                f"{shifted_site[0]:.6f} {shifted_site[1]:.6f} {shifted_site[2]:.6f} "
-                f"{placement_settings.reactive_sphere_radius_angstrom:.1f}"
-            ),
-            "end atoms",
-        ]
+        _reactive_site_constraint_lines(
+            retained_atoms=retained_modifier_atoms,
+            reactive_local_index=reactive_local_index,
+            shifted_site=shifted_site,
+            placement_settings=placement_settings,
+            target_bond_length=plan.target_bond_length_angstrom,
+        )
     ]
 
     packmol_input_text = build_packmol_input(
@@ -316,15 +315,13 @@ def place_modifiers_with_resolved_plans(
         reactive_local_index = _retained_local_index(retained_atoms, plan.modifier_link_atom)
         shifted_site = _coord(plan.protein_link_atom) + coord_shift
         structure_extra_lines.append(
-            [
-                f"atoms {reactive_local_index + 1}",
-                (
-                    "inside sphere "
-                    f"{shifted_site[0]:.6f} {shifted_site[1]:.6f} {shifted_site[2]:.6f} "
-                    f"{placement_settings.reactive_sphere_radius_angstrom:.1f}"
-                ),
-                "end atoms",
-            ]
+            _reactive_site_constraint_lines(
+                retained_atoms=retained_atoms,
+                reactive_local_index=reactive_local_index,
+                shifted_site=shifted_site,
+                placement_settings=placement_settings,
+                target_bond_length=plan.target_bond_length_angstrom,
+            )
         )
 
     packmol_input_text = build_packmol_input(
@@ -401,38 +398,6 @@ def place_modifiers_with_resolved_plans(
         )
 
     return tuple(results)
-
-
-def place_modifier_with_resolved_plan_rigid(
-    modifier: GeneratedPolymerFragment,
-    plan: ResolvedAttachmentPlan,
-) -> PlacedPolymerFragment:
-    """Place a modifier by translating its reactive atom to the target bond length.
-
-    The transform is a single rigid-body translation of the complete modifier.
-    It preserves every internal coordinate and uses the resolved attachment plan's
-    protein atom, modifier atom, and target bond length.
-
-    Parameters
-    ----------
-    modifier : GeneratedPolymerFragment
-        Source modifier fragment with input coordinates.
-    plan : ResolvedAttachmentPlan
-        Resolved atom-level attachment plan.
-
-    Returns
-    -------
-    PlacedPolymerFragment
-        Modifier with translated coordinates and original graph metadata.
-    """
-    full_coords = _coords_from_atoms(tuple(atom.to_pdb_atom() for atom in modifier.atoms))
-    transformed_coords = _snap_reactive_atom_to_bond_length(
-        full_coords,
-        plan.modifier_link_atom,
-        plan.protein_link_atom,
-        plan.target_bond_length_angstrom,
-    )
-    return _placed_fragment_from_coords(modifier, transformed_coords)
 
 
 def resolve_modifier_reactive_atom_from_placed(fragment: PlacedPolymerFragment) -> PdbAtomRecord:
@@ -562,6 +527,44 @@ def _write_simple_pdb(path: Path, coords: np.ndarray, elements: list[str]) -> No
         )
     lines.append("END\n")
     path.write_text("".join(lines), encoding="utf-8")
+
+
+def _reactive_site_constraint_lines(
+    *,
+    retained_atoms: tuple[PdbAtomRecord, ...],
+    reactive_local_index: int,
+    shifted_site: np.ndarray,
+    placement_settings: PackmolModifierPlacementSettings,
+    target_bond_length: float,
+) -> list[str]:
+    """Return Packmol atom constraints for covalent-site placement.
+
+    The reactive atom is constrained to a narrow bond-length shell around the
+    protein site, while non-reactive modifier atoms are kept outside the normal
+    Packmol tolerance around the same site. This keeps Packmol responsible for
+    non-overlapping local pose selection before the shared final bond snap.
+    """
+    shell_inner = max(target_bond_length - _REACTIVE_BOND_SHELL_HALF_WIDTH_ANGSTROM, 0.01)
+    shell_outer = target_bond_length + _REACTIVE_BOND_SHELL_HALF_WIDTH_ANGSTROM
+    site = f"{shifted_site[0]:.6f} {shifted_site[1]:.6f} {shifted_site[2]:.6f}"
+    lines = [
+        f"atoms {reactive_local_index + 1}",
+        f"outside sphere {site} {shell_inner:.2f}",
+        f"inside sphere {site} {shell_outer:.2f}",
+        "end atoms",
+    ]
+    exclusion_radius = placement_settings.tolerance_angstrom
+    for index, _atom in enumerate(retained_atoms):
+        if index == reactive_local_index:
+            continue
+        lines.extend(
+            [
+                f"atoms {index + 1}",
+                f"outside sphere {site} {exclusion_radius:.2f}",
+                "end atoms",
+            ]
+        )
+    return lines
 
 
 def _read_pdb_coords(path: Path) -> np.ndarray:
