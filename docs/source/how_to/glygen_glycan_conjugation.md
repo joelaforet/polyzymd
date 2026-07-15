@@ -107,7 +107,7 @@ that choice visible.
 from pathlib import Path
 
 from polyzymd.builders.conjugation import build_conjugate_from_config
-from polyzymd.builders.conjugation.system_workflow import ConjugatedPolymerSystemSettings
+from polyzymd.builders.conjugation import ConjugatedPolymerSystemSettings
 
 result = build_conjugate_from_config(
     "config.yaml",

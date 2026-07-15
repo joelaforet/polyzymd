@@ -505,6 +505,7 @@ def test_package_facade_exports_public_api_only():
         "ConjugationEngine",
         "build_conjugate",
         "build_conjugate_from_config",
+        "ConjugatedPolymerSystemSettings",
     }
 
     assert set(conjugation.__all__) == expected
