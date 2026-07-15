@@ -86,7 +86,6 @@ conjugation:
         atom_name: ND2
       moiety:
         name: G80966KZ
-        role: glycan
         input_path: structures/G80966KZ_glycam.pdb
       mechanism:
         name: n_glycosylation

@@ -143,6 +143,19 @@ class TestConjugationConfigParsing:
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
             SimulationConfig.model_validate(data)
 
+    def test_stale_moiety_role_rejected_as_extra_field(self):
+        """Old moiety role labels are rejected by the public conjugation config."""
+        data = _minimal_simulation_config_data()
+        attachment = _minimal_attachment_data()
+        attachment["moiety"]["role"] = "moiety"
+        data["conjugation"] = {
+            "enabled": True,
+            "attachments": [attachment],
+        }
+
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            SimulationConfig.model_validate(data)
+
     def test_invalid_ccd_policy_rejected(self):
         """Unknown CCD/Pablo policies fail validation."""
         with pytest.raises(ValidationError):
