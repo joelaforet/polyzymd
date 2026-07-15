@@ -403,6 +403,38 @@ def place_modifiers_with_resolved_plans(
     return tuple(results)
 
 
+def place_modifier_with_resolved_plan_rigid(
+    modifier: GeneratedPolymerFragment,
+    plan: ResolvedAttachmentPlan,
+) -> PlacedPolymerFragment:
+    """Place a modifier by translating its reactive atom to the target bond length.
+
+    The transform is a single rigid-body translation of the complete modifier.
+    It preserves every internal coordinate and uses the resolved attachment plan's
+    protein atom, modifier atom, and target bond length.
+
+    Parameters
+    ----------
+    modifier : GeneratedPolymerFragment
+        Source modifier fragment with input coordinates.
+    plan : ResolvedAttachmentPlan
+        Resolved atom-level attachment plan.
+
+    Returns
+    -------
+    PlacedPolymerFragment
+        Modifier with translated coordinates and original graph metadata.
+    """
+    full_coords = _coords_from_atoms(tuple(atom.to_pdb_atom() for atom in modifier.atoms))
+    transformed_coords = _snap_reactive_atom_to_bond_length(
+        full_coords,
+        plan.modifier_link_atom,
+        plan.protein_link_atom,
+        plan.target_bond_length_angstrom,
+    )
+    return _placed_fragment_from_coords(modifier, transformed_coords)
+
+
 def resolve_modifier_reactive_atom_from_placed(fragment: PlacedPolymerFragment) -> PdbAtomRecord:
     """Resolve a reactive atom from a placed fragment."""
     matches = [

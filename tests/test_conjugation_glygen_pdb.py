@@ -6,11 +6,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
 import pytest
 
 from polyzymd.builders.conjugation import ConjugatedPolymerSystemSettings as PublicSettings
 from polyzymd.builders.conjugation._moiety_provider import validate_moiety_source_config
 from polyzymd.builders.conjugation.glygen_pdb import load_glygen_glycan_pdb
+from polyzymd.builders.conjugation.structure.parsing import (
+    parse_pdb_atom_records,
+    parse_pdb_conect_pairs,
+)
 from polyzymd.builders.conjugation.system_workflow import (
     ConjugatedPolymerSystemSettings,
     _build_attachment_spec,
@@ -218,6 +223,167 @@ def test_coordinate_only_workflow_removes_roh_and_links_asn(tmp_path: Path) -> N
     assert Path(result.artifact_paths["glygen_glygen_ingestion"]).exists()
 
 
+@pytest.mark.parametrize("external_like", [False, True])
+def test_coordinate_only_places_glycan_at_n_glycosylation_bond_length(
+    tmp_path: Path, external_like: bool
+) -> None:
+    """Coordinate-only GlyGen output should use rigid resolved-plan placement."""
+    glycan_path = _write_glygen_fixture(
+        tmp_path / f"glycan_{external_like}.pdb",
+        include_conect=True,
+        coordinate_offset=(25.0, -7.0, 3.0) if external_like else (0.0, 0.0, 0.0),
+    )
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    result, spec = _build_coordinate_only_fixture_result(tmp_path, protein_path, glycan_path)
+
+    output_atoms = tuple(parse_pdb_atom_records(result.crosslinked_conjugate_pdb_path))
+    nd2 = _single_atom(output_atoms, chain_id="A", residue_number=1, atom_name="ND2")
+    c1 = _single_atom(output_atoms, chain_id="C", residue_number=1, atom_name="C1")
+    bond_length = _distance(_xyz(nd2), _xyz(c1))
+
+    assert 1.35 <= bond_length <= 1.65
+    assert not np.allclose(_xyz(c1), _xyz(spec.resolved_plan.modifier_link_atom), atol=1.0e-3)
+
+
+def test_coordinate_only_preserves_internal_glycan_distances(tmp_path: Path) -> None:
+    """Rigid coordinate-only placement should not distort glycan internal geometry."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_conect.pdb", include_conect=True)
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    result, _spec = _build_coordinate_only_fixture_result(tmp_path, protein_path, glycan_path)
+
+    source_atoms = tuple(
+        atom for atom in parse_pdb_atom_records(glycan_path) if atom.residue_name.upper() != "ROH"
+    )
+    output_atoms = tuple(
+        atom
+        for atom in parse_pdb_atom_records(result.crosslinked_conjugate_pdb_path)
+        if atom.chain_id == "C"
+    )
+    output_by_source = _output_glycan_atoms_by_source(source_atoms, output_atoms)
+
+    for index, left in enumerate(source_atoms):
+        for right in source_atoms[index + 1 :]:
+            source_distance = _distance(_xyz(left), _xyz(right))
+            output_distance = _distance(
+                _xyz(output_by_source[left.serial]), _xyz(output_by_source[right.serial])
+            )
+            assert output_distance == pytest.approx(source_distance, abs=1.0e-6)
+
+
+def test_coordinate_only_conect_matches_retained_source_graph_and_crosslink(
+    tmp_path: Path,
+) -> None:
+    """Output CONECT should equal retained source graph plus the Asn-glycan crosslink."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_conect.pdb", include_conect=True)
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    result, _spec = _build_coordinate_only_fixture_result(tmp_path, protein_path, glycan_path)
+
+    source_atoms = tuple(parse_pdb_atom_records(glycan_path))
+    output_atoms = tuple(parse_pdb_atom_records(result.crosslinked_conjugate_pdb_path))
+    retained_source_atoms = tuple(
+        atom for atom in source_atoms if atom.residue_name.upper() != "ROH"
+    )
+    output_glycan_atoms = tuple(atom for atom in output_atoms if atom.chain_id == "C")
+    output_by_source = _output_glycan_atoms_by_source(retained_source_atoms, output_glycan_atoms)
+    source_to_output = {serial: atom.serial for serial, atom in output_by_source.items()}
+
+    retained_source_serials = set(source_to_output)
+    expected_edges = {
+        frozenset((source_to_output[left], source_to_output[right]))
+        for left, right in parse_pdb_conect_pairs(glycan_path)
+        if left in retained_source_serials and right in retained_source_serials
+    }
+    nd2 = _single_atom(output_atoms, chain_id="A", residue_number=1, atom_name="ND2")
+    c1 = _single_atom(output_atoms, chain_id="C", residue_number=1, atom_name="C1")
+    expected_edges.add(frozenset((nd2.serial, c1.serial)))
+    output_edges = {
+        frozenset(edge) for edge in parse_pdb_conect_pairs(result.crosslinked_conjugate_pdb_path)
+    }
+
+    assert output_edges == expected_edges
+
+
+def test_coordinate_only_emits_no_implausible_conect_lengths(tmp_path: Path) -> None:
+    """Coordinate-only CONECT records should not contain long covalent edges."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_conect.pdb", include_conect=True)
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    result, _spec = _build_coordinate_only_fixture_result(tmp_path, protein_path, glycan_path)
+
+    atoms_by_serial = {
+        atom.serial: atom for atom in parse_pdb_atom_records(result.crosslinked_conjugate_pdb_path)
+    }
+    long_edges = []
+    for left, right in parse_pdb_conect_pairs(result.crosslinked_conjugate_pdb_path):
+        atom_left = atoms_by_serial[left]
+        atom_right = atoms_by_serial[right]
+        distance = _distance(_xyz(atom_left), _xyz(atom_right))
+        has_hydrogen = "H" in {_element(atom_left), _element(atom_right)}
+        limit = 1.405 if has_hydrogen else 2.205
+        if distance > limit:
+            long_edges.append((left, right, distance))
+
+    assert long_edges == []
+
+
+def test_glygen_loader_converts_coordinate_inferred_indices_to_source_serials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Coordinate-inferred GlyGen bonds should not retain raw RDKit atom indices."""
+    glycan_path = _write_glygen_fixture(
+        tmp_path / "glycan_high_serials.pdb",
+        include_conect=False,
+        serial_offset=100,
+    )
+    _patch_coordinate_bonds(
+        monkeypatch,
+        atom_count=9,
+        bonds=(
+            (1, 2),
+            (1, 3),
+            (1, 8),
+            (3, 4),
+            (4, 6),
+            (6, 5),
+            (6, 7),
+            (8, 9),
+        ),
+    )
+
+    result = load_glygen_glycan_pdb(glycan_path)
+
+    assert result.fragment.bonds[0] == (101, 102)
+    assert all(endpoint >= 101 for bond in result.fragment.bonds for endpoint in bond)
+
+
+def test_coordinate_only_high_serial_graph_avoids_raw_index_endpoint_ambiguity(
+    tmp_path: Path,
+) -> None:
+    """High source serials guard against writer serial-first/index-fallback ambiguity."""
+    glycan_path = _write_glygen_fixture(
+        tmp_path / "glycan_high_serials.pdb",
+        include_conect=True,
+        serial_offset=100,
+    )
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    result, spec = _build_coordinate_only_fixture_result(tmp_path, protein_path, glycan_path)
+
+    assert spec.generated_fragment.bonds[0] == (101, 102)
+    assert all(endpoint >= 101 for bond in spec.generated_fragment.bonds for endpoint in bond)
+
+    output_edges = {
+        frozenset(edge) for edge in parse_pdb_conect_pairs(result.crosslinked_conjugate_pdb_path)
+    }
+    output_atoms = tuple(parse_pdb_atom_records(result.crosslinked_conjugate_pdb_path))
+    output_glycan_atoms = tuple(atom for atom in output_atoms if atom.chain_id == "C")
+    source_atoms = tuple(
+        atom for atom in parse_pdb_atom_records(glycan_path) if atom.residue_name.upper() != "ROH"
+    )
+    output_by_source = _output_glycan_atoms_by_source(source_atoms, output_glycan_atoms)
+    expected_c1_o5 = frozenset((output_by_source[101].serial, output_by_source[102].serial))
+
+    assert expected_c1_o5 in output_edges
+
+
 def _attachment(glycan_path: Path) -> SimpleNamespace:
     """Build a minimal n_glycosylation attachment namespace."""
     return SimpleNamespace(
@@ -247,6 +413,76 @@ def _attachment(glycan_path: Path) -> SimpleNamespace:
     )
 
 
+def _build_coordinate_only_fixture_result(
+    tmp_path: Path,
+    protein_path: Path,
+    glycan_path: Path,
+) -> tuple[Any, Any]:
+    """Build a coordinate-only GlyGen fixture result and its attachment spec."""
+    attachment = _attachment(glycan_path)
+    settings = ConjugatedPolymerSystemSettings(glygen_pdb_output_mode="coordinate_only")
+    spec, *_ = _build_attachment_spec(
+        attachment,
+        attachment_index=1,
+        protein_pdb_path=protein_path,
+        artifact_dir=tmp_path,
+        workflow_settings=settings,
+    )
+    result = _build_glygen_coordinate_only_result(
+        protein_pdb_path=protein_path,
+        specs=(spec,),
+        output_dir=tmp_path,
+        construction_dir=tmp_path / "construction",
+        protein_canonicalization=None,
+    )
+    return result, spec
+
+
+def _single_atom(
+    atoms: tuple[Any, ...], *, chain_id: str, residue_number: int, atom_name: str
+) -> Any:
+    """Return one atom matching simple PDB identity fields."""
+    matches = [
+        atom
+        for atom in atoms
+        if atom.chain_id == chain_id
+        and atom.residue_number == residue_number
+        and atom.atom_name.strip().upper() == atom_name.upper()
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _output_glycan_atoms_by_source(
+    source_atoms: tuple[Any, ...], output_atoms: tuple[Any, ...]
+) -> dict[int, Any]:
+    """Map retained source glycan serials to output atoms by residue and atom name."""
+    output_by_key = {
+        (atom.residue_name, atom.residue_number, atom.atom_name): atom for atom in output_atoms
+    }
+    mapping = {}
+    for atom in source_atoms:
+        key = (atom.residue_name, atom.residue_number, atom.atom_name)
+        assert key in output_by_key
+        mapping[atom.serial] = output_by_key[key]
+    return mapping
+
+
+def _xyz(atom: Any) -> np.ndarray:
+    """Return one atom coordinate vector."""
+    return np.asarray([atom.x, atom.y, atom.z], dtype=float)
+
+
+def _distance(left: np.ndarray, right: np.ndarray) -> float:
+    """Return Euclidean distance between two coordinate vectors."""
+    return float(np.linalg.norm(left - right))
+
+
+def _element(atom: Any) -> str:
+    """Return a normalized atom element symbol."""
+    return (atom.element or atom.atom_name[:1]).strip().upper()
+
+
 def _write_asn_fixture(path: Path) -> Path:
     """Write a tiny explicit-hydrogen ASN residue fixture."""
     atoms = [
@@ -264,33 +500,46 @@ def _write_asn_fixture(path: Path) -> Path:
     return path
 
 
-def _write_glygen_fixture(path: Path, *, include_conect: bool) -> Path:
+def _write_glygen_fixture(
+    path: Path,
+    *,
+    include_conect: bool,
+    coordinate_offset: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    serial_offset: int = 0,
+) -> Path:
     """Write a small labeled multi-residue GlyGen-style glycan fixture."""
+    dx, dy, dz = coordinate_offset
     atoms = [
-        (1, "C1", "NAG", "", 1, 0.0, 0.0, 0.0, "C"),
-        (2, "O5", "NAG", "", 1, 0.0, 1.4, 0.0, "O"),
-        (3, "C2", "NAG", "", 1, 1.5, 0.0, 0.0, "C"),
-        (4, "O2", "NAG", "", 1, 2.8, 0.0, 0.0, "O"),
-        (5, "O1", "MAN", "", 2, 5.2, 0.0, 0.0, "O"),
-        (6, "C1", "MAN", "", 2, 4.1, 0.0, 0.0, "C"),
-        (7, "O5", "MAN", "", 2, 4.1, 1.4, 0.0, "O"),
-        (8, "O1", "ROH", "", 3, -1.3, 0.0, 0.0, "O"),
-        (9, "HO1", "ROH", "", 3, -2.2, 0.0, 0.0, "H"),
+        (1, "C1", "NAG", "", 1, 0.0 + dx, 0.0 + dy, 0.0 + dz, "C"),
+        (2, "O5", "NAG", "", 1, 0.0 + dx, 1.4 + dy, 0.0 + dz, "O"),
+        (3, "C2", "NAG", "", 1, 1.5 + dx, 0.0 + dy, 0.0 + dz, "C"),
+        (4, "O2", "NAG", "", 1, 2.8 + dx, 0.0 + dy, 0.0 + dz, "O"),
+        (5, "O1", "MAN", "", 2, 5.2 + dx, 0.0 + dy, 0.0 + dz, "O"),
+        (6, "C1", "MAN", "", 2, 4.1 + dx, 0.0 + dy, 0.0 + dz, "C"),
+        (7, "O5", "MAN", "", 2, 4.1 + dx, 1.4 + dy, 0.0 + dz, "O"),
+        (8, "O1", "ROH", "", 3, -1.3 + dx, 0.0 + dy, 0.0 + dz, "O"),
+        (9, "HO1", "ROH", "", 3, -2.2 + dx, 0.0 + dy, 0.0 + dz, "H"),
     ]
-    lines = [_pdb_atom(*atom) for atom in atoms]
+    lines = [_pdb_atom(atom[0] + serial_offset, *atom[1:]) for atom in atoms]
     if include_conect:
+        serial = {index: index + serial_offset for index in range(1, 10)}
         lines.extend(
             [
-                "CONECT    1    2    3    8\n",
-                "CONECT    3    4\n",
-                "CONECT    4    6\n",
-                "CONECT    6    5\n",
-                "CONECT    6    7\n",
-                "CONECT    8    9\n",
+                _conect(serial[1], serial[2], serial[3], serial[8]),
+                _conect(serial[3], serial[4]),
+                _conect(serial[4], serial[6]),
+                _conect(serial[6], serial[5]),
+                _conect(serial[6], serial[7]),
+                _conect(serial[8], serial[9]),
             ]
         )
     path.write_text("".join(lines) + "END\n", encoding="utf-8")
     return path
+
+
+def _conect(source: int, *targets: int) -> str:
+    """Format one fixed-width CONECT fixture line."""
+    return f"CONECT{source:5d}{''.join(f'{target:5d}' for target in targets)}\n"
 
 
 def _write_glygen_branch_fixture(path: Path) -> Path:
