@@ -21,6 +21,18 @@ from polyzymd.builders.conjugation.structure.parsing import (
 )
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
+_COORDINATE_INFERRED_ALLOWED_BONDS = frozenset(
+    {
+        frozenset(("C", "C")),
+        frozenset(("C", "H")),
+        frozenset(("C", "N")),
+        frozenset(("C", "O")),
+        frozenset(("H", "N")),
+        frozenset(("H", "O")),
+    }
+)
+_COORDINATE_INFERRED_MAX_VALENCE = {"H": 1, "C": 4, "N": 4, "O": 2}
+
 
 class GlyGenLinkageDiagnostic(BaseModel):
     """Residue-level diagnostic for one inter-residue glycan bond."""
@@ -115,6 +127,8 @@ def load_glygen_glycan_pdb(path: Path | str, *, chain_id: str = "C") -> GlyGenPd
             f"GlyGen PDB graph has no bonds after {provenance} connectivity loading: {source_path}"
         )
     _validate_serial_bonds(serial_bonds, serial_to_atom, source_path)
+    if provenance == "coordinate_inferred":
+        _validate_coordinate_inferred_bonds(serial_bonds, serial_to_atom, source_path)
     index_bonds = tuple(
         sorted((serial_to_atom[left].atom_index, serial_to_atom[right].atom_index))
         for left, right in serial_bonds
@@ -123,6 +137,7 @@ def load_glygen_glycan_pdb(path: Path | str, *, chain_id: str = "C") -> GlyGenPd
 
     roh_o1, roh_ho1 = _resolve_roh_leaving_atoms(atoms)
     c1_atom = _resolve_reducing_c1(serial_bonds, serial_to_atom, roh_o1)
+    _validate_roh_reducing_subgraph(serial_bonds, roh_o1=roh_o1, roh_ho1=roh_ho1, c1_atom=c1_atom)
     diagnostics = _linkage_diagnostics(serial_bonds, serial_to_atom)
     if not any(item.plausible_glycosidic for item in diagnostics):
         raise ValueError(
@@ -216,6 +231,43 @@ def _validate_serial_bonds(
         raise ValueError(f"GlyGen PDB CONECT references unknown atom serials {unknown} in {path}")
 
 
+def _validate_coordinate_inferred_bonds(
+    bonds: tuple[tuple[int, int], ...], serial_to_atom: dict[int, PdbAtomRecord], path: Path
+) -> None:
+    """Reject unsafe proximity-inferred graph edges before accepting coordinates."""
+    valences = dict.fromkeys(serial_to_atom, 0)
+    for left, right in bonds:
+        atom_left = serial_to_atom[left]
+        atom_right = serial_to_atom[right]
+        element_left = _normalized_element(atom_left)
+        element_right = _normalized_element(atom_right)
+        pair = frozenset((element_left, element_right))
+        if pair not in _COORDINATE_INFERRED_ALLOWED_BONDS:
+            raise ValueError(
+                "Coordinate-inferred GlyGen PDB graph contains an unsafe element bond "
+                f"{element_left}-{element_right} between atom serials {left}-{right} in {path}"
+            )
+        valences[left] += 1
+        valences[right] += 1
+
+    overbonded = []
+    for serial, valence in valences.items():
+        element = _normalized_element(serial_to_atom[serial])
+        max_valence = _COORDINATE_INFERRED_MAX_VALENCE.get(element)
+        if max_valence is None:
+            raise ValueError(
+                "Coordinate-inferred GlyGen PDB graph contains unsupported element "
+                f"{element!r} at atom serial {serial} in {path}"
+            )
+        if valence > max_valence:
+            overbonded.append(f"{serial}:{element}{valence}>{max_valence}")
+    if overbonded:
+        raise ValueError(
+            "Coordinate-inferred GlyGen PDB graph has overbonded atoms "
+            f"{', '.join(overbonded)} in {path}"
+        )
+
+
 def _validate_connected_graph(
     atoms: tuple[PdbAtomRecord, ...],
     bonds: tuple[tuple[int, int], ...],
@@ -258,6 +310,8 @@ def _resolve_roh_leaving_atoms(
     ho1 = [atom for atom in roh_atoms if atom.atom_name.upper() == "HO1"]
     if len(o1) != 1 or len(ho1) != 1:
         raise ValueError("ROH leaving group must contain unique atoms named O1 and HO1")
+    if _normalized_element(o1[0]) != "O" or _normalized_element(ho1[0]) != "H":
+        raise ValueError("ROH leaving group requires O1 element O and HO1 element H")
     return o1[0], ho1[0]
 
 
@@ -273,7 +327,11 @@ def _resolve_reducing_c1(
             continue
         other = right if left == roh_o1.serial else left
         atom = serial_to_atom[other]
-        if atom.residue_name.upper() != "ROH" and atom.atom_name.upper() == "C1":
+        if (
+            atom.residue_name.upper() != "ROH"
+            and atom.atom_name.upper() == "C1"
+            and _normalized_element(atom) == "C"
+        ):
             candidates.append(atom)
     if len(candidates) != 1:
         raise ValueError(
@@ -281,6 +339,42 @@ def _resolve_reducing_c1(
             f"found {len(candidates)} candidates"
         )
     return candidates[0]
+
+
+def _validate_roh_reducing_subgraph(
+    bonds: tuple[tuple[int, int], ...],
+    *,
+    roh_o1: PdbAtomRecord,
+    roh_ho1: PdbAtomRecord,
+    c1_atom: PdbAtomRecord,
+) -> None:
+    """Validate the exact ROH leaving-group subgraph accepted for cleavage."""
+    if c1_atom.residue_name.upper() == "ROH":
+        raise ValueError("GlyGen reducing sugar C1 must belong to a non-ROH residue")
+    if _normalized_element(c1_atom) != "C":
+        raise ValueError("GlyGen reducing sugar C1 must have element C")
+    bond_set = {frozenset(bond) for bond in bonds}
+    required = {
+        frozenset((roh_ho1.serial, roh_o1.serial)),
+        frozenset((roh_o1.serial, c1_atom.serial)),
+    }
+    if not required.issubset(bond_set):
+        raise ValueError("GlyGen PDB must contain exact ROH:HO1-ROH:O1-C1 reducing subgraph")
+
+    neighbors: dict[int, set[int]] = {
+        roh_ho1.serial: set(),
+        roh_o1.serial: set(),
+        c1_atom.serial: set(),
+    }
+    for left, right in bonds:
+        if left in neighbors:
+            neighbors[left].add(right)
+        if right in neighbors:
+            neighbors[right].add(left)
+    if neighbors[roh_ho1.serial] != {roh_o1.serial}:
+        raise ValueError("GlyGen ROH:HO1 must be bonded only to ROH:O1")
+    if neighbors[roh_o1.serial] != {roh_ho1.serial, c1_atom.serial}:
+        raise ValueError("GlyGen ROH:O1 must be bonded exactly to ROH:HO1 and reducing C1")
 
 
 def _linkage_diagnostics(
@@ -340,3 +434,8 @@ def _residue_key(atom: PdbAtomRecord) -> tuple[str, int, str, str]:
 def _residue_label(atom: PdbAtomRecord) -> str:
     """Return a compact residue label for diagnostics."""
     return f"{atom.chain_id}:{atom.residue_name}{atom.residue_number}{atom.insertion_code}"
+
+
+def _normalized_element(atom: PdbAtomRecord) -> str:
+    """Return an uppercase element symbol for validation."""
+    return atom.element.strip().upper()
