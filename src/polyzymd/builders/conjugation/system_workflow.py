@@ -290,7 +290,7 @@ def build_conjugated_polymer_system_from_config(
             use_product_state_pablo_library=workflow_settings.use_product_state_pablo_library,
             use_conjugate_relaxation=workflow_settings.run_relaxation,
         )
-    except Exception as exc:
+    except RuntimeError as exc:
         if pdb_fragment_coordinate_artifact_path is not None:
             raise RuntimeError(
                 "Experimental PDB-fragment Pablo/OpenFF continuation failed after coordinate-only "

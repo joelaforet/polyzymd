@@ -122,9 +122,11 @@ clearer.
 A moiety is the group added to the protein. The active provider layer resolves
 polymer recipes, single-residue SMILES moieties, and selected file-based sources.
 In Phase 11, `moiety.input_path` is a generic residue-resolved PDB-fragment
-source. The provider enforces exactly one source on the moiety, while each
-mechanism decides whether a loaded fragment is compatible. The tested profile is
-GlyGen/GlyCAM-style PDB N-glycan input with `mechanism.name: n_glycosylation`.
+source structurally: the provider loads a connected fragment and then asks the
+selected reaction template whether that fragment is chemically compatible. The
+current executable chemistry profile is GlyGen/GlyCAM-style PDB N-glycan input
+with `mechanism.name: n_glycosylation`, unless another registered template opts
+in to PDB-fragment compatibility.
 
 ### Polymer Recipe Moiety
 
@@ -177,7 +179,7 @@ parameters, or a production glycan force-field assignment. See
 |-------|------|---------|
 | `name` | string | Moiety identifier. |
 | `residue_name` | string | Residue name to use for a generated single-residue moiety. |
-| `input_path` | path | Generic residue-resolved PDB-fragment source. GlyGen/GlyCAM-style N-glycan input is supported when `mechanism.name: n_glycosylation`. |
+| `input_path` | path | Generic residue-resolved PDB-fragment source. The built-in executable profile is GlyGen/GlyCAM-style N-glycan input when `mechanism.name: n_glycosylation`; other mechanisms must opt in through their reaction template. |
 | `smiles` | string | SMILES for generated single-residue moieties. |
 | `link_site` | mapping | Explicit moiety atom selected for an explicit linkage. |
 | `recipe` | mapping | Polymer recipe for generated polymer moieties. |
@@ -225,7 +227,12 @@ supported by the public API.
 
 ## Explicit PDB Linkage Example
 
-Use `explicit_linkage` only when built-in mechanism defaults are insufficient.
+The schema can represent explicit atom-level PDB linkages, and `input_path` is a
+generic structural source. The current config-driven coordinate workflow does
+not register an executable `explicit_linkage` reaction template, so this example
+is a schema shape for advanced development rather than a supported Phase 11
+chemistry profile. Use a built-in or custom registered reaction template before
+running this path.
 
 ```yaml
 conjugation:

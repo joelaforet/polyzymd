@@ -18,7 +18,10 @@ from polyzymd.builders.conjugation._linkage import (
 )
 from polyzymd.builders.conjugation._pdb_fragment import PdbFragmentLoadResult
 from polyzymd.builders.conjugation.polymer import GeneratedMoietyFragment, GeneratedPolymerFragment
-from polyzymd.builders.conjugation.reactions.base import ReactionTemplate
+from polyzymd.builders.conjugation.reactions.base import (
+    PdbFragmentCompatibilityResult,
+    ReactionTemplate,
+)
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 
@@ -219,6 +222,34 @@ class NGlycosylationReaction(ReactionTemplate):
             ),
             atom_roles=tuple(AtomRoleSpec.model_validate(role) for role in cls.role_metadata()),
             description=cls.description,
+        )
+
+    @classmethod
+    def resolve_pdb_fragment_source(
+        cls,
+        pdb_fragment: PdbFragmentLoadResult,
+        attachment: Any,
+        *,
+        settings: NGlycosylationReactionSettings | None = None,
+    ) -> PdbFragmentCompatibilityResult:
+        """Validate and resolve a GlyGen/GlyCAM PDB fragment for N-glycosylation."""
+        profile = glygen_pdb_profile_from_fragment(pdb_fragment)
+        return PdbFragmentCompatibilityResult(
+            fragment=profile.fragment,
+            reactive_sequence_index=0,
+            reactive_selector={
+                "chain_id": "C",
+                "residue_name": _reactive_residue_name(profile),
+                "residue_number": _reactive_residue_number(profile),
+                "atom_name": "C1",
+                "atom_serial": profile.reducing_c1_serial,
+            },
+            sidecar_payload={
+                "n_glycosylation_profile": profile.model_dump(mode="json", exclude={"fragment"})
+            },
+            diagnostics=(
+                "Resolved PDB-fragment moiety source with GlyGen/GlyCAM N-glycan profile",
+            ),
         )
 
     @classmethod
@@ -444,6 +475,18 @@ def glygen_pdb_profile_from_fragment(load_result: PdbFragmentLoadResult) -> GlyG
         leaving_atom_indices=(roh_o1.atom_index, roh_ho1.atom_index),
         linkage_diagnostics=diagnostics,
     )
+
+
+def _reactive_residue_name(profile: GlyGenPdbProfileResult) -> str:
+    """Return the residue name for the glycan reactive atom."""
+    atom = profile.fragment.atoms[profile.reducing_c1_atom_index]
+    return atom.residue_name
+
+
+def _reactive_residue_number(profile: GlyGenPdbProfileResult) -> int:
+    """Return the residue number for the glycan reactive atom."""
+    atom = profile.fragment.atoms[profile.reducing_c1_atom_index]
+    return atom.residue_number
 
 
 def _anomeric_group_from_glygen_fragment(fragment: GeneratedPolymerFragment) -> GlycanAnomericGroup:

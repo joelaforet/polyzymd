@@ -18,7 +18,7 @@ from polyzymd.builders.conjugation.polymer import (
     generate_multi_residue_molecule,
 )
 from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
-from polyzymd.builders.conjugation.reactions.n_glycosylation import glygen_pdb_profile_from_fragment
+from polyzymd.builders.conjugation.reactions.library import get_reaction
 
 
 class ResolvedMoietySource(BaseModel):
@@ -235,32 +235,28 @@ def _resolve_pdb_fragment_source(
     mechanism_name = str(getattr(getattr(attachment, "mechanism", None), "name", "") or "")
     source_path = Path(moiety.input_path)
     pdb_fragment = load_pdb_fragment(source_path)
-    if mechanism_name.strip().lower() != "n_glycosylation":
-        raise ValueError(
-            "attachment.moiety.input_path loaded a generic PDB fragment, but mechanism "
-            f"{mechanism_name!r} does not define PDB-fragment compatibility validation"
-        )
-    profile = glygen_pdb_profile_from_fragment(pdb_fragment)
+    reaction_template = get_reaction(mechanism_name.strip().lower())
+    settings_builder = getattr(reaction_template, "settings_from_attachment", None)
+    reaction_settings = settings_builder(attachment) if callable(settings_builder) else None
+    compatibility = reaction_template.resolve_pdb_fragment_source(
+        pdb_fragment,
+        attachment,
+        settings=reaction_settings,
+    )
     sidecar_path = (
         output_dir / f"{_safe_attachment_token(attachment.name)}_pdb_fragment_ingestion.json"
     )
     pdb_fragment.write_sidecar(sidecar_path)
-    _annotate_n_glycosylation_profile_sidecar(sidecar_path, profile)
+    _annotate_pdb_fragment_sidecar(sidecar_path, compatibility.sidecar_payload)
     sidecars = {"pdb": source_path, "pdb_fragment_ingestion": sidecar_path}
     return ResolvedMoietySource(
-        fragment=profile.fragment,
-        source_fragment=profile.fragment,
+        fragment=compatibility.fragment,
+        source_fragment=compatibility.fragment,
         source_kind="pdb_fragment",
         sidecars=sidecars,
-        reactive_sequence_index=0,
-        reactive_selector={
-            "chain_id": "C",
-            "residue_name": _reactive_residue_name(profile),
-            "residue_number": _reactive_residue_number(profile),
-            "atom_name": "C1",
-            "atom_serial": profile.reducing_c1_serial,
-        },
-        diagnostics=("Resolved PDB-fragment moiety source with GlyGen/GlyCAM N-glycan profile",),
+        reactive_sequence_index=compatibility.reactive_sequence_index,
+        reactive_selector=compatibility.reactive_selector,
+        diagnostics=compatibility.diagnostics,
         pdb_fragment=pdb_fragment,
     )
 
@@ -277,26 +273,15 @@ def generated_fragment_for_resolved_source(
     return source.fragment
 
 
-def _annotate_n_glycosylation_profile_sidecar(sidecar_path: Path, profile: Any) -> None:
-    """Add mechanism-owned N-glycosylation profile diagnostics to a sidecar."""
+def _annotate_pdb_fragment_sidecar(sidecar_path: Path, annotation: dict[str, Any]) -> None:
+    """Add mechanism-owned compatibility diagnostics to a sidecar."""
     import json
 
+    if not annotation:
+        return
     payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    profile_payload = profile.model_dump(mode="json", exclude={"fragment"})
-    payload["n_glycosylation_profile"] = profile_payload
+    payload.update(annotation)
     sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _reactive_residue_name(profile: Any) -> str:
-    """Return the residue name for the glycan reactive atom."""
-    atom = profile.fragment.atoms[profile.reducing_c1_atom_index]
-    return atom.residue_name
-
-
-def _reactive_residue_number(profile: Any) -> int:
-    """Return the residue number for the glycan reactive atom."""
-    atom = profile.fragment.atoms[profile.reducing_c1_atom_index]
-    return atom.residue_number
 
 
 def _moiety_sidecars(fragment: GeneratedMoietyFragment) -> dict[str, Path]:
