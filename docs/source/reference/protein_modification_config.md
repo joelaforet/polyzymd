@@ -12,10 +12,10 @@ attachment spec through shared assembly, Pablo/OpenFF parameterization, charge
 patching, conjugate relaxation, and validation. Non-NHS mechanisms and generic explicit
 linkages are executable development paths, but they remain experimental unless a
 mechanism-specific validation note says otherwise. Phase 11 also supports a
-coordinate-only residue-resolved PDB-fragment input path. The documented and
-tested source profile is GlyGen/GlyCAM-style N-glycan PDB input with
-`mechanism.name: n_glycosylation`; its Pablo/OpenFF continuation is explicitly
-experimental.
+coordinate-only residue-resolved PDB-fragment input path. N-glycosylation
+accepts residue-resolved multi-residue glycan PDB fragments based on structural
+reducing-end chemistry, not on file provenance; its Pablo/OpenFF continuation is
+explicitly experimental.
 
 ## Top-Level Block
 
@@ -124,7 +124,7 @@ polymer recipes, single-residue SMILES moieties, and selected file-based sources
 In Phase 11, `moiety.input_path` is a generic residue-resolved PDB-fragment
 source structurally: the provider loads a connected fragment and then asks the
 selected reaction template whether that fragment is chemically compatible. The
-current executable chemistry profile is GlyGen/GlyCAM-style PDB N-glycan input
+current executable chemistry profile is residue-resolved PDB N-glycan input
 with `mechanism.name: n_glycosylation`, unless another registered template opts
 in to PDB-fragment compatibility.
 
@@ -155,14 +155,16 @@ moiety:
   residue_name: NAG
 ```
 
-### GlyGen/GlyCAM PDB N-glycan Moiety
+### Residue-resolved PDB N-glycan moiety
 
 For the Phase 11 PDB-fragment N-glycosylation path, provide the glycan PDB with
 `moiety.input_path` and use `mechanism.name: n_glycosylation`. Do not also set
 `smiles`, `residue_name`, `recipe`, or `polymer_recipe` on the same moiety;
 the provider requires exactly one source. The loaded PDB must contain one
-connected residue-resolved glycan graph and the strict reducing-end `ROH`
-leaving group with atoms named `O1` and `HO1`.
+connected residue-resolved glycan graph and a structurally valid reducing-end
+anomeric `C1` with explicit hydroxyl O/H atoms. An ordinary residue-local
+hydroxyl is accepted. The separate-residue `ROH` cap with atoms named `O1` and
+`HO1` is also accepted as one supported structural representation.
 
 ```yaml
 moiety:
@@ -179,7 +181,7 @@ parameters, or a production glycan force-field assignment. See
 |-------|------|---------|
 | `name` | string | Moiety identifier. |
 | `residue_name` | string | Residue name to use for a generated single-residue moiety. |
-| `input_path` | path | Generic residue-resolved PDB-fragment source. The built-in executable profile is GlyGen/GlyCAM-style N-glycan input when `mechanism.name: n_glycosylation`; other mechanisms must opt in through their reaction template. |
+| `input_path` | path | Generic residue-resolved PDB-fragment source. The built-in executable profile is residue-resolved N-glycan input when `mechanism.name: n_glycosylation`; other mechanisms must opt in through their reaction template. |
 | `smiles` | string | SMILES for generated single-residue moieties. |
 | `link_site` | mapping | Explicit moiety atom selected for an explicit linkage. |
 | `recipe` | mapping | Polymer recipe for generated polymer moieties. |
@@ -188,11 +190,11 @@ parameters, or a production glycan force-field assignment. See
 SMILES moieties used with the experimental N-glycosylation mechanism must
 provide a three-character PDB-safe `residue_name`.
 
-GlyGen/GlyCAM PDB N-glycan moieties used with `n_glycosylation` derive their
+Residue-resolved PDB N-glycan moieties used with `n_glycosylation` derive their
 reactive selector from the loaded glycan: chain `C`, the reducing sugar residue,
-atom `C1`, and the source atom serial. The workflow removes the glycan
-`ROH:O1`/`ROH:HO1` leaving atoms and links the glycan reducing-end `C1` to the
-Asn site atom.
+atom `C1`, and the source atom serial unless an explicit `moiety.link_site`
+selector is supplied. The workflow removes the validated hydroxyl O/H leaving
+atoms and links the glycan reducing-end `C1` to the Asn site atom.
 
 ## Mechanism
 
