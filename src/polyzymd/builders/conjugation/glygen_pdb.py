@@ -147,7 +147,7 @@ def load_glygen_glycan_pdb(path: Path | str, *, chain_id: str = "C") -> GlyGenPd
     residues = _residue_mapping(atoms)
     fragment = GeneratedPolymerFragment.from_atom_records(
         tuple(PolymerFragmentAtom.from_pdb_atom(atom) for atom in atoms),
-        bonds=index_bonds,
+        bonds=serial_bonds,
         residues=tuple(PolymerFragmentResidue.model_validate(item) for item in residues),
         reactive_atom_serial=c1_atom.serial,
         reactive_atom_index=c1_atom.atom_index,

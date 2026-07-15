@@ -50,6 +50,7 @@ from polyzymd.builders.conjugation.pablo.product_state import (
 )
 from polyzymd.builders.conjugation.placement import (
     PackmolModifierPlacementSettings,
+    place_modifier_with_resolved_plan_rigid,
     place_modifiers_with_resolved_plans,
 )
 from polyzymd.builders.conjugation.polymer import MultiResidueGenerationResult
@@ -701,9 +702,16 @@ def _write_glygen_coordinate_artifact(
 ) -> tuple[Path, Any]:
     """Write the residue-preserved GlyGen coordinate artifact and sidecar annotation."""
     output_path = construction_dir / "glygen_coordinate_only_conjugate.pdb"
+    placed_fragment = placed_fragment_from_resolved_plan(
+        place_modifier_with_resolved_plan_rigid(
+            spec.generated_fragment,
+            spec.resolved_plan,
+        ),
+        spec.resolved_plan,
+    )
     assembly = write_crosslinked_pdb(
         protein_pdb_path,
-        spec.generated_fragment.to_placed_fragment(name=spec.attachment_id),
+        placed_fragment.model_copy(update={"name": spec.attachment_id}),
         spec.resolved_plan.to_pdb_linkage_attachment(),
         output_path,
         CrosslinkedPdbAssemblyOptions(
