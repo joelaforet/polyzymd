@@ -28,6 +28,64 @@ _BOX_PADDING_ANGSTROM = 30.0
 _REACTIVE_BOND_SHELL_HALF_WIDTH_ANGSTROM = 0.05
 
 
+class PackmolOutputValidationError(RuntimeError):
+    """Packmol output was absent, unreadable, or inconsistent with inputs."""
+
+    def __init__(
+        self,
+        *,
+        message: str,
+        output_path: Path,
+        input_path: Path,
+        error_log_path: Path,
+        exit_code: int | None,
+        output_exists: bool,
+        atom_count: int | None,
+        expected_atom_count: int,
+    ) -> None:
+        """Initialize a Packmol output validation failure.
+
+        Parameters
+        ----------
+        message : str
+            Human-readable validation failure.
+        output_path : pathlib.Path
+            Expected Packmol output PDB path.
+        input_path : pathlib.Path
+            Packmol input path for diagnostics.
+        error_log_path : pathlib.Path
+            Packmol stdout/error log path for diagnostics.
+        exit_code : int or None
+            Parsed Packmol exit code when available.
+        output_exists : bool
+            Whether the expected output file existed.
+        atom_count : int or None
+            Parsed atom count when the output was readable.
+        expected_atom_count : int
+            Required atom count for the placement input.
+        """
+        self.output_path = output_path
+        self.input_path = input_path
+        self.error_log_path = error_log_path
+        self.exit_code = exit_code
+        self.output_exists = output_exists
+        self.atom_count = atom_count
+        self.expected_atom_count = expected_atom_count
+        super().__init__(message)
+
+    def diagnostic(self, attempt_index: int | None = None) -> str:
+        """Return an actionable single-attempt diagnostic string."""
+        prefix = f"attempt {attempt_index}: " if attempt_index is not None else ""
+        exit_code = "unknown" if self.exit_code is None else str(self.exit_code)
+        atom_count = "unreadable" if self.atom_count is None else str(self.atom_count)
+        return (
+            f"{prefix}Packmol output validation failed: exit code {exit_code}, "
+            f"output exists={self.output_exists}, atoms={atom_count}/"
+            f"{self.expected_atom_count}, input={self.input_path}, "
+            f"error log={self.error_log_path}, output={self.output_path}"
+        )
+
+
 class PackmolModifierPlacementSettings(BaseModel):
     """Settings for constrained modifier placement with Packmol."""
 
@@ -202,13 +260,13 @@ def place_modifier_with_resolved_plan(
 
     executor = run_packmol_func or run_packmol
     packmol_output_path = Path(executor(packmol_input_text, work_dir))
-    packed_coords = _read_pdb_coords(packmol_output_path)
     expected_atoms = len(shifted_protein) + len(retained_modifier_atoms)
-    if len(packed_coords) != expected_atoms:
-        raise RuntimeError(
-            f"Packmol output has {len(packed_coords)} atoms, expected {expected_atoms} "
-            f"(protein={len(shifted_protein)}, modifier={len(retained_modifier_atoms)})"
-        )
+    packed_coords = _read_packmol_output_coords(
+        packmol_output_path,
+        expected_atom_count=expected_atoms,
+        input_path=packmol_input_path,
+        error_log_path=work_dir / "packmol_error.log",
+    )
 
     packed_modifier_coords = packed_coords[len(shifted_protein) :] - coord_shift
     transformed_full_coords = _transform_full_modifier(
@@ -346,14 +404,14 @@ def place_modifiers_with_resolved_plans(
 
     executor = run_packmol_func or run_packmol
     packmol_output_path = Path(executor(packmol_input_text, work_dir))
-    packed_coords = _read_pdb_coords(packmol_output_path)
     retained_counts = tuple(len(atoms) for atoms in retained_atom_groups)
     expected_atoms = len(shifted_protein) + sum(retained_counts)
-    if len(packed_coords) != expected_atoms:
-        raise RuntimeError(
-            f"Packmol output has {len(packed_coords)} atoms, expected {expected_atoms} "
-            f"(protein={len(shifted_protein)}, modifiers={retained_counts})"
-        )
+    packed_coords = _read_packmol_output_coords(
+        packmol_output_path,
+        expected_atom_count=expected_atoms,
+        input_path=packmol_input_path,
+        error_log_path=work_dir / "packmol_error.log",
+    )
 
     results: list[PackmolModifierPlacementResult] = []
     start = len(shifted_protein)
@@ -579,6 +637,50 @@ def _read_pdb_coords(path: Path) -> np.ndarray:
     return np.asarray(pdb_coordinates(path, require_atoms=False), dtype=float)
 
 
+def _read_packmol_output_coords(
+    path: Path,
+    *,
+    expected_atom_count: int,
+    input_path: Path,
+    error_log_path: Path,
+) -> np.ndarray:
+    """Read and validate a Packmol output PDB before accepting placement.
+
+    Packmol exit code 173 can still leave a usable best-effort PDB. The output
+    is accepted only when the expected file exists, is readable, and contains
+    exactly the atoms implied by the input structures.
+    """
+    output_path = Path(path)
+    output_exists = output_path.exists()
+    atom_count: int | None = None
+    try:
+        coords = _read_pdb_coords(output_path)
+        atom_count = int(len(coords))
+    except (OSError, ValueError) as error:
+        raise PackmolOutputValidationError(
+            message=str(error),
+            output_path=output_path,
+            input_path=input_path,
+            error_log_path=error_log_path,
+            exit_code=_packmol_exit_code(error_log_path),
+            output_exists=output_exists,
+            atom_count=atom_count,
+            expected_atom_count=expected_atom_count,
+        ) from error
+    if atom_count != expected_atom_count:
+        raise PackmolOutputValidationError(
+            message=(f"Packmol output has {atom_count} atoms, expected {expected_atom_count}"),
+            output_path=output_path,
+            input_path=input_path,
+            error_log_path=error_log_path,
+            exit_code=_packmol_exit_code(error_log_path),
+            output_exists=output_exists,
+            atom_count=atom_count,
+            expected_atom_count=expected_atom_count,
+        )
+    return coords
+
+
 def _retained_local_index(
     retained_atoms: tuple[PdbAtomRecord, ...], reactive_atom: PdbAtomRecord
 ) -> int:
@@ -716,6 +818,16 @@ def _packmol_exit_status(work_dir: Path) -> str:
     if "173" in text:
         return "173_imperfect_accepted"
     return "nonzero_accepted_output"
+
+
+def _packmol_exit_code(error_log_path: Path) -> int | None:
+    """Return the Packmol exit code recorded in an error log when available."""
+    if not error_log_path.exists():
+        return 0
+    text = error_log_path.read_text(encoding="utf-8", errors="replace")
+    if "173" in text:
+        return 173
+    return None
 
 
 def _same_atom(atom_a: PdbAtomRecord, atom_b: PdbAtomRecord) -> bool:
