@@ -282,13 +282,18 @@ def run_packmol(
 
     if result.returncode == _PACKMOL_EXIT_IMPERFECT:
         error_log_path.write_text(stdout)
+        output_message = (
+            f"The best solution was written to {output_path.name} and will be validated."
+            if output_path.exists()
+            else f"The expected best-solution file {output_path.name} was not written."
+        )
         logger.warning(
             "Packmol exited with code %d (imperfect packing). "
-            "The best solution was written to %s and will be used. "
+            "%s "
             "Minor steric clashes will be resolved during energy minimisation. "
             "See %s for details.",
             _PACKMOL_EXIT_IMPERFECT,
-            output_path.name,
+            output_message,
             error_log_path,
         )
     elif result.returncode != 0:

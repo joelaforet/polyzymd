@@ -305,6 +305,65 @@ def test_coordinate_only_has_no_heavy_nonbonded_clashes(tmp_path: Path) -> None:
     assert result.construction.placement.final_conect_graph_valid is True
 
 
+def test_coordinate_only_retries_code_173_when_output_is_missing(tmp_path: Path) -> None:
+    """Packmol code 173 without an output PDB should retry without FileNotFoundError."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_conect.pdb", include_conect=True)
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    calls: list[Path] = []
+    valid_executor = _fake_packmol_executor(calls)
+
+    def fake_packmol(input_text: str, work_dir: Path | str) -> Path:
+        """Skip the first best-effort output, then write a valid retry output."""
+        working_directory = Path(work_dir)
+        if not calls:
+            calls.append(working_directory)
+            (working_directory / "packmol_error.log").write_text(
+                "Packmol ended with code 173\n", encoding="utf-8"
+            )
+            return working_directory / "packmol_output.pdb"
+        return valid_executor(input_text, working_directory)
+
+    result, _spec = _build_coordinate_only_fixture_result_with_executor(
+        tmp_path,
+        protein_path,
+        glycan_path,
+        fake_packmol,
+    )
+
+    assert calls == [
+        tmp_path / "construction" / "packmol_modifier_placement",
+        tmp_path / "construction" / "packmol_modifier_placement_attempt_02",
+    ]
+    assert result.construction.placement.final_conect_graph_valid is True
+
+
+def test_coordinate_only_accepts_valid_code_173_packmol_output(tmp_path: Path) -> None:
+    """Packmol code 173 should remain usable when the output PDB validates."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_conect.pdb", include_conect=True)
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    calls: list[Path] = []
+    valid_executor = _fake_packmol_executor(calls)
+
+    def fake_packmol(input_text: str, work_dir: Path | str) -> Path:
+        """Write a valid best-effort output and the retained Packmol error log."""
+        output_path = valid_executor(input_text, work_dir)
+        (Path(work_dir) / "packmol_error.log").write_text(
+            "Packmol ended with code 173\n", encoding="utf-8"
+        )
+        return output_path
+
+    result, _spec = _build_coordinate_only_fixture_result_with_executor(
+        tmp_path,
+        protein_path,
+        glycan_path,
+        fake_packmol,
+    )
+
+    assert calls == [tmp_path / "construction" / "packmol_modifier_placement"]
+    assert result.construction.placement.packmol_exit_status == "173_imperfect_accepted"
+    assert result.construction.placement.final_conect_graph_valid is True
+
+
 def test_coordinate_only_classifies_glycosidic_neighbors_by_graph_distance(
     tmp_path: Path,
 ) -> None:
@@ -474,6 +533,24 @@ def _build_coordinate_only_fixture_result(
     glycan_path: Path,
 ) -> tuple[Any, Any]:
     """Build a coordinate-only GlyGen fixture result and its attachment spec."""
+    packmol_calls: list[Path] = []
+    result, spec = _build_coordinate_only_fixture_result_with_executor(
+        tmp_path,
+        protein_path,
+        glycan_path,
+        _fake_packmol_executor(packmol_calls),
+    )
+    assert packmol_calls == [tmp_path / "construction" / "packmol_modifier_placement"]
+    return result, spec
+
+
+def _build_coordinate_only_fixture_result_with_executor(
+    tmp_path: Path,
+    protein_path: Path,
+    glycan_path: Path,
+    run_packmol_func: Any,
+) -> tuple[Any, Any]:
+    """Build a coordinate-only GlyGen fixture result with a custom Packmol fake."""
     attachment = _attachment(glycan_path)
     settings = ConjugatedPolymerSystemSettings(glygen_pdb_output_mode="coordinate_only")
     spec, *_ = _build_attachment_spec(
@@ -483,7 +560,6 @@ def _build_coordinate_only_fixture_result(
         artifact_dir=tmp_path,
         workflow_settings=settings,
     )
-    packmol_calls: list[Path] = []
     result = _build_glygen_coordinate_only_result(
         protein_pdb_path=protein_path,
         specs=(spec,),
@@ -491,9 +567,8 @@ def _build_coordinate_only_fixture_result(
         construction_dir=tmp_path / "construction",
         protein_canonicalization=None,
         placement_settings=settings.placement,
-        run_packmol_func=_fake_packmol_executor(packmol_calls),
+        run_packmol_func=run_packmol_func,
     )
-    assert packmol_calls == [tmp_path / "construction" / "packmol_modifier_placement"]
     return result, spec
 
 

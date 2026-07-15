@@ -50,6 +50,7 @@ from polyzymd.builders.conjugation.pablo.product_state import (
 )
 from polyzymd.builders.conjugation.placement import (
     PackmolModifierPlacementSettings,
+    PackmolOutputValidationError,
     place_modifier_with_resolved_plan,
     place_modifiers_with_resolved_plans,
 )
@@ -773,14 +774,18 @@ def _place_glygen_coordinate_only_with_packmol(
                     "nloop": max(settings.nloop, 1000),
                 }
             )
-        placement = place_modifier_with_resolved_plan(
-            protein_pdb_path,
-            modifier,
-            plan,
-            construction_dir,
-            settings=attempt_settings,
-            run_packmol_func=run_packmol_func,
-        )
+        try:
+            placement = place_modifier_with_resolved_plan(
+                protein_pdb_path,
+                modifier,
+                plan,
+                construction_dir,
+                settings=attempt_settings,
+                run_packmol_func=run_packmol_func,
+            )
+        except PackmolOutputValidationError as error:
+            failures.append(error.diagnostic(attempt_index))
+            continue
         attempt_path = output_path
         if attempt_index > 1:
             attempt_path = output_path.with_name(
@@ -815,9 +820,13 @@ def _place_glygen_coordinate_only_with_packmol(
                 )
             return placement, assembly
         failures.append(
-            f"attempt {attempt_index}: min heavy nonbonded distance {min_distance:.3f} A "
-            f"for {pair} with {summary.contact_count} true contacts using "
-            f"{placement.packmol_input_path}"
+            _format_glygen_packmol_attempt_diagnostic(
+                attempt_index=attempt_index,
+                placement=placement,
+                min_distance=min_distance,
+                pair=pair,
+                contact_count=summary.contact_count,
+            )
         )
     raise RuntimeError(
         "Packmol could not place the coordinate-only GlyGen fragment without severe "
@@ -871,6 +880,49 @@ def _format_nonbonded_contact_pair(contact: Any | None) -> str:
     if contact is None:
         return "none"
     return f"{contact.left_identity}-{contact.right_identity}"
+
+
+def _format_glygen_packmol_attempt_diagnostic(
+    *,
+    attempt_index: int,
+    placement: Any,
+    min_distance: float,
+    pair: str,
+    contact_count: int,
+) -> str:
+    """Return a retry diagnostic for a Packmol placement with final clashes."""
+    output_path = Path(placement.packmol_output_path)
+    output_exists = output_path.exists()
+    atom_count = _safe_pdb_atom_count(output_path) if output_exists else None
+    error_log_path = Path(placement.packmol_input_path).with_name("packmol_error.log")
+    exit_code = _packmol_exit_code_from_log(error_log_path)
+    atom_count_text = "unreadable" if atom_count is None else str(atom_count)
+    exit_code_text = "unknown" if exit_code is None else str(exit_code)
+    return (
+        f"attempt {attempt_index}: exit code {exit_code_text}, "
+        f"output exists={output_exists}, atoms={atom_count_text}, "
+        f"input={placement.packmol_input_path}, error log={error_log_path}, "
+        f"min true heavy nonbonded distance {min_distance:.3f} A for {pair} "
+        f"with {contact_count} true contacts"
+    )
+
+
+def _safe_pdb_atom_count(path: Path) -> int | None:
+    """Return a PDB atom count, or ``None`` when the output is unreadable."""
+    try:
+        return len(parse_structure_pdb_atom_records(path))
+    except OSError:
+        return None
+
+
+def _packmol_exit_code_from_log(error_log_path: Path) -> int | None:
+    """Return the Packmol exit code recorded in a retained error log."""
+    if not error_log_path.exists():
+        return 0
+    text = error_log_path.read_text(encoding="utf-8", errors="replace")
+    if "173" in text:
+        return 173
+    return None
 
 
 def _glygen_final_clash_graph_bonds(
