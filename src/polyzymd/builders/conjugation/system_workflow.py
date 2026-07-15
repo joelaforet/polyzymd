@@ -19,7 +19,7 @@ from polyzymd.builders.conjugation._linkage import (
     require_pablo_crosslink_requirement,
 )
 from polyzymd.builders.conjugation._moiety_provider import (
-    attachment_uses_glygen_pdb,
+    attachment_uses_pdb_fragment,
     generated_fragment_for_resolved_source,
     resolve_moiety_source,
     validate_moiety_source_config,
@@ -101,9 +101,9 @@ from polyzymd.config.schema import (
 _ATOM_RECORD_PREFIXES = ATOM_RECORD_PREFIXES
 _NHS_LYS_REACTION = get_reaction("nhs_lys")
 _NHS_LYS_COORDINATE_BACKEND_MECHANISM = _NHS_LYS_REACTION.coordinate_backend_mechanism
-_GLYGEN_COORDINATE_ONLY_MIN_PACKMOL_TOLERANCE_ANGSTROM = 2.5
-_GLYGEN_COORDINATE_ONLY_MAX_PACKMOL_ATTEMPTS = 20
-_GLYGEN_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM = 2.0
+_PDB_FRAGMENT_COORDINATE_ONLY_MIN_PACKMOL_TOLERANCE_ANGSTROM = 2.5
+_PDB_FRAGMENT_COORDINATE_ONLY_MAX_PACKMOL_ATTEMPTS = 20
+_PDB_FRAGMENT_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM = 2.0
 LOGGER = logging.getLogger(__name__)
 
 
@@ -136,7 +136,7 @@ class ConjugatedPolymerSystemSettings(BaseModel):
         default_factory=InterchangeParameterizationSettings
     )
     relaxation: ConjugateRelaxationSettings = Field(default_factory=ConjugateRelaxationSettings)
-    glygen_pdb_output_mode: Literal["coordinate_only", "experimental_pablo"] = "coordinate_only"
+    pdb_fragment_output_mode: Literal["coordinate_only", "experimental_pablo"] = "coordinate_only"
 
 
 class ConjugateConstructionResult(BaseModel):
@@ -233,10 +233,10 @@ def build_conjugated_polymer_system_from_config(
     modifiers = tuple(spec.generated_fragment for spec in specs)
     resolved_plans = tuple(spec.resolved_plan for spec in specs)
     if (
-        _uses_glygen_pdb_sources(attachments)
-        and workflow_settings.glygen_pdb_output_mode == "coordinate_only"
+        _uses_pdb_fragment_sources(attachments)
+        and workflow_settings.pdb_fragment_output_mode == "coordinate_only"
     ):
-        result = _build_glygen_coordinate_only_result(
+        result = _build_pdb_fragment_coordinate_only_result(
             protein_pdb_path=protein_pdb_path,
             specs=specs,
             output_dir=artifact_dir,
@@ -248,24 +248,26 @@ def build_conjugated_polymer_system_from_config(
         result.workflow_json_path = workflow_path
         result.artifact_paths["workflow_json"] = workflow_path
         result.save(workflow_path)
-        LOGGER.info("Saved coordinate-only GlyGen conjugation workflow JSON to %s", workflow_path)
+        LOGGER.info(
+            "Saved coordinate-only PDB-fragment conjugation workflow JSON to %s", workflow_path
+        )
         return result
-    if _uses_glygen_pdb_sources(attachments):
+    if _uses_pdb_fragment_sources(attachments):
         if len(specs) != 1:
-            raise ValueError("GlyGen PDB ingestion MVP supports exactly one glycan attachment")
-        glygen_coordinate_artifact_path, _, _ = _write_glygen_coordinate_artifact(
+            raise ValueError("PDB-fragment ingestion MVP supports exactly one attachment")
+        pdb_fragment_coordinate_artifact_path, _, _ = _write_pdb_fragment_coordinate_artifact(
             protein_pdb_path=protein_pdb_path,
             spec=specs[0],
             construction_dir=construction_dir,
             placement_settings=workflow_settings.placement,
         )
         LOGGER.warning(
-            "Continuing GlyGen PDB input into experimental Pablo/OpenFF mode; "
+            "Continuing PDB-fragment input into experimental Pablo/OpenFF mode; "
             "coordinate-only artifact path is %s",
-            glygen_coordinate_artifact_path,
+            pdb_fragment_coordinate_artifact_path,
         )
     else:
-        glygen_coordinate_artifact_path = None
+        pdb_fragment_coordinate_artifact_path = None
     ccd_pablo_policy = _policy_with_resolved_crosslinks(
         config.conjugation.ccd_pablo,
         resolved_plans,
@@ -289,10 +291,10 @@ def build_conjugated_polymer_system_from_config(
             use_conjugate_relaxation=workflow_settings.run_relaxation,
         )
     except Exception as exc:
-        if glygen_coordinate_artifact_path is not None:
+        if pdb_fragment_coordinate_artifact_path is not None:
             raise RuntimeError(
-                "Experimental GlyGen Pablo/OpenFF continuation failed after coordinate-only "
-                f"artifact was written to {glygen_coordinate_artifact_path}"
+                "Experimental PDB-fragment Pablo/OpenFF continuation failed after coordinate-only "
+                f"artifact was written to {pdb_fragment_coordinate_artifact_path}"
             ) from exc
         raise
     if workflow_settings.preserve_reference_atom_names:
@@ -617,19 +619,19 @@ def _enabled_supported_attachments(
             getattr(attachment, "moiety", None),
             mechanism_name=getattr(getattr(attachment, "mechanism", None), "name", None),
         )
-    if any(attachment_uses_glygen_pdb(attachment) for attachment in attachments) and not all(
-        attachment_uses_glygen_pdb(attachment) for attachment in attachments
+    if any(attachment_uses_pdb_fragment(attachment) for attachment in attachments) and not all(
+        attachment_uses_pdb_fragment(attachment) for attachment in attachments
     ):
-        raise ValueError("GlyGen PDB input attachments cannot be mixed with other moiety sources")
+        raise ValueError("PDB-fragment input attachments cannot be mixed with other moiety sources")
     return attachments
 
 
-def _uses_glygen_pdb_sources(attachments: tuple[Any, ...]) -> bool:
-    """Return whether any enabled attachment uses GlyGen PDB input."""
-    return any(attachment_uses_glygen_pdb(attachment) for attachment in attachments)
+def _uses_pdb_fragment_sources(attachments: tuple[Any, ...]) -> bool:
+    """Return whether any enabled attachment uses PDB-fragment input."""
+    return any(attachment_uses_pdb_fragment(attachment) for attachment in attachments)
 
 
-def _build_glygen_coordinate_only_result(
+def _build_pdb_fragment_coordinate_only_result(
     *,
     protein_pdb_path: Path | str,
     specs: tuple[AttachmentBuildSpec, ...],
@@ -639,11 +641,11 @@ def _build_glygen_coordinate_only_result(
     placement_settings: PackmolModifierPlacementSettings | None = None,
     run_packmol_func: Any | None = None,
 ) -> ConjugationResult:
-    """Write a coordinate-only residue-resolved GlyGen conjugate artifact."""
+    """Write a coordinate-only residue-resolved PDB-fragment conjugate artifact."""
     if len(specs) != 1:
-        raise ValueError("GlyGen coordinate-only MVP supports exactly one glycan attachment")
+        raise ValueError("PDB-fragment coordinate-only MVP supports exactly one attachment")
     spec = specs[0]
-    output_path, assembly, placement = _write_glygen_coordinate_artifact(
+    output_path, assembly, placement = _write_pdb_fragment_coordinate_artifact(
         protein_pdb_path=protein_pdb_path,
         spec=spec,
         construction_dir=construction_dir,
@@ -651,9 +653,9 @@ def _build_glygen_coordinate_only_result(
         run_packmol_func=run_packmol_func,
     )
     sidecars = dict(spec.source_sidecars)
-    sidecar_path = sidecars.get("glygen_ingestion")
+    sidecar_path = sidecars.get("pdb_fragment_ingestion")
     if sidecar_path is not None:
-        _annotate_glygen_sidecar(sidecar_path, coordinate_artifact_path=output_path)
+        _annotate_pdb_fragment_sidecar(sidecar_path, coordinate_artifact_path=output_path)
     construction = SimpleNamespace(
         crosslinked_pdb_path=output_path,
         validation_report_path=None,
@@ -663,7 +665,7 @@ def _build_glygen_coordinate_only_result(
         pablo=None,
         parameterization=None,
         relaxation=None,
-        diagnostics=("Coordinate-only GlyGen PDB artifact; Pablo/OpenFF not run",),
+        diagnostics=("Coordinate-only PDB-fragment artifact; Pablo/OpenFF not run",),
     )
     result = ConjugationResult(
         status="coordinate_only",
@@ -702,14 +704,14 @@ def _build_glygen_coordinate_only_result(
     result.artifact_paths.update(
         {
             "crosslinked_conjugate_pdb": output_path,
-            "glygen_coordinate_only_pdb": output_path,
-            **{f"glygen_{name}": path for name, path in sidecars.items()},
+            "pdb_fragment_coordinate_only_pdb": output_path,
+            **{f"pdb_fragment_{name}": path for name, path in sidecars.items()},
         }
     )
     return result
 
 
-def _write_glygen_coordinate_artifact(
+def _write_pdb_fragment_coordinate_artifact(
     *,
     protein_pdb_path: Path | str,
     spec: AttachmentBuildSpec,
@@ -717,41 +719,41 @@ def _write_glygen_coordinate_artifact(
     placement_settings: PackmolModifierPlacementSettings | None = None,
     run_packmol_func: Any | None = None,
 ) -> tuple[Path, Any, Any]:
-    """Write the residue-preserved GlyGen coordinate artifact through Packmol placement."""
-    output_path = construction_dir / "glygen_coordinate_only_conjugate.pdb"
-    placement, assembly = _place_glygen_coordinate_only_with_packmol(
+    """Write the residue-preserved PDB-fragment coordinate artifact through Packmol placement."""
+    output_path = construction_dir / "pdb_fragment_coordinate_only_conjugate.pdb"
+    placement, assembly = _place_pdb_fragment_coordinate_only_with_packmol(
         protein_pdb_path,
         spec.generated_fragment,
         spec.resolved_plan,
         construction_dir,
         output_path=output_path,
-        settings=_glygen_coordinate_only_placement_settings(placement_settings),
+        settings=_pdb_fragment_coordinate_only_placement_settings(placement_settings),
         run_packmol_func=run_packmol_func,
     )
-    sidecar_path = spec.source_sidecars.get("glygen_ingestion")
+    sidecar_path = spec.source_sidecars.get("pdb_fragment_ingestion")
     if sidecar_path is not None:
-        _annotate_glygen_sidecar(sidecar_path, coordinate_artifact_path=output_path)
+        _annotate_pdb_fragment_sidecar(sidecar_path, coordinate_artifact_path=output_path)
     return output_path, assembly, placement
 
 
-def _glygen_coordinate_only_placement_settings(
+def _pdb_fragment_coordinate_only_placement_settings(
     settings: PackmolModifierPlacementSettings | None,
 ) -> PackmolModifierPlacementSettings:
-    """Return Packmol settings with a conservative glycan steric tolerance."""
+    """Return Packmol settings with a conservative fragment steric tolerance."""
     placement_settings = settings or PackmolModifierPlacementSettings()
     if (
         placement_settings.tolerance_angstrom
-        >= _GLYGEN_COORDINATE_ONLY_MIN_PACKMOL_TOLERANCE_ANGSTROM
+        >= _PDB_FRAGMENT_COORDINATE_ONLY_MIN_PACKMOL_TOLERANCE_ANGSTROM
     ):
         return placement_settings
     return placement_settings.model_copy(
         update={
-            "tolerance_angstrom": _GLYGEN_COORDINATE_ONLY_MIN_PACKMOL_TOLERANCE_ANGSTROM,
+            "tolerance_angstrom": _PDB_FRAGMENT_COORDINATE_ONLY_MIN_PACKMOL_TOLERANCE_ANGSTROM,
         }
     )
 
 
-def _place_glygen_coordinate_only_with_packmol(
+def _place_pdb_fragment_coordinate_only_with_packmol(
     protein_pdb_path: Path | str,
     modifier: Any,
     plan: ResolvedAttachmentPlan,
@@ -761,9 +763,9 @@ def _place_glygen_coordinate_only_with_packmol(
     settings: PackmolModifierPlacementSettings,
     run_packmol_func: Any | None,
 ) -> tuple[Any, Any]:
-    """Place a GlyGen fragment through Packmol until final-graph clashes are acceptable."""
+    """Place a PDB fragment through Packmol until final-graph clashes are acceptable."""
     failures: list[str] = []
-    for attempt_index in range(1, _GLYGEN_COORDINATE_ONLY_MAX_PACKMOL_ATTEMPTS + 1):
+    for attempt_index in range(1, _PDB_FRAGMENT_COORDINATE_ONLY_MAX_PACKMOL_ATTEMPTS + 1):
         attempt_settings = settings
         if attempt_index > 1:
             attempt_settings = settings.model_copy(
@@ -791,14 +793,14 @@ def _place_glygen_coordinate_only_with_packmol(
             attempt_path = output_path.with_name(
                 f"{output_path.stem}_attempt_{attempt_index:02d}{output_path.suffix}"
             )
-        assembly = _write_glygen_placed_artifact(
+        assembly = _write_pdb_fragment_placed_artifact(
             protein_pdb_path=protein_pdb_path,
             placed_modifier=placement.placed_modifier,
             plan=plan,
             output_path=attempt_path,
-            attachment_id=getattr(modifier, "name", "glygen"),
+            attachment_id=getattr(modifier, "name", "pdb_fragment"),
         )
-        summary = _summarize_glygen_true_nonbonded_contacts(attempt_path)
+        summary = _summarize_pdb_fragment_true_nonbonded_contacts(attempt_path)
         min_distance = summary.min_distance_angstrom or float("inf")
         pair = _format_nonbonded_contact_pair(summary.min_contact)
         if summary.contact_count == 0:
@@ -811,16 +813,16 @@ def _place_glygen_coordinate_only_with_packmol(
                 }
             )
             if attempt_path != output_path:
-                assembly = _write_glygen_placed_artifact(
+                assembly = _write_pdb_fragment_placed_artifact(
                     protein_pdb_path=protein_pdb_path,
                     placed_modifier=placement.placed_modifier,
                     plan=plan,
                     output_path=output_path,
-                    attachment_id=getattr(modifier, "name", "glygen"),
+                    attachment_id=getattr(modifier, "name", "pdb_fragment"),
                 )
             return placement, assembly
         failures.append(
-            _format_glygen_packmol_attempt_diagnostic(
+            _format_pdb_fragment_packmol_attempt_diagnostic(
                 attempt_index=attempt_index,
                 placement=placement,
                 min_distance=min_distance,
@@ -829,13 +831,14 @@ def _place_glygen_coordinate_only_with_packmol(
             )
         )
     raise RuntimeError(
-        "Packmol could not place the coordinate-only GlyGen fragment without severe "
-        "protein-glycan heavy-atom clashes below "
-        f"{_GLYGEN_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM:.1f} A. " + "; ".join(failures)
+        "Packmol could not place the coordinate-only PDB fragment without severe "
+        "protein-fragment heavy-atom clashes below "
+        f"{_PDB_FRAGMENT_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM:.1f} A. "
+        + "; ".join(failures)
     )
 
 
-def _write_glygen_placed_artifact(
+def _write_pdb_fragment_placed_artifact(
     *,
     protein_pdb_path: Path | str,
     placed_modifier: Any,
@@ -843,7 +846,7 @@ def _write_glygen_placed_artifact(
     output_path: Path,
     attachment_id: str,
 ) -> Any:
-    """Write one candidate final GlyGen coordinate-only artifact."""
+    """Write one candidate final PDB-fragment coordinate-only artifact."""
     placed_fragment = placed_fragment_from_resolved_plan(placed_modifier, plan)
     return write_crosslinked_pdb(
         protein_pdb_path,
@@ -858,20 +861,20 @@ def _write_glygen_placed_artifact(
     )
 
 
-def _summarize_glygen_true_nonbonded_contacts(output_path: Path) -> Any:
-    """Return graph-distance-aware clash metrics for a final GlyGen PDB."""
+def _summarize_pdb_fragment_true_nonbonded_contacts(output_path: Path) -> Any:
+    """Return graph-distance-aware clash metrics for a final PDB-fragment PDB."""
     atoms = tuple(parse_structure_pdb_atom_records(output_path))
-    bonds = _glygen_final_clash_graph_bonds(output_path, atoms)
+    bonds = _pdb_fragment_final_clash_graph_bonds(output_path, atoms)
     if not validate_conect_graph(atoms, bonds):
         raise RuntimeError(
-            f"GlyGen coordinate-only CONECT graph has unknown endpoints: {output_path}"
+            f"PDB-fragment coordinate-only CONECT graph has unknown endpoints: {output_path}"
         )
     return summarize_nonbonded_heavy_clashes(
         atoms,
         bonds,
-        cutoff_angstrom=_GLYGEN_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM,
+        cutoff_angstrom=_PDB_FRAGMENT_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM,
         excluded_bond_depth=3,
-        include_pair=_is_protein_glycan_pair,
+        include_pair=_is_protein_fragment_pair,
     )
 
 
@@ -882,7 +885,7 @@ def _format_nonbonded_contact_pair(contact: Any | None) -> str:
     return f"{contact.left_identity}-{contact.right_identity}"
 
 
-def _format_glygen_packmol_attempt_diagnostic(
+def _format_pdb_fragment_packmol_attempt_diagnostic(
     *,
     attempt_index: int,
     placement: Any,
@@ -925,11 +928,11 @@ def _packmol_exit_code_from_log(error_log_path: Path) -> int | None:
     return None
 
 
-def _glygen_final_clash_graph_bonds(
+def _pdb_fragment_final_clash_graph_bonds(
     output_path: Path,
     atoms: tuple[PdbAtomRecord, ...],
 ) -> tuple[tuple[int, int], ...]:
-    """Return final graph bonds for GlyGen protein-glycan clash classification."""
+    """Return final graph bonds for PDB-fragment protein-fragment clash classification."""
     conect_bonds = set(parse_pdb_conect_pairs(output_path))
     local_protein_bonds = {
         tuple(sorted((left.serial, right.serial)))
@@ -943,8 +946,8 @@ def _glygen_final_clash_graph_bonds(
     return tuple(sorted(conect_bonds | local_protein_bonds))
 
 
-def _is_protein_glycan_pair(left: PdbAtomRecord, right: PdbAtomRecord) -> bool:
-    """Return whether a pair spans protein chain A and glycan chain C."""
+def _is_protein_fragment_pair(left: PdbAtomRecord, right: PdbAtomRecord) -> bool:
+    """Return whether a pair spans protein chain A and fragment chain C."""
     chains = {left.chain_id.strip().upper(), right.chain_id.strip().upper()}
     return chains == {"A", "C"}
 
@@ -968,8 +971,8 @@ def _protein_local_bond_distance(left: PdbAtomRecord, right: PdbAtomRecord) -> f
     )
 
 
-def _annotate_glygen_sidecar(sidecar_path: Path, *, coordinate_artifact_path: Path) -> None:
-    """Add the coordinate-only artifact path to an existing GlyGen sidecar."""
+def _annotate_pdb_fragment_sidecar(sidecar_path: Path, *, coordinate_artifact_path: Path) -> None:
+    """Add the coordinate-only artifact path to an existing PDB-fragment sidecar."""
     payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
     payload["coordinate_artifact_path"] = str(coordinate_artifact_path)
     sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

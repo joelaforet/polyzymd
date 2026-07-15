@@ -12,7 +12,8 @@ attachment spec through shared assembly, Pablo/OpenFF parameterization, charge
 patching, conjugate relaxation, and validation. Non-NHS mechanisms and generic explicit
 linkages are executable development paths, but they remain experimental unless a
 mechanism-specific validation note says otherwise. Phase 11 also supports a
-coordinate-only GlyGen/GlyCAM-style PDB N-glycan input path for
+coordinate-only residue-resolved PDB-fragment input path. The documented and
+tested source profile is GlyGen/GlyCAM-style N-glycan PDB input with
 `mechanism.name: n_glycosylation`; its Pablo/OpenFF continuation is explicitly
 experimental.
 
@@ -120,10 +121,10 @@ clearer.
 
 A moiety is the group added to the protein. The active provider layer resolves
 polymer recipes, single-residue SMILES moieties, and selected file-based sources.
-In Phase 11, `moiety.input_path` is used for GlyGen/GlyCAM-style residue-resolved
-PDB N-glycan input with `mechanism.name: n_glycosylation`; it is also part of the
-advanced explicit-linkage schema. The mechanism decides which source forms are
-supported for a given attachment.
+In Phase 11, `moiety.input_path` is a generic residue-resolved PDB-fragment
+source. The provider enforces exactly one source on the moiety, while each
+mechanism decides whether a loaded fragment is compatible. The tested profile is
+GlyGen/GlyCAM-style PDB N-glycan input with `mechanism.name: n_glycosylation`.
 
 ### Polymer Recipe Moiety
 
@@ -154,7 +155,7 @@ moiety:
 
 ### GlyGen/GlyCAM PDB N-glycan Moiety
 
-For the Phase 11 GlyGen PDB N-glycosylation path, provide the glycan PDB with
+For the Phase 11 PDB-fragment N-glycosylation path, provide the glycan PDB with
 `moiety.input_path` and use `mechanism.name: n_glycosylation`. Do not also set
 `smiles`, `residue_name`, `recipe`, or `polymer_recipe` on the same moiety;
 the provider requires exactly one source. The loaded PDB must contain one
@@ -167,8 +168,8 @@ moiety:
   input_path: structures/G80966KZ_glycam.pdb
 ```
 
-The default workflow mode writes a coordinate-only artifact and a GlyGen
-ingestion sidecar. It does not produce a final OpenMM system, GLYCAM/CHARMM
+The default workflow mode writes a coordinate-only artifact and a PDB-fragment
+ingestion sidecar with N-glycosylation profile diagnostics. It does not produce a final OpenMM system, GLYCAM/CHARMM
 parameters, or a production glycan force-field assignment. See
 {doc}`../how_to/glygen_glycan_conjugation` for the task workflow.
 
@@ -176,7 +177,7 @@ parameters, or a production glycan force-field assignment. See
 |-------|------|---------|
 | `name` | string | Moiety identifier. |
 | `residue_name` | string | Residue name to use for a generated single-residue moiety. |
-| `input_path` | path | PDB file for Phase 11 GlyGen/GlyCAM-style N-glycan input with `mechanism.name: n_glycosylation`; also used by the advanced explicit-linkage schema. |
+| `input_path` | path | Generic residue-resolved PDB-fragment source. GlyGen/GlyCAM-style N-glycan input is supported when `mechanism.name: n_glycosylation`. |
 | `smiles` | string | SMILES for generated single-residue moieties. |
 | `link_site` | mapping | Explicit moiety atom selected for an explicit linkage. |
 | `recipe` | mapping | Polymer recipe for generated polymer moieties. |

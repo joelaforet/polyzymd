@@ -2,7 +2,7 @@
 
 Use this guide when an RCSB PDB entry identifies the glycan you want to model,
 and a GlyGen or GlyCAM-style source supplies a downloadable residue-resolved 3D
-PDB that PolyzyMD can attach to an asparagine site with the current GlyGen PDB
+PDB that PolyzyMD can attach to an asparagine site with the current PDB-fragment
 N-glycosylation workflow.
 
 ```{important}
@@ -21,9 +21,9 @@ for external workflows.
 - A PolyzyMD configuration that enables `conjugation` and defines one
   `n_glycosylation` attachment using `moiety.input_path`.
 
-The current GlyGen PDB MVP supports exactly one GlyGen PDB glycan attachment per
-coordinate-only build and does not mix GlyGen PDB inputs with SMILES or polymer
-moiety sources.
+The current PDB-fragment ingestion MVP supports exactly one GlyGen/GlyCAM-profile
+glycan attachment per coordinate-only build and does not mix PDB-fragment inputs
+with SMILES or polymer moiety sources.
 
 ## 1. Find the glycan on RCSB PDB
 
@@ -52,7 +52,8 @@ moiety sources.
 
 ### File considerations
 
-- The loader requires a single connected glycan graph.
+- The generic loader requires a single connected fragment graph and preserves
+  residue labels.
 - Files with `CONECT` records use those records directly.
 - Files without `CONECT` records use RDKit coordinate-inferred connectivity and
   record `coordinate_inferred` provenance in the sidecar. Inspect the output PDB
@@ -99,7 +100,7 @@ labels in chain `C` after removing the `ROH` leaving group.
 ## 4. Run the coordinate-only build through the Python API
 
 Use the public config-driven conjugation API. The default
-`glygen_pdb_output_mode` is `coordinate_only`; the explicit settings below make
+`pdb_fragment_output_mode` is `coordinate_only`; the explicit settings below make
 that choice visible.
 
 ```python
@@ -112,13 +113,13 @@ result = build_conjugate_from_config(
     "config.yaml",
     output_dir=Path("artifacts/glygen_asn60"),
     settings=ConjugatedPolymerSystemSettings(
-        glygen_pdb_output_mode="coordinate_only",
+        pdb_fragment_output_mode="coordinate_only",
     ),
 )
 
 print(result.status)
-print(result.artifact_paths["glygen_coordinate_only_pdb"])
-print(result.artifact_paths["glygen_glygen_ingestion"])
+print(result.artifact_paths["pdb_fragment_coordinate_only_pdb"])
+print(result.artifact_paths["pdb_fragment_pdb_fragment_ingestion"])
 ```
 
 Do not use the coordinate-only result as a ready-to-run OpenMM system. It has no
@@ -130,11 +131,11 @@ The default coordinate-only paths are:
 
 | Artifact | Typical path | What to check |
 |----------|--------------|---------------|
-| Crosslinked PDB | `artifacts/glygen_asn60/conjugate-construction/glygen_coordinate_only_conjugate.pdb` | Asn site is `ASX`; glycan residues are in chain `C`; `ROH` atoms are absent; the PDB contains linkage `CONECT`/`LINK` evidence. |
-| GlyGen ingestion sidecar | `artifacts/glygen_asn60/conjugate-polymerist-cache/asn60_glygen_glycan_glygen_ingestion.json` | `connectivity_provenance`, reducing `C1`, removed `ROH` atoms, residue mapping, and linkage diagnostics. |
+| Crosslinked PDB | `artifacts/glygen_asn60/conjugate-construction/pdb_fragment_coordinate_only_conjugate.pdb` | Asn site is `ASX`; glycan residues are in chain `C`; `ROH` atoms are absent; the PDB contains linkage `CONECT`/`LINK` evidence. |
+| PDB-fragment ingestion sidecar | `artifacts/glygen_asn60/conjugate-polymerist-cache/asn60_glygen_glycan_pdb_fragment_ingestion.json` | `connectivity_provenance`, residue mapping, and the `n_glycosylation_profile` with reducing `C1`, removed `ROH` atoms, and linkage diagnostics. |
 | Workflow JSON | `artifacts/glygen_asn60/conjugated_polymer_system_workflow.json` | `status: coordinate_only` and artifact path metadata. |
 
-For raw GlyGen PDBs without `CONECT`, pay particular attention to the sidecar's
+For raw GlyGen/GlyCAM PDBs without `CONECT`, pay particular attention to the sidecar's
 `connectivity_provenance: coordinate_inferred` value and linkage diagnostics.
 Coordinate-inferred bonds are validated for a connected graph and plausible
 inter-residue C--O glycosidic linkages, but you should still inspect the emitted
@@ -142,9 +143,9 @@ PDB and provenance before parameterizing elsewhere.
 
 ## Experimental Pablo/OpenFF continuation
 
-`ConjugatedPolymerSystemSettings(glygen_pdb_output_mode="experimental_pablo")`
+`ConjugatedPolymerSystemSettings(pdb_fragment_output_mode="experimental_pablo")`
 continues past the coordinate artifact into the current Pablo/OpenFF path. This
-mode is experimental for GlyGen PDB glycans and is not a GLYCAM or CHARMM
+mode is experimental for GlyGen/GlyCAM-profile PDB fragments and is not a GLYCAM or CHARMM
 parameterization workflow. Prefer `coordinate_only` unless you are explicitly
 testing the Pablo/OpenFF continuation and are prepared to validate failures and
 charge/parameter provenance yourself.
