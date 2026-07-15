@@ -11,7 +11,10 @@ mechanism resolves a product-state attachment plan, and the workflow carries an
 attachment spec through shared assembly, Pablo/OpenFF parameterization, charge
 patching, conjugate relaxation, and validation. Non-NHS mechanisms and generic explicit
 linkages are executable development paths, but they remain experimental unless a
-mechanism-specific validation note says otherwise.
+mechanism-specific validation note says otherwise. Phase 11 also supports a
+coordinate-only GlyGen/GlyCAM-style PDB N-glycan input path for
+`mechanism.name: n_glycosylation`; its Pablo/OpenFF continuation is explicitly
+experimental.
 
 ## Top-Level Block
 
@@ -116,8 +119,10 @@ clearer.
 ## Moiety
 
 A moiety is the group added to the protein. The active provider layer resolves
-polymer recipes, single-residue SMILES moieties, and explicit file-based sources
-used by advanced linkage workflows. The mechanism decides which source forms are
+polymer recipes, single-residue SMILES moieties, and selected file-based sources.
+In Phase 11, `moiety.input_path` is used for GlyGen/GlyCAM-style residue-resolved
+PDB N-glycan input with `mechanism.name: n_glycosylation`; it is also part of the
+advanced explicit-linkage schema. The mechanism decides which source forms are
 supported for a given attachment.
 
 ### Polymer Recipe Moiety
@@ -147,12 +152,33 @@ moiety:
   residue_name: NAG
 ```
 
+### GlyGen/GlyCAM PDB N-glycan Moiety
+
+For the Phase 11 GlyGen PDB N-glycosylation path, provide the glycan PDB with
+`moiety.input_path` and use `mechanism.name: n_glycosylation`. Do not also set
+`smiles`, `residue_name`, `recipe`, or `polymer_recipe` on the same moiety;
+the provider requires exactly one source. The loaded PDB must contain one
+connected residue-resolved glycan graph and the strict reducing-end `ROH`
+leaving group with atoms named `O1` and `HO1`.
+
+```yaml
+moiety:
+  name: G80966KZ
+  role: glycan
+  input_path: structures/G80966KZ_glycam.pdb
+```
+
+The default workflow mode writes a coordinate-only artifact and a GlyGen
+ingestion sidecar. It does not produce a final OpenMM system, GLYCAM/CHARMM
+parameters, or a production glycan force-field assignment. See
+{doc}`../how_to/glygen_glycan_conjugation` for the task workflow.
+
 | Field | Type | Meaning |
 |-------|------|---------|
 | `name` | string | Moiety identifier. |
 | `role` | string | User-facing role label, such as `polymer`, `glycan`, or `moiety`. |
 | `residue_name` | string | Residue name to use for a generated single-residue moiety. |
-| `input_path` | path | PDB/SDF file to load for explicit-linkage workflows. |
+| `input_path` | path | PDB file for Phase 11 GlyGen/GlyCAM-style N-glycan input with `mechanism.name: n_glycosylation`; also used by the advanced explicit-linkage schema. |
 | `smiles` | string | SMILES for generated single-residue moieties. |
 | `link_site` | mapping | Explicit moiety atom selected for an explicit linkage. |
 | `recipe` | mapping | Polymer recipe for generated polymer moieties. |
@@ -160,6 +186,12 @@ moiety:
 
 SMILES moieties used with the experimental N-glycosylation mechanism must
 provide a three-character PDB-safe `residue_name`.
+
+GlyGen/GlyCAM PDB N-glycan moieties used with `n_glycosylation` derive their
+reactive selector from the loaded glycan: chain `C`, the reducing sugar residue,
+atom `C1`, and the source atom serial. The workflow removes the glycan
+`ROH:O1`/`ROH:HO1` leaving atoms and links the glycan reducing-end `C1` to the
+Asn site atom.
 
 ## Mechanism
 
