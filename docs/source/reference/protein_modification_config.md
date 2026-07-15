@@ -11,7 +11,7 @@ mechanism resolves a product-state attachment plan, and the workflow carries an
 attachment spec through shared assembly, Pablo/OpenFF parameterization, charge
 patching, conjugate relaxation, and validation. Non-NHS mechanisms and generic explicit
 linkages are executable development paths, but they remain experimental unless a
-mechanism-specific validation note says otherwise. Phase 11 also supports a
+mechanism-specific validation note says otherwise. PolyzyMD also supports a
 coordinate-only residue-resolved PDB-fragment input path. N-glycosylation
 accepts residue-resolved multi-residue glycan PDB fragments based on structural
 reducing-end chemistry, not on file provenance; its Pablo/OpenFF continuation is
@@ -121,7 +121,7 @@ clearer.
 
 A moiety is the group added to the protein. The active provider layer resolves
 polymer recipes, single-residue SMILES moieties, and selected file-based sources.
-In Phase 11, `moiety.input_path` is a generic residue-resolved PDB-fragment
+The field, `moiety.input_path` is a generic residue-resolved PDB-fragment
 source structurally: the provider loads a connected fragment and then asks the
 selected reaction template whether that fragment is chemically compatible. The
 current executable chemistry profile is residue-resolved PDB N-glycan input
@@ -157,7 +157,7 @@ moiety:
 
 ### Residue-resolved PDB N-glycan moiety
 
-For the Phase 11 PDB-fragment N-glycosylation path, provide the glycan PDB with
+For loading in a multi-residue PDB file via the N-glycosylation mechanism, provide the glycan PDB with
 `moiety.input_path` and use `mechanism.name: n_glycosylation`. Do not also set
 `smiles`, `residue_name`, `recipe`, or `polymer_recipe` on the same moiety;
 the provider requires exactly one source. The loaded PDB must contain one
@@ -232,8 +232,7 @@ supported by the public API.
 The schema can represent explicit atom-level PDB linkages, and `input_path` is a
 generic structural source. The current config-driven coordinate workflow does
 not register an executable `explicit_linkage` reaction template, so this example
-is a schema shape for advanced development rather than a supported Phase 11
-chemistry profile. Use a built-in or custom registered reaction template before
+is a schema shape for advanced development. Use a built-in or custom registered reaction template before
 running this path.
 
 ```yaml
