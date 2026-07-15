@@ -196,6 +196,7 @@ def test_coordinate_only_workflow_removes_roh_and_links_asn(tmp_path: Path) -> N
     protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
     attachment = _attachment(glycan_path)
     settings = ConjugatedPolymerSystemSettings(glygen_pdb_output_mode="coordinate_only")
+    packmol_calls: list[Path] = []
     spec, *_ = _build_attachment_spec(
         attachment,
         attachment_index=1,
@@ -210,6 +211,8 @@ def test_coordinate_only_workflow_removes_roh_and_links_asn(tmp_path: Path) -> N
         output_dir=tmp_path,
         construction_dir=tmp_path / "construction",
         protein_canonicalization=None,
+        placement_settings=settings.placement,
+        run_packmol_func=_fake_packmol_executor(packmol_calls),
     )
     output = result.crosslinked_conjugate_pdb_path.read_text(encoding="utf-8")
 
@@ -221,13 +224,17 @@ def test_coordinate_only_workflow_removes_roh_and_links_asn(tmp_path: Path) -> N
     assert " ASX A" in output
     assert "HD21" not in output
     assert Path(result.artifact_paths["glygen_glygen_ingestion"]).exists()
+    assert packmol_calls == [tmp_path / "construction" / "packmol_modifier_placement"]
+    assert result.construction.placement.packmol_input_path.exists()
+    assert "inside sphere" in result.construction.placement.packmol_input_text
+    assert "outside sphere" in result.construction.placement.packmol_input_text
 
 
 @pytest.mark.parametrize("external_like", [False, True])
 def test_coordinate_only_places_glycan_at_n_glycosylation_bond_length(
     tmp_path: Path, external_like: bool
 ) -> None:
-    """Coordinate-only GlyGen output should use rigid resolved-plan placement."""
+    """Coordinate-only GlyGen output should use Packmol-constrained placement."""
     glycan_path = _write_glygen_fixture(
         tmp_path / f"glycan_{external_like}.pdb",
         include_conect=True,
@@ -268,6 +275,34 @@ def test_coordinate_only_preserves_internal_glycan_distances(tmp_path: Path) -> 
                 _xyz(output_by_source[left.serial]), _xyz(output_by_source[right.serial])
             )
             assert output_distance == pytest.approx(source_distance, abs=1.0e-6)
+
+
+def test_coordinate_only_has_no_heavy_nonbonded_clashes(tmp_path: Path) -> None:
+    """Coordinate-only output should avoid severe protein-glycan heavy clashes."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_conect.pdb", include_conect=True)
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    result, _spec = _build_coordinate_only_fixture_result(tmp_path, protein_path, glycan_path)
+
+    output_atoms = tuple(parse_pdb_atom_records(result.crosslinked_conjugate_pdb_path))
+    protein_heavy = tuple(
+        atom for atom in output_atoms if atom.chain_id == "A" and _element(atom) != "H"
+    )
+    glycan_heavy = tuple(
+        atom for atom in output_atoms if atom.chain_id == "C" and _element(atom) != "H"
+    )
+    bonded_edges = {
+        frozenset(edge) for edge in parse_pdb_conect_pairs(result.crosslinked_conjugate_pdb_path)
+    }
+    clashes = []
+    for protein_atom in protein_heavy:
+        for glycan_atom in glycan_heavy:
+            if frozenset((protein_atom.serial, glycan_atom.serial)) in bonded_edges:
+                continue
+            distance = _distance(_xyz(protein_atom), _xyz(glycan_atom))
+            if distance < 2.0:
+                clashes.append((protein_atom.atom_name, glycan_atom.atom_name, distance))
+
+    assert clashes == []
 
 
 def test_coordinate_only_conect_matches_retained_source_graph_and_crosslink(
@@ -428,14 +463,91 @@ def _build_coordinate_only_fixture_result(
         artifact_dir=tmp_path,
         workflow_settings=settings,
     )
+    packmol_calls: list[Path] = []
     result = _build_glygen_coordinate_only_result(
         protein_pdb_path=protein_path,
         specs=(spec,),
         output_dir=tmp_path,
         construction_dir=tmp_path / "construction",
         protein_canonicalization=None,
+        placement_settings=settings.placement,
+        run_packmol_func=_fake_packmol_executor(packmol_calls),
     )
+    assert packmol_calls == [tmp_path / "construction" / "packmol_modifier_placement"]
     return result, spec
+
+
+def _fake_packmol_executor(calls: list[Path]) -> Any:
+    """Return a Packmol fake that writes fixed protein plus translated modifier coordinates."""
+
+    def fake_packmol(input_text: str, work_dir: Path | str) -> Path:
+        """Write deterministic Packmol-like output and record invocation."""
+        working_directory = Path(work_dir)
+        calls.append(working_directory)
+        structure_paths = _packmol_structure_paths(input_text)
+        assert len(structure_paths) == 2
+        protein_atoms = tuple(parse_pdb_atom_records(structure_paths[0]))
+        modifier_atoms = tuple(parse_pdb_atom_records(structure_paths[1]))
+        sphere_center = _packmol_inside_sphere_center(input_text)
+        reactive_index = _packmol_reactive_atom_index(input_text)
+        reactive_atom = modifier_atoms[reactive_index]
+        translation = sphere_center + np.asarray([3.0, 0.0, 0.0]) - _xyz(reactive_atom)
+        output_path = working_directory / "packmol_output.pdb"
+        lines = []
+        serial = 1
+        for atom in protein_atoms:
+            lines.append(
+                _pdb_atom(serial, atom.atom_name, "PRO", "A", 1, atom.x, atom.y, atom.z, "C")
+            )
+            serial += 1
+        for atom in modifier_atoms:
+            xyz = _xyz(atom) + translation
+            lines.append(
+                _pdb_atom(
+                    serial,
+                    atom.atom_name,
+                    atom.residue_name,
+                    "C",
+                    atom.residue_number,
+                    float(xyz[0]),
+                    float(xyz[1]),
+                    float(xyz[2]),
+                    _element(atom),
+                )
+            )
+            serial += 1
+        output_path.write_text("".join(lines) + "END\n", encoding="utf-8")
+        return output_path
+
+    return fake_packmol
+
+
+def _packmol_structure_paths(input_text: str) -> tuple[Path, ...]:
+    """Extract structure paths from Packmol input text."""
+    return tuple(
+        Path(line.split(maxsplit=1)[1])
+        for line in input_text.splitlines()
+        if line.startswith("structure ")
+    )
+
+
+def _packmol_inside_sphere_center(input_text: str) -> np.ndarray:
+    """Extract the reactive-site sphere center from Packmol input text."""
+    for line in input_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("inside sphere "):
+            fields = stripped.split()
+            return np.asarray([float(fields[2]), float(fields[3]), float(fields[4])])
+    raise AssertionError("Packmol input did not contain an inside sphere constraint")
+
+
+def _packmol_reactive_atom_index(input_text: str) -> int:
+    """Extract the zero-based reactive atom index from Packmol input text."""
+    for line in input_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("atoms "):
+            return int(stripped.split()[1]) - 1
+    raise AssertionError("Packmol input did not contain an atom constraint")
 
 
 def _single_atom(

@@ -50,7 +50,7 @@ from polyzymd.builders.conjugation.pablo.product_state import (
 )
 from polyzymd.builders.conjugation.placement import (
     PackmolModifierPlacementSettings,
-    place_modifier_with_resolved_plan_rigid,
+    place_modifier_with_resolved_plan,
     place_modifiers_with_resolved_plans,
 )
 from polyzymd.builders.conjugation.polymer import MultiResidueGenerationResult
@@ -97,6 +97,9 @@ from polyzymd.config.schema import (
 _ATOM_RECORD_PREFIXES = ATOM_RECORD_PREFIXES
 _NHS_LYS_REACTION = get_reaction("nhs_lys")
 _NHS_LYS_COORDINATE_BACKEND_MECHANISM = _NHS_LYS_REACTION.coordinate_backend_mechanism
+_GLYGEN_COORDINATE_ONLY_MIN_PACKMOL_TOLERANCE_ANGSTROM = 2.5
+_GLYGEN_COORDINATE_ONLY_MAX_PACKMOL_ATTEMPTS = 5
+_GLYGEN_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM = 2.0
 LOGGER = logging.getLogger(__name__)
 
 
@@ -235,6 +238,7 @@ def build_conjugated_polymer_system_from_config(
             output_dir=artifact_dir,
             construction_dir=construction_dir,
             protein_canonicalization=protein_canonicalization,
+            placement_settings=workflow_settings.placement,
         )
         workflow_path = artifact_dir / workflow_settings.workflow_json_name
         result.workflow_json_path = workflow_path
@@ -245,10 +249,11 @@ def build_conjugated_polymer_system_from_config(
     if _uses_glygen_pdb_sources(attachments):
         if len(specs) != 1:
             raise ValueError("GlyGen PDB ingestion MVP supports exactly one glycan attachment")
-        glygen_coordinate_artifact_path, _ = _write_glygen_coordinate_artifact(
+        glygen_coordinate_artifact_path, _, _ = _write_glygen_coordinate_artifact(
             protein_pdb_path=protein_pdb_path,
             spec=specs[0],
             construction_dir=construction_dir,
+            placement_settings=workflow_settings.placement,
         )
         LOGGER.warning(
             "Continuing GlyGen PDB input into experimental Pablo/OpenFF mode; "
@@ -627,15 +632,19 @@ def _build_glygen_coordinate_only_result(
     output_dir: Path,
     construction_dir: Path,
     protein_canonicalization: ProteinCanonicalizationResult | None,
+    placement_settings: PackmolModifierPlacementSettings | None = None,
+    run_packmol_func: Any | None = None,
 ) -> ConjugationResult:
     """Write a coordinate-only residue-resolved GlyGen conjugate artifact."""
     if len(specs) != 1:
         raise ValueError("GlyGen coordinate-only MVP supports exactly one glycan attachment")
     spec = specs[0]
-    output_path, assembly = _write_glygen_coordinate_artifact(
+    output_path, assembly, placement = _write_glygen_coordinate_artifact(
         protein_pdb_path=protein_pdb_path,
         spec=spec,
         construction_dir=construction_dir,
+        placement_settings=placement_settings,
+        run_packmol_func=run_packmol_func,
     )
     sidecars = dict(spec.source_sidecars)
     sidecar_path = sidecars.get("glygen_ingestion")
@@ -645,6 +654,8 @@ def _build_glygen_coordinate_only_result(
         crosslinked_pdb_path=output_path,
         validation_report_path=None,
         assembly=assembly,
+        placement=placement,
+        placements=(placement,),
         pablo=None,
         parameterization=None,
         relaxation=None,
@@ -699,14 +710,21 @@ def _write_glygen_coordinate_artifact(
     protein_pdb_path: Path | str,
     spec: AttachmentBuildSpec,
     construction_dir: Path,
-) -> tuple[Path, Any]:
-    """Write the residue-preserved GlyGen coordinate artifact and sidecar annotation."""
+    placement_settings: PackmolModifierPlacementSettings | None = None,
+    run_packmol_func: Any | None = None,
+) -> tuple[Path, Any, Any]:
+    """Write the residue-preserved GlyGen coordinate artifact through Packmol placement."""
     output_path = construction_dir / "glygen_coordinate_only_conjugate.pdb"
+    placement = _place_glygen_coordinate_only_with_packmol(
+        protein_pdb_path,
+        spec.generated_fragment,
+        spec.resolved_plan,
+        construction_dir,
+        settings=_glygen_coordinate_only_placement_settings(placement_settings),
+        run_packmol_func=run_packmol_func,
+    )
     placed_fragment = placed_fragment_from_resolved_plan(
-        place_modifier_with_resolved_plan_rigid(
-            spec.generated_fragment,
-            spec.resolved_plan,
-        ),
+        placement.placed_modifier,
         spec.resolved_plan,
     )
     assembly = write_crosslinked_pdb(
@@ -723,7 +741,134 @@ def _write_glygen_coordinate_artifact(
     sidecar_path = spec.source_sidecars.get("glygen_ingestion")
     if sidecar_path is not None:
         _annotate_glygen_sidecar(sidecar_path, coordinate_artifact_path=output_path)
-    return output_path, assembly
+    return output_path, assembly, placement
+
+
+def _glygen_coordinate_only_placement_settings(
+    settings: PackmolModifierPlacementSettings | None,
+) -> PackmolModifierPlacementSettings:
+    """Return Packmol settings with a conservative glycan steric tolerance."""
+    placement_settings = settings or PackmolModifierPlacementSettings()
+    if (
+        placement_settings.tolerance_angstrom
+        >= _GLYGEN_COORDINATE_ONLY_MIN_PACKMOL_TOLERANCE_ANGSTROM
+    ):
+        return placement_settings
+    return placement_settings.model_copy(
+        update={
+            "tolerance_angstrom": _GLYGEN_COORDINATE_ONLY_MIN_PACKMOL_TOLERANCE_ANGSTROM,
+        }
+    )
+
+
+def _place_glygen_coordinate_only_with_packmol(
+    protein_pdb_path: Path | str,
+    modifier: Any,
+    plan: ResolvedAttachmentPlan,
+    construction_dir: Path,
+    *,
+    settings: PackmolModifierPlacementSettings,
+    run_packmol_func: Any | None,
+) -> Any:
+    """Place a GlyGen fragment through Packmol until heavy clashes are acceptable."""
+    failures: list[str] = []
+    for attempt_index in range(1, _GLYGEN_COORDINATE_ONLY_MAX_PACKMOL_ATTEMPTS + 1):
+        attempt_settings = settings
+        if attempt_index > 1:
+            attempt_settings = settings.model_copy(
+                update={"work_dir_name": f"{settings.work_dir_name}_attempt_{attempt_index:02d}"}
+            )
+        placement = place_modifier_with_resolved_plan(
+            protein_pdb_path,
+            modifier,
+            plan,
+            construction_dir,
+            settings=attempt_settings,
+            run_packmol_func=run_packmol_func,
+        )
+        min_distance, pair = _glygen_min_heavy_nonbonded_distance(
+            protein_pdb_path,
+            placement.placed_modifier,
+            plan,
+        )
+        if min_distance >= _GLYGEN_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM:
+            return placement
+        failures.append(
+            f"attempt {attempt_index}: min heavy nonbonded distance {min_distance:.3f} A "
+            f"for {pair} using {placement.packmol_input_path}"
+        )
+    raise RuntimeError(
+        "Packmol could not place the coordinate-only GlyGen fragment without severe "
+        "protein-glycan heavy-atom clashes below "
+        f"{_GLYGEN_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM:.1f} A. " + "; ".join(failures)
+    )
+
+
+def _glygen_min_heavy_nonbonded_distance(
+    protein_pdb_path: Path | str,
+    placed_modifier: Any,
+    plan: ResolvedAttachmentPlan,
+) -> tuple[float, str]:
+    """Return the minimum nonbonded heavy distance for a placed glycan."""
+    protein_atoms = tuple(
+        atom
+        for atom in parse_structure_pdb_atom_records(protein_pdb_path)
+        if _pdb_atom_element(atom) != "H"
+    )
+    leaving_identities = {_pdb_atom_identity(atom) for atom in plan.modifier_leaving_atoms}
+    modifier_atoms = tuple(
+        atom
+        for atom in placed_modifier.atoms
+        if _pdb_atom_element(atom) != "H" and _pdb_atom_identity(atom) not in leaving_identities
+    )
+    crosslink_identity = (
+        _pdb_atom_identity(plan.protein_link_atom),
+        _pdb_atom_identity(plan.modifier_link_atom),
+    )
+    min_distance = float("inf")
+    min_pair = "unknown"
+    for protein_atom in protein_atoms:
+        for modifier_atom in modifier_atoms:
+            pair_identity = (_pdb_atom_identity(protein_atom), _pdb_atom_identity(modifier_atom))
+            if pair_identity == crosslink_identity:
+                continue
+            distance = float(
+                np.linalg.norm(_pdb_atom_xyz(protein_atom) - _pdb_atom_xyz(modifier_atom))
+            )
+            if distance < min_distance:
+                min_distance = distance
+                min_pair = (
+                    f"{protein_atom.chain_id}:{protein_atom.residue_name}{protein_atom.residue_number}:"
+                    f"{protein_atom.atom_name}-"
+                    f"{modifier_atom.chain_id}:{modifier_atom.residue_name}"
+                    f"{modifier_atom.residue_number}:{modifier_atom.atom_name}"
+                )
+    return min_distance, min_pair
+
+
+def _pdb_atom_element(atom: PdbAtomRecord) -> str:
+    """Return a normalized PDB atom element."""
+    return (atom.element or atom.atom_name[:1]).strip().upper()
+
+
+def _pdb_atom_xyz(atom: PdbAtomRecord) -> np.ndarray:
+    """Return a PDB atom coordinate vector."""
+    return np.asarray([atom.x, atom.y, atom.z], dtype=float)
+
+
+def _pdb_atom_identity(
+    atom: PdbAtomRecord,
+) -> tuple[int | None, int | None, str, int, str, str, str]:
+    """Return a stable identity for comparing source and placed PDB atoms."""
+    return (
+        atom.atom_index,
+        atom.serial,
+        atom.atom_name.upper(),
+        atom.residue_number,
+        atom.insertion_code.upper(),
+        atom.residue_name.upper(),
+        atom.chain_id.upper(),
+    )
 
 
 def _annotate_glygen_sidecar(sidecar_path: Path, *, coordinate_artifact_path: Path) -> None:
