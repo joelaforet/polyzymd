@@ -20,6 +20,13 @@ from polyzymd.builders.conjugation.system_workflow import (
     ConjugatedPolymerSystemSettings,
     _build_attachment_spec,
     _build_glygen_coordinate_only_result,
+    _glygen_final_clash_graph_bonds,
+    _is_protein_glycan_pair,
+    _summarize_glygen_true_nonbonded_contacts,
+)
+from polyzymd.builders.conjugation.validation import (
+    classify_bond_path_length,
+    summarize_nonbonded_heavy_clashes,
 )
 
 
@@ -284,25 +291,38 @@ def test_coordinate_only_has_no_heavy_nonbonded_clashes(tmp_path: Path) -> None:
     result, _spec = _build_coordinate_only_fixture_result(tmp_path, protein_path, glycan_path)
 
     output_atoms = tuple(parse_pdb_atom_records(result.crosslinked_conjugate_pdb_path))
-    protein_heavy = tuple(
-        atom for atom in output_atoms if atom.chain_id == "A" and _element(atom) != "H"
+    bonds = _glygen_final_clash_graph_bonds(result.crosslinked_conjugate_pdb_path, output_atoms)
+    summary = summarize_nonbonded_heavy_clashes(
+        output_atoms,
+        bonds,
+        cutoff_angstrom=2.0,
+        excluded_bond_depth=3,
+        include_pair=_is_protein_glycan_pair,
     )
-    glycan_heavy = tuple(
-        atom for atom in output_atoms if atom.chain_id == "C" and _element(atom) != "H"
-    )
-    bonded_edges = {
-        frozenset(edge) for edge in parse_pdb_conect_pairs(result.crosslinked_conjugate_pdb_path)
-    }
-    clashes = []
-    for protein_atom in protein_heavy:
-        for glycan_atom in glycan_heavy:
-            if frozenset((protein_atom.serial, glycan_atom.serial)) in bonded_edges:
-                continue
-            distance = _distance(_xyz(protein_atom), _xyz(glycan_atom))
-            if distance < 2.0:
-                clashes.append((protein_atom.atom_name, glycan_atom.atom_name, distance))
 
-    assert clashes == []
+    assert summary.contact_count == 0
+    assert result.construction.placement.true_nonbonded_heavy_contact_count_below_2_angstrom == 0
+    assert result.construction.placement.final_conect_graph_valid is True
+
+
+def test_coordinate_only_classifies_glycosidic_neighbors_by_graph_distance(
+    tmp_path: Path,
+) -> None:
+    """Close ND2-O5 and CG-O5 contacts should classify as near-neighbor geometry."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_conect.pdb", include_conect=True)
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    result, _spec = _build_coordinate_only_fixture_result(tmp_path, protein_path, glycan_path)
+
+    output_atoms = tuple(parse_pdb_atom_records(result.crosslinked_conjugate_pdb_path))
+    bonds = _glygen_final_clash_graph_bonds(result.crosslinked_conjugate_pdb_path, output_atoms)
+    nd2 = _single_atom(output_atoms, chain_id="A", residue_number=1, atom_name="ND2")
+    cg = _single_atom(output_atoms, chain_id="A", residue_number=1, atom_name="CG")
+    o5 = _single_atom(output_atoms, chain_id="C", residue_number=1, atom_name="O5")
+    summary = _summarize_glygen_true_nonbonded_contacts(result.crosslinked_conjugate_pdb_path)
+
+    assert classify_bond_path_length(nd2.serial, o5.serial, bonds) == 2
+    assert classify_bond_path_length(cg.serial, o5.serial, bonds) == 3
+    assert summary.contact_count == 0
 
 
 def test_coordinate_only_conect_matches_retained_source_graph_and_crosslink(
