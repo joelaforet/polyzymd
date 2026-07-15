@@ -668,6 +668,8 @@ class ConjugationPdbAtomSelectorConfig(BaseModel):
 class ConjugationMoietyConfig(BaseModel):
     """Placeholder for a covalent moiety, PTM, glycan, or polymer."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., description="Moiety identifier")
     residue_name: str | None = Field(None, max_length=4, description="Residue name for the moiety")
     input_path: Path | None = Field(None, description="Optional PDB/SDF path for the moiety")
@@ -683,7 +685,6 @@ class ConjugationMoietyConfig(BaseModel):
         None,
         description="Explicit PDB atom selector for the moiety linkage site",
     )
-    role: str = Field("moiety", description="User-facing component role label")
 
     @field_validator("polymer_recipe", mode="before")
     @classmethod

@@ -164,7 +164,6 @@ leaving group with atoms named `O1` and `HO1`.
 ```yaml
 moiety:
   name: G80966KZ
-  role: glycan
   input_path: structures/G80966KZ_glycam.pdb
 ```
 
@@ -176,7 +175,6 @@ parameters, or a production glycan force-field assignment. See
 | Field | Type | Meaning |
 |-------|------|---------|
 | `name` | string | Moiety identifier. |
-| `role` | string | User-facing role label, such as `polymer`, `glycan`, or `moiety`. |
 | `residue_name` | string | Residue name to use for a generated single-residue moiety. |
 | `input_path` | path | PDB file for Phase 11 GlyGen/GlyCAM-style N-glycan input with `mechanism.name: n_glycosylation`; also used by the advanced explicit-linkage schema. |
 | `smiles` | string | SMILES for generated single-residue moieties. |
@@ -240,7 +238,6 @@ conjugation:
         atom_name: NZ
       moiety:
         name: custom-moiety
-        role: moiety
         input_path: structures/custom_moiety.pdb
         link_site:
           chain_id: X
