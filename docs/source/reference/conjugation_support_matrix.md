@@ -24,7 +24,7 @@ chemistry into a supported workflow.
 | NHS-lysine polymer attachment with `mechanism.name: nhs_lys_amide` | Validated vertical slice | Current reliability milestone target. Supports generic provider/resolved-plan/attachment-spec orchestration, Pablo/OpenFF Interchange, ff14SB plus polymer templates, local NAGL patch charge bridge, charge reconciliation, conjugate relaxation, validation report, and final solvation. |
 | Multiple NHS-lysine polymer attachments | Executable | Multi-site attachment metadata is handled by the validation report and shared conjugate relaxation. Treat scientific validation as system-specific. |
 | SMILES moiety with `mechanism.name: n_glycosylation` | Wired, experimental | The path uses the generic moiety provider, resolved attachment plans, attachment specs, product-state charge patching, and validation hooks. It is not the same validated vertical slice as NHS-Lys polymer conjugation. |
-| Residue-resolved PDB-fragment input through `moiety.input_path` | Executable loader; mechanism-gated assembly | The generic loader validates one single-model, serial-safe, connected PDB fragment with CONECT or coordinate-inferred connectivity and residue mapping. Mechanisms decide compatibility. The documented/tested profile is GlyGen/GlyCAM-style N-glycan input with `mechanism.name: n_glycosylation`; the default `pdb_fragment_output_mode` is `coordinate_only`, and `experimental_pablo` continues into the current Pablo/OpenFF path for testing only. This is not a GLYCAM or CHARMM parameterization workflow and does not claim residue-resolved glycan force-field coverage. |
+| Residue-resolved PDB-fragment input through `moiety.input_path` | Executable loader; mechanism-gated assembly | The generic loader validates one single-model, serial-safe, connected PDB fragment with CONECT or coordinate-inferred connectivity and residue mapping. Mechanisms decide compatibility. N-glycosylation accepts residue-resolved multi-residue glycan PDB fragments that contain a structurally valid reducing-end anomeric C1 with explicit hydroxyl O/H atoms, including the supported separate-residue `ROH` hydroxyl-cap convention. The default `pdb_fragment_output_mode` is `coordinate_only`, and `experimental_pablo` continues into the current Pablo/OpenFF path for testing only. This is not a GLYCAM or CHARMM parameterization workflow and does not claim residue-resolved glycan force-field coverage. |
 | Mixed mechanisms in one config | Wired, experimental | Shared assembly and validation can handle multiple resolved plans, but mixed-chemistry scientific validation remains mechanism-specific. |
 | O-glycosylation | Planned | Vocabulary/design area only. |
 | Arbitrary SMARTS-defined chemistry | Planned | SMARTS can describe roles for future mechanisms, but does not by itself provide placement, product residues, charge patches, templates, or validation. |
@@ -89,9 +89,10 @@ Common conjugation reliability artifacts include:
 - NHS-Lys is the validated vertical slice. Non-NHS mechanisms and generic
   explicit linkages are active development paths and should be treated as
   experimental even when they produce artifacts.
-- Generic PDB-fragment input is mechanism-gated. The GlyGen/GlyCAM N-glycan
-  profile for N-glycosylation is supported as a coordinate-only artifact by
-  default. Continuing that artifact into the current
+- Generic PDB-fragment input is mechanism-gated. Residue-resolved multi-residue
+  glycan PDB fragments with valid reducing-end C1 hydroxyl chemistry are
+  supported for N-glycosylation as coordinate-only artifacts by default.
+  Continuing those artifacts into the current
   Pablo/OpenFF path is experimental and should not be described as GLYCAM,
   CHARMM, or production glycan parameterization.
 - The exact runtime handoff from a build-time OpenFF Interchange to a lean CUDA
