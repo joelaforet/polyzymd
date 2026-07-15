@@ -10,7 +10,10 @@ import numpy as np
 import pytest
 
 from polyzymd.builders.conjugation import ConjugatedPolymerSystemSettings as PublicSettings
-from polyzymd.builders.conjugation._moiety_provider import validate_moiety_source_config
+from polyzymd.builders.conjugation._moiety_provider import (
+    resolve_moiety_source,
+    validate_moiety_source_config,
+)
 from polyzymd.builders.conjugation._pdb_fragment import load_pdb_fragment
 from polyzymd.builders.conjugation.reactions.n_glycosylation import glygen_pdb_profile_from_fragment
 from polyzymd.builders.conjugation.structure.parsing import (
@@ -197,6 +200,44 @@ def test_input_path_preserves_generic_exactly_one_source_semantics() -> None:
 
     assert validate_moiety_source_config(moiety, mechanism_name="nhs_lys") == ["input_path"]
     assert validate_moiety_source_config(moiety, mechanism_name="n_glycosylation") == ["input_path"]
+
+
+def test_input_path_provider_routes_pdb_fragment_compatibility_to_template(
+    tmp_path: Path,
+) -> None:
+    """Provider should let the selected reaction template reject unsupported fragments."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_conect.pdb", include_conect=True)
+    attachment = _attachment(glycan_path)
+    attachment.mechanism.name = "nhs_lys_amide"
+    attachment.site.residue_name = "LYS"
+    attachment.site.atom_name = "NZ"
+
+    with pytest.raises(ValueError, match="does not support PDB-fragment moiety sources"):
+        resolve_moiety_source(
+            attachment,
+            attachment_index=1,
+            output_dir=tmp_path,
+            protein_pdb_path=tmp_path / "protein.pdb",
+        )
+
+
+def test_n_glycosylation_template_owns_pdb_fragment_profile_resolution(
+    tmp_path: Path,
+) -> None:
+    """N-glycosylation should add its profile only through the reaction hook."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_conect.pdb", include_conect=True)
+    source = resolve_moiety_source(
+        _attachment(glycan_path),
+        attachment_index=1,
+        output_dir=tmp_path,
+        protein_pdb_path=tmp_path / "protein.pdb",
+    )
+
+    sidecar = source.sidecars["pdb_fragment_ingestion"].read_text(encoding="utf-8")
+
+    assert source.source_kind == "pdb_fragment"
+    assert source.reactive_selector["atom_name"] == "C1"
+    assert "n_glycosylation_profile" in sidecar
 
 
 def test_coordinate_only_workflow_removes_roh_and_links_asn(tmp_path: Path) -> None:
