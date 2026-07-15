@@ -615,8 +615,30 @@ pixi run -e build-cuda-12-6 pytest tests/ -v -k "fast_e2e and conjugation"</code
     </section>
 
     <section class="phase" id="phase-11">
-      <h3>Phase 11 — Reaction serialization/schema and canonical reaction contract</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-11-reactions</code></p>
+      <h3>Phase 11 — GlyGen residue-resolved glycan PDB ingestion MVP</h3>
+      <p><strong>Branch:</strong> <code>conjugation-engine-refactor-phase-11-glygen-glycan-ingestion</code></p>
+      <p><strong>Objective:</strong> Ingest downloaded labeled GlyGen/GlyCAM multi-residue PDB glycans for N-glycosylation coordinate artifacts before broad reaction serialization work.</p>
+      <p><strong>Likely files:</strong> GlyGen PDB loader/provider modules, N-glycosylation reaction adapter, coordinate-only workflow branch, PDB writer identity mapping, and targeted conjugation tests.</p>
+      <p><strong>Deletions:</strong> None. This phase must not add vendored glycan catalogs, IUPAC parsing, online lookup, RDKit residue splitting, or GLYCAM/CHARMM parameterization claims.</p>
+      <ul class="checklist">
+        <li><input type="checkbox"> <span>Activate <code>moiety.input_path</code> only for N-glycosylation PDB input, reject mixed source types, and default to coordinate-only output.</span></li>
+        <li><input type="checkbox"> <span>Load single-model GlyGen/GlyCAM PDB files, normalize blank chains to C, and derive graph provenance from CONECT or coordinate-inferred RDKit bonding.</span></li>
+        <li><input type="checkbox"> <span>Validate serial uniqueness, connected graph, unique <code>ROH:O1/HO1</code>, reducing sugar <code>C1</code>, plausible C-O inter-residue linkages, and diagnostic sidecars.</span></li>
+        <li><input type="checkbox"> <span>Write residue-preserved coordinate-only PDB artifacts with internal/crosslink CONECT records, ROH removed, Asn ND2 hydrogen removed, and provenance/residue mapping sidecars.</span></li>
+        <li><input type="checkbox"> <span>Keep Pablo/OpenFF continuation explicitly experimental and label failures with the coordinate artifact path.</span></li>
+      </ul>
+      <p><strong>Targeted tests:</strong></p>
+      <pre><code>pixi run -e build pytest tests/test_conjugation_glygen_pdb.py -v
+pixi run -e build pytest tests/ -v -k "glygen or n_glycosylation"
+pixi run -e build ruff check src/polyzymd/builders/conjugation tests/test_conjugation_glygen_pdb.py</code></pre>
+      <p><strong>Checkpoint:</strong> Run the external GlyGen coordinate-only fixture if available locally; keep it optional and out of the standard test dependency set.</p>
+      <p><strong>Risk:</strong> <span class="risk-high">High</span>. Incorrect graph inference or residue identity mapping can silently corrupt the glycan linkage.</p>
+      <p><strong>User review gate:</strong> Review accepted/rejected GlyGen examples, provenance sidecar fields, coordinate-only PDB output, and experimental Pablo/OpenFF failure labeling.</p>
+    </section>
+
+    <section class="phase" id="phase-12">
+      <h3>Phase 12 — Reaction serialization/schema and canonical reaction contract</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-12-reactions</code></p>
       <p><strong>Objective:</strong> Replace hardcoded Python reaction drift with explicit data-file reaction input and one canonical resolver contract.</p>
       <p><strong>Likely files:</strong> <code>src/polyzymd/config/schema.py</code>, <code>src/polyzymd/builders/conjugation/reactions/</code>, reaction parsing/resolution modules, tests under <code>tests/</code> matching existing conjugation reaction tests.</p>
       <p><strong>Deletions:</strong> Remove obsolete <code>resolve_attachment</code>/<code>resolve_plan</code> split after <code>resolve(...)</code> parity; delete stale graph diagnostics only if replaced by contract tests.</p>
@@ -636,9 +658,9 @@ pixi run -e build pytest tests/ -v -k "nhs_lys or linkage or attachment"</code><
       <p><strong>User review gate:</strong> Review accepted and rejected reaction examples, error messages, and checkpoint parity before merge.</p>
     </section>
 
-    <section class="phase" id="phase-12">
-      <h3>Phase 12 — Normalized moiety sources and synchronized file support</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-12-moiety</code></p>
+    <section class="phase" id="phase-13">
+      <h3>Phase 13 — Normalized moiety sources and synchronized file support</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-13-moiety</code></p>
       <p><strong>Objective:</strong> Route SMILES, Polymerist recipe, synchronized PDB + charged SDF, and constrained PDB-only inputs into one <code>Moiety</code> contract.</p>
       <p><strong>Likely files:</strong> moiety/provider modules, polymer recipe adapters, file-input loaders, config schema, charge provenance helpers, corresponding tests.</p>
       <p><strong>Deletions:</strong> Delete duplicate provider/spec adapters after all production callers consume <code>Moiety</code>.</p>
@@ -658,9 +680,9 @@ pixi run -e build pytest tests/ -v -k "charge and conjugation"</code></pre>
       <p><strong>User review gate:</strong> User reviews the normalized source matrix, file-source validation failures, and checkpoint output.</p>
     </section>
 
-    <section class="phase" id="phase-13">
-      <h3>Phase 13 — Identity ledger and <code>pdb_index</code> coordinate mapping</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-13-identity-ledger</code></p>
+    <section class="phase" id="phase-14">
+      <h3>Phase 14 — Identity ledger and <code>pdb_index</code> coordinate mapping</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-14-identity-ledger</code></p>
       <p><strong>Objective:</strong> Replace order-only assumptions with identity-ledger mapping from product assembly through Pablo topology ingestion before any production switch to Pablo-ingested topology.</p>
       <p><strong>Likely files:</strong> product assembly, PDB/CONECT helpers, Pablo bridge, coordinate mapping utilities, validation tests.</p>
       <p><strong>Deletions:</strong> Delete order-only coordinate and atom matching paths once all callers use unique <code>pdb_index</code>/identity mapping.</p>
@@ -679,10 +701,10 @@ pixi run -e build pytest tests/ -v -k "pablo and conjugation"</code></pre>
       <p><strong>User review gate:</strong> User reviews identity ledger examples and confirms order-only paths were deleted, not retained as fallback shims.</p>
     </section>
 
-    <section class="phase" id="phase-14">
-      <h3>Phase 14 — Pablo precursor definitions and <code>with_crosslink</code> parity for NHS-Lys</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-14-pablo-nhs-lys</code></p>
-      <p><strong>Objective:</strong> Establish public Pablo precursor/crosslink parity for NHS-Lys on top of the Phase 13 identity ledger. Any production switch to Pablo-ingested topology is allowed only after identity mapping is in place.</p>
+    <section class="phase" id="phase-15">
+      <h3>Phase 15 — Pablo precursor definitions and <code>with_crosslink</code> parity for NHS-Lys</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-15-pablo-nhs-lys</code></p>
+      <p><strong>Objective:</strong> Establish public Pablo precursor/crosslink parity for NHS-Lys on top of the Phase 14 identity ledger. Any production switch to Pablo-ingested topology is allowed only after identity mapping is in place.</p>
       <p><strong>Likely files:</strong> <code>src/polyzymd/builders/conjugation/pablo/</code>, product/topology bridge modules, NHS-Lys reaction modules, relevant tests.</p>
       <p><strong>Deletions:</strong> Do not delete shared/manual Pablo definition logic in this phase because multi-residue polymer parity still depends on it. Delete only narrowly NHS-Lys-only scaffolding if it is proven unused by polymer paths; otherwise defer all deletion to Phase 15.</p>
       <ul class="checklist">
@@ -701,9 +723,9 @@ pixi run -e build pytest tests/ -v -k "product and conjugation"</code></pre>
       <p><strong>User review gate:</strong> User reviews the Pablo library plan, checkpoint parity, and any precisely scoped NHS-only deletions.</p>
     </section>
 
-    <section class="phase" id="phase-15">
-      <h3>Phase 15 — Multi-residue polymer definitions and <code>linking_bond</code> parity</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-15-polymer-linking</code></p>
+    <section class="phase" id="phase-16">
+      <h3>Phase 16 — Multi-residue polymer definitions and <code>linking_bond</code> parity</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-16-polymer-linking</code></p>
       <p><strong>Objective:</strong> Extend the public Pablo definition path to multi-residue polymer/moiety cases while preserving current linking behavior.</p>
       <p><strong>Likely files:</strong> polymer/moiety residue definition planning modules, Pablo bridge, product assembly, polymer recipe tests.</p>
       <p><strong>Deletions:</strong> After both NHS-Lys parity and multi-residue polymer parity pass, remove the shared/manual Pablo definition logic and any remaining single-residue-only special cases or duplicate multi-residue placement/definition code in the same PR.</p>
@@ -722,9 +744,9 @@ pixi run -e build pytest tests/ -v -k "conjugation"</code></pre>
       <p><strong>User review gate:</strong> User reviews multi-residue parity outputs, capability-limit errors, and the final deletion of shared/manual Pablo definition logic before merge.</p>
     </section>
 
-    <section class="phase" id="phase-16">
-      <h3>Phase 16 — Shared force-field loader, Sage 2.3.0 default, ordered OFFXML, and concise audit</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-16-force-fields</code></p>
+    <section class="phase" id="phase-17">
+      <h3>Phase 17 — Shared force-field loader, Sage 2.3.0 default, ordered OFFXML, and concise audit</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-17-force-fields</code></p>
       <p><strong>Objective:</strong> Introduce a small shared force-field loader/manifest/audit utility and switch project defaults to ff14SB + Sage 2.3.0 while preserving existing component charging behavior.</p>
       <p><strong>Likely files:</strong> force-field utility module, config defaults/schema, conjugation parameterization bridge, SystemBuilder force-field call sites, audit tests.</p>
       <p><strong>Deletions:</strong> Delete duplicate local force-field source assembly in conjugation once shared utility is production. Do not delete charge bridge internals speculatively.</p>
@@ -744,9 +766,9 @@ pixi run -e build pytest tests/ -v -k "system_builder or builder"</code></pre>
       <p><strong>User review gate:</strong> User reviews manifest defaults, override semantics, audit sample, and confirms no component-charging rewrite occurred.</p>
     </section>
 
-    <section class="phase" id="phase-17">
-      <h3>Phase 17 — Contract, placement, and workflow consolidation with real LOC deletion</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-17-consolidation</code></p>
+    <section class="phase" id="phase-18">
+      <h3>Phase 18 — Contract, placement, and workflow consolidation with real LOC deletion</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-18-consolidation</code></p>
       <p><strong>Objective:</strong> Collapse duplicate placement/workflow paths around <code>Moiety</code>, <code>ResolvedReaction</code>, and <code>ProductAssembly</code> now that parity has been proven.</p>
       <p><strong>Likely files:</strong> system workflow, placement modules, moiety adapters, reaction bridge, Pablo product bridge, tests that reference deleted private helpers.</p>
       <p><strong>Deletions:</strong> Remove duplicate single/multi placement paths, obsolete adapters, obsolete graph diagnostics, and dead workflow glue. Preserve identity/provenance and contract tests.</p>
@@ -765,9 +787,9 @@ pixi run -e build pytest tests/ -v -k "workflow or system_workflow or placement"
       <p><strong>User review gate:</strong> User reviews deletion summary, kept/removed tests, and confirms no shims remain.</p>
     </section>
 
-    <section class="phase" id="phase-18">
-      <h3>Phase 18 — Final full audit and integration</h3>
-      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-18-final-audit</code></p>
+    <section class="phase" id="phase-19">
+      <h3>Phase 19 — Final full audit and integration</h3>
+      <p><strong>Branch:</strong> <code>conjugation-pablo-convergence-phase-19-final-audit</code></p>
       <p><strong>Objective:</strong> Run complete integration validation, close documentation gaps, and prepare merge from <code>conjugation-engine-refactor</code> to <code>refactor/conjugation-engine</code>.</p>
       <p><strong>Likely files:</strong> Only targeted fixes discovered by audit; release notes or docs if explicitly requested.</p>
       <p><strong>Deletions:</strong> Any final dead code proven unreachable by tests and checkpoint; no speculative cleanup.</p>
@@ -877,7 +899,7 @@ pixi run -e build black src/ tests/ --check</code></pre>
       <li><input type="checkbox"> <span>Final parameterization uses ordered OFFXML sources with ff14SB + Sage 2.3.0 defaults and concise assignment audit.</span></li>
       <li><input type="checkbox"> <span>Old paths are deleted after complete relevant parity; no compatibility facades or duplicate production paths remain.</span></li>
       <li><input type="checkbox"> <span>POC notebooks, temp files, unrelated dirty files, and unrelated tests are untouched.</span></li>
-      <li><input type="checkbox"> <span>Final merge to <code>refactor/conjugation-engine</code> is user-approved after Phase 18 audit.</span></li>
+      <li><input type="checkbox"> <span>Final merge to <code>refactor/conjugation-engine</code> is user-approved after Phase 19 audit.</span></li>
     </ul>
   </section>
 

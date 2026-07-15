@@ -16,7 +16,7 @@ from polyzymd.builders.conjugation._linkage import (
     parse_pdb_atom_records,
     resolve_explicit_linkage_contract,
 )
-from polyzymd.builders.conjugation.polymer import GeneratedMoietyFragment
+from polyzymd.builders.conjugation.polymer import GeneratedMoietyFragment, GeneratedPolymerFragment
 from polyzymd.builders.conjugation.reactions.base import ReactionTemplate
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
@@ -206,7 +206,7 @@ class NGlycosylationReaction(ReactionTemplate):
     def build_contract(
         cls,
         site_config: Any,
-        moiety_fragment: GeneratedMoietyFragment,
+        moiety_fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
         *,
         protein_pdb_path: Path | str | None = None,
         settings: NGlycosylationReactionSettings | None = None,
@@ -214,7 +214,10 @@ class NGlycosylationReaction(ReactionTemplate):
         """Build a generic linkage contract for an Asn-glycan attachment."""
         resolved = settings or cls.default_settings()
         site_selector = _site_selector_from_config(site_config, settings=resolved)
-        group = cls.detect_anomeric_group(moiety_fragment)
+        if isinstance(moiety_fragment, GeneratedMoietyFragment):
+            group = cls.detect_anomeric_group(moiety_fragment)
+        else:
+            group = _anomeric_group_from_glygen_fragment(moiety_fragment)
         moiety_atoms = _moiety_pdb_atoms(moiety_fragment)
         atoms_by_index = {atom.atom_index: atom for atom in moiety_atoms}
         reactive_atom = atoms_by_index.get(group.reactive_carbon_index)
@@ -229,7 +232,7 @@ class NGlycosylationReaction(ReactionTemplate):
                 _selector_from_pdb_atom(_resolve_asn_nd2_hydrogen(protein_pdb_path, site_selector)),
             )
 
-        product_site, product_moiety = resolved.product_residue_names(moiety_fragment.residue_name)
+        product_site, product_moiety = resolved.product_residue_names(reactive_atom.residue_name)
         modifier_selector = _selector_from_pdb_atom(reactive_atom)
         return ExplicitLinkageContract(
             protein_endpoint=ReactiveEndpoint(
@@ -244,6 +247,9 @@ class NGlycosylationReaction(ReactionTemplate):
                 product_residue_name=product_moiety,
                 leaving_atom_selectors=tuple(
                     _selector_from_pdb_atom(atom) for atom in leaving_atoms
+                ),
+                allow_external_leaving_residue=not isinstance(
+                    moiety_fragment, GeneratedMoietyFragment
                 ),
             ),
             bond=LinkageBond(
@@ -260,7 +266,7 @@ class NGlycosylationReaction(ReactionTemplate):
         cls,
         protein_pdb_path: Path | str,
         site_config: Any,
-        moiety_fragment: GeneratedMoietyFragment,
+        moiety_fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
         *,
         settings: NGlycosylationReactionSettings | None = None,
     ) -> ResolvedAttachmentPlan:
@@ -281,7 +287,7 @@ class NGlycosylationReaction(ReactionTemplate):
         self,
         protein_pdb_path: Path | str,
         site_config: Any,
-        fragment: GeneratedMoietyFragment,
+        fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
         *,
         settings: NGlycosylationReactionSettings | None = None,
     ) -> ResolvedAttachmentPlan:
@@ -361,6 +367,41 @@ def detect_glycan_anomeric_group(mol: Any) -> GlycanAnomericGroup:
         )
         raise ValueError(f"Ambiguous glycan anomeric motif assignments: {assignments}")
     return next(iter(unique.values()))
+
+
+def _anomeric_group_from_glygen_fragment(fragment: GeneratedPolymerFragment) -> GlycanAnomericGroup:
+    """Build an anomeric group from strict GlyGen ROH/C1 selectors."""
+    reactive_matches = [
+        atom
+        for atom in fragment.atoms
+        if (
+            fragment.reactive_atom_index is not None
+            and atom.atom_index == fragment.reactive_atom_index
+        )
+        or (
+            fragment.reactive_atom_serial is not None
+            and atom.serial == fragment.reactive_atom_serial
+        )
+    ]
+    leaving_matches = [
+        atom for atom in fragment.atoms if atom.atom_index in fragment.leaving_atom_indices
+    ]
+    if len(reactive_matches) != 1 or len(leaving_matches) != 2:
+        raise ValueError(
+            "GlyGen PDB N-glycosylation requires one reducing C1 and ROH O1/HO1 leaving atoms"
+        )
+    oxygen = [atom for atom in leaving_matches if atom.atom_name.upper() == "O1"]
+    if len(oxygen) != 1:
+        raise ValueError("GlyGen PDB N-glycosylation requires ROH:O1 as a leaving atom")
+    reactive_atom = reactive_matches[0]
+    return GlycanAnomericGroup(
+        reactive_carbon_index=reactive_atom.atom_index,
+        hydroxyl_oxygen_index=oxygen[0].atom_index,
+        ring_oxygen_index=reactive_atom.atom_index,
+        leaving_atom_indices=tuple(atom.atom_index for atom in leaving_matches),
+        candidate_atom_indices=(reactive_atom.atom_index,),
+        evidence={"source": "glygen_roh_convention"},
+    )
 
 
 def _rdkit_mol_from_moiety_fragment(fragment: GeneratedMoietyFragment) -> Any:
@@ -501,7 +542,9 @@ def _geometry_bound_hydrogens(
     )
 
 
-def _moiety_pdb_atoms(fragment: GeneratedMoietyFragment) -> tuple[PdbAtomRecord, ...]:
+def _moiety_pdb_atoms(
+    fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
+) -> tuple[PdbAtomRecord, ...]:
     """Convert a generated moiety fragment to PDB atom records."""
     atoms: list[PdbAtomRecord] = []
     for atom in fragment.atoms:
