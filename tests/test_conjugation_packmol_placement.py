@@ -71,7 +71,9 @@ def test_packmol_input_uses_random_constrained_reactive_placement(monkeypatch, t
     assert "fixed 0. 0. 0. 0. 0. 0." in input_text
     assert "structure" in input_text
     assert "atoms 2" in input_text
+    assert input_text.count("inside sphere") == 1
     assert "inside sphere" in input_text
+    assert "outside sphere" not in input_text
     assert "rotate" not in input_text.lower()
     assert "center" not in input_text.lower()
     assert "NZ" in result.excluded_protein_atom_names
@@ -124,6 +126,51 @@ def test_resolved_plan_placement_uses_resolved_atoms_and_target_length(tmp_path:
         if line.startswith(("ATOM", "HETATM"))
     ]
     assert len(retained_lines) == 3
+
+
+def test_glygen_coordinate_only_packmol_input_constrains_only_c1(tmp_path: Path):
+    """GlyGen coordinate-only placement should constrain only reactive C1."""
+    protein_path = _protein_pdb(tmp_path)
+    modifier = _generated_modifier_with_c1_reactive_atom()
+    plan = resolve_explicit_linkage_contract(
+        protein_path,
+        modifier,
+        _explicit_contract(target_bond_length=1.45, modifier_atom_name="C1"),
+    )
+
+    def fake_run_packmol(input_text: str, work_dir: Path) -> Path:
+        """Write a simple Packmol-like output preserving input ordering."""
+        output_path = work_dir / "packmol_output.pdb"
+        protein_lines = [
+            line
+            for line in (work_dir / "protein_fixed_sterics.pdb").read_text().splitlines(True)
+            if line.startswith(("ATOM", "HETATM"))
+        ]
+        modifier_lines = [
+            line
+            for line in (work_dir / "modifier_retained.pdb").read_text().splitlines(True)
+            if line.startswith(("ATOM", "HETATM"))
+        ]
+        output_path.write_text("".join([*protein_lines, *modifier_lines, "END\n"]))
+        return output_path
+
+    result = place_modifier_with_resolved_plan(
+        protein_path,
+        modifier,
+        plan,
+        tmp_path,
+        run_packmol_func=fake_run_packmol,
+    )
+
+    input_text = result.packmol_input_text
+    assert "atoms 1\n  inside sphere" in input_text
+    assert input_text.count("inside sphere") == 1
+    assert "inside sphere" in input_text
+    assert " 1.40" not in input_text
+    assert " 1.50" not in input_text
+    assert "outside sphere" not in input_text
+    assert "atoms 2\n  outside sphere" not in input_text
+    assert "atoms 3\n  outside sphere" not in input_text
 
 
 def test_joint_resolved_plan_placement_uses_one_packmol_run_for_two_fragments(
@@ -182,6 +229,7 @@ def test_joint_resolved_plan_placement_uses_one_packmol_run_for_two_fragments(
     input_text = results[0].packmol_input_text
     assert input_text.count("structure ") == 3
     assert input_text.count("inside sphere") == 2
+    assert "outside sphere" not in input_text
     assert all(abs(result.placed_bond_length_angstrom - 1.45) < 1.0e-6 for result in results)
 
 
@@ -273,8 +321,14 @@ def _install_fake_mdanalysis_distance_array(monkeypatch, distance_array) -> None
     monkeypatch.setitem(sys.modules, "MDAnalysis.lib.distances", distances_module)
 
 
-def _explicit_contract(*, target_bond_length: float) -> ExplicitLinkageContract:
+def _explicit_contract(
+    *,
+    target_bond_length: float,
+    modifier_atom_name: str = "RC",
+) -> ExplicitLinkageContract:
     """Build a generic explicit linkage contract for placement tests."""
+    modifier_residue_number = 1 if modifier_atom_name == "C1" else 2
+    modifier_leaving_atom_names = () if modifier_atom_name == "C1" else ("LG",)
     return ExplicitLinkageContract(
         protein_endpoint=ReactiveEndpoint(
             participant="protein",
@@ -291,20 +345,32 @@ def _explicit_contract(*, target_bond_length: float) -> ExplicitLinkageContract:
             participant="modifier",
             selector=PdbAtomSelector(
                 chain_id="Z",
-                residue_name="NHS",
-                residue_number=2,
-                atom_name="RC",
+                residue_name="SB1" if modifier_atom_name == "C1" else "NHS",
+                residue_number=modifier_residue_number,
+                atom_name=modifier_atom_name,
             ),
             product_residue_name="NHX",
-            leaving_atom_names=("LG",),
+            leaving_atom_names=modifier_leaving_atom_names,
         ),
         bond=LinkageBond(
             protein_atom_name="NZ",
-            modifier_atom_name="RC",
+            modifier_atom_name=modifier_atom_name,
             bond_order=1,
             target_bond_length_angstrom=target_bond_length,
         ),
         mechanism_name="explicit_linkage",
+    )
+
+
+def _generated_modifier_with_c1_reactive_atom() -> GeneratedPolymerFragment:
+    """Create a GlyGen-like coordinate-only modifier with reactive C1."""
+    fragment = _generated_modifier()
+    return fragment.model_copy(
+        update={
+            "reactive_atom_serial": 101,
+            "reactive_atom_index": 0,
+            "reactive_atom_name": "C1",
+        }
     )
 
 

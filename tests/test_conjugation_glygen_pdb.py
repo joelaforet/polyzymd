@@ -233,8 +233,9 @@ def test_coordinate_only_workflow_removes_roh_and_links_asn(tmp_path: Path) -> N
     assert Path(result.artifact_paths["glygen_glygen_ingestion"]).exists()
     assert packmol_calls == [tmp_path / "construction" / "packmol_modifier_placement"]
     assert result.construction.placement.packmol_input_path.exists()
-    assert "inside sphere" in result.construction.placement.packmol_input_text
-    assert "outside sphere" in result.construction.placement.packmol_input_text
+    assert result.construction.placement.packmol_input_text.count("inside sphere") == 1
+    assert "atoms 1\n  inside sphere" in result.construction.placement.packmol_input_text
+    assert "outside sphere" not in result.construction.placement.packmol_input_text
 
 
 @pytest.mark.parametrize("external_like", [False, True])
