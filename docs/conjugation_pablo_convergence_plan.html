@@ -615,15 +615,15 @@ pixi run -e build-cuda-12-6 pytest tests/ -v -k "fast_e2e and conjugation"</code
     </section>
 
     <section class="phase" id="phase-11">
-      <h3>Phase 11 — GlyGen residue-resolved glycan PDB ingestion MVP</h3>
+      <h3>Phase 11 — Residue-resolved PDB-fragment ingestion MVP</h3>
       <p><strong>Branch:</strong> <code>conjugation-engine-refactor-phase-11-glygen-glycan-ingestion</code></p>
-      <p><strong>Objective:</strong> Ingest downloaded labeled GlyGen/GlyCAM multi-residue PDB glycans for N-glycosylation coordinate artifacts before broad reaction serialization work.</p>
-      <p><strong>Likely files:</strong> GlyGen PDB loader/provider modules, N-glycosylation reaction adapter, coordinate-only workflow branch, PDB writer identity mapping, and targeted conjugation tests.</p>
+      <p><strong>Objective:</strong> Ingest residue-resolved multi-residue PDB fragments for coordinate artifacts, with GlyGen/GlyCAM N-glycans as the documented N-glycosylation source profile, before broad reaction serialization work.</p>
+      <p><strong>Likely files:</strong> Generic PDB-fragment loader/provider modules, N-glycosylation reaction adapter, coordinate-only workflow branch, PDB writer identity mapping, and targeted conjugation tests.</p>
       <p><strong>Deletions:</strong> None. This phase must not add vendored glycan catalogs, IUPAC parsing, online lookup, RDKit residue splitting, or GLYCAM/CHARMM parameterization claims.</p>
       <ul class="checklist">
-        <li><input type="checkbox"> <span>Activate <code>moiety.input_path</code> only for N-glycosylation PDB input, reject mixed source types, and default to coordinate-only output.</span></li>
-        <li><input type="checkbox"> <span>Load single-model GlyGen/GlyCAM PDB files, normalize blank chains to C, and derive graph provenance from CONECT or coordinate-inferred RDKit bonding.</span></li>
-        <li><input type="checkbox"> <span>Validate serial uniqueness, connected graph, unique <code>ROH:O1/HO1</code>, reducing sugar <code>C1</code>, plausible C-O inter-residue linkages, and diagnostic sidecars.</span></li>
+        <li><input type="checkbox"> <span>Activate <code>moiety.input_path</code> as a generic PDB-fragment source, reject mixed source types, and default compatible coordinate-only output.</span></li>
+        <li><input type="checkbox"> <span>Load single-model residue-resolved PDB fragment files, normalize blank chains to C, and derive graph provenance from CONECT or coordinate-inferred RDKit bonding.</span></li>
+        <li><input type="checkbox"> <span>Validate generic serial uniqueness and connected graphs in the loader, then validate GlyGen/GlyCAM <code>ROH:O1/HO1</code>, reducing sugar <code>C1</code>, plausible C-O inter-residue linkages, and diagnostic sidecars in the N-glycosylation profile.</span></li>
         <li><input type="checkbox"> <span>Write residue-preserved coordinate-only PDB artifacts with internal/crosslink CONECT records, ROH removed, Asn ND2 hydrogen removed, and provenance/residue mapping sidecars.</span></li>
         <li><input type="checkbox"> <span>Keep Pablo/OpenFF continuation explicitly experimental and label failures with the coordinate artifact path.</span></li>
       </ul>
