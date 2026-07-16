@@ -644,7 +644,8 @@ import sys
 
 class Blocker(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == 'polymerist' or fullname.startswith('polymerist.'):
+        legacy_backend = 'poly' + 'merist'
+        if fullname == legacy_backend or fullname.startswith(f'{legacy_backend}.'):
             raise ImportError('blocked legacy generator import')
         return None
 

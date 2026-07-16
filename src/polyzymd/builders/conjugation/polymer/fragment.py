@@ -214,7 +214,7 @@ class GeneratedPolymerFragment(BaseModel):
         Parameters
         ----------
         atoms : sequence
-            Atom records from PDB parsing, Polymerist/RDKit adapters, or tests.
+            Atom records from PDB parsing, RDKit adapters, or tests.
         bonds : sequence of tuple, optional
             Internal polymer bonds by serial, index, or atom name, by default ``()``.
         bond_orders : sequence of tuple, optional

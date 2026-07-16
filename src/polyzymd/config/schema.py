@@ -279,16 +279,18 @@ class PolymerGenerationMode(str, Enum):
 
     - ``cached`` loads released legacy sequence-derived SDF filenames from
       ``sdf_directory``.
-    - ``dynamic`` generates linear methacrylate polymers natively for bundled
-      default ATRP reactions; custom ``.rxn`` reaction sets still route through
-      the legacy Polymerist backend.
+    - ``dynamic`` generates linear methacrylate polymers natively for literal
+      ``default`` reaction markers.
     - ``fragments`` assembles explicit terminal/middle linear fragments with
       native mBuild ports.
+    - ``provided`` packs only explicit charged SDF molecules from
+      ``provided_molecules``.
     """
 
     CACHED = "cached"  # Load legacy sequence-derived SDF files from disk
-    DYNAMIC = "dynamic"  # Generate native methacrylates or custom .rxn legacy chains
+    DYNAMIC = "dynamic"  # Generate native methacrylates from default markers
     FRAGMENTS = "fragments"  # Assemble explicit linear fragments natively
+    PROVIDED = "provided"  # Pack only explicit charged SDF molecule pools
 
 
 class ProvidedMoleculeEntry(BaseModel):
@@ -361,16 +363,12 @@ class PolymerFragmentSpec(BaseModel):
 
 
 class ReactionConfig(BaseModel):
-    """Paths to reaction templates for ATRP polymer generation.
+    """Reaction selector for native methacrylate dynamic generation.
 
-    These .rxn files define the chemical transformations used to create
-    polymer fragments from raw monomer SMILES. For ATRP, this includes:
-    - Initiation: Activates the vinyl group (e.g., chlorination)
-    - Polymerization: Creates chain-extending fragments
-    - Termination: Restores the alkene for chain ends
-
-    You can use "default" as a special value to use the bundled ATRP
-    methacrylate reaction templates that ship with PolyzyMD.
+    The literal value ``"default"`` selects PolyzyMD's native methacrylate
+    dynamic generator. Custom ``.rxn`` reaction files are no longer supported;
+    use explicit fragments, the ``polyzymd init`` CGSmiles notebook, or
+    ``provided_molecules`` for custom chemistry.
 
     Example:
         reactions:
@@ -379,62 +377,46 @@ class ReactionConfig(BaseModel):
           termination: "default"
 
     Attributes:
-        initiation: Path to the initiation reaction template (.rxn) or "default"
-        polymerization: Path to the polymerization reaction template (.rxn) or "default"
-        termination: Path to the termination reaction template (.rxn) or "default"
+        initiation: Native dynamic marker, currently only "default".
+        polymerization: Native dynamic marker, currently only "default".
+        termination: Native dynamic marker, currently only "default".
     """
 
-    initiation: Path = Field(..., description="Path to ATRP initiation .rxn file or 'default'")
-    polymerization: Path = Field(
-        ..., description="Path to ATRP polymerization .rxn file or 'default'"
+    initiation: str = Field(..., description="Native dynamic marker; only 'default' is supported")
+    polymerization: str = Field(
+        ..., description="Native dynamic marker; only 'default' is supported"
     )
-    termination: Path = Field(..., description="Path to ATRP termination .rxn file or 'default'")
+    termination: str = Field(..., description="Native dynamic marker; only 'default' is supported")
 
     @field_validator("initiation", "polymerization", "termination", mode="before")
     @classmethod
-    def resolve_default_paths(cls, v, info) -> Path:
-        """Resolve 'default' to bundled ATRP reaction paths."""
-        from polyzymd.data.reactions import (
-            get_atrp_initiation_path,
-            get_atrp_polymerization_path,
-            get_atrp_termination_path,
-        )
-
+    def resolve_default_paths(cls, v, info) -> str:
+        """Accept the native default marker and reject custom reaction files."""
         if isinstance(v, str) and v.lower() == "default":
-            # Map field name to the appropriate getter
-            field_to_getter = {
-                "initiation": get_atrp_initiation_path,
-                "polymerization": get_atrp_polymerization_path,
-                "termination": get_atrp_termination_path,
-            }
-            getter = field_to_getter.get(info.field_name)
-            if getter:
-                return getter()
-            raise ValueError(f"Unknown reaction field: {info.field_name}")
-
-        # Convert string to Path if needed
-        if isinstance(v, str):
-            v = Path(v)
-
-        # Validate .rxn extension
-        if isinstance(v, Path) and v.suffix.lower() != ".rxn":
-            raise ValueError(f"Expected .rxn file, got {v.suffix}")
-
-        return v
+            return "default"
+        path = Path(v) if isinstance(v, str | Path) else None
+        if path is not None and path.suffix.lower() == ".rxn":
+            raise ValueError(
+                "Custom .rxn polymer reactions are no longer supported. Migrate to "
+                "polymers.fragments, author branched chemistry with `polyzymd init` and the "
+                "CGSmiles notebook, or provide a charged SDF through polymers.provided_molecules."
+            )
+        raise ValueError(f"Unsupported reaction selector for {info.field_name}: use 'default'")
 
 
 class PolymerConfig(BaseModel):
     """Configuration for polymer components.
 
-    Supports three sequence-derived linear polymer modes:
+    Supports three sequence-derived linear polymer modes and one provided-only mode:
 
     - ``cached``: Load released legacy pre-built polymer SDF files from
       ``sdf_directory`` using sequence-derived filenames.
-    - ``dynamic``: Generate polymers on-the-fly from monomer SMILES. Bundled
-      default ATRP reactions use the native methacrylate backend; custom
-      ``.rxn`` reaction sets use the legacy Polymerist backend.
+    - ``dynamic``: Generate native methacrylate polymers on-the-fly from
+      monomer SMILES with literal ``default`` reaction markers.
     - ``fragments``: Assemble explicit terminal/middle fragments natively with
       mBuild ports. This mode does not support ``sdf_directory``.
+    - ``provided``: Pack explicit charged SDF molecule pools from
+      ``provided_molecules`` without generated source fields.
 
     Opaque user-provided charged SDF molecules, including branched or nonlinear
     molecules, can be added through ``provided_molecules`` and are packed with
@@ -447,13 +429,13 @@ class PolymerConfig(BaseModel):
 
     Attributes:
         enabled: Whether to include polymers in the system
-        generation_mode: ``cached``, ``dynamic``, or ``fragments``.
+        generation_mode: ``cached``, ``dynamic``, ``fragments``, or ``provided``.
         type_prefix: Prefix for polymer type in filenames (e.g., "SBMA-EGPMA")
         monomers: List of monomer specifications with probabilities (and SMILES for dynamic)
         length: Number of monomer units per polymer chain
         count: Number of polymer chains to add
         sdf_directory: Deprecated path to sequence-derived SDF files (cached and historical dynamic modes)
-        reactions: Reaction templates for ATRP (required for dynamic mode)
+        reactions: Native default reaction markers (required for dynamic mode)
         charger: Charge assignment method for generated polymers
         max_retries: Maximum retries for polymer generation (ring-piercing failures)
         cache_directory: Directory for caching generated polymers and fragments
@@ -464,22 +446,22 @@ class PolymerConfig(BaseModel):
     enabled: bool = Field(True, description="Include polymers in system")
     generation_mode: PolymerGenerationMode = Field(
         PolymerGenerationMode.CACHED,
-        description="Polymer generation mode: 'cached', 'dynamic', or 'fragments'",
+        description="Polymer generation mode: 'cached', 'dynamic', 'fragments', or 'provided'",
     )
-    type_prefix: str = Field(..., description="Polymer type prefix for filenames")
-    monomers: list[MonomerSpec] = Field(..., min_length=1, description="Monomer specifications")
+    type_prefix: str | None = Field(None, description="Polymer type prefix for filenames")
+    monomers: list[MonomerSpec] = Field(default_factory=list, description="Monomer specifications")
     fragments: dict[str, PolymerFragmentSpec] | None = Field(
         None,
         description="Explicit terminal/middle fragment strings keyed by monomer label",
     )
-    length: int = Field(..., ge=1, description="Monomers per chain")
-    count: int = Field(..., ge=1, description="Number of polymer chains")
+    length: int | None = Field(None, ge=1, description="Monomers per chain")
+    count: int | None = Field(None, ge=1, description="Number of polymer chains")
     sdf_directory: Path | None = Field(
         None,
         description="Deprecated directory with sequence-derived pre-built polymer SDFs",
     )
     reactions: ReactionConfig | None = Field(
-        None, description="ATRP reaction templates (required for dynamic mode)"
+        None, description="Native default reaction markers (required for dynamic mode)"
     )
     charger: ChargeMethod = Field(
         ChargeMethod.NAGL,
@@ -517,7 +499,7 @@ class PolymerConfig(BaseModel):
     @model_validator(mode="after")
     def validate_probabilities_sum_to_one(self) -> "PolymerConfig":
         """Ensure monomer probabilities sum to 1.0."""
-        if self.enabled:
+        if self.enabled and self.generation_mode != PolymerGenerationMode.PROVIDED:
             total = sum(m.probability for m in self.monomers)
             if abs(total - 1.0) > 1e-6:
                 raise ValueError(f"Monomer probabilities must sum to 1.0, got {total}")
@@ -528,6 +510,20 @@ class PolymerConfig(BaseModel):
         """Validate that required fields are present for the selected generation mode."""
         if not self.enabled:
             return self
+
+        if self.generation_mode == PolymerGenerationMode.PROVIDED:
+            if not self.provided_molecules:
+                raise ValueError("Provided generation mode requires nonempty provided_molecules")
+            return self
+
+        if not self.type_prefix:
+            raise ValueError(f"{self.generation_mode.value} generation mode requires type_prefix")
+        if not self.monomers:
+            raise ValueError(f"{self.generation_mode.value} generation mode requires monomers")
+        if self.length is None:
+            raise ValueError(f"{self.generation_mode.value} generation mode requires length")
+        if self.count is None:
+            raise ValueError(f"{self.generation_mode.value} generation mode requires count")
 
         if self.generation_mode == PolymerGenerationMode.DYNAMIC:
             # Dynamic mode requires SMILES for all monomers
@@ -541,7 +537,7 @@ class PolymerConfig(BaseModel):
             # Dynamic mode requires reaction templates
             if self.reactions is None:
                 raise ValueError(
-                    "Dynamic generation mode requires 'reactions' field with ATRP reaction templates"
+                    "Dynamic generation mode requires 'reactions' field with default markers"
                 )
 
         elif self.generation_mode == PolymerGenerationMode.FRAGMENTS:

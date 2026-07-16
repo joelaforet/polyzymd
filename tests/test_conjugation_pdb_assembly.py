@@ -120,7 +120,7 @@ def _polymer_fragment() -> PlacedPolymerFragment:
 
 
 def _three_mer_polymer_fragment_with_internal_reactive_residue() -> PlacedPolymerFragment:
-    """Create raw Polymerist-like order: reactive middle residue first, terminals after."""
+    """Create raw generated order: reactive middle residue first, terminals after."""
     atoms = (
         PdbAtomRecord(
             serial=201,

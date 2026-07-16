@@ -174,7 +174,7 @@ def generate_native_methacrylate_polymer(
         Validated recipe containing methacrylate monomer SMILES.
     cache_directory : pathlib.Path or str
         User-facing polymer cache root. Native artifacts are written under a
-        versioned subdirectory to avoid reusing legacy Polymerist outputs.
+        versioned subdirectory to avoid reusing older backend outputs.
     sequence : str or None, optional
         Exact sequence to build. When omitted, ``recipe.generate_sequence()`` is
         used, by default ``None``.

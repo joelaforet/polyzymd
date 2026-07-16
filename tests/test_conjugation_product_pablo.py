@@ -17,7 +17,7 @@ from polyzymd.builders.conjugation.pablo.product import (
     build_product_state_pablo_library_for_specs,
 )
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
-from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.polymer.pdb_fragment import generated_fragment_from_pdb
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.config.schema import ConjugationCcdPabloPolicyConfig
 
@@ -377,7 +377,7 @@ def test_product_state_pablo_library_preserves_sdf_formal_charges_without_pdb_ch
     product.write_text(_fixture_product_pdb(fixture, include_charges=False), encoding="utf-8")
     polymer_pdb.write_text(_fixture_polymer_pdb(fixture, include_charges=False), encoding="utf-8")
     polymer_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
-    fragment = generated_fragment_from_polymerist_pdb(
+    fragment = generated_fragment_from_pdb(
         polymer_pdb,
         reactive_atom_name="CAA",
         leaving_atom_names=("OAA",),
@@ -419,7 +419,7 @@ def test_product_state_pablo_library_uses_charged_sdf_formal_charges(tmp_path: P
     )
     raw_sdf.write_text(_sdf_from_atoms_and_bonds(neutral_atoms, fixture.bonds), encoding="utf-8")
     charged_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
-    fragment = generated_fragment_from_polymerist_pdb(
+    fragment = generated_fragment_from_pdb(
         polymer_pdb,
         reactive_atom_name="CAA",
         leaving_atom_names=("OAA",),
@@ -671,7 +671,7 @@ def test_product_state_pablo_library_rejects_invalid_charged_sdf_atom_indices(
         )
 
 
-def test_generated_fragment_from_polymerist_pdb_preserves_sdf_bond_orders(tmp_path: Path):
+def test_generated_fragment_from_pdb_preserves_sdf_bond_orders(tmp_path: Path):
     """GeneratedPolymerFragment should carry explicit SDF orders from the sidecar."""
     pdb_path = tmp_path / "modifier.pdb"
     sdf_path = pdb_path.with_suffix(".sdf")
@@ -698,7 +698,7 @@ def test_generated_fragment_from_polymerist_pdb_preserves_sdf_bond_orders(tmp_pa
         encoding="utf-8",
     )
 
-    fragment = generated_fragment_from_polymerist_pdb(
+    fragment = generated_fragment_from_pdb(
         pdb_path,
         reactive_atom_name="C1",
         leaving_atom_names=("O1",),

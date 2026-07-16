@@ -136,7 +136,8 @@ monomers:
 
 ### ATRP Reaction Configuration
 
-By default, PolyzyMD uses bundled ATRP reaction templates. You can also specify custom reaction files:
+Dynamic mode uses the bundled default reaction markers. Custom `.rxn` reaction
+files are no longer supported.
 
 Snippet:
 
@@ -149,12 +150,17 @@ polymers:
     polymerization: "default"    # Use bundled template
     termination: "default"       # Use bundled template
   
-  # Or specify custom reaction files:
-  # reactions:
-  #   initiation: "/path/to/my_initiation.rxn"
-  #   polymerization: "/path/to/my_polymerization.rxn"
-  #   termination: "/path/to/my_termination.rxn"
+  # Custom .rxn files are rejected. Use fragments, the CGSmiles notebook from
+  # `polyzymd init`, or provided_molecules for custom chemistry.
 ```
+
+Migration paths for old custom `.rxn` workflows are:
+
+- `generation_mode: "fragments"` for linear explicit fragments;
+- the offline CGSmiles notebook from `polyzymd init` for supported tree-like
+  authored SDFs;
+- externally authored charged SDFs through `provided_molecules` for other
+  chemistry.
 
 ### Charge Assignment
 
@@ -379,8 +385,11 @@ monomers:
 ```{note}
 For non-methacrylate monomers or different polymerization chemistries, provide
 explicit charged SDF molecules through `provided_molecules` or use the advanced
-native fragments mode. Runtime CGSmiles authoring and a fragment-design notebook
-are future work, not current user interfaces.
+native fragments mode. Runtime CGSmiles authoring is not part of simulation
+builds. For branched offline authoring, start from the CGSmiles/mBuild notebook
+created by `polyzymd init`; it writes charged SDFs and a `provided_molecules`
+snippet for the runtime configuration. See
+{doc}`author_branched_polymers_offline`.
 ```
 
 ---

@@ -151,11 +151,11 @@ class SystemBuilder:
 
     def build_polymers(
         self,
-        characters: List[str],
-        probabilities: List[float],
-        length: int,
-        count: int,
-        type_prefix: str,
+        characters: List[str] | None = None,
+        probabilities: List[float] | None = None,
+        length: int | None = None,
+        count: int | None = None,
+        type_prefix: str | None = None,
         sdf_directory: Optional[Union[str, Path]] = None,
         seed: Optional[int] = None,
         # New parameters for dynamic generation
@@ -173,14 +173,15 @@ class SystemBuilder:
     ) -> Tuple[List[Molecule], List[int]]:
         """Build polymer components.
 
-        Supports three sequence-derived generation modes:
+        Supports three sequence-derived generation modes and one provided-only mode:
 
         - "cached": Load legacy sequence-derived polymer SDFs from sdf_directory
         - "dynamic": Generate polymers on-the-fly from monomer SMILES
         - "fragments": Assemble explicit terminal/middle fragments natively
+        - "provided": Pack only explicit charged SDF molecule pools
 
         ``provided_molecules`` adds opaque user-provided charged SDF molecules
-        to the merged molecule/count list before packing.
+        to the merged molecule/count list before packing in generated modes.
 
         Args:
             characters: Monomer labels.
@@ -190,11 +191,12 @@ class SystemBuilder:
             type_prefix: Filename prefix.
             sdf_directory: Deprecated directory with sequence-derived polymer SDFs.
             seed: Random seed for reproducibility.
-            generation_mode: "cached", "dynamic", or "fragments".
+            generation_mode: "cached", "dynamic", "fragments", or "provided".
             monomer_smiles: Dict of monomer name -> SMILES (dynamic mode).
             monomer_names: Dict of label -> monomer name (dynamic mode).
             residue_names: Dict of monomer name -> 3-char residue name.
-            reactions: ReactionConfig with ATRP reaction paths (dynamic mode).
+            reactions: ReactionConfig with literal "default" markers for native dynamic mode;
+                custom .rxn files are unsupported.
             charger_type: Charge method ("nagl", "espaloma", "am1bcc").
             max_retries: Max retries for polymer generation.
             cache_directory: Directory for caching generated polymers.
@@ -224,7 +226,7 @@ class SystemBuilder:
             polymer_random_seed=polymer_random_seed,
         )
 
-        molecules, counts = self._polymer_builder.build(count=count, seed=seed)
+        molecules, counts = self._polymer_builder.build(count=count or 0, seed=seed)
         self._polymer_molecules = molecules
         self._polymer_counts = counts
         self._n_polymer_chains = sum(counts)
@@ -420,7 +422,7 @@ class SystemBuilder:
         ff = ForceField(self._protein_ff, self._sm_ff)
 
         # Get water molecule with pre-computed charges for charge_from_molecules
-        # Use PolyzyMD's cached water instead of Polymerist's for consistency
+        # Use PolyzyMD's cached water for consistent residue metadata
         water_model = "tip3p"
         if self._solvent_builder._composition:
             water_model = self._solvent_builder._composition.water_model

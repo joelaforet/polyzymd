@@ -282,7 +282,6 @@ def _require_gpu_solvation_stack_or_skip():
     if shutil.which("packmol") is None:
         pytest.skip("Packmol binary is not available on PATH")
 
-    pytest.importorskip("polymerist", exc_type=ImportError)
     pytest.importorskip("openff.toolkit")
     pytest.importorskip("openff.interchange")
     pytest.importorskip("rdkit")

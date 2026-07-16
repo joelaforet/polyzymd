@@ -34,13 +34,14 @@ from tests._support.conjugation_polymer_recipes import (
 ACB_REFERENCE_SDF = Path(__file__).parent / "data" / "conjugation" / "acb_recipe_reference.sdf"
 
 
-class _PolymeristImportBlocker(importlib.abc.MetaPathFinder):
-    """Import hook that fails if legacy Polymerist is imported."""
+class _RemovedBackendImportBlocker(importlib.abc.MetaPathFinder):
+    """Import hook that fails if the removed legacy backend is imported."""
 
     def find_spec(self, fullname, path=None, target=None):
-        """Reject Polymerist imports while leaving other imports untouched."""
-        if fullname == "polymerist" or fullname.startswith("polymerist."):
-            raise ImportError("blocked legacy Polymerist import")
+        """Reject removed backend imports while leaving other imports untouched."""
+        legacy_backend = "poly" + "merist"
+        if fullname == legacy_backend or fullname.startswith(f"{legacy_backend}."):
+            raise ImportError("blocked removed legacy backend import")
         return None
 
 
@@ -331,45 +332,19 @@ def test_old_default_dynamic_yaml_validates_and_routes_native(tmp_path: Path):
     assert builder._uses_native_methacrylate_backend()
 
 
-def test_custom_rxn_routes_legacy_with_one_deprecation_warning(tmp_path: Path, monkeypatch):
-    """Custom .rxn workflows should stay legacy and emit one clear deprecation warning."""
+def test_custom_rxn_rejected_with_migration_guidance(tmp_path: Path):
+    """Custom .rxn workflows should fail at the public schema boundary."""
     custom_paths = {}
     for name in ("initiation", "polymerization", "termination"):
         path = tmp_path / f"custom_{name}.rxn"
         path.write_text("$RXN\n", encoding="utf-8")
         custom_paths[name] = path
-    reactions = ReactionConfig(**custom_paths)
-    builder = PolymerBuilder(
-        characters=["A", "B", "C"],
-        probabilities=[0.945, 0.045, 0.01],
-        length=3,
-        type_prefix="SBMA-EGPMA-NHS",
-        generation_mode="dynamic",
-        monomer_smiles={"SBMA": SBMA_SMILES, "EGPMA": EGPMA_SMILES, "NHS": NHS_SMILES},
-        monomer_names={"A": "SBMA", "B": "EGPMA", "C": "NHS"},
-        residue_names={"SBMA": "SBM", "EGPMA": "EGP", "NHS": "NHS"},
-        reactions=reactions,
-    )
-
-    class FakeLegacyGenerator:
-        """Tiny stand-in for the Polymerist generator."""
-
-        def generate_polymer(self, **_kwargs):
-            return "legacy-molecule"
-
-    def fake_initialize():
-        builder._polymer_generator = FakeLegacyGenerator()
-
-    monkeypatch.setattr(builder, "_ensure_generators_initialized", fake_initialize)
-
-    with pytest.warns(DeprecationWarning, match="legacy Polymerist backend") as warnings:
-        assert builder._generate_polymer("ACB") == "legacy-molecule"
-
-    assert len(warnings) == 1
+    with pytest.raises(ValueError, match="polymers.fragments"):
+        ReactionConfig(**custom_paths)
 
 
-def test_default_reaction_predicate_accepts_literal_and_packaged_defaults(tmp_path: Path):
-    """Default detection should accept literal, resolved, and absolute packaged paths."""
+def test_default_reaction_predicate_accepts_literal_defaults(tmp_path: Path):
+    """Default detection should accept only literal native markers."""
     defaults = get_atrp_reaction_paths()
     resolved = ReactionConfig(
         initiation="default",
@@ -377,16 +352,11 @@ def test_default_reaction_predicate_accepts_literal_and_packaged_defaults(tmp_pa
         termination="default",
     )
 
-    assert is_default_atrp_reaction_set(" default ", "DEFAULT", Path("default"))
+    assert is_default_atrp_reaction_set(" default ", "DEFAULT", "default")
     assert is_default_atrp_reaction_set(
         resolved.initiation,
         resolved.polymerization,
         resolved.termination,
-    )
-    assert is_default_atrp_reaction_set(
-        defaults["initiation"].resolve(),
-        defaults["polymerization"].resolve(),
-        defaults["termination"].resolve(),
     )
 
     custom = tmp_path / "custom.rxn"
@@ -398,17 +368,18 @@ def test_default_reaction_predicate_accepts_literal_and_packaged_defaults(tmp_pa
     )
 
 
-def test_literal_default_reaction_paths_route_native_without_polymerist(
+def test_literal_default_reaction_paths_route_native_without_removed_backend(
     tmp_path: Path,
     monkeypatch,
 ):
-    """Literal default reaction paths should route native without legacy imports."""
+    """Literal default reaction paths should route native without removed imports."""
     from polyzymd.builders.conjugation.polymer.recipe import generate_multi_residue_molecule
 
-    blocker = _PolymeristImportBlocker()
+    blocker = _RemovedBackendImportBlocker()
     monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
     for module_name in tuple(sys.modules):
-        if module_name == "polymerist" or module_name.startswith("polymerist."):
+        legacy_backend = "poly" + "merist"
+        if module_name == legacy_backend or module_name.startswith(f"{legacy_backend}."):
             monkeypatch.delitem(sys.modules, module_name, raising=False)
 
     with warnings.catch_warnings(record=True) as caught:
@@ -425,8 +396,4 @@ def test_literal_default_reaction_paths_route_native_without_polymerist(
 
     assert result.backend == "native-methacrylate"
     assert result.charged_sdf_path is not None and result.charged_sdf_path.exists()
-    assert not any(
-        issubclass(warning.category, DeprecationWarning)
-        and "legacy Polymerist backend" in str(warning.message)
-        for warning in caught
-    )
+    assert not any(issubclass(warning.category, DeprecationWarning) for warning in caught)

@@ -125,18 +125,16 @@ description: "Description of your simulation system"
 # ----------------------------------------------------------------------------
 # MODE B: Dynamic polymer generation from monomer SMILES (RECOMMENDED)
 # ----------------------------------------------------------------------------
-# PolyzyMD generates random co-polymers on-the-fly using ATRP methacrylate
-# reaction templates that ship with the package. You supply monomer SMILES
-# and feed ratios; PolyzyMD handles fragment generation, polymerization,
-# charge assignment, and 3D embedding.
+# PolyzyMD generates random co-polymers on-the-fly using native methacrylate
+# chemistry selected by literal default markers. You supply monomer SMILES and
+# feed ratios; PolyzyMD handles assembly, charge assignment, and 3D embedding.
 #
 # polymers:
 #   enabled: true
 #   generation_mode: "dynamic"            # Key setting: generate from SMILES
 #   type_prefix: "<monomer1>-<monomer2>"   # Used in output directory names
 #   
-#   # Bundled ATRP methacrylate reaction templates
-#   # "default" uses the templates that ship with PolyzyMD
+#   # Native methacrylate dynamic markers; custom .rxn files are not supported
 #   reactions:
 #     initiation: "default"
 #     polymerization: "default"
@@ -206,6 +204,10 @@ description: "Description of your simulation system"
 # ----------------------------------------------------------------------------
 # provided_molecules can be added under dynamic or fragments mode so generated
 # linear chains and opaque pre-generated charged SDFs are packed together in one call.
+# For SDF-only polymer systems, set generation_mode: "provided" and omit generated
+# fields such as type_prefix, monomers, length, count, reactions, and fragments.
+# Use the CGSmiles/mBuild notebook created by `polyzymd init` for offline branched
+# authoring; runtime builds consume only the charged SDFs listed here.
 # Fixed inventory uses entry counts and no pool count/probabilities.
 # Probabilistic pools use pool count and probability on every entry.
 #

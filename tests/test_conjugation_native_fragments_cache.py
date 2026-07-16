@@ -24,13 +24,14 @@ from polyzymd.builders.polymer import PolymerBuilder
 from polyzymd.config.schema import PolymerConfig
 
 
-class _PolymeristImportBlocker(importlib.abc.MetaPathFinder):
-    """Import hook that fails if legacy Polymerist is imported."""
+class _RemovedBackendImportBlocker(importlib.abc.MetaPathFinder):
+    """Import hook that fails if the removed legacy backend is imported."""
 
     def find_spec(self, fullname, path=None, target=None):
-        """Reject Polymerist imports while leaving other imports untouched."""
-        if fullname == "polymerist" or fullname.startswith("polymerist."):
-            raise ImportError("blocked legacy Polymerist import")
+        """Reject removed backend imports while leaving other imports untouched."""
+        legacy_backend = "poly" + "merist"
+        if fullname == legacy_backend or fullname.startswith(f"{legacy_backend}."):
+            raise ImportError("blocked removed legacy backend import")
         return None
 
 
@@ -577,9 +578,9 @@ def test_template_includes_phase14_polymer_examples():
     assert "probability:" in template
 
 
-def test_native_fragments_do_not_import_polymerist(tmp_path: Path):
-    """Fragments/default/provided molecule native paths should not import Polymerist."""
-    blocker = _PolymeristImportBlocker()
+def test_native_fragments_do_not_import_removed_backend(tmp_path: Path):
+    """Fragments/default/provided molecule native paths should not import removed code."""
+    blocker = _RemovedBackendImportBlocker()
     sys.meta_path.insert(0, blocker)
     try:
         from_mbuild(

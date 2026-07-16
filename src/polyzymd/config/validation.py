@@ -62,7 +62,7 @@ def _check_directory(warnings: list[str], path_value: Any, label: str) -> Path |
 
 
 def _check_polymer_references(warnings: list[str], polymers: Any) -> None:
-    """Check polymer SDF and reaction-template references."""
+    """Check polymer SDF references."""
 
     generation_mode = str(getattr(polymers, "generation_mode", "")).lower()
     if generation_mode.endswith("cached"):
@@ -73,15 +73,6 @@ def _check_polymer_references(warnings: list[str], polymers: Any) -> None:
         )
         if sdf_directory is not None:
             _check_cached_polymer_sdfs(warnings, polymers, sdf_directory)
-
-    reactions = getattr(polymers, "reactions", None)
-    if reactions is not None:
-        for field_name in ("initiation", "polymerization", "termination"):
-            _check_file(
-                warnings,
-                getattr(reactions, field_name, None),
-                f"polymer {field_name} reaction template",
-            )
 
 
 def _check_cached_polymer_sdfs(warnings: list[str], polymers: Any, sdf_directory: Path) -> None:

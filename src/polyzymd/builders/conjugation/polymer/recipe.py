@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import random
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +11,6 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from polyzymd.builders.conjugation.structure.parsing import pdb_has_conect_records
 
 DEFAULT_PROBABILITY_TOLERANCE = 1.0e-6
-LEGACY_POLYMERIST_WARNING = (
-    "Custom polymer .rxn workflows still use the legacy Polymerist backend; this backend is "
-    "deprecated and will be replaced by native recipe implementations in a future release."
-)
 
 
 class PolymerMonomerRecipe(BaseModel):
@@ -230,8 +225,8 @@ class PolymerRecipe(BaseModel):
         """Return the sequence-label to monomer-name mapping expected by the backend."""
         return {monomer.label: monomer.name for monomer in self.monomers}
 
-    def to_polymerist_residue_names(self) -> dict[str, str]:
-        """Return monomer-name to residue-name mapping for Polymerist PDB output."""
+    def to_residue_names(self) -> dict[str, str]:
+        """Return monomer-name to residue-name mapping for PDB output."""
         return {monomer.name: monomer.residue_name for monomer in self.monomers}
 
 
@@ -240,7 +235,7 @@ class MultiResidueGenerationResult(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    backend: str = "polymerist"
+    backend: str = "native-methacrylate"
     recipe_name: str
     sequence: str
     cache_directory: Path
@@ -275,9 +270,8 @@ def generate_multi_residue_molecule(
     cache_directory : pathlib.Path or str
         Directory for generated fragment and polymer PDB cache files.
     reaction_paths : dict[str, pathlib.Path] or None, optional
-        Explicit reaction paths for custom legacy workflows. ``None`` selects
-        bundled defaults and routes to native methacrylate generation, by default
-        ``None``.
+        Must be ``None`` or literal native default markers. Custom ``.rxn``
+        paths are no longer supported, by default ``None``.
     force_regenerate : bool, optional
         Rebuild cached backend fragments when possible, by default ``False``.
     max_retries : int, optional
@@ -298,104 +292,39 @@ def generate_multi_residue_molecule(
     cache_path.mkdir(parents=True, exist_ok=True)
     resolved_reaction_paths = reaction_paths or get_atrp_reaction_paths()
 
-    if is_default_atrp_reaction_set(
+    if not is_default_atrp_reaction_set(
         resolved_reaction_paths["initiation"],
         resolved_reaction_paths["polymerization"],
         resolved_reaction_paths["termination"],
     ):
-        native_result = generate_native_methacrylate_polymer(
-            recipe,
-            cache_path,
-            force_regenerate=force_regenerate,
-        )
-        return MultiResidueGenerationResult(
-            backend="native-methacrylate",
-            recipe_name=recipe.name,
-            sequence=native_result.sequence,
-            cache_directory=native_result.paths.pdb_path.parent,
-            monomer_group_path=native_result.paths.pdb_path.parent,
-            pdb_path=native_result.paths.pdb_path,
-            sdf_path=native_result.paths.sdf_path,
-            charged_sdf_path=native_result.paths.charged_sdf_path,
-            object_type=type(native_result.compound).__name__,
-            atom_count=native_result.molecule.n_atoms,
-            rdkit_mol=native_result.molecule.to_rdkit(),
+        raise ValueError(
+            "Custom .rxn polymer reactions are no longer supported. Migrate to "
+            "polymers.fragments, author branched chemistry with `polyzymd init` and the "
+            "CGSmiles notebook, or provide a charged SDF through polymers.provided_molecules."
         )
 
-    warnings.warn(LEGACY_POLYMERIST_WARNING, DeprecationWarning, stacklevel=2)
-
-    from polyzymd.builders.fragment_generator import FragmentGenerator
-    from polyzymd.builders.polymer_generator import PolymerGenerator
-
-    fragment_generator = FragmentGenerator(
-        initiation_rxn_path=resolved_reaction_paths["initiation"],
-        polymerization_rxn_path=resolved_reaction_paths["polymerization"],
-        termination_rxn_path=resolved_reaction_paths["termination"],
-        cache_directory=cache_path,
-    )
-    monomer_group = fragment_generator.load_or_generate(
-        monomer_smiles=recipe.to_monomer_smiles(),
-        type_prefix=recipe.name,
+    native_result = generate_native_methacrylate_polymer(
+        recipe,
+        cache_path,
         force_regenerate=force_regenerate,
     )
-
-    sequence = recipe.generate_sequence()
-    polymer_generator = PolymerGenerator(
-        monomer_group=monomer_group,
-        cache_directory=cache_path,
-        max_retries=max_retries,
-    )
-    polymer_object, pdb_path = polymer_generator._build_polymer_structure(
-        sequence=sequence,
-        monomer_names=recipe.to_sequence_monomer_names(),
-        residue_names=recipe.to_polymerist_residue_names(),
-        energy_minimize=energy_minimize,
-    )
-    rdkit_mol = None
-    sdf_path = None
-    charged_sdf_path = None
-    pdb_file = Path(pdb_path) if pdb_path is not None else None
-    if pdb_file is not None and pdb_file.exists():
-        sdf_path = pdb_file.with_suffix(".sdf")
-        rdkit_mol = _polymerist_to_pdb_aligned_rdkit_mol(polymer_object, pdb_file)
-        _write_rdkit_sdf_sidecar(rdkit_mol, sdf_path)
-    generate_polymer = getattr(polymer_generator, "generate_polymer", None)
-    make_filename = getattr(polymer_generator, "_make_polymer_filename", None)
-    if callable(generate_polymer) and callable(make_filename):
-        generate_polymer(
-            sequence=sequence,
-            monomer_names=recipe.to_sequence_monomer_names(),
-            residue_names=recipe.to_polymerist_residue_names(),
-            force_regenerate=force_regenerate,
-        )
-        charged_filename = make_filename(
-            sequence,
-            recipe.to_sequence_monomer_names(),
-            charged=True,
-        )
-        expected_charged_sdf_path = cache_path / f"{charged_filename}.sdf"
-        if expected_charged_sdf_path.exists():
-            charged_sdf_path = expected_charged_sdf_path
-    atom_count = _get_rdkit_atom_count(rdkit_mol)
-    if atom_count is None:
-        atom_count = _get_polymerist_atom_count(polymer_object)
-
     return MultiResidueGenerationResult(
+        backend="native-methacrylate",
         recipe_name=recipe.name,
-        sequence=sequence,
-        cache_directory=cache_path,
-        monomer_group_path=fragment_generator.get_cache_path(recipe.name),
-        pdb_path=pdb_path,
-        sdf_path=sdf_path,
-        charged_sdf_path=charged_sdf_path,
-        object_type=type(polymer_object).__name__,
-        atom_count=atom_count,
-        rdkit_mol=rdkit_mol,
+        sequence=native_result.sequence,
+        cache_directory=native_result.paths.pdb_path.parent,
+        monomer_group_path=native_result.paths.pdb_path.parent,
+        pdb_path=native_result.paths.pdb_path,
+        sdf_path=native_result.paths.sdf_path,
+        charged_sdf_path=native_result.paths.charged_sdf_path,
+        object_type=type(native_result.compound).__name__,
+        atom_count=native_result.molecule.n_atoms,
+        rdkit_mol=native_result.molecule.to_rdkit(),
     )
 
 
-def _get_polymerist_atom_count(polymer_object: object) -> int | None:
-    """Return a best-effort atom count from a Polymerist or mBuild object."""
+def _get_object_atom_count(polymer_object: object) -> int | None:
+    """Return a best-effort atom count from a molecule-like object."""
     for attribute in ("n_particles", "n_atoms"):
         value = getattr(polymer_object, attribute, None)
         if isinstance(value, int):
@@ -425,20 +354,20 @@ def _get_rdkit_atom_count(rdkit_mol: object | None) -> int | None:
     return None
 
 
-def _polymerist_to_pdb_aligned_rdkit_mol(
+def _object_to_pdb_aligned_rdkit_mol(
     polymer_object: object,
     pdb_path: Path,
     *,
     required: bool = True,
 ) -> Any | None:
-    """Convert a Polymerist object to a PDB-aligned RDKit sidecar molecule.
+    """Convert a molecule-like object to a PDB-aligned RDKit sidecar molecule.
 
     Parameters
     ----------
     polymer_object : object
-        Polymerist or mBuild object that can provide an RDKit molecule.
+        Molecule-like object that can provide an RDKit molecule.
     pdb_path : pathlib.Path
-        PDB exported from the same final Polymerist/mBuild object. Its atom order
+        PDB exported from the same final object. Its atom order
         is used as the authoritative sidecar atom order.
     required : bool, optional
         Raise on conversion failures when ``True``. When ``False``, failures are
@@ -482,7 +411,7 @@ def _polymerist_to_pdb_aligned_rdkit_mol(
         aligned_mol.UpdatePropertyCache(strict=False)
     except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
         _handle_sdf_sidecar_failure(
-            "Failed to convert Polymerist polymer to a PDB-aligned RDKit molecule",
+            "Failed to convert molecule to a PDB-aligned RDKit molecule",
             required=required,
             cause=exc,
         )
@@ -492,7 +421,7 @@ def _polymerist_to_pdb_aligned_rdkit_mol(
 
 
 def _set_unspecified_bonds_to_single(rdkit_mol: object) -> None:
-    """Assign explicit single orders to mBuild/Polymerist topology-only bonds."""
+    """Assign explicit single orders to topology-only bonds."""
     from rdkit import Chem
 
     for bond in rdkit_mol.GetBonds():
@@ -514,7 +443,7 @@ def _align_rdkit_bond_orders_to_pdb_mol(source_mol: object, pdb_path: Path) -> A
         raise ValueError(f"RDKit could not read generated polymer PDB atoms from {pdb_path}")
     if source_mol.GetNumAtoms() != pdb_mol.GetNumAtoms():
         raise ValueError(
-            "Polymerist RDKit/PDB atom count mismatch while writing SDF sidecar: "
+            "RDKit/PDB atom count mismatch while writing SDF sidecar: "
             f"RDKit={source_mol.GetNumAtoms()}, PDB={pdb_mol.GetNumAtoms()}"
         )
 
@@ -523,7 +452,7 @@ def _align_rdkit_bond_orders_to_pdb_mol(source_mol: object, pdb_path: Path) -> A
     ):
         if source_atom.GetSymbol() != pdb_atom.GetSymbol():
             raise ValueError(
-                "Polymerist RDKit/PDB atom order mismatch while writing SDF sidecar: "
+                "RDKit/PDB atom order mismatch while writing SDF sidecar: "
                 f"atom {atom_index} is {source_atom.GetSymbol()} in RDKit and "
                 f"{pdb_atom.GetSymbol()} in PDB"
             )
@@ -536,7 +465,7 @@ def _align_rdkit_bond_orders_to_pdb_mol(source_mol: object, pdb_path: Path) -> A
         missing = sorted(source_pairs - pdb_pairs)
         extra = sorted(pdb_pairs - source_pairs)
         raise ValueError(
-            "Polymerist RDKit/PDB connectivity mismatch while writing SDF sidecar: "
+            "RDKit/PDB connectivity mismatch while writing SDF sidecar: "
             f"missing in PDB={missing[:5]}, extra in PDB={extra[:5]}"
         )
 
@@ -546,10 +475,10 @@ def _align_rdkit_bond_orders_to_pdb_mol(source_mol: object, pdb_path: Path) -> A
             source_bond.GetBeginAtomIdx(), source_bond.GetEndAtomIdx()
         )
         if pdb_bond is None:
-            raise ValueError("Polymerist PDB molecule lost a source bond during alignment")
+            raise ValueError("PDB molecule lost a source bond during alignment")
         bond_order = float(source_bond.GetBondTypeAsDouble())
         if bond_order <= 0.0:
-            raise ValueError("Polymerist source molecule contains a zero/unknown bond order")
+            raise ValueError("Source molecule contains a zero/unknown bond order")
         pdb_bond.SetBondType(source_bond.GetBondType())
 
     aligned = editable.GetMol()

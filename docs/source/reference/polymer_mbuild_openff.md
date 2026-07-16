@@ -11,9 +11,9 @@ support, and adapter boundaries, not a general polymer-design user interface.
 |---------|-----------------|
 | mBuild to OpenFF molecule conversion | `polyzymd.builders.conjugation.polymer.from_mbuild(compound)` converts an atomistic `mbuild.Compound` into a canonical OpenFF `Molecule`. |
 | Existing conjugation adapters | OpenFF molecule and SDF adapters can produce `GeneratedPolymerFragment` objects for existing conjugation paths. |
-| Dynamic generation default | Bundled-default dynamic generation uses native linear methacrylate generation and OpenFF charging/cache. Custom `.rxn` workflows retain deprecated Polymerist compatibility behavior. |
+| Dynamic generation default | Literal-default dynamic generation uses native linear methacrylate generation and OpenFF charging/cache. Custom `.rxn` workflows are rejected. |
 | Automatic chemistry suggestions | Not implemented. PolyzyMD does not infer missing chemistry or suggest atoms automatically. |
-| Native fragment assembly | `generation_mode: "fragments"` supports linear explicit-fragment assembly from terminal/middle strings with mBuild `Port` and `force_overlap()`. Runtime CGSmiles and a fragment-authoring notebook are not implemented. |
+| Native fragment assembly | `generation_mode: "fragments"` supports linear explicit-fragment assembly from terminal/middle strings with mBuild `Port` and `force_overlap()`. Runtime CGSmiles is not part of simulation builds. `polyzymd init` includes an offline CGSmiles/mBuild notebook scaffold that authors charged SDFs for `provided_molecules`. |
 
 ## Public adapter entry points
 
@@ -75,7 +75,7 @@ the same conformer in angstrom units.
 ## Validation evidence for the ACB adapter slice
 
 The ACB adapter slice is the fixed SBMA-NHS-EGPMA sequence with labels A-C-B. It
-has been checked against Polymerist for:
+has been checked for:
 
 - formula `C31H42N2O12S`;
 - 88 atoms;
@@ -117,9 +117,26 @@ has one `terminal`/`middle` pair for each monomer label. Runtime fragment parsin
 then enforces dummy atom counts, dummy degrees, directional maps, RDKit parsing,
 embedding, sanitization, mBuild port placement, and OpenFF conversion/charging.
 
-For nonlinear, branched, or dendrimer molecules, supply explicit charged SDFs
-through `polymers.provided_molecules`. PolyzyMD does not provide runtime
-CGSmiles authoring or a fragment-design notebook in this phase.
+For nonlinear, branched, or dendrimer molecules, author explicit charged SDFs
+offline and supply them through `polymers.provided_molecules`. `polyzymd init`
+creates `notebooks/cgsmiles_polymer_scaffold.ipynb` as a compact offline
+CGSmiles/mBuild helper for this path. Simulation runtime does not resolve
+CGSmiles; it consumes the charged SDF plus the emitted `provided_molecules`
+snippet.
+
+The offline CGSmiles helper supports tree coarse graphs where each coarse edge
+resolves to exactly one atomistic interfragment bond. The coarse edge `order` is
+interpreted as bond order, not as multiplicity; supported values are `1.0`,
+`1.5` aromatic, `2.0`, and `3.0`. PIM-like doubly linked or multi-point residue
+pairs and cycles remain outside this helper and should be supplied as explicit
+charged SDFs through `provided_molecules`.
+
+Current end-to-end validation covered one authored molecule through OpenFF
+parameterization, Packmol packing/solvation with TIP3P, and completed a
+1000-step CPU OpenMM smoke run. This validates the documented
+notebook-to-SDF-to-build path; it does not add support for multiple
+interfragment records, PIM-style multi-point links, or ring closures.
 
 For the current validated conjugation boundary and build artifacts, see
-{doc}`conjugation_support_matrix` and {doc}`../how_to/validate_conjugates`.
+{doc}`conjugation_support_matrix`, {doc}`../how_to/validate_conjugates`, and
+{doc}`../how_to/author_branched_polymers_offline`.

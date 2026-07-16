@@ -1,4 +1,4 @@
-"""Adapter from Polymerist-generated PDB files to generated polymer fragments."""
+"""Adapter from PDB files to generated polymer fragments."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from polyzymd.builders.conjugation.structure.parsing import (
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 
-def generated_fragment_from_polymerist_pdb(
+def generated_fragment_from_pdb(
     pdb_path: Path | str,
     *,
     recipe: PolymerRecipe | None = None,
@@ -36,12 +36,12 @@ def generated_fragment_from_polymerist_pdb(
     leaving_atom_indices: Sequence[int] = (),
     leaving_atom_names: Sequence[str] = (),
 ) -> GeneratedPolymerFragment:
-    """Convert a Polymerist-generated PDB into a generated polymer fragment.
+    """Convert a PDB into a generated polymer fragment.
 
     Parameters
     ----------
     pdb_path : pathlib.Path or str
-        Polymerist-generated PDB file containing polymer ATOM/HETATM records.
+        PDB file containing polymer ATOM/HETATM records.
     recipe : PolymerRecipe or None, optional
         Optional recipe metadata used to annotate residues, by default ``None``.
     sequence : str or None, optional
@@ -87,7 +87,7 @@ def generated_fragment_from_polymerist_pdb(
         be resolved unambiguously.
     """
     path = Path(pdb_path)
-    pdb_atoms = _parse_polymerist_pdb_atoms(path)
+    pdb_atoms = _parse_pdb_fragment_atoms(path)
     mol = _load_rdkit_pdb(path)
     bond_order_mol = _load_sdf_bond_order_mol(
         path.with_suffix(".sdf"), expected_atoms=len(pdb_atoms)
@@ -190,12 +190,12 @@ def generated_fragment_from_polymerist_pdb(
     )
 
 
-def _parse_polymerist_pdb_atoms(path: Path) -> tuple[PdbAtomRecord, ...]:
-    """Parse all PDB atom records from a Polymerist PDB file."""
+def _parse_pdb_fragment_atoms(path: Path) -> tuple[PdbAtomRecord, ...]:
+    """Parse all PDB atom records from a fragment PDB file."""
     try:
         return parse_pdb_atom_records(path, require_atoms=True)
     except ValueError as exc:
-        raise ValueError(f"No ATOM/HETATM records found in Polymerist PDB: {path}") from exc
+        raise ValueError(f"No ATOM/HETATM records found in fragment PDB: {path}") from exc
 
 
 def _load_rdkit_pdb(path: Path) -> Any:
@@ -210,9 +210,9 @@ def _load_rdkit_pdb(path: Path) -> Any:
         proximityBonding=use_proximity_bonding,
     )
     if mol is None:
-        raise ValueError(f"RDKit could not read Polymerist PDB connectivity from {path}")
+        raise ValueError(f"RDKit could not read fragment PDB connectivity from {path}")
     if mol.GetNumAtoms() == 0:
-        raise ValueError(f"RDKit read zero atoms from Polymerist PDB {path}")
+        raise ValueError(f"RDKit read zero atoms from fragment PDB {path}")
     return mol
 
 
@@ -302,7 +302,7 @@ def _map_rdkit_atoms_to_pdb_atoms(
     """Map RDKit atom indices to parsed PDB atom records with verification."""
     if mol.GetNumAtoms() != len(pdb_atoms):
         raise ValueError(
-            "RDKit/PDB atom count mismatch while mapping Polymerist PDB atoms: "
+            "RDKit/PDB atom count mismatch while mapping fragment PDB atoms: "
             f"RDKit={mol.GetNumAtoms()}, PDB={len(pdb_atoms)}"
         )
 
@@ -344,7 +344,7 @@ def _map_rdkit_atoms_to_pdb_atoms(
         return {rd_atom.GetIdx(): pdb_atoms[rd_atom.GetIdx()] for rd_atom in mol.GetAtoms()}
 
     raise ValueError(
-        "Could not verify RDKit atom-index to PDB atom-record mapping. Polymerist PDB atom "
+        "Could not verify RDKit atom-index to PDB atom-record mapping. Fragment PDB atom "
         "serials, names, and residue metadata must be preserved by RDKit before bonds can be "
         "translated to PDB serial pairs."
     )
@@ -385,7 +385,7 @@ def _serial_bonds_from_rdkit_mol(
         begin = rdkit_to_pdb[bond.GetBeginAtomIdx()]
         end = rdkit_to_pdb[bond.GetEndAtomIdx()]
         if begin.serial is None or end.serial is None:
-            raise ValueError("PDB serials are required to emit Polymerist fragment bonds")
+            raise ValueError("PDB serials are required to emit fragment bonds")
         bonds.add(tuple(sorted((begin.serial, end.serial))))
     return tuple(sorted(bonds))
 
@@ -400,7 +400,7 @@ def _serial_bond_orders_from_rdkit_mol(
         begin = rdkit_to_pdb[bond.GetBeginAtomIdx()]
         end = rdkit_to_pdb[bond.GetEndAtomIdx()]
         if begin.serial is None or end.serial is None:
-            raise ValueError("PDB serials are required to emit Polymerist fragment bond orders")
+            raise ValueError("PDB serials are required to emit fragment bond orders")
         serial_1, serial_2 = sorted((begin.serial, end.serial))
         bond_orders.add((serial_1, serial_2, float(bond.GetBondTypeAsDouble())))
     return tuple(sorted(bond_orders))
@@ -567,7 +567,7 @@ def _candidate_rdkit_indices(
             )
         ]
         if not selected:
-            raise ValueError("Reactive residue selector did not match any Polymerist PDB atoms")
+            raise ValueError("Reactive residue selector did not match any fragment PDB atoms")
         return {_rdkit_index_for_pdb_atom(atom, pdb_identity_to_rdkit) for atom in selected}
     if explicit_reactive_atom is not None:
         selected = [atom for atom in atoms if _same_residue(atom, explicit_reactive_atom)]

@@ -16,7 +16,7 @@ from polyzymd.builders.conjugation.polymer import (
     build_smiles_moiety_fragment,
     generate_multi_residue_molecule,
 )
-from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.polymer.pdb_fragment import generated_fragment_from_pdb
 
 
 class ResolvedMoietySource(BaseModel):
@@ -156,7 +156,7 @@ def _resolve_polymer_recipe_source(
         sequence=generation.sequence,
         reactive_sequence_index=reactive_sequence_index,
     )
-    fragment = generated_fragment_from_polymerist_pdb(
+    fragment = generated_fragment_from_pdb(
         generation.pdb_path,
         recipe=recipe,
         sequence=generation.sequence,
@@ -280,7 +280,7 @@ def _reactive_residue_selector(
         residues.append(key)
     if not residues:
         raise ValueError(f"No ATOM/HETATM residues found in {pdb_path}")
-    pdb_order_index = _polymerist_pdb_order_index(
+    pdb_order_index = _recipe_pdb_order_index(
         reactive_sequence_index,
         sequence_length=len(sequence),
     )
@@ -302,8 +302,8 @@ def _reactive_residue_selector(
     }
 
 
-def _polymerist_pdb_order_index(sequence_index: int, *, sequence_length: int) -> int:
-    """Map user sequence order to Polymerist's PDB residue emission order."""
+def _recipe_pdb_order_index(sequence_index: int, *, sequence_length: int) -> int:
+    """Map recipe sequence order to generated PDB residue order."""
     if sequence_length <= 2:
         return sequence_index
     if sequence_index == 0:

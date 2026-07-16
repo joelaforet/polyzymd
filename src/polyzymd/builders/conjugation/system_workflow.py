@@ -103,9 +103,9 @@ class ConjugatedPolymerSystemSettings(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     force_regenerate_conjugate_polymer: bool = False
-    conjugate_polymerist_max_retries: int = Field(3, ge=1)
-    conjugate_polymerist_energy_minimize: bool = True
-    conjugate_cache_dir_name: str = "conjugate-polymerist-cache"
+    conjugate_generation_max_retries: int = Field(3, ge=1)
+    conjugate_generation_energy_minimize: bool = True
+    conjugate_cache_dir_name: str = "conjugate-generation-cache"
     conjugate_artifact_dir_name: str = "conjugate-construction"
     solvated_pdb_name: str = "solvated_conjugate_free_polymers.pdb"
     workflow_json_name: str = "conjugated_polymer_system_workflow.json"
@@ -503,8 +503,8 @@ def _build_attachment_spec(
         output_dir=provider_dir,
         protein_pdb_path=protein_pdb_path,
         force_regenerate=workflow_settings.force_regenerate_conjugate_polymer,
-        max_retries=workflow_settings.conjugate_polymerist_max_retries,
-        energy_minimize=workflow_settings.conjugate_polymerist_energy_minimize,
+        max_retries=workflow_settings.conjugate_generation_max_retries,
+        energy_minimize=workflow_settings.conjugate_generation_energy_minimize,
         random_seed=random_seed,
     )
     LOGGER.info("Resolving linkage for attachment %d", attachment_index)

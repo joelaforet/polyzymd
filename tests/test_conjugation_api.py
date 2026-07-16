@@ -49,6 +49,15 @@ def test_new_conjugation_modules_import():
     assert reactions.NhsLysReaction is NhsLysReaction
 
 
+def test_linkage_and_pablo_product_import_without_polymer_package_cycle():
+    """Linkage and Pablo modules should import without polymer package cycles."""
+    import polyzymd.builders.conjugation._linkage as linkage
+    from polyzymd.builders.conjugation.pablo import product
+
+    assert linkage.PabloCrosslinkRequirement is PabloCrosslinkRequirement
+    assert callable(product.build_product_state_pablo_library)
+
+
 def test_reaction_library_exposes_nhs_lys_template():
     """The initial built-in reaction registry should expose NHS-Lys."""
     import polyzymd.builders.conjugation.reactions.library as library

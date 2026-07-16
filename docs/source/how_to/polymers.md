@@ -5,19 +5,24 @@ This guide covers configuring polymer chains in PolyzyMD simulations.
 ```{tip}
 **Looking for dynamic polymer generation?** If you want native linear
 methacrylate generation from SMILES strings, see the {doc}`dynamic_polymers`
-guide. For the mBuild/OpenFF fragment adapter, see
-{doc}`../reference/polymer_mbuild_openff`.
+guide. For offline branched-polymer authoring, see
+{doc}`author_branched_polymers_offline`. For the mBuild/OpenFF fragment adapter,
+see {doc}`../reference/polymer_mbuild_openff`.
 ```
 
 ## Overview
 
 PolyzyMD supports adding linear generated co-polymers and explicit charged SDF
-molecules to your simulation box. Polymers are:
+molecules to your simulation box. The `polyzymd init` scaffold also includes an
+offline CGSmiles/mBuild notebook for authoring charged SDFs that are consumed
+through `provided_molecules`. Polymers are:
 
 - Generated based on monomer probabilities
 - Optionally assembled from explicit linear fragments
 - Optionally combined with user-supplied charged SDF molecules through
   `provided_molecules`
+- Packed from user-supplied charged SDF molecules only with
+  `generation_mode: "provided"`
 - Placed around the enzyme using PACKMOL
 - Parameterized with OpenFF force fields
 
@@ -51,8 +56,30 @@ polymers:
 
 With the bundled `"default"` reactions, `generation_mode: "dynamic"` uses the
 native linear methacrylate backend. Nonlinear, branched, and dendrimer molecules
-are supplied as charged SDFs with `provided_molecules`; runtime CGSmiles and an
-authoring notebook are future work, not current user interfaces.
+are supplied as charged SDFs with `provided_molecules`. Runtime CGSmiles is not
+used during simulation builds; use `notebooks/cgsmiles_polymer_scaffold.ipynb`
+from `polyzymd init` only as an offline authoring helper.
+
+The offline CGSmiles helper supports tree coarse graphs where each coarse edge
+resolves to exactly one atomistic interfragment bond. Edge `order` is bond order
+and may be `1.0`, `1.5` aromatic, `2.0`, or `3.0`. PIM-like doubly linked or
+multi-point residue pairs and cycles should be provided as charged SDFs directly.
+
+For SDF-only polymer systems, use provided mode without dummy generated fields:
+
+```yaml
+polymers:
+  enabled: true
+  generation_mode: "provided"
+  provided_molecules:
+    - name: "branched_polymer"
+      entries:
+        - sdf_path: "generated_molecules/branched_polymer.sdf"
+          count: 1
+```
+
+For `dynamic`, `fragments`, or `cached` systems, keep the generated-polymer
+fields and merge `provided_molecules` into the existing `polymers` block.
 
 ---
 
@@ -506,6 +533,7 @@ Start with small polymer systems (2 × 5-mer) to test your setup before scaling 
 ## See Also
 
 - {doc}`dynamic_polymers` - Generate native linear methacrylate polymers from SMILES
+- {doc}`author_branched_polymers_offline` - Author charged SDFs for branched tree-like polymers
 - {doc}`../reference/polymer_mbuild_openff` - mBuild/OpenFF adapter reference
 - {doc}`gromacs_export` - Running simulations with GROMACS
 - {doc}`../reference/configuration` - Complete configuration reference

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from polyzymd.config.schema import SimulationConfig
+from polyzymd.config.schema import PolymerConfig, SimulationConfig
 
 
 @pytest.fixture
@@ -152,6 +152,29 @@ class TestConfigValidation:
             sdf_directory=Path("/tmp/test"),  # Required for cached mode
         )
         assert len(config.monomers) == 2
+
+    def test_provided_polymer_mode_requires_only_provided_molecules(self):
+        """Provided mode should not require generated polymer source fields."""
+        config = PolymerConfig(
+            generation_mode="provided",
+            provided_molecules=[
+                {
+                    "name": "branched",
+                    "entries": [{"sdf_path": "generated/branched.sdf", "count": 1}],
+                }
+            ],
+        )
+
+        assert config.generation_mode.value == "provided"
+        assert config.type_prefix is None
+        assert config.monomers == []
+        assert config.length is None
+        assert config.count is None
+
+    def test_provided_polymer_mode_rejects_empty_pools(self):
+        """Provided mode should require at least one provided molecule pool."""
+        with pytest.raises(ValidationError, match="requires nonempty provided_molecules"):
+            PolymerConfig(generation_mode="provided")
 
     def test_thermodynamics_config(self):
         """Test ThermodynamicsConfig validation and defaults."""
