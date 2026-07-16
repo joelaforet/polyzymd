@@ -1,4 +1,4 @@
-"""Tests for the Polymerist PDB to generated fragment adapter."""
+"""Tests for the PDB to generated fragment adapter."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.polymer.pdb_fragment import generated_fragment_from_pdb
 from polyzymd.builders.conjugation.polymer.recipe import generate_multi_residue_molecule
 from polyzymd.builders.conjugation.structure.pdb import NhsLysPdbAttachment, write_crosslinked_pdb
 from tests._support.conjugation_polymer_recipes import sbma_egpma_nhs_recipe
@@ -146,9 +146,9 @@ def _nhs_group(*, serial_offset: int = 0, residue_number: int = 1, x_offset: flo
     )
 
 
-def _polymerist_like_pdb(tmp_path: Path) -> Path:
-    """Write a small Polymerist-like PDB with one NHS residue and one side residue."""
-    path = tmp_path / "polymerist_like.pdb"
+def _fragment_like_pdb(tmp_path: Path) -> Path:
+    """Write a small fragment PDB with one NHS residue and one side residue."""
+    path = tmp_path / "fragment_like.pdb"
     path.write_text(
         _nhs_group()
         + _pdb_atom(6, "P1", "SBM", "C", 2, 5.0, 0.0, 0.0, element="C")
@@ -175,9 +175,9 @@ def _protein_pdb(tmp_path: Path) -> Path:
     return path
 
 
-def test_polymerist_like_pdb_converts_to_generated_fragment(tmp_path):
+def test_fragment_like_pdb_converts_to_generated_fragment(tmp_path):
     """Synthetic NHS-containing PDB files should convert to generated fragments."""
-    fragment = generated_fragment_from_polymerist_pdb(_polymerist_like_pdb(tmp_path), sequence="CA")
+    fragment = generated_fragment_from_pdb(_fragment_like_pdb(tmp_path), sequence="CA")
 
     assert len(fragment.atoms) == 6
     assert fragment.sequence == "CA"
@@ -189,7 +189,7 @@ def test_polymerist_like_pdb_converts_to_generated_fragment(tmp_path):
 
 def test_reactive_carbon_leaving_group_and_bonds_are_mapped_to_pdb_records(tmp_path):
     """Reactive data and bonds should be translated from RDKit indices to PDB records."""
-    fragment = generated_fragment_from_polymerist_pdb(_polymerist_like_pdb(tmp_path))
+    fragment = generated_fragment_from_pdb(_fragment_like_pdb(tmp_path))
 
     assert fragment.leaving_atom_serials == (3, 4, 5)
     assert fragment.leaving_atom_indices == (2, 3, 4)
@@ -208,7 +208,7 @@ def test_generated_fragment_uses_aligned_sidecar_positive_bond_orders(tmp_path):
     pdb_path = _minimal_sidecar_pdb(tmp_path)
     _write_sidecar_sdf(pdb_path.with_suffix(".sdf"), ((1, 2, 2), (1, 3, 1)))
 
-    fragment = generated_fragment_from_polymerist_pdb(
+    fragment = generated_fragment_from_pdb(
         pdb_path,
         reactive_atom_name="C1",
         leaving_atom_names=("O1",),
@@ -228,7 +228,7 @@ def test_generated_fragment_preserves_sdf_formal_charges(tmp_path):
         formal_charges={2: -1, 3: 1},
     )
 
-    fragment = generated_fragment_from_polymerist_pdb(
+    fragment = generated_fragment_from_pdb(
         pdb_path,
         reactive_atom_name="C1",
         leaving_atom_names=("O1",),
@@ -245,7 +245,7 @@ def test_generated_fragment_rejects_zero_order_sidecar_bonds(tmp_path):
     _write_sidecar_sdf(pdb_path.with_suffix(".sdf"), ((1, 2, 0), (1, 3, 1)))
 
     with pytest.raises(ValueError, match="under-specified zero/unknown bond orders"):
-        generated_fragment_from_polymerist_pdb(
+        generated_fragment_from_pdb(
             pdb_path,
             reactive_atom_name="C1",
             leaving_atom_names=("O1",),
@@ -262,16 +262,16 @@ def test_multiple_nhs_groups_raise_ambiguity_without_selector(tmp_path):
     )
 
     with pytest.raises(ValueError, match="Ambiguous NHS ester reactive group"):
-        generated_fragment_from_polymerist_pdb(path)
+        generated_fragment_from_pdb(path)
 
-    selected = generated_fragment_from_polymerist_pdb(path, reactive_residue_number=2)
+    selected = generated_fragment_from_pdb(path, reactive_residue_number=2)
     assert selected.reactive_atom_serial == 11
     assert selected.leaving_atom_serials == (13, 14, 15)
 
 
 def test_generated_fragment_feeds_crosslinked_pdb_writer(tmp_path):
     """The adapter output should convert to a placed fragment for PDB assembly."""
-    fragment = generated_fragment_from_polymerist_pdb(_polymerist_like_pdb(tmp_path))
+    fragment = generated_fragment_from_pdb(_fragment_like_pdb(tmp_path))
     output_path = tmp_path / "assembled.pdb"
 
     result = write_crosslinked_pdb(
@@ -292,15 +292,13 @@ def test_generated_fragment_feeds_crosslinked_pdb_writer(tmp_path):
     assert "LYX" in output_text
 
 
-def test_real_polymerist_generation_pdb_converts_to_generated_fragment(tmp_path):
-    """Real Polymerist PDB generation should feed the generated-fragment adapter."""
-    pytest.importorskip("polymerist", exc_type=ImportError)
-
+def test_real_native_generation_pdb_converts_to_generated_fragment(tmp_path):
+    """Real native PDB generation should feed the generated-fragment adapter."""
     recipe = sbma_egpma_nhs_recipe(length=3, seed=5, reactive_monomer_index=1)
-    result = generate_multi_residue_molecule(recipe, tmp_path / "polymerist", max_retries=1)
+    result = generate_multi_residue_molecule(recipe, tmp_path / "native", max_retries=1)
     assert result.pdb_path is not None
 
-    fragment = generated_fragment_from_polymerist_pdb(
+    fragment = generated_fragment_from_pdb(
         result.pdb_path,
         recipe=recipe,
         sequence=result.sequence,

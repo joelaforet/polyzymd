@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from polyzymd.config.schema import SimulationConfig
 from polyzymd.config.validation import collect_reference_warnings
 
@@ -107,8 +109,8 @@ def test_collect_reference_warnings_reports_empty_cached_polymer_directory(
     assert any("Missing cached polymer SDF files" in warning for warning in warnings)
 
 
-def test_collect_reference_warnings_reports_missing_reaction_templates(tmp_path: Path) -> None:
-    """Dynamic polymer custom reaction paths should be checked at runtime."""
+def test_custom_reaction_templates_reject_at_schema_boundary(tmp_path: Path) -> None:
+    """Dynamic polymer custom reaction paths should be rejected immediately."""
 
     data = _minimal_config_data(tmp_path)
     data["polymers"] = {
@@ -124,12 +126,5 @@ def test_collect_reference_warnings_reports_missing_reaction_templates(tmp_path:
             "termination": tmp_path / "missing_term.rxn",
         },
     }
-    config = SimulationConfig(**data)
-
-    warnings = collect_reference_warnings(config)
-
-    assert any("Missing polymer initiation reaction template" in warning for warning in warnings)
-    assert any(
-        "Missing polymer polymerization reaction template" in warning for warning in warnings
-    )
-    assert any("Missing polymer termination reaction template" in warning for warning in warnings)
+    with pytest.raises(ValueError, match="provided_molecules"):
+        SimulationConfig(**data)

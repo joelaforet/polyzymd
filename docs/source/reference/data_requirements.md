@@ -32,6 +32,9 @@ Running `polyzymd init -n my_simulation` creates:
 my_simulation/
 ├── config.yaml              # Simulation configuration (edit this)
 ├── structures/              # Input PDB/SDF files
+├── notebooks/               # Optional offline authoring notebooks
+│   └── cgsmiles_polymer_scaffold.ipynb
+├── generated_molecules/     # Charged SDFs emitted by authoring notebooks
 ├── job_scripts/             # Generated SLURM submission scripts
 └── slurm_logs/              # SLURM stdout/stderr logs
 ```
@@ -158,14 +161,69 @@ directory and referenced from `config.yaml`.
 |---|---|---|---|
 | Protein structure | PDB (`.pdb`) | `enzyme.pdb_path` | Standard residue names, protonated at simulation pH, no missing heavy atoms in regions of interest |
 | Substrate | SDF (`.sdf`) | `substrate.sdf_path` | 3D coordinates with docked pose, explicit hydrogens preferred |
-| Polymer (if pre-built) | SDF (`.sdf`) | `polymers.sdf_directory` | One SDF per chain, or use dynamic generation from SMILES |
-| Reaction templates | RXN or `"default"` | `polymers.reactions.*` | The string `"default"` loads bundled ATRP templates; a file path loads a custom template |
+| Generated polymer cache | SDF/PDB/JSON | `polymers.cache_directory` | Written by native dynamic or fragments generation; do not edit while a build is running |
+| Provided molecule | SDF (`.sdf`) | `polymers.provided_molecules[].entries[].sdf_path` | One connected charged molecule per file; see requirements below |
+| Legacy sequence SDF library | SDF (`.sdf`) | `polymers.sdf_directory` | Deprecated compatibility path for sequence-derived filenames, not an explicit molecule pool |
+| Reaction templates | `"default"` only | `polymers.reactions.*` | The string `"default"` selects the native linear methacrylate backend; custom `.rxn` paths are rejected |
 
 ```{note}
 The sentinel value `"default"` for reaction templates is **not** a file path.
-Do not prepend a directory to it. PolyzyMD resolves `"default"` to bundled
-reaction files at runtime.
+Do not prepend a directory to it. Custom `.rxn` workflows have been removed;
+migrate to native fragments, the offline CGSmiles notebook for supported
+tree-like authored SDFs, or externally authored charged SDFs through
+`provided_molecules`.
 ```
+
+### Provided molecule SDF requirements
+
+`provided_molecules` is the preferred interface for explicit user-supplied
+charged SDF molecules. It is additive and can coexist with dynamic or fragments
+polymer generation, or it can be used by itself with
+`generation_mode: "provided"`.
+
+Every referenced SDF file must satisfy all of these requirements:
+
+| Requirement | Details |
+|---|---|
+| Exactly one SDF record | Multi-record SDF files are rejected. Split libraries into one file per molecule. |
+| One connected molecule | Salts, disconnected mixtures, and multi-component records are rejected. |
+| Conformer coordinates | At least one conformer with finite coordinates is required. |
+| No dummy atoms | Atoms with atomic number 0, including `*` placeholders, are rejected. |
+| Complete partial charges | Every atom must have a finite partial charge in the SDF. |
+| OpenFF-loadable | `openff.toolkit.Molecule.from_file(..., file_format="SDF")` must load the molecule successfully. |
+
+PolyzyMD does not autocharge `provided_molecules` entries. If a molecule needs
+charging, charge and validate it before referencing it in `config.yaml`.
+
+`polyzymd init` creates `notebooks/cgsmiles_polymer_scaffold.ipynb` and
+`generated_molecules/` for optional offline polymer authoring. The notebook writes
+charged SDFs and a `provided_molecules` YAML snippet. Simulation runtime does not
+execute CGSmiles. Use the full emitted `polymers` block for provided-only mode;
+merge only the `provided_molecules` list into an existing generated-polymer block.
+
+### Native fragment generation inputs
+
+`generation_mode: "fragments"` assembles native linear explicit-fragment
+polymers from `polymers.fragments` strings. Schema validation checks that the
+mapping exists, has one entry for each monomer label, and gives each entry a
+`terminal` and `middle` string. Runtime parsing then enforces the molecular
+details: `terminal` strings contain exactly one `*` atom, `middle` strings
+contain exactly two `*` atoms, dummy atoms have degree 1, optional `[*:1]` and
+`[*:2]` maps are valid, and each fragment can be parsed, embedded, sanitized,
+placed, converted, charged, and cached. Assembly follows the exact generated
+sequence direction and creates single inter-fragment bonds with mBuild `Port` and
+`force_overlap()`.
+
+For the mBuild/OpenFF adapter boundary, see {doc}`polymer_mbuild_openff`.
+
+### Legacy `sdf_directory` requirements
+
+`polymers.sdf_directory` is deprecated compatibility behavior for old
+sequence-derived polymer libraries. It is not an alias for `provided_molecules`.
+When present, PolyzyMD looks for generated sequence filenames such as
+`SBMA-EGPMA_seq=AABBA_5-mer_charged.sdf` and emits a deprecation warning.
+
+For new explicit charged SDF molecules, use `provided_molecules` instead.
 
 ---
 
@@ -252,9 +310,9 @@ paths in `comparison.yaml`.
   `config.yaml` must match where the trajectory files actually reside.
 
 - **The `"default"` sentinel for reactions.** Setting
-  `polymers.reactions.initiation: "default"` tells PolyzyMD to use a bundled
-  reaction template. Writing `"structures/default"` or any path containing
-  `"default"` will fail because no such file exists.
+  `polymers.reactions.initiation: "default"` tells PolyzyMD to use the native
+  linear methacrylate backend. Writing `"structures/default"` or a custom `.rxn`
+  path will fail.
 
 - **Missing replicate directories.** Each replicate number listed in
   `comparison.yaml` must have a corresponding directory on disk. If replicate 3
@@ -273,4 +331,5 @@ paths in `comparison.yaml`.
 - {doc}`configuration` -- Full configuration field reference
 - {doc}`cli_reference` -- CLI command reference including `init` and `compare init`
 - {doc}`../how_to/analysis_compare_conditions` -- How to set up and run a comparison
+- {doc}`../how_to/author_branched_polymers_offline` -- Offline branched polymer SDF authoring
 - {doc}`../get_started/quickstart` -- Run your first simulation end-to-end

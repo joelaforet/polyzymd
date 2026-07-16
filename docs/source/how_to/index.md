@@ -66,6 +66,7 @@ Prepare build inputs and configure your enzyme-polymer conjugate systems.
 
 Add Polymers to a Simulation <polymers>
 Generate Polymers from SMILES <dynamic_polymers>
+Author Branched Polymers Offline <author_branched_polymers_offline>
 Validate Conjugate Build Artifacts <validate_conjugates>
 Troubleshoot OpenFF PDB Ingestion <troubleshoot_openff_pdb_ingestion>
 Extend Protein Modifications <extend_protein_modifications>

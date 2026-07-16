@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from polyzymd.builders.conjugation.polymer.recipe import (
     PolymerRecipe,
-    _polymerist_to_pdb_aligned_rdkit_mol,
+    _object_to_pdb_aligned_rdkit_mol,
     _write_rdkit_sdf_sidecar,
     generate_multi_residue_molecule,
 )
@@ -77,7 +77,7 @@ def _write_small_polymer_pdb(path: Path) -> None:
 
 
 def _small_polymer_rdkit_mol():
-    """Build a three-atom RDKit fixture with one Polymerist-style unspecified bond."""
+    """Build a three-atom RDKit fixture with one unspecified bond."""
     Chem = pytest.importorskip("rdkit.Chem")
 
     editable = Chem.RWMol()
@@ -261,16 +261,16 @@ conjugation:
 
 
 def test_real_multi_residue_recipe_generation(tmp_path):
-    """The backend should consume the real SBMA/EGPMA/NHS recipe when installed."""
+    """The native backend should consume the real SBMA/EGPMA/NHS recipe."""
     recipe = sbma_egpma_nhs_recipe(length=3, seed=5, reactive_monomer_index=1)
 
     try:
-        result = generate_multi_residue_molecule(recipe, tmp_path / "polymerist", max_retries=1)
+        result = generate_multi_residue_molecule(recipe, tmp_path / "native", max_retries=1)
     except Exception as exc:
-        pytest.skip(f"Polymerist generation stack unavailable in this environment: {exc}")
+        pytest.skip(f"Native methacrylate generation stack unavailable in this environment: {exc}")
 
     assert result.sequence[1] == "C"
-    assert result.backend == "polymerist"
+    assert result.backend == "native-methacrylate"
     assert result.monomer_group_path.exists()
     assert result.pdb_path is not None and result.pdb_path.exists()
     assert result.pdb_path.with_suffix(".sdf").exists()
@@ -278,22 +278,22 @@ def test_real_multi_residue_recipe_generation(tmp_path):
     assert result.atom_count is None or result.atom_count > 0
 
 
-def test_polymerist_to_pdb_aligned_rdkit_mol_matches_pdb_atoms_and_bond_orders(
+def test_object_to_pdb_aligned_rdkit_mol_matches_pdb_atoms_and_bond_orders(
     tmp_path,
 ):
     """Sidecar conversion should align to PDB atoms and make bond orders explicit."""
 
     class FakePolymer:
-        """Fake final Polymerist polymer exposing RDKit conversion."""
+        """Fake final object exposing RDKit conversion."""
 
         def to_rdkit(self):
-            """Return a minimal Polymerist-like source molecule."""
+            """Return a minimal source molecule."""
             return _small_polymer_rdkit_mol()
 
     pdb_path = tmp_path / "polymer.pdb"
     _write_small_polymer_pdb(pdb_path)
 
-    mol = _polymerist_to_pdb_aligned_rdkit_mol(FakePolymer(), pdb_path)
+    mol = _object_to_pdb_aligned_rdkit_mol(FakePolymer(), pdb_path)
 
     assert mol.GetNumAtoms() == 3
     assert _bond_order(mol, 1, 2) == 2.0
@@ -301,130 +301,20 @@ def test_polymerist_to_pdb_aligned_rdkit_mol_matches_pdb_atoms_and_bond_orders(
     assert all(float(bond.GetBondTypeAsDouble()) > 0.0 for bond in mol.GetBonds())
 
 
-def test_generate_multi_residue_molecule_returns_pdb_aligned_rdkit_sidecar(
-    monkeypatch,
-    tmp_path,
-):
-    """Recipe generation should return a PDB-aligned RDKit mol and SDF sidecar."""
-    built_sequences = []
-
-    class FakeFragmentGenerator:
-        """Fake fragment generator avoiding Polymerist imports."""
-
-        def __init__(self, *, cache_directory, **_kwargs):
-            self.cache_directory = cache_directory
-
-        def load_or_generate(self, **_kwargs):
-            """Return a placeholder monomer group."""
-            return object()
-
-        def get_cache_path(self, recipe_name):
-            """Return the expected monomer-group cache path."""
-            return self.cache_directory / f"{recipe_name}.json"
-
-    class FakePolymer:
-        """Fake Polymerist polymer with RDKit conversion."""
-
-        n_particles = 3
-
-        def to_rdkit(self):
-            """Return the final-chain fixture molecule."""
-            return _small_polymer_rdkit_mol()
-
-    class FakePolymerGenerator:
-        """Fake polymer generator avoiding Polymerist structure building."""
-
-        def __init__(self, **_kwargs):
-            pass
-
-        def _build_polymer_structure(self, *, sequence, **_kwargs):
-            """Write a PDB and return a fake polymer object."""
-            built_sequences.append(sequence)
-            pdb_path = tmp_path / "polymer.pdb"
-            _write_small_polymer_pdb(pdb_path)
-            return FakePolymer(), pdb_path
-
-    fake_fragment_module = ModuleType("polyzymd.builders.fragment_generator")
-    fake_fragment_module.FragmentGenerator = FakeFragmentGenerator
-    fake_polymer_module = ModuleType("polyzymd.builders.polymer_generator")
-    fake_polymer_module.PolymerGenerator = FakePolymerGenerator
-    fake_reactions_module = ModuleType("polyzymd.data.reactions")
-    fake_reactions_module.get_atrp_reaction_paths = lambda: {
-        "initiation": tmp_path / "initiation.rxn",
-        "polymerization": tmp_path / "polymerization.rxn",
-        "termination": tmp_path / "termination.rxn",
-    }
-    monkeypatch.setitem(sys.modules, "polyzymd.builders.fragment_generator", fake_fragment_module)
-    monkeypatch.setitem(sys.modules, "polyzymd.builders.polymer_generator", fake_polymer_module)
-    monkeypatch.setitem(sys.modules, "polyzymd.data.reactions", fake_reactions_module)
-
+def test_generate_multi_residue_molecule_rejects_custom_reaction_paths(tmp_path):
+    """Custom reaction paths should fail with migration guidance."""
     recipe = sbma_nhs_egpma_acb_recipe()
-    result = generate_multi_residue_molecule(recipe, tmp_path / "cache")
-    Chem = pytest.importorskip("rdkit.Chem")
-    sidecar_mols = [
-        mol
-        for mol in Chem.SDMolSupplier(str(result.sdf_path), removeHs=False, sanitize=False)
-        if mol is not None
-    ]
-
-    assert built_sequences == ["ACB"]
-    assert result.rdkit_mol.GetNumAtoms() == 3
-    assert result.sdf_path == tmp_path / "polymer.sdf"
-    assert result.sdf_path.exists()
-    assert result.atom_count == 3
-    assert [(mol.GetNumAtoms(), mol.GetNumBonds()) for mol in sidecar_mols] == [(3, 2)]
-    assert _bond_order(sidecar_mols[0], 1, 2) == 2.0
-    assert _bond_order(sidecar_mols[0], 1, 3) == 1.0
-    assert all(float(bond.GetBondTypeAsDouble()) > 0.0 for bond in sidecar_mols[0].GetBonds())
-    assert "rdkit_mol" not in result.model_dump()
-
-
-def test_polymer_generator_forwards_energy_minimize_flag(monkeypatch, tmp_path):
-    """Polymer generation should let callers skip Polymerist minimization."""
-    from polyzymd.builders import polymer_generator as polymer_generator_module
-
-    calls = []
-
-    class FakeMonomerGroup:
-        def __init__(self, monomers):
-            self.monomers = monomers
-            self.term_orient = {}
-
-    class FakeSourceGroup:
-        monomers = {"A_1-site": object(), "A_2-site": object()}
-
-    def fake_build_linear_polymer(**kwargs):
-        calls.append(kwargs)
-        return object()
-
-    def fake_write_pdb(path, chain, *, resname_map=None):
-        path.write_text("END\n")
-
-    monkeypatch.setattr(polymer_generator_module, "MonomerGroup", FakeMonomerGroup)
-    monkeypatch.setattr(
-        polymer_generator_module,
-        "build_linear_polymer",
-        fake_build_linear_polymer,
-    )
-    monkeypatch.setattr(polymer_generator_module, "mbmol_to_rdmol", lambda chain: object())
-    monkeypatch.setattr(polymer_generator_module, "summarize_ring_piercing", lambda mol: {})
-    monkeypatch.setattr(polymer_generator_module, "mbmol_to_openmm_pdb", fake_write_pdb)
-
-    generator = polymer_generator_module.PolymerGenerator.__new__(
-        polymer_generator_module.PolymerGenerator
-    )
-    generator.monomer_group = FakeSourceGroup()
-    generator.cache_directory = tmp_path
-    generator.max_retries = 1
-
-    _, pdb_path = generator._build_polymer_structure(
-        sequence="AAA",
-        monomer_names={"A": "A"},
-        energy_minimize=False,
-    )
-
-    assert pdb_path.exists()
-    assert calls[0]["energy_minimize"] is False
+    custom_reactions = {
+        "initiation": tmp_path / "custom_initiation.rxn",
+        "polymerization": tmp_path / "custom_polymerization.rxn",
+        "termination": tmp_path / "custom_termination.rxn",
+    }
+    with pytest.raises(ValueError, match="polymers.fragments"):
+        generate_multi_residue_molecule(
+            recipe,
+            tmp_path / "cache",
+            reaction_paths=custom_reactions,
+        )
 
 
 def test_rdkit_sdf_sidecar_write_failure_surfaces(monkeypatch, tmp_path):

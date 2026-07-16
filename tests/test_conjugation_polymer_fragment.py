@@ -189,7 +189,7 @@ def test_generated_fragment_rejects_ambiguous_reactive_selector():
 
 
 def test_generated_fragment_from_pdb_lines_infers_residues():
-    """PDB-like atom sources should convert without Polymerist or RDKit."""
+    """PDB-like atom sources should convert without optional toolkit adapters."""
     lines = [
         _pdb_atom(201, "C1", "SBM", "C", 1, 0.0, 0.0, 0.0, record_name="HETATM"),
         _pdb_atom(202, "RC", "NHS", "C", 2, 1.0, 0.0, 0.0, record_name="HETATM"),

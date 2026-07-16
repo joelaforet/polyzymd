@@ -86,84 +86,293 @@ substrate: null
 
 ## Polymer Configuration
 
-PolyzyMD supports two modes for polymer generation: **cached** (load from pre-built SDF files) and **dynamic** (generate on-the-fly from SMILES).
+PolyzyMD supports three polymer generation modes plus an additive interface for
+explicit user-supplied molecules:
+
+| Interface | Purpose |
+|-----------|---------|
+| `generation_mode: "dynamic"` | Native linear methacrylate generation from monomer SMILES and the bundled default ATRP reaction set. |
+| `generation_mode: "fragments"` | Native linear explicit-fragment assembly from terminal and middle fragment strings. |
+| `generation_mode: "cached"` | Deprecated compatibility mode for sequence-derived SDF filename libraries. |
+| `provided_molecules` | Preferred additive interface for explicit charged SDF molecules supplied by the user. Can be used alongside dynamic or fragments generation. |
 
 ```{tip}
 For a complete guide on dynamic polymer generation, see {doc}`../how_to/dynamic_polymers`.
+For offline branched-polymer authoring with the scaffold notebook, see
+{doc}`../how_to/author_branched_polymers_offline`.
 ```
 
-### Basic Configuration (Cached Mode)
+For the mBuild/OpenFF adapter boundary used by native fragment assembly, see
+{doc}`polymer_mbuild_openff`.
+
+### Basic Configuration (Dynamic Mode)
+
+Polymer section snippet:
 
 ```yaml
 polymers:
   enabled: true                          # Enable/disable polymers
+  generation_mode: "dynamic"             # Native linear methacrylate generation
   type_prefix: "SBMA-EGPMA"              # Polymer type identifier
   
   monomers:                              # Monomer definitions
     - label: "A"                         # Single character label
       probability: 0.98                  # Selection probability (0-1)
-      name: "SBMA"                       # Full name (optional)
+      name: "MMA"                        # Full name (optional)
+      smiles: "C=C(C)C(=O)OC"
     - label: "B"
       probability: 0.02
-      name: "EGPMA"
-  
+      name: "EMA"
+      smiles: "C=C(C)C(=O)OCC"
+   
   length: 5                              # Monomers per chain
   count: 2                               # Number of polymer chains
-  
-  sdf_directory: null                    # Pre-built polymer SDFs (optional)
+
+  reactions:
+    initiation: "default"
+    polymerization: "default"
+    termination: "default"
+
   cache_directory: ".polymer_cache"      # Cache for generated polymers
 ```
 
 ### Dynamic Generation Configuration
 
-To generate polymers on-the-fly from monomer SMILES (without pre-built SDF files):
+To generate native linear methacrylate polymers on-the-fly from monomer SMILES:
+
+Polymer section snippet:
 
 ```yaml
 polymers:
   enabled: true
-  generation_mode: "dynamic"             # Enable dynamic generation
+  generation_mode: "dynamic"             # Native default with bundled reactions
   type_prefix: "SBMA-EGPMA"
   
-  # ATRP reaction templates (use bundled defaults or custom paths)
+  # Native dynamic markers; custom .rxn files are no longer supported
   reactions:
-    initiation: "default"                # or "/path/to/custom.rxn"
+    initiation: "default"
     polymerization: "default"
     termination: "default"
   
   monomers:
     - label: "A"
       probability: 0.7
-      name: "SBMA"
-      smiles: "[H]C([H])=C(C(=O)OC...)..."  # Required for dynamic mode
-      residue_name: "SBM"                   # Optional 3-letter residue name
+      name: "MMA"
+      smiles: "C=C(C)C(=O)OC"               # Required for dynamic mode
+      residue_name: "MMA"                   # Optional 3-letter residue name
     - label: "B"
       probability: 0.3
-      name: "EGPMA"
-      smiles: "[H]C([H])=C(C(=O)OC...)..."
-      residue_name: "EGM"
+      name: "EMA"
+      smiles: "C=C(C)C(=O)OCC"
+      residue_name: "EMA"
   
   length: 5
   count: 2
-  charger: "nagl"                        # Charge method: nagl, espaloma, am1bcc
+  charger: "nagl"                        # OpenFF charge method: nagl, espaloma, am1bcc
   max_retries: 10                        # Retries for ring-piercing detection
   cache_directory: ".polymer_cache"
 ```
+
+When `reactions` is the `"default"` set, dynamic generation uses the native
+linear methacrylate backend and caches charged OpenFF SDF artifacts. Custom
+`.rxn` workflows are rejected during config validation. Migration paths are
+explicit linear fragments, the CGSmiles notebook from `polyzymd init` for
+supported tree-like authored SDFs, or charged SDF molecules through
+`provided_molecules`.
+
+### Native Explicit-Fragment Generation
+
+Use `generation_mode: "fragments"` when each monomer label has explicit terminal
+and middle fragment strings. This is a complete minimal polymer section; add it
+to a normal simulation `config.yaml` that also defines enzyme, solvent,
+thermodynamics, simulation phases, and output settings.
+
+```yaml
+polymers:
+  enabled: true
+  generation_mode: "fragments"
+  type_prefix: "linear-carbon-fragment"
+
+  monomers:
+    - label: "A"
+      probability: 1.0
+      name: "CarbonFragment"
+
+  fragments:
+    A:
+      terminal: "[*]C"
+      middle: "[*:1]C[*:2]"
+
+  length: 3
+  count: 1
+  charger: "nagl"
+  cache_directory: ".polymer_cache"
+```
+
+Validation timing for `fragments` mode:
+
+- Schema validation checks that `fragments` is present, that it contains exactly
+  one entry for each `monomers[].label`, and that each entry has `terminal` and
+  `middle` strings.
+- Runtime fragment parsing checks that each `terminal` string has exactly one
+  dummy atom (`*`), each `middle` string has exactly two dummy atoms, dummy atoms
+  have degree 1, optional directional maps are valid, and the fragment can be
+  parsed, embedded, sanitized, placed, converted, and charged.
+- Directional maps are optional. When used on middle fragments, `[*:1]` marks
+  incoming connectivity and `[*:2]` marks outgoing connectivity.
+- Assembly is linear and follows the exact generated sequence direction; PolyzyMD
+  does not reverse-canonicalize the sequence.
+- Inter-fragment connections are single bonds created with mBuild `Port` objects
+  and `force_overlap()`.
+- The assembled molecule is converted through OpenFF, charged with `charger`, and
+  cached under `cache_directory`.
+
+There are no separate head/tail schema keys. PolyzyMD does not infer missing
+chemistry or suggest fragment strings automatically.
+
+### Additive Provided Molecules
+
+`provided_molecules` is the preferred interface for explicit user-supplied
+charged SDF molecules. It is additive: the selected molecules are packed with the
+polymers generated by `generation_mode: "dynamic"` or `"fragments"`, or with a
+compatible cached sequence library.
+
+For provided-only systems, use `generation_mode: "provided"`. This mode requires
+only a nonempty `provided_molecules` list and does not require `type_prefix`,
+`monomers`, `length`, `count`, `reactions`, `fragments`, or `sdf_directory`.
+
+Provided-only snippet:
+
+```yaml
+polymers:
+  enabled: true
+  generation_mode: "provided"
+  provided_molecules:
+    - name: "branched_polymer"
+      entries:
+        - sdf_path: "generated_molecules/branched_polymer.sdf"
+          count: 1
+```
+
+Fixed inventory mode uses entry-level counts:
+
+Polymer section snippet:
+
+```yaml
+polymers:
+  enabled: true
+  generation_mode: "dynamic"
+  # ... monomers, length, count, reactions ...
+  provided_molecules:
+    - name: "branched_additives"
+      entries:
+        - sdf_path: "structures/branched_polymer_01.sdf"
+          count: 1
+        - sdf_path: "structures/branched_polymer_02.sdf"
+          count: 2
+```
+
+Probabilistic mode uses a pool-level `count`, entry probabilities, and an
+optional pool-local seed:
+
+Complete polymer section example; this assumes the referenced charged SDF files
+already exist and satisfy the requirements in {doc}`data_requirements`:
+
+```yaml
+polymers:
+  enabled: true
+  generation_mode: "dynamic"
+  type_prefix: "MMA"
+  monomers:
+    - label: "A"
+      probability: 1.0
+      name: "MethylMethacrylate"
+      smiles: "C=C(C)C(=O)OC"
+  length: 3
+  count: 1
+  reactions:
+    initiation: "default"
+    polymerization: "default"
+    termination: "default"
+  random_seed: 2026
+  provided_molecules:
+    - name: "charged_oligomer_pool"
+      count: 3
+      seed: 17
+      entries:
+        - sdf_path: "structures/oligomer_a.sdf"
+          probability: 0.7
+        - sdf_path: "structures/oligomer_b.sdf"
+          probability: 0.3
+```
+
+Validation rules for `provided_molecules`:
+
+- In fixed mode, every entry has `count`; the pool has no `count`; entries have
+  no probabilities.
+- In probabilistic mode, the pool has `count`; every entry has `probability`;
+  entries have no `count`; probabilities sum to 1.0.
+- Seed precedence for probabilistic selection is pool `seed`, then
+  `polymers.random_seed`, then the workflow/replicate seed. The selected root
+  seed is combined with the pool index and pool name so pools are independent.
+- The unreleased `cached_pools` key is rejected; use `provided_molecules`.
+
+Provided SDF requirements are listed in {doc}`data_requirements`.
+
+The `polyzymd init` notebook writes charged SDFs and an example full `polymers`
+block for supported offline CGSmiles/mBuild authoring. Use the full block for
+provided-only systems, or merge only its `provided_molecules` list into an
+existing `dynamic`, `fragments`, or `cached` polymer block. Simulation builds
+consume those files directly and do not execute CGSmiles.
+
+### Deprecated `sdf_directory` Compatibility Mode
+
+`sdf_directory` is deprecated compatibility behavior for sequence-derived SDF
+filename libraries. It is not an alias for `provided_molecules` and should not be
+used for new explicit molecule pools.
+
+Legacy compatibility snippet:
+
+```yaml
+polymers:
+  enabled: true
+  generation_mode: "cached"
+  type_prefix: "SBMA-EGPMA"
+  monomers:
+    - label: "A"
+      probability: 0.98
+      name: "SBMA"
+    - label: "B"
+      probability: 0.02
+      name: "EGPMA"
+  length: 5
+  count: 2
+  sdf_directory: "legacy_polymer_sdfs"
+```
+
+PolyzyMD emits a deprecation warning when this path is used. Migrate explicit
+charged SDF molecules to `provided_molecules`. Keep `sdf_directory` only for old
+libraries whose filenames are derived from generated sequences, for example
+`SBMA-EGPMA_seq=AABBA_5-mer_charged.sdf`.
 
 ### All Polymer Options
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `enabled` | bool | No | true | Enable polymer addition |
-| `generation_mode` | string | No | "cached" | `cached` or `dynamic` |
-| `type_prefix` | string | Yes | - | Identifier for polymer type |
-| `monomers` | list | Yes | - | Monomer specifications |
-| `length` | int | Yes | - | Chain length (number of monomers) |
-| `count` | int | Yes | - | Number of chains to add |
-| `sdf_directory` | path | No | null | Directory with pre-built polymer SDFs |
-| `cache_directory` | path | No | ".polymer_cache" | Cache directory |
-| `reactions` | object | No | all "default" | ATRP reaction templates (dynamic mode) |
-| `charger` | string | No | "nagl" | Charge method for dynamic generation |
+| `generation_mode` | string | No | "cached" | `cached`, `dynamic`, `fragments`, or `provided`; prefer `dynamic` or `fragments` for new generated polymers and `provided` for pre-authored SDF-only systems |
+| `type_prefix` | string | Generated modes | - | Identifier for generated polymer type |
+| `monomers` | list | Generated modes | `[]` | Monomer specifications |
+| `fragments` | object | Fragments only | null | Terminal and middle fragment strings keyed by monomer label |
+| `length` | int | Generated modes | - | Chain length (number of monomers) |
+| `count` | int | Generated modes | - | Number of generated chains to add |
+| `sdf_directory` | path | Cached only | null | Deprecated sequence-derived SDF library directory |
+| `provided_molecules` | list | Provided mode only, optional otherwise | `[]` | Explicit charged SDF molecule pools |
+| `cache_directory` | path | No | ".polymer_cache" | Cache directory for generated and charged polymer artifacts |
+| `reactions` | object | Dynamic only | all "default" | Native dynamic markers; custom `.rxn` files are unsupported |
+| `charger` | string | No | "nagl" | OpenFF charge method for generated polymers |
 | `max_retries` | int | No | 10 | Max attempts for ring-piercing avoidance |
+| `random_seed` | int | No | null | Seed for sequence generation and fallback seed for probabilistic provided molecule pools |
 
 ### Monomer Specification
 
@@ -781,6 +990,7 @@ See the example configurations in `src/polyzymd/templates/examples/`:
 ## See Also
 
 - {doc}`../how_to/dynamic_polymers` - Dynamic polymer generation from SMILES
+- {doc}`../how_to/author_branched_polymers_offline` - Offline branched polymer SDF authoring
 - {doc}`../how_to/gromacs_export` - Running GROMACS simulations on HPC clusters
 - {doc}`../how_to/polymers` - Polymer setup guide
 - {doc}`../how_to/restraints` - Atom selection and restraints

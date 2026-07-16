@@ -120,7 +120,6 @@ smirnoff99frosst      = ">=1.1"
 openff-amber-ff-ports = ">=2024.0"
 openff-nagl           = ">=0.4"
 openff-nagl-models    = ">=2024.0"
-mbuild                = ">=1.2"
 openbabel             = ">=3.1"
 rdkit                 = ">=2023.09"
 rustworkx             = ">=0.15"
@@ -129,17 +128,23 @@ gemmi                 = ">=0.6"
 pdbfixer              = ">=1.9"
 packmol               = ">=20.0"
 pytorch               = "2.6.*"
+hoomd                 = ">=4.0"
+gmso                  = ">=0.12"
+foyer                 = ">=0.12"
+forcefield-utilities  = ">=0.4"
+ele                   = ">=0.2"
+parmed                = ">=3.4.3"
+unyt                  = ">=2.9.5"
+lark                  = ">=1.2"
+lxml                  = ">=5"
+boltons               = ">=24"
+treelib               = ">=1.7"
+numba                 = ">=0.61"
 
 [feature.builder.pypi-dependencies]
-polymerist   = ">=1.1.0"
 openff-pablo = { git = "https://github.com/openforcefield/openff-pablo.git", tag = "v0.2.2" }
-# NOTE: espaloma-charge is intentionally excluded. polymerist eagerly imports
-# it at module level (_toolkits.py), which triggers a broken dgl -> graphbolt
-# import chain that crashes when dgl and PyTorch versions are mismatched.
-# PolyzyMD uses NAGL (not espaloma) for charge assignment; NAGL >=0.2 has a
-# pure-PyTorch fallback that works without dgl. Users who need espaloma can
-# install it manually: pip install espaloma-charge
-
+mbuild = { git = "https://github.com/mosdef-hub/mbuild.git", rev = "d251a54562ac1ba276887673ca2d3d567bd366e3" }
+cgsmiles = "==1.0.2"
 
 # =============================================================================
 # FEATURE: openmm-any
@@ -168,6 +173,9 @@ sphinx-design    = ">=0.5"
 sphinx-click     = ">=4.0"
 autodoc-pydantic = ">=2.1"
 ipykernel = ">=7.3.0,<8"
+jupyterlab = ">=4.4,<5"
+nbformat = ">=5.10,<6"
+nbclient = ">=0.10,<0.11"
 
 
 # =============================================================================

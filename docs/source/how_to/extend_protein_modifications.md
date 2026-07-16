@@ -98,7 +98,7 @@ Use the simplest builder that preserves chemical intent.
 |---------------|---------------------|
 | Curated modified residue | Residue template or PDB/SDF loader. |
 | Glycan | Curated glycan PDB/SDF loader first, recipe generator later. |
-| Polymer | Polymerist-backed polymer generator. |
+| Polymer | Native recipe or PDB/SDF-backed polymer source. |
 | PEG or linker | Small-molecule SDF loader or deterministic generator. |
 | Fluorophore or custom label | User-supplied SDF/PDB with explicit link site. |
 
@@ -128,7 +128,7 @@ Large moieties need placement safeguards. A robust executable workflow should:
 4. Retry or fail before OpenMM if severe clashes remain.
 5. Run OpenMM minimization after placement.
 
-Do not rely on Polymerist or Open Babel minimization for large conjugated
+Do not rely on ad hoc minimization for large conjugated
 polymers when the intended relaxation path is OpenMM.
 
 ## Add Parameterization Policy

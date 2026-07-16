@@ -1,7 +1,7 @@
 """Opt-in integrated physics validation test for conjugation construction.
 
-This is the acceptance test for the real construction path: Polymerist recipe
-generation, Polymerist PDB parsing, Packmol placement, crosslinked PDB writing,
+This is the acceptance test for the real construction path: native recipe
+generation, PDB parsing, Packmol placement, crosslinked PDB writing,
 Pablo ingestion with explicit LYX/NHX crosslink configuration, OpenFF
 Interchange parameterization, and conjugate OpenMM relaxation.
 
@@ -43,7 +43,7 @@ from polyzymd.builders.conjugation.placement import (
     PackmolModifierPlacementSettings,
     place_modifier_with_packmol,
 )
-from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.polymer.pdb_fragment import generated_fragment_from_pdb
 from polyzymd.builders.conjugation.polymer.recipe import generate_multi_residue_molecule
 from polyzymd.builders.conjugation.relaxation.models import ConjugateRelaxationSettings
 from polyzymd.builders.conjugation.relaxation.openmm import relax_conjugate
@@ -60,7 +60,7 @@ VALIDATION_ENV_VAR = "POLYZYMD_RUN_CONJUGATION_PABLO_VALIDATION"
 VALIDATION_PLATFORM_ENV_VAR = "POLYZYMD_CONJUGATION_VALIDATION_PLATFORM"
 VALIDATION_MINIMIZATION_ITERS_ENV_VAR = "POLYZYMD_CONJUGATION_VALIDATION_MIN_ITERS"
 VALIDATION_NVT_STEPS_ENV_VAR = "POLYZYMD_CONJUGATION_VALIDATION_NVT_STEPS"
-VALIDATION_POLYMERIST_RETRIES_ENV_VAR = "POLYZYMD_CONJUGATION_VALIDATION_POLYMERIST_RETRIES"
+VALIDATION_GENERATION_RETRIES_ENV_VAR = "POLYZYMD_CONJUGATION_VALIDATION_GENERATION_RETRIES"
 POC_PROTEIN_PATH = (
     Path(__file__).resolve().parents[1]
     / "src"
@@ -92,9 +92,9 @@ def test_opt_in_integrated_conjugation_physics_validation(tmp_path: Path):
         artifact_dir,
         lambda: generate_multi_residue_molecule(
             recipe,
-            artifact_dir / "polymerist-cache",
+            artifact_dir / "generation-cache",
             force_regenerate=True,
-            max_retries=_int_env(VALIDATION_POLYMERIST_RETRIES_ENV_VAR, default=1),
+            max_retries=_int_env(VALIDATION_GENERATION_RETRIES_ENV_VAR, default=1),
         ),
     )
     if generation.pdb_path is None:
@@ -105,9 +105,9 @@ def test_opt_in_integrated_conjugation_physics_validation(tmp_path: Path):
         )
 
     modifier = _run_stage(
-        "Polymerist PDB parsing",
+        "PDB fragment parsing",
         artifact_dir,
-        lambda: generated_fragment_from_polymerist_pdb(
+        lambda: generated_fragment_from_pdb(
             generation.pdb_path,
             recipe=recipe,
             sequence=generation.sequence,
@@ -221,7 +221,6 @@ def _require_conjugation_stack_or_skip() -> str:
     if shutil.which("packmol") is None:
         pytest.skip("Packmol binary is not available on PATH")
 
-    pytest.importorskip("polymerist", exc_type=ImportError)
     pytest.importorskip("openff.pablo")
     pytest.importorskip("openff.toolkit")
     pytest.importorskip("openff.interchange")

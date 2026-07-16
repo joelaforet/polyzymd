@@ -45,9 +45,18 @@ This creates a directory like:
 my_first_simulation/
 |- config.yaml
 |- structures/
+|- notebooks/
+|  `- cgsmiles_polymer_scaffold.ipynb
+|- generated_molecules/
 |- job_scripts/
 `- slurm_logs/
 ```
+
+The notebook is optional. Use it only when you need to author a charged SDF for
+a branched or dendrimer-like polymer that will be supplied through
+`polymers.provided_molecules`. Runtime simulation builds do not execute
+CGSmiles; they consume the SDF and YAML snippet produced by the notebook. See
+{doc}`../how_to/author_branched_polymers_offline` for that workflow.
 
 Move into the new project:
 
@@ -275,6 +284,7 @@ See the Blanca GPU recipe in {doc}`../how_to/gromacs_export`.
 At this point you should have:
 
 - a project directory created by `polyzymd init`
+- an optional offline polymer authoring notebook under `notebooks/`
 - a minimal, validated `config.yaml`
 - a successful build dry run or real build
 - a clear next step for local execution or SLURM submission
@@ -295,6 +305,7 @@ percentages, and status for each replicate. If any replicate shows
 ## Where to go next
 
 - Add a substrate or polymers: {doc}`../reference/configuration`
+- Author a branched polymer SDF offline: {doc}`../how_to/author_branched_polymers_offline`
 - Export to GROMACS: {doc}`../how_to/gromacs_export`
 - Add distance restraints: {doc}`../how_to/restraints`
 - Tune staged equilibration: {doc}`../how_to/equilibration`

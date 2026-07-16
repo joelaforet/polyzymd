@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 import tempfile
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +38,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 LOGGER = logging.getLogger("polyzymd")
+_SAFE_PROJECT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 BUILD_PIXI_ENVS = ("build",)
 SIM_PIXI_ENVS = ("sim-cuda-12-4", "sim-cuda-12-6")
 KNOWN_SPLIT_PIXI_ENVS = (*BUILD_PIXI_ENVS, *SIM_PIXI_ENVS, "analysis", "test", "docs")
@@ -2592,7 +2595,25 @@ def init(name: str) -> None:
 
     warn_if_wrong_pixi_env("init", "build")
 
-    project_dir = Path(name)
+    raw_project_dir = Path(name)
+    if (
+        raw_project_dir.is_absolute()
+        or raw_project_dir.name != name
+        or name in {".", ".."}
+        or ".." in raw_project_dir.parts
+        or _SAFE_PROJECT_NAME_PATTERN.fullmatch(name) is None
+    ):
+        click.echo(
+            click.style(
+                "Error: Project name must be a simple safe name using letters, numbers, '_', '.', or '-'.",
+                fg="red",
+            ),
+            err=True,
+        )
+        sys.exit(1)
+
+    project_dir = (Path.cwd() / name).resolve()
+    created_project_dir = False
 
     # Check if directory already exists
     if project_dir.exists():
@@ -2607,10 +2628,13 @@ def init(name: str) -> None:
         # Create directory structure
         _echo_branding()
         colored_echo(f"Creating project directory: {name}/")
-        project_dir.mkdir(parents=True)
+        project_dir.mkdir()
+        created_project_dir = True
         (project_dir / "structures").mkdir()
         (project_dir / "job_scripts").mkdir()
         (project_dir / "slurm_logs").mkdir()
+        (project_dir / "notebooks").mkdir()
+        (project_dir / "generated_molecules").mkdir()
 
         # Render template configuration
         config_content = render_package_template(
@@ -2636,6 +2660,12 @@ def init(name: str) -> None:
         )
         ligand_placeholder.write_text(prepend_file_header(ligand_content, comment_prefix="#"))
 
+        notebook_resource = resources.files("polyzymd.templates.notebooks").joinpath(
+            "cgsmiles_polymer_scaffold.ipynb"
+        )
+        notebook_dest = project_dir / "notebooks" / "cgsmiles_polymer_scaffold.ipynb"
+        notebook_dest.write_bytes(notebook_resource.read_bytes())
+
         # Success message
         colored_echo()
         click.echo(click.style("Project created successfully!", fg="green"))
@@ -2644,14 +2674,17 @@ def init(name: str) -> None:
         colored_echo(f"  {name}/")
         colored_echo("  ├── config.yaml              <- Edit this file")
         colored_echo("  ├── structures/              <- Add your PDB/SDF files")
+        colored_echo("  ├── notebooks/               <- CGSmiles polymer authoring scaffold")
+        colored_echo("  ├── generated_molecules/     <- Charged SDF outputs")
         colored_echo("  ├── job_scripts/")
         colored_echo("  └── slurm_logs/")
         colored_echo()
         colored_echo("Next steps:")
         colored_echo(f"  1. Add structure files to {name}/structures/")
-        colored_echo(f"  2. Edit {name}/config.yaml (uncomment and customize sections)")
-        colored_echo(f"  3. Validate: polyzymd validate -c {name}/config.yaml")
-        colored_echo(f"  4. Build:    polyzymd build -c {name}/config.yaml -r 1")
+        colored_echo(f"  2. Complete required sections in {name}/config.yaml")
+        colored_echo(f"  3. Optional notebook: pixi run -e build jupyter lab {name}/notebooks/")
+        colored_echo(f"  4. Validate: pixi run -e build polyzymd validate -c {name}/config.yaml")
+        colored_echo(f"  5. Build:    pixi run -e build polyzymd build -c {name}/config.yaml -r 1")
         colored_echo()
         colored_echo(
             "Documentation: https://polyzymd.readthedocs.io/en/latest/tutorials/quickstart.html"
@@ -2660,7 +2693,7 @@ def init(name: str) -> None:
     except Exception as e:
         # Broad catch is intentional — must clean up partially-created
         # directory regardless of what went wrong
-        if project_dir.exists():
+        if created_project_dir and project_dir.exists():
             shutil.rmtree(project_dir)
         click.echo(click.style(f"Error creating project: {e}", fg="red"), err=True)
         sys.exit(1)

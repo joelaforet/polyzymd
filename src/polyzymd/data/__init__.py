@@ -26,7 +26,7 @@ __all__ = [
     "get_solvent_molecule",
     "list_available_solvents",
     "clear_cache",
-    # ATRP reaction templates
+    # Native dynamic reaction markers
     "get_atrp_reaction_paths",
     "get_atrp_initiation_path",
     "get_atrp_polymerization_path",

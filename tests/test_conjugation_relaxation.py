@@ -754,7 +754,6 @@ def test_opt_in_conjugation_stack_validation_requirements_are_available():
         )
     if shutil.which("packmol") is None:
         pytest.skip("Packmol binary is not available on PATH")
-    pytest.importorskip("polymerist")
     pytest.importorskip("openff.toolkit")
     pytest.importorskip("openff.interchange")
     pytest.importorskip("openff.pablo")

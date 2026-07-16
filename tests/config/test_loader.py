@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 
 class TestSaveConfigYamlDumper:
     """save_config uses a local Dumper subclass, not the global yaml.Dumper."""
@@ -154,8 +156,8 @@ class TestReactionDefaultSentinel:
         for key in ("initiation", "polymerization", "termination"):
             assert result["reactions"][key] == "default"
 
-    def test_schema_resolves_default_to_bundled_paths(self):
-        """ReactionConfig must resolve 'default' to real .rxn file paths."""
+    def test_schema_preserves_default_markers(self):
+        """ReactionConfig must preserve native default markers."""
         from polyzymd.config.schema import ReactionConfig
 
         cfg = ReactionConfig(
@@ -163,12 +165,9 @@ class TestReactionDefaultSentinel:
             polymerization="default",
             termination="default",
         )
-        assert cfg.initiation.suffix == ".rxn"
-        assert cfg.polymerization.suffix == ".rxn"
-        assert cfg.termination.suffix == ".rxn"
-        assert cfg.initiation.exists()
-        assert cfg.polymerization.exists()
-        assert cfg.termination.exists()
+        assert cfg.initiation == "default"
+        assert cfg.polymerization == "default"
+        assert cfg.termination == "default"
 
     def test_expand_then_validate_default_end_to_end(self):
         """Simulate the full load path: _expand_paths then model_validate."""
@@ -183,7 +182,18 @@ class TestReactionDefaultSentinel:
         expanded = _expand_paths({"reactions": raw}, Path("/any/base/dir"))
         cfg = ReactionConfig.model_validate(expanded["reactions"])
         for field in ("initiation", "polymerization", "termination"):
-            path = getattr(cfg, field)
-            assert path.suffix == ".rxn"
-            assert "atrp" in path.name
-            assert path.exists()
+            assert getattr(cfg, field) == "default"
+
+    def test_custom_rxn_validate_end_to_end_rejects(self):
+        """Custom reaction paths expanded by the loader should still be rejected."""
+        from polyzymd.config.loader import _expand_paths
+        from polyzymd.config.schema import ReactionConfig
+
+        raw = {
+            "initiation": "custom_init.rxn",
+            "polymerization": "custom_poly.rxn",
+            "termination": "custom_term.rxn",
+        }
+        expanded = _expand_paths({"reactions": raw}, Path("/any/base/dir"))
+        with pytest.raises(ValueError, match="provided_molecules"):
+            ReactionConfig.model_validate(expanded["reactions"])

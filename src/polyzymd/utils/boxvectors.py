@@ -201,8 +201,7 @@ def get_box_volume(
             Each row represents one box vector [a, b, c].
         units_as_openmm: If True, return volume with OpenMM units.
             If False (default), return with OpenFF units.
-            Note: This parameter is named for API compatibility with
-            Polymerist but the actual return type is always OpenFF Quantity.
+            Note: The actual return type is always OpenFF Quantity.
 
     Returns:
         The box volume with appropriate cubic length units.

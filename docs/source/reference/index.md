@@ -46,6 +46,13 @@ Lookup fields for covalent modifications and polymer conjugation.
 Which conjugation mechanisms are planned, wired, executable, or validated.
 :::
 
+:::{grid-item-card} mBuild to OpenFF Polymer Adapter
+:link: polymer_mbuild_openff
+:link-type: doc
+
+Current adapter scope for atomistic mBuild compounds and OpenFF polymer fragments.
+:::
+
 :::{grid-item-card} Analysis Plugin Reference
 :link: analysis_plugin_settings
 :link-type: doc
@@ -79,6 +86,7 @@ Configuration Reference <configuration>
 
 Protein Modification Config Reference <protein_modification_config>
 Conjugation Support Matrix <conjugation_support_matrix>
+mBuild to OpenFF Polymer Adapter <polymer_mbuild_openff>
 Data Requirements & Directory Layout <data_requirements>
 OpenFF PDB Ingestion Reference <openff_pdb_ingestion>
 Benchmarks <benchmarks>

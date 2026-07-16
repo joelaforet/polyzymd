@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from openff.toolkit import Molecule
 
 
-# Default NAGL model - using rc.3 to match Polymerist
+# Default NAGL model
 # TODO: Update to production model "openff-gnn-am1bcc-1.0.0.pt" when ready
 #       (requires openff-nagl-models >= v2025.09.0)
 DEFAULT_NAGL_MODEL = "openff-gnn-am1bcc-0.1.0-rc.3.pt"

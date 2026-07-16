@@ -139,7 +139,7 @@ not a chemistry executor by itself. It answers questions like:
 ### Moiety Builder
 
 The moiety builder creates or loads the object that will be attached. Current
-polymer work uses Polymerist to generate polymer fragments. Future builders may
+polymer work uses native recipes or explicit PDB/SDF fragment sources. Future builders may
 load glycans from curated PDB/SDF files, create PEG chains, or replace one amino
 acid residue with a modified residue template.
 

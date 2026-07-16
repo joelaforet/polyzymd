@@ -93,7 +93,7 @@ conjugation/
 ├── polymer/                 # modifier/polymer recipe and fragment helpers
 │   ├── recipe.py
 │   ├── fragment.py
-│   └── polymerist.py
+│   └── pdb_fragment.py
 ├── placement.py             # Packmol/geometric placement
 ├── pablo/                   # Pablo/OpenFF integration boundary
 │   ├── ingestion.py         # Pablo ingestion boundary

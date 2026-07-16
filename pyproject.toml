@@ -75,9 +75,8 @@ analysis = [
     "seaborn>=0.13",
 ]
 
-# Polymer building (polymerist integration)
+# Polymer building utilities
 polymers = [
-    "polymerist>=1.1.0",
     "networkx>=3.0",
     "anytree>=2.8.0",
 ]

@@ -76,6 +76,9 @@ polyzymd init -n <project_name>
 ├── structures/              <- Add your PDB/SDF files here
 │   ├── place_protein_here.placeholder.txt
 │   └── place_ligand_here.placeholder.txt
+├── notebooks/               <- Offline CGSmiles polymer authoring scaffold
+│   └── cgsmiles_polymer_scaffold.ipynb
+├── generated_molecules/     <- Charged SDF outputs from the notebook
 ├── job_scripts/             <- Generated SLURM scripts go here
 └── slurm_logs/              <- SLURM output logs go here
 ```
@@ -106,6 +109,8 @@ polyzymd validate -c config.yaml
 - The command will fail if the directory already exists
 - The template `config.yaml` has all sections commented out with example values
 - Uncomment and modify only the sections you need
+- The CGSmiles notebook is optional and offline. It writes charged SDFs plus a
+  `provided_molecules` YAML snippet; `polyzymd build` does not execute CGSmiles.
 
 ---
 
