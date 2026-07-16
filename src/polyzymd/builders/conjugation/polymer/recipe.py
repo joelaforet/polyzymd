@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,10 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from polyzymd.builders.conjugation.structure.parsing import pdb_has_conect_records
 
 DEFAULT_PROBABILITY_TOLERANCE = 1.0e-6
+LEGACY_POLYMERIST_WARNING = (
+    "Custom polymer .rxn workflows still use the legacy Polymerist backend; this backend is "
+    "deprecated and will be replaced by native recipe implementations in a future release."
+)
 
 
 class PolymerMonomerRecipe(BaseModel):
@@ -252,6 +257,7 @@ def generate_multi_residue_molecule(
     recipe: PolymerRecipe,
     cache_directory: Path | str,
     *,
+    reaction_paths: dict[str, Path] | None = None,
     force_regenerate: bool = False,
     max_retries: int = 3,
     energy_minimize: bool = True,
@@ -268,6 +274,10 @@ def generate_multi_residue_molecule(
         Validated polymer recipe containing monomer SMILES and probabilities.
     cache_directory : pathlib.Path or str
         Directory for generated fragment and polymer PDB cache files.
+    reaction_paths : dict[str, pathlib.Path] or None, optional
+        Explicit reaction paths for custom legacy workflows. ``None`` selects
+        bundled defaults and routes to native methacrylate generation, by default
+        ``None``.
     force_regenerate : bool, optional
         Rebuild cached backend fragments when possible, by default ``False``.
     max_retries : int, optional
@@ -281,18 +291,46 @@ def generate_multi_residue_molecule(
     MultiResidueGenerationResult
         Summary with generated sequence, cache paths, and object metadata.
     """
-    from polyzymd.builders.fragment_generator import FragmentGenerator
-    from polyzymd.builders.polymer_generator import PolymerGenerator
-    from polyzymd.data.reactions import get_atrp_reaction_paths
+    from polyzymd.builders.conjugation.polymer.native import generate_native_methacrylate_polymer
+    from polyzymd.data.reactions import get_atrp_reaction_paths, is_default_atrp_reaction_set
 
     cache_path = Path(cache_directory)
     cache_path.mkdir(parents=True, exist_ok=True)
-    reaction_paths = get_atrp_reaction_paths()
+    resolved_reaction_paths = reaction_paths or get_atrp_reaction_paths()
+
+    if is_default_atrp_reaction_set(
+        resolved_reaction_paths["initiation"],
+        resolved_reaction_paths["polymerization"],
+        resolved_reaction_paths["termination"],
+    ):
+        native_result = generate_native_methacrylate_polymer(
+            recipe,
+            cache_path,
+            force_regenerate=force_regenerate,
+        )
+        return MultiResidueGenerationResult(
+            backend="native-methacrylate",
+            recipe_name=recipe.name,
+            sequence=native_result.sequence,
+            cache_directory=native_result.paths.pdb_path.parent,
+            monomer_group_path=native_result.paths.pdb_path.parent,
+            pdb_path=native_result.paths.pdb_path,
+            sdf_path=native_result.paths.sdf_path,
+            charged_sdf_path=native_result.paths.charged_sdf_path,
+            object_type=type(native_result.compound).__name__,
+            atom_count=native_result.molecule.n_atoms,
+            rdkit_mol=native_result.molecule.to_rdkit(),
+        )
+
+    warnings.warn(LEGACY_POLYMERIST_WARNING, DeprecationWarning, stacklevel=2)
+
+    from polyzymd.builders.fragment_generator import FragmentGenerator
+    from polyzymd.builders.polymer_generator import PolymerGenerator
 
     fragment_generator = FragmentGenerator(
-        initiation_rxn_path=reaction_paths["initiation"],
-        polymerization_rxn_path=reaction_paths["polymerization"],
-        termination_rxn_path=reaction_paths["termination"],
+        initiation_rxn_path=resolved_reaction_paths["initiation"],
+        polymerization_rxn_path=resolved_reaction_paths["polymerization"],
+        termination_rxn_path=resolved_reaction_paths["termination"],
         cache_directory=cache_path,
     )
     monomer_group = fragment_generator.load_or_generate(

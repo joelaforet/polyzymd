@@ -261,16 +261,16 @@ conjugation:
 
 
 def test_real_multi_residue_recipe_generation(tmp_path):
-    """The backend should consume the real SBMA/EGPMA/NHS recipe when installed."""
+    """The native backend should consume the real SBMA/EGPMA/NHS recipe."""
     recipe = sbma_egpma_nhs_recipe(length=3, seed=5, reactive_monomer_index=1)
 
     try:
-        result = generate_multi_residue_molecule(recipe, tmp_path / "polymerist", max_retries=1)
+        result = generate_multi_residue_molecule(recipe, tmp_path / "native", max_retries=1)
     except Exception as exc:
-        pytest.skip(f"Polymerist generation stack unavailable in this environment: {exc}")
+        pytest.skip(f"Native methacrylate generation stack unavailable in this environment: {exc}")
 
     assert result.sequence[1] == "C"
-    assert result.backend == "polymerist"
+    assert result.backend == "native-methacrylate"
     assert result.monomer_group_path.exists()
     assert result.pdb_path is not None and result.pdb_path.exists()
     assert result.pdb_path.with_suffix(".sdf").exists()
@@ -354,12 +354,23 @@ def test_generate_multi_residue_molecule_returns_pdb_aligned_rdkit_sidecar(
         "polymerization": tmp_path / "polymerization.rxn",
         "termination": tmp_path / "termination.rxn",
     }
+    fake_reactions_module.is_default_atrp_reaction_set = lambda *_args: False
     monkeypatch.setitem(sys.modules, "polyzymd.builders.fragment_generator", fake_fragment_module)
     monkeypatch.setitem(sys.modules, "polyzymd.builders.polymer_generator", fake_polymer_module)
     monkeypatch.setitem(sys.modules, "polyzymd.data.reactions", fake_reactions_module)
 
     recipe = sbma_nhs_egpma_acb_recipe()
-    result = generate_multi_residue_molecule(recipe, tmp_path / "cache")
+    custom_reactions = {
+        "initiation": tmp_path / "custom_initiation.rxn",
+        "polymerization": tmp_path / "custom_polymerization.rxn",
+        "termination": tmp_path / "custom_termination.rxn",
+    }
+    with pytest.warns(DeprecationWarning, match="legacy Polymerist backend"):
+        result = generate_multi_residue_molecule(
+            recipe,
+            tmp_path / "cache",
+            reaction_paths=custom_reactions,
+        )
     Chem = pytest.importorskip("rdkit.Chem")
     sidecar_mols = [
         mol

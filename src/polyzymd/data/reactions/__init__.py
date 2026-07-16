@@ -62,3 +62,70 @@ def get_atrp_polymerization_path() -> Path:
 def get_atrp_termination_path() -> Path:
     """Get path to ATRP termination reaction template."""
     return _REACTIONS_DIR / "atrp_termination.rxn"
+
+
+def is_default_atrp_reaction_set(
+    initiation: Path | str,
+    polymerization: Path | str,
+    termination: Path | str,
+) -> bool:
+    """Return whether paths are the bundled default ATRP reaction set.
+
+    Parameters
+    ----------
+    initiation : pathlib.Path or str
+        Candidate initiation reaction path.
+    polymerization : pathlib.Path or str
+        Candidate polymerization reaction path.
+    termination : pathlib.Path or str
+        Candidate termination reaction path.
+
+    Returns
+    -------
+    bool
+        ``True`` when all three paths resolve to the bundled defaults.
+    """
+    defaults = get_atrp_reaction_paths()
+    candidates = {
+        "initiation": _normalize_reaction_candidate(
+            initiation, role="initiation", defaults=defaults
+        ),
+        "polymerization": _normalize_reaction_candidate(
+            polymerization,
+            role="polymerization",
+            defaults=defaults,
+        ),
+        "termination": _normalize_reaction_candidate(
+            termination, role="termination", defaults=defaults
+        ),
+    }
+    return all(candidates[key].resolve() == defaults[key].resolve() for key in defaults)
+
+
+def _normalize_reaction_candidate(
+    candidate: Path | str,
+    *,
+    role: str,
+    defaults: Dict[str, Path],
+) -> Path:
+    """Normalize a reaction candidate before default-set comparison.
+
+    Parameters
+    ----------
+    candidate : pathlib.Path or str
+        Candidate reaction path or literal default token.
+    role : str
+        Reaction role used to select the packaged default path.
+    defaults : dict[str, pathlib.Path]
+        Packaged default reaction paths by role.
+
+    Returns
+    -------
+    pathlib.Path
+        Packaged default path for literal ``default`` candidates, otherwise the
+        candidate converted to a path.
+    """
+    text = str(candidate).strip()
+    if text.lower() == "default":
+        return defaults[role]
+    return Path(candidate)

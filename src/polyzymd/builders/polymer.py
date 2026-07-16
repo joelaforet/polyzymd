@@ -3,11 +3,12 @@ Builder for polymer components.
 
 This module handles random co-polymer sequence generation, loading pre-built
 polymer structures from SDF files, and optionally generating new polymers
-using Polymerist when cached structures are not available.
+using the native bundled methacrylate generator or legacy Polymerist custom
+reaction workflows when cached structures are not available.
 
 Supports two generation modes:
 - Cached: Load pre-built SDF files from disk
-- Dynamic: Generate polymers on-the-fly using Polymerist from raw monomer SMILES
+- Dynamic: Generate default methacrylate polymers natively from raw monomer SMILES
 
 Made by PolyzyMD, by Joseph R. Laforet Jr.
 """
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import random
+import warnings
 from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
@@ -26,6 +28,11 @@ if TYPE_CHECKING:
     from polyzymd.config.schema import MonomerSpec, PolymerConfig, ReactionConfig
 
 LOGGER = logging.getLogger(__name__)
+
+LEGACY_POLYMERIST_WARNING = (
+    "Custom polymer .rxn workflows still use the legacy Polymerist backend; this backend is "
+    "deprecated and will be replaced by native recipe implementations in a future release."
+)
 
 
 def canonical_sequence(sequence: str) -> str:
@@ -81,9 +88,11 @@ class PolymerBuilder:
        - Requires sdf_directory with pre-built polymer files
        - Filenames: {type_prefix}_seq={sequence}_{length}-mer_charged.sdf
 
-    2. Dynamic mode: Generate polymers on-the-fly using Polymerist
+    2. Dynamic mode: Generate polymers on-the-fly
        - Requires monomer SMILES and ATRP reaction templates
-       - Automatically generates fragments, builds chains, assigns charges
+       - Uses native bundled methacrylate chemistry for default reactions
+       - Uses deprecated Polymerist routing only for custom .rxn reactions
+       - Automatically builds chains, assigns charges, and caches results
        - Caches results for subsequent runs
 
     Example (cached mode):
@@ -360,7 +369,13 @@ class PolymerBuilder:
             if sdf_path.exists():
                 return self._load_from_sdf(sdf_path)
 
-        # Try to load from cache directory (checked in ALL modes)
+        if self._generation_mode == "dynamic" and self._uses_native_methacrylate_backend():
+            native_cache_path = self._native_artifact_paths(sequence).charged_sdf_path
+            if native_cache_path.exists():
+                return self._load_from_sdf(native_cache_path)
+            return self._generate_polymer(sequence)
+
+        # Try to load from cache directory (checked in ALL legacy modes)
         cache_path = self._get_sdf_path(sequence, self._cache_directory)
         if cache_path.exists():
             return self._load_from_sdf(cache_path)
@@ -421,10 +436,10 @@ class PolymerBuilder:
         return molecule
 
     def _generate_polymer(self, sequence: str) -> Molecule:
-        """Generate a polymer molecule using Polymerist.
+        """Generate a polymer molecule using native or legacy dynamic routing.
 
-        For dynamic mode, this uses FragmentGenerator and PolymerGenerator
-        to build polymer structures from raw monomer SMILES.
+        Default bundled reactions use the native methacrylate backend. Custom
+        ``.rxn`` workflows use the deprecated Polymerist backend.
 
         Args:
             sequence: Canonical polymer sequence.
@@ -442,6 +457,11 @@ class PolymerBuilder:
                 f"Either provide pre-built SDF files or switch to dynamic generation mode."
             )
 
+        if self._uses_native_methacrylate_backend():
+            return self._generate_native_methacrylate_polymer(sequence)
+
+        warnings.warn(LEGACY_POLYMERIST_WARNING, DeprecationWarning, stacklevel=2)
+
         # Ensure generators are initialized
         self._ensure_generators_initialized()
 
@@ -454,6 +474,77 @@ class PolymerBuilder:
         )
 
         return mol
+
+    def _generate_native_methacrylate_polymer(self, sequence: str) -> Molecule:
+        """Generate a dynamic default polymer with the native methacrylate recipe.
+
+        Args:
+            sequence: Canonical polymer sequence.
+
+        Returns:
+            OpenFF Molecule for the charged polymer.
+        """
+        from polyzymd.builders.conjugation.polymer.native import (
+            generate_native_methacrylate_polymer,
+        )
+
+        recipe = self._native_recipe(sequence)
+        result = generate_native_methacrylate_polymer(
+            recipe,
+            self._cache_directory,
+            sequence=sequence,
+            charger_type=self._charger_type,
+        )
+        return result.charged_molecule
+
+    def _native_recipe(self, sequence: str):
+        """Return a native PolymerRecipe for the current dynamic builder state."""
+        from polyzymd.builders.conjugation.polymer.recipe import (
+            PolymerMonomerRecipe,
+            PolymerRecipe,
+        )
+
+        monomers = []
+        for label in self._characters:
+            monomer_name = self._monomer_names[label]
+            monomers.append(
+                PolymerMonomerRecipe(
+                    label=label,
+                    name=monomer_name,
+                    residue_name=self._residue_names.get(monomer_name, monomer_name[:3].upper()),
+                    smiles=self._monomer_smiles[monomer_name],
+                    probability=self._probabilities[self._characters.index(label)],
+                )
+            )
+        return PolymerRecipe(
+            name=self._type_prefix,
+            monomers=tuple(monomers),
+            length=self._length,
+            fixed_sequence=sequence,
+        )
+
+    def _uses_native_methacrylate_backend(self) -> bool:
+        """Return whether dynamic generation should use the bundled native backend."""
+        if self._generation_mode != "dynamic" or self._reactions is None:
+            return False
+        from polyzymd.data.reactions import is_default_atrp_reaction_set
+
+        return is_default_atrp_reaction_set(
+            self._reactions.initiation,
+            self._reactions.polymerization,
+            self._reactions.termination,
+        )
+
+    def _native_artifact_paths(self, sequence: str):
+        """Return centralized native artifact paths for a dynamic sequence."""
+        from polyzymd.builders.conjugation.polymer.native import native_artifact_paths
+
+        return native_artifact_paths(
+            self._native_recipe(sequence),
+            sequence,
+            self._cache_directory,
+            charger_type=self._charger_type,
+        )
 
     def _ensure_generators_initialized(self) -> None:
         """Lazy-initialize FragmentGenerator and PolymerGenerator.
