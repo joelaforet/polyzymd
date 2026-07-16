@@ -36,6 +36,15 @@
    :show-inheritance:
 ```
 
+## Conjugation Polymer Adapters
+
+```{eval-rst}
+.. automodule:: polyzymd.builders.conjugation.polymer.mbuild
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
 ## Solvent Builder
 
 ```{eval-rst}

@@ -1,0 +1,187 @@
+
+     RDKit          3D
+
+ 88 89  0  0  0  0  0  0  0  0999 V2000
+   -3.1700    0.2390    1.1590 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.5730   -0.2390   -0.1880 C   0  0  1  0  0  0  0  0  0  0  0  0
+   -3.3810    0.3190   -1.3760 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -4.4290   -0.0470   -1.3350 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.9360   -0.0090   -2.3410 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.4030    1.4290   -1.3690 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.1390    0.2870   -0.2930 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.9610    1.4950   -0.3570 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.0820   -0.5660   -0.4110 O   0  0  0  0  0  0  0  0  0  0  0  0
+    1.2040   -0.2300   -0.3560 N   0  0  0  0  0  0  0  0  0  0  0  0
+    1.7670    0.7940    0.3250 C   0  0  0  0  0  0  0  0  0  0  0  0
+    1.1470    1.5680    1.0360 O   0  0  0  0  0  0  0  0  0  0  0  0
+    3.2510    0.8520    0.1470 C   0  0  0  0  0  0  0  0  0  0  0  0
+    3.5410    1.8090   -0.3370 H   0  0  0  0  0  0  0  0  0  0  0  0
+    3.7620    0.7430    1.1260 H   0  0  0  0  0  0  0  0  0  0  0  0
+    3.5310   -0.3590   -0.7640 C   0  0  0  0  0  0  0  0  0  0  0  0
+    4.1760   -1.1070   -0.2570 H   0  0  0  0  0  0  0  0  0  0  0  0
+    3.9790   -0.0440   -1.7310 H   0  0  0  0  0  0  0  0  0  0  0  0
+    2.1630   -0.9270   -0.9800 C   0  0  0  0  0  0  0  0  0  0  0  0
+    1.9330   -1.9170   -1.6570 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.6220   -0.3320    1.8910 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -4.2520    0.0230    1.1650 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.0590    1.6850    1.5600 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.6510    2.1500    2.7810 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.6920    3.6490    2.9950 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.0260    4.2090    2.0960 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.4000    3.8820    3.8190 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.6810    4.0140    3.2730 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.2180    1.3290    3.9830 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.0060    1.9300    5.0300 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.0750   -0.0300    3.9750 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.9490   -0.7870    5.1320 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.7450   -2.3010    4.8750 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.4550   -2.7550    4.2450 N   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.4310   -2.4380    2.8000 C   0  0  0  0  0  0  0  0  0  0  0  0
+    0.4610   -2.8860    2.3080 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.4540   -1.3490    2.6080 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.3080   -2.8800    2.2920 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.4510   -4.2430    4.3470 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.4570   -4.5770    5.4100 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.4550   -4.6820    3.8690 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.3390   -4.6930    3.8460 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.7500   -2.2520    4.9960 C   0  0  0  0  0  0  0  0  0  0  0  0
+    1.3340   -0.8660    4.5890 C   0  0  0  0  0  0  0  0  0  0  0  0
+    2.3010   -0.8410    3.3860 C   0  0  0  0  0  0  0  0  0  0  0  0
+    3.9050   -1.6550    3.7210 S   0  0  0  0  0  6  0  0  0  0  0  0
+    3.7250   -3.3400    3.9920 O   0  0  0  0  0  0  0  0  0  0  0  0
+    4.9090   -1.4120    2.3510 O   0  0  0  0  0  0  0  0  0  0  0  0
+    4.6030   -0.8920    5.0910 O   0  0  0  0  0  0  0  0  0  0  0  0
+    1.8700   -1.2340    2.4510 H   0  0  0  0  0  0  0  0  0  0  0  0
+    2.5440    0.2230    3.1910 H   0  0  0  0  0  0  0  0  0  0  0  0
+    1.9210   -0.4790    5.4490 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.5240   -0.1390    4.4070 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.4780   -2.1930    6.0740 H   0  0  0  0  0  0  0  0  0  0  0  0
+    1.5840   -2.9780    4.9770 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.8280   -2.7640    5.8870 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.6150   -2.6920    4.3060 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.1420   -0.3980    5.7840 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.8950   -0.6770    5.7060 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.4040    2.4010    0.8200 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.5750   -1.7910   -0.2990 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.1720   -2.7530    0.4840 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -4.1250   -2.4940    1.6480 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -4.5240   -3.4250    2.0980 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.6680   -1.9710    2.4960 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -5.0240   -1.9630    1.2790 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.9090   -4.1960    0.2130 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.1410   -5.0040    1.1040 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.4120   -4.6370   -0.9770 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.3090   -5.9880   -1.2860 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.6990   -6.6490   -1.3050 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.5980   -8.0190   -1.4380 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -4.6380   -8.8820   -1.2650 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -5.9550   -8.4430   -0.9850 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -6.1980   -7.3920   -0.9160 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -6.9810   -9.3700   -0.7840 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -7.9820   -9.0230   -0.5650 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -6.7130  -10.7360   -0.8580 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -7.5110  -11.4510   -0.6960 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -5.4190  -11.1820   -1.1360 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -5.2130  -12.2420   -1.1890 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -4.3860  -10.2570   -1.3390 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -3.3850  -10.6150   -1.5430 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -4.3220   -6.2210   -2.1200 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -4.2060   -6.4520   -0.3420 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.6650   -6.4850   -0.5260 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.8270   -6.1100   -2.2790 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.9750   -2.1590   -1.1290 H   0  0  0  0  0  0  0  0  0  0  0  0
+  2  1  1  1
+  1 21  1  0
+  1 22  1  0
+  1 23  1  0
+  2  3  1  0
+  2  7  1  0
+  2 61  1  0
+  3  4  1  0
+  3  5  1  0
+  3  6  1  0
+  7  8  2  0
+  7  9  1  0
+  9 10  1  0
+ 10 11  1  0
+ 10 19  1  0
+ 11 12  2  0
+ 11 13  1  0
+ 13 14  1  0
+ 13 15  1  0
+ 13 16  1  0
+ 16 17  1  0
+ 16 18  1  0
+ 16 19  1  0
+ 19 20  2  0
+ 23 24  2  0
+ 23 60  1  0
+ 24 25  1  0
+ 24 29  1  0
+ 25 26  1  0
+ 25 27  1  0
+ 25 28  1  0
+ 29 30  2  0
+ 29 31  1  0
+ 31 32  1  0
+ 32 33  1  0
+ 32 58  1  0
+ 32 59  1  0
+ 33 34  1  0
+ 33 56  1  0
+ 33 57  1  0
+ 34 35  1  0
+ 34 39  1  0
+ 34 43  1  0
+ 35 36  1  0
+ 35 37  1  0
+ 35 38  1  0
+ 39 40  1  0
+ 39 41  1  0
+ 39 42  1  0
+ 43 44  1  0
+ 43 54  1  0
+ 43 55  1  0
+ 44 45  1  0
+ 44 52  1  0
+ 44 53  1  0
+ 45 46  1  0
+ 45 50  1  0
+ 45 51  1  0
+ 46 47  2  0
+ 46 48  2  0
+ 46 49  1  0
+ 61 62  2  0
+ 61 88  1  0
+ 62 63  1  0
+ 62 67  1  0
+ 63 64  1  0
+ 63 65  1  0
+ 63 66  1  0
+ 67 68  2  0
+ 67 69  1  0
+ 69 70  1  0
+ 70 71  1  0
+ 70 86  1  0
+ 70 87  1  0
+ 71 72  1  0
+ 71 84  1  0
+ 71 85  1  0
+ 72 73  1  0
+ 73 74  2  0
+ 73 82  1  0
+ 74 75  1  0
+ 74 76  1  0
+ 76 77  1  0
+ 76 78  2  0
+ 78 79  1  0
+ 78 80  1  0
+ 80 81  1  0
+ 80 82  2  0
+ 82 83  1  0
+M  CHG  2  34   1  49  -1
+M  END
+>  <metadata>  (1) 
+{0: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 1]}', 'substructure_query_id': 1, 'extended_name': 'NHS_2-site'}, 1: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 2]}', 'substructure_query_id': 2, 'extended_name': 'NHS_2-site'}, 2: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 4]}', 'substructure_query_id': 4, 'extended_name': 'NHS_2-site'}, 3: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 5]}', 'substructure_query_id': 5, 'extended_name': 'NHS_2-site'}, 4: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 6]}', 'substructure_query_id': 6, 'extended_name': 'NHS_2-site'}, 5: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 7]}', 'substructure_query_id': 7, 'extended_name': 'NHS_2-site'}, 6: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 8]}', 'substructure_query_id': 8, 'extended_name': 'NHS_2-site'}, 7: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 9]}', 'substructure_query_id': 9, 'extended_name': 'NHS_2-site'}, 8: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 10]}', 'substructure_query_id': 10, 'extended_name': 'NHS_2-site'}, 9: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 11]}', 'substructure_query_id': 11, 'extended_name': 'NHS_2-site'}, 10: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 12]}', 'substructure_query_id': 12, 'extended_name': 'NHS_2-site'}, 11: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 13]}', 'substructure_query_id': 13, 'extended_name': 'NHS_2-site'}, 12: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 14]}', 'substructure_query_id': 14, 'extended_name': 'NHS_2-site'}, 13: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 15]}', 'substructure_query_id': 15, 'extended_name': 'NHS_2-site'}, 14: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 16]}', 'substructure_query_id': 16, 'extended_name': 'NHS_2-site'}, 15: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 17]}', 'substructure_query_id': 17, 'extended_name': 'NHS_2-site'}, 16: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 18]}', 'substructure_query_id': 18, 'extended_name': 'NHS_2-site'}, 17: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 19]}', 'substructure_query_id': 19, 'extended_name': 'NHS_2-site'}, 18: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 20]}', 'substructure_query_id': 20, 'extended_name': 'NHS_2-site'}, 19: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 21]}', 'substructure_query_id': 21, 'extended_name': 'NHS_2-site'}, 20: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 22]}', 'substructure_query_id': 22, 'extended_name': 'NHS_2-site'}, 21: {'residue_name': 'NHS', 'residue_number': 1, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"1": ["NHS_2-site", 23]}', 'substructure_query_id': 23, 'extended_name': 'NHS_2-site'}, 22: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 1]}', 'substructure_query_id': 1, 'extended_name': 'SBMA_1-site'}, 23: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 2]}', 'substructure_query_id': 2, 'extended_name': 'SBMA_1-site'}, 24: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 3]}', 'substructure_query_id': 3, 'extended_name': 'SBMA_1-site'}, 25: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 4]}', 'substructure_query_id': 4, 'extended_name': 'SBMA_1-site'}, 26: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 5]}', 'substructure_query_id': 5, 'extended_name': 'SBMA_1-site'}, 27: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 6]}', 'substructure_query_id': 6, 'extended_name': 'SBMA_1-site'}, 28: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 7]}', 'substructure_query_id': 7, 'extended_name': 'SBMA_1-site'}, 29: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 8]}', 'substructure_query_id': 8, 'extended_name': 'SBMA_1-site'}, 30: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 9]}', 'substructure_query_id': 9, 'extended_name': 'SBMA_1-site'}, 31: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 10]}', 'substructure_query_id': 10, 'extended_name': 'SBMA_1-site'}, 32: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 11]}', 'substructure_query_id': 11, 'extended_name': 'SBMA_1-site'}, 33: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 12]}', 'substructure_query_id': 12, 'extended_name': 'SBMA_1-site'}, 34: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 13]}', 'substructure_query_id': 13, 'extended_name': 'SBMA_1-site'}, 35: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 14]}', 'substructure_query_id': 14, 'extended_name': 'SBMA_1-site'}, 36: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 15]}', 'substructure_query_id': 15, 'extended_name': 'SBMA_1-site'}, 37: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 16]}', 'substructure_query_id': 16, 'extended_name': 'SBMA_1-site'}, 38: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 17]}', 'substructure_query_id': 17, 'extended_name': 'SBMA_1-site'}, 39: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 18]}', 'substructure_query_id': 18, 'extended_name': 'SBMA_1-site'}, 40: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 19]}', 'substructure_query_id': 19, 'extended_name': 'SBMA_1-site'}, 41: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 20]}', 'substructure_query_id': 20, 'extended_name': 'SBMA_1-site'}, 42: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 21]}', 'substructure_query_id': 21, 'extended_name': 'SBMA_1-site'}, 43: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 22]}', 'substructure_query_id': 22, 'extended_name': 'SBMA_1-site'}, 44: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 23]}', 'substructure_query_id': 23, 'extended_name': 'SBMA_1-site'}, 45: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 24]}', 'substructure_query_id': 24, 'extended_name': 'SBMA_1-site'}, 46: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 25]}', 'substructure_query_id': 25, 'extended_name': 'SBMA_1-site'}, 47: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 26]}', 'substructure_query_id': 26, 'extended_name': 'SBMA_1-site'}, 48: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 27]}', 'substructure_query_id': 27, 'extended_name': 'SBMA_1-site'}, 49: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 28]}', 'substructure_query_id': 28, 'extended_name': 'SBMA_1-site'}, 50: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 29]}', 'substructure_query_id': 29, 'extended_name': 'SBMA_1-site'}, 51: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 30]}', 'substructure_query_id': 30, 'extended_name': 'SBMA_1-site'}, 52: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 31]}', 'substructure_query_id': 31, 'extended_name': 'SBMA_1-site'}, 53: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 32]}', 'substructure_query_id': 32, 'extended_name': 'SBMA_1-site'}, 54: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 33]}', 'substructure_query_id': 33, 'extended_name': 'SBMA_1-site'}, 55: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 34]}', 'substructure_query_id': 34, 'extended_name': 'SBMA_1-site'}, 56: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 35]}', 'substructure_query_id': 35, 'extended_name': 'SBMA_1-site'}, 57: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 36]}', 'substructure_query_id': 36, 'extended_name': 'SBMA_1-site'}, 58: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 37]}', 'substructure_query_id': 37, 'extended_name': 'SBMA_1-site'}, 59: {'residue_name': 'SBM', 'residue_number': 0, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"0": ["SBMA_1-site", 38]}', 'substructure_query_id': 38, 'extended_name': 'SBMA_1-site'}, 60: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 1]}', 'substructure_query_id': 1, 'extended_name': 'EGPMA_1-site'}, 61: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 2]}', 'substructure_query_id': 2, 'extended_name': 'EGPMA_1-site'}, 62: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 3]}', 'substructure_query_id': 3, 'extended_name': 'EGPMA_1-site'}, 63: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 4]}', 'substructure_query_id': 4, 'extended_name': 'EGPMA_1-site'}, 64: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 5]}', 'substructure_query_id': 5, 'extended_name': 'EGPMA_1-site'}, 65: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 6]}', 'substructure_query_id': 6, 'extended_name': 'EGPMA_1-site'}, 66: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 7]}', 'substructure_query_id': 7, 'extended_name': 'EGPMA_1-site'}, 67: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 8]}', 'substructure_query_id': 8, 'extended_name': 'EGPMA_1-site'}, 68: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 9]}', 'substructure_query_id': 9, 'extended_name': 'EGPMA_1-site'}, 69: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 10]}', 'substructure_query_id': 10, 'extended_name': 'EGPMA_1-site'}, 70: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 11]}', 'substructure_query_id': 11, 'extended_name': 'EGPMA_1-site'}, 71: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 12]}', 'substructure_query_id': 12, 'extended_name': 'EGPMA_1-site'}, 72: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 13]}', 'substructure_query_id': 13, 'extended_name': 'EGPMA_1-site'}, 73: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 14]}', 'substructure_query_id': 14, 'extended_name': 'EGPMA_1-site'}, 74: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 15]}', 'substructure_query_id': 15, 'extended_name': 'EGPMA_1-site'}, 75: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 16]}', 'substructure_query_id': 16, 'extended_name': 'EGPMA_1-site'}, 76: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 17]}', 'substructure_query_id': 17, 'extended_name': 'EGPMA_1-site'}, 77: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 18]}', 'substructure_query_id': 18, 'extended_name': 'EGPMA_1-site'}, 78: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 19]}', 'substructure_query_id': 19, 'extended_name': 'EGPMA_1-site'}, 79: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 20]}', 'substructure_query_id': 20, 'extended_name': 'EGPMA_1-site'}, 80: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 21]}', 'substructure_query_id': 21, 'extended_name': 'EGPMA_1-site'}, 81: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 22]}', 'substructure_query_id': 22, 'extended_name': 'EGPMA_1-site'}, 82: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 23]}', 'substructure_query_id': 23, 'extended_name': 'EGPMA_1-site'}, 83: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 24]}', 'substructure_query_id': 24, 'extended_name': 'EGPMA_1-site'}, 84: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 25]}', 'substructure_query_id': 25, 'extended_name': 'EGPMA_1-site'}, 85: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 26]}', 'substructure_query_id': 26, 'extended_name': 'EGPMA_1-site'}, 86: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 27]}', 'substructure_query_id': 27, 'extended_name': 'EGPMA_1-site'}, 87: {'residue_name': 'EGP', 'residue_number': 2, 'insertion_code': ' ', 'chain_id': '1', 'match_info': '{"2": ["EGPMA_1-site", 28]}', 'substructure_query_id': 28, 'extended_name': 'EGPMA_1-site'}}
+
+$$$$
