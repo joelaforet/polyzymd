@@ -1,6 +1,7 @@
 # Dynamic Polymer Generation
 
-This guide explains how to generate polymer chains on-the-fly from raw monomer SMILES strings, eliminating the need for pre-built polymer SDF files.
+This guide explains how to generate linear methacrylate polymer chains
+on-the-fly from raw monomer SMILES strings.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -16,36 +17,36 @@ Alternatively, prefix each command with `pixi run -e build`.
 
 ## Overview
 
-PolyzyMD supports two modes for polymer generation:
+PolyzyMD supports generated polymers and explicit user-supplied molecule pools:
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
-| **Cached** (default) | Load pre-built polymers from SDF files | Reproducibility, specific sequences |
-| **Dynamic** | Generate polymers from monomer SMILES | Flexibility, new monomers, rapid prototyping |
+| **Dynamic** | Generate linear methacrylate polymers from monomer SMILES | Flexibility, new monomers, rapid prototyping |
+| **Fragments** | Assemble native linear explicit fragments from terminal/middle strings | Linear recipes where you provide fragment strings |
+| **Provided molecules** | Pack explicit charged SDF molecules through `provided_molecules` | Branched, dendrimer, nonlinear, or externally authored molecules |
+| **Cached** | Deprecated sequence-derived SDF filename libraries | Compatibility with old inventories only |
 
-Dynamic mode uses **ATRP (Atom-Transfer Radical Polymerization)** chemistry to:
-1. Activate raw monomer SMILES via initiation reactions
-2. Generate all possible polymer fragments
-3. Build complete polymer chains with proper termination
-4. Assign partial charges automatically
+Dynamic mode with the bundled `"default"` reactions uses PolyzyMD's native
+linear methacrylate backend to build, charge, and cache OpenFF molecules.
 
 ## When to Use Dynamic Mode
 
 **Use Dynamic Mode when:**
 - You want to test new monomer chemistries quickly
-- You don't have pre-built polymer SDF files
-- You want the system to handle fragment generation automatically
+- You want native linear methacrylate generation from monomer SMILES
+- You want PolyzyMD to charge and cache generated polymers automatically
 
-**Use Cached Mode when:**
-- You need exact reproducibility of polymer structures
-- You have validated, pre-built polymer SDFs
-- You're running production simulations with known good structures
+**Use `provided_molecules` when:**
+- You already have charged single-molecule SDFs
+- The molecule is branched, dendrimeric, nonlinear, or externally authored
+- You do not want PolyzyMD to regenerate or autocharge the molecule
 
 ---
 
 ## Quick Start
 
-Here's a minimal configuration for dynamic polymer generation:
+Configuration snippet for dynamic polymer generation; add the remaining required
+simulation sections from your project template:
 
 ```yaml
 name: "dynamic_polymer_test"
@@ -72,6 +73,10 @@ polymers:
   length: 5
   count: 2
   charger: "nagl"
+  reactions:
+    initiation: "default"
+    polymerization: "default"
+    termination: "default"
 
 # ... rest of configuration (solvent, thermodynamics, etc.)
 ```
@@ -89,27 +94,32 @@ polyzymd run-segment -c config.yaml -r 1
 
 ### Generation Mode
 
+Snippet:
+
 ```yaml
 polymers:
-  generation_mode: "dynamic"    # or "cached" (default)
+  generation_mode: "dynamic"
 ```
 
 | Value | Description |
 |-------|-------------|
-| `cached` | Load polymers from pre-built SDF files (default) |
-| `dynamic` | Generate polymers from monomer SMILES using ATRP chemistry |
+| `dynamic` | Generate linear methacrylate polymers from monomer SMILES with bundled default reactions |
+| `fragments` | Assemble native linear explicit fragments from `terminal` and `middle` strings |
+| `cached` | Deprecated sequence-derived SDF library compatibility mode |
 
 ### Monomer SMILES
 
 In dynamic mode, each monomer requires a `smiles` field:
 
+Snippet:
+
 ```yaml
 monomers:
   - label: "A"
     probability: 0.7
-    name: "SBMA"
-    smiles: "[H]C([H])=C(C(=O)..."    # Raw methacrylate SMILES
-    residue_name: "SBM"               # Optional: 3-letter residue name
+    name: "MMA"
+    smiles: "C=C(C)C(=O)OC"    # Raw methacrylate SMILES
+    residue_name: "MMA"        # Optional: 3-letter residue name
 ```
 
 | Field | Required | Description |
@@ -127,6 +137,8 @@ monomers:
 ### ATRP Reaction Configuration
 
 By default, PolyzyMD uses bundled ATRP reaction templates. You can also specify custom reaction files:
+
+Snippet:
 
 ```yaml
 polymers:
@@ -146,6 +158,8 @@ polymers:
 
 ### Charge Assignment
 
+Snippet:
+
 ```yaml
 polymers:
   charger: "nagl"    # Charge method for polymer atoms
@@ -160,6 +174,8 @@ polymers:
 ### Retry Configuration
 
 Dynamic generation may occasionally produce structures with ring-piercing artifacts. The system automatically retries:
+
+Snippet:
 
 ```yaml
 polymers:
@@ -295,23 +311,23 @@ output:
 
 ### Step 1: Fragment Generation
 
-When you run a simulation with `generation_mode: "dynamic"`, the system:
+When you run a simulation with `generation_mode: "dynamic"` and bundled
+`"default"` reactions, the native backend:
 
-1. **Loads raw monomer SMILES** from your configuration
-2. **Runs initiation reactions** to activate the monomers (chlorination for ATRP)
-3. **Runs polymerization reactions** to enumerate all possible fragments
-4. **Runs termination reactions** on 1-site fragments to restore terminal alkenes
-5. **Creates a MonomerGroup** with named fragments (e.g., `SBMA_2-site`, `SBMA_1-site`)
+1. **Loads raw methacrylate monomer SMILES** from your configuration
+2. **Generates a linear native recipe** for the requested sequence
+3. **Builds and validates OpenFF geometry**
+4. **Assigns partial charges** using the configured charger
+5. **Writes charged cache artifacts** under `cache_directory`
 
 ### Step 2: Polymer Building
 
 For each polymer chain:
 
 1. **Generate random sequence** based on monomer probabilities (e.g., "AABBA")
-2. **Set terminal orientations** (head/tail use 1-site fragments)
-3. **Build 3D structure** using Polymerist's `build_linear_polymer()`
-4. **Validate no ring-piercing** (retry if necessary)
-5. **Assign partial charges** using the configured charger
+2. **Build a native linear methacrylate structure** for that exact sequence
+3. **Validate geometry**
+4. **Assign partial charges** using the configured charger
 
 ### Step 3: Caching
 
@@ -319,9 +335,10 @@ Generated fragments and polymers are cached for reuse:
 
 ```
 .polymer_cache/
-├── SBMA-EGPMA_monomer_group.json     # Fragment definitions
-├── SBMA-EGPMA_AABBA_5-mer_charged.sdf  # Charged polymer structures
-└── ...
+├── native-methacrylate-v*/             # Native dynamic artifacts
+│   └── ..._charged.sdf                 # Charged polymer structures
+└── native-fragments-v*/                # Native fragments artifacts, when used
+    └── ..._charged.sdf
 ```
 
 To regenerate from scratch, delete the cache:
@@ -356,20 +373,24 @@ monomers:
   - label: "C"
     probability: 0.1
     name: "MyNewMonomer"
-    smiles: "[H]C([H])=C(C(=O)O...)C([H])([H])[H]"
+    smiles: "C=C(C)C(=O)OCCO"
 ```
 
 ```{note}
-For non-methacrylate monomers or different polymerization chemistries (e.g., ring-opening, condensation), you would need to provide custom reaction files. This is an advanced use case.
+For non-methacrylate monomers or different polymerization chemistries, provide
+explicit charged SDF molecules through `provided_molecules` or use the advanced
+native fragments mode. Runtime CGSmiles authoring and a fragment-design notebook
+are future work, not current user interfaces.
 ```
 
 ---
 
 ## Troubleshooting
 
-### "No 1-site terminal fragment found for monomer"
+### Cached artifact mismatch or geometry failure
 
-**Cause**: The cached MonomerGroup has old fragment names.
+**Cause**: Cached native artifacts were produced from an older recipe or the
+current generated geometry failed validation.
 
 **Solution**: Delete the cache and regenerate:
 ```bash
@@ -385,17 +406,19 @@ rm -rf .polymer_cache
 2. Try shorter polymer chains
 3. Check that monomer SMILES are correct
 
-### "Symbol 'X' not present in monomer group mapping"
+### "Symbol 'X' not present in monomer mapping"
 
-**Cause**: Mismatch between sequence labels and MonomerGroup fragments.
+**Cause**: Mismatch between generated sequence labels and configured monomers.
 
-**Solution**: Ensure all monomer labels (A, B, C...) in your config have corresponding fragments generated. Delete the cache and regenerate.
+**Solution**: Ensure every sequence label (A, B, C...) appears in `monomers`.
+Delete the cache and regenerate if the configuration changed.
 
-### Slow fragment generation
+### Slow first generation
 
-**Cause**: First run generates all fragments, which can take time.
+**Cause**: First run builds, charges, validates, and writes cache artifacts.
 
-**Solution**: This is normal for the first run. Subsequent runs use the cached MonomerGroup and are much faster.
+**Solution**: This is normal for the first run. Subsequent runs reuse charged
+cache artifacts and are much faster.
 
 ---
 

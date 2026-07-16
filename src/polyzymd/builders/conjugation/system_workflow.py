@@ -1256,6 +1256,9 @@ def _build_and_pack_free_polymers(
         charger_type=polymers.charger.value,
         max_retries=polymers.max_retries,
         cache_directory=polymers.cache_directory,
+        fragments=polymers.fragments,
+        provided_molecules=polymers.provided_molecules,
+        polymer_random_seed=polymers.random_seed,
     )
     packing = polymers.packing
     builder.pack_polymers(

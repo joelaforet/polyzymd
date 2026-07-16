@@ -75,18 +75,19 @@ description: "Description of your simulation system"
 # Random co-polymer chains to add around the enzyme.
 # Set to null or comment out if not using polymers.
 #
-# Two modes are available:
+# Three native/free-polymer modes are available:
 #   MODE A - Pre-built: Supply SDF files of already-parameterized polymers
 #   MODE B - Dynamic:   Generate polymers on-the-fly from monomer SMILES
+#   MODE C - Fragments: Assemble explicit linear terminal/middle fragments
 #
 # polymers: null
 #
 # ----------------------------------------------------------------------------
 # MODE A: Pre-built polymer SDFs
 # ----------------------------------------------------------------------------
-# Use this when you already have polymer structure files (e.g., from a
-# previous run or external tool). Place SDF files in a directory and
-# point sdf_directory to it.
+# Deprecated compatibility mode. Use provided_molecules for explicit molecule
+# inventories. sdf_directory derives filenames from generated sequences and is
+# retained only for historical cached polymer directories.
 #
 # polymers:
 #   enabled: true
@@ -104,7 +105,7 @@ description: "Description of your simulation system"
 #   length: 10                            # Number of monomers per chain
 #   count: 4                              # Number of polymer chains
 #   
-#   # Directory containing pre-built polymer SDF files
+#   # Deprecated directory containing sequence-derived pre-built polymer SDF files
 #   sdf_directory: "polymer_sdfs/my_polymer"
 #   
 #   # Cache directory for generated polymers
@@ -167,6 +168,61 @@ description: "Description of your simulation system"
 #     padding: 2.0                        # nm padding around solute
 #     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
 #     movebadrandom: false                # set true for dense/heterogeneous systems
+
+# ----------------------------------------------------------------------------
+# MODE C: Native explicit linear fragments
+# ----------------------------------------------------------------------------
+# Reuses the terminal + middle fragment schema. Terminal fragments must contain
+# exactly one dummy atom; middle fragments must contain exactly two dummy atoms.
+# Optional [*:1] and [*:2] maps declare incoming and outgoing middle ports.
+#
+# polymers:
+#   enabled: true
+#   generation_mode: "fragments"
+#   type_prefix: "linear_fragments"
+#
+#   monomers:
+#     - label: "A"
+#       probability: 1.0
+#       name: "fragment_A"
+#
+#   fragments:
+#     A:
+#       terminal: "[*]C"
+#       middle: "[*:1]C([*:2])"
+#
+#   charger: "nagl"
+#   length: 6
+#   count: 4
+#   cache_directory: ".polymer_cache"
+#
+#   packing:
+#     padding: 2.0
+#     tolerance: 2.0
+#     movebadrandom: false
+
+# ----------------------------------------------------------------------------
+# Additive provided molecule examples
+# ----------------------------------------------------------------------------
+# provided_molecules can be added under dynamic or fragments mode so generated
+# linear chains and opaque pre-generated charged SDFs are packed together in one call.
+# Fixed inventory uses entry counts and no pool count/probabilities.
+# Probabilistic pools use pool count and probability on every entry.
+#
+#   provided_molecules:
+#     - name: "fixed_branched"
+#       entries:
+#         - sdf_path: "polymers/dendrimer.sdf"
+#           count: 2
+#
+#     - name: "probabilistic_branched"
+#       count: 4
+#       seed: 100
+#       entries:
+#         - sdf_path: "polymers/three_arm_peg.sdf"
+#           probability: 0.6
+#         - sdf_path: "polymers/four_arm_peg.sdf"
+#           probability: 0.4
 
 # ============================================================================
 # Solvent Configuration (REQUIRED)

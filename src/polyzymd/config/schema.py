@@ -273,10 +273,91 @@ class MonomerSpec(BaseModel):
 
 
 class PolymerGenerationMode(str, Enum):
-    """Mode for polymer generation."""
+    """Mode for free-polymer construction.
 
-    CACHED = "cached"  # Load pre-built SDF files from disk
-    DYNAMIC = "dynamic"  # Generate polymers on-the-fly using Polymerist
+    Modes select how sequence-derived polymer chains are obtained:
+
+    - ``cached`` loads released legacy sequence-derived SDF filenames from
+      ``sdf_directory``.
+    - ``dynamic`` generates linear methacrylate polymers natively for bundled
+      default ATRP reactions; custom ``.rxn`` reaction sets still route through
+      the legacy Polymerist backend.
+    - ``fragments`` assembles explicit terminal/middle linear fragments with
+      native mBuild ports.
+    """
+
+    CACHED = "cached"  # Load legacy sequence-derived SDF files from disk
+    DYNAMIC = "dynamic"  # Generate native methacrylates or custom .rxn legacy chains
+    FRAGMENTS = "fragments"  # Assemble explicit linear fragments natively
+
+
+class ProvidedMoleculeEntry(BaseModel):
+    """One user-provided charged SDF entry in an additive molecule pool."""
+
+    sdf_path: Path = Field(..., description="Path to a charged single-molecule SDF")
+    probability: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Entry probability for probabilistic provided molecule pools",
+    )
+    count: int | None = Field(
+        None,
+        ge=1,
+        description="Fixed inventory count for fixed provided molecule pools",
+    )
+
+    @field_validator("sdf_path")
+    @classmethod
+    def validate_sdf_suffix(cls, value: Path) -> Path:
+        """Reject non-SDF provided molecule entries at schema load time."""
+        if value.suffix.lower() != ".sdf":
+            raise ValueError("Provided molecule entries must reference .sdf files")
+        return value
+
+
+class ProvidedMoleculePoolConfig(BaseModel):
+    """Additive pool of opaque user-provided charged molecule SDFs."""
+
+    name: str = Field(..., min_length=1, description="Provided molecule pool identifier")
+    entries: list[ProvidedMoleculeEntry] = Field(..., min_length=1)
+    count: int | None = Field(
+        None,
+        ge=1,
+        description="Number of selections for probabilistic provided molecule pools",
+    )
+    seed: int | None = Field(None, description="Pool-local random seed")
+
+    @model_validator(mode="after")
+    def validate_pool_mode(self) -> "ProvidedMoleculePoolConfig":
+        """Validate mutually exclusive probabilistic and fixed inventory modes."""
+        has_pool_count = self.count is not None
+        has_probabilities = [entry.probability is not None for entry in self.entries]
+        has_counts = [entry.count is not None for entry in self.entries]
+
+        if has_pool_count:
+            if not all(has_probabilities) or any(has_counts):
+                raise ValueError(
+                    "Probabilistic provided molecule pools require pool count, probability on "
+                    "every entry, and no entry counts"
+                )
+            total = sum(entry.probability or 0.0 for entry in self.entries)
+            if abs(total - 1.0) > 1.0e-6:
+                raise ValueError(f"Provided molecule probabilities must sum to 1.0, got {total}")
+            return self
+
+        if not all(has_counts) or any(has_probabilities):
+            raise ValueError(
+                "Fixed provided molecule pools require count on every entry, no pool count, and no probabilities"
+            )
+        return self
+
+
+class PolymerFragmentSpec(BaseModel):
+    """Explicit terminal and middle fragment strings for native linear assembly."""
+
+    terminal: str = Field(..., min_length=1, description="Terminal fragment with one dummy atom")
+    middle: str = Field(..., min_length=1, description="Middle fragment with two dummy atoms")
 
 
 class ReactionConfig(BaseModel):
@@ -345,22 +426,33 @@ class ReactionConfig(BaseModel):
 class PolymerConfig(BaseModel):
     """Configuration for polymer components.
 
-    Supports two generation modes:
-    - "cached": Load pre-built polymer SDF files from sdf_directory
-    - "dynamic": Generate polymers on-the-fly using Polymerist from SMILES
+    Supports three sequence-derived linear polymer modes:
+
+    - ``cached``: Load released legacy pre-built polymer SDF files from
+      ``sdf_directory`` using sequence-derived filenames.
+    - ``dynamic``: Generate polymers on-the-fly from monomer SMILES. Bundled
+      default ATRP reactions use the native methacrylate backend; custom
+      ``.rxn`` reaction sets use the legacy Polymerist backend.
+    - ``fragments``: Assemble explicit terminal/middle fragments natively with
+      mBuild ports. This mode does not support ``sdf_directory``.
+
+    Opaque user-provided charged SDF molecules, including branched or nonlinear
+    molecules, can be added through ``provided_molecules`` and are packed with
+    generated or legacy sequence-derived chains.
 
     For dynamic mode, you must provide:
-    - SMILES for each monomer in monomers[].smiles
-    - Reaction templates in the reactions field
+
+    - SMILES for each monomer in ``monomers[].smiles``.
+    - Reaction templates in the ``reactions`` field.
 
     Attributes:
         enabled: Whether to include polymers in the system
-        generation_mode: "cached" for pre-built SDFs, "dynamic" for on-the-fly generation
+        generation_mode: ``cached``, ``dynamic``, or ``fragments``.
         type_prefix: Prefix for polymer type in filenames (e.g., "SBMA-EGPMA")
         monomers: List of monomer specifications with probabilities (and SMILES for dynamic)
         length: Number of monomer units per polymer chain
         count: Number of polymer chains to add
-        sdf_directory: Path to pre-built polymer SDF files (for cached mode)
+        sdf_directory: Deprecated path to sequence-derived SDF files (cached and historical dynamic modes)
         reactions: Reaction templates for ATRP (required for dynamic mode)
         charger: Charge assignment method for generated polymers
         max_retries: Maximum retries for polymer generation (ring-piercing failures)
@@ -372,14 +464,19 @@ class PolymerConfig(BaseModel):
     enabled: bool = Field(True, description="Include polymers in system")
     generation_mode: PolymerGenerationMode = Field(
         PolymerGenerationMode.CACHED,
-        description="Polymer generation mode: 'cached' (pre-built SDFs) or 'dynamic' (generate from SMILES)",
+        description="Polymer generation mode: 'cached', 'dynamic', or 'fragments'",
     )
     type_prefix: str = Field(..., description="Polymer type prefix for filenames")
     monomers: list[MonomerSpec] = Field(..., min_length=1, description="Monomer specifications")
+    fragments: dict[str, PolymerFragmentSpec] | None = Field(
+        None,
+        description="Explicit terminal/middle fragment strings keyed by monomer label",
+    )
     length: int = Field(..., ge=1, description="Monomers per chain")
     count: int = Field(..., ge=1, description="Number of polymer chains")
     sdf_directory: Path | None = Field(
-        None, description="Directory with pre-built polymer SDFs (for cached mode)"
+        None,
+        description="Deprecated directory with sequence-derived pre-built polymer SDFs",
     )
     reactions: ReactionConfig | None = Field(
         None, description="ATRP reaction templates (required for dynamic mode)"
@@ -404,6 +501,18 @@ class PolymerConfig(BaseModel):
         None,
         description="Random seed for polymer sequence generation. If None, uses replicate number.",
     )
+    provided_molecules: list[ProvidedMoleculePoolConfig] = Field(
+        default_factory=list,
+        description="Additive user-provided charged SDF molecules packed with generated polymers",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_unreleased_cached_pools_key(cls, data: Any) -> Any:
+        """Reject the unreleased cached_pools key after migration to provided_molecules."""
+        if isinstance(data, dict) and "cached_pools" in data:
+            raise ValueError("Use 'provided_molecules' instead of unreleased 'cached_pools'")
+        return data
 
     @model_validator(mode="after")
     def validate_probabilities_sum_to_one(self) -> "PolymerConfig":
@@ -433,6 +542,20 @@ class PolymerConfig(BaseModel):
             if self.reactions is None:
                 raise ValueError(
                     "Dynamic generation mode requires 'reactions' field with ATRP reaction templates"
+                )
+
+        elif self.generation_mode == PolymerGenerationMode.FRAGMENTS:
+            if self.sdf_directory is not None:
+                raise ValueError(
+                    "Fragments generation mode does not support deprecated sdf_directory"
+                )
+            if self.fragments is None:
+                raise ValueError("Fragments generation mode requires 'fragments' specifications")
+            monomer_labels = {m.label for m in self.monomers}
+            fragment_labels = set(self.fragments)
+            if fragment_labels != monomer_labels:
+                raise ValueError(
+                    "Fragments generation mode requires one fragment spec for each monomer label"
                 )
 
         elif self.generation_mode == PolymerGenerationMode.CACHED:

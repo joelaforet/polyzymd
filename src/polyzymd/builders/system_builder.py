@@ -167,12 +167,20 @@ class SystemBuilder:
         charger_type: str = "nagl",
         max_retries: int = 10,
         cache_directory: Optional[Union[str, Path]] = None,
+        fragments: Optional[Dict[str, Any]] = None,
+        provided_molecules: Optional[List[Any]] = None,
+        polymer_random_seed: Optional[int] = None,
     ) -> Tuple[List[Molecule], List[int]]:
         """Build polymer components.
 
-        Supports two generation modes:
-        - "cached": Load pre-built polymer SDFs from sdf_directory
+        Supports three sequence-derived generation modes:
+
+        - "cached": Load legacy sequence-derived polymer SDFs from sdf_directory
         - "dynamic": Generate polymers on-the-fly from monomer SMILES
+        - "fragments": Assemble explicit terminal/middle fragments natively
+
+        ``provided_molecules`` adds opaque user-provided charged SDF molecules
+        to the merged molecule/count list before packing.
 
         Args:
             characters: Monomer labels.
@@ -180,9 +188,9 @@ class SystemBuilder:
             length: Monomers per chain.
             count: Number of polymer chains.
             type_prefix: Filename prefix.
-            sdf_directory: Directory with pre-built polymer SDFs (cached mode).
+            sdf_directory: Deprecated directory with sequence-derived polymer SDFs.
             seed: Random seed for reproducibility.
-            generation_mode: "cached" or "dynamic".
+            generation_mode: "cached", "dynamic", or "fragments".
             monomer_smiles: Dict of monomer name -> SMILES (dynamic mode).
             monomer_names: Dict of label -> monomer name (dynamic mode).
             residue_names: Dict of monomer name -> 3-char residue name.
@@ -190,6 +198,9 @@ class SystemBuilder:
             charger_type: Charge method ("nagl", "espaloma", "am1bcc").
             max_retries: Max retries for polymer generation.
             cache_directory: Directory for caching generated polymers.
+            fragments: Explicit terminal/middle fragment specs for fragments mode.
+            provided_molecules: Additive opaque user-provided charged SDF molecule pools.
+            polymer_random_seed: Polymer-level seed for provided molecule precedence.
 
         Returns:
             Tuple of (unique polymer molecules, counts).
@@ -208,6 +219,9 @@ class SystemBuilder:
             reactions=reactions,
             charger_type=charger_type,
             max_retries=max_retries,
+            fragments=fragments,
+            provided_molecules=provided_molecules,
+            polymer_random_seed=polymer_random_seed,
         )
 
         molecules, counts = self._polymer_builder.build(count=count, seed=seed)
@@ -923,6 +937,9 @@ class SystemBuilder:
                 charger_type=config.polymers.charger.value,
                 max_retries=config.polymers.max_retries,
                 cache_directory=config.polymers.cache_directory,
+                fragments=config.polymers.fragments,
+                provided_molecules=config.polymers.provided_molecules,
+                polymer_random_seed=config.polymers.random_seed,
             )
 
             # Get packing config (uses defaults if not specified)
