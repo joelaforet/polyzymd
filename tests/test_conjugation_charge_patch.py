@@ -10,12 +10,12 @@ from polyzymd.builders.conjugation.pablo import charge_patch
 
 
 def test_peptide_capped_records_apply_strict_cap_closure(monkeypatch):
-    """Cap/flank residuals should close over sorted modified-residue atoms only."""
+    """Local residuals should close over sorted modified-residue atoms only."""
     spec = _spec()
     reference = _reference_build()
     molecule = SimpleNamespace(
         atoms=tuple(SimpleNamespace(metadata={"atom_map": index}) for index in range(1, 6)),
-        partial_charges=[0.10, -0.05, 0.20, -0.10, 0.01],
+        partial_charges=[0.10, -0.05, 0.041, -0.10, 0.01],
     )
 
     monkeypatch.setattr(
@@ -30,10 +30,11 @@ def test_peptide_capped_records_apply_strict_cap_closure(monkeypatch):
 
     charges = {record.atom_name: record.charge_e for record in records}
     assert model_name == charge_patch.DEFAULT_PATCH_NAGL_MODEL
-    assert charges["CA"] == pytest.approx(0.10 + 0.01 / 3.0)
-    assert charges["CB"] == pytest.approx(-0.05 + 0.01 / 3.0)
-    assert charges["NZ"] == pytest.approx(0.20 + 0.01 / 3.0)
+    assert charges["CA"] == pytest.approx(0.10 + 0.009 / 3.0)
+    assert charges["CB"] == pytest.approx(-0.05 + 0.009 / 3.0)
+    assert charges["NZ"] == pytest.approx(0.041 + 0.009 / 3.0)
     assert charges["C001"] == pytest.approx(-0.10)
+    assert sum(charges.values()) == pytest.approx(0.0, abs=1.0e-12)
 
 
 def test_peptide_capped_records_keep_unmapped_cap_charges_distinct(monkeypatch):
@@ -48,7 +49,7 @@ def test_peptide_capped_records_keep_unmapped_cap_charges_distinct(monkeypatch):
             SimpleNamespace(metadata={"atom_map": 3}),
             SimpleNamespace(metadata={"atom_map": 4}),
         ),
-        partial_charges=[0.01, 0.10, -0.05, 0.20, -0.10],
+        partial_charges=[0.01, 0.10, -0.05, 0.041, -0.10],
     )
 
     monkeypatch.setattr(
@@ -62,9 +63,9 @@ def test_peptide_capped_records_keep_unmapped_cap_charges_distinct(monkeypatch):
     )
 
     charges = {record.atom_name: record.charge_e for record in records}
-    assert charges["CA"] == pytest.approx(0.10 + 0.01 / 3.0)
-    assert charges["CB"] == pytest.approx(-0.05 + 0.01 / 3.0)
-    assert charges["NZ"] == pytest.approx(0.20 + 0.01 / 3.0)
+    assert charges["CA"] == pytest.approx(0.10 + 0.009 / 3.0)
+    assert charges["CB"] == pytest.approx(-0.05 + 0.009 / 3.0)
+    assert charges["NZ"] == pytest.approx(0.041 + 0.009 / 3.0)
     assert charges["C001"] == pytest.approx(-0.10)
 
 
@@ -86,10 +87,10 @@ def test_partial_charges_assign_negative_keys_to_unmapped_reference_atoms():
 
 
 def test_peptide_capped_records_reject_large_cap_residual(monkeypatch):
-    """Large cap/flank residuals should fail instead of silently normalizing."""
+    """Large local residuals should fail instead of silently normalizing."""
     molecule = SimpleNamespace(
         atoms=tuple(SimpleNamespace(metadata={"atom_map": index}) for index in range(1, 6)),
-        partial_charges=[0.10, -0.05, 0.20, -0.10, 0.5],
+        partial_charges=[0.10, -0.05, 0.20, -0.10, 0.0],
     )
     monkeypatch.setattr(
         charge_patch, "_build_reference_product", lambda *_args, **_kwargs: _reference_build()
@@ -101,6 +102,35 @@ def test_peptide_capped_records_reject_large_cap_residual(monkeypatch):
             _spec(),
             product_atoms=_product_atoms(),
         )
+
+
+def test_local_formal_projection_accepts_g42666_asx_residual():
+    """The observed G42666 ASX residual should distribute below the per-atom bound."""
+    reference = _reference_build_with_closure_domain(13)
+    charges = dict.fromkeys(range(1, 14), -0.18544238 / 13.0)
+    charges[14] = 0.15030887
+
+    records, closure = charge_patch._records_with_cap_closure(reference, charges)
+
+    assert closure["target_formal_charge_e"] == pytest.approx(0.0)
+    assert closure["target_scope"] == "all_emitted_mapped_local_product_atoms"
+    assert closure["correction_domain"] == "modified_protein_residue_closure_atoms"
+    assert closure["residual_to_target_e"] == pytest.approx(0.03513351)
+    assert closure["closure_atom_count"] == 13
+    assert closure["per_atom_closure_e"] == pytest.approx(0.03513351 / 13.0)
+    assert closure["max_per_atom_closure_e"] < 0.005
+    assert closure["final_projected_total_e"] == pytest.approx(0.0, abs=1.0e-12)
+    assert sum(record.charge_e for record in records) == pytest.approx(0.0, abs=1.0e-12)
+
+
+def test_local_formal_projection_rejects_excessive_per_atom_correction():
+    """Residuals above 0.005 e per closure atom should remain hard failures."""
+    reference = _reference_build_with_closure_domain(13)
+    charges = dict.fromkeys(range(1, 14), -0.216)
+    charges[14] = 2.742
+
+    with pytest.raises(charge_patch.LocalChargePatchError, match="exceeds 0.005 e"):
+        charge_patch._records_with_cap_closure(reference, charges)
 
 
 def test_peptide_capped_records_reject_terminal_site():
@@ -192,6 +222,41 @@ def _reference_build() -> charge_patch._ReferenceBuild:
         cap_map_numbers=(5,),
         product_atom_count=4,
         reference_atom_count=5,
+    )
+
+
+def _reference_build_with_closure_domain(closure_count: int) -> charge_patch._ReferenceBuild:
+    """Build a mapped neutral reference with a configurable closure domain."""
+    mapped = {
+        index: charge_patch._MappedAtom(
+            ("protein", index, f"C{index}"),
+            f"C{index}",
+            "C",
+            "A",
+            "ASX",
+            10,
+            "",
+            "modified_protein_product",
+        )
+        for index in range(1, closure_count + 1)
+    }
+    mapped[closure_count + 1] = charge_patch._MappedAtom(
+        ("modifier", closure_count + 1, "C001"),
+        "C001",
+        "C",
+        "C",
+        "NAG",
+        1,
+        "",
+        "moiety_product",
+    )
+    return charge_patch._ReferenceBuild(
+        molecule=object(),
+        mapped_atoms=mapped,
+        closure_map_numbers=tuple(range(1, closure_count + 1)),
+        cap_map_numbers=(),
+        product_atom_count=len(mapped),
+        reference_atom_count=len(mapped),
     )
 
 

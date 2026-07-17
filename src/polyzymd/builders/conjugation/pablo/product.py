@@ -835,6 +835,9 @@ def _fragment_atom_descriptor(
         return None
     if unique_atom_names is not None and atom_name in unique_atom_names:
         return atom_name
+    residue_name = getattr(atom, "residue_name", None)
+    if residue_name:
+        return (residue_name, atom_name)
     return (getattr(atom, "residue_number", None), atom_name)
 
 
@@ -1214,6 +1217,7 @@ def _product_lookup(
             lookup.setdefault(atom.atom_index, atom)
         if atom_name_counts[atom.atom_name] == 1:
             lookup.setdefault(atom.atom_name, atom)
+        lookup.setdefault((atom.residue_name, atom.atom_name), atom)
         lookup.setdefault((atom.residue_number, atom.atom_name), atom)
         lookup.setdefault((atom.chain_id, atom.residue_number, atom.atom_name), atom)
         if source_residue_aliases:

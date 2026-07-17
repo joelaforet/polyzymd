@@ -12,8 +12,8 @@ from polyzymd.builders.conjugation.pablo.charge_records import AtomPartialCharge
 
 DEFAULT_PATCH_NAGL_MODEL = "openff-gnn-am1bcc-0.1.0-rc.3.pt"
 PATCH_SOURCE = "preproduction-nagl:product-state-peptide-capped-charge-bridge"
-CAP_FLANK_TOTAL_TOLERANCE_E = 0.02
 CAP_FLANK_PER_ATOM_TOLERANCE_E = 0.005
+LOCAL_FORMAL_CHARGE_TOLERANCE_E = 1.0e-8
 LOGGER = logging.getLogger(__name__)
 
 
@@ -349,21 +349,27 @@ def _add_modifier_bonds(rwmol: Any, indices: Mapping[Any, int], spec: Any, fragm
 def _records_with_cap_closure(
     reference: _ReferenceBuild, charges: Mapping[int, float]
 ) -> tuple[list[AtomPartialChargeRecord], dict[str, Any]]:
-    """Emit mapped product records after strict cap/flank residual closure."""
+    """Emit mapped product records after local formal-charge projection."""
     mapped_total = sum(charges[number] for number in reference.mapped_atoms)
     raw_total = sum(charges.values())
-    cap_residual = raw_total - mapped_total
+    target_total = _target_local_formal_charge(reference)
+    residual = target_total - mapped_total
     closure_count = len(reference.closure_map_numbers)
-    per_atom = cap_residual / closure_count if closure_count else 0.0
-    if (
-        not closure_count
-        or abs(cap_residual) > CAP_FLANK_TOTAL_TOLERANCE_E
-        or abs(per_atom) > CAP_FLANK_PER_ATOM_TOLERANCE_E
+    per_atom = residual / closure_count if closure_count else 0.0
+    if not closure_count or any(
+        number not in reference.mapped_atoms for number in reference.closure_map_numbers
     ):
         raise LocalChargePatchError(
-            "Peptide-capped product-state charge closure failed: "
-            f"cap/flank residual={cap_residual:.8f} e, per-atom={per_atom:.8f} e, "
-            "thresholds are 0.02 e total and 0.005 e per atom. Remediation: provide a "
+            "Peptide-capped product-state charge closure failed: local closure domain is empty "
+            "or contains atoms outside the mapped product. Remediation: provide a complete "
+            "product graph/SDF with stable Pablo identities."
+        )
+    if abs(per_atom) > CAP_FLANK_PER_ATOM_TOLERANCE_E:
+        raise LocalChargePatchError(
+            "Peptide-capped product-state charge closure failed: local formal target "
+            f"{target_total:.8f} e, mapped total={mapped_total:.8f} e, "
+            f"residual={residual:.8f} e, closure atoms={closure_count}, "
+            f"per-atom correction={per_atom:.8f} e exceeds 0.005 e. Remediation: provide a "
             "complete product graph/SDF with stable Pablo identities and avoid terminal, "
             "overlapping, or protein-protein modifications."
         )
@@ -383,15 +389,32 @@ def _records_with_cap_closure(
                 source_role="local_nagl_patch",
             )
         )
+    final_total = sum(record.charge_e for record in records)
+    if abs(final_total - target_total) > LOCAL_FORMAL_CHARGE_TOLERANCE_E:
+        raise LocalChargePatchError(
+            "Peptide-capped product-state charge closure failed after projection: "
+            f"final local total={final_total:.12f} e target={target_total:.12f} e"
+        )
     return records, {
-        "formal_charge_e": 0.0,
+        "formal_charge_e": float(target_total),
+        "target_formal_charge_e": float(target_total),
+        "target_scope": "all_emitted_mapped_local_product_atoms",
+        "correction_domain": "modified_protein_residue_closure_atoms",
         "raw_reference_total_e": float(raw_total),
         "mapped_product_total_e": float(mapped_total),
-        "cap_flank_residual_e": float(cap_residual),
+        "residual_to_target_e": float(residual),
+        "final_projected_total_e": float(final_total),
+        "omitted_reference_residual_e": float(raw_total - mapped_total),
+        "cap_flank_residual_e": float(raw_total - mapped_total),
         "closure_atom_count": closure_count,
         "max_per_atom_closure_e": abs(float(per_atom)),
         "per_atom_closure_e": float(per_atom),
     }
+
+
+def _target_local_formal_charge(reference: _ReferenceBuild) -> float:
+    """Return the retained local product formal-charge target."""
+    return float(sum(atom.formal_charge for atom in reference.mapped_atoms.values()))
 
 
 def _charge_with_nagl(molecule: Any, *, model_name: str) -> Any:
@@ -460,8 +483,14 @@ def _log_patch_diagnostics(
         "product_atom_count": reference.product_atom_count,
         "reference_atom_count": reference.reference_atom_count,
         "mapped_atom_count": len(reference.mapped_atoms),
+        "target_formal_charge_e": closure["target_formal_charge_e"],
+        "target_scope": closure["target_scope"],
+        "correction_domain": closure["correction_domain"],
         "raw_reference_total_e": closure["raw_reference_total_e"],
         "mapped_product_total_e": closure["mapped_product_total_e"],
+        "residual_to_target_e": closure["residual_to_target_e"],
+        "final_projected_total_e": closure["final_projected_total_e"],
+        "omitted_reference_residual_e": closure["omitted_reference_residual_e"],
         "cap_flank_residual_e": closure["cap_flank_residual_e"],
         "closure_atom_count": closure["closure_atom_count"],
         "max_per_atom_closure_e": closure["max_per_atom_closure_e"],
@@ -473,10 +502,11 @@ def _log_patch_diagnostics(
         ],
     }
     LOGGER.info(
-        "Product-state peptide-capped NAGL charge patch site=%s mapped=%d residual=%.8f e closure=%d max=%.8f e",
+        "Product-state peptide-capped NAGL charge patch site=%s mapped=%d "
+        "residual_to_target=%.8f e closure=%d max=%.8f e",
         payload["site"],
         payload["mapped_atom_count"],
-        payload["cap_flank_residual_e"],
+        payload["residual_to_target_e"],
         payload["closure_atom_count"],
         payload["max_per_atom_closure_e"],
     )

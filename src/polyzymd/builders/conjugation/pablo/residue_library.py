@@ -118,6 +118,80 @@ def build_pablo_residue_library(
     )
 
 
+def bonded_hydrogen_names(
+    residue_name: str,
+    atom_name: str,
+    *,
+    residue_library: Any | None = None,
+    pablo_module: Any | None = None,
+) -> tuple[str, ...]:
+    """Return Pablo-template hydrogen names bonded to a residue atom.
+
+    Parameters
+    ----------
+    residue_name : str
+        CCD residue name to query.
+    atom_name : str
+        Residue atom whose bonded hydrogens are requested.
+    residue_library : Any or None, optional
+        Injectable Pablo residue-library object, by default ``None``.
+    pablo_module : Any or None, optional
+        Injectable ``openff.pablo`` module, by default ``None``.
+
+    Returns
+    -------
+    tuple of str
+        Sorted hydrogen atom names from authoritative Pablo residue connectivity.
+    """
+    if residue_library is None:
+        if pablo_module is None:
+            pablo_module = importlib.import_module("openff.pablo")
+        residue_library = pablo_module.STD_CCD_CACHE
+    definitions = _residue_definitions(residue_library, residue_name)
+    if not definitions:
+        raise PabloResidueLibraryError(f"Pablo residue library has no {residue_name} definitions")
+
+    observed_sets = []
+    for definition in definitions:
+        atom_symbols = {
+            str(getattr(atom, "name", "")).upper(): str(getattr(atom, "symbol", "")).upper()
+            for atom in getattr(definition, "atoms", ())
+        }
+        bonded = set()
+        for bond in getattr(definition, "bonds", ()):  # noqa: B007
+            left = str(getattr(bond, "atom1", "")).upper()
+            right = str(getattr(bond, "atom2", "")).upper()
+            if left == atom_name.upper() and atom_symbols.get(right) == "H":
+                bonded.add(right)
+            if right == atom_name.upper() and atom_symbols.get(left) == "H":
+                bonded.add(left)
+        if bonded:
+            observed_sets.append(frozenset(bonded))
+    unique_sets = set(observed_sets)
+    if len(unique_sets) != 1:
+        raise PabloResidueLibraryError(
+            f"Pablo residue library has inconsistent {residue_name}:{atom_name} bonded H names: "
+            f"{sorted(tuple(sorted(item)) for item in unique_sets)}"
+        )
+    return tuple(sorted(next(iter(unique_sets))))
+
+
+def _residue_definitions(residue_library: Any, residue_name: str) -> tuple[Any, ...]:
+    """Return residue definitions from a Pablo-like residue library."""
+    key = residue_name.upper()
+    if hasattr(residue_library, "get"):
+        definitions = residue_library.get(key)
+    else:
+        definitions = residue_library[key]
+    if definitions is None:
+        return ()
+    if isinstance(definitions, tuple):
+        return definitions
+    if isinstance(definitions, list):
+        return tuple(definitions)
+    return (definitions,)
+
+
 def _apply_lookup_policy(
     residue_library: Any,
     policy: Any | None,

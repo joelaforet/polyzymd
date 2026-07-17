@@ -80,7 +80,7 @@ class PolymerFragmentAtom(BaseModel):
             temp_factor=atom.temp_factor,
             element=atom.element,
             charge=atom.charge,
-            formal_charge=None,
+            formal_charge=_pdb_formal_charge(atom.charge),
             alt_loc=atom.alt_loc,
             record_name=atom.record_name,
         )
@@ -111,6 +111,22 @@ class PolymerFragmentAtom(BaseModel):
             alt_loc=self.alt_loc,
             record_name=self.record_name,
         )
+
+
+def _pdb_formal_charge(value: str) -> int | None:
+    """Parse a PDB formal-charge field into an integer when specified."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    if len(text) == 2 and text[0].isdigit() and text[1] in "+-":
+        magnitude = int(text[0])
+        return magnitude if text[1] == "+" else -magnitude
+    if len(text) == 2 and text[0] in "+-" and text[1].isdigit():
+        magnitude = int(text[1])
+        return magnitude if text[0] == "+" else -magnitude
+    if text in {"+", "-"}:
+        return 1 if text == "+" else -1
+    return int(text)
 
 
 class GeneratedPolymerFragment(BaseModel):
