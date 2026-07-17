@@ -160,6 +160,7 @@ def _mock_sim_config(scratch_dir: Path) -> MagicMock:
     """Create a mock SimulationConfig for status tests."""
     mock = MagicMock()
     mock.engine = "openmm"
+    mock.get_working_directory.side_effect = lambda replicate=1: scratch_dir / f"run_{replicate}"
     mock.simulation_phases.production.duration = 100.0
     mock.simulation_phases.production.time_step = 2.0
     mock.simulation_phases.production.samples = 250
