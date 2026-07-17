@@ -66,6 +66,41 @@ Do not collapse the whole polymer chain into one residue to make ingestion easie
 Each monomer residue identity should remain explicit so custom residue definitions
 and OpenFF parameterization can reason about the actual product graph.
 
+## PDB-fragment glycan ingestion contract
+
+Residue-resolved glycan moieties supplied through `moiety.input_path` are treated
+as provider-neutral fragments before product-state Pablo/OpenFF ingestion. The
+fragment contract is intentionally strict:
+
+| Requirement | Expected state | Failure mode |
+|---|---|---|
+| Connectivity source | Complete `CONECT` records | Missing `CONECT` raises `coordinate inference is disabled` |
+| Coordinate inference | Not performed | Coordinates never create or repair bonds |
+| Atom serials | Every bond endpoint must be a known atom serial | Unknown serials fail before motif detection |
+| Self bonds | Disallowed | Self-referential `CONECT` records fail explicitly |
+| Components | One connected fragment graph | Isolated atoms or disconnected components fail |
+| Explicit H degree | Exactly one graph bond per hydrogen | Degree 0 or >1 fails explicitly |
+| Common valence | No obvious impossible upper valence | Overbonded H, O, C, N, S, or P fails |
+| Bond orders | Assigned only on the accepted graph from atoms, explicit H, charges, and `CONECT` pairs | Assignment that changes atom count, connectivity, radicals, or total formal charge fails |
+
+N-glycosylation motif detection is graph-first. The candidate anomeric carbon
+must be bonded to an O-H leaving group and to a retained ring oxygen connected
+into the sugar graph. Atom names and residue names are selectors and diagnostics;
+they are not used to infer chemistry. A single motif is resolved automatically.
+Zero motifs fail with `No glycan anomeric motif was found`. Multiple motifs fail
+with `Ambiguous glycan anomeric motif assignments` and should be disambiguated
+with the existing `moiety.link_site` reactive atom selector.
+
+For the local G42666 CONECT acceptance fixture, the graph-first detector resolves
+anomeric carbon serial 4, leaving oxygen/hydrogen serials 1 and 2, and retained
+ring oxygen serial 14. The N-glycosylation transformation removes one selected
+Asn `ND2` hydrogen, keeps the glycan reactive carbon, removes exactly the O+H
+leaving moiety, and adds one `ND2`-C1 bond. When formal charges are available in
+the participating records, the product-state charge bridge is expected to
+preserve the net formal charge after leaving-group removal and bond formation.
+The same strict graph supplies bond-order assignment for the acetamide carbonyls,
+including source serials 6-8 and 33-35 as order 2 bonds.
+
 ## OpenFF disulfide behavior
 
 - `CYX` may be accepted as a cysteine-like residue alias during parsing, but it is
@@ -125,6 +160,9 @@ narrow custom-substructure proof of concept. Do not suppress the error.
 | Failure adjacent to residues listed in `REMARK 465` | Missing-coordinate residues or missing heavy atoms alter termini or local chemistry | Read PDB header and visualize gaps | Model missing regions externally if required for the study | Automatic filling is a modeling decision |
 | `declared leaving atoms {'HZ3', 'HZ2'} not found in any LYX residue` | Pablo was configured with reactant-state leaving atom names for an already modified product PDB | Inspect the emitted product PDB and the resolved crosslink requirement; confirm the linked residues contain `LYX:NZ` and `NHX:<acyl carbon>` and no leaving atoms | Generate the Pablo crosslink from the resolved product-state plan and use `leaving_atoms: [[], []]` after PolyzyMD has already removed leaving atoms | Do not hardcode `HZ2`/`HZ3`; actual source hydrogens may have different names such as `H11`/`H13`, and product-state ingestion should not remove them again |
 | `Atom A:LYX23.NZ ... has 1 radical electrons, formal charge +1, and 3 bonds` | Product-state `LYX` definition kept protonated lysine `NZ+` charge after extra NZ hydrogens were removed and the amide crosslink was added | Inspect the generated `LYX` atom definition and OpenFF atom-level radical diagnostic | Neutralize product-state `LYX:NZ` in the generated Pablo definition when leaving hydrogens are absent | The molecule-level error may mention S/P-block radical support even when the atom-level dump identifies nitrogen |
+| `PDB fragment ingestion requires complete CONECT records; coordinate inference is disabled` | A residue-resolved fragment PDB lacks explicit graph connectivity | Count `CONECT` records and inspect source serial coverage | Add curated complete `CONECT` records upstream | PolyzyMD will not infer bonds from coordinates |
+| `PDB fragment CONECT graph connectivity was accepted, but bond orders could not be assigned` | The graph is explicit but the PDB lacks enough chemically consistent information for radical-free bond-order assignment | Inspect explicit hydrogens, formal charges, and ambiguous valences; compare against an SDF/OpenFF source | Provide an SDF/OpenFF-native fragment source or curate the PDB graph and charges | Connectivity is not repaired or altered during this step |
+| `Ambiguous glycan anomeric motif assignments` | More than one graph-valid reducing-end motif exists in a glycan fragment | Inspect candidate serials in the error message | Configure `moiety.link_site` to select the intended anomeric carbon | Do not rely on atom names such as `C1` to break ties |
 
 ## Catalog maintenance rule
 

@@ -10,12 +10,15 @@ import numpy as np
 import pytest
 
 from polyzymd.builders.conjugation import ConjugatedPolymerSystemSettings as PublicSettings
+from polyzymd.builders.conjugation._linkage import PdbAtomSelector
 from polyzymd.builders.conjugation._moiety_provider import (
     resolve_moiety_source,
     validate_moiety_source_config,
 )
 from polyzymd.builders.conjugation._pdb_fragment import load_pdb_fragment
 from polyzymd.builders.conjugation.reactions.n_glycosylation import (
+    NGlycosylationReaction,
+    _resolve_asn_nd2_hydrogen,
     residue_resolved_glycan_pdb_profile_from_fragment,
 )
 from polyzymd.builders.conjugation.structure.parsing import (
@@ -35,6 +38,10 @@ from polyzymd.builders.conjugation.validation import (
     summarize_nonbonded_heavy_clashes,
 )
 
+G42666_CONECT_PATH = (
+    Path(__file__).resolve().parent / "data/conjugation/glygen/synthetic_g42666_style_conect.pdb"
+)
+
 
 def test_glygen_loader_uses_conect_and_preserves_residues(tmp_path: Path) -> None:
     """GlyGen loader should validate CONECT graphs and strict ROH leaving atoms."""
@@ -44,10 +51,157 @@ def test_glygen_loader_uses_conect_and_preserves_residues(tmp_path: Path) -> Non
     result = residue_resolved_glycan_pdb_profile_from_fragment(load_result)
 
     assert load_result.connectivity_provenance == "conect"
-    assert result.reducing_c1_serial == 1
-    assert result.fragment.leaving_atom_serials == (8, 9)
-    assert [residue.residue_name for residue in result.fragment.residues] == ["NAG", "MAN", "ROH"]
+    assert result.reducing_c1_serial == 4
+    assert result.fragment.leaving_atom_serials == (1, 2)
+    assert [residue.residue_name for residue in result.fragment.residues] == ["ROH", "NAG", "MAN"]
     assert any(item.plausible_glycosidic for item in result.linkage_diagnostics)
+
+
+def test_external_g42666_conect_exact_anomeric_group_and_plan() -> None:
+    """Local external G42666 fixture should resolve the audited reducing-end serials."""
+    if not G42666_CONECT_PATH.exists():
+        pytest.skip(f"External G42666 fixture not present: {G42666_CONECT_PATH}")
+    load_result = load_pdb_fragment(G42666_CONECT_PATH)
+    profile = residue_resolved_glycan_pdb_profile_from_fragment(load_result)
+
+    assert profile.reducing_c1_serial == 4
+    assert profile.fragment.leaving_atom_serials == (1, 2)
+    assert profile.fragment.atoms[profile.hydroxyl_oxygen_atom_index].serial == 1
+    assert profile.fragment.atoms[profile.hydroxyl_hydrogen_atom_index].serial == 2
+    assert profile.retained_ring_oxygen_serial == 14
+    assert profile.fragment.reactive_atom_serial == 4
+
+
+def test_external_g42666_bond_orders_preserve_graph_and_carbonyls() -> None:
+    """Bond-order assignment should preserve G42666 CONECT and repair acetamide C=O."""
+    if not G42666_CONECT_PATH.exists():
+        pytest.skip(f"External G42666 fixture not present: {G42666_CONECT_PATH}")
+
+    load_result = load_pdb_fragment(G42666_CONECT_PATH)
+    bond_set = {frozenset(bond) for bond in load_result.serial_bonds}
+    order_set = {frozenset((left, right)) for left, right, _order in load_result.serial_bond_orders}
+    orders = {
+        frozenset((left, right)): order for left, right, order in load_result.serial_bond_orders
+    }
+
+    assert order_set == bond_set
+    assert orders[frozenset((6, 8))] == pytest.approx(2.0)
+    assert orders[frozenset((33, 35))] == pytest.approx(2.0)
+    assert len(load_result.source_atoms) == 57
+
+
+def test_generated_fragment_equivalent_uses_graph_detector(tmp_path: Path) -> None:
+    """Generated fragments should follow the same graph semantics as PDB input."""
+    load_result = load_pdb_fragment(
+        _write_glygen_fixture(tmp_path / "glycan_conect.pdb", include_conect=True)
+    )
+    profile = residue_resolved_glycan_pdb_profile_from_fragment(load_result)
+
+    contract = NGlycosylationReaction.build_contract(
+        {"chain_id": "A", "residue_name": "ASN", "residue_number": 1},
+        profile.fragment,
+    )
+
+    assert contract.modifier_endpoint.selector.atom_serial == 4
+    assert tuple(
+        selector.atom_serial for selector in contract.modifier_endpoint.leaving_atom_selectors
+    ) == (
+        1,
+        2,
+    )
+
+
+def test_g42666_resolve_plan_removes_one_asn_h_and_keeps_link_atom(tmp_path: Path) -> None:
+    """N-glycosylation plan should remove one ND2 H and retain the C1 link atom."""
+    if not G42666_CONECT_PATH.exists():
+        pytest.skip(f"External G42666 fixture not present: {G42666_CONECT_PATH}")
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    profile = residue_resolved_glycan_pdb_profile_from_fragment(
+        load_pdb_fragment(G42666_CONECT_PATH)
+    )
+
+    plan = NGlycosylationReaction.resolve_plan(
+        protein_path,
+        {"chain_id": "A", "residue_name": "ASN", "residue_number": 1},
+        profile.fragment,
+    )
+
+    assert plan.protein_link_atom.atom_name == "ND2"
+    assert tuple(atom.atom_name for atom in plan.protein_leaving_atoms) == ("HD21",)
+    assert plan.modifier_link_atom.serial == 4
+    assert tuple(atom.serial for atom in plan.modifier_leaving_atoms) == (1, 2)
+    assert plan.pablo_crosslink_requirement.linking_atoms == ("ND2", "C1")
+    assert plan.pablo_crosslink_requirement.leaving_atoms[0] == ("HD21",)
+
+
+def test_asn_nd2_hydrogen_resolution_uses_template_not_coordinates(tmp_path: Path) -> None:
+    """Pablo ASN topology should select ND2 H even when coordinates are nonbondlike."""
+    protein_path = _write_asn_fixture(tmp_path / "asn_far_h.pdb", hydrogens=("HD21",))
+
+    hydrogen = _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+
+    assert hydrogen.atom_name == "HD21"
+
+
+def test_asn_nd2_hydrogen_resolution_rejects_missing_template_h(tmp_path: Path) -> None:
+    """Missing Pablo-template ND2 H names should fail without geometry fallback."""
+    protein_path = _write_asn_fixture(tmp_path / "asn_no_h.pdb", hydrogens=())
+
+    with pytest.raises(ValueError, match="exactly one explicit Asn ND2 hydrogen"):
+        _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+
+
+def test_asn_nd2_hydrogen_resolution_rejects_ambiguous_template_h(tmp_path: Path) -> None:
+    """Multiple observed Pablo-template ND2 H names should be diagnostic ambiguity."""
+    protein_path = _write_asn_fixture(tmp_path / "asn_two_h.pdb", hydrogens=("HD21", "HD22"))
+
+    with pytest.raises(ValueError, match="found 2"):
+        _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+
+
+def test_g42666_product_pablo_definitions_retain_carbonyl_order_two(tmp_path: Path) -> None:
+    """Product-state Pablo residue definitions should keep G42666 carbonyl orders."""
+    if not G42666_CONECT_PATH.exists():
+        pytest.skip(f"External G42666 fixture not present: {G42666_CONECT_PATH}")
+    pytest.importorskip("openff.pablo")
+    from polyzymd.builders.conjugation.pablo.product import (
+        build_product_state_pablo_library_for_specs,
+    )
+
+    glycan_path = G42666_CONECT_PATH
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    attachment = _attachment(glycan_path)
+    settings = ConjugatedPolymerSystemSettings(pdb_fragment_output_mode="coordinate_only")
+    spec, *_ = _build_attachment_spec(
+        attachment,
+        attachment_index=1,
+        protein_pdb_path=protein_path,
+        artifact_dir=tmp_path,
+        workflow_settings=settings,
+    )
+    result = _build_pdb_fragment_coordinate_only_result(
+        protein_pdb_path=protein_path,
+        specs=(spec,),
+        output_dir=tmp_path,
+        construction_dir=tmp_path / "construction",
+        protein_canonicalization=None,
+        placement_settings=settings.placement,
+        run_packmol_func=_fake_packmol_executor([]),
+    )
+
+    library = build_product_state_pablo_library_for_specs(
+        result.crosslinked_conjugate_pdb_path,
+        protein_path,
+        (spec,),
+    )
+    carbonyl_orders = [
+        getattr(bond, "order", None)
+        for definition in library.definitions
+        for bond in getattr(definition, "bonds", ())
+        if {getattr(bond, "atom1", ""), getattr(bond, "atom2", "")} == {"C2N", "O2N"}
+    ]
+
+    assert carbonyl_orders.count(2) >= 2
 
 
 def test_conjugation_facade_exports_workflow_settings() -> None:
@@ -55,52 +209,62 @@ def test_conjugation_facade_exports_workflow_settings() -> None:
     assert PublicSettings is ConjugatedPolymerSystemSettings
 
 
-def test_glygen_loader_infers_coordinates_without_conect(tmp_path: Path) -> None:
-    """GlyGen loader should report coordinate-inferred provenance without CONECT."""
+def test_glygen_loader_rejects_missing_conect_without_coordinate_inference(tmp_path: Path) -> None:
+    """GlyGen loader should require explicit CONECT and never infer from coordinates."""
     glycan_path = _write_glygen_fixture(tmp_path / "glycan_no_conect.pdb", include_conect=False)
 
-    load_result = load_pdb_fragment(glycan_path)
-    result = residue_resolved_glycan_pdb_profile_from_fragment(load_result)
-
-    assert load_result.connectivity_provenance == "coordinate_inferred"
-    assert result.reducing_c1_serial == 1
+    with pytest.raises(ValueError, match="requires complete CONECT records"):
+        load_pdb_fragment(glycan_path)
 
 
-def test_loader_rejects_missing_reducing_end_hydroxyl(tmp_path: Path) -> None:
-    """PDB-fragment compatibility should fail actionably when hydroxyl atoms are absent."""
+def test_loader_is_not_roh_residue_name_dependent(tmp_path: Path) -> None:
+    """PDB-fragment compatibility should use graph chemistry instead of ROH names."""
     glycan_path = _write_glygen_fixture(tmp_path / "glycan_bad.pdb", include_conect=True)
     glycan_path.write_text(
         glycan_path.read_text(encoding="utf-8").replace("ROH", "BAD"), encoding="utf-8"
     )
 
-    with pytest.raises(ValueError, match="explicit hydroxyl O/H group"):
-        residue_resolved_glycan_pdb_profile_from_fragment(load_pdb_fragment(glycan_path))
+    result = residue_resolved_glycan_pdb_profile_from_fragment(load_pdb_fragment(glycan_path))
+
+    assert result.fragment.leaving_atom_serials == (1, 2)
 
 
 def test_glygen_loader_rejects_wrong_roh_ho1_element(tmp_path: Path) -> None:
     """GlyGen loader should require ROH:HO1 to be a hydrogen atom."""
     glycan_path = _write_glygen_fixture(tmp_path / "glycan_bad_ho1.pdb", include_conect=True)
-    _replace_atom_element(glycan_path, serial=9, element="O")
+    _replace_atom_element(glycan_path, serial=2, element="O")
+    glycan_path.write_text(
+        glycan_path.read_text(encoding="utf-8").replace("HO1", "OO1"), encoding="utf-8"
+    )
 
-    with pytest.raises(ValueError, match="HO1 element H"):
+    with pytest.raises(
+        ValueError,
+        match="above obvious upper valence|No glycan anomeric motif|bond orders could not be assigned",
+    ):
         residue_resolved_glycan_pdb_profile_from_fragment(load_pdb_fragment(glycan_path))
 
 
 def test_glygen_loader_rejects_wrong_roh_o1_element(tmp_path: Path) -> None:
     """GlyGen loader should require ROH:O1 to be an oxygen atom."""
     glycan_path = _write_glygen_fixture(tmp_path / "glycan_bad_o1.pdb", include_conect=True)
-    _replace_atom_element(glycan_path, serial=8, element="C")
+    _replace_atom_element(glycan_path, serial=1, element="C")
 
-    with pytest.raises(ValueError, match="O1 element O"):
+    with pytest.raises(
+        ValueError,
+        match="above obvious upper valence|No glycan anomeric motif|bond orders could not be assigned",
+    ):
         residue_resolved_glycan_pdb_profile_from_fragment(load_pdb_fragment(glycan_path))
 
 
 def test_glygen_loader_rejects_wrong_reducing_c1_element(tmp_path: Path) -> None:
     """GlyGen loader should require the reducing C1 candidate to be carbon."""
     glycan_path = _write_glygen_fixture(tmp_path / "glycan_bad_c1.pdb", include_conect=True)
-    _replace_atom_element(glycan_path, serial=1, element="O")
+    _replace_atom_element(glycan_path, serial=4, element="O")
 
-    with pytest.raises(ValueError, match="unique reducing sugar C1"):
+    with pytest.raises(
+        ValueError,
+        match="above obvious upper valence|No glycan anomeric motif|bond orders could not be assigned",
+    ):
         residue_resolved_glycan_pdb_profile_from_fragment(load_pdb_fragment(glycan_path))
 
 
@@ -110,10 +274,13 @@ def test_glygen_loader_rejects_missing_exact_roh_bond(tmp_path: Path) -> None:
         tmp_path / "glycan_missing_roh_bond.pdb", include_conect=True
     )
     text = glycan_path.read_text(encoding="utf-8")
-    text = text.replace("CONECT    8    9\n", "CONECT    1    9\n")
+    text = text.replace("CONECT    1    2\n", "CONECT    4    2\n")
     glycan_path.write_text(text, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="exact ROH:HO1-ROH:O1-C1"):
+    with pytest.raises(
+        ValueError,
+        match="above obvious upper valence|No glycan anomeric motif|bond orders could not be assigned",
+    ):
         residue_resolved_glycan_pdb_profile_from_fragment(load_pdb_fragment(glycan_path))
 
 
@@ -121,77 +288,71 @@ def test_glygen_loader_rejects_extra_roh_o1_carbon_bond(tmp_path: Path) -> None:
     """GlyGen loader should not accept unrelated C-O bonds around ROH:O1."""
     glycan_path = _write_glygen_fixture(tmp_path / "glycan_extra_roh_bond.pdb", include_conect=True)
     text = glycan_path.read_text(encoding="utf-8")
-    text = text.replace("CONECT    8    9\n", "CONECT    8    9    3\n")
+    text = text.replace("CONECT    1    2\n", "CONECT    1    2    3\n")
     glycan_path.write_text(text, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="bonded exactly"):
+    with pytest.raises(ValueError, match="above obvious upper valence|No glycan anomeric motif"):
         residue_resolved_glycan_pdb_profile_from_fragment(load_pdb_fragment(glycan_path))
 
 
-def test_coordinate_inferred_loader_rejects_false_hydrogen_proximity(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Coordinate-inferred validation should reject impossible H-H bonds."""
-    glycan_path = _write_glygen_fixture(tmp_path / "glycan_false_hh.pdb", include_conect=False)
-    _patch_coordinate_bonds(
-        monkeypatch,
-        atom_count=9,
-        bonds=((1, 2), (1, 3), (1, 8), (3, 4), (4, 6), (6, 5), (6, 7), (8, 9), (9, 9)),
+def test_loader_rejects_unknown_conect_serial(tmp_path: Path) -> None:
+    """Strict CONECT loading should reject references outside the atom table."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_unknown_serial.pdb", include_conect=True)
+    glycan_path.write_text(
+        glycan_path.read_text(encoding="utf-8").replace("CONECT    1    2", "CONECT    1   99"),
+        encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="unsafe element bond H-H"):
-        residue_resolved_glycan_pdb_profile_from_fragment(load_pdb_fragment(glycan_path))
+    with pytest.raises(ValueError, match="unknown atom serials"):
+        load_pdb_fragment(glycan_path)
 
 
-def test_coordinate_inferred_loader_rejects_overbonded_atoms(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Coordinate-inferred validation should reject unsafe extra valence."""
-    glycan_path = _write_glygen_fixture(tmp_path / "glycan_overbonded.pdb", include_conect=False)
-    _patch_coordinate_bonds(
-        monkeypatch,
-        atom_count=9,
-        bonds=((1, 2), (1, 3), (1, 8), (3, 4), (4, 6), (6, 5), (6, 7), (8, 9), (3, 8)),
+def test_loader_rejects_self_conect_bond(tmp_path: Path) -> None:
+    """Strict CONECT loading should reject self bonds instead of dropping them."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_self_bond.pdb", include_conect=True)
+    glycan_path.write_text(
+        glycan_path.read_text(encoding="utf-8") + "CONECT    9    9\n",
+        encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="overbonded atoms"):
-        residue_resolved_glycan_pdb_profile_from_fragment(load_pdb_fragment(glycan_path))
+    with pytest.raises(ValueError, match="self bonds"):
+        load_pdb_fragment(glycan_path)
 
 
-def test_coordinate_inferred_loader_accepts_glygen_branch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Coordinate-inferred validation should accept a plausible branched glycan graph."""
-    glycan_path = _write_glygen_branch_fixture(tmp_path / "glycan_branch.pdb")
-    _patch_coordinate_bonds(
-        monkeypatch,
-        atom_count=13,
-        bonds=(
-            (1, 2),
-            (1, 3),
-            (1, 8),
-            (3, 4),
-            (3, 10),
-            (4, 6),
-            (6, 5),
-            (6, 7),
-            (8, 9),
-            (10, 11),
-            (11, 12),
-            (12, 13),
-        ),
+def test_loader_rejects_isolated_atoms_from_partial_conect(tmp_path: Path) -> None:
+    """Strict CONECT loading should reject partial graphs with isolated atoms."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_partial_conect.pdb", include_conect=True)
+    text = glycan_path.read_text(encoding="utf-8").replace("CONECT    1    2\n", "")
+    glycan_path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="hydrogens must have degree 1|disconnected"):
+        load_pdb_fragment(glycan_path)
+
+
+def test_loader_rejects_explicit_hydrogen_degree_not_one(tmp_path: Path) -> None:
+    """Strict CONECT loading should reject hydrogens with degree other than one."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_bad_h_degree.pdb", include_conect=True)
+    text = glycan_path.read_text(encoding="utf-8")
+    text = text.replace("CONECT    1    2\n", "CONECT    1    2\nCONECT    2    4\n")
+    glycan_path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="hydrogens must have degree 1"):
+        load_pdb_fragment(glycan_path)
+
+
+def test_loader_rejects_obvious_upper_valence(tmp_path: Path) -> None:
+    """Strict CONECT loading should reject impossible valence before motif detection."""
+    glycan_path = _write_glygen_fixture(
+        tmp_path / "glycan_overvalent_oxygen.pdb", include_conect=True
     )
+    text = glycan_path.read_text(encoding="utf-8").replace(
+        "CONECT    1    2\n",
+        "CONECT    1    2    3    4\n",
+    )
+    glycan_path.write_text(text, encoding="utf-8")
 
-    load_result = load_pdb_fragment(glycan_path)
-    result = residue_resolved_glycan_pdb_profile_from_fragment(load_result)
-
-    assert load_result.connectivity_provenance == "coordinate_inferred"
-    assert [residue.residue_name for residue in result.fragment.residues] == [
-        "NAG",
-        "MAN",
-        "ROH",
-        "GAL",
-    ]
+    with pytest.raises(ValueError, match="above obvious upper valence"):
+        load_pdb_fragment(glycan_path)
 
 
 def test_input_path_preserves_generic_exactly_one_source_semantics() -> None:
@@ -279,7 +440,7 @@ def test_coordinate_only_workflow_removes_roh_and_links_asn(tmp_path: Path) -> N
     assert packmol_calls == [tmp_path / "construction" / "packmol_modifier_placement"]
     assert result.construction.placement.packmol_input_path.exists()
     assert result.construction.placement.packmol_input_text.count("inside sphere") == 1
-    assert "atoms 1\n  inside sphere" in result.construction.placement.packmol_input_text
+    assert "atoms 2\n  inside sphere" in result.construction.placement.packmol_input_text
     assert "outside sphere" not in result.construction.placement.packmol_input_text
 
 
@@ -307,7 +468,7 @@ def test_coordinate_only_places_glycan_at_n_glycosylation_bond_length(
 
 def test_coordinate_only_accepts_generic_local_hydroxyl_glycan(tmp_path: Path) -> None:
     """Coordinate-only export should accept generic residue-resolved glycan labels."""
-    glycan_path = _write_generic_local_hydroxyl_fixture(tmp_path / "external_like.pdb")
+    glycan_path = _write_glygen_fixture(tmp_path / "external_like.pdb", include_conect=True)
     protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
     result, _spec = _build_coordinate_only_fixture_result(tmp_path, protein_path, glycan_path)
 
@@ -318,8 +479,8 @@ def test_coordinate_only_accepts_generic_local_hydroxyl_glycan(tmp_path: Path) -
     c1 = _single_atom(output_atoms, chain_id="C", residue_number=1, atom_name="C1")
 
     assert result.status == "coordinate_only"
-    assert " QAA C" in output
-    assert " Z9B C" in output
+    assert " NAG C" in output
+    assert " MAN C" in output
     assert "HO1" not in output
     assert any(set(pair) == {nd2.serial, c1.serial} for pair in bonds)
     assert "CONECT" in output
@@ -509,10 +670,10 @@ def test_coordinate_only_emits_no_implausible_conect_lengths(tmp_path: Path) -> 
     assert long_edges == []
 
 
-def test_glygen_loader_converts_coordinate_inferred_indices_to_source_serials(
+def test_glygen_loader_rejects_high_serial_coordinate_only_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Coordinate-inferred GlyGen bonds should not retain raw RDKit atom indices."""
+    """Strict GlyGen loading should reject high-serial input without CONECT records."""
     glycan_path = _write_glygen_fixture(
         tmp_path / "glycan_high_serials.pdb",
         include_conect=False,
@@ -533,10 +694,8 @@ def test_glygen_loader_converts_coordinate_inferred_indices_to_source_serials(
         ),
     )
 
-    result = residue_resolved_glycan_pdb_profile_from_fragment(load_pdb_fragment(glycan_path))
-
-    assert result.fragment.bonds[0] == (101, 102)
-    assert all(endpoint >= 101 for bond in result.fragment.bonds for endpoint in bond)
+    with pytest.raises(ValueError, match="requires complete CONECT"):
+        load_pdb_fragment(glycan_path)
 
 
 def test_coordinate_only_high_serial_graph_avoids_raw_index_endpoint_ambiguity(
@@ -563,7 +722,7 @@ def test_coordinate_only_high_serial_graph_avoids_raw_index_endpoint_ambiguity(
         atom for atom in parse_pdb_atom_records(glycan_path) if atom.residue_name.upper() != "ROH"
     )
     output_by_source = _output_glycan_atoms_by_source(source_atoms, output_glycan_atoms)
-    expected_c1_o5 = frozenset((output_by_source[101].serial, output_by_source[102].serial))
+    expected_c1_o5 = frozenset((output_by_source[104].serial, output_by_source[114].serial))
 
     assert expected_c1_o5 in output_edges
 
@@ -594,6 +753,17 @@ def _attachment(glycan_path: Path) -> SimpleNamespace:
             product_residues=SimpleNamespace(site=None, moiety=None),
             bond=SimpleNamespace(order=1, site_atom=None, target_bond_length_angstrom=1.45),
         ),
+    )
+
+
+def _asn_selector() -> PdbAtomSelector:
+    """Return the default ASN ND2 selector for tests."""
+    return PdbAtomSelector(
+        chain_id="A",
+        residue_name="ASN",
+        residue_number=1,
+        atom_name="ND2",
+        insertion_code="",
     )
 
 
@@ -760,7 +930,7 @@ def _element(atom: Any) -> str:
     return (atom.element or atom.atom_name[:1]).strip().upper()
 
 
-def _write_asn_fixture(path: Path) -> Path:
+def _write_asn_fixture(path: Path, *, hydrogens: tuple[str, ...] = ("HD21",)) -> Path:
     """Write a tiny explicit-hydrogen ASN residue fixture."""
     atoms = [
         (1, "N", "ASN", "A", 1, 0.0, 0.0, 0.0, "N"),
@@ -770,9 +940,12 @@ def _write_asn_fixture(path: Path) -> Path:
         (5, "CG", "ASN", "A", 1, 3.0, -1.2, 0.0, "C"),
         (6, "OD1", "ASN", "A", 1, 3.6, -2.2, 0.0, "O"),
         (7, "ND2", "ASN", "A", 1, 3.5, 0.0, 0.0, "N"),
-        (8, "HD21", "ASN", "A", 1, 4.4, 0.0, 0.0, "H"),
-        (9, "HD22", "ASN", "A", 1, 3.1, 0.8, 0.0, "H"),
     ]
+    hydrogen_coords = {
+        "HD21": (8, "HD21", "ASN", "A", 1, 14.4, 0.0, 0.0, "H"),
+        "HD22": (9, "HD22", "ASN", "A", 1, 13.1, 0.8, 0.0, "H"),
+    }
+    atoms.extend(hydrogen_coords[name] for name in hydrogens)
     path.write_text("".join(_pdb_atom(*atom) for atom in atoms) + "END\n", encoding="utf-8")
     return path
 
@@ -786,30 +959,28 @@ def _write_glygen_fixture(
 ) -> Path:
     """Write a small labeled multi-residue GlyGen-style glycan fixture."""
     dx, dy, dz = coordinate_offset
-    atoms = [
-        (1, "C1", "NAG", "", 1, 0.0 + dx, 0.0 + dy, 0.0 + dz, "C"),
-        (2, "O5", "NAG", "", 1, 0.0 + dx, 1.4 + dy, 0.0 + dz, "O"),
-        (3, "C2", "NAG", "", 1, 1.5 + dx, 0.0 + dy, 0.0 + dz, "C"),
-        (4, "O2", "NAG", "", 1, 2.8 + dx, 0.0 + dy, 0.0 + dz, "O"),
-        (5, "O1", "MAN", "", 2, 5.2 + dx, 0.0 + dy, 0.0 + dz, "O"),
-        (6, "C1", "MAN", "", 2, 4.1 + dx, 0.0 + dy, 0.0 + dz, "C"),
-        (7, "O5", "MAN", "", 2, 4.1 + dx, 1.4 + dy, 0.0 + dz, "O"),
-        (8, "O1", "ROH", "", 3, -1.3 + dx, 0.0 + dy, 0.0 + dz, "O"),
-        (9, "HO1", "ROH", "", 3, -2.2 + dx, 0.0 + dy, 0.0 + dz, "H"),
-    ]
-    lines = [_pdb_atom(atom[0] + serial_offset, *atom[1:]) for atom in atoms]
-    if include_conect:
-        serial = {index: index + serial_offset for index in range(1, 10)}
-        lines.extend(
-            [
-                _conect(serial[1], serial[2], serial[3], serial[8]),
-                _conect(serial[3], serial[4]),
-                _conect(serial[4], serial[6]),
-                _conect(serial[6], serial[5]),
-                _conect(serial[6], serial[7]),
-                _conect(serial[8], serial[9]),
-            ]
+    source_atoms = parse_pdb_atom_records(G42666_CONECT_PATH)
+    residue_map = {"4YB": ("NAG", 1), "0YB": ("MAN", 2), "ROH": ("ROH", 3)}
+    lines = []
+    for atom in source_atoms:
+        residue_name, residue_number = residue_map[atom.residue_name]
+        lines.append(
+            _pdb_atom(
+                atom.serial + serial_offset,
+                atom.atom_name,
+                residue_name,
+                "",
+                residue_number,
+                atom.x + dx,
+                atom.y + dy,
+                atom.z + dz,
+                atom.element,
+            )
         )
+    if include_conect:
+        for left, right in parse_pdb_conect_pairs(G42666_CONECT_PATH):
+            if left < right:
+                lines.append(_conect(left + serial_offset, right + serial_offset))
     path.write_text("".join(lines) + "END\n", encoding="utf-8")
     return path
 
@@ -817,24 +988,24 @@ def _write_glygen_fixture(
 def _write_generic_local_hydroxyl_fixture(path: Path) -> Path:
     """Write a generic residue-resolved glycan with a residue-local reducing OH."""
     atoms = [
-        (1, "C1", "QAA", "", 1, 0.0, 0.0, 0.0, "C"),
-        (2, "O1", "QAA", "", 1, -1.2, 0.0, 0.0, "O"),
-        (3, "HO1", "QAA", "", 1, -2.0, 0.0, 0.0, "H"),
-        (4, "O5", "QAA", "", 1, 0.0, 1.4, 0.0, "O"),
-        (5, "C2", "QAA", "", 1, 1.5, 0.0, 0.0, "C"),
-        (6, "O2", "QAA", "", 1, 2.8, 0.0, 0.0, "O"),
-        (7, "C4", "Z9B", "", 2, 4.1, 0.0, 0.0, "C"),
-        (8, "O4", "Z9B", "", 2, 5.2, 0.0, 0.0, "O"),
-        (9, "O5", "Z9B", "", 2, 4.1, 1.4, 0.0, "O"),
+        (1, "A1", "QAA", "", 1, 0.0, 0.0, 0.0, "C"),
+        (2, "B2", "QAA", "", 1, 0.0, 1.4, 0.0, "O"),
+        (3, "C3", "QAA", "", 1, 1.5, 0.0, 0.0, "C"),
+        (4, "D4", "QAA", "", 1, 2.8, 0.0, 0.0, "O"),
+        (5, "E5", "Z9B", "", 2, 5.2, 0.0, 0.0, "O"),
+        (6, "F6", "Z9B", "", 2, 4.1, 0.0, 0.0, "C"),
+        (7, "G7", "Z9B", "", 2, 4.1, 1.4, 0.0, "O"),
+        (8, "X7", "QAA", "", 1, -1.3, 0.0, 0.0, "O"),
+        (9, "Y8", "QAA", "", 1, -2.2, 0.0, 0.0, "H"),
     ]
     lines = [_pdb_atom(*atom) for atom in atoms]
     lines.extend(
         [
-            _conect(1, 2, 4, 5),
-            _conect(2, 3),
-            _conect(5, 6),
-            _conect(6, 7),
-            _conect(7, 8, 9),
+            _conect(1, 2, 3, 8),
+            _conect(3, 4),
+            _conect(4, 6),
+            _conect(6, 5, 7, 2),
+            _conect(8, 9),
         ]
     )
     path.write_text("".join(lines) + "END\n", encoding="utf-8")

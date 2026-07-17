@@ -388,6 +388,20 @@ def test_bridge_reconciles_small_residual_over_local_patch_atoms(monkeypatch, tm
     assert reconciliation["success"] is True
     assert reconciliation["corrected_atom_count"] == 1
     assert reconciliation["per_atom_correction_e"] == pytest.approx(0.004)
+    assert (
+        reconciliation["formal_target_scope"]
+        == "all_emitted_mapped_local_product_atoms_asx_plus_glycan"
+    )
+    assert (
+        reconciliation["correction_domain"]
+        == "modified_protein_chain_a_asx_local_closure_atoms_only"
+    )
+    assert diagnostic["formal_target_scope"] == reconciliation["formal_target_scope"]
+    assert diagnostic["correction_domain"] == reconciliation["correction_domain"]
+    assert "ASX + glycan" in diagnostic["policy"]
+    assert "chain-A ASX/local closure atoms" in diagnostic["policy"]
+    assert any("ASX plus" in item for item in report.assumptions)
+    assert any("chain-A ASX/local closure atoms" in item for item in report.diagnostics)
 
 
 def test_bridge_refuses_raw_sdf_as_validated_charge_source(tmp_path):

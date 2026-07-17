@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections import deque
+from collections import Counter, deque
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
@@ -16,22 +17,22 @@ from polyzymd.builders.conjugation.polymer.fragment import (
 )
 from polyzymd.builders.conjugation.structure.parsing import (
     parse_pdb_atom_records,
-    parse_pdb_conect_pairs,
-    pdb_has_conect_records,
+    parse_pdb_conect_serials,
 )
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
-_COORDINATE_INFERRED_ALLOWED_BONDS = frozenset(
-    {
-        frozenset(("C", "C")),
-        frozenset(("C", "H")),
-        frozenset(("C", "N")),
-        frozenset(("C", "O")),
-        frozenset(("H", "N")),
-        frozenset(("H", "O")),
-    }
-)
-_COORDINATE_INFERRED_MAX_VALENCE = {"H": 1, "C": 4, "N": 4, "O": 2}
+_OBVIOUS_MAX_VALENCE = {
+    "H": 1,
+    "F": 1,
+    "CL": 1,
+    "BR": 1,
+    "I": 1,
+    "O": 2,
+    "N": 4,
+    "C": 4,
+    "P": 6,
+    "S": 6,
+}
 
 
 class PdbFragmentLoadResult(BaseModel):
@@ -40,7 +41,9 @@ class PdbFragmentLoadResult(BaseModel):
     source_atoms: tuple[PdbAtomRecord, ...] = Field(exclude=True)
     source_path: Path
     serial_bonds: tuple[tuple[int, int], ...]
-    connectivity_provenance: Literal["conect", "coordinate_inferred"]
+    serial_bond_orders: tuple[tuple[int, int, float], ...]
+    serial_formal_charges: tuple[tuple[int, int], ...] = Field(default_factory=tuple)
+    connectivity_provenance: Literal["conect"]
     residue_mapping: tuple[dict[str, int | str], ...]
 
     def to_fragment(
@@ -78,6 +81,7 @@ class PdbFragmentLoadResult(BaseModel):
         return GeneratedPolymerFragment.from_atom_records(
             tuple(PolymerFragmentAtom.from_pdb_atom(atom) for atom in self.source_atoms),
             bonds=self.serial_bonds,
+            bond_orders=self.serial_bond_orders,
             residues=tuple(
                 PolymerFragmentResidue.model_validate(item) for item in self.residue_mapping
             ),
@@ -123,7 +127,7 @@ def load_pdb_fragment(path: Path | str, *, chain_id: str = "C") -> PdbFragmentLo
     Parameters
     ----------
     path : pathlib.Path or str
-        PDB fragment containing ATOM/HETATM records and optional CONECT records.
+        PDB fragment containing ATOM/HETATM records and complete CONECT records.
     chain_id : str, optional
         Chain assigned to blank-chain atoms, by default ``"C"``.
 
@@ -142,21 +146,19 @@ def load_pdb_fragment(path: Path | str, *, chain_id: str = "C") -> PdbFragmentLo
     atoms = _normalized_atoms(source_path, chain_id=chain_id)
     _validate_unique_serials(atoms, source_path)
     serial_to_atom = {atom.serial: atom for atom in atoms if atom.serial is not None}
-    provenance: Literal["conect", "coordinate_inferred"] = (
-        "conect" if pdb_has_conect_records(source_path) else "coordinate_inferred"
-    )
-    serial_bonds = (
-        parse_pdb_conect_pairs(source_path)
-        if provenance == "conect"
-        else _coordinate_inferred_serial_bonds(source_path, atoms)
-    )
+    provenance: Literal["conect"] = "conect"
+    serial_bonds = _strict_conect_serial_bonds(source_path)
     if not serial_bonds:
         raise ValueError(
-            f"PDB fragment graph has no bonds after {provenance} connectivity loading: {source_path}"
+            "PDB fragment graph has no bonds after strict CONECT connectivity loading: "
+            f"{source_path}"
         )
     _validate_serial_bonds(serial_bonds, serial_to_atom, source_path)
-    if provenance == "coordinate_inferred":
-        _validate_coordinate_inferred_bonds(serial_bonds, serial_to_atom, source_path)
+    _validate_conect_degrees(serial_bonds, serial_to_atom, source_path)
+    serial_bond_orders, serial_formal_charges = _assign_conect_chemistry(
+        atoms, serial_bonds, source_path
+    )
+    atoms = _atoms_with_assigned_formal_charges(atoms, serial_formal_charges)
     index_bonds = tuple(
         sorted((serial_to_atom[left].atom_index, serial_to_atom[right].atom_index))
         for left, right in serial_bonds
@@ -166,6 +168,8 @@ def load_pdb_fragment(path: Path | str, *, chain_id: str = "C") -> PdbFragmentLo
         source_atoms=atoms,
         source_path=source_path,
         serial_bonds=tuple(sorted(tuple(sorted(bond)) for bond in serial_bonds)),
+        serial_bond_orders=serial_bond_orders,
+        serial_formal_charges=serial_formal_charges,
         connectivity_provenance=provenance,
         residue_mapping=_residue_mapping(atoms),
     )
@@ -203,27 +207,35 @@ def _validate_unique_serials(atoms: tuple[PdbAtomRecord, ...], path: Path) -> No
         raise ValueError(f"PDB fragment atoms require unique serial numbers: {path}")
 
 
-def _coordinate_inferred_serial_bonds(
-    path: Path, atoms: tuple[PdbAtomRecord, ...]
-) -> tuple[tuple[int, int], ...]:
-    """Infer PDB bonds with RDKit proximity bonding and return serial pairs."""
-    from rdkit import Chem
-
-    mol = Chem.MolFromPDBFile(str(path), sanitize=False, removeHs=False, proximityBonding=True)
-    if mol is None:
+def _strict_conect_serial_bonds(path: Path) -> tuple[tuple[int, int], ...]:
+    """Parse CONECT bonds without coordinate inference or repair."""
+    bonds: set[tuple[int, int]] = set()
+    self_bonds: list[int] = []
+    saw_conect = False
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if not line.startswith("CONECT"):
+                continue
+            saw_conect = True
+            serials = parse_pdb_conect_serials(line)
+            if len(serials) < 2:
+                continue
+            source = serials[0]
+            for target in serials[1:]:
+                if source == target:
+                    self_bonds.append(source)
+                    continue
+                bonds.add(tuple(sorted((source, target))))
+    if not saw_conect:
         raise ValueError(
-            f"RDKit could not infer PDB fragment connectivity from coordinates in {path}"
+            "PDB fragment ingestion requires complete CONECT records; "
+            f"coordinate inference is disabled for {path}"
         )
-    if mol.GetNumAtoms() != len(atoms):
+    if self_bonds:
         raise ValueError(
-            "RDKit coordinate-inferred PDB fragment atom count differs from PDB atom count: "
-            f"RDKit={mol.GetNumAtoms()} PDB={len(atoms)} path={path}"
+            f"PDB fragment CONECT contains self bonds for atom serials {sorted(self_bonds)} in {path}"
         )
-    serials = tuple(atom.serial for atom in atoms)
-    return tuple(
-        sorted((serials[bond.GetBeginAtomIdx()], serials[bond.GetEndAtomIdx()]))
-        for bond in mol.GetBonds()
-    )
+    return tuple(sorted(bonds))
 
 
 def _validate_serial_bonds(
@@ -235,41 +247,217 @@ def _validate_serial_bonds(
         raise ValueError(f"PDB fragment CONECT references unknown atom serials {unknown} in {path}")
 
 
-def _validate_coordinate_inferred_bonds(
+def _validate_conect_degrees(
     bonds: tuple[tuple[int, int], ...], serial_to_atom: dict[int, PdbAtomRecord], path: Path
 ) -> None:
-    """Reject unsafe proximity-inferred graph edges before accepting coordinates."""
-    valences = dict.fromkeys(serial_to_atom, 0)
+    """Reject explicit-H and impossible valence states in the CONECT graph."""
+    valences: Counter[int] = Counter()
     for left, right in bonds:
-        atom_left = serial_to_atom[left]
-        atom_right = serial_to_atom[right]
-        element_left = _normalized_element(atom_left)
-        element_right = _normalized_element(atom_right)
-        pair = frozenset((element_left, element_right))
-        if pair not in _COORDINATE_INFERRED_ALLOWED_BONDS:
-            raise ValueError(
-                "Coordinate-inferred PDB fragment graph contains an unsafe element bond "
-                f"{element_left}-{element_right} between atom serials {left}-{right} in {path}"
-            )
         valences[left] += 1
         valences[right] += 1
 
+    invalid_hydrogens = []
     overbonded = []
-    for serial, valence in valences.items():
-        element = _normalized_element(serial_to_atom[serial])
-        max_valence = _COORDINATE_INFERRED_MAX_VALENCE.get(element)
-        if max_valence is None:
-            raise ValueError(
-                "Coordinate-inferred PDB fragment graph contains unsupported element "
-                f"{element!r} at atom serial {serial} in {path}"
-            )
-        if valence > max_valence:
+    for serial, atom in serial_to_atom.items():
+        valence = valences[serial]
+        element = _normalized_element(atom)
+        if element == "H" and valence != 1:
+            invalid_hydrogens.append(f"{serial}:H{valence}")
+        max_valence = _OBVIOUS_MAX_VALENCE.get(element)
+        if max_valence is not None and valence > max_valence:
             overbonded.append(f"{serial}:{element}{valence}>{max_valence}")
+    if invalid_hydrogens:
+        raise ValueError(
+            "PDB fragment CONECT explicit hydrogens must have degree 1; found "
+            f"{', '.join(invalid_hydrogens)} in {path}"
+        )
     if overbonded:
         raise ValueError(
-            "Coordinate-inferred PDB fragment graph has overbonded atoms "
+            "PDB fragment CONECT graph has atoms above obvious upper valence "
             f"{', '.join(overbonded)} in {path}"
         )
+
+
+def _assign_conect_chemistry(
+    atoms: tuple[PdbAtomRecord, ...],
+    bonds: tuple[tuple[int, int], ...],
+    path: Path,
+) -> tuple[tuple[tuple[int, int, float], ...], tuple[tuple[int, int], ...]]:
+    """Assign bond orders and charges on the fixed CONECT graph."""
+    from rdkit import Chem
+    from rdkit.Chem import rdDetermineBonds
+
+    serial_to_index = {atom.serial: index for index, atom in enumerate(atoms)}
+    input_bonds = {frozenset((left, right)) for left, right in bonds}
+    explicit_charges = {
+        atom.serial: _pdb_formal_charge(atom.charge)
+        for atom in atoms
+        if atom.serial is not None and atom.charge.strip()
+    }
+    mol = Chem.RWMol()
+    for atom in atoms:
+        rd_atom = Chem.Atom(_rdkit_element_symbol(atom))
+        rd_atom.SetFormalCharge(_pdb_formal_charge(atom.charge))
+        rd_atom.SetNoImplicit(True)
+        mol.AddAtom(rd_atom)
+    for left, right in bonds:
+        mol.AddBond(serial_to_index[left], serial_to_index[right], Chem.BondType.SINGLE)
+    conformer = Chem.Conformer(len(atoms))
+    for index, atom in enumerate(atoms):
+        conformer.SetAtomPosition(index, (float(atom.x), float(atom.y), float(atom.z)))
+    mol.AddConformer(conformer)
+    rd_mol = mol.GetMol()
+    total_charge = sum(_pdb_formal_charge(atom.charge) for atom in atoms)
+    try:
+        rdDetermineBonds.DetermineBondOrders(
+            rd_mol,
+            charge=total_charge,
+            allowChargedFragments=True,
+            embedChiral=False,
+        )
+    except Exception as exc:  # noqa: BLE001 - RDKit raises several C++ exception types
+        raise ValueError(
+            "PDB fragment CONECT graph connectivity was accepted, but bond orders could not "
+            "be assigned from explicit atoms, hydrogens, charges, and CONECT records. Provide "
+            f"an SDF/OpenFF source for chemistry that cannot be resolved from PDB graph: {path}"
+        ) from exc
+
+    _validate_rdkit_bond_order_assignment(
+        rd_mol,
+        atoms=atoms,
+        input_bonds=input_bonds,
+        total_charge=total_charge,
+        explicit_charges=explicit_charges,
+        path=path,
+    )
+    serials = tuple(atom.serial for atom in atoms)
+    ordered = []
+    for bond in rd_mol.GetBonds():
+        left = serials[bond.GetBeginAtomIdx()]
+        right = serials[bond.GetEndAtomIdx()]
+        ordered.append((*tuple(sorted((left, right))), float(bond.GetBondTypeAsDouble())))
+    assigned_charges = tuple(
+        sorted(
+            (serials[atom.GetIdx()], int(atom.GetFormalCharge()))
+            for atom in rd_mol.GetAtoms()
+            if int(atom.GetFormalCharge()) != 0
+        )
+    )
+    return tuple(sorted(ordered)), assigned_charges
+
+
+def _validate_rdkit_bond_order_assignment(
+    mol: object,
+    *,
+    atoms: tuple[PdbAtomRecord, ...],
+    input_bonds: set[frozenset[int]],
+    total_charge: int,
+    explicit_charges: Mapping[int, int],
+    path: Path,
+) -> None:
+    """Validate that RDKit assigned only orders, not a different graph."""
+    rd_atoms = tuple(mol.GetAtoms())
+    if len(rd_atoms) != len(atoms):
+        raise ValueError(
+            "PDB fragment bond-order assignment changed atom count: "
+            f"input={len(atoms)} output={len(rd_atoms)} in {path}"
+        )
+    serials = tuple(atom.serial for atom in atoms)
+    output_bonds = {
+        frozenset((serials[bond.GetBeginAtomIdx()], serials[bond.GetEndAtomIdx()]))
+        for bond in mol.GetBonds()
+    }
+    if output_bonds != input_bonds:
+        raise ValueError(
+            "PDB fragment bond-order assignment changed CONECT connectivity; refusing to "
+            f"repair or infer bonds for {path}"
+        )
+    radicals = [
+        f"{serials[atom.GetIdx()]}:{atom.GetSymbol()}{atom.GetNumRadicalElectrons()}"
+        for atom in rd_atoms
+        if atom.GetNumRadicalElectrons()
+    ]
+    if radicals:
+        raise ValueError(
+            "PDB fragment bond-order assignment left radical atoms "
+            f"{', '.join(radicals)} in {path}; provide an SDF/OpenFF source"
+        )
+    assigned_charge = sum(atom.GetFormalCharge() for atom in rd_atoms)
+    if assigned_charge != total_charge:
+        raise ValueError(
+            "PDB fragment bond-order assignment changed total formal charge from "
+            f"{total_charge} to {assigned_charge} in {path}"
+        )
+    changed_explicit = []
+    for atom in rd_atoms:
+        serial = serials[atom.GetIdx()]
+        if serial in explicit_charges and atom.GetFormalCharge() != explicit_charges[serial]:
+            changed_explicit.append(
+                f"{serial}:{explicit_charges[serial]}->{atom.GetFormalCharge()}"
+            )
+    if changed_explicit:
+        raise ValueError(
+            "PDB fragment bond-order assignment changed explicit PDB formal charges "
+            f"{', '.join(changed_explicit)} in {path}"
+        )
+    unsupported = [
+        bond.GetBondTypeAsDouble()
+        for bond in mol.GetBonds()
+        if bond.GetBondTypeAsDouble() not in {1.0, 1.5, 2.0, 3.0}
+    ]
+    if unsupported:
+        raise ValueError(
+            "PDB fragment bond-order assignment produced unsupported bond orders "
+            f"{unsupported} in {path}"
+        )
+
+
+def _rdkit_element_symbol(atom: PdbAtomRecord) -> str:
+    """Return an RDKit-compatible element symbol for a parsed PDB atom."""
+    element = atom.element.strip()
+    if not element:
+        element = atom.atom_name.strip()
+    normalized = element[:1].upper() + element[1:2].lower()
+    if normalized.upper() == "CL":
+        return "Cl"
+    if normalized.upper() == "BR":
+        return "Br"
+    return normalized[:2].strip()
+
+
+def _pdb_formal_charge(value: str) -> int:
+    """Parse a PDB formal-charge field into an integer charge."""
+    text = (value or "").strip()
+    if not text:
+        return 0
+    if len(text) == 2 and text[0].isdigit() and text[1] in "+-":
+        magnitude = int(text[0])
+        return magnitude if text[1] == "+" else -magnitude
+    if len(text) == 2 and text[0] in "+-" and text[1].isdigit():
+        magnitude = int(text[1])
+        return magnitude if text[0] == "+" else -magnitude
+    if text in {"+", "-"}:
+        return 1 if text == "+" else -1
+    return int(text)
+
+
+def _atoms_with_assigned_formal_charges(
+    atoms: tuple[PdbAtomRecord, ...], serial_formal_charges: tuple[tuple[int, int], ...]
+) -> tuple[PdbAtomRecord, ...]:
+    """Return atoms with RDKit-assigned formal charges in PDB charge fields."""
+    charges = dict(serial_formal_charges)
+    return tuple(
+        atom.model_copy(update={"charge": _format_pdb_formal_charge(charges.get(atom.serial, 0))})
+        for atom in atoms
+    )
+
+
+def _format_pdb_formal_charge(charge: int) -> str:
+    """Format an integer formal charge for a PDB charge field."""
+    if charge == 0:
+        return ""
+    sign = "+" if charge > 0 else "-"
+    return f"{abs(charge)}{sign}"
 
 
 def _validate_connected_graph(

@@ -55,10 +55,14 @@ SMILES or polymer moiety sources.
 
 - The generic loader requires a single connected fragment graph and preserves
   residue labels.
-- Files with `CONECT` records use those records directly.
-- Files without `CONECT` records use RDKit coordinate-inferred connectivity and
-  record `coordinate_inferred` provenance in the sidecar. Inspect the output PDB
-  and sidecar before using the structure downstream.
+- Files must include complete, curated `CONECT` records for the whole fragment.
+  PolyzyMD rejects missing and detectably invalid explicit graphs, including
+  unknown endpoints, self-bonds, disconnected or isolated atoms, invalid
+  explicit-H degree, and obvious overvalence where applicable.
+- PolyzyMD cannot prove every expected chemical bond is present and never
+  repairs or infers omitted connectivity from coordinates. RDKit assigns bond
+  orders only on the accepted exact connectivity. Inspect the output PDB and
+  sidecar before using the structure downstream.
 - Multi-model PDB files are not automatically reduced. If a GlycoShape or other
   download contains more than one `MODEL` record, extract the model you want into
   a single-model PDB before loading it.
@@ -136,11 +140,11 @@ The default coordinate-only paths are:
 | PDB-fragment ingestion sidecar | `artifacts/nglycan_asn60/conjugate-polymerist-cache/asn60_residue_resolved_glycan_pdb_fragment_ingestion.json` | `connectivity_provenance`, residue mapping, and the `n_glycosylation_profile` with reducing `C1`, removed hydroxyl atoms, and linkage diagnostics. |
 | Workflow JSON | `artifacts/nglycan_asn60/conjugated_polymer_system_workflow.json` | `status: coordinate_only` and artifact path metadata. |
 
-For raw glycan PDBs without `CONECT`, pay particular attention to the sidecar's
-`connectivity_provenance: coordinate_inferred` value and linkage diagnostics.
-Coordinate-inferred bonds are validated for a connected graph and plausible
-inter-residue C--O glycosidic linkages, but you should still inspect the emitted
-PDB and provenance before parameterizing elsewhere.
+Raw glycan PDBs must include complete curated `CONECT` records. PolyzyMD
+rejects missing or detectably invalid explicit graphs, but cannot prove every
+expected chemical bond is present; for accepted fragments, confirm the sidecar
+reports explicit `CONECT` provenance and inspect the linkage diagnostics before
+parameterizing elsewhere.
 
 ## Experimental Pablo/OpenFF continuation
 

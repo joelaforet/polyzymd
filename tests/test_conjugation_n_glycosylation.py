@@ -164,7 +164,7 @@ def _glycan_fragment(tmp_path: Path, *, residue_name: str = "NAG"):
 
 
 def _asn_pdb(tmp_path: Path) -> Path:
-    """Create a small Asn residue with explicit ND2 hydrogens."""
+    """Create a small Asn residue with one explicit ND2 leaving hydrogen."""
     path = tmp_path / "asn.pdb"
     lines = [
         _pdb_atom(1, "N", "ASN", "A", 42, 0.0, 0.0, 0.0, element="N"),
@@ -174,7 +174,6 @@ def _asn_pdb(tmp_path: Path) -> Path:
         _pdb_atom(5, "OD1", "ASN", "A", 42, 2.0, -1.2, 0.0, element="O"),
         _pdb_atom(6, "ND2", "ASN", "A", 42, 2.0, 1.2, 0.0, element="N"),
         _pdb_atom(7, "HD21", "ASN", "A", 42, 2.0, 2.1, 0.0, element="H"),
-        _pdb_atom(8, "HD22", "ASN", "A", 42, 2.8, 1.2, 0.0, element="H"),
     ]
     path.write_text("".join(lines) + "END\n", encoding="utf-8")
     return path

@@ -142,6 +142,49 @@ Do not reuse reactant-state leaving names such as `HZ2`/`HZ3` as a default. The
 source protein may have used different hydrogen names, and those atoms should
 already be absent from the product PDB.
 
+## Residue-resolved glycan PDB fragments
+
+PolyzyMD's PDB-fragment moiety ingestion is strict about connectivity. A glycan
+fragment supplied with `moiety.input_path` must include complete `CONECT` records
+for the fragment graph. PolyzyMD does not infer, guess, or repair fragment bonds
+from coordinates.
+
+After accepting the explicit graph, PolyzyMD may assign bond orders on that exact
+graph from parsed atoms, explicit hydrogens, formal charges, and `CONECT` pairs.
+This step must preserve the atom count and undirected bond set exactly; it never
+creates or deletes connectivity.
+
+Common fragment-ingestion messages:
+
+- `PDB fragment ingestion requires complete CONECT records; coordinate inference
+  is disabled`: add curated `CONECT` records to the source fragment.
+- `PDB fragment CONECT references unknown atom serials`: a `CONECT` endpoint is
+  not present as an `ATOM` or `HETATM` serial.
+- `PDB fragment CONECT contains self bonds`: a source atom is bonded to itself.
+- `PDB fragment graph is disconnected`: the fragment has isolated atoms or
+  disconnected components after reading only `CONECT` records.
+- `PDB fragment CONECT explicit hydrogens must have degree 1`: an explicit
+  hydrogen has zero or multiple graph bonds.
+- `PDB fragment CONECT graph has atoms above obvious upper valence`: the explicit
+  graph is chemically impossible for a common element such as H, C, N, or O.
+- `bond orders could not be assigned`: the PDB graph is connected, but PDB atom
+  records do not carry enough chemically consistent information to assign formal
+  bond orders without radicals or charge changes. Provide an SDF or OpenFF-native
+  source for that fragment chemistry.
+- `No glycan anomeric motif was found`: N-glycosylation could not find a graph
+  motif with an anomeric carbon, an O-H leaving group, and a retained ring oxygen.
+- `Ambiguous glycan anomeric motif assignments`: more than one graph motif was
+  possible. Use the existing `moiety.link_site` selector to choose the reactive
+  atom instead of adding name-based assumptions.
+
+Atom and residue names are used for diagnostics and selectors, not for chemistry
+inference. The reducing-end motif can be named `C1/O1/HO1`, use a separate `ROH`
+cap, or use source-specific names, provided the `CONECT` graph describes the same
+chemistry. For the audited G42666 CONECT fixture, the selected transformation is
+anomeric carbon serial 4, leaving oxygen/hydrogen serials 1 and 2, retained ring
+oxygen serial 14, removal of one Asn `ND2` hydrogen, and formation of a single
+`ND2`-C1 bond.
+
 ## Disulfides
 
 For each disulfide:
