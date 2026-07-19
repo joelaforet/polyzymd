@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -149,9 +150,16 @@ def build_product_state_pablo_library(
         source_atoms=source_atoms,
         requirement=requirement,
         source_residue_name=_source_protein_residue_name(resolved_plan, source_atoms),
+        modifier_crosslink_atom=_pablo_modifier_crosslink_atom(requirement.linking_atoms[1]),
     )
     definitions.append(protein_definition)
-    summaries.append(_summarize_definition(protein_definition, protein_key))
+    summaries.append(
+        _summarize_definition(
+            protein_definition,
+            protein_key,
+            raw_crosslink=(requirement.linking_atoms[0], requirement.linking_atoms[1]),
+        )
+    )
 
     polymer_residue_keys = _product_residue_keys_from_mappings(
         product_atoms,
@@ -200,6 +208,17 @@ def build_product_state_pablo_library(
     for key, residue_atoms in _product_polymer_residues(polymer_atoms):
         is_modified = key == modifier_key
         link_plan = polymer_link_plans.get(key, _EMPTY_POLYMER_LINK_PLAN)
+        atom_name_aliases = dict(link_plan.atom_name_aliases)
+        raw_crosslink = None
+        if is_modified:
+            atom_name_aliases.update(
+                _modifier_crosslink_atom_aliases(
+                    requirement.linking_atoms[1],
+                    residue_atoms=residue_atoms,
+                    existing_aliases=atom_name_aliases,
+                )
+            )
+            raw_crosslink = (requirement.linking_atoms[1], requirement.linking_atoms[0])
         definition = _build_pdb_residue_definition(
             atom_cls,
             bond_cls,
@@ -213,19 +232,23 @@ def build_product_state_pablo_library(
                 side="modifier" if is_modified else "none",
             ),
             crosslink=(
-                (requirement.linking_atoms[1], requirement.linking_atoms[0])
+                (
+                    _pablo_modifier_crosslink_atom(requirement.linking_atoms[1]),
+                    requirement.linking_atoms[0],
+                )
                 if is_modified
                 else link_plan.crosslink
             ),
             extra_leaving_bonds=link_plan.extra_leaving_bonds,
-            atom_name_aliases=dict(link_plan.atom_name_aliases),
+            atom_name_aliases=atom_name_aliases,
             bond_order=int(requirement.bond_order),
             description="PolyzyMD product-state polymer residue definition",
         )
         definitions.append(definition)
-        summaries.append(_summarize_definition(definition, key))
+        summaries.append(_summarize_definition(definition, key, raw_crosslink=raw_crosslink))
 
     _validate_no_whole_polymer_collapse(summaries)
+    definitions = list(_deduplicate_product_definitions(definitions))
     residue_library = pablo.STD_CCD_CACHE.with_(definitions)
     diagnostics.append(
         "Product-state residue definitions were added directly; Pablo with_crosslink() was not used"
@@ -283,6 +306,7 @@ def build_product_state_pablo_library_for_specs(
     diagnostics = tuple(
         diagnostic for library in libraries for diagnostic in getattr(library, "diagnostics", ())
     )
+    definitions = _deduplicate_product_definitions(definitions)
     return ProductStatePabloLibrary(
         residue_library=pablo.STD_CCD_CACHE.with_(definitions),
         definitions=definitions,
@@ -466,6 +490,7 @@ def _build_protein_product_definition(
     source_atoms: list[PdbAtomRecord],
     requirement: PabloCrosslinkRequirement,
     source_residue_name: str,
+    modifier_crosslink_atom: str,
 ) -> Any:
     """Build the modified protein residue definition from the source residue template."""
     product_names = {atom.atom_name for atom in product_atoms}
@@ -526,7 +551,7 @@ def _build_protein_product_definition(
     )
     crosslink = bond_cls.with_defaults(
         requirement.linking_atoms[0],
-        requirement.linking_atoms[1],
+        modifier_crosslink_atom,
         order=int(requirement.bond_order),
     )
     return residue_cls(
@@ -940,7 +965,61 @@ def _record_external_polymer_bond(
 
 _POLYMER_LINK_EXIT_ATOM = "POU"
 _POLYMER_LINK_ENTRY_ATOM = "PIN"
+_MODIFIER_CROSSLINK_ATOM = "CXL"
+_GENERATED_CARBON_ATOM_PATTERN = re.compile(r"^C\d{3}$")
 _EMPTY_POLYMER_LINK_PLAN = _PolymerLinkPlan(None, None, (), ())
+
+
+def _pablo_modifier_crosslink_atom(raw_atom_name: str) -> str:
+    """Return Pablo's canonical modifier crosslink atom name when needed.
+
+    Product PDB emitters often assign attachment-local names such as ``C063``
+    or ``C071`` to chemically equivalent modifier crosslink carbons. Pablo uses
+    one internal atom name for those templates, while raw PDB names remain
+    accepted through atom synonyms.
+    """
+    if _GENERATED_CARBON_ATOM_PATTERN.fullmatch(raw_atom_name.upper()):
+        return _MODIFIER_CROSSLINK_ATOM
+    return raw_atom_name
+
+
+def _modifier_crosslink_atom_aliases(
+    raw_atom_name: str,
+    *,
+    residue_atoms: tuple[PdbAtomRecord, ...],
+    existing_aliases: Mapping[str, str],
+) -> dict[str, str]:
+    """Return guarded atom-name aliases needed by the modifier definition."""
+    canonical_name = _pablo_modifier_crosslink_atom(raw_atom_name)
+    if canonical_name == raw_atom_name:
+        return {}
+
+    matching_raw_atoms = [atom for atom in residue_atoms if atom.atom_name == raw_atom_name]
+    if len(matching_raw_atoms) != 1:
+        raise ValueError(
+            "Product-state Pablo C### crosslink alias requires exactly one raw product atom "
+            f"named {raw_atom_name!r} in residue {residue_atoms[0].residue_name!r}; "
+            f"found {len(matching_raw_atoms)}."
+        )
+    cxl_atoms = [atom for atom in residue_atoms if atom.atom_name == canonical_name]
+    if cxl_atoms:
+        raise ValueError(
+            "Product-state Pablo cannot alias generated crosslink atom "
+            f"{raw_atom_name!r} to {canonical_name!r} because the product residue already "
+            "contains a real atom with that name."
+        )
+    conflicting_aliases = [
+        raw_name
+        for raw_name, target_name in existing_aliases.items()
+        if target_name == canonical_name
+    ]
+    if conflicting_aliases:
+        preview = ", ".join(sorted(conflicting_aliases))
+        raise ValueError(
+            "Product-state Pablo cannot map multiple raw atom names to internal "
+            f"{canonical_name!r}: {preview}, {raw_atom_name}."
+        )
+    return {raw_atom_name: canonical_name}
 
 
 def _plan_polymer_external_links(
@@ -1405,23 +1484,157 @@ def _coalesce_leaving_bonds(
 def _summarize_definition(
     definition: Any,
     key: tuple[str, str, int, str],
+    *,
+    raw_crosslink: tuple[str, str] | None = None,
 ) -> ProductStatePabloDefinitionSummary:
     """Build a JSON-safe summary for one Pablo definition."""
     crosslink = getattr(definition, "crosslink", None)
     linking_bond = getattr(definition, "linking_bond", None)
+    summary_crosslink = raw_crosslink
+    if summary_crosslink is None and crosslink is not None:
+        summary_crosslink = (crosslink.atom1, crosslink.atom2)
     return ProductStatePabloDefinitionSummary(
         residue_name=str(getattr(definition, "residue_name", key[1])),
         chain_id=key[0],
         residue_number=key[2],
-        atom_names=tuple(atom.name for atom in getattr(definition, "atoms", ())),
+        atom_names=tuple(_summary_atom_name(atom) for atom in getattr(definition, "atoms", ())),
         leaving_atom_names=tuple(
-            atom.name
+            _summary_atom_name(atom)
             for atom in getattr(definition, "atoms", ())
             if getattr(atom, "leaving", False)
         ),
         bond_count=len(tuple(getattr(definition, "bonds", ()))),
         linking_bond=(linking_bond.atom1, linking_bond.atom2) if linking_bond is not None else None,
-        crosslink=(crosslink.atom1, crosslink.atom2) if crosslink is not None else None,
+        crosslink=summary_crosslink,
+    )
+
+
+def _summary_atom_name(atom: Any) -> str:
+    """Return the raw product-PDB atom name for user-facing summaries."""
+    synonyms = tuple(getattr(atom, "synonyms", ()) or ())
+    if getattr(atom, "name", None) == _MODIFIER_CROSSLINK_ATOM and synonyms:
+        return str(synonyms[0])
+    return str(getattr(atom, "name", ""))
+
+
+def _deduplicate_product_definitions(definitions: Iterable[Any]) -> tuple[Any, ...]:
+    """Collapse exact duplicate Pablo definitions and reject ambiguous chemistry.
+
+    Pablo can host same-name residue definitions only when non-leaving atom-name
+    selectors are distinguishable. Repeated product attachments therefore share
+    one generated definition when the internal chemistry is identical, but a
+    same-name/same-selector chemistry conflict is raised before Pablo emits a
+    lower-level matching error.
+    """
+    by_selector: dict[tuple[str, tuple[str, ...]], Any] = {}
+    index_by_selector: dict[tuple[str, tuple[str, ...]], int] = {}
+    signatures: dict[tuple[str, tuple[str, ...]], tuple[Any, ...]] = {}
+    deduplicated: list[Any] = []
+    for definition in definitions:
+        selector = _definition_selector(definition)
+        signature = _definition_chemistry_signature(definition)
+        existing = by_selector.get(selector)
+        if existing is None:
+            by_selector[selector] = definition
+            index_by_selector[selector] = len(deduplicated)
+            signatures[selector] = signature
+            deduplicated.append(definition)
+            continue
+        if signatures[selector] != signature:
+            residue_name, atom_names = selector
+            preview = ", ".join(atom_names[:8])
+            raise ValueError(
+                "Product-state Pablo definitions are ambiguous: residue "
+                f"{residue_name!r} has the same non-leaving atom-name selector "
+                f"({preview}) but different chemistry, including leaving-group chemistry. "
+                "Use distinct residue names or atom names for chemically different "
+                "product-state templates."
+            )
+        merged = _merge_definition_synonyms(existing, definition)
+        by_selector[selector] = merged
+        deduplicated[index_by_selector[selector]] = merged
+    return tuple(deduplicated)
+
+
+def _definition_selector(definition: Any) -> tuple[str, tuple[str, ...]]:
+    """Return the residue name and non-leaving atom selector for Pablo matching."""
+    residue_name = str(getattr(definition, "residue_name", ""))
+    atom_names = tuple(
+        sorted(
+            str(atom.name)
+            for atom in getattr(definition, "atoms", ())
+            if not getattr(atom, "leaving", False)
+        )
+    )
+    if not residue_name or not atom_names:
+        return (f"<opaque:{id(definition)}>", ())
+    return (residue_name, atom_names)
+
+
+def _definition_chemistry_signature(definition: Any) -> tuple[Any, ...]:
+    """Return a synonym-insensitive chemistry signature for one definition."""
+    atoms = tuple(
+        sorted(
+            (
+                str(atom.name),
+                str(getattr(atom, "symbol", "") or ""),
+                int(getattr(atom, "charge", 0) or 0),
+                bool(getattr(atom, "leaving", False)),
+            )
+            for atom in getattr(definition, "atoms", ())
+        )
+    )
+    bonds = tuple(
+        sorted(
+            _ordered_bond(str(bond.atom1), str(bond.atom2), int(getattr(bond, "order", 1) or 1))
+            for bond in getattr(definition, "bonds", ())
+        )
+    )
+    linking_bond = _bond_signature(getattr(definition, "linking_bond", None))
+    crosslink = _bond_signature(getattr(definition, "crosslink", None))
+    return (atoms, bonds, linking_bond, crosslink)
+
+
+def _bond_signature(bond: Any | None) -> tuple[str, str, int] | None:
+    """Return a stable bond signature for optional Pablo metadata bonds."""
+    if bond is None:
+        return None
+    return _ordered_bond(str(bond.atom1), str(bond.atom2), int(getattr(bond, "order", 1) or 1))
+
+
+def _merge_definition_synonyms(existing: Any, duplicate: Any) -> Any:
+    """Merge raw PDB atom-name synonyms from an exact duplicate definition."""
+    duplicate_atoms = {atom.name: atom for atom in getattr(duplicate, "atoms", ())}
+    merged_atoms = []
+    changed = False
+    for atom in getattr(existing, "atoms", ()):
+        duplicate_atom = duplicate_atoms.get(atom.name)
+        if duplicate_atom is None:
+            merged_atoms.append(atom)
+            continue
+        synonyms = tuple(
+            sorted(
+                set(getattr(atom, "synonyms", ()) or ())
+                | set(getattr(duplicate_atom, "synonyms", ()) or ())
+            )
+        )
+        if synonyms != tuple(getattr(atom, "synonyms", ()) or ()):
+            atom = atom.replace(synonyms=synonyms)
+            changed = True
+        merged_atoms.append(atom)
+    if not changed:
+        return existing
+    replace = getattr(existing, "replace", None)
+    if callable(replace):
+        return replace(atoms=tuple(merged_atoms))
+    return type(existing)(
+        residue_name=existing.residue_name,
+        description=getattr(existing, "description", ""),
+        linking_bond=getattr(existing, "linking_bond", None),
+        crosslink=getattr(existing, "crosslink", None),
+        atoms=tuple(merged_atoms),
+        bonds=tuple(getattr(existing, "bonds", ())),
+        virtual_sites=tuple(getattr(existing, "virtual_sites", ())),
     )
 
 

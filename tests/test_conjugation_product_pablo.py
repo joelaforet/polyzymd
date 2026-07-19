@@ -30,6 +30,59 @@ class PolymerChemistryFixture:
     expected_valences: dict[tuple[int, str], int]
 
 
+@dataclass(frozen=True)
+class _FakeAtomDefinition:
+    name: str
+    symbol: str = "C"
+    charge: int = 0
+    leaving: bool = False
+    synonyms: tuple[str, ...] = ()
+
+    def replace(self, **updates: object) -> _FakeAtomDefinition:
+        """Return a copy with selected Pablo-like fields replaced."""
+        values = {
+            "name": self.name,
+            "symbol": self.symbol,
+            "charge": self.charge,
+            "leaving": self.leaving,
+            "synonyms": self.synonyms,
+        }
+        values.update(updates)
+        return type(self)(**values)
+
+
+@dataclass(frozen=True)
+class _FakeBondDefinition:
+    atom1: str
+    atom2: str
+    order: int = 1
+
+
+@dataclass(frozen=True)
+class _FakeResidueDefinition:
+    residue_name: str
+    atoms: tuple[_FakeAtomDefinition, ...]
+    bonds: tuple[_FakeBondDefinition, ...]
+    description: str = "Test definition"
+    linking_bond: _FakeBondDefinition | None = None
+    crosslink: _FakeBondDefinition | None = None
+    virtual_sites: tuple[object, ...] = ()
+
+    def replace(self, **updates: object) -> _FakeResidueDefinition:
+        """Return a copy with selected Pablo-like fields replaced."""
+        values = {
+            "residue_name": self.residue_name,
+            "atoms": self.atoms,
+            "bonds": self.bonds,
+            "description": self.description,
+            "linking_bond": self.linking_bond,
+            "crosslink": self.crosslink,
+            "virtual_sites": self.virtual_sites,
+        }
+        values.update(updates)
+        return type(self)(**values)
+
+
 _SBMA_EGPMA_NHS_CHEMISTRY = PolymerChemistryFixture(
     name="sbma_egpma_nhs_explicit_valence",
     atoms=(
@@ -521,6 +574,113 @@ def test_product_state_pablo_library_for_specs_scopes_repeated_polymer_residues(
         assert _bond_order(definitions[residue_number], "CAA", "CBA") == 1
 
 
+def test_product_state_pablo_library_for_specs_deduplicates_five_repeated_templates(
+    tmp_path: Path,
+):
+    """Repeated generated crosslink labels should share one internal Pablo template."""
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    raw_crosslink_atoms = ("C063", "C071", "C079", "C087", "C095")
+    residue_numbers = (23, 44, 65, 86, 107)
+    source.write_text(_source_many_lys_pdb(residue_numbers), encoding="utf-8")
+    product.write_text(
+        _repeated_generated_attachment_product_pdb(residue_numbers, raw_crosslink_atoms),
+        encoding="utf-8",
+    )
+    specs = tuple(
+        SimpleNamespace(
+            attachment_id=f"site_{residue_number}",
+            generated_fragment=SimpleNamespace(bonds=((raw_atom, "O020"),), bond_orders=()),
+            resolved_plan=_generated_crosslink_resolved_plan_like(
+                protein_residue_number=residue_number,
+                modifier_residue_number=index,
+                modifier_link_atom=raw_atom,
+            ),
+            product_residue_mappings=_product_residue_mappings((1,), (index,)),
+        )
+        for index, (residue_number, raw_atom) in enumerate(
+            zip(residue_numbers, raw_crosslink_atoms, strict=True), start=1
+        )
+    )
+
+    library = build_product_state_pablo_library_for_specs(product, source, specs)
+
+    assert [definition.residue_name for definition in library.definitions].count("LYX") == 1
+    assert [definition.residue_name for definition in library.definitions].count("NHX") == 1
+    nhx_definition = next(
+        definition for definition in library.definitions if definition.residue_name == "NHX"
+    )
+    assert _definition_atom_synonyms(nhx_definition, "CXL") == raw_crosslink_atoms
+    assert _definition_crosslink(nhx_definition) == ("CXL", "NZ")
+    lyx_definition = next(
+        definition for definition in library.definitions if definition.residue_name == "LYX"
+    )
+    assert _definition_crosslink(lyx_definition) == ("CXL", "NZ")
+    assert all("CXL" not in summary.atom_names for summary in library.summaries)
+    assert all(
+        summary.crosslink != ("CXL", "NZ") and summary.crosslink != ("NZ", "CXL")
+        for summary in library.summaries
+    )
+    assert library.crosslink_requirement.linking_atoms == ("NZ", "C063")
+
+
+def test_product_state_pablo_definitions_allow_sb2_variants_with_distinct_selectors():
+    """Same residue names may coexist when non-leaving atom selectors are unique."""
+    first = _fake_residue_definition("SB2", ("C1", "O1"), (("C1", "O1", 1),))
+    second = _fake_residue_definition("SB2", ("C2", "O2"), (("C2", "O2", 1),))
+
+    assert product_pablo_module._deduplicate_product_definitions((first, second)) == (first, second)
+
+
+def test_product_state_pablo_definitions_reject_same_selector_different_leaving_chemistry():
+    """Same non-leaving selector with different leaving chemistry should fail clearly."""
+    first = _fake_residue_definition(
+        "SB2",
+        ("C1", "O1"),
+        (("C1", "O1", 1), ("C1", "LG1", 1)),
+        leaving_atom_names=("LG1",),
+    )
+    second = _fake_residue_definition(
+        "SB2",
+        ("C1", "O1"),
+        (("C1", "O1", 1), ("C1", "LG2", 1)),
+        leaving_atom_names=("LG2",),
+    )
+
+    with pytest.raises(ValueError, match="same non-leaving atom-name selector"):
+        product_pablo_module._deduplicate_product_definitions((first, second))
+
+
+def test_product_state_pablo_crosslink_alias_rejects_existing_cxl_name():
+    """Generated C### aliases should not mask a real CXL atom in the product residue."""
+    residue_atoms = (
+        _pdb_record(11, "C063", "NHX", residue_number=1),
+        _pdb_record(12, "CXL", "NHX", residue_number=1),
+    )
+
+    with pytest.raises(ValueError, match="already contains a real atom"):
+        product_pablo_module._modifier_crosslink_atom_aliases(
+            "C063",
+            residue_atoms=residue_atoms,
+            existing_aliases={},
+        )
+
+
+def test_product_state_pablo_crosslink_alias_rejects_duplicate_raw_atom():
+    """Generated C### aliases should require one residue-scoped raw PDB atom."""
+    residue_atoms = (
+        _pdb_record(11, "C063", "NHX", residue_number=1),
+        _pdb_record(12, "C063", "NHX", residue_number=1),
+    )
+
+    with pytest.raises(ValueError, match="exactly one raw product atom"):
+        product_pablo_module._modifier_crosslink_atom_aliases(
+            "C063",
+            residue_atoms=residue_atoms,
+            existing_aliases={},
+        )
+
+
 def test_product_state_pablo_library_rejects_under_specified_sdf(tmp_path: Path):
     """SDF zero-order bonds should fail with an actionable error, not chemistry repair."""
     fixture = _SBMA_EGPMA_NHS_CHEMISTRY
@@ -716,6 +876,31 @@ def _fixture_resolved_plan_like(
     requirement = PabloCrosslinkRequirement(
         residues=("LYX", "NHX"),
         linking_atoms=("NZ", "CAA"),
+        leaving_atoms=(("HZ2", "HZ3"), ()),
+        bond_order=1,
+    )
+    return SimpleNamespace(
+        pablo_crosslink_requirement=requirement,
+        protein_link_atom=SimpleNamespace(chain_id="A", residue_number=protein_residue_number),
+        modifier_link_atom=SimpleNamespace(chain_id="C", residue_number=modifier_residue_number),
+        modifier_leaving_atoms=(),
+        contract=SimpleNamespace(
+            protein_endpoint=SimpleNamespace(
+                selector=SimpleNamespace(residue_name="LYS"),
+            ),
+        ),
+    )
+
+
+def _generated_crosslink_resolved_plan_like(
+    *,
+    protein_residue_number: int,
+    modifier_residue_number: int,
+    modifier_link_atom: str,
+):
+    requirement = PabloCrosslinkRequirement(
+        residues=("LYX", "NHX"),
+        linking_atoms=("NZ", modifier_link_atom),
         leaving_atoms=(("HZ2", "HZ3"), ()),
         bond_order=1,
     )
@@ -1060,6 +1245,31 @@ def _source_two_lys_pdb() -> str:
     return "".join(lines)
 
 
+def _source_many_lys_pdb(residue_numbers: tuple[int, ...]) -> str:
+    """Return source-PDB text with one LYS residue for each requested number."""
+    lines = []
+    serial = 1
+    for residue_number in residue_numbers:
+        for atom_name, element in (
+            ("N", "N"),
+            ("CA", "C"),
+            ("C", "C"),
+            ("O", "O"),
+            ("CB", "C"),
+            ("CG", "C"),
+            ("CD", "C"),
+            ("CE", "C"),
+            ("NZ", "N"),
+            ("HZ1", "H"),
+            ("HZ2", "H"),
+            ("HZ3", "H"),
+        ):
+            lines.append(_pdb_atom(serial, atom_name, "LYS", "A", residue_number, element))
+            serial += 1
+    lines.append("END\n")
+    return "".join(lines)
+
+
 def _product_residue_mappings(
     source_numbers: tuple[int, ...],
     target_numbers: tuple[int, ...],
@@ -1102,6 +1312,46 @@ def _product_pdb() -> str:
             "END\n",
         ]
     )
+
+
+def _repeated_generated_attachment_product_pdb(
+    residue_numbers: tuple[int, ...],
+    raw_crosslink_atoms: tuple[str, ...],
+) -> str:
+    """Return product-PDB text with repeated LYX/NHX generated attachments."""
+    lines: list[str] = []
+    serial = 1
+    nhx_serials: list[tuple[int, int, int]] = []
+    for index, (residue_number, raw_atom) in enumerate(
+        zip(residue_numbers, raw_crosslink_atoms, strict=True), start=1
+    ):
+        nz_serial = serial + 8
+        for atom_name, element in (
+            ("N", "N"),
+            ("CA", "C"),
+            ("C", "C"),
+            ("O", "O"),
+            ("CB", "C"),
+            ("CG", "C"),
+            ("CD", "C"),
+            ("CE", "C"),
+            ("NZ", "N"),
+            ("HZ1", "H"),
+        ):
+            lines.append(_pdb_atom(serial, atom_name, "LYX", "A", residue_number, element))
+            serial += 1
+        carbon_serial = serial
+        oxygen_serial = serial + 1
+        lines.append(_pdb_atom(carbon_serial, raw_atom, "NHX", "C", index, "C", record="HETATM"))
+        lines.append(_pdb_atom(oxygen_serial, "O020", "NHX", "C", index, "O", record="HETATM"))
+        serial += 2
+        nhx_serials.append((nz_serial, carbon_serial, oxygen_serial))
+    for nz_serial, carbon_serial, oxygen_serial in nhx_serials:
+        lines.append(f"CONECT{nz_serial:5d}{carbon_serial:5d}\n")
+        lines.append(f"CONECT{carbon_serial:5d}{nz_serial:5d}{oxygen_serial:5d}\n")
+        lines.append(f"CONECT{oxygen_serial:5d}{carbon_serial:5d}\n")
+    lines.append("END\n")
+    return "".join(lines)
 
 
 def _public_three_mer_product_pdb() -> str:
@@ -1175,11 +1425,36 @@ def _product_two_lys_atoms() -> list[str]:
 
 
 def _chain_c_definitions(library):
+    if len(library.summaries) == len(library.definitions):
+        return [
+            (summary, definition)
+            for summary, definition in zip(library.summaries, library.definitions, strict=True)
+            if summary.chain_id == "C"
+        ]
     return [
-        (summary, definition)
-        for summary, definition in zip(library.summaries, library.definitions, strict=True)
+        (summary, _definition_for_summary(summary, library.definitions))
+        for summary in library.summaries
         if summary.chain_id == "C"
     ]
+
+
+def _definition_for_summary(summary, definitions):
+    """Return the deduplicated definition represented by a product summary."""
+    summary_names = set(summary.atom_names)
+    for definition in definitions:
+        if definition.residue_name != summary.residue_name:
+            continue
+        definition_names = {_definition_raw_atom_name(atom) for atom in definition.atoms}
+        if definition_names == summary_names:
+            return definition
+    raise AssertionError(f"Definition for summary {summary.residue_name} was not found")
+
+
+def _definition_raw_atom_name(atom) -> str:
+    synonyms = tuple(getattr(atom, "synonyms", ()) or ())
+    if getattr(atom, "name", None) == "CXL" and synonyms:
+        return synonyms[0]
+    return atom.name
 
 
 def _bond_order(definition, atom1: str, atom2: str) -> int:
@@ -1211,6 +1486,39 @@ def _definition_atom_charge(definition, atom_name: str) -> int:
     raise AssertionError(f"Atom {atom_name} was not defined")
 
 
+def _definition_atom_synonyms(definition, atom_name: str) -> tuple[str, ...]:
+    for atom in definition.atoms:
+        if atom.name == atom_name:
+            return tuple(atom.synonyms)
+    raise AssertionError(f"Atom {atom_name} was not defined")
+
+
+def _definition_crosslink(definition) -> tuple[str, str] | None:
+    crosslink = getattr(definition, "crosslink", None)
+    if crosslink is None:
+        return None
+    return tuple(sorted((crosslink.atom1, crosslink.atom2)))
+
+
+def _fake_residue_definition(
+    residue_name: str,
+    atom_names: tuple[str, ...],
+    bonds: tuple[tuple[str, str, int], ...],
+    *,
+    leaving_atom_names: tuple[str, ...] = (),
+) -> _FakeResidueDefinition:
+    """Return a small Pablo-like residue definition for deduplication tests."""
+    all_atom_names = (*atom_names, *leaving_atom_names)
+    return _FakeResidueDefinition(
+        residue_name=residue_name,
+        atoms=tuple(
+            _FakeAtomDefinition(atom_name, leaving=atom_name in leaving_atom_names)
+            for atom_name in all_atom_names
+        ),
+        bonds=tuple(_FakeBondDefinition(atom1, atom2, order) for atom1, atom2, order in bonds),
+    )
+
+
 def _fragment_bond_order(fragment: GeneratedPolymerFragment, serial1: int, serial2: int) -> int:
     pair = {serial1, serial2}
     for left, right, order in fragment.bond_orders:
@@ -1234,4 +1542,27 @@ def _pdb_atom(
         f"{record:<6}{serial:5d} {atom_name:<4} {residue_name:>3} {chain_id}"
         f"{residue_number:4d}       0.000   0.000   0.000  1.00  0.00          "
         f"{element:>2}{charge:>2}\n"
+    )
+
+
+def _pdb_record(
+    serial: int,
+    atom_name: str,
+    residue_name: str,
+    *,
+    residue_number: int,
+) -> PdbAtomRecord:
+    """Return a minimal parsed PDB atom record for unit-level alias tests."""
+    return PdbAtomRecord(
+        serial=serial,
+        atom_index=serial - 1,
+        atom_name=atom_name,
+        residue_name=residue_name,
+        chain_id="C",
+        residue_number=residue_number,
+        x=0.0,
+        y=0.0,
+        z=0.0,
+        element="C",
+        record_name="HETATM",
     )
