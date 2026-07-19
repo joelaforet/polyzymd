@@ -519,6 +519,139 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     assert calls["validation"] == 0
 
 
+def test_product_state_specs_use_exact_assembly_serial_pairs(tmp_path: Path):
+    """Multi-attachment product specs should bind repeated modifier names by serial."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    product_pdb = tmp_path / "product.pdb"
+    product_pdb.write_text(
+        _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+        + _pdb_line(2, "C001", "NAG", "C", 10, element="C")
+        + _pdb_line(3, "ND2 ", "ASX", "A", 87, element="N")
+        + _pdb_line(4, "C001", "NAG", "C", 20, element="C")
+        + "CONECT    1    2\n"
+        + "CONECT    2    1\n"
+        + "CONECT    3    4\n"
+        + "CONECT    4    3\n"
+        + "END\n",
+        encoding="utf-8",
+    )
+    assembly = SimpleNamespace(
+        added_conect_pairs=((1, 2), (3, 4)),
+        residue_mappings={
+            "fragment_1:1": {"source_residue_number": 1, "target_residue_number": 10},
+            "fragment_2:1": {"source_residue_number": 1, "target_residue_number": 20},
+        },
+    )
+
+    updated = workflow_module._product_state_specs_with_assembly_mappings(
+        _product_mapping_specs(),
+        assembly_result=assembly,
+        product_pdb_path=product_pdb,
+    )
+
+    assert [spec.resolved_plan.protein_link_atom.serial for spec in updated] == [1, 3]
+    assert [spec.resolved_plan.modifier_link_atom.serial for spec in updated] == [2, 4]
+    assert [spec.resolved_plan.modifier_link_atom.residue_number for spec in updated] == [10, 20]
+    assert updated[0].product_residue_mappings == {
+        "1": {"source_residue_number": 1, "target_residue_number": 10}
+    }
+
+
+def test_product_state_specs_reject_swapped_or_mismatched_pairs(tmp_path: Path):
+    """Assembly pairs must be ordered as protein then matching modifier endpoints."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    product_pdb = tmp_path / "product.pdb"
+    product_pdb.write_text(
+        _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+        + _pdb_line(2, "C001", "NAG", "C", 10, element="C")
+        + _pdb_line(3, "ND2 ", "ASX", "A", 87, element="N")
+        + _pdb_line(4, "C001", "NAG", "C", 20, element="C")
+        + "END\n",
+        encoding="utf-8",
+    )
+    assembly = SimpleNamespace(added_conect_pairs=((2, 1), (3, 4)), residue_mappings={})
+
+    with pytest.raises(ValueError, match="protein endpoint"):
+        workflow_module._product_state_specs_with_assembly_mappings(
+            _product_mapping_specs(),
+            assembly_result=assembly,
+            product_pdb_path=product_pdb,
+        )
+
+
+def test_product_state_specs_reject_crossed_identical_modifier_endpoints(tmp_path: Path):
+    """Assembly pairs must bind each protein to its own mapped modifier residue."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    product_pdb = tmp_path / "product.pdb"
+    product_pdb.write_text(
+        _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+        + _pdb_line(2, "C001", "NAG", "C", 10, element="C")
+        + _pdb_line(3, "ND2 ", "ASX", "A", 87, element="N")
+        + _pdb_line(4, "C001", "NAG", "C", 20, element="C")
+        + "END\n",
+        encoding="utf-8",
+    )
+    assembly = SimpleNamespace(
+        added_conect_pairs=((1, 4), (3, 2)),
+        residue_mappings={
+            "fragment_1:1": {
+                "source_residue_number": 1,
+                "source_insertion_code": "",
+                "target_chain": "C",
+                "target_residue_number": 10,
+                "target_insertion_code": "",
+            },
+            "fragment_2:1": {
+                "source_residue_number": 1,
+                "source_insertion_code": "",
+                "target_chain": "C",
+                "target_residue_number": 20,
+                "target_insertion_code": "",
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="modifier endpoint"):
+        workflow_module._product_state_specs_with_assembly_mappings(
+            _product_mapping_specs(),
+            assembly_result=assembly,
+            product_pdb_path=product_pdb,
+        )
+
+
+def test_product_state_specs_are_idempotent_after_product_mapping(tmp_path: Path):
+    """Already product-mapped specs should not use target residues as source keys."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    product_pdb = tmp_path / "product.pdb"
+    product_pdb.write_text(
+        _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+        + _pdb_line(2, "C001", "NAG", "C", 10, element="C")
+        + _pdb_line(3, "ND2 ", "ASX", "A", 87, element="N")
+        + _pdb_line(4, "C001", "NAG", "C", 20, element="C")
+        + "END\n",
+        encoding="utf-8",
+    )
+    assembly = SimpleNamespace(added_conect_pairs=((1, 2), (3, 4)), residue_mappings={})
+    once = workflow_module._product_state_specs_with_assembly_mappings(
+        _product_mapping_specs(),
+        assembly_result=assembly,
+        product_pdb_path=product_pdb,
+    )
+
+    twice = workflow_module._product_state_specs_with_assembly_mappings(
+        once,
+        assembly_result=assembly,
+        product_pdb_path=product_pdb,
+    )
+
+    assert [spec.resolved_plan.modifier_link_atom.serial for spec in twice] == [2, 4]
+    assert [spec.resolved_plan.modifier_link_atom.residue_number for spec in twice] == [10, 20]
+
+
 @pytest.mark.parametrize(
     (
         "run_relaxation",
@@ -579,7 +712,9 @@ def test_relaxation_receives_product_path_and_attachment_specs(
 
     def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
         Path(output_path).write_text(
-            _pdb_line(1, "C001", "NAG", "C", 1, element="C") + "END\n",
+            _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+            + _pdb_line(2, "C001", "NAG", "C", 1, element="C")
+            + "END\n",
             encoding="utf-8",
         )
         return CrosslinkedPdbAssemblyResult(
@@ -691,7 +826,10 @@ def test_relaxation_receives_product_path_and_attachment_specs(
     assert ("relaxation_product_pdb_path" in calls) is expect_relaxation
     if expect_relaxation:
         assert calls["relaxation_product_pdb_path"] == construction.crosslinked_pdb_path
-        assert calls["relaxation_attachment_specs"] == (spec,)
+        relaxation_spec = calls["relaxation_attachment_specs"][0]
+        assert relaxation_spec.attachment_id == spec.attachment_id
+        assert relaxation_spec.resolved_plan.protein_link_atom.serial == 1
+        assert relaxation_spec.resolved_plan.modifier_link_atom.serial == 2
     assert "interchange" not in calls["validation_kwargs"]
 
 
@@ -721,6 +859,8 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
         source_sidecars={},
         fragment=SimpleNamespace(source_kind="moiety"),
     )
+    protein_template = _charged_molecule_like("protein", residue_name="ASX")
+    protein_template.atoms[0].metadata["atom_name"] = "ND2"
     product_template = _charged_molecule_like("product", residue_name="NAG")
     product_template.properties = {"polyzymd_charge_provenance": "charge-bridge:test"}
     standard_template = _charged_molecule_like("water", residue_name="HOH")
@@ -747,7 +887,9 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
 
     def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
         Path(output_path).write_text(
-            _pdb_line(1, "C001", "NAG", "C", 1, element="C") + "END\n",
+            _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+            + _pdb_line(2, "C001", "NAG", "C", 1, element="C")
+            + "END\n",
             encoding="utf-8",
         )
         return CrosslinkedPdbAssemblyResult(
@@ -774,7 +916,7 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
                 path=Path(path),
                 suffix=".pdb",
                 pablo=PabloAvailability(available=True),
-                topology=SimpleNamespace(molecules=(product_template,)),
+                topology=SimpleNamespace(molecules=(protein_template, product_template)),
             )
 
     intermediate = {}
@@ -1618,6 +1760,30 @@ def _generic_resolved_plan(
         modifier_product_residue_name="NAG",
         pablo_crosslink_requirement=requirement,
         target_bond_length_angstrom=1.45,
+    )
+
+
+def _product_mapping_specs() -> tuple[SimpleNamespace, SimpleNamespace]:
+    """Return two simple specs with repeated modifier atom names."""
+    return (
+        SimpleNamespace(
+            attachment_id="attachment_01",
+            attachment_index=1,
+            resolved_plan=_generic_resolved_plan(
+                residue_number=42,
+                modifier_residue_number=1,
+                modifier_atom="C001",
+            ),
+        ),
+        SimpleNamespace(
+            attachment_id="attachment_02",
+            attachment_index=2,
+            resolved_plan=_generic_resolved_plan(
+                residue_number=87,
+                modifier_residue_number=1,
+                modifier_atom="C001",
+            ),
+        ),
     )
 
 

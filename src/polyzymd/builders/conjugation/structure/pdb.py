@@ -572,6 +572,7 @@ def _append_polymer_fragment(
     warnings: list[str],
 ) -> _PolymerAppendResult:
     """Append retained polymer atoms and internal connectivity for one fragment."""
+    _validate_polymer_leaving_selectors(fragment)
     removed_atoms = [atom for atom in fragment.atoms if _is_removed_polymer_atom(atom, fragment)]
     removed_keys = {_atom_identity(atom) for atom in removed_atoms}
     kept_atoms = [atom for atom in fragment.atoms if _atom_identity(atom) not in removed_keys]
@@ -600,7 +601,9 @@ def _append_polymer_fragment(
             residue_key_to_number[residue_key] = residue_cursor
             residue_mappings[f"fragment_{fragment_index}:{residue_key[0]}{residue_key[1]}"] = {
                 "source_residue_number": residue_key[0],
+                "source_insertion_code": residue_key[1] or "",
                 "target_residue_number": residue_cursor,
+                "target_insertion_code": "",
                 "target_chain": options.polymer_chain,
             }
             residue_cursor += 1
@@ -674,6 +677,20 @@ def _append_polymer_fragment(
         next_residue_number=residue_cursor,
         residue_mappings=residue_mappings,
     )
+
+
+def _validate_polymer_leaving_selectors(fragment: PlacedPolymerFragment) -> None:
+    """Validate name-only polymer leaving selectors before atom removal."""
+    if fragment.leaving_atom_serials or fragment.leaving_atom_indices:
+        return
+    for name in fragment.leaving_atom_names:
+        matches = [atom for atom in fragment.atoms if atom.atom_name.upper() == name.upper()]
+        unique = _unique_atoms(matches)
+        if len(unique) != 1:
+            raise ValueError(
+                f"Expected exactly one leaving atom named {name} in {fragment.name}, "
+                f"found {len(unique)}"
+            )
 
 
 def _order_polymer_atoms_by_connectivity(
@@ -989,31 +1006,31 @@ def _is_hydrogen_atom(atom: PdbAtomRecord) -> bool:
 
 def _is_removed_polymer_atom(atom: PdbAtomRecord, fragment: PlacedPolymerFragment) -> bool:
     """Return whether a polymer atom is selected as leaving group."""
-    return (
-        (atom.serial is not None and atom.serial in fragment.leaving_atom_serials)
-        or (atom.atom_index is not None and atom.atom_index in fragment.leaving_atom_indices)
-        or atom.atom_name.upper() in {name.upper() for name in fragment.leaving_atom_names}
-    )
+    if fragment.leaving_atom_serials:
+        return atom.serial is not None and atom.serial in fragment.leaving_atom_serials
+    if fragment.leaving_atom_indices:
+        return atom.atom_index is not None and atom.atom_index in fragment.leaving_atom_indices
+    if fragment.leaving_atom_names:
+        return atom.atom_name.upper() in {name.upper() for name in fragment.leaving_atom_names}
+    return False
 
 
 def _resolve_reactive_polymer_atom(fragment: PlacedPolymerFragment) -> PdbAtomRecord:
     """Resolve the polymer reactive atom from explicit selectors."""
-    matches = [
-        atom
-        for atom in fragment.atoms
-        if (
-            fragment.reactive_atom_serial is not None
-            and atom.serial == fragment.reactive_atom_serial
-        )
-        or (
-            fragment.reactive_atom_index is not None
-            and atom.atom_index == fragment.reactive_atom_index
-        )
-        or (
-            fragment.reactive_atom_name is not None
-            and atom.atom_name.upper() == fragment.reactive_atom_name.upper()
-        )
-    ]
+    if fragment.reactive_atom_serial is not None:
+        matches = [atom for atom in fragment.atoms if atom.serial == fragment.reactive_atom_serial]
+    elif fragment.reactive_atom_index is not None:
+        matches = [
+            atom for atom in fragment.atoms if atom.atom_index == fragment.reactive_atom_index
+        ]
+    elif fragment.reactive_atom_name is not None:
+        matches = [
+            atom
+            for atom in fragment.atoms
+            if atom.atom_name.upper() == fragment.reactive_atom_name.upper()
+        ]
+    else:
+        matches = []
     unique = _unique_atoms(matches)
     if len(unique) != 1:
         raise ValueError(
