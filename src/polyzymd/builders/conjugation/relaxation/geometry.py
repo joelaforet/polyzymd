@@ -76,7 +76,29 @@ def replace_pdb_coordinates(
     coordinates_angstrom: Any,
     output_path: Path | str,
 ) -> Path:
-    """Write a PDB by replacing only ATOM/HETATM coordinate columns."""
+    """Write a PDB by replacing only ATOM/HETATM coordinate columns.
+
+    Parameters
+    ----------
+    template_pdb_path : pathlib.Path or str
+        Authoritative PDB whose atom, residue, chain, TER, LINK, and CONECT
+        records must be preserved.
+    coordinates_angstrom : Any
+        Replacement coordinate array with one finite XYZ triplet per atom.
+    output_path : pathlib.Path or str
+        Destination for the coordinate-updated PDB.
+
+    Returns
+    -------
+    pathlib.Path
+        Path to the written PDB.
+
+    Raises
+    ------
+    ValueError
+        If the coordinate count, shape, finiteness, or fixed-width coordinate
+        range is invalid for the template atom table.
+    """
     template_path = Path(template_pdb_path)
     output = Path(output_path)
     coords = np.asarray(coordinates_angstrom, dtype=float)
@@ -100,10 +122,42 @@ def replace_pdb_coordinates(
         for raw_line in handle:
             line = raw_line.rstrip("\n")
             if line.startswith(("ATOM", "HETATM")):
-                x_coord, y_coord, z_coord = coords[coord_index]
+                x_coord, y_coord, z_coord = (
+                    _format_pdb_coordinate(value) for value in coords[coord_index]
+                )
                 padded = f"{line:<80}"
-                line = f"{padded[:30]}{x_coord:8.3f}{y_coord:8.3f}{z_coord:8.3f}{padded[54:]}"
+                line = f"{padded[:30]}{x_coord}{y_coord}{z_coord}{padded[54:]}"
                 coord_index += 1
             out_lines.append(line)
     output.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
     return output
+
+
+def _format_pdb_coordinate(value: float) -> str:
+    """Return one fixed-width PDB coordinate field.
+
+    Parameters
+    ----------
+    value : float
+        Coordinate value in angstroms.
+
+    Returns
+    -------
+    str
+        Coordinate formatted as an exactly 8-character PDB field.
+
+    Raises
+    ------
+    ValueError
+        If the coordinate is non-finite or cannot fit after three-decimal
+        rounding.
+    """
+    if not np.isfinite(value):
+        raise ValueError("Replacement coordinates contain non-finite values")
+    field = f"{value:8.3f}"
+    if len(field) != 8:
+        raise ValueError(
+            "Replacement coordinate cannot fit in an 8-character PDB field: "
+            f"value={value!r}, formatted={field!r}"
+        )
+    return field

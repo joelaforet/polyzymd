@@ -26,8 +26,12 @@ from polyzymd.builders.conjugation.relaxation._openmm_system import (
     _remove_barostats,
     _restore_particle_masses,
     _run_fixed_product_md,
+    _write_relaxed_product_pdb,
 )
-from polyzymd.builders.conjugation.relaxation.geometry import positions_to_numpy
+from polyzymd.builders.conjugation.relaxation.geometry import (
+    positions_to_numpy,
+    replace_pdb_coordinates,
+)
 from polyzymd.builders.conjugation.relaxation.models import (
     ConjugateRelaxationDiagnostics,
     ConjugateRelaxationSettings,
@@ -104,6 +108,102 @@ def _topology_atom(
 def test_validate_finite_energy_accepts_finite_values():
     """Finite energies should pass OpenMM relaxation checks."""
     validate_finite_energy(-123.4, label="test_energy")
+
+
+def test_write_relaxed_product_pdb_preserves_identity_and_connectivity(tmp_path):
+    """Relaxed coordinate export should preserve product PDB identity records."""
+    product = tmp_path / "product.pdb"
+    relaxed = tmp_path / "relaxed.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(1, "CA", "ALA", "A", 1, 0.0, element="C"),
+                "TER       2      ALA A   1\n",
+                _pdb_line(3, "C1", "PEG", "C", 2, 1.0, element="C"),
+                "LINK         CA  ALA A   1                 C1  PEG C   2     1555   1555"
+                "  1.50\n",
+                "CONECT    1    3\n",
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    final_positions_nm = np.array([[0.25, -0.5, 1.0], [1.5, 2.0, -0.25]])
+    unit = SimpleNamespace(nanometer=1.0)
+
+    _write_relaxed_product_pdb(
+        product,
+        final_positions_nm,
+        relaxed,
+        unit,
+        expected_atom_count=2,
+    )
+
+    original_lines = product.read_text(encoding="utf-8").splitlines()
+    lines = relaxed.read_text(encoding="utf-8").splitlines()
+    assert lines[0][:30] == original_lines[0][:30]
+    assert lines[2][:30] == original_lines[2][:30]
+    assert lines[0][21] == "A"
+    assert lines[2][21] == "C"
+    assert lines[1].startswith("TER")
+    assert lines[3].startswith("LINK")
+    assert lines[4] == "CONECT    1    3"
+    assert lines[0][30:54] == "   2.500  -5.000  10.000"
+    assert lines[2][30:54] == "  15.000  20.000  -2.500"
+
+
+def test_replace_pdb_coordinates_accepts_valid_fixed_width_edge_fields(tmp_path):
+    """Fixed-width coordinate replacement should accept exactly fitting edge fields."""
+    product = tmp_path / "product.pdb"
+    relaxed = tmp_path / "relaxed.pdb"
+    product.write_text(_pdb_line(1, "CA", "ALA", "A", 1, 0.0, element="C"), encoding="utf-8")
+
+    replace_pdb_coordinates(product, np.array([[-999.999, 9999.999, 0.0]]), relaxed)
+
+    line = relaxed.read_text(encoding="utf-8").splitlines()[0]
+    assert line[30:54] == "-999.9999999.999   0.000"
+    assert all(len(line[start : start + 8]) == 8 for start in (30, 38, 46))
+
+
+@pytest.mark.parametrize("coordinate", [-1000.0, 9999.9996])
+def test_replace_pdb_coordinates_rejects_fixed_width_overflow(tmp_path, coordinate):
+    """Coordinate replacement should reject raw and rounded PDB field overflow."""
+    product = tmp_path / "product.pdb"
+    relaxed = tmp_path / "relaxed.pdb"
+    product.write_text(_pdb_line(1, "CA", "ALA", "A", 1, 0.0, element="C"), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="8-character PDB field"):
+        replace_pdb_coordinates(product, np.array([[coordinate, 0.0, 0.0]]), relaxed)
+
+
+def test_write_relaxed_product_pdb_rejects_atom_count_mismatch(tmp_path):
+    """Relaxed coordinate export should require one final position per product atom."""
+    product = tmp_path / "product.pdb"
+    product.write_text(_pdb_line(1, "CA", "ALA", "A", 1, 0.0, element="C"), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="atom count"):
+        _write_relaxed_product_pdb(
+            product,
+            np.array([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]]),
+            tmp_path / "relaxed.pdb",
+            SimpleNamespace(nanometer=1.0),
+            expected_atom_count=1,
+        )
+
+
+def test_write_relaxed_product_pdb_rejects_nonfinite_positions(tmp_path):
+    """Relaxed coordinate export should reject non-finite final coordinates."""
+    product = tmp_path / "product.pdb"
+    product.write_text(_pdb_line(1, "CA", "ALA", "A", 1, 0.0, element="C"), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="non-finite"):
+        _write_relaxed_product_pdb(
+            product,
+            np.array([[math.nan, 0.0, 0.0]]),
+            tmp_path / "relaxed.pdb",
+            SimpleNamespace(nanometer=1.0),
+            expected_atom_count=1,
+        )
 
 
 def test_resolve_product_linkage_pairs_uses_generic_assembly_metadata(tmp_path):
@@ -656,7 +756,9 @@ def test_conjugate_relaxation_stage_b_uses_fresh_fixed_system(monkeypatch, tmp_p
     )
     monkeypatch.setattr(relaxation_workflows, "_force_group_energies", lambda *_args: {})
     monkeypatch.setattr(relaxation_workflows, "_add_linkage_anchor_restraints", lambda *_args: 0)
-    monkeypatch.setattr(relaxation_workflows, "_write_openmm_pdb", lambda *_args: None)
+    monkeypatch.setattr(
+        relaxation_workflows, "_write_relaxed_product_pdb", lambda *_args, **_kwargs: None
+    )
 
     topology = _relaxation_topology()
     interchange = _RelaxationInterchange(topology)
@@ -698,7 +800,9 @@ def test_conjugate_relaxation_restores_masses_after_stage_b_error(monkeypatch, t
     )
     monkeypatch.setattr(relaxation_workflows, "_force_group_energies", lambda *_args: {})
     monkeypatch.setattr(relaxation_workflows, "_add_linkage_anchor_restraints", lambda *_args: 0)
-    monkeypatch.setattr(relaxation_workflows, "_write_openmm_pdb", lambda *_args: None)
+    monkeypatch.setattr(
+        relaxation_workflows, "_write_relaxed_product_pdb", lambda *_args, **_kwargs: None
+    )
 
     def fail_md(*_args, **_kwargs):
         raise RuntimeError("backend instability")
@@ -733,7 +837,9 @@ def test_conjugate_relaxation_stage_b_tolerance_violation_fails(monkeypatch, tmp
     )
     monkeypatch.setattr(relaxation_workflows, "_force_group_energies", lambda *_args: {})
     monkeypatch.setattr(relaxation_workflows, "_add_linkage_anchor_restraints", lambda *_args: 0)
-    monkeypatch.setattr(relaxation_workflows, "_write_openmm_pdb", lambda *_args: None)
+    monkeypatch.setattr(
+        relaxation_workflows, "_write_relaxed_product_pdb", lambda *_args, **_kwargs: None
+    )
 
     def moving_md(*_args, **_kwargs):
         """Return final coordinates with an immobilized-protein displacement violation."""

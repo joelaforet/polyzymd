@@ -204,11 +204,16 @@ def test_relaxed_conjugate_pdb_prefers_final_conjugate_relaxation_artifact(tmp_p
     """Downstream solvation should consume the Stage B relaxed PDB."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
+    crosslinked = tmp_path / "crosslinked_product.pdb"
     minimized = tmp_path / "conjugate_minimized.pdb"
     relaxed = tmp_path / "conjugate_relaxed.pdb"
+    crosslinked.write_text(
+        "ATOM      1  CA  ALA A   1       0.000   0.000   0.000\nEND\n", encoding="utf-8"
+    )
     minimized.write_text("END\n", encoding="utf-8")
     relaxed.write_text("END\n", encoding="utf-8")
     construction = SimpleNamespace(
+        crosslinked_pdb_path=crosslinked,
         relaxation=SimpleNamespace(
             minimized_pdb_path=minimized,
             relaxed_pdb_path=relaxed,

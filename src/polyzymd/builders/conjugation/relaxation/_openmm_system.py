@@ -14,6 +14,10 @@ from polyzymd.builders.conjugation.relaxation._diagnostics import (
     validate_finite_energy,
     validate_finite_positions,
 )
+from polyzymd.builders.conjugation.relaxation.geometry import (
+    positions_to_numpy,
+    replace_pdb_coordinates,
+)
 from polyzymd.builders.conjugation.relaxation.models import (
     ConjugateRelaxationSettings,
     ProductLinkage,
@@ -425,8 +429,43 @@ def _validate_platform_context(openmm: Any, platform: Any) -> None:
     del integrator
 
 
-def _write_openmm_pdb(openmm_app: Any, topology: Any, positions: Any, output_path: Path) -> None:
-    """Write an OpenMM PDB artifact."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as handle:
-        openmm_app.PDBFile.writeFile(topology, positions, handle)
+def _write_relaxed_product_pdb(
+    template_pdb_path: Path | str,
+    positions: Any,
+    output_path: Path,
+    openmm_unit: Any,
+    *,
+    expected_atom_count: int | None = None,
+) -> None:
+    """Write final relaxation coordinates into the authoritative product PDB.
+
+    Parameters
+    ----------
+    template_pdb_path : pathlib.Path or str
+        Product PDB carrying authoritative fixed-width identity and connectivity
+        records.
+    positions : Any
+        OpenMM-like final positions in nanometers.
+    output_path : pathlib.Path
+        Destination PDB path.
+    openmm_unit : Any
+        OpenMM unit module used for unit-aware coordinate extraction.
+    expected_atom_count : int or None, optional
+        Expected topology atom count for strict validation, by default ``None``.
+
+    Raises
+    ------
+    ValueError
+        If final positions are non-finite or have the wrong atom count.
+    """
+    coords_nm = positions_to_numpy(positions, openmm_unit)
+    if coords_nm.ndim != 2 or coords_nm.shape[1] != 3:
+        raise ValueError(f"Relaxed positions have invalid shape: {coords_nm.shape}")
+    if not np.all(np.isfinite(coords_nm)):
+        raise ValueError("Relaxed positions contain non-finite values")
+    if expected_atom_count is not None and coords_nm.shape[0] != expected_atom_count:
+        raise ValueError(
+            "Relaxed position atom count does not match product topology: "
+            f"positions={coords_nm.shape[0]}, topology={expected_atom_count}"
+        )
+    replace_pdb_coordinates(template_pdb_path, coords_nm * 10.0, output_path)
