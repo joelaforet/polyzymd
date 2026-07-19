@@ -1180,6 +1180,7 @@ def _construct_conjugate_from_specs(
     product_state_specs = _product_state_specs_with_assembly_mappings(
         specs,
         assembly_result=assembly_result,
+        product_pdb_path=crosslinked_pdb_path,
     )
 
     product_state_pablo_library = None
@@ -1244,7 +1245,7 @@ def _construct_conjugate_from_specs(
             parameterization_result.interchange,
             artifact_dir,
             product_pdb_path=crosslinked_pdb_path,
-            attachment_specs=specs,
+            attachment_specs=product_state_specs,
             assembly=assembly_result,
             settings=settings.relaxation,
         )
@@ -1296,11 +1297,19 @@ def _product_state_specs_with_assembly_mappings(
     specs: tuple[Any, ...],
     *,
     assembly_result: Any,
+    product_pdb_path: Path | str,
 ) -> tuple[Any, ...]:
-    """Return specs whose plans point at concrete product-PDB modifier residues."""
+    """Return specs whose plans point at exact product-PDB linkage atoms."""
     mappings = getattr(assembly_result, "residue_mappings", {}) or {}
+    added_pairs = tuple(getattr(assembly_result, "added_conect_pairs", ()) or ())
+    if len(added_pairs) != len(specs):
+        raise ValueError(
+            "Product-state spec mapping requires one ordered assembly CONECT pair per "
+            f"attachment spec (pairs={len(added_pairs)}, specs={len(specs)})"
+        )
+    product_atom_by_serial = _product_pdb_atoms_by_serial(product_pdb_path)
     updated_specs = []
-    for fragment_index, spec in enumerate(specs, start=1):
+    for fragment_index, (spec, pair) in enumerate(zip(specs, added_pairs, strict=True), start=1):
         plan = spec.resolved_plan
         fragment_prefix = f"fragment_{fragment_index}:"
         fragment_mappings = {
@@ -1308,20 +1317,18 @@ def _product_state_specs_with_assembly_mappings(
             for key, value in mappings.items()
             if key.startswith(fragment_prefix)
         }
-        source_key = _modifier_source_residue_key(plan.modifier_link_atom)
-        mapping = fragment_mappings.get(source_key)
-        if mapping is None:
-            updated_specs.append(_copy_spec_with_product_mappings(spec, fragment_mappings))
-            continue
-
-        modifier_link_atom = plan.modifier_link_atom.model_copy(
-            update={
-                "chain_id": str(mapping.get("target_chain", "C")),
-                "residue_number": int(mapping["target_residue_number"]),
-                "residue_name": plan.modifier_product_residue_name,
-            }
+        protein_atom = _product_atom_for_serial(product_atom_by_serial, pair[0], "protein")
+        modifier_atom = _product_atom_for_serial(product_atom_by_serial, pair[1], "modifier")
+        _validate_product_pair_for_spec(
+            spec,
+            protein_atom=protein_atom,
+            modifier_atom=modifier_atom,
+            fragment_index=fragment_index,
+            fragment_mappings=fragment_mappings,
         )
-        updated_plan = plan.model_copy(update={"modifier_link_atom": modifier_link_atom})
+        updated_plan = plan.model_copy(
+            update={"protein_link_atom": protein_atom, "modifier_link_atom": modifier_atom}
+        )
         updated_specs.append(
             _copy_spec_with_product_mappings(
                 spec,
@@ -1330,6 +1337,117 @@ def _product_state_specs_with_assembly_mappings(
             )
         )
     return tuple(updated_specs)
+
+
+def _product_pdb_atoms_by_serial(product_pdb_path: Path | str) -> dict[int, PdbAtomRecord]:
+    """Return product PDB atom records keyed by unique serial."""
+    atoms_by_serial: dict[int, PdbAtomRecord] = {}
+    for atom in parse_structure_pdb_atom_records(Path(product_pdb_path), require_atoms=True):
+        serial = atom.serial
+        if serial is None:
+            raise ValueError(f"Product PDB atom {atom.atom_name} is missing a serial")
+        if serial in atoms_by_serial:
+            raise ValueError(f"Product PDB contains duplicate atom serial {serial}")
+        atoms_by_serial[serial] = atom
+    return atoms_by_serial
+
+
+def _product_atom_for_serial(
+    product_atom_by_serial: dict[int, PdbAtomRecord], serial: int, role: str
+) -> PdbAtomRecord:
+    """Return the product atom record for an assembly CONECT serial."""
+    atom = product_atom_by_serial.get(int(serial))
+    if atom is None:
+        raise ValueError(f"Assembly {role} CONECT serial {serial} is missing from product PDB")
+    return atom
+
+
+def _validate_product_pair_for_spec(
+    spec: Any,
+    *,
+    protein_atom: PdbAtomRecord,
+    modifier_atom: PdbAtomRecord,
+    fragment_index: int,
+    fragment_mappings: dict[str, dict[str, int | str]],
+) -> None:
+    """Validate an ordered product linkage pair against one attachment spec."""
+    plan = spec.resolved_plan
+    _validate_product_protein_atom(plan, protein_atom, fragment_index)
+    _validate_product_modifier_atom(plan, modifier_atom, fragment_index, fragment_mappings)
+
+
+def _validate_product_protein_atom(plan: Any, atom: PdbAtomRecord, fragment_index: int) -> None:
+    """Validate a product PDB protein endpoint for one resolved plan."""
+    selector = getattr(getattr(plan, "contract", None), "protein_endpoint", None)
+    selector = getattr(selector, "selector", None)
+    source_atom = plan.protein_link_atom
+    expected_chain = getattr(selector, "chain_id", source_atom.chain_id)
+    expected_residue_number = getattr(selector, "residue_number", source_atom.residue_number)
+    expected_insertion_code = getattr(selector, "insertion_code", source_atom.insertion_code)
+    expected_atom_name = source_atom.atom_name
+    expected_residue_names = {
+        str(source_atom.residue_name).upper(),
+        str(plan.protein_product_residue_name).upper(),
+    }
+    if (
+        atom.chain_id.upper() != str(expected_chain).upper()
+        or atom.residue_number != int(expected_residue_number)
+        or (atom.insertion_code or "").upper() != str(expected_insertion_code or "").upper()
+        or atom.atom_name.upper() != str(expected_atom_name).upper()
+        or atom.residue_name.upper() not in expected_residue_names
+    ):
+        raise ValueError(
+            "Assembly CONECT pair protein endpoint does not match attachment "
+            f"{fragment_index}: serial={atom.serial} {atom.chain_id}:{atom.residue_name}:"
+            f"{atom.residue_number}{atom.insertion_code}:{atom.atom_name}"
+        )
+
+
+def _validate_product_modifier_atom(
+    plan: Any,
+    atom: PdbAtomRecord,
+    fragment_index: int,
+    fragment_mappings: dict[str, dict[str, int | str]],
+) -> None:
+    """Validate a product PDB modifier endpoint for one resolved plan."""
+    source_atom = plan.modifier_link_atom
+    expected_atom_name = source_atom.atom_name.upper()
+    expected_residue_names = {
+        str(source_atom.residue_name).upper(),
+        str(plan.modifier_product_residue_name).upper(),
+    }
+    mapping = fragment_mappings.get(_modifier_source_residue_key(source_atom), {})
+    has_mapping = bool(mapping)
+    mismatches = []
+    if atom.atom_name.upper() != expected_atom_name:
+        mismatches.append(f"atom name expected={expected_atom_name!r} observed={atom.atom_name!r}")
+    if atom.residue_name.upper() not in expected_residue_names:
+        mismatches.append(
+            "residue name expected one of "
+            f"{sorted(expected_residue_names)!r} observed={atom.residue_name!r}"
+        )
+    expected_chain = str(mapping.get("target_chain", "") or "").upper()
+    expected_residue_number = mapping.get("target_residue_number")
+    expected_insertion_code = str(mapping.get("target_insertion_code", "") or "").upper()
+    if expected_chain and atom.chain_id.upper() != expected_chain:
+        mismatches.append(f"chain expected={expected_chain!r} observed={atom.chain_id!r}")
+    if expected_residue_number not in {None, ""} and atom.residue_number != int(
+        expected_residue_number
+    ):
+        mismatches.append(
+            f"residue number expected={expected_residue_number} observed={atom.residue_number}"
+        )
+    if has_mapping and (atom.insertion_code or "").upper() != expected_insertion_code:
+        mismatches.append(
+            "insertion code expected="
+            f"{expected_insertion_code!r} observed={atom.insertion_code!r}"
+        )
+    if mismatches:
+        raise ValueError(
+            "Assembly CONECT pair modifier endpoint does not match attachment "
+            f"{fragment_index}: serial={atom.serial} {atom.chain_id}:{atom.residue_name}:"
+            f"{atom.residue_number}{atom.insertion_code}:{atom.atom_name}; " + "; ".join(mismatches)
+        )
 
 
 def _copy_spec_with_product_mappings(
