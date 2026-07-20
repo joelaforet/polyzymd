@@ -193,11 +193,48 @@ def _read_state_rows(path: Path) -> list[dict[str, float]]:
     """Read OpenMM state data and normalize potential-energy values."""
     rows = []
     with path.open("r", encoding="utf-8") as handle:
-        reader = csv.DictReader(line for line in handle if not line.startswith("#"))
+        reader = csv.DictReader(_state_csv_lines(handle))
         for row in reader:
-            energy_key = next(key for key in row if "Potential Energy" in key)
+            energy_key = _potential_energy_key(row)
             rows.append({"potential_energy": float(row[energy_key])})
     return rows
+
+
+def _state_csv_lines(lines: Any) -> Any:
+    """Yield parseable OpenMM state CSV lines while preserving the commented header."""
+    header_seen = False
+    for line in lines:
+        if not line.startswith("#"):
+            yield line
+            continue
+        uncommented = line[1:]
+        if _is_state_csv_header(uncommented):
+            if header_seen:
+                raise ValueError("OpenMM state CSV contains multiple StateDataReporter headers")
+            header_seen = True
+            yield uncommented
+
+
+def _is_state_csv_header(line: str) -> bool:
+    """Return whether an uncommented line is the OpenMM StateDataReporter header."""
+    try:
+        fields = next(csv.reader([line]))
+    except csv.Error:
+        return False
+    normalized = [field.strip().strip('"') for field in fields]
+    return bool(
+        len(normalized) >= 2
+        and normalized[0] == "Step"
+        and any(field.startswith("Potential Energy") for field in normalized[1:])
+    )
+
+
+def _potential_energy_key(row: dict[str, str]) -> str:
+    """Return the CSV column key that contains potential energy values."""
+    try:
+        return next(key for key in row if key is not None and "Potential Energy" in key)
+    except StopIteration as exc:
+        raise ValueError("OpenMM state CSV is missing potential-energy data") from exc
 
 
 def _trajectory_frame_count(path: Path, topology: Any) -> int | None:

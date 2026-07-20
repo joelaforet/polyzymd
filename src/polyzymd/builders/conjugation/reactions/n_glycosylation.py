@@ -1071,15 +1071,26 @@ def _resolve_asn_nd2_hydrogen(
         for atom in residue_atoms
         if atom.atom_name.strip().upper() in template_hydrogen_names and _is_hydrogen_atom(atom)
     ]
+    if len(observed) == 1:
+        return observed[0]
+
+    canonical_observed = {
+        atom.atom_name.strip().upper(): atom
+        for atom in observed
+        if atom.atom_name.strip().upper() in {"HD21", "HD22"}
+    }
+    if len(observed) == 2 and set(canonical_observed) == {"HD21", "HD22"}:
+        return canonical_observed["HD21"]
+
     if len(observed) != 1:
         raise ValueError(
             "N-glycosylation requires exactly one explicit Asn ND2 hydrogen to remove from "
-            "Pablo ASN template connectivity; "
+            "Pablo ASN template connectivity, or the canonical HD21/HD22 pair for "
+            "deterministic HD21 removal; "
             f"found {len(observed)} for {selector.chain_id}:ASN{selector.residue_number}:ND2. "
             f"Template bonded H names: {', '.join(template_hydrogen_names)}. No coordinate "
             "geometry fallback is used."
         )
-    return observed[0]
 
 
 def _same_residue(left: PdbAtomRecord, right: PdbAtomRecord) -> bool:
