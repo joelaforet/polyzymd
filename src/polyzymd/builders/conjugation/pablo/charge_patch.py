@@ -133,6 +133,7 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
     fragment = spec.generated_fragment
     protein_link = plan.protein_link_atom
     modifier_link = plan.modifier_link_atom
+    resolved_modifier_link = _resolve_retained_modifier_link_atom(spec, fragment)
     residue_atoms = _modified_residue_atoms(product_atoms, protein_link)
     if not residue_atoms:
         raise LocalChargePatchError("No final product atoms matched the modified residue")
@@ -179,7 +180,9 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
         rwmol,
         rd_indices,
         _mapped_link_key(protein_link, rd_indices, role="protein"),
-        _modifier_link_key(modifier_link, rd_indices),
+        _modifier_link_key(
+            modifier_link, rd_indices, resolved_modifier_link=resolved_modifier_link
+        ),
         int(round(float(getattr(plan.pablo_crosslink_requirement, "bond_order", 1)))),
     )
     mol = rwmol.GetMol()
@@ -207,9 +210,19 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
 
 
 def _modifier_link_key(
-    modifier_link: Any, indices: Mapping[tuple[str, int | None, str], int]
+    modifier_link: Any,
+    indices: Mapping[tuple[str, int | None, str], int],
+    *,
+    resolved_modifier_link: Any | None = None,
 ) -> tuple[str, int | None, str]:
     """Return the retained modifier key for the resolved link atom."""
+    if resolved_modifier_link is not None:
+        key = _product_key(resolved_modifier_link, role="modifier")
+        if key in indices:
+            return key
+        raise LocalChargePatchError(
+            "Resolved Pablo modifier link atom is missing from the retained product graph"
+        )
     key = _product_key(modifier_link, role="modifier")
     if key in indices:
         return key
@@ -542,7 +555,7 @@ def _retained_modifier_atoms(
                 atom,
                 _MappedAtom(
                     key=key,
-                    atom_name=_atom_name(atom),
+                    atom_name=identity["atom_name"],
                     element=_atom_element(atom),
                     chain_id=identity["chain_id"],
                     residue_name=identity["residue_name"],
@@ -564,6 +577,102 @@ def _retained_fragment_atoms(spec: Any, fragment: Any) -> tuple[Any, ...]:
         for atom in tuple(getattr(fragment, "atoms", ()) or ())
         if _product_key(atom, role="modifier") not in leaving
     )
+
+
+def _resolve_retained_modifier_link_atom(spec: Any, fragment: Any) -> Any:
+    """Resolve the source-fragment atom retained for the modifier link.
+
+    The generated-fragment source identity is authoritative for RDKit graph keys. Product PDB
+    identities are applied later only when emitting charge records.
+    """
+    plan = getattr(spec, "resolved_plan", None)
+    modifier_link = getattr(plan, "modifier_link_atom", None)
+    atoms = tuple(getattr(fragment, "atoms", ()) or ())
+    retained = tuple(_retained_fragment_atoms(spec, fragment))
+    serial_atom = _single_fragment_match(
+        atoms,
+        attr="serial",
+        value=getattr(fragment, "reactive_atom_serial", None),
+        label="reactive atom serial",
+    )
+    index_atom = _single_fragment_match(
+        atoms,
+        attr="atom_index",
+        value=getattr(fragment, "reactive_atom_index", None),
+        label="reactive atom index",
+    )
+    has_serial = getattr(fragment, "reactive_atom_serial", None) not in (None, "")
+    has_index = getattr(fragment, "reactive_atom_index", None) not in (None, "")
+    if (
+        has_serial
+        and has_index
+        and (serial_atom is None or index_atom is None or serial_atom is not index_atom)
+    ):
+        raise LocalChargePatchError(
+            "Generated-fragment reactive atom serial and index resolve to different source atoms"
+        )
+    resolved = serial_atom or index_atom
+    if resolved is None:
+        resolved = _unique_name_fragment_match(
+            retained,
+            getattr(fragment, "reactive_atom_name", None)
+            or getattr(modifier_link, "atom_name", None),
+        )
+    if resolved is None:
+        raise LocalChargePatchError(
+            "Generated-fragment reactive atom identity is missing or ambiguous for the modifier link"
+        )
+    if all(resolved is not atom for atom in retained):
+        raise LocalChargePatchError(
+            "Generated-fragment reactive atom resolves to a leaving atom, not a retained modifier atom"
+        )
+    expected_name = _atom_name(modifier_link).upper() if modifier_link is not None else ""
+    if expected_name and _atom_name(resolved).upper() != expected_name:
+        raise LocalChargePatchError(
+            "Generated-fragment reactive atom name does not match the Pablo modifier link atom name"
+        )
+    _validate_mapped_modifier_link_identity(spec, resolved)
+    return resolved
+
+
+def _single_fragment_match(
+    atoms: Sequence[Any], *, attr: str, value: Any, label: str
+) -> Any | None:
+    """Return a single source-fragment atom selected by a scalar identity."""
+    if value in (None, ""):
+        return None
+    target = int(value)
+    matches = [atom for atom in atoms if getattr(atom, attr, None) == target]
+    if len(matches) > 1:
+        raise LocalChargePatchError(f"Generated-fragment {label} {target!r} is ambiguous")
+    return matches[0] if matches else None
+
+
+def _unique_name_fragment_match(atoms: Sequence[Any], name: Any) -> Any | None:
+    """Return a source-fragment atom only when the fallback name is unique."""
+    if name in (None, ""):
+        return None
+    target = str(name).strip().upper()
+    matches = [atom for atom in atoms if _atom_name(atom).upper() == target]
+    if len(matches) > 1:
+        raise LocalChargePatchError(
+            f"Generated-fragment reactive atom name {target!r} is ambiguous among retained atoms"
+        )
+    return matches[0] if matches else None
+
+
+def _validate_mapped_modifier_link_identity(spec: Any, atom: Any) -> None:
+    """Validate explicit residue mappings preserve the reactive product atom identity."""
+    mapping = _mapping_for_atom(spec, atom)
+    if not mapping:
+        return
+    plan = getattr(spec, "resolved_plan", None)
+    modifier_link = getattr(plan, "modifier_link_atom", None)
+    expected_name = _atom_name(modifier_link).upper() if modifier_link is not None else ""
+    if expected_name and _atom_name(atom).upper() != expected_name:
+        raise LocalChargePatchError(
+            "Mapped modifier reactive atom source name does not match product link atom name"
+        )
 
 
 def _fragment_bonds(fragment: Any) -> tuple[tuple[Any, Any, float], ...]:
@@ -656,7 +765,9 @@ def _mapped_modifier_product_identity(
         chain_id=chain_id,
         residue_name=residue_name,
         residue_number=residue_number,
+        insertion_code=insertion_code,
         atom_name=atom_name,
+        allow_unique_name_fallback=not mapping,
     )
     if product_atom is not None:
         return {
@@ -666,33 +777,51 @@ def _mapped_modifier_product_identity(
             ),
             "residue_number": getattr(product_atom, "residue_number", residue_number),
             "insertion_code": str(getattr(product_atom, "insertion_code", insertion_code) or ""),
+            "atom_name": _atom_name(product_atom),
         }
+    if mapping:
+        raise LocalChargePatchError(
+            "Mapped modifier source residue did not resolve to the exact product atom identity: "
+            f"chain={chain_id!r} residue={residue_name!r} number={residue_number!r} "
+            f"atom={atom_name!r}"
+        )
     return {
         "chain_id": chain_id,
         "residue_name": residue_name,
         "residue_number": residue_number,
         "insertion_code": insertion_code,
+        "atom_name": atom_name,
     }
 
 
 def _modifier_product_atom_lookup(product_atoms: Sequence[Any]) -> dict[str, dict[Any, Any]]:
     """Return final product atom lookup tables for modifier identities."""
-    grouped_by_name: dict[str, list[Any]] = {}
-    by_residue_atom: dict[tuple[str, int | None, str, str], Any] = {}
+    grouped_by_chain_name: dict[tuple[str, str], list[Any]] = {}
+    by_residue_atom: dict[tuple[str, int | None, str, str, str], Any] = {}
+    exact_identities: set[tuple[str, int | None, str, str, str]] = set()
     for atom in product_atoms:
-        if str(getattr(atom, "chain_id", "") or "").strip() != "C":
-            continue
         atom_name = _atom_name(atom)
         chain_id = str(getattr(atom, "chain_id", "") or "").strip()
         residue_number = _optional_int(getattr(atom, "residue_number", None))
         residue_name = str(getattr(atom, "residue_name", "") or "").strip().upper()
-        grouped_by_name.setdefault(atom_name, []).append(atom)
-        by_residue_atom[(chain_id, residue_number, residue_name, atom_name)] = atom
-        by_residue_atom.setdefault((chain_id, residue_number, "", atom_name), atom)
+        insertion_code = str(getattr(atom, "insertion_code", "") or "").strip()
+        exact_key = (chain_id, residue_number, insertion_code, residue_name, atom_name)
+        if exact_key in exact_identities:
+            raise LocalChargePatchError(
+                "Duplicate product atom identity in final product PDB: "
+                f"chain={chain_id!r} residue={residue_name!r} number={residue_number!r} "
+                f"insertion={insertion_code!r} atom={atom_name!r}"
+            )
+        exact_identities.add(exact_key)
+        grouped_by_chain_name.setdefault((chain_id, atom_name), []).append(atom)
+        by_residue_atom[exact_key] = atom
+        by_residue_atom.setdefault((chain_id, residue_number, insertion_code, "", atom_name), atom)
     return {
         "by_residue_atom": by_residue_atom,
-        "by_unique_name": {
-            atom_name: atoms[0] for atom_name, atoms in grouped_by_name.items() if len(atoms) == 1
+        "by_unique_chain_name": {
+            chain_name: atoms[0]
+            for chain_name, atoms in grouped_by_chain_name.items()
+            if len(atoms) == 1 and chain_name[0] != "A"
         },
     }
 
@@ -703,16 +832,29 @@ def _lookup_modifier_product_atom(
     chain_id: str,
     residue_name: str,
     residue_number: int | None,
+    insertion_code: str,
     atom_name: str,
+    allow_unique_name_fallback: bool = True,
 ) -> Any | None:
     """Return a matching final product atom for a modifier atom."""
     by_residue_atom = product_atom_lookup.get("by_residue_atom", {})
-    key = (str(chain_id or "C").strip(), residue_number, str(residue_name or "").upper(), atom_name)
-    return (
-        by_residue_atom.get(key)
-        or by_residue_atom.get((key[0], residue_number, "", atom_name))
-        or product_atom_lookup.get("by_unique_name", {}).get(atom_name)
+    normalized_chain = str(chain_id or "C").strip()
+    normalized_insertion = str(insertion_code or "").strip()
+    key = (
+        normalized_chain,
+        residue_number,
+        normalized_insertion,
+        str(residue_name or "").upper(),
+        atom_name,
     )
+    match = by_residue_atom.get(key) or by_residue_atom.get(
+        (normalized_chain, residue_number, normalized_insertion, "", atom_name)
+    )
+    if match is not None or not allow_unique_name_fallback:
+        return match
+    if normalized_chain == "A":
+        return None
+    return product_atom_lookup.get("by_unique_chain_name", {}).get((normalized_chain, atom_name))
 
 
 def _mapped_atom(atom: Any, *, key: tuple[str, int | None, str], source_role: str) -> _MappedAtom:

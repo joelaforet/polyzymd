@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from polyzymd.builders.conjugation._linkage import PdbAtomSelector
 from polyzymd.builders.conjugation.polymer import build_smiles_moiety_fragment
 from polyzymd.builders.conjugation.reactions import (
     NGlycosylationReaction,
@@ -14,7 +15,10 @@ from polyzymd.builders.conjugation.reactions import (
     get_reaction,
     list_reactions,
 )
-from polyzymd.builders.conjugation.reactions.n_glycosylation import detect_glycan_anomeric_group
+from polyzymd.builders.conjugation.reactions.n_glycosylation import (
+    _resolve_asn_nd2_hydrogen,
+    detect_glycan_anomeric_group,
+)
 from polyzymd.config.schema import ConjugationAttachmentConfig
 
 pytest.importorskip("rdkit")
@@ -134,6 +138,43 @@ def test_resolve_plan_builds_asx_to_user_glycan_residue_linkage(tmp_path: Path):
     assert len(plan.modifier_leaving_atoms) >= 2
 
 
+def test_asn_nd2_hydrogen_resolution_selects_hd21_from_canonical_pair(
+    tmp_path: Path,
+) -> None:
+    """Canonical HD21/HD22 candidates should remove HD21 by name, not file order."""
+    protein_path = _asn_pdb(tmp_path, hydrogens=("HD22", "HD21"))
+
+    hydrogen = _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+
+    assert hydrogen.atom_name == "HD21"
+
+
+def test_asn_nd2_hydrogen_resolution_returns_single_candidate_unchanged(
+    tmp_path: Path,
+) -> None:
+    """A single Pablo-template ND2 hydrogen should be accepted as supplied."""
+    protein_path = _asn_pdb(tmp_path, hydrogens=("HD22",))
+
+    hydrogen = _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+
+    assert hydrogen.atom_name == "HD22"
+
+
+def test_asn_nd2_hydrogen_resolution_rejects_ambiguous_noncanonical_candidates(
+    tmp_path: Path,
+) -> None:
+    """Multiple noncanonical template candidates should fail without geometry fallback."""
+    protein_path = _asn_pdb(tmp_path, hydrogens=("HN1", "HN2"))
+    residue_library = _fake_asn_nd2_hydrogen_library(("HN1", "HN2"))
+
+    with pytest.raises(ValueError, match="canonical HD21/HD22 pair"):
+        _resolve_asn_nd2_hydrogen(
+            protein_path,
+            _asn_selector(),
+            residue_library=residue_library,
+        )
+
+
 def test_rejects_non_asn_target_residue(tmp_path: Path):
     """N-glycosylation should fail clearly when the selected residue is not ASN."""
     fragment = _glycan_fragment(tmp_path)
@@ -163,7 +204,30 @@ def _glycan_fragment(tmp_path: Path, *, residue_name: str = "NAG"):
     )
 
 
-def _asn_pdb(tmp_path: Path) -> Path:
+def _asn_selector() -> PdbAtomSelector:
+    """Return the default ASN ND2 selector for local fixtures."""
+    return PdbAtomSelector(
+        chain_id="A",
+        residue_name="ASN",
+        residue_number=42,
+        atom_name="ND2",
+        insertion_code="",
+    )
+
+
+def _fake_asn_nd2_hydrogen_library(
+    hydrogen_names: tuple[str, ...],
+) -> dict[str, tuple[object, ...]]:
+    """Return a Pablo-like residue library with injectable ASN ND2 hydrogens."""
+    atoms = [
+        SimpleNamespace(name="ND2", symbol="N"),
+        *(SimpleNamespace(name=name, symbol="H") for name in hydrogen_names),
+    ]
+    bonds = [SimpleNamespace(atom1="ND2", atom2=name) for name in hydrogen_names]
+    return {"ASN": (SimpleNamespace(atoms=atoms, bonds=bonds),)}
+
+
+def _asn_pdb(tmp_path: Path, *, hydrogens: tuple[str, ...] = ("HD21",)) -> Path:
     """Create a small Asn residue with one explicit ND2 leaving hydrogen."""
     path = tmp_path / "asn.pdb"
     lines = [
@@ -173,8 +237,21 @@ def _asn_pdb(tmp_path: Path) -> Path:
         _pdb_atom(4, "CG", "ASN", "A", 42, 2.0, 0.0, 0.0),
         _pdb_atom(5, "OD1", "ASN", "A", 42, 2.0, -1.2, 0.0, element="O"),
         _pdb_atom(6, "ND2", "ASN", "A", 42, 2.0, 1.2, 0.0, element="N"),
-        _pdb_atom(7, "HD21", "ASN", "A", 42, 2.0, 2.1, 0.0, element="H"),
     ]
+    for offset, hydrogen_name in enumerate(hydrogens, start=7):
+        lines.append(
+            _pdb_atom(
+                offset,
+                hydrogen_name,
+                "ASN",
+                "A",
+                42,
+                2.0,
+                2.1 + offset / 10,
+                0.0,
+                element="H",
+            )
+        )
     path.write_text("".join(lines) + "END\n", encoding="utf-8")
     return path
 

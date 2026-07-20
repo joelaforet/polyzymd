@@ -151,12 +151,15 @@ def test_asn_nd2_hydrogen_resolution_rejects_missing_template_h(tmp_path: Path) 
         _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
 
 
-def test_asn_nd2_hydrogen_resolution_rejects_ambiguous_template_h(tmp_path: Path) -> None:
-    """Multiple observed Pablo-template ND2 H names should be diagnostic ambiguity."""
-    protein_path = _write_asn_fixture(tmp_path / "asn_two_h.pdb", hydrogens=("HD21", "HD22"))
+def test_asn_nd2_hydrogen_resolution_selects_hd21_from_canonical_template_pair(
+    tmp_path: Path,
+) -> None:
+    """Canonical Pablo-template ND2 H names should resolve deterministically to HD21."""
+    protein_path = _write_asn_fixture(tmp_path / "asn_two_h.pdb", hydrogens=("HD22", "HD21"))
 
-    with pytest.raises(ValueError, match="found 2"):
-        _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+    hydrogen = _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+
+    assert hydrogen.atom_name == "HD21"
 
 
 def test_g42666_product_pablo_definitions_retain_carbonyl_order_two(tmp_path: Path) -> None:
