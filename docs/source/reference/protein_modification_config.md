@@ -10,12 +10,11 @@ The active architecture is generic: a moiety provider resolves each source, a
 mechanism resolves a product-state attachment plan, and the workflow carries an
 attachment spec through shared assembly, Pablo/OpenFF parameterization, charge
 patching, conjugate relaxation, and validation. Non-NHS mechanisms and generic explicit
-linkages are executable development paths, but they remain experimental unless a
-mechanism-specific validation note says otherwise. PolyzyMD also supports a
-coordinate-only residue-resolved PDB-fragment input path. N-glycosylation
-accepts residue-resolved multi-residue glycan PDB fragments based on structural
-reducing-end chemistry, not on file provenance; its Pablo/OpenFF continuation is
-explicitly experimental.
+linkages are executable experimental paths unless a
+mechanism-specific validation note says otherwise. PolyzyMD also supports strict
+native OpenMM GLYCAM N-glycosylation for canonical GLYCAM-named CONECT PDB
+glycans when `force_field.conjugate_parameterization` is
+`native_openmm_glycam` and `force_field.glycan_policy` is `strict_glycam`.
 
 ## Top-Level Block
 
@@ -157,29 +156,36 @@ moiety:
 
 ### Residue-resolved PDB N-glycan moiety
 
-For loading in a multi-residue PDB file via the N-glycosylation mechanism, provide the glycan PDB with
-`moiety.input_path` and use `mechanism.name: n_glycosylation`. Do not also set
-`smiles`, `residue_name`, `recipe`, or `polymer_recipe` on the same moiety;
-the provider requires exactly one source. The loaded PDB must contain one
-connected residue-resolved glycan graph and a structurally valid reducing-end
-anomeric `C1` with explicit hydroxyl O/H atoms. An ordinary residue-local
-hydroxyl is accepted. The separate-residue `ROH` cap with atoms named `O1` and
-`HO1` is also accepted as one supported structural representation.
+For loading in a multi-residue PDB file via the N-glycosylation mechanism,
+provide the glycan PDB with `moiety.input_path` and use
+`mechanism.name: n_glycosylation`. Do not also set `smiles`, `residue_name`,
+`recipe`, or `polymer_recipe` on the same moiety; the provider requires exactly
+one source. For strict native GLYCAM parameterization, set
+`moiety.force_field_domain: glycan` and provide a canonical GLYCAM-named PDB with
+complete `CONECT` records. The loaded PDB must contain one connected
+residue-resolved glycan graph and a structurally valid reducing-end anomeric `C1`
+with explicit hydroxyl O/H atoms. An ordinary residue-local hydroxyl is accepted.
+The separate-residue `ROH` cap with atoms named `O1` and `HO1` is also accepted
+as one supported structural representation.
 
 ```yaml
 moiety:
   name: G80966KZ
+  force_field_domain: glycan
   input_path: structures/G80966KZ_glycam.pdb
 ```
 
-The default workflow mode writes a coordinate-only artifact and a PDB-fragment
-ingestion sidecar with N-glycosylation profile diagnostics. It does not produce a final OpenMM system, GLYCAM/CHARMM
-parameters, or a production glycan force-field assignment. See
-{doc}`../how_to/glygen_glycan_conjugation` for the task workflow.
+With `force_field.conjugate_parameterization: native_openmm_glycam`, PolyzyMD
+attaches the glycan to Asn, uses attachment-scoped internal residue aliases for
+Pablo full modified-topology parsing, restores canonical GLYCAM names after
+Pablo succeeds, and maps the modified Asn/ASX residue to GLYCAM `NLN` during
+OpenMM system creation. Multiple glycan attachments such as Asn25 and Asn60 are
+supported by the same scoped-identity mechanism.
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | `name` | string | Moiety identifier. |
+| `force_field_domain` | `glycan` or `sage` | Optional per-moiety force-field domain. Use `glycan` for strict native GLYCAM/NLN routing. Use `sage` only for explicit Sage-domain moieties. |
 | `residue_name` | string | Residue name to use for a generated single-residue moiety. |
 | `input_path` | path | Generic residue-resolved PDB-fragment source. The built-in executable profile is residue-resolved N-glycan input when `mechanism.name: n_glycosylation`; other mechanisms must opt in through their reaction template. |
 | `smiles` | string | SMILES for generated single-residue moieties. |
@@ -195,6 +201,14 @@ reactive selector from the loaded glycan: chain `C`, the reducing sugar residue,
 atom `C1`, and the source atom serial unless an explicit `moiety.link_site`
 selector is supplied. The workflow removes the validated hydroxyl O/H leaving
 atoms and links the glycan reducing-end `C1` to the Asn site atom.
+
+Migration note: older or minimal configs that omit glycan route fields continue
+to use the backward-compatible Sage/Interchange route
+(`force_field.glycan_policy: sage_fallback` and
+`force_field.conjugate_parameterization: openff_interchange`). Strict GLYCAM does
+not silently fall back to Sage; opt in by setting both
+`force_field.glycan_policy: strict_glycam` and
+`force_field.conjugate_parameterization: native_openmm_glycam`.
 
 ## Mechanism
 
@@ -232,7 +246,7 @@ supported by the public API.
 The schema can represent explicit atom-level PDB linkages, and `input_path` is a
 generic structural source. The current config-driven coordinate workflow does
 not register an executable `explicit_linkage` reaction template, so this example
-is a schema shape for advanced development. Use a built-in or custom registered reaction template before
+is a schema shape for advanced use. Use a built-in or custom registered reaction template before
 running this path.
 
 ```yaml

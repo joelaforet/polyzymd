@@ -39,6 +39,14 @@ OpenFF chemistry requirements and PolyzyMD chain conventions for enzyme PDBs.
 Lookup fields for covalent modifications and polymer conjugation.
 :::
 
+:::{grid-item-card} Native GLYCAM Exact Export
+:link: glycam_exact_export
+:link-type: doc
+
+Exact OpenMM/GROMACS semantics, sidecars, audits, and limitations for strict
+GLYCAM N-glycosylation.
+:::
+
 :::{grid-item-card} Conjugation Support Matrix
 :link: conjugation_support_matrix
 :link-type: doc
@@ -78,6 +86,7 @@ Configuration Reference <configuration>
 :maxdepth: 1
 
 Protein Modification Config Reference <protein_modification_config>
+Native GLYCAM Exact Export Reference <glycam_exact_export>
 Conjugation Support Matrix <conjugation_support_matrix>
 Data Requirements & Directory Layout <data_requirements>
 OpenFF PDB Ingestion Reference <openff_pdb_ingestion>

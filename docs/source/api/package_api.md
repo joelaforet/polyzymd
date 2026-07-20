@@ -9,6 +9,7 @@ simulation runners, workflow helpers, and core shared types.
 API Overview <overview>
 Configuration Module <config>
 Builders Module <builders>
+Exact OpenMM Export <exact_openmm>
 Simulation Module <simulation>
 Workflow Module <workflow>
 Core Module <core>
