@@ -530,13 +530,12 @@ thermodynamics:
 simulation_phases:
   equilibration_stages:
     - name: "heating"
-      duration: 0.2                      # nanoseconds
       samples: 20                        # frames to save
       ensemble: "NVT"
       temperature_start: 60.0            # starting temperature (K)
       temperature_end: 300.0             # final temperature (K)
-      temperature_increment: 1.0         # step size (K)
-      temperature_interval: 1200.0       # time between steps (fs)
+      temperature_increment: 1.0         # increase per update (K)
+      temperature_interval_steps: 600    # MD steps between updates
       position_restraints:
         - group: "protein_heavy"
           force_constant: 4184.0
@@ -560,6 +559,11 @@ simulation_phases:
 
 PolyzyMD requires staged equilibration. Use one or more entries in
 `equilibration_stages` even for minimal workflows.
+
+For a temperature ramp, omit `duration`. Set `temperature_increment` in K and
+`temperature_interval_steps` in MD steps. PolyzyMD computes how many updates are
+needed to reach the endpoint and derives the duration. Constant-temperature
+stages continue to require an explicit `duration`.
 
 ### Ensembles
 

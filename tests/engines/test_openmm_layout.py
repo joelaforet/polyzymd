@@ -8,6 +8,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from polyzymd.engines.openmm.engine import OpenMMEngine
+from polyzymd.simulation.progress import (
+    SegmentRecord,
+    SegmentStatus,
+    SimulationProgress,
+    save_progress,
+)
 
 
 def _make_engine() -> OpenMMEngine:
@@ -126,6 +132,39 @@ class TestOpenMMTrajectorySearch:
         engine = _make_engine()
         with pytest.raises(ValueError, match="Empty OpenMM trajectory segment"):
             engine.resolve_trajectory_layout(tmp_path, replicate=1)
+
+    def test_skips_completed_zero_frame_final_segment(self, tmp_path: Path) -> None:
+        """A final remainder after the last report boundary has no DCD file."""
+        prod0 = tmp_path / "production_0"
+        prod0.mkdir()
+        (prod0 / "production_0_trajectory.dcd").write_bytes(b"DCD")
+        (tmp_path / "production_1").mkdir()
+        progress = SimulationProgress(
+            total_steps_requested=105,
+            total_samples_requested=10,
+            status="completed",
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=102,
+                    steps_requested=102,
+                    samples_written=10,
+                    status=SegmentStatus.COMPLETED,
+                ),
+                SegmentRecord(
+                    index=1,
+                    steps_completed=3,
+                    steps_requested=3,
+                    samples_written=0,
+                    status=SegmentStatus.COMPLETED,
+                ),
+            ],
+        )
+        save_progress(tmp_path, progress)
+
+        layout = _make_engine().resolve_trajectory_layout(tmp_path, replicate=1)
+
+        assert layout.trajectory_paths == [prod0 / "production_0_trajectory.dcd"]
 
     def test_rejects_gapped_daisy_chain_segments(self, tmp_path: Path) -> None:
         """Canonical daisy-chain segment indices must be contiguous."""

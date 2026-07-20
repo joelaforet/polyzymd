@@ -29,7 +29,6 @@ def minimal_config_data():
                 "ensemble": "NPT",
                 "duration": 1.0,
                 "samples": 10,
-                "report_interval": 50000,
                 "checkpoint_interval": 60.0,
             },
         },
@@ -430,6 +429,21 @@ class TestRunDirectoryNaming:
 class TestSimulationPhasesConfig:
     """Test staged equilibration requirements."""
 
+    def test_ignores_deprecated_report_interval(self, caplog):
+        """Legacy intervals are ignored so samples controls trajectory cadence."""
+        from polyzymd.config.schema import SimulationPhaseConfig
+
+        phase = SimulationPhaseConfig(
+            ensemble="NPT",
+            duration=1.0,
+            samples=10,
+            report_interval=50000,
+            checkpoint_interval=60.0,
+        )
+
+        assert "report_interval" not in phase.model_dump()
+        assert "Ignoring deprecated" in caplog.text
+
     def test_requires_equilibration_stages(self):
         from pydantic import ValidationError
 
@@ -439,7 +453,6 @@ class TestSimulationPhasesConfig:
             ensemble="NPT",
             duration=1.0,
             samples=10,
-            report_interval=50000,
             checkpoint_interval=60.0,
             time_step=2.0,
         )
@@ -456,7 +469,6 @@ class TestSimulationPhasesConfig:
             ensemble="NPT",
             duration=1.0,
             samples=10,
-            report_interval=50000,
             checkpoint_interval=60.0,
             time_step=2.0,
         )
@@ -485,10 +497,136 @@ class TestSimulationPhasesConfig:
                     "ensemble": "NPT",
                     "duration": 1.0,
                     "samples": 10,
-                    "report_interval": 50000,
                     "checkpoint_interval": 60.0,
                 },
                 segments=[],
+            )
+
+
+class TestEquilibrationTemperatureRamp:
+    """Validate increment-based temperature ramps and derived durations."""
+
+    @staticmethod
+    def _stage(**overrides):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        values = {
+            "name": "heating",
+            "temperature_start": 60.0,
+            "temperature_end": 300.0,
+            "temperature_increment": 1.0,
+            "temperature_interval_steps": 600,
+            "time_step": 2.0,
+        }
+        values.update(overrides)
+        return EquilibrationStageConfig(**values)
+
+    def test_derives_duration_without_user_duration(self):
+        stage = self._stage()
+
+        assert stage.resolved_duration == pytest.approx(0.288)
+        assert stage.temperature_ramp_updates == 240
+
+    def test_shortens_final_increment_to_hit_endpoint(self):
+        stage = self._stage(
+            temperature_start=100.0,
+            temperature_end=112.0,
+            temperature_increment=5.0,
+            temperature_interval_steps=100,
+        )
+
+        assert stage.temperature_ramp_updates == 3
+        assert stage.resolved_duration == pytest.approx(0.0006)
+        assert stage.temperature_at_step(200, 300) == pytest.approx(110.0)
+        assert stage.temperature_at_step(300, 300) == pytest.approx(112.0)
+
+    def test_fractional_increment_does_not_add_spurious_update(self):
+        stage = self._stage(
+            temperature_start=60.0,
+            temperature_end=60.7,
+            temperature_increment=0.1,
+            temperature_interval_steps=100,
+        )
+
+        assert stage.temperature_ramp_updates == 7
+        assert stage.resolved_duration == pytest.approx(0.0014)
+
+    def test_serialized_ramp_omits_derived_duration_and_round_trips(self):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        stage = self._stage()
+        serialized = stage.model_dump()
+
+        assert "duration" not in serialized
+        restored = EquilibrationStageConfig.model_validate(serialized)
+        assert restored.resolved_duration == stage.resolved_duration
+        assert restored.temperature_ramp_updates == stage.temperature_ramp_updates
+
+    def test_rejects_duration_with_increment_based_ramp(self):
+        with pytest.raises(ValidationError, match="Do not specify 'duration'"):
+            self._stage(duration=0.2)
+
+    def test_requires_duration_for_constant_temperature(self):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        with pytest.raises(ValidationError, match="require 'duration'"):
+            EquilibrationStageConfig(name="equilibration", temperature=300.0)
+
+    @pytest.mark.parametrize("end", [60.0, 50.0])
+    def test_requires_increasing_temperature(self, end):
+        with pytest.raises(ValidationError, match="must be <"):
+            self._stage(temperature_end=end)
+
+    def test_migrates_legacy_increment_and_interval(self, caplog):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        stage = EquilibrationStageConfig(
+            name="heating",
+            duration=0.1,
+            temperature_start=60.0,
+            temperature_end=300.0,
+            temperature_increment=1.0,
+            temperature_interval=1200.0,
+        )
+
+        assert stage.temperature_increment == pytest.approx(1.0)
+        assert stage.temperature_interval_steps == 600
+        assert stage.resolved_duration == pytest.approx(0.288)
+        assert "converted to temperature_interval_steps=600" in caplog.text
+
+    def test_rejects_duration_only_ramp(self):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        with pytest.raises(ValidationError, match="Do not specify 'duration'"):
+            EquilibrationStageConfig(
+                name="heating",
+                duration=0.3,
+                temperature_start=60.0,
+                temperature_end=300.0,
+            )
+
+    def test_rejects_decimal_rate(self):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        with pytest.raises(ValidationError, match="not supported"):
+            EquilibrationStageConfig(
+                name="heating",
+                temperature_start=60.0,
+                temperature_end=300.0,
+                temperature_ramp_rate=0.8333333333333334,
+            )
+
+    def test_rejects_old_and_new_intervals_together(self):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        with pytest.raises(ValidationError, match="Cannot specify both"):
+            EquilibrationStageConfig(
+                name="heating",
+                temperature_start=60.0,
+                temperature_end=300.0,
+                temperature_increment=1.0,
+                temperature_interval=1200.0,
+                temperature_interval_steps=600,
             )
 
 

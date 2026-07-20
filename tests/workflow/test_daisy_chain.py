@@ -25,7 +25,6 @@ def _simulation_config_data(tmp_path: Path) -> dict:
                 "ensemble": "NPT",
                 "duration": 100.0,
                 "samples": 10,
-                "report_interval": 50000,
                 "checkpoint_interval": 60.0,
             },
         },

@@ -507,7 +507,7 @@ class MDPGenerator:
 
                 params = self._create_equilibration_params(
                     name=stage.name,
-                    duration_ns=stage.duration,
+                    duration_ns=stage.resolved_duration,
                     samples=stage.samples,
                     time_step_fs=stage.time_step or 2.0,
                     temperature=temperature,
@@ -619,14 +619,23 @@ class MDPGenerator:
         """
         time_step_fs = stage.time_step or 2.0
         dt_ps = time_step_fs / 1000.0
-        nsteps = int(stage.duration * 1e6 / time_step_fs)
+        nsteps = int(round(stage.resolved_duration * 1e6 / time_step_fs))
         samples = stage.samples
         output_interval = max(1, nsteps // samples) if samples > 0 else 5000
 
         # Temperature ramping parameters
-        t_start = stage.temperature_start
-        t_end = stage.temperature_end
-        duration_ps = stage.duration * 1000  # ns to ps
+        t_start = stage.get_start_temperature()
+        t_end = stage.get_final_temperature()
+        increment = stage.temperature_increment
+        interval_steps = stage.temperature_interval_steps
+        assert increment is not None
+        assert interval_steps is not None
+        logger.info(
+            f"GROMACS temperature ramp '{stage.name}': {t_start:g} K -> {t_end:g} K "
+            f"by {increment:g} K every {interval_steps} steps; derived duration "
+            f"{stage.resolved_duration:.6f} ns ({stage.temperature_ramp_updates} updates, "
+            f"{nsteps} total steps at {time_step_fs:g} fs)"
+        )
 
         # Map thermostat
         thermostat = stage.thermostat.value if stage.thermostat else "LangevinMiddle"
@@ -642,11 +651,12 @@ class MDPGenerator:
 
         ref_p = self._pressure * 1.01325
 
-        # GROMACS annealing: simple linear ramp
-        # annealing-time: times in ps
-        # annealing-temp: temperatures at those times
-        annealing_time = [0.0, duration_ps]
-        annealing_temp = [t_start, t_end]
+        # GROMACS interpolates between update points separated by the requested steps.
+        interval_ps = interval_steps * dt_ps
+        annealing_time = [i * interval_ps for i in range(stage.temperature_ramp_updates + 1)]
+        annealing_temp = [
+            min(t_end, t_start + i * increment) for i in range(stage.temperature_ramp_updates + 1)
+        ]
 
         return MDPParameters(
             title=f"Temperature Ramping: {stage.name} ({t_start}K -> {t_end}K)",
@@ -661,7 +671,7 @@ class MDPGenerator:
             nstxout_compressed=output_interval,
             continuation=not is_first_stage,
             tcoupl=tcoupl,
-            tau_t=stage.thermostat_timescale or 0.5,
+            tau_t=stage.thermostat_timescale or 1.0,
             ref_t=t_end,  # Reference temp is final temp
             pcoupl=pcoupl,
             pcoupltype=pcoupltype,
@@ -669,7 +679,7 @@ class MDPGenerator:
             gen_vel=is_first_stage,
             gen_temp=t_start,  # Generate velocities at start temp
             annealing="single",
-            annealing_npoints=2,
+            annealing_npoints=len(annealing_time),
             annealing_time=annealing_time,
             annealing_temp=annealing_temp,
             define=posres_defines,

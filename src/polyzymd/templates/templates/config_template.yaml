@@ -295,26 +295,26 @@ description: "Description of your simulation system"
 #
 # Temperature settings:
 #   - Use "temperature" for constant temperature
-#   - Use "temperature_start" + "temperature_end" for ramping
-#   - temperature_increment: Temperature step size (K, default: 1.0)
-#   - temperature_interval: Time between increments (fs, default: 1200)
+#   - For ramping, set temperature_start, temperature_end,
+#     temperature_increment (K), and temperature_interval_steps;
+#     PolyzyMD derives the duration
 #
 # simulation_phases:
 #   equilibration_stages:
 #     # Stage 1: Heat from 60K to 300K with everything restrained
 #     - name: "heating"
-#       duration: 0.288                   # nanoseconds
 #       samples: 50                       # trajectory frames
 #       ensemble: "NVT"
 #       temperature_start: 60.0           # Start temperature (K)
 #       temperature_end: 300.0            # End temperature (K)
-#       temperature_increment: 1.0        # Step size (K)
-#       temperature_interval: 1200.0      # Time between steps (fs)
+#       temperature_increment: 1.0         # Increase per update (K)
+#       temperature_interval_steps: 600    # MD steps between updates
 #       position_restraints:
 #         - group: "protein_heavy"
 #           force_constant: 4184.0        # kJ/mol/nm^2 (= 1 kcal/mol/A^2)
 #         - group: "polymer_heavy"
 #           force_constant: 4184.0
+#     # Add a constant-temperature stage after heating to equilibrate at the endpoint.
 #     
 #     # Stage 2: Relax polymers while keeping protein restrained
 #     - name: "polymer_relaxation"
@@ -338,7 +338,6 @@ description: "Description of your simulation system"
 #     ensemble: "NPT"
 #     duration: 100.0
 #     samples: 2500
-#     report_interval: 20000
 #     checkpoint_interval: 60.0
 #     time_step: 2.0
 #     thermostat: "LangevinMiddle"

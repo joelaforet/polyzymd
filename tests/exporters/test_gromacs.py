@@ -180,6 +180,43 @@ def _posres_indices(itp_path: Path, define: str) -> list[int]:
     return indices
 
 
+class TestTemperatureRampMDP:
+    """Verify GROMACS annealing uses the schema-derived ramp duration."""
+
+    def test_annealing_duration_and_steps_are_derived_from_rate(self, caplog):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        caplog.set_level("INFO")
+        stage = EquilibrationStageConfig(
+            name="heating",
+            temperature_start=60.0,
+            temperature_end=300.0,
+            temperature_increment=1.0,
+            temperature_interval_steps=600,
+            time_step=2.0,
+            samples=20,
+        )
+        generator = MDPGenerator.__new__(MDPGenerator)
+        generator._pressure = 1.0
+
+        params = generator._create_annealing_params(
+            stage=stage,
+            stage_num=1,
+            is_first_stage=True,
+        )
+
+        assert params.nsteps == 144000
+        assert params.annealing_time[0] == 0.0
+        assert params.annealing_time[1] == pytest.approx(1.2)
+        assert params.annealing_npoints == 241
+        assert params.annealing_time[-1] == pytest.approx(288.0)
+        assert params.annealing_temp[0] == 60.0
+        assert params.annealing_temp[-1] == 300.0
+        assert params.tau_t == pytest.approx(1.0)
+        assert "1 K every 600 steps" in caplog.text
+        assert "derived duration 0.288000 ns" in caplog.text
+
+
 def _assert_posres_indices_within_atom_count(itp_path: Path, define: str) -> None:
     """Assert generated position restraint indices are local to their ITP."""
     indices = _posres_indices(itp_path, define)

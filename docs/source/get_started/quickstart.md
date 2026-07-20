@@ -112,13 +112,12 @@ thermodynamics:
 simulation_phases:
   equilibration_stages:
     - name: "heating"
-      duration: 0.2
       samples: 20
       ensemble: "NVT"
       temperature_start: 60.0
       temperature_end: 300.0
       temperature_increment: 1.0
-      temperature_interval: 1200.0
+      temperature_interval_steps: 600  # duration is derived
       position_restraints:
         - group: "protein_heavy"
           force_constant: 4184.0
