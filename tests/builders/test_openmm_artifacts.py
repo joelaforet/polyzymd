@@ -134,16 +134,36 @@ def test_build_openmm_artifacts_routes_conjugation_without_heavy_write(
     class FakeSettings:
         """Fake conjugation settings class with the required flag."""
 
-        def __init__(self, *, create_final_interchange: bool) -> None:
+        def __init__(
+            self,
+            *,
+            create_final_interchange: bool,
+            pdb_fragment_output_mode: str = "coordinate_only",
+        ) -> None:
             self.create_final_interchange = create_final_interchange
+            self.pdb_fragment_output_mode = pdb_fragment_output_mode
+
+        def model_copy(self, *, update: dict[str, object]) -> "FakeSettings":
+            """Return a fake settings copy with selected updates."""
+            values = {
+                "create_final_interchange": self.create_final_interchange,
+                "pdb_fragment_output_mode": self.pdb_fragment_output_mode,
+            }
+            values.update(update)
+            return FakeSettings(**values)
 
     conjugation_module = types.ModuleType("polyzymd.builders.conjugation")
     conjugation_module.build_conjugate_from_config = fake_build_conjugate_from_config
     workflow_module = types.ModuleType("polyzymd.builders.conjugation.system_workflow")
     workflow_module.ConjugatedPolymerSystemSettings = FakeSettings
+    native_module = types.ModuleType("polyzymd.builders.conjugation.native_openmm_glycam")
+    native_module.native_glycam_enabled = lambda _config: False
     monkeypatch.setitem(sys.modules, "polyzymd.builders.conjugation", conjugation_module)
     monkeypatch.setitem(
         sys.modules, "polyzymd.builders.conjugation.system_workflow", workflow_module
+    )
+    monkeypatch.setitem(
+        sys.modules, "polyzymd.builders.conjugation.native_openmm_glycam", native_module
     )
 
     artifacts = build_openmm_artifacts(
@@ -162,6 +182,90 @@ def test_build_openmm_artifacts_routes_conjugation_without_heavy_write(
     assert artifacts.pdb_path == alias
     assert alias.read_text(encoding="utf-8") == "fresh conjugation pdb\n"
     assert not artifacts.system_path.exists()
+
+
+def test_build_openmm_artifacts_uses_native_glycam_product_state_route(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Native GLYCAM CLI builds should not remain on coordinate-only defaults."""
+    captured: dict[str, object] = {}
+    source = tmp_path / SOLVATED_CONJUGATE_PDB
+
+    result = SimpleNamespace(
+        system_builder=None,
+        exact_export_bundle="exact-bundle",
+        require_final_interchange=lambda: "exact-bundle",
+        get_component_info=lambda: {},
+    )
+
+    def fake_build_conjugate_from_config(*args: object, **kwargs: object) -> object:
+        """Record native workflow settings and create the route-specific PDB."""
+        captured["kwargs"] = kwargs
+        source.write_text("native conjugation pdb\n", encoding="utf-8")
+        return result
+
+    class FakeSettings:
+        """Fake settings class with Pydantic-like copy support."""
+
+        def __init__(
+            self,
+            *,
+            create_final_interchange: bool,
+            pdb_fragment_output_mode: str = "coordinate_only",
+        ) -> None:
+            self.create_final_interchange = create_final_interchange
+            self.pdb_fragment_output_mode = pdb_fragment_output_mode
+
+        def model_copy(self, *, update: dict[str, object]) -> "FakeSettings":
+            """Return a fake settings copy with selected updates."""
+            data = {
+                "create_final_interchange": self.create_final_interchange,
+                "pdb_fragment_output_mode": self.pdb_fragment_output_mode,
+            }
+            data.update(update)
+            return FakeSettings(**data)
+
+    conjugation_module = types.ModuleType("polyzymd.builders.conjugation")
+    conjugation_module.build_conjugate_from_config = fake_build_conjugate_from_config
+    workflow_module = types.ModuleType("polyzymd.builders.conjugation.system_workflow")
+    workflow_module.ConjugatedPolymerSystemSettings = FakeSettings
+    native_module = types.ModuleType("polyzymd.builders.conjugation.native_openmm_glycam")
+    native_module.native_glycam_enabled = lambda _config: True
+    monkeypatch.setitem(sys.modules, "polyzymd.builders.conjugation", conjugation_module)
+    monkeypatch.setitem(
+        sys.modules, "polyzymd.builders.conjugation.system_workflow", workflow_module
+    )
+    monkeypatch.setitem(
+        sys.modules, "polyzymd.builders.conjugation.native_openmm_glycam", native_module
+    )
+
+    artifacts = build_openmm_artifacts(
+        sim_config=_config(conjugation_enabled=True),
+        working_dir=tmp_path,
+        polymer_seed=11,
+        write_system=False,
+    )
+
+    settings = cast(dict[str, Any], captured["kwargs"])["settings"]
+    assert settings.pdb_fragment_output_mode == "experimental_pablo"
+    assert artifacts.require_final_interchange() == "exact-bundle"
+    assert artifacts.exact_export_bundle == "exact-bundle"
+
+
+def test_conjugation_workflow_settings_inherit_openmm_platform() -> None:
+    """Config-driven conjugation relaxation should follow the configured OpenMM platform."""
+    from polyzymd.builders.conjugation.system_workflow import (
+        ConjugatedPolymerSystemSettings,
+        _settings_with_config_defaults,
+    )
+
+    settings = ConjugatedPolymerSystemSettings()
+    config = SimpleNamespace(openmm=SimpleNamespace(platform="CPU"))
+
+    resolved = _settings_with_config_defaults(settings, config)
+
+    assert resolved.relaxation.platform_name == "CPU"
 
 
 def test_build_openmm_artifacts_routes_standard_system_builder(

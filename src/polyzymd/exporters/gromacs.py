@@ -15,14 +15,21 @@ Made by PolyzyMD, by Joseph R. Laforet Jr.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from polyzymd.core.branding import FULL_CREDIT_LINE, SHORT_CREDIT_LINE
+from polyzymd.exporters.exact_openmm import (
+    AtomIdentity,
+    ExactTopologyBondRecord,
+    gromacs_atom_order_hash,
+    gromacs_topology_hash,
+)
 from polyzymd.utils.templates import render_package_template
 from polyzymd.workflow.slurm import _validate_script_value
 
@@ -38,6 +45,8 @@ if TYPE_CHECKING:
     from polyzymd.core.atom_groups import AtomGroupResolver, SystemComponentInfo
 
 logger = logging.getLogger(__name__)
+
+_EXACT_PAIR_TOLERANCE = 1e-12
 
 # =============================================================================
 # Constants and Mappings
@@ -1530,6 +1539,827 @@ class RunScriptGenerator:
 # =============================================================================
 
 
+def patch_gromacs_topology_with_exact_exceptions(top_path: Path, sidecar: Any) -> dict[str, Any]:
+    """Patch a GROMACS topology with exact local exception semantics."""
+    lines = top_path.read_text(encoding="utf-8").splitlines()
+    topology = _parse_gromacs_topology_layout(lines)
+    _preflight_exact_gromacs_identity(topology, sidecar)
+    grouped = _group_exact_exceptions_by_molecule_type(topology, sidecar)
+    raw_pair_set = _expand_local_pair_set(topology)
+    exact_nonzero_set = _exact_pair_set(sidecar.nonzero_exceptions)
+    if not raw_pair_set:
+        raise RuntimeError("Exact GROMACS export failed closed: raw baseline has no [ pairs ] rows")
+    if _exact_pair_set(sidecar.zero_exceptions) & raw_pair_set:
+        raise RuntimeError("Exact GROMACS export failed closed: raw pairs include zero exclusions")
+    if raw_pair_set != exact_nonzero_set:
+        raise RuntimeError(
+            "Exact GROMACS export failed closed: raw pair set does not match exact nonzero "
+            f"exception set (raw={len(raw_pair_set)}, exact={len(exact_nonzero_set)})"
+        )
+
+    patched_lines = _replace_defaults(lines)
+    patched_lines = _patch_local_exception_sections(patched_lines, topology, grouped, sidecar)
+    top_path.write_text("\n".join(patched_lines) + "\n", encoding="utf-8")
+
+    patched_topology = _parse_gromacs_topology_layout(patched_lines)
+    validation = _validate_expanded_local_semantics(patched_topology, sidecar)
+    return {
+        "schema_version": 1,
+        "route": "native_openmm_glycam_exact_gromacs",
+        "topology": str(top_path),
+        "raw_pair_count": len(raw_pair_set),
+        "raw_local_pair_row_count": sum(
+            len(block.sections.get("pairs", _TopologySection(-1, -1, ())).entries)
+            for block in topology.molecule_types.values()
+        ),
+        "exact_nonzero_exception_count": len(sidecar.nonzero_exceptions),
+        "exact_zero_exception_count": len(sidecar.zero_exceptions),
+        "patched_pair_count": validation["expanded_pair_count"],
+        "patched_local_pair_row_count": validation["local_pair_row_count"],
+        "patched_exclusion_count": validation["expanded_exclusion_count"],
+        "patched_local_exclusion_row_count": validation["local_exclusion_row_count"],
+        "pair_mismatch_count": validation["pair_mismatch_count"],
+        "exclusion_mismatch_count": validation["exclusion_mismatch_count"],
+        "zero_pairs_in_patched_pairs": validation["zero_pairs_in_patched_pairs"],
+        "constraint_count": len(sidecar.constraints),
+        "exception_hash": sidecar.exception_hash,
+        "atom_order_hash": sidecar.atom_order_hash,
+        "gromacs_atom_order_hash": getattr(sidecar, "gromacs_atom_order_hash", None),
+        "gromacs_topology_hash": getattr(sidecar, "gromacs_topology_hash", None),
+        "route_invariants": dict(getattr(sidecar, "route_invariants", {}) or {}),
+        "nonbonded_metadata": sidecar.nonbonded_metadata.model_dump(mode="json"),
+    }
+
+
+def _section_entries(lines: list[str], section: str) -> list[list[str]]:
+    """Return non-comment token rows from a GROMACS topology section."""
+    entries: list[list[str]] = []
+    active = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("["):
+            active = stripped.lower() == f"[ {section.lower()} ]"
+            continue
+        if active and stripped and not stripped.startswith(";"):
+            entries.append(stripped.split(";", 1)[0].split())
+    return entries
+
+
+@dataclass(frozen=True)
+class _TopologySection:
+    """A local section inside one GROMACS molecule type."""
+
+    header_index: int
+    end_index: int
+    entries: tuple[tuple[str, ...], ...]
+
+
+@dataclass(frozen=True)
+class _MoleculeTypeBlock:
+    """A parsed GROMACS molecule type block."""
+
+    name: str
+    start_index: int
+    end_index: int
+    atom_count: int
+    sections: dict[str, _TopologySection]
+
+
+@dataclass(frozen=True)
+class _AtomInstance:
+    """A global atom mapped into GROMACS molecule-copy coordinates."""
+
+    molecule_type: str
+    copy_index: int
+    local_index: int
+
+
+@dataclass(frozen=True)
+class _TopologyLayout:
+    """Parsed molecule layout and global atom map for a GROMACS topology."""
+
+    molecule_types: dict[str, _MoleculeTypeBlock]
+    molecule_counts: dict[str, int]
+    molecule_order: tuple[tuple[str, int], ...]
+    atom_instances: dict[int, _AtomInstance]
+
+
+@dataclass(frozen=True)
+class _GroupedLocalExceptions:
+    """Exact exception rows grouped by molecule type and local atom pair."""
+
+    pairs: dict[str, dict[tuple[int, int], Any]]
+    exclusions: dict[str, dict[tuple[int, int], Any]]
+
+
+def _preflight_exact_gromacs_identity(topology: _TopologyLayout, sidecar: Any) -> None:
+    """Validate parsed GROMACS atom order and topology before mutation."""
+
+    atoms, bonds = _expanded_gromacs_atom_and_bond_identity(topology)
+    _validate_parsed_gromacs_against_authoritative(atoms, bonds, sidecar)
+    expected_atoms = tuple(getattr(sidecar, "gromacs_atoms", ()) or ())
+    expected_bonds = tuple(getattr(sidecar, "gromacs_topology_bonds", ()) or ())
+    if not expected_atoms and not expected_bonds:
+        return
+    if len(atoms) != sidecar.particle_count:
+        raise RuntimeError(
+            "Exact GROMACS export failed closed before patching: particle count mismatch "
+            f"GROMACS={len(atoms)} sidecar={sidecar.particle_count}"
+        )
+    if tuple((a.index, a.name, a.residue_name, a.residue_id) for a in atoms) != tuple(
+        (a.index, a.name, a.residue_name, a.residue_id) for a in expected_atoms
+    ):
+        raise RuntimeError(
+            "Exact GROMACS export failed closed before patching: atom order/identity mismatch"
+        )
+    if gromacs_atom_order_hash(tuple(atoms)) != sidecar.gromacs_atom_order_hash:
+        raise RuntimeError(
+            "Exact GROMACS export failed closed before patching: atom-order hash mismatch"
+        )
+    if _topology_bond_pairs(bonds) != _topology_bond_pairs(expected_bonds):
+        raise RuntimeError(
+            "Exact GROMACS export failed closed before patching: topology bond identity mismatch"
+        )
+    if gromacs_topology_hash(tuple(atoms), tuple(bonds)) != sidecar.gromacs_topology_hash:
+        raise RuntimeError(
+            "Exact GROMACS export failed closed before patching: topology bond hash mismatch"
+        )
+
+
+def _validate_parsed_gromacs_against_authoritative(
+    atoms: list[AtomIdentity], bonds: list[ExactTopologyBondRecord], sidecar: Any
+) -> None:
+    """Validate a raw GROMACS topology against authoritative OpenMM identity.
+
+    GROMACS topology rows do not preserve chain identifiers. Interchange may also
+    renumber repeated water residues and write common water residue-name aliases.
+    The only accepted normalization is therefore: ignore chain IDs, require exact
+    atom order and atom names, require exact non-water residue names and residue
+    IDs, normalize known water residue names to ``HOH``, and ignore only water
+    residue IDs.
+    """
+
+    if len(atoms) != sidecar.particle_count:
+        raise RuntimeError(
+            "Exact GROMACS export failed closed before patching: particle count mismatch "
+            f"GROMACS={len(atoms)} sidecar={sidecar.particle_count}"
+        )
+    expected_atoms = _normalized_authoritative_atoms_for_gromacs(sidecar.atoms, atoms)
+    parsed_atoms = tuple(_normalized_gromacs_atom(atom) for atom in atoms)
+    if parsed_atoms != expected_atoms:
+        raise RuntimeError(
+            "Exact GROMACS export failed closed before patching: atom order/identity mismatch"
+        )
+    if _gromacs_explicit_bond_pairs(bonds, sidecar) != _authoritative_gromacs_explicit_bond_pairs(
+        sidecar
+    ):
+        raise RuntimeError(
+            "Exact GROMACS export failed closed before patching: topology bond identity mismatch"
+        )
+
+
+def _normalized_authoritative_atoms_for_gromacs(
+    authoritative_atoms: tuple[AtomIdentity, ...], parsed_atoms: list[AtomIdentity]
+) -> tuple[tuple[int, str, str, str], ...]:
+    """Return authoritative atom identities under documented GROMACS normalization."""
+
+    return tuple(
+        _normalized_authoritative_atom(authoritative, parsed)
+        for authoritative, parsed in zip(authoritative_atoms, parsed_atoms, strict=True)
+    )
+
+
+def _normalized_authoritative_atom(
+    authoritative: AtomIdentity, parsed: AtomIdentity
+) -> tuple[int, str, str, str]:
+    """Normalize one authoritative atom for comparison with parsed GROMACS rows."""
+
+    if _is_water_residue(authoritative.residue_name) and _is_water_residue(parsed.residue_name):
+        return (authoritative.index, authoritative.name, "HOH", "")
+    return (
+        authoritative.index,
+        authoritative.name,
+        authoritative.residue_name,
+        authoritative.residue_id,
+    )
+
+
+def _normalized_gromacs_atom(atom: AtomIdentity) -> tuple[int, str, str, str]:
+    """Normalize one parsed GROMACS atom under the accepted export policy."""
+
+    if _is_water_residue(atom.residue_name):
+        return (atom.index, atom.name, "HOH", "")
+    return (atom.index, atom.name, atom.residue_name, atom.residue_id)
+
+
+def _is_water_residue(residue_name: str) -> bool:
+    """Return whether a residue name is an accepted water alias."""
+
+    return residue_name.upper() in {"HOH", "WAT", "SOL", "TIP3", "TIP3P"}
+
+
+def _topology_bond_pairs(
+    bonds: list[ExactTopologyBondRecord] | tuple[ExactTopologyBondRecord, ...],
+) -> set[tuple[int, int]]:
+    """Return exact global topology bond pairs independent of section origin."""
+
+    return {tuple(sorted((bond.i, bond.j))) for bond in bonds}
+
+
+def _authoritative_gromacs_explicit_bond_pairs(sidecar: Any) -> set[tuple[int, int]]:
+    """Return authoritative bond pairs expected as explicit GROMACS topology rows."""
+
+    topology_pairs = _topology_bond_pairs(sidecar.topology_bonds)
+    constrained_pairs = {tuple(sorted((record.i, record.j))) for record in sidecar.constraints}
+    return topology_pairs - constrained_pairs
+
+
+def _gromacs_explicit_bond_pairs(
+    bonds: list[ExactTopologyBondRecord] | tuple[ExactTopologyBondRecord, ...], sidecar: Any
+) -> set[tuple[int, int]]:
+    """Return parsed GROMACS pairs excluding constraints already proven by OpenMM."""
+
+    constrained_pairs = {tuple(sorted((record.i, record.j))) for record in sidecar.constraints}
+    return _topology_bond_pairs(bonds) - constrained_pairs
+
+
+def _expanded_gromacs_atom_and_bond_identity(
+    topology: _TopologyLayout,
+) -> tuple[list[AtomIdentity], list[ExactTopologyBondRecord]]:
+    """Expand parsed GROMACS atom rows and topology bonds across molecule copies."""
+
+    atoms: list[AtomIdentity] = []
+    bonds: list[ExactTopologyBondRecord] = []
+    for molecule_type, copies, copy_start in _expanded_molecule_rows_with_ordinals(
+        topology.molecule_order
+    ):
+        block = topology.molecule_types[molecule_type]
+        atom_rows = block.sections.get("atoms", _TopologySection(-1, -1, ())).entries
+        bond_rows = block.sections.get("bonds", _TopologySection(-1, -1, ())).entries
+        constraint_rows = block.sections.get("constraints", _TopologySection(-1, -1, ())).entries
+        settle_rows = block.sections.get("settles", _TopologySection(-1, -1, ())).entries
+        for _ in range(copies):
+            offset = len(atoms)
+            local_atoms: dict[int, AtomIdentity] = {}
+            for row in atom_rows:
+                if len(row) < 5:
+                    raise RuntimeError("Exact GROMACS export found malformed [ atoms ] row")
+                local_index = int(row[0])
+                atom = AtomIdentity(
+                    index=offset + local_index,
+                    name=row[4],
+                    residue_name=row[3],
+                    residue_id=row[2],
+                    chain_id="",
+                )
+                local_atoms[local_index] = atom
+                atoms.append(atom)
+            for row in (*bond_rows, *constraint_rows):
+                if len(row) < 2:
+                    continue
+                left, right = sorted((int(row[0]), int(row[1])))
+                bonds.append(
+                    ExactTopologyBondRecord(
+                        i=offset + left,
+                        j=offset + right,
+                        atom_i=local_atoms[left],
+                        atom_j=local_atoms[right],
+                    )
+                )
+            for row in settle_rows:
+                if len(row) < 1:
+                    continue
+                first = int(row[0])
+                for other in (first + 1, first + 2):
+                    if other not in local_atoms:
+                        continue
+                    bonds.append(
+                        ExactTopologyBondRecord(
+                            i=offset + first,
+                            j=offset + other,
+                            atom_i=local_atoms[first],
+                            atom_j=local_atoms[other],
+                        )
+                    )
+    return atoms, bonds
+
+
+def _sidecar_with_parsed_gromacs_identity(top_path: Path, sidecar: Any) -> Any:
+    """Return a sidecar augmented with validated GROMACS-visible identity."""
+
+    topology = _parse_gromacs_topology_layout(top_path.read_text(encoding="utf-8").splitlines())
+    atoms, bonds = _expanded_gromacs_atom_and_bond_identity(topology)
+    _validate_parsed_gromacs_against_authoritative(atoms, bonds, sidecar)
+    return sidecar.model_copy(
+        update={
+            "gromacs_atoms": tuple(atoms),
+            "gromacs_topology_bonds": tuple(bonds),
+            "gromacs_atom_order_hash": gromacs_atom_order_hash(tuple(atoms)),
+            "gromacs_topology_hash": gromacs_topology_hash(tuple(atoms), tuple(bonds)),
+        }
+    )
+
+
+def _parse_gromacs_topology_layout(lines: list[str]) -> _TopologyLayout:
+    """Parse molecule types, atom counts, molecule copies, and global atom map."""
+    blocks = _parse_molecule_type_blocks(lines)
+    molecule_order = tuple(_parse_molecules_from_lines(lines))
+    if not blocks or not molecule_order:
+        raise RuntimeError("Exact GROMACS export requires molecule types and [ molecules ] layout")
+    counts: dict[str, int] = {}
+    atom_instances: dict[int, _AtomInstance] = {}
+    global_index = 1
+    for molecule_type, copies, copy_start in _expanded_molecule_rows_with_ordinals(molecule_order):
+        block = blocks.get(molecule_type)
+        if block is None:
+            raise RuntimeError(f"[ molecules ] references unknown molecule type {molecule_type!r}")
+        counts[molecule_type] = counts.get(molecule_type, 0) + copies
+        for copy_offset in range(copies):
+            copy_index = copy_start + copy_offset
+            for local_index in range(1, block.atom_count + 1):
+                atom_instances[global_index] = _AtomInstance(
+                    molecule_type=molecule_type,
+                    copy_index=copy_index,
+                    local_index=local_index,
+                )
+                global_index += 1
+    return _TopologyLayout(
+        molecule_types=blocks,
+        molecule_counts=counts,
+        molecule_order=molecule_order,
+        atom_instances=atom_instances,
+    )
+
+
+def _parse_molecule_type_blocks(lines: list[str]) -> dict[str, _MoleculeTypeBlock]:
+    """Return molecule type blocks keyed by name."""
+    starts = [idx for idx, line in enumerate(lines) if line.strip().lower() == "[ moleculetype ]"]
+    blocks: dict[str, _MoleculeTypeBlock] = {}
+    for ordinal, start in enumerate(starts):
+        end = (
+            starts[ordinal + 1]
+            if ordinal + 1 < len(starts)
+            else _system_section_index(lines, start)
+        )
+        name = _molecule_type_name(lines, start, end)
+        sections = _sections_in_block(lines, start, end)
+        atom_count = len(sections.get("atoms", _TopologySection(-1, -1, ())).entries)
+        if atom_count <= 0:
+            raise RuntimeError(f"Molecule type {name!r} has no parseable [ atoms ] rows")
+        blocks[name] = _MoleculeTypeBlock(
+            name=name,
+            start_index=start,
+            end_index=end,
+            atom_count=atom_count,
+            sections=sections,
+        )
+    return blocks
+
+
+def _system_section_index(lines: list[str], start: int) -> int:
+    """Return the section index ending the last molecule type block."""
+    for idx in range(start + 1, len(lines)):
+        if lines[idx].strip().lower() == "[ system ]":
+            return idx
+    return len(lines)
+
+
+def _molecule_type_name(lines: list[str], start: int, end: int) -> str:
+    """Return the first data token in a molecule type section."""
+    for line in lines[start + 1 : end]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith(";"):
+            continue
+        if stripped.startswith("["):
+            break
+        return stripped.split()[0]
+    raise RuntimeError("Could not parse [ moleculetype ] name")
+
+
+def _sections_in_block(lines: list[str], start: int, end: int) -> dict[str, _TopologySection]:
+    """Return local sections in one molecule type block."""
+    section_headers = [idx for idx in range(start + 1, end) if lines[idx].strip().startswith("[")]
+    sections: dict[str, _TopologySection] = {}
+    for ordinal, header in enumerate(section_headers):
+        name = lines[header].strip().strip("[] \t").lower()
+        section_end = section_headers[ordinal + 1] if ordinal + 1 < len(section_headers) else end
+        entries = tuple(
+            tuple(stripped.split(";", 1)[0].split())
+            for stripped in (line.strip() for line in lines[header + 1 : section_end])
+            if stripped and not stripped.startswith(";")
+        )
+        sections[name] = _TopologySection(header, section_end, entries)
+    return sections
+
+
+def _parse_molecules_from_lines(lines: list[str]) -> list[tuple[str, int]]:
+    """Parse the global GROMACS [ molecules ] layout."""
+    entries = _section_entries(lines, "molecules")
+    layout = []
+    for entry in entries:
+        if len(entry) >= 2:
+            layout.append((entry[0], int(entry[1])))
+    return layout
+
+
+def _expanded_molecule_rows_with_ordinals(
+    molecule_order: tuple[tuple[str, int], ...] | list[tuple[str, int]],
+) -> list[tuple[str, int, int]]:
+    """Return molecule rows with cumulative per-type copy ordinal starts."""
+
+    copy_ordinals: dict[str, int] = {}
+    expanded: list[tuple[str, int, int]] = []
+    for molecule_type, copies in molecule_order:
+        start = copy_ordinals.get(molecule_type, 0)
+        expanded.append((molecule_type, copies, start))
+        copy_ordinals[molecule_type] = start + copies
+    return expanded
+
+
+def _replace_defaults(lines: list[str]) -> list[str]:
+    """Return topology lines with ``gen-pairs`` disabled."""
+    new_lines: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip().lower()
+        if stripped == "[ defaults ]":
+            new_lines.append(line)
+            index += 1
+            while index < len(lines) and (
+                not lines[index].strip() or lines[index].strip().startswith(";")
+            ):
+                new_lines.append(lines[index])
+                index += 1
+            if index >= len(lines):
+                raise RuntimeError("Exact GROMACS export could not find [ defaults ] data row")
+            parts = lines[index].split()
+            if len(parts) < 5:
+                raise RuntimeError("Exact GROMACS export found malformed [ defaults ] row")
+            new_lines.append(f"{parts[0]:>6} {parts[1]:>5} no {parts[3]:>12} {parts[4]:>12}")
+            index += 1
+            continue
+        new_lines.append(line)
+        index += 1
+    return new_lines
+
+
+def _group_exact_exceptions_by_molecule_type(
+    topology: _TopologyLayout, sidecar: Any
+) -> _GroupedLocalExceptions:
+    """Group exact global exceptions by molecule type and local pair."""
+    pairs = _group_records_by_local_pair(topology, sidecar.nonzero_exceptions, sidecar)
+    exclusions = _group_records_by_local_pair(
+        topology, sidecar.zero_exceptions + sidecar.nonzero_exceptions, sidecar
+    )
+    return _GroupedLocalExceptions(pairs=pairs, exclusions=exclusions)
+
+
+def _group_records_by_local_pair(
+    topology: _TopologyLayout, records: tuple[Any, ...], sidecar: Any
+) -> dict[str, dict[tuple[int, int], Any]]:
+    """Return representative records grouped by molecule type and local pair."""
+    grouped: dict[str, dict[tuple[int, int], Any]] = {}
+    counts: dict[tuple[str, tuple[int, int]], int] = {}
+    particles = {particle.index: particle for particle in sidecar.particles}
+    signatures: dict[tuple[str, tuple[int, int]], tuple[Any, ...]] = {}
+    for record in records:
+        left = topology.atom_instances.get(record.i)
+        right = topology.atom_instances.get(record.j)
+        if left is None or right is None:
+            raise RuntimeError("Exact sidecar atom index is outside the GROMACS topology")
+        if left.molecule_type != right.molecule_type or left.copy_index != right.copy_index:
+            raise RuntimeError(
+                "Exact GROMACS export does not support inter-copy or inter-type exceptions: "
+                f"{record.i}-{record.j}"
+            )
+        local_pair = tuple(sorted((left.local_index, right.local_index)))
+        key = (left.molecule_type, local_pair)
+        signature = _record_semantic_signature(record, particles)
+        previous = signatures.setdefault(key, signature)
+        if previous != signature:
+            raise RuntimeError(
+                "Repeated molecule type has inconsistent local exception semantics for "
+                f"{left.molecule_type} {local_pair}"
+            )
+        grouped.setdefault(left.molecule_type, {})[local_pair] = record
+        counts[key] = counts.get(key, 0) + 1
+    for molecule_type, local_pair in counts:
+        expected = topology.molecule_counts[molecule_type]
+        observed = counts[(molecule_type, local_pair)]
+        if observed != expected:
+            raise RuntimeError(
+                "Repeated molecule type local exception count mismatch for "
+                f"{molecule_type} {local_pair}: observed={observed}, expected={expected}"
+            )
+    return grouped
+
+
+def _record_semantic_signature(record: Any, particles: dict[int, Any]) -> tuple[Any, ...]:
+    """Return a comparable local exception and particle signature."""
+    left = particles[record.i]
+    right = particles[record.j]
+    return (
+        f"{record.charge_product_e2:.16g}",
+        f"{record.sigma_nm:.16g}",
+        f"{record.epsilon_kj_mol:.16g}",
+        f"{left.charge_e:.16g}",
+        f"{right.charge_e:.16g}",
+        f"{left.sigma_nm:.16g}",
+        f"{right.sigma_nm:.16g}",
+        f"{left.epsilon_kj_mol:.16g}",
+        f"{right.epsilon_kj_mol:.16g}",
+    )
+
+
+def _patch_local_exception_sections(
+    lines: list[str],
+    topology: _TopologyLayout,
+    grouped: _GroupedLocalExceptions,
+    sidecar: Any,
+) -> list[str]:
+    """Replace each molecule type's local pairs and exclusions."""
+    new_lines: list[str] = []
+    index = 0
+    blocks_by_start = {block.start_index: block for block in topology.molecule_types.values()}
+    while index < len(lines):
+        block = blocks_by_start.get(index)
+        if block is None:
+            new_lines.append(lines[index])
+            index += 1
+            continue
+        new_lines.extend(_patched_molecule_type_block(lines, block, grouped, sidecar))
+        index = block.end_index
+    return new_lines
+
+
+def _patched_molecule_type_block(
+    lines: list[str],
+    block: _MoleculeTypeBlock,
+    grouped: _GroupedLocalExceptions,
+    sidecar: Any,
+) -> list[str]:
+    """Return one molecule type block with exact local pair/exclusion sections."""
+    pair_lines = _exact_pairs_section(grouped.pairs.get(block.name, {}), sidecar)
+    exclusion_lines = _exact_exclusions_section(grouped.exclusions.get(block.name, {}))
+    out: list[str] = []
+    index = block.start_index
+    first_section_index = min(
+        (section.header_index for section in block.sections.values()), default=block.end_index
+    )
+    pair_inserted = False
+    exclusion_inserted = False
+    while index < block.end_index:
+        stripped = lines[index].strip().lower()
+        if block.start_index < index < first_section_index and _is_molecule_type_data_line(
+            lines[index]
+        ):
+            out.append(_molecule_type_line_with_nrexcl_zero(lines[index]))
+            index += 1
+            continue
+        if stripped == "[ pairs ]":
+            out.extend(pair_lines)
+            pair_inserted = True
+            index += 1
+            while index < block.end_index and not lines[index].strip().startswith("["):
+                index += 1
+            continue
+        if stripped == "[ exclusions ]":
+            out.extend(exclusion_lines)
+            exclusion_inserted = True
+            index += 1
+            while index < block.end_index and not lines[index].strip().startswith("["):
+                index += 1
+            continue
+        if pair_lines and not pair_inserted and _should_insert_pair_section_before(stripped):
+            out.extend(pair_lines)
+            pair_inserted = True
+        out.append(lines[index])
+        index += 1
+    if pair_lines and not pair_inserted:
+        out.extend(pair_lines)
+    if exclusion_lines and not exclusion_inserted:
+        out.extend(exclusion_lines)
+    return out
+
+
+def _should_insert_pair_section_before(section: str) -> bool:
+    """Return whether exact pairs should precede this local section."""
+    return section in {"[ bonds ]", "[ settles ]", "[ angles ]", "[ dihedrals ]"}
+
+
+def _is_molecule_type_data_line(line: str) -> bool:
+    """Return whether a line contains molecule type data tokens."""
+    stripped = line.strip()
+    return bool(stripped and not stripped.startswith(";") and not stripped.startswith("["))
+
+
+def _molecule_type_line_with_nrexcl_zero(line: str) -> str:
+    """Return a molecule type row with automatic bonded exclusions disabled."""
+    data, separator, comment = line.partition(";")
+    parts = data.split()
+    if len(parts) < 2:
+        raise RuntimeError("Exact GROMACS export found malformed [ moleculetype ] row")
+    rendered = f"{parts[0]:<12} 0"
+    if separator:
+        return f"{rendered} ;{comment}"
+    return rendered
+
+
+def _exact_pairs_section(records: dict[tuple[int, int], Any], sidecar: Any) -> list[str]:
+    """Return exact local GROMACS function-2 pair rows."""
+    if not records:
+        return []
+    charges = {particle.index: particle.charge_e for particle in sidecar.particles}
+    lines = [
+        "[ pairs ]",
+        "; ai aj funct fudgeQQ qi qj sigma epsilon ; exact OpenMM NonbondedForce exceptions",
+    ]
+    for local_pair, record in sorted(records.items()):
+        qi = charges[record.i]
+        qj = charges[record.j]
+        if abs(qi * qj) < 1e-14:
+            qi_out = record.charge_product_e2
+            qj_out = 1.0
+            fudge = 1.0
+        else:
+            qi_out = qi
+            qj_out = qj
+            fudge = record.charge_product_e2 / (qi * qj)
+        lines.append(
+            f"{local_pair[0]:6d} {local_pair[1]:6d} 2 {fudge: .16g} {qi_out: .16g} "
+            f"{qj_out: .16g} {record.sigma_nm: .16g} {record.epsilon_kj_mol: .16g}"
+        )
+    return lines
+
+
+def _exact_exclusions_section(records: dict[tuple[int, int], Any]) -> list[str]:
+    """Return exact local GROMACS regular nonbonded exclusion rows."""
+    if not records:
+        return []
+    lines = [
+        "[ exclusions ]",
+        "; ai aj ; exact OpenMM NonbondedForce exceptions",
+    ]
+    lines.extend(f"{pair[0]:6d} {pair[1]:6d}" for pair in sorted(records))
+    return lines
+
+
+def _expand_local_pairs(
+    topology: _TopologyLayout, sidecar: Any
+) -> dict[tuple[int, int], tuple[float, float, float]]:
+    """Expand local GROMACS pair rows to global pair parameters."""
+    expanded: dict[tuple[int, int], tuple[float, float, float]] = {}
+    for molecule_type, copies, copy_start in _expanded_molecule_rows_with_ordinals(
+        topology.molecule_order
+    ):
+        block = topology.molecule_types[molecule_type]
+        entries = block.sections.get("pairs", _TopologySection(-1, -1, ())).entries
+        for copy_offset in range(copies):
+            copy_index = copy_start + copy_offset
+            offset = _copy_global_offset(topology, molecule_type, copy_index)
+            for entry in entries:
+                if len(entry) < 8:
+                    continue
+                local_i, local_j = int(entry[0]), int(entry[1])
+                pair = tuple(sorted((offset + local_i, offset + local_j)))
+                fudge, qi, qj, sigma, epsilon = (float(value) for value in entry[3:8])
+                expanded[pair] = (fudge * qi * qj, sigma, epsilon)
+    return expanded
+
+
+def _expand_local_pair_set(topology: _TopologyLayout) -> set[tuple[int, int]]:
+    """Expand local GROMACS pair rows to global atom pairs without parameters."""
+    expanded: set[tuple[int, int]] = set()
+    for molecule_type, copies, copy_start in _expanded_molecule_rows_with_ordinals(
+        topology.molecule_order
+    ):
+        block = topology.molecule_types[molecule_type]
+        entries = block.sections.get("pairs", _TopologySection(-1, -1, ())).entries
+        for copy_offset in range(copies):
+            copy_index = copy_start + copy_offset
+            offset = _copy_global_offset(topology, molecule_type, copy_index)
+            for entry in entries:
+                if len(entry) < 2:
+                    continue
+                expanded.add(tuple(sorted((offset + int(entry[0]), offset + int(entry[1])))))
+    return expanded
+
+
+def _expand_local_exclusions(topology: _TopologyLayout) -> set[tuple[int, int]]:
+    """Expand local GROMACS exclusion rows to global atom pairs."""
+    expanded: set[tuple[int, int]] = set()
+    for molecule_type, copies, copy_start in _expanded_molecule_rows_with_ordinals(
+        topology.molecule_order
+    ):
+        block = topology.molecule_types[molecule_type]
+        entries = block.sections.get("exclusions", _TopologySection(-1, -1, ())).entries
+        for copy_offset in range(copies):
+            copy_index = copy_start + copy_offset
+            offset = _copy_global_offset(topology, molecule_type, copy_index)
+            for entry in entries:
+                if len(entry) < 2:
+                    continue
+                first = int(entry[0])
+                for other in entry[1:]:
+                    expanded.add(tuple(sorted((offset + first, offset + int(other)))))
+    return expanded
+
+
+def _copy_global_offset(topology: _TopologyLayout, molecule_type: str, copy_index: int) -> int:
+    """Return the zero-based global atom offset for a molecule copy."""
+    offset = 0
+    remaining = copy_index
+    for current_type, copies in topology.molecule_order:
+        atom_count = topology.molecule_types[current_type].atom_count
+        if current_type == molecule_type:
+            if remaining < copies:
+                return offset + remaining * atom_count
+            remaining -= copies
+        offset += copies * atom_count
+    raise RuntimeError(f"Could not resolve molecule copy {molecule_type}[{copy_index}]")
+
+
+def _validate_expanded_local_semantics(topology: _TopologyLayout, sidecar: Any) -> dict[str, int]:
+    """Validate patched local pairs and exclusions by global re-expansion."""
+    expanded_pairs = _expand_local_pairs(topology, sidecar)
+    expanded_exclusions = _expand_local_exclusions(topology)
+    exact_pairs = _exact_pair_parameter_table(sidecar.nonzero_exceptions)
+    exact_zero = _exact_pair_set(sidecar.zero_exceptions)
+    exact_exclusions = exact_zero | set(exact_pairs)
+    pair_mismatches = 0
+    if set(expanded_pairs) != set(exact_pairs):
+        pair_mismatches += len(set(expanded_pairs) ^ set(exact_pairs))
+    for pair, expected in exact_pairs.items():
+        got = expanded_pairs.get(pair)
+        if got is None:
+            continue
+        if any(
+            abs(got_value - expected_value) > _EXACT_PAIR_TOLERANCE
+            for got_value, expected_value in zip(got, expected, strict=True)
+        ):
+            pair_mismatches += 1
+    exclusion_mismatches = len(expanded_exclusions ^ exact_exclusions)
+    zero_pairs_in_patched = len(exact_zero & set(expanded_pairs))
+    if pair_mismatches or exclusion_mismatches or zero_pairs_in_patched:
+        raise RuntimeError(
+            "Exact GROMACS export failed closed after local semantic validation: "
+            f"pair_mismatches={pair_mismatches}, "
+            f"exclusion_mismatches={exclusion_mismatches}, "
+            f"zero_pairs_in_patched={zero_pairs_in_patched}"
+        )
+    return {
+        "expanded_pair_count": len(expanded_pairs),
+        "expanded_exclusion_count": len(expanded_exclusions),
+        "local_pair_row_count": sum(
+            len(block.sections.get("pairs", _TopologySection(-1, -1, ())).entries)
+            for block in topology.molecule_types.values()
+        ),
+        "local_exclusion_row_count": sum(
+            len(block.sections.get("exclusions", _TopologySection(-1, -1, ())).entries)
+            for block in topology.molecule_types.values()
+        ),
+        "pair_mismatch_count": pair_mismatches,
+        "exclusion_mismatch_count": exclusion_mismatches,
+        "zero_pairs_in_patched_pairs": zero_pairs_in_patched,
+    }
+
+
+def _exact_pair_set(records: tuple[Any, ...]) -> set[tuple[int, int]]:
+    """Return global sorted atom pairs from exact exception records."""
+    return {tuple(sorted((record.i, record.j))) for record in records}
+
+
+def _exact_pair_parameter_table(
+    records: tuple[Any, ...],
+) -> dict[tuple[int, int], tuple[float, float, float]]:
+    """Return exact global pair parameters keyed by sorted atom pair."""
+    return {
+        tuple(sorted((record.i, record.j))): (
+            record.charge_product_e2,
+            record.sigma_nm,
+            record.epsilon_kj_mol,
+        )
+        for record in records
+    }
+
+
+def _exact_mdp_string(params: MDPParameters, sidecar: Any) -> str:
+    """Return MDP text aligned narrowly to exact OpenMM nonbonded metadata."""
+    metadata = sidecar.nonbonded_metadata
+    params.rcoulomb = metadata.cutoff_nm
+    params.rvdw = metadata.cutoff_nm
+    params.ewald_rtol = metadata.ewald_error_tolerance
+    params.coulombtype = "PME" if metadata.method.upper() == "PME" else metadata.method
+    params.dispcorr = "EnerPres" if metadata.use_dispersion_correction else "no"
+    if metadata.use_switching_function and metadata.switching_distance_nm is not None:
+        params.vdw_modifier = "Potential-switch"
+        params.rvdw_switch = metadata.switching_distance_nm
+    else:
+        params.vdw_modifier = "None"
+    return params.to_mdp_string()
+
+
 class GromacsExporter:
     """Coordinates full GROMACS export from PolyzyMD systems.
 
@@ -1554,7 +2384,9 @@ class GromacsExporter:
         """Initialize the GROMACS exporter.
 
         Args:
-            interchange: OpenFF Interchange object with parameterized system.
+            interchange: OpenFF Interchange object with parameterized system, or
+                a PolyzyMD ``ExactExportBundle`` for the native GLYCAM
+                exact-exception compatibility bridge.
             config: PolyzyMD SimulationConfig with simulation parameters.
             component_info: Optional SystemComponentInfo for position restraints.
                 If not provided, position restraints will be skipped.
@@ -1593,6 +2425,9 @@ class GromacsExporter:
             prefix = self._generate_prefix()
 
         result: Dict[str, any] = {}
+
+        if getattr(self._interchange, "is_exact_export_bundle", False):
+            return self._export_exact_bundle(output_dir, prefix, gmx_command)
 
         # Step 1: Export coordinates and topology via Interchange
         logger.info("Exporting coordinates and topology...")
@@ -1653,6 +2488,86 @@ class GromacsExporter:
         # Log summary
         self._log_summary(result, output_dir)
 
+        return result
+
+    def _export_exact_bundle(
+        self,
+        output_dir: Path,
+        prefix: str,
+        gmx_command: str,
+    ) -> Dict[str, Any]:
+        """Export a native GLYCAM exact bundle with explicit OpenMM exceptions.
+
+        This branch is a PolyzyMD compatibility bridge and not a vanilla
+        Interchange export. A private baseline Interchange writes raw GROMACS
+        files, then the topology is patched to ``gen-pairs = no`` with explicit
+        function-2 rows for every nonzero OpenMM exception in the sidecar.
+        """
+        if self._component_info is not None:
+            raise ValueError(
+                "GROMACS exact native OpenMM GLYCAM export does not support component_info "
+                "position-restraint postprocessing because it cannot be proven without changing "
+                "exact topology semantics. Disable component_info or use the OpenFF/Sage route."
+            )
+        bundle = self._interchange
+        baseline = bundle.require_private_baseline_interchange()
+        original_interchange = self._interchange
+        self._interchange = baseline
+        try:
+            self._fix_zero_indexed_residues()
+        finally:
+            self._interchange = original_interchange
+        output_prefix = str(output_dir / prefix)
+        baseline.to_gromacs(prefix=output_prefix, monolithic=True, _merge_atom_types=True)
+        gro_path = output_dir / f"{prefix}.gro"
+        top_path = output_dir / f"{prefix}.top"
+        stub_mdp = output_dir / f"{prefix}.mdp"
+        if stub_mdp.exists():
+            stub_mdp.unlink()
+
+        self._fix_gro_residue_numbering(gro_path, top_path, output_dir, prefix)
+
+        sidecar = _sidecar_with_parsed_gromacs_identity(top_path, bundle.sidecar)
+        if bundle.sidecar_path is not None:
+            sidecar.save(bundle.sidecar_path)
+
+        audit = patch_gromacs_topology_with_exact_exceptions(
+            top_path=top_path,
+            sidecar=sidecar,
+        )
+        audit_path = output_dir / f"{prefix}_exact_gromacs_audit.json"
+        audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        mdp_generator = MDPGenerator(self._config)
+        em_path = output_dir / "em.mdp"
+        em_path.write_text(
+            _exact_mdp_string(mdp_generator.generate_energy_minimization(), bundle.sidecar)
+        )
+        eq_paths = []
+        for filename, params in mdp_generator.generate_equilibration_stages():
+            mdp_path = output_dir / filename
+            mdp_path.write_text(_exact_mdp_string(params, bundle.sidecar))
+            eq_paths.append(mdp_path)
+        prod_path = output_dir / "prod.mdp"
+        prod_path.write_text(_exact_mdp_string(mdp_generator.generate_production(), bundle.sidecar))
+
+        script_generator = RunScriptGenerator(prefix, [p.name for p in eq_paths], gmx_command)
+        script_path = output_dir / f"run_{prefix}_gromacs.sh"
+        script_generator.generate(script_path)
+
+        result: Dict[str, Any] = {
+            "gro": gro_path,
+            "top": top_path,
+            "em_mdp": em_path,
+            "eq_mdps": eq_paths,
+            "prod_mdp": prod_path,
+            "posres": {},
+            "posres_defines": {},
+            "run_script": script_path,
+            "exact_exception_sidecar": bundle.sidecar_path,
+            "exact_gromacs_audit": audit_path,
+        }
+        self._log_summary(result, output_dir)
         return result
 
     def _export_interchange(

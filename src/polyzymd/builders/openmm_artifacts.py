@@ -27,6 +27,7 @@ class OpenMMBuildArtifacts:
     pdb_path: Path
     system_path: Path
     conjugation_enabled: bool
+    exact_export_bundle: Any | None = None
 
     def get_component_info(self) -> Any:
         """Return component metadata from the route-specific build object.
@@ -50,6 +51,8 @@ class OpenMMBuildArtifacts:
         """
         if self.result is not None:
             return self.result.require_final_interchange()
+        if self.exact_export_bundle is not None:
+            return self.exact_export_bundle
         return self.interchange
 
 
@@ -210,12 +213,18 @@ def build_openmm_artifacts(
     """
     if conjugation_enabled(sim_config):
         from polyzymd.builders.conjugation import build_conjugate_from_config
+        from polyzymd.builders.conjugation.native_openmm_glycam import native_glycam_enabled
         from polyzymd.builders.conjugation.system_workflow import ConjugatedPolymerSystemSettings
 
+        workflow_settings = ConjugatedPolymerSystemSettings(create_final_interchange=True)
+        if native_glycam_enabled(sim_config):
+            workflow_settings = workflow_settings.model_copy(
+                update={"pdb_fragment_output_mode": "experimental_pablo"}
+            )
         result = build_conjugate_from_config(
             sim_config,
             output_dir=working_dir,
-            settings=ConjugatedPolymerSystemSettings(create_final_interchange=True),
+            settings=workflow_settings,
             free_polymer_seed=polymer_seed,
         )
         builder = result.system_builder
@@ -242,6 +251,7 @@ def build_openmm_artifacts(
             builder=builder,
             interchange=None,
             result=result,
+            exact_export_bundle=getattr(result, "exact_export_bundle", None),
             pdb_path=pdb_path,
             system_path=system_path,
             conjugation_enabled=True,
@@ -267,6 +277,7 @@ def build_openmm_artifacts(
         builder=builder,
         interchange=interchange,
         result=None,
+        exact_export_bundle=None,
         pdb_path=working_dir / SOLVATED_SYSTEM_PDB,
         system_path=system_path,
         conjugation_enabled=False,

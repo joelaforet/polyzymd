@@ -31,6 +31,7 @@ def run_g42666_manual_e2e(
     production_steps: int = 150_000,
     report_interval: int = 1_000,
     platform_name: str = "CPU",
+    native_glycam: bool = False,
 ) -> dict[str, Any]:
     """Run the guarded local G42666 build and OpenMM production acceptance check.
 
@@ -46,6 +47,8 @@ def run_g42666_manual_e2e(
         Reporter interval in steps, by default 1000.
     platform_name : str, optional
         OpenMM platform name, by default ``"CPU"``.
+    native_glycam : bool, optional
+        Use the explicit native OpenMM GLYCAM route, by default ``False``.
 
     Returns
     -------
@@ -57,6 +60,10 @@ def run_g42666_manual_e2e(
     output_dir.mkdir(parents=True, exist_ok=True)
     runtime_config = _runtime_config_path(output_dir, glycan_path=glycan_path)
     config = load_config(runtime_config)
+    if native_glycam:
+        config.force_field.conjugate_parameterization = "native_openmm_glycam"
+        config.force_field.glycan_policy = "strict_glycam"
+        config.solvent.ions.neutralize = False
     settings = ConjugatedPolymerSystemSettings(
         create_final_interchange=True,
         pdb_fragment_output_mode="experimental_pablo",
@@ -64,7 +71,7 @@ def run_g42666_manual_e2e(
         conjugate_polymerist_max_retries=3,
         conjugate_polymerist_energy_minimize=True,
         conjugate_parameterization=InterchangeParameterizationSettings(
-            small_molecule_force_field="openff-2.3.0.offxml",
+            force_field_names=("ff14sb_off_impropers_0.0.4.offxml", "openff-2.3.0.offxml"),
         ),
         relaxation=ConjugateRelaxationSettings(platform_name=platform_name),
     )
@@ -75,10 +82,11 @@ def run_g42666_manual_e2e(
         settings=settings,
         free_polymer_seed=202610,
     )
-    if result.final_interchange is None:
+    handoff = result.require_final_interchange()
+    if not native_glycam and result.final_interchange is None:
         raise AssertionError("G42666 E2E build did not retain a final Interchange")
     simulation_summary = _run_openmm_production(
-        result.final_interchange,
+        handoff,
         output_dir / "production_md",
         production_steps=production_steps,
         report_interval=report_interval,
@@ -92,6 +100,8 @@ def run_g42666_manual_e2e(
         "relaxed_conjugate_pdb": str(result.relaxed_conjugate_pdb_path),
         "solvated_pdb": str(result.solvated_pdb_path),
         "final_interchange_created": bool(result.final_interchange_created),
+        "native_glycam": native_glycam,
+        "native_glycam_audit": str(result.artifact_paths.get("native_openmm_glycam_audit", "")),
         "attachment_diagnostics": _attachment_diagnostics(result.attachment_specs),
         "simulation": simulation_summary,
     }
@@ -139,6 +149,7 @@ def _run_openmm_production(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     platform = openmm.Platform.getPlatformByName(platform_name)
+    platform_properties = {"Precision": "mixed"} if platform.getName() == "CUDA" else {}
     system = interchange.to_openmm(combine_nonbonded_forces=True)
     topology = interchange.to_openmm_topology()
     integrator = openmm.LangevinMiddleIntegrator(
@@ -146,8 +157,13 @@ def _run_openmm_production(
         1.0 / unit.picosecond,
         2.0 * unit.femtosecond,
     )
-    simulation = Simulation(topology, system, integrator, platform)
-    simulation.context.setPositions(interchange.positions.to_openmm())
+    simulation = Simulation(topology, system, integrator, platform, platform_properties)
+    positions = (
+        interchange.to_openmm_positions()
+        if hasattr(interchange, "to_openmm_positions")
+        else interchange.positions.to_openmm()
+    )
+    simulation.context.setPositions(positions)
     initial_energy = _potential_energy(simulation)
     trajectory_path = output_dir / "g42666_production.dcd"
     state_path = output_dir / "g42666_state.csv"
@@ -168,6 +184,7 @@ def _run_openmm_production(
     frame_count = _trajectory_frame_count(trajectory_path, topology)
     return {
         "platform": platform.getName(),
+        "platform_properties": platform_properties,
         "steps": production_steps,
         "report_interval": report_interval,
         "requested_frames": production_steps // report_interval,
@@ -276,6 +293,16 @@ def _validate_summary(summary: dict[str, Any]) -> None:
     assert n_glycan["protein_leaving_atoms"] == ["HD21"]
     assert n_glycan["modifier_link_serial"] == 4
     assert n_glycan["modifier_leaving_serials"] == [1, 2]
+    if summary.get("native_glycam"):
+        assert summary["final_interchange_created"] is False
+        audit_path = Path(summary["native_glycam_audit"])
+        assert audit_path.exists()
+        audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        assert audit["route"] == "native_openmm_glycam"
+        assert audit["residue_templates"]
+        assert math.isclose(audit["pme_settings"]["cutoff_nm"], 1.0)
+    else:
+        assert summary["final_interchange_created"] is True
     simulation = summary["simulation"]
     assert simulation["state_rows"] == simulation["requested_frames"]
     if simulation["trajectory_frames"] is not None:
@@ -293,6 +320,11 @@ def main() -> None:
     parser.add_argument("--platform", default="CPU")
     parser.add_argument("--production-steps", type=int, default=150_000)
     parser.add_argument("--report-interval", type=int, default=1_000)
+    parser.add_argument(
+        "--native-glycam",
+        action="store_true",
+        help="Use the explicit native OpenMM GLYCAM route instead of final Interchange.",
+    )
     args = parser.parse_args()
     glycan_path = args.glycan_path or _env_glycan_path()
     if glycan_path is None:
@@ -303,6 +335,7 @@ def main() -> None:
         production_steps=args.production_steps,
         report_interval=args.report_interval,
         platform_name=args.platform,
+        native_glycam=args.native_glycam,
     )
     print(json.dumps(summary, indent=2, allow_nan=False))
 

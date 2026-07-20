@@ -671,6 +671,13 @@ class ConjugationMoietyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., description="Moiety identifier")
+    force_field_domain: Literal["glycan", "sage"] | None = Field(
+        None,
+        description=(
+            "Optional force-field domain for final conjugate routing. Use glycan for "
+            "strict native GLYCAM/NLN handling and sage for explicit OpenFF Sage fallback."
+        ),
+    )
     residue_name: str | None = Field(None, max_length=4, description="Residue name for the moiety")
     input_path: Path | None = Field(None, description="Optional PDB/SDF path for the moiety")
     smiles: str | None = Field(
@@ -1678,6 +1685,34 @@ class ForceFieldConfig(BaseModel):
 
     protein: str = Field("ff14sb_off_impropers_0.0.4.offxml", description="Protein force field")
     small_molecule: str = Field("openff-2.0.0.offxml", description="Small molecule force field")
+    glycan_policy: Literal["strict_glycam", "sage_fallback"] = Field(
+        "sage_fallback",
+        description=(
+            "Policy for glycan-domain conjugation moieties. sage_fallback preserves the "
+            "backward-compatible OpenFF/Sage Interchange route. strict_glycam is an "
+            "explicit opt-in required only for native OpenMM GLYCAM/NLN parameterization."
+        ),
+    )
+    conjugate_parameterization: Literal["openff_interchange", "native_openmm_glycam"] = Field(
+        "openff_interchange",
+        description=(
+            "Explicit final conjugate parameterization route. The native_openmm_glycam route is "
+            "an explicit opt-in OpenMM-only GLYCAM route for canonical N-linked glycans."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_glycan_policy_route(self) -> "ForceFieldConfig":
+        """Validate glycan policy compatibility with the conjugate route."""
+        if (
+            self.conjugate_parameterization == "native_openmm_glycam"
+            and self.glycan_policy != "strict_glycam"
+        ):
+            raise ValueError(
+                "native_openmm_glycam requires force_field.glycan_policy='strict_glycam'; "
+                "use openff_interchange with glycan_policy='sage_fallback' for explicit Sage fallback"
+            )
+        return self
 
 
 # =============================================================================
@@ -1932,6 +1967,42 @@ class SimulationConfig(BaseModel):
     gromacs: GromacsEngineConfig = Field(
         default_factory=GromacsEngineConfig, description="GROMACS engine settings"
     )
+
+    @model_validator(mode="after")
+    def validate_conjugate_force_field_domains(self) -> "SimulationConfig":
+        """Validate force-field domain routing for conjugation moieties."""
+        attachments = tuple(getattr(self.conjugation, "attachments", ()) or ())
+        enabled = tuple(
+            attachment for attachment in attachments if getattr(attachment, "enabled", True)
+        )
+        glycan_domain = tuple(
+            attachment
+            for attachment in enabled
+            if getattr(getattr(attachment, "moiety", None), "force_field_domain", None) == "glycan"
+        )
+        sage_domain = tuple(
+            attachment
+            for attachment in enabled
+            if getattr(getattr(attachment, "moiety", None), "force_field_domain", None) == "sage"
+        )
+        if (
+            glycan_domain
+            and self.force_field.glycan_policy == "strict_glycam"
+            and self.force_field.conjugate_parameterization != "native_openmm_glycam"
+        ):
+            raise ValueError(
+                "glycan-domain conjugation moieties with strict_glycam policy require "
+                "force_field.conjugate_parameterization='native_openmm_glycam'; select "
+                "glycan_policy='sage_fallback' explicitly to preserve the Sage/Interchange route"
+            )
+        if sage_domain and self.force_field.conjugate_parameterization == "native_openmm_glycam":
+            names = ", ".join(attachment.name for attachment in sage_domain)
+            raise ValueError(
+                "Covalently attached Sage-domain moieties are unsupported in strict native GLYCAM "
+                f"routing ({names}); disconnected precharged Sage components may coexist, but "
+                "cross-boundary bonded and exception provenance is not audited"
+            )
+        return self
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SimulationConfig":

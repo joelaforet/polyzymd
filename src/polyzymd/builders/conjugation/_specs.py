@@ -105,6 +105,8 @@ class AttachmentBuildSpec(BaseModel):
         default_factory=dict,
         exclude=True,
     )
+    endpoint_provenance: dict[str, Any] = Field(default_factory=dict)
+    scoped_residue_aliases: dict[str, str] = Field(default_factory=dict)
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
 
 

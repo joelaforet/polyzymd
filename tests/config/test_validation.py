@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from polyzymd.config.schema import SimulationConfig
 from polyzymd.config.validation import collect_reference_warnings
@@ -133,3 +134,30 @@ def test_collect_reference_warnings_reports_missing_reaction_templates(tmp_path:
         "Missing polymer polymerization reaction template" in warning for warning in warnings
     )
     assert any("Missing polymer termination reaction template" in warning for warning in warnings)
+
+
+def test_collect_reference_warnings_reports_missing_conjugation_moiety_input_path(
+    tmp_path: Path,
+) -> None:
+    """Configured glycan/PDB-fragment moiety input paths should be checked."""
+    config = SimpleNamespace(
+        enzyme=SimpleNamespace(pdb_path=tmp_path / "enzyme.pdb"),
+        substrate=None,
+        polymers=SimpleNamespace(enabled=False),
+        conjugation=SimpleNamespace(
+            enabled=True,
+            attachments=(
+                SimpleNamespace(
+                    enabled=True,
+                    name="asn60_glycan",
+                    moiety=SimpleNamespace(input_path=tmp_path / "missing_glycan.pdb"),
+                ),
+            ),
+        ),
+    )
+
+    warnings = collect_reference_warnings(config)
+
+    assert any("Missing conjugation moiety asn60_glycan" in warning for warning in warnings)
+    assert any("input_path" in warning for warning in warnings)
+    assert any("missing_glycan.pdb" in warning for warning in warnings)
