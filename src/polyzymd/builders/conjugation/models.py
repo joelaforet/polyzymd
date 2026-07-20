@@ -103,6 +103,7 @@ class ConjugationResult(BaseModel):
     modifier: Any | None = Field(default=None, exclude=True)
     modifiers: tuple[Any, ...] = Field(default_factory=tuple, exclude=True)
     final_interchange: Any | None = Field(default=None, exclude=True)
+    exact_export_bundle: Any | None = Field(default=None, exclude=True)
     system_builder: Any | None = Field(default=None, exclude=True)
     relaxed_conjugate_topology: Any = Field(default=None, exclude=True)
     solvated_topology: Any = Field(default=None, exclude=True)
@@ -128,6 +129,7 @@ class ConjugationResult(BaseModel):
             **{name: path for name, path in paths.items() if path is not None},
             **self.artifact_paths,
         }
+        _restore_legacy_pdb_fragment_alias(self.artifact_paths)
         return self
 
     @classmethod
@@ -205,6 +207,7 @@ class ConjugationResult(BaseModel):
             relaxed_conjugate_topology=getattr(workflow_result, "relaxed_conjugate_topology", None),
             solvated_topology=getattr(workflow_result, "solvated_topology", None),
             final_interchange=getattr(workflow_result, "final_interchange", None),
+            exact_export_bundle=getattr(workflow_result, "exact_export_bundle", None),
             system_builder=getattr(workflow_result, "system_builder", None),
         )
 
@@ -240,6 +243,8 @@ class ConjugationResult(BaseModel):
             If the workflow did not create or retain a final Interchange.
         """
         if self.final_interchange is None:
+            if self.exact_export_bundle is not None:
+                return self.exact_export_bundle
             raise RuntimeError(
                 "ConjugationResult does not contain a final Interchange. "
                 "Run the build with create_final_interchange enabled before exporting."
@@ -274,3 +279,13 @@ def _optional_path(value: Any) -> Path | None:
     if value is None:
         return None
     return Path(value)
+
+
+def _restore_legacy_pdb_fragment_alias(artifact_paths: dict[str, Path]) -> None:
+    """Restore the original unindexed PDB-fragment ingestion artifact key."""
+    legacy_key = "pdb_fragment_pdb_fragment_ingestion"
+    if legacy_key in artifact_paths:
+        return
+    indexed_key = "pdb_fragment_1_pdb_fragment_ingestion"
+    if indexed_key in artifact_paths:
+        artifact_paths[legacy_key] = artifact_paths[indexed_key]

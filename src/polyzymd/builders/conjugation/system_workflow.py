@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from collections.abc import MutableMapping
+from collections.abc import Iterable, MutableMapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -34,6 +34,10 @@ from polyzymd.builders.conjugation.construction import (
 )
 from polyzymd.builders.conjugation.final_interchange import create_final_conjugated_interchange
 from polyzymd.builders.conjugation.models import ConjugationResult
+from polyzymd.builders.conjugation.native_openmm_glycam import (
+    create_native_openmm_glycam_handoff,
+    native_glycam_enabled,
+)
 from polyzymd.builders.conjugation.pablo.charge_templates import (
     build_conjugate_charge_templates,
 )
@@ -139,6 +143,21 @@ class ConjugatedPolymerSystemSettings(BaseModel):
     pdb_fragment_output_mode: Literal["coordinate_only", "experimental_pablo"] = "coordinate_only"
 
 
+def _settings_with_config_defaults(
+    settings: ConjugatedPolymerSystemSettings | None,
+    config: Any,
+) -> ConjugatedPolymerSystemSettings:
+    """Return workflow settings with missing runtime defaults copied from config."""
+    workflow_settings = settings or ConjugatedPolymerSystemSettings()
+    platform_name = getattr(getattr(config, "openmm", None), "platform", None)
+    if platform_name is None or workflow_settings.relaxation.platform_name is not None:
+        return workflow_settings
+    relaxation = workflow_settings.relaxation.model_copy(
+        update={"platform_name": str(platform_name)}
+    )
+    return workflow_settings.model_copy(update={"relaxation": relaxation})
+
+
 class ConjugateConstructionResult(BaseModel):
     """Specs-first construction result for product-state conjugation."""
 
@@ -202,7 +221,7 @@ def build_conjugated_polymer_system_from_config(
     non-covalent polymer chains to pack around that conjugate, and ``solvent``
     defines the final solvent box.
     """
-    workflow_settings = settings or ConjugatedPolymerSystemSettings()
+    workflow_settings = _settings_with_config_defaults(settings, config)
     artifact_dir = Path(output_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     construction_dir = artifact_dir / workflow_settings.conjugate_artifact_dir_name
@@ -232,9 +251,11 @@ def build_conjugated_polymer_system_from_config(
     reactive_selectors = tuple(payload[3] for payload in spec_payloads)
     modifiers = tuple(spec.generated_fragment for spec in specs)
     resolved_plans = tuple(spec.resolved_plan for spec in specs)
+    use_native_glycam = native_glycam_enabled(config)
     if (
         _uses_pdb_fragment_sources(attachments)
         and workflow_settings.pdb_fragment_output_mode == "coordinate_only"
+        and not use_native_glycam
     ):
         result = _build_pdb_fragment_coordinate_only_result(
             protein_pdb_path=protein_pdb_path,
@@ -253,11 +274,9 @@ def build_conjugated_polymer_system_from_config(
         )
         return result
     if _uses_pdb_fragment_sources(attachments):
-        if len(specs) != 1:
-            raise ValueError("PDB-fragment ingestion MVP supports exactly one attachment")
-        pdb_fragment_coordinate_artifact_path, _, _ = _write_pdb_fragment_coordinate_artifact(
+        pdb_fragment_coordinate_artifact_path, _, _ = _write_pdb_fragment_coordinate_artifacts(
             protein_pdb_path=protein_pdb_path,
-            spec=specs[0],
+            specs=specs,
             construction_dir=construction_dir,
             placement_settings=workflow_settings.placement,
         )
@@ -317,14 +336,25 @@ def build_conjugated_polymer_system_from_config(
         relaxed_conjugate_topology=relaxed_topology,
         working_dir=artifact_dir,
         polymer_seed=free_polymer_seed,
-        create_interchange=workflow_settings.create_final_interchange,
+        create_interchange=workflow_settings.create_final_interchange and not use_native_glycam,
         product_state_pablo_library=getattr(construction, "product_state_pablo_library", None),
         parameterization_settings=workflow_settings.conjugate_parameterization,
     )
     solvated_pdb_path = artifact_dir / workflow_settings.solvated_pdb_name
-    builder.save_topology(solvated_pdb_path)
+    exact_export_bundle = None
+    if use_native_glycam:
+        LOGGER.info("Creating native OpenMM GLYCAM handoff")
+        exact_export_bundle = create_native_openmm_glycam_handoff(
+            builder,
+            config=config,
+            construction=construction,
+            output_dir=artifact_dir,
+        )
+        exact_export_bundle.write_pdb(solvated_pdb_path)
+    else:
+        builder.save_topology(solvated_pdb_path)
     LOGGER.info("Wrote final solvated conjugate PDB to %s", solvated_pdb_path)
-    if workflow_settings.preserve_reference_atom_names:
+    if workflow_settings.preserve_reference_atom_names and not use_native_glycam:
         _restore_pdb_atom_name_fields(solvated_pdb_path, construction.crosslinked_pdb_path)
 
     result = ConjugationResult(
@@ -346,14 +376,20 @@ def build_conjugated_polymer_system_from_config(
         protein_canonicalization=protein_canonicalization,
         relaxed_conjugate_pdb_path=relaxed_pdb,
         solvated_pdb_path=solvated_pdb_path,
-        final_interchange_created=builder.interchange is not None,
+        final_interchange_created=False if use_native_glycam else builder.interchange is not None,
         modifier=modifiers[0],
         modifiers=modifiers,
         relaxed_conjugate_topology=relaxed_topology,
         solvated_topology=builder.solvated_topology,
-        final_interchange=builder.interchange,
+        final_interchange=None if use_native_glycam else builder.interchange,
+        exact_export_bundle=exact_export_bundle,
         system_builder=builder,
     )
+    if exact_export_bundle is not None:
+        result.artifact_paths["native_openmm_glycam_audit"] = exact_export_bundle.audit_path
+        sidecar_path = getattr(exact_export_bundle, "sidecar_path", None)
+        if sidecar_path is not None:
+            result.artifact_paths["exact_openmm_exceptions"] = sidecar_path
     workflow_path = artifact_dir / workflow_settings.workflow_json_name
     result.workflow_json_path = workflow_path
     result.artifact_paths["workflow_json"] = workflow_path
@@ -642,26 +678,19 @@ def _build_pdb_fragment_coordinate_only_result(
     run_packmol_func: Any | None = None,
 ) -> ConjugationResult:
     """Write a coordinate-only residue-resolved PDB-fragment conjugate artifact."""
-    if len(specs) != 1:
-        raise ValueError("PDB-fragment coordinate-only MVP supports exactly one attachment")
-    spec = specs[0]
-    output_path, assembly, placement = _write_pdb_fragment_coordinate_artifact(
+    output_path, assembly, placement = _write_pdb_fragment_coordinate_artifacts(
         protein_pdb_path=protein_pdb_path,
-        spec=spec,
+        specs=specs,
         construction_dir=construction_dir,
         placement_settings=placement_settings,
         run_packmol_func=run_packmol_func,
     )
-    sidecars = dict(spec.source_sidecars)
-    sidecar_path = sidecars.get("pdb_fragment_ingestion")
-    if sidecar_path is not None:
-        _annotate_pdb_fragment_sidecar(sidecar_path, coordinate_artifact_path=output_path)
     construction = SimpleNamespace(
         crosslinked_pdb_path=output_path,
         validation_report_path=None,
         assembly=assembly,
         placement=placement,
-        placements=(placement,),
+        placements=placement if isinstance(placement, tuple) else (placement,),
         pablo=None,
         parameterization=None,
         relaxation=None,
@@ -673,42 +702,58 @@ def _build_pdb_fragment_coordinate_only_result(
         crosslinked_conjugate_pdb_path=output_path,
         construction=construction,
         attachment_specs=specs,
-        generated_sequence=spec.generated_fragment.sequence,
+        generated_sequence=getattr(specs[0].generated_fragment, "sequence", None),
         reactive_sequence_index=0,
         reactive_residue_selector={
             "chain_id": "C",
-            "atom_serial": spec.generated_fragment.reactive_atom_serial or 0,
-            "atom_index": spec.generated_fragment.reactive_atom_index or 0,
-            "atom_name": spec.generated_fragment.reactive_atom_name or "C1",
+            "atom_serial": getattr(specs[0].generated_fragment, "reactive_atom_serial", None) or 0,
+            "atom_index": getattr(specs[0].generated_fragment, "reactive_atom_index", None) or 0,
+            "atom_name": getattr(specs[0].generated_fragment, "reactive_atom_name", None) or "C1",
         },
         generated_sequences=tuple(
             fragment.sequence
-            for fragment in (spec.generated_fragment,)
+            for fragment in (spec.generated_fragment for spec in specs)
             if fragment.sequence is not None
         ),
-        reactive_sequence_indices=(0,),
+        reactive_sequence_indices=tuple(range(len(specs))),
         reactive_residue_selectors=(
-            {
-                "chain_id": "C",
-                "atom_serial": spec.generated_fragment.reactive_atom_serial or 0,
-                "atom_index": spec.generated_fragment.reactive_atom_index or 0,
-                "atom_name": spec.generated_fragment.reactive_atom_name or "C1",
-            },
+            *(_reactive_selector_for_fragment(spec.generated_fragment) for spec in specs),
         ),
         conjugate_generations=(),
         protein_canonicalization=protein_canonicalization,
-        modifier=spec.generated_fragment,
-        modifiers=(spec.generated_fragment,),
+        modifier=specs[0].generated_fragment,
+        modifiers=tuple(spec.generated_fragment for spec in specs),
         final_interchange_created=False,
     )
     result.artifact_paths.update(
         {
             "crosslinked_conjugate_pdb": output_path,
             "pdb_fragment_coordinate_only_pdb": output_path,
-            **{f"pdb_fragment_{name}": path for name, path in sidecars.items()},
+            **_pdb_fragment_sidecar_artifacts(specs),
         }
     )
     return result
+
+
+def _reactive_selector_for_fragment(fragment: Any) -> dict[str, int | str]:
+    """Return a compact reactive atom selector for coordinate-only artifacts."""
+    return {
+        "chain_id": "C",
+        "atom_serial": getattr(fragment, "reactive_atom_serial", None) or 0,
+        "atom_index": getattr(fragment, "reactive_atom_index", None) or 0,
+        "atom_name": getattr(fragment, "reactive_atom_name", None) or "C1",
+    }
+
+
+def _pdb_fragment_sidecar_artifacts(specs: tuple[AttachmentBuildSpec, ...]) -> dict[str, Path]:
+    """Return namespaced PDB-fragment sidecar artifact paths."""
+    artifacts: dict[str, Path] = {}
+    for index, spec in enumerate(specs, start=1):
+        for name, path in spec.source_sidecars.items():
+            artifacts[f"pdb_fragment_{index}_{name}"] = path
+            if index == 1:
+                artifacts.setdefault(f"pdb_fragment_{name}", path)
+    return artifacts
 
 
 def _write_pdb_fragment_coordinate_artifact(
@@ -734,6 +779,58 @@ def _write_pdb_fragment_coordinate_artifact(
     if sidecar_path is not None:
         _annotate_pdb_fragment_sidecar(sidecar_path, coordinate_artifact_path=output_path)
     return output_path, assembly, placement
+
+
+def _write_pdb_fragment_coordinate_artifacts(
+    *,
+    protein_pdb_path: Path | str,
+    specs: tuple[AttachmentBuildSpec, ...],
+    construction_dir: Path,
+    placement_settings: PackmolModifierPlacementSettings | None = None,
+    run_packmol_func: Any | None = None,
+) -> tuple[Path, Any, Any]:
+    """Write one coordinate artifact for one or more independent PDB fragments."""
+    if len(specs) == 1:
+        return _write_pdb_fragment_coordinate_artifact(
+            protein_pdb_path=protein_pdb_path,
+            spec=specs[0],
+            construction_dir=construction_dir,
+            placement_settings=placement_settings,
+            run_packmol_func=run_packmol_func,
+        )
+    output_path = construction_dir / "pdb_fragment_coordinate_only_conjugate.pdb"
+    placements = place_modifiers_with_resolved_plans(
+        protein_pdb_path,
+        tuple(spec.generated_fragment for spec in specs),
+        tuple(spec.resolved_plan for spec in specs),
+        construction_dir,
+        settings=_pdb_fragment_coordinate_only_placement_settings(placement_settings),
+        run_packmol_func=run_packmol_func,
+    )
+    placed_fragments = tuple(
+        placed_fragment_from_resolved_plan(
+            placement.placed_modifier, spec.resolved_plan
+        ).model_copy(
+            update={"name": getattr(spec.generated_fragment, "name", f"pdb_fragment_{index}")}
+        )
+        for index, (placement, spec) in enumerate(zip(placements, specs, strict=True), start=1)
+    )
+    assembly = write_crosslinked_pdb(
+        protein_pdb_path,
+        placed_fragments,
+        tuple(spec.resolved_plan.to_pdb_linkage_attachment() for spec in specs),
+        output_path,
+        CrosslinkedPdbAssemblyOptions(
+            protein_chain="A",
+            polymer_chain="C",
+            include_link_records=True,
+        ),
+    )
+    for spec in specs:
+        sidecar_path = spec.source_sidecars.get("pdb_fragment_ingestion")
+        if sidecar_path is not None:
+            _annotate_pdb_fragment_sidecar(sidecar_path, coordinate_artifact_path=output_path)
+    return output_path, assembly, placements
 
 
 def _pdb_fragment_coordinate_only_placement_settings(
@@ -1182,13 +1279,18 @@ def _construct_conjugate_from_specs(
         assembly_result=assembly_result,
         product_pdb_path=crosslinked_pdb_path,
     )
+    pablo_product_pdb_path = _write_scoped_pablo_ingestion_pdb(
+        crosslinked_pdb_path,
+        product_state_specs,
+        artifact_dir / "assembled_crosslinked.pablo_scoped.pdb",
+    )
 
     product_state_pablo_library = None
     product_state_residue_library = None
     if use_product_state_pablo_library:
         LOGGER.info("Building product-state Pablo residue library")
         product_state_pablo_library = _product_state_pablo_library_for_specs(
-            product_pdb=crosslinked_pdb_path,
+            product_pdb=pablo_product_pdb_path,
             source_protein_pdb=protein_pdb_path,
             specs=product_state_specs,
         )
@@ -1196,20 +1298,20 @@ def _construct_conjugate_from_specs(
 
     LOGGER.info("Ingesting product-state PDB with Pablo")
     pablo_result = PabloIngestor(policy=ccd_pablo_policy).ingest_structure(
-        crosslinked_pdb_path,
+        pablo_product_pdb_path,
         chain_policy=chain_policy,
         output_dir=artifact_dir,
         residue_library=product_state_residue_library,
     )
     if not pablo_result.success or pablo_result.topology is None:
-        raise RuntimeError(_pablo_failure_message(pablo_result))
+        raise RuntimeError(_pablo_failure_message(pablo_result, specs=product_state_specs))
     if product_state_pablo_library is not None:
-        _apply_pdb_atom_identity_to_topology(pablo_result.topology, crosslinked_pdb_path)
+        _apply_pdb_atom_identity_to_topology(pablo_result.topology, pablo_product_pdb_path)
         LOGGER.info("Building preproduction product-state charge bridge")
         product_state_pablo_library = _product_state_library_with_charge_bridge(
             product_state_pablo_library,
             product_topology=pablo_result.topology,
-            product_pdb=crosslinked_pdb_path,
+            product_pdb=pablo_product_pdb_path,
             source_protein_pdb=protein_pdb_path,
             specs=product_state_specs,
             output_dir=artifact_dir,
@@ -1219,11 +1321,15 @@ def _construct_conjugate_from_specs(
             product_state_pablo_library,
             pablo_result.topology,
         )
+    else:
+        _apply_pdb_atom_identity_to_topology(pablo_result.topology, pablo_product_pdb_path)
 
     charge_templates, require_charge_templates = _intermediate_conjugate_charge_templates(
         pablo_result.topology,
         product_state_pablo_library,
     )
+    _apply_pdb_atom_identity_to_topology(pablo_result.topology, crosslinked_pdb_path)
+    _restore_scoped_alias_metadata(pablo_result.topology, product_state_specs)
     LOGGER.info("Parameterizing conjugate with OpenFF Interchange")
     parameterization_result = create_interchange_from_pablo_topology(
         pablo_result.topology,
@@ -1275,7 +1381,7 @@ def _construct_conjugate_from_specs(
             output_dir=artifact_dir,
             resolved_plan=resolved_plans[0],
             resolved_plans=resolved_plans,
-            attachment_specs=specs,
+            attachment_specs=product_state_specs,
             crosslink_validation=crosslink_validations[0],
             crosslink_validations=crosslink_validations,
             placement=placements[0],
@@ -1308,7 +1414,9 @@ def _product_state_specs_with_assembly_mappings(
             f"attachment spec (pairs={len(added_pairs)}, specs={len(specs)})"
         )
     product_atom_by_serial = _product_pdb_atoms_by_serial(product_pdb_path)
+    _validate_added_conect_pairs(product_pdb_path, added_pairs, assembly_result=assembly_result)
     updated_specs = []
+    alias_cursor = 1
     for fragment_index, (spec, pair) in enumerate(zip(specs, added_pairs, strict=True), start=1):
         plan = spec.resolved_plan
         fragment_prefix = f"fragment_{fragment_index}:"
@@ -1326,6 +1434,18 @@ def _product_state_specs_with_assembly_mappings(
             fragment_index=fragment_index,
             fragment_mappings=fragment_mappings,
         )
+        fragment_mappings, alias_map, alias_cursor = _fragment_mappings_with_scoped_aliases(
+            fragment_mappings,
+            product_atom_by_serial,
+            alias_cursor,
+        )
+        endpoint_provenance = _endpoint_provenance_for_spec(
+            assembly_result,
+            fragment_index=fragment_index,
+            protein_atom=protein_atom,
+            modifier_atom=modifier_atom,
+            conect_pair=pair,
+        )
         updated_plan = plan.model_copy(
             update={"protein_link_atom": protein_atom, "modifier_link_atom": modifier_atom}
         )
@@ -1334,9 +1454,126 @@ def _product_state_specs_with_assembly_mappings(
                 spec,
                 fragment_mappings,
                 resolved_plan=updated_plan,
+                endpoint_provenance=endpoint_provenance,
+                scoped_residue_aliases=alias_map,
             )
         )
     return tuple(updated_specs)
+
+
+def _validate_added_conect_pairs(
+    product_pdb_path: Path | str,
+    added_pairs: tuple[tuple[int, int], ...],
+    *,
+    assembly_result: Any,
+) -> None:
+    """Verify every assembly endpoint pair is present in the emitted CONECT graph."""
+    if not tuple(getattr(assembly_result, "attachment_endpoint_records", ()) or ()):
+        return
+    conect_pairs = {frozenset(pair) for pair in parse_pdb_conect_pairs(Path(product_pdb_path))}
+    for pair in added_pairs:
+        if frozenset(pair) not in conect_pairs:
+            raise ValueError(
+                "Crosslinked PDB assembly endpoint provenance is inconsistent: emitted "
+                f"CONECT records do not contain pair {pair} in {product_pdb_path}"
+            )
+
+
+def _fragment_mappings_with_scoped_aliases(
+    fragment_mappings: dict[str, dict[str, int | str]],
+    product_atom_by_serial: dict[int, PdbAtomRecord],
+    alias_cursor: int,
+) -> tuple[dict[str, dict[str, int | str]], dict[str, str], int]:
+    """Attach attachment-local Pablo residue aliases to product residue mappings."""
+    atoms_by_residue = _product_atoms_by_residue(product_atom_by_serial.values())
+    updated: dict[str, dict[str, int | str]] = {}
+    alias_map: dict[str, str] = {}
+    for source_key, mapping in sorted(fragment_mappings.items()):
+        chain = str(mapping.get("target_chain", "C") or "C")
+        residue_number = int(mapping["target_residue_number"])
+        insertion_code = str(mapping.get("target_insertion_code", "") or "")
+        residue_atoms = atoms_by_residue.get((chain, residue_number, insertion_code), ())
+        if not residue_atoms:
+            raise ValueError(
+                "Product-state scoped Pablo aliasing could not find emitted residue "
+                f"{chain}:{residue_number}{insertion_code} for source {source_key}"
+            )
+        canonical_name = residue_atoms[0].residue_name.strip().upper()
+        scoped_name = _scoped_pablo_residue_name(alias_cursor)
+        alias_cursor += 1
+        residue_key = _product_residue_alias_key(chain, residue_number, insertion_code)
+        alias_map[residue_key] = scoped_name
+        enriched = dict(mapping)
+        enriched["canonical_residue_name"] = canonical_name
+        enriched["scoped_residue_name"] = scoped_name
+        updated[source_key] = enriched
+    return updated, alias_map, alias_cursor
+
+
+def _product_atoms_by_residue(
+    atoms: Iterable[PdbAtomRecord],
+) -> dict[tuple[str, int, str], tuple[PdbAtomRecord, ...]]:
+    """Group product atoms by chain, residue number, and insertion code."""
+    grouped: dict[tuple[str, int, str], list[PdbAtomRecord]] = {}
+    for atom in atoms:
+        key = (atom.chain_id, atom.residue_number, atom.insertion_code or "")
+        grouped.setdefault(key, []).append(atom)
+    return {key: tuple(value) for key, value in grouped.items()}
+
+
+def _scoped_pablo_residue_name(index: int) -> str:
+    """Return a deterministic three-character residue alias for Pablo matching."""
+    if index > 899:
+        raise ValueError("Attachment-scoped Pablo aliases exceeded the supported residue count")
+    return f"Z{index:02d}"
+
+
+def _product_residue_alias_key(chain: str, residue_number: int, insertion_code: str) -> str:
+    """Return the scoped-alias map key for one emitted product residue."""
+    return f"{chain}:{residue_number}{insertion_code or ''}"
+
+
+def _endpoint_provenance_for_spec(
+    assembly_result: Any,
+    *,
+    fragment_index: int,
+    protein_atom: PdbAtomRecord,
+    modifier_atom: PdbAtomRecord,
+    conect_pair: tuple[int, int],
+) -> dict[str, Any]:
+    """Return serial-first endpoint provenance for one attachment spec."""
+    endpoint_records = tuple(getattr(assembly_result, "attachment_endpoint_records", ()) or ())
+    record = next(
+        (
+            item
+            for item in endpoint_records
+            if int(item.get("attachment_index", 0)) == fragment_index
+        ),
+        None,
+    )
+    return {
+        "attachment_index": fragment_index,
+        "conect_pair": {"protein_serial": conect_pair[0], "modifier_serial": conect_pair[1]},
+        "protein_endpoint": (
+            record.get("protein_endpoint") if record else _pdb_atom_payload(protein_atom)
+        ),
+        "modifier_endpoint": (
+            record.get("modifier_endpoint") if record else _pdb_atom_payload(modifier_atom)
+        ),
+        "atom_mappings": dict(getattr(assembly_result, "atom_mappings", {}) or {}),
+    }
+
+
+def _pdb_atom_payload(atom: PdbAtomRecord) -> dict[str, int | str]:
+    """Return JSON-safe PDB atom identity payload."""
+    return {
+        "serial": int(atom.serial) if atom.serial is not None else "",
+        "atom_name": atom.atom_name,
+        "residue_name": atom.residue_name,
+        "chain_id": atom.chain_id,
+        "residue_number": atom.residue_number,
+        "insertion_code": atom.insertion_code or "",
+    }
 
 
 def _product_pdb_atoms_by_serial(product_pdb_path: Path | str) -> dict[int, PdbAtomRecord]:
@@ -1504,6 +1741,76 @@ def _product_state_pablo_library_for_specs(
     )
 
 
+def _write_scoped_pablo_ingestion_pdb(
+    canonical_pdb_path: Path | str,
+    specs: tuple[Any, ...],
+    scoped_pdb_path: Path,
+) -> Path:
+    """Write a Pablo-only PDB with attachment-local residue-name aliases."""
+    alias_by_residue: dict[str, str] = {}
+    for spec in specs:
+        alias_by_residue.update(getattr(spec, "scoped_residue_aliases", {}) or {})
+    if not alias_by_residue:
+        return Path(canonical_pdb_path)
+
+    updated_lines: list[str] = []
+    with Path(canonical_pdb_path).open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith(_ATOM_RECORD_PREFIXES):
+                key = _pdb_line_residue_alias_key(line)
+                alias = alias_by_residue.get(key)
+                if alias is not None:
+                    line = _replace_pdb_residue_name_field(line, alias)
+            updated_lines.append(line)
+    scoped_pdb_path.write_text("".join(updated_lines), encoding="utf-8")
+    return scoped_pdb_path
+
+
+def _pdb_line_residue_alias_key(line: str) -> str:
+    """Return the scoped alias key from one fixed-width PDB atom line."""
+    chain = line[21:22].strip() or " "
+    residue_number = int(line[22:26])
+    insertion_code = line[26:27].strip()
+    return _product_residue_alias_key(chain, residue_number, insertion_code)
+
+
+def _replace_pdb_residue_name_field(line: str, residue_name: str) -> str:
+    """Replace the fixed-width PDB residue name field."""
+    newline = "\n" if line.endswith("\n") else ""
+    body = line[:-1] if newline else line
+    padded = body.ljust(20)
+    return f"{padded[:17]}{residue_name.strip().upper():>3}{padded[20:]}{newline}"
+
+
+def _restore_scoped_alias_metadata(topology: Any, specs: tuple[Any, ...]) -> None:
+    """Restore canonical GLYCAM residue names after Pablo-only alias matching."""
+    canonical_by_alias: dict[str, str] = {}
+    for spec in specs:
+        for mapping in (getattr(spec, "product_residue_mappings", {}) or {}).values():
+            alias = str(mapping.get("scoped_residue_name", "") or "").strip().upper()
+            canonical = str(mapping.get("canonical_residue_name", "") or "").strip().upper()
+            if alias and canonical:
+                canonical_by_alias[alias] = canonical
+    if not canonical_by_alias:
+        return
+    for atom in _iter_openff_topology_atoms(topology):
+        metadata = getattr(atom, "metadata", {}) or {}
+        residue_name = str(metadata.get("residue_name", "") or "").strip().upper()
+        canonical = canonical_by_alias.get(residue_name)
+        if canonical is None:
+            continue
+        atom.name = str(metadata.get("atom_name", getattr(atom, "name", ""))).strip()
+        _update_atom_metadata(
+            atom,
+            {
+                "residue_name": canonical,
+                "canonical_residue_name": canonical,
+                "pablo_scoped_residue_name": residue_name,
+                "product_identity_source": "canonical_product_pdb_after_pablo_alias",
+            },
+        )
+
+
 def _safe_attachment_token(name: str) -> str:
     """Return a conservative artifact-directory token."""
     token = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in name.strip())
@@ -1530,10 +1837,28 @@ def _save_direct_workflow_summary(
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def _pablo_failure_message(result: Any) -> str:
+def _pablo_failure_message(result: Any, *, specs: tuple[Any, ...] = ()) -> str:
+    """Return an actionable Pablo failure message with attachment context."""
     diagnostics = [f"{diag.code}: {diag.message}" for diag in result.diagnostics]
     joined = "; ".join(diagnostics) if diagnostics else "no diagnostics were reported"
-    return f"Pablo ingestion failed or returned no topology for {result.path}: {joined}"
+    details = []
+    for spec in specs:
+        endpoint = getattr(spec, "endpoint_provenance", {}) or {}
+        sidecars = getattr(spec, "source_sidecars", {}) or {}
+        details.append(
+            {
+                "attachment_id": getattr(spec, "attachment_id", ""),
+                "attachment_index": getattr(spec, "attachment_index", ""),
+                "source_glycan": str(
+                    sidecars.get("pdb") or sidecars.get("pdb_fragment_ingestion") or ""
+                ),
+                "conect_pair": endpoint.get("conect_pair", {}),
+                "protein_endpoint": endpoint.get("protein_endpoint", {}),
+                "modifier_endpoint": endpoint.get("modifier_endpoint", {}),
+            }
+        )
+    context = f" attachment_context={json.dumps(details, sort_keys=True)}" if details else ""
+    return f"Pablo ingestion failed or returned no topology for {result.path}: {joined}{context}"
 
 
 def _relaxed_conjugate_pdb(construction: ModifierConstructionResult) -> Path:
@@ -1875,6 +2200,8 @@ def _apply_pdb_atom_identity_to_topology(topology: Any, template_pdb_path: Path 
     """
     template_atoms = _pdb_atom_records(Path(template_pdb_path))
     topology_atoms = list(_iter_openff_topology_atoms(topology))
+    if not topology_atoms:
+        return
     if len(topology_atoms) != len(template_atoms):
         raise ValueError(
             "Topology atom count does not match product identity template count: "

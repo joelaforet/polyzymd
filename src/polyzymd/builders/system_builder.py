@@ -1056,6 +1056,13 @@ class SystemBuilder:
             RuntimeError: If Interchange not created.
         """
         if self._interchange is None:
+            exact_export_bundle = getattr(self, "_exact_export_bundle", None)
+            if exact_export_bundle is not None:
+                return (
+                    exact_export_bundle.to_openmm_topology(),
+                    exact_export_bundle.to_openmm(),
+                    exact_export_bundle.to_openmm_positions(),
+                )
             raise RuntimeError("Interchange not created. Call create_interchange() first.")
 
         from openff.interchange.interop.openmm._positions import to_openmm_positions
@@ -1140,9 +1147,15 @@ class SystemBuilder:
             >>> print(f"Run: cd {result['gro'].parent} && ./{result['run_script'].name}")
         """
         if self._interchange is None:
-            raise RuntimeError(
-                "Interchange not created. Call create_interchange() or build_from_config() first."
-            )
+            exact_export_bundle = getattr(self, "_exact_export_bundle", None)
+            if exact_export_bundle is not None:
+                export_source = exact_export_bundle
+            else:
+                raise RuntimeError(
+                    "Interchange not created. Call create_interchange() or build_from_config() first."
+                )
+        else:
+            export_source = self._interchange
 
         if self._solvated_topology is not None:
             self._assign_pdb_identifiers()
@@ -1180,7 +1193,7 @@ class SystemBuilder:
                 )
 
             exporter = GromacsExporter(
-                interchange=self._interchange,
+                interchange=export_source,
                 config=config,
                 component_info=component_info,
             )
@@ -1193,6 +1206,8 @@ class SystemBuilder:
 
             return result
         # Build-only export without MDP generation
+        if export_source is not self._interchange:
+            raise RuntimeError("Exact GLYCAM bundle export requires generate_mdps=True")
         return self._export_gromacs_minimal(output_dir, prefix)
 
     def _export_gromacs_minimal(

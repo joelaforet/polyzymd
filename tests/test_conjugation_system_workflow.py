@@ -543,6 +543,24 @@ def test_product_state_specs_use_exact_assembly_serial_pairs(tmp_path: Path):
     )
     assembly = SimpleNamespace(
         added_conect_pairs=((1, 2), (3, 4)),
+        attachment_endpoint_records=(
+            {
+                "attachment_index": 1,
+                "conect_pair": {"protein_serial": 1, "modifier_serial": 2},
+                "protein_endpoint": {"serial": 1, "atom_name": "ND2"},
+                "modifier_endpoint": {"serial": 2, "atom_name": "C001"},
+            },
+            {
+                "attachment_index": 2,
+                "conect_pair": {"protein_serial": 3, "modifier_serial": 4},
+                "protein_endpoint": {"serial": 3, "atom_name": "ND2"},
+                "modifier_endpoint": {"serial": 4, "atom_name": "C001"},
+            },
+        ),
+        atom_mappings={
+            "fragment_1:1:C001": {"source_serial": 1, "target_serial": 2},
+            "fragment_2:1:C001": {"source_serial": 1, "target_serial": 4},
+        },
         residue_mappings={
             "fragment_1:1": {"source_residue_number": 1, "target_residue_number": 10},
             "fragment_2:1": {"source_residue_number": 1, "target_residue_number": 20},
@@ -558,9 +576,54 @@ def test_product_state_specs_use_exact_assembly_serial_pairs(tmp_path: Path):
     assert [spec.resolved_plan.protein_link_atom.serial for spec in updated] == [1, 3]
     assert [spec.resolved_plan.modifier_link_atom.serial for spec in updated] == [2, 4]
     assert [spec.resolved_plan.modifier_link_atom.residue_number for spec in updated] == [10, 20]
-    assert updated[0].product_residue_mappings == {
-        "1": {"source_residue_number": 1, "target_residue_number": 10}
+    assert updated[0].endpoint_provenance["conect_pair"] == {
+        "protein_serial": 1,
+        "modifier_serial": 2,
     }
+    assert (
+        updated[1].endpoint_provenance["atom_mappings"]["fragment_2:1:C001"]["target_serial"] == 4
+    )
+    assert updated[0].product_residue_mappings["1"]["target_residue_number"] == 10
+    assert updated[1].product_residue_mappings["1"]["target_residue_number"] == 20
+    assert updated[0].product_residue_mappings["1"]["canonical_residue_name"] == "NAG"
+    assert updated[1].product_residue_mappings["1"]["canonical_residue_name"] == "NAG"
+    assert (
+        updated[0].product_residue_mappings["1"]["scoped_residue_name"]
+        != updated[1].product_residue_mappings["1"]["scoped_residue_name"]
+    )
+
+
+def test_product_state_specs_reject_missing_provenance_conect_pair(tmp_path: Path):
+    """Endpoint provenance should prove that emitted CONECT records carry every link."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    product_pdb = tmp_path / "product.pdb"
+    product_pdb.write_text(
+        _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+        + _pdb_line(2, "C001", "NAG", "C", 10, element="C")
+        + "END\n",
+        encoding="utf-8",
+    )
+    assembly = SimpleNamespace(
+        added_conect_pairs=((1, 2),),
+        attachment_endpoint_records=(
+            {
+                "attachment_index": 1,
+                "conect_pair": {"protein_serial": 1, "modifier_serial": 2},
+            },
+        ),
+        atom_mappings={},
+        residue_mappings={
+            "fragment_1:1": {"source_residue_number": 1, "target_residue_number": 10}
+        },
+    )
+
+    with pytest.raises(ValueError, match="CONECT records do not contain pair"):
+        workflow_module._product_state_specs_with_assembly_mappings(
+            (_product_mapping_specs()[0],),
+            assembly_result=assembly,
+            product_pdb_path=product_pdb,
+        )
 
 
 def test_product_state_specs_reject_swapped_or_mismatched_pairs(tmp_path: Path):

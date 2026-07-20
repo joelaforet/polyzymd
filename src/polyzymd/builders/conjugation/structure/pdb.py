@@ -363,6 +363,10 @@ class CrosslinkedPdbAssemblyResult(BaseModel):
     added_conect_pairs: tuple[tuple[int, int], ...] = Field(default_factory=tuple)
     warnings: tuple[str, ...] = Field(default_factory=tuple)
     residue_mappings: dict[str, dict[str, int | str]] = Field(default_factory=dict)
+    atom_mappings: dict[str, dict[str, int | str]] = Field(default_factory=dict)
+    attachment_endpoint_records: tuple[dict[str, int | str | dict[str, int | str]], ...] = Field(
+        default_factory=tuple
+    )
 
 
 def canonicalize_poc_residue_name(raw_residue_name: str, *, crosslinked: bool = False) -> str:
@@ -447,6 +451,7 @@ def write_crosslinked_pdb(
     atom_lines: list[str] = []
     conect_map: dict[int, set[int]] = {}
     residue_mappings: dict[str, dict[str, int | str]] = {}
+    atom_mappings: dict[str, dict[str, int | str]] = {}
     removed_polymer_atoms: list[PdbAtomRecord] = []
     crosslink_pair: tuple[int, int] | None = None
     crosslink_pairs: list[tuple[int, int]] = []
@@ -499,6 +504,7 @@ def write_crosslinked_pdb(
         output_atoms.extend(fragment_result.atoms)
         removed_polymer_atoms.extend(fragment_result.removed_atoms)
         residue_mappings.update(fragment_result.residue_mappings)
+        atom_mappings.update(fragment_result.atom_mappings)
 
         conect_map.setdefault(target_serial, set()).add(fragment_result.reactive_serial)
         conect_map.setdefault(fragment_result.reactive_serial, set()).add(target_serial)
@@ -528,6 +534,15 @@ def write_crosslinked_pdb(
         handle.write("END\n")
 
     removed_atoms = [*removed_protein_atoms, *removed_polymer_atoms]
+    endpoint_records = tuple(
+        _attachment_endpoint_record(
+            fragment_index=index,
+            protein_atom=_product_atom_by_serial(output_atoms, pair[0]),
+            modifier_atom=_product_atom_by_serial(output_atoms, pair[1]),
+            conect_pair=pair,
+        )
+        for index, pair in enumerate(crosslink_pairs, start=1)
+    )
     return CrosslinkedPdbAssemblyResult(
         output_path=destination,
         protein_atom_count=len(kept_protein_atoms),
@@ -544,6 +559,8 @@ def write_crosslinked_pdb(
         added_conect_pairs=tuple(crosslink_pairs),
         warnings=tuple(warnings),
         residue_mappings=residue_mappings,
+        atom_mappings=atom_mappings,
+        attachment_endpoint_records=endpoint_records,
     )
 
 
@@ -557,6 +574,7 @@ class _PolymerAppendResult(BaseModel):
     next_serial: int
     next_residue_number: int
     residue_mappings: dict[str, dict[str, int | str]]
+    atom_mappings: dict[str, dict[str, int | str]]
 
 
 def _append_polymer_fragment(
@@ -587,6 +605,7 @@ def _append_polymer_fragment(
 
     residue_key_to_number: dict[tuple[int, str], int] = {}
     residue_mappings: dict[str, dict[str, int | str]] = {}
+    atom_mappings: dict[str, dict[str, int | str]] = {}
     reactive_residue_key = _polymer_residue_key(reactive_atom)
     atom_serial_by_index: dict[int, int] = {}
     atom_serial_by_input_serial: dict[int, int] = {}
@@ -631,6 +650,22 @@ def _append_polymer_fragment(
         if atom.serial is not None:
             atom_serial_by_input_serial[atom.serial] = new_serial
         atom_serial_by_name.setdefault(atom.atom_name, new_serial)
+        atom_mappings[
+            f"fragment_{fragment_index}:{residue_key[0]}{residue_key[1]}:{atom.atom_name}"
+        ] = {
+            "source_serial": int(atom.serial) if atom.serial is not None else "",
+            "source_atom_index": int(atom.atom_index) if atom.atom_index is not None else "",
+            "source_atom_name": atom.atom_name,
+            "source_residue_name": atom.residue_name,
+            "source_residue_number": residue_key[0],
+            "source_insertion_code": residue_key[1] or "",
+            "target_serial": new_serial,
+            "target_atom_name": updated.atom_name,
+            "target_residue_name": updated.residue_name,
+            "target_residue_number": updated.residue_number,
+            "target_insertion_code": updated.insertion_code or "",
+            "target_chain": updated.chain_id,
+        }
 
     retained_keys = {_atom_identity(atom) for atom in kept_atoms}
     for atom_1_ref, atom_2_ref in fragment.bonds:
@@ -676,7 +711,44 @@ def _append_polymer_fragment(
         next_serial=next_serial,
         next_residue_number=residue_cursor,
         residue_mappings=residue_mappings,
+        atom_mappings=atom_mappings,
     )
+
+
+def _product_atom_by_serial(atoms: list[PdbAtomRecord], serial: int) -> PdbAtomRecord:
+    """Return an emitted atom by exact output serial."""
+    for atom in atoms:
+        if atom.serial == serial:
+            return atom
+    raise ValueError(f"Crosslinked PDB assembly recorded missing output serial {serial}")
+
+
+def _attachment_endpoint_record(
+    *,
+    fragment_index: int,
+    protein_atom: PdbAtomRecord,
+    modifier_atom: PdbAtomRecord,
+    conect_pair: tuple[int, int],
+) -> dict[str, int | str | dict[str, int | str]]:
+    """Build serial-first endpoint provenance for one emitted attachment."""
+    return {
+        "attachment_index": fragment_index,
+        "conect_pair": {"protein_serial": conect_pair[0], "modifier_serial": conect_pair[1]},
+        "protein_endpoint": _endpoint_atom_payload(protein_atom),
+        "modifier_endpoint": _endpoint_atom_payload(modifier_atom),
+    }
+
+
+def _endpoint_atom_payload(atom: PdbAtomRecord) -> dict[str, int | str]:
+    """Return a JSON-safe atom endpoint record."""
+    return {
+        "serial": int(atom.serial) if atom.serial is not None else "",
+        "atom_name": atom.atom_name,
+        "residue_name": atom.residue_name,
+        "chain_id": atom.chain_id,
+        "residue_number": atom.residue_number,
+        "insertion_code": atom.insertion_code or "",
+    }
 
 
 def _validate_polymer_leaving_selectors(fragment: PlacedPolymerFragment) -> None:

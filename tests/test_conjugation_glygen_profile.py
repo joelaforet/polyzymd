@@ -207,6 +207,58 @@ def test_g42666_product_pablo_definitions_retain_carbonyl_order_two(tmp_path: Pa
     assert carbonyl_orders.count(2) >= 2
 
 
+def test_product_pablo_endpoint_prefers_assembly_provenance_over_source_serial() -> None:
+    """Product-state endpoint lookup should distinguish source and product serials."""
+    from polyzymd.builders.conjugation.pablo.product import _locate_residue_key
+    from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
+
+    atoms = [
+        _pdb_record(serial=4, atom_name="CB", residue_name="ASN", chain_id="A", residue_number=1),
+        _pdb_record(serial=20, atom_name="C1", residue_name="NAG", chain_id="C", residue_number=1),
+    ]
+    source_link_atom = PdbAtomRecord(
+        serial=4,
+        atom_name="C1",
+        residue_name="NAG",
+        chain_id="C",
+        residue_number=1,
+        x=0.0,
+        y=0.0,
+        z=0.0,
+        element="C",
+    )
+
+    key = _locate_residue_key(
+        atoms,
+        residue_name="NAG",
+        atom_name="C1",
+        resolved_atom=source_link_atom,
+        endpoint_provenance={"conect_pair": {"protein_serial": 1, "modifier_serial": 20}},
+        endpoint_role="modifier",
+    )
+
+    assert key == ("C", "NAG", 1, "")
+
+
+def test_product_pablo_mapped_endpoint_rejects_ambiguous_fallback() -> None:
+    """Mapped multi-attachment endpoint lookup should fail instead of guessing."""
+    from polyzymd.builders.conjugation.pablo.product import _locate_residue_key
+
+    atoms = [
+        _pdb_record(serial=10, atom_name="C1", residue_name="NAG", chain_id="C", residue_number=1),
+        _pdb_record(serial=40, atom_name="C1", residue_name="NAG", chain_id="C", residue_number=2),
+    ]
+
+    with pytest.raises(ValueError, match="requires exact assembly provenance"):
+        _locate_residue_key(
+            atoms,
+            residue_name="NAG",
+            atom_name="C1",
+            resolved_atom=None,
+            allow_legacy_serial_fallback=False,
+        )
+
+
 def test_conjugation_facade_exports_workflow_settings() -> None:
     """Public conjugation facade should expose workflow settings."""
     assert PublicSettings is ConjugatedPolymerSystemSettings
@@ -1057,6 +1109,30 @@ def _pdb_atom(
         f"HETATM{serial:5d} {atom_name:<4} {residue_name:>3} {chain_id:1}"
         f"{residue_number:4d}    {x:8.3f}{y:8.3f}{z:8.3f}"
         f"  1.00  0.00          {element:>2}\n"
+    )
+
+
+def _pdb_record(
+    *,
+    serial: int,
+    atom_name: str,
+    residue_name: str,
+    chain_id: str,
+    residue_number: int,
+) -> Any:
+    """Return one parsed PDB atom record for endpoint-resolution tests."""
+    from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
+
+    return PdbAtomRecord(
+        serial=serial,
+        atom_name=atom_name,
+        residue_name=residue_name,
+        chain_id=chain_id,
+        residue_number=residue_number,
+        x=0.0,
+        y=0.0,
+        z=0.0,
+        element=atom_name[0],
     )
 
 

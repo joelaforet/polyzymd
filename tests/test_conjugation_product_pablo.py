@@ -38,6 +38,19 @@ class _FakeAtomDefinition:
     leaving: bool = False
     synonyms: tuple[str, ...] = ()
 
+    @classmethod
+    def with_defaults(
+        cls,
+        name: str,
+        symbol: str,
+        *,
+        synonyms: tuple[str, ...] = (),
+        charge: int = 0,
+        leaving: bool = False,
+    ) -> _FakeAtomDefinition:
+        """Return a Pablo-like atom definition with defaulted metadata."""
+        return cls(name=name, symbol=symbol, charge=charge, leaving=leaving, synonyms=synonyms)
+
     def replace(self, **updates: object) -> _FakeAtomDefinition:
         """Return a copy with selected Pablo-like fields replaced."""
         values = {
@@ -56,6 +69,11 @@ class _FakeBondDefinition:
     atom1: str
     atom2: str
     order: int = 1
+
+    @classmethod
+    def with_defaults(cls, atom1: str, atom2: str, *, order: int = 1) -> _FakeBondDefinition:
+        """Return a Pablo-like bond definition with defaulted metadata."""
+        return cls(atom1=atom1, atom2=atom2, order=order)
 
 
 @dataclass(frozen=True)
@@ -574,6 +592,49 @@ def test_product_state_pablo_library_for_specs_scopes_repeated_polymer_residues(
         assert _bond_order(definitions[residue_number], "CAA", "CBA") == 1
 
 
+def test_product_state_pablo_library_maps_repeated_residue_name_bond_orders(
+    tmp_path: Path,
+):
+    """Repeated canonical glycan residues should receive source-local bond orders."""
+    source = tmp_path / "source.pdb"
+    product = tmp_path / "product.pdb"
+    source.write_text(_source_lys_pdb(), encoding="utf-8")
+    product.write_text(_repeated_glycan_product_pdb(), encoding="utf-8")
+    fragment = _repeated_glycan_fragment()
+    requirement = PabloCrosslinkRequirement(
+        residues=("LYX", "4YB"),
+        linking_atoms=("NZ", "C1"),
+        leaving_atoms=(("HZ2", "HZ3"), ()),
+        bond_order=1,
+    )
+    resolved_plan = SimpleNamespace(
+        pablo_crosslink_requirement=requirement,
+        protein_link_atom=SimpleNamespace(chain_id="A", residue_number=23),
+        modifier_link_atom=SimpleNamespace(chain_id="C", residue_number=10),
+        modifier_leaving_atoms=(),
+        contract=SimpleNamespace(
+            protein_endpoint=SimpleNamespace(
+                selector=SimpleNamespace(residue_name="LYS"),
+            ),
+        ),
+    )
+
+    library = build_product_state_pablo_library(
+        product,
+        source,
+        None,
+        fragment,
+        resolved_plan,
+        product_residue_mappings=_product_residue_mappings((2, 3), (10, 11)),
+    )
+
+    definitions = {
+        summary.residue_number: definition for summary, definition in _chain_c_definitions(library)
+    }
+    assert _bond_order(definitions[10], "C2N", "O2N") == 2
+    assert _bond_order(definitions[11], "C2N", "O2N") == 2
+
+
 def test_product_state_pablo_library_for_specs_deduplicates_five_repeated_templates(
     tmp_path: Path,
 ):
@@ -632,8 +693,8 @@ def test_product_state_pablo_definitions_allow_sb2_variants_with_distinct_select
     assert product_pablo_module._deduplicate_product_definitions((first, second)) == (first, second)
 
 
-def test_product_state_pablo_definitions_reject_same_selector_different_leaving_chemistry():
-    """Same non-leaving selector with different leaving chemistry should fail clearly."""
+def test_product_state_pablo_definitions_allow_distinct_leaving_selectors():
+    """Same retained atoms may coexist when leaving selectors are distinct."""
     first = _fake_residue_definition(
         "SB2",
         ("C1", "O1"),
@@ -647,8 +708,198 @@ def test_product_state_pablo_definitions_reject_same_selector_different_leaving_
         leaving_atom_names=("LG2",),
     )
 
-    with pytest.raises(ValueError, match="same non-leaving atom-name selector"):
-        product_pablo_module._deduplicate_product_definitions((first, second))
+    assert product_pablo_module._deduplicate_product_definitions((first, second)) == (
+        first,
+        second,
+    )
+
+
+def test_product_state_pablo_coalesces_linking_atom_leaving_fragments():
+    """Polymer link definitions should expose one direct leaving fragment per link atom."""
+    definition = product_pablo_module._build_pdb_residue_definition(
+        _FakeAtomDefinition,
+        _FakeBondDefinition,
+        _FakeResidueDefinition,
+        residue_atoms=(
+            _pdb_record(1, "POU", "VMA", residue_number=1),
+            _pdb_record(2, "C1", "VMA", residue_number=1),
+        ),
+        bonds=(("POU", "C1", 1),),
+        formal_charges={},
+        linking_bond=("POU", "PIN", 1),
+        leaving_atoms=(),
+        crosslink=None,
+        extra_leaving_bonds=(("POU", "L001"), ("POU", "L002")),
+        atom_name_aliases={},
+        bond_order=1,
+        description="Test product-state definition",
+    )
+
+    leaving_names = {atom.name for atom in definition.atoms if atom.leaving}
+    direct_leavers = {
+        bond.atom2 if bond.atom1 == "POU" else bond.atom1
+        for bond in definition.bonds
+        if "POU" in (bond.atom1, bond.atom2)
+        and (bond.atom2 if bond.atom1 == "POU" else bond.atom1) in leaving_names
+    }
+
+    assert direct_leavers == {"L001"}
+    assert _FakeBondDefinition("L001", "L002", 1) in definition.bonds
+
+
+def test_product_state_pablo_plans_degree_three_graph_with_one_crosslink():
+    """Degree-three glycan nodes should use prior/posterior plus one Pablo crosslink."""
+    root = ("C", "4YB", 1, "")
+    middle = ("C", "0YB", 2, "")
+    posterior = ("C", "0MB", 3, "")
+    branch = ("C", "1MA", 4, "")
+    plans, diagnostics = product_pablo_module._plan_polymer_external_links(
+        (
+            product_pablo_module._PolymerExternalBond(root, middle, "O4", "C1", 1),
+            product_pablo_module._PolymerExternalBond(middle, posterior, "O4", "C1", 1),
+            product_pablo_module._PolymerExternalBond(middle, branch, "O3", "C1", 1),
+        ),
+        reserved_crosslink_keys={root},
+    )
+
+    assert any("Branched product polymer connectivity" in item for item in diagnostics)
+    assert plans[root].linking_bond == ("POU", "PIN", 1)
+    assert plans[posterior].linking_bond == ("POU", "PIN", 1)
+    assert plans[middle].crosslink == ("O3", "C1")
+    assert plans[branch].crosslink == ("C1", "O3")
+
+
+def test_product_state_pablo_keeps_pendant_branch_subtrees_linked():
+    """Pendant branch subtrees should not leave child edges as unmatched CONECT records."""
+    keys = {index: ("C", f"Z{index:02d}", index, "") for index in range(1, 9)}
+
+    plans, _diagnostics = product_pablo_module._plan_polymer_external_links(
+        (
+            product_pablo_module._PolymerExternalBond(keys[1], keys[2], "O4", "C1", 1),
+            product_pablo_module._PolymerExternalBond(keys[2], keys[3], "O4", "C1", 1),
+            product_pablo_module._PolymerExternalBond(keys[3], keys[4], "O6", "C1", 1),
+            product_pablo_module._PolymerExternalBond(keys[4], keys[5], "O6", "C1", 1),
+            product_pablo_module._PolymerExternalBond(keys[4], keys[6], "O3", "C1", 1),
+            product_pablo_module._PolymerExternalBond(keys[3], keys[7], "O3", "C1", 1),
+            product_pablo_module._PolymerExternalBond(keys[7], keys[8], "O2", "C1", 1),
+        ),
+        reserved_crosslink_keys={keys[1]},
+    )
+
+    assert plans[keys[7]].linking_bond == ("POU", "PIN", 1)
+    assert plans[keys[8]].linking_bond == ("POU", "PIN", 1)
+    assert plans[keys[7]].crosslink == ("C1", "O3")
+    assert plans[keys[8]].crosslink is None
+
+
+def test_product_state_pablo_prefers_conect_external_edges_over_fragment_aliases():
+    """PDB CONECT should be authoritative for scoped inter-residue glycan edges."""
+    product_atoms = [
+        _pdb_record(1, "O4", "Z01", residue_number=1),
+        _pdb_record(2, "O3", "Z01", residue_number=1),
+        _pdb_record(3, "C1", "Z02", residue_number=2),
+        _pdb_record(4, "H4O", "Z01", residue_number=1),
+    ]
+
+    _product_bonds, external_bonds = product_pablo_module._product_bonds_and_links_by_residue(
+        product_atoms,
+        ((1, 3),),
+        fragment_bonds=(
+            ((1, "O3"), (2, "C1"), 1),
+            ((1, "H4O"), (2, "C1"), 1),
+        ),
+    )
+
+    assert external_bonds == (
+        product_pablo_module._PolymerExternalBond(
+            ("C", "Z01", 1, ""),
+            ("C", "Z02", 2, ""),
+            "O4",
+            "C1",
+            1,
+        ),
+    )
+
+
+def test_product_state_pablo_restores_glycam_n_acetyl_carbonyl_order():
+    """GLYCAM N-acetyl carbonyls should not become radical single-bond motifs."""
+    product_atoms = [
+        _pdb_record(1, "C2N", "Z04", residue_number=4),
+        _pdb_record(2, "O2N", "Z04", residue_number=4),
+        _pdb_record(3, "N2", "Z04", residue_number=4),
+        _pdb_record(4, "CME", "Z04", residue_number=4),
+    ]
+
+    product_bonds, _external_bonds = product_pablo_module._product_bonds_and_links_by_residue(
+        product_atoms,
+        ((1, 2), (1, 3), (1, 4)),
+        fragment_bonds=(),
+    )
+
+    assert product_bonds[("C", "Z04", 4, "")][0] == ("C2N", "CME", 1)
+    assert ("C2N", "O2N", 2) in product_bonds[("C", "Z04", 4, "")]
+
+
+def test_product_state_pablo_legacy_direct_serial_fallback_requires_unambiguous_name():
+    """Legacy direct specs may fallback from source serials only when name matching is unique."""
+    diagnostics: list[str] = []
+    atoms = [
+        _pdb_record(4, "CB", "ASX", residue_number=1),
+        _pdb_record(10, "C1", "Z01", residue_number=2),
+    ]
+
+    key = product_pablo_module._locate_residue_key(
+        atoms,
+        residue_name="Z01",
+        atom_name="C1",
+        resolved_atom=SimpleNamespace(serial=4),
+        diagnostics=diagnostics,
+        allow_legacy_serial_fallback=True,
+    )
+
+    assert key == ("C", "Z01", 2, "")
+    assert any(
+        "Legacy direct product-state endpoint serial fallback" in item for item in diagnostics
+    )
+
+
+def test_product_state_pablo_rejects_degree_greater_than_three_graph():
+    """Degree-four glycan graphs should fail before Pablo emits opaque errors."""
+    hub = ("C", "0YB", 2, "")
+    edges = tuple(
+        product_pablo_module._PolymerExternalBond(
+            hub,
+            ("C", f"B{index}", index, ""),
+            f"O{index}",
+            "C1",
+            1,
+        )
+        for index in range(1, 5)
+    )
+
+    with pytest.raises(ValueError, match="degree 4"):
+        product_pablo_module._plan_polymer_external_links(
+            edges,
+            reserved_crosslink_keys={("C", "4YB", 1, "")},
+        )
+
+
+def test_product_state_pablo_rejects_branch_on_reserved_crosslink_residue():
+    """A reducing residue cannot spend a second Pablo crosslink on a branch."""
+    root = ("C", "4YB", 1, "")
+    first = ("C", "0YB", 2, "")
+    branch = ("C", "1MA", 3, "")
+    second_branch = ("C", "2MA", 4, "")
+
+    with pytest.raises(ValueError, match="reserved protein crosslink"):
+        product_pablo_module._plan_polymer_external_links(
+            (
+                product_pablo_module._PolymerExternalBond(root, first, "O4", "C1", 1),
+                product_pablo_module._PolymerExternalBond(root, branch, "O3", "C1", 1),
+                product_pablo_module._PolymerExternalBond(root, second_branch, "O6", "C1", 1),
+            ),
+            reserved_crosslink_keys={root},
+        )
 
 
 def test_product_state_pablo_crosslink_alias_rejects_existing_cxl_name():
@@ -1282,6 +1533,68 @@ def _product_residue_mappings(
         }
         for source_number, target_number in zip(source_numbers, target_numbers, strict=True)
     }
+
+
+def _repeated_glycan_fragment() -> GeneratedPolymerFragment:
+    """Return a two-residue fragment with duplicated GLYCAM residue and atom names."""
+    atoms = []
+    serial = 1
+    for residue_number in (2, 3):
+        for atom_name, element in (("C1", "C"), ("C2N", "C"), ("O2N", "O")):
+            atoms.append(
+                PdbAtomRecord(
+                    serial=serial,
+                    atom_index=serial - 1,
+                    atom_name=atom_name,
+                    residue_name="4YB",
+                    chain_id="C",
+                    residue_number=residue_number,
+                    x=0.0,
+                    y=0.0,
+                    z=0.0,
+                    element=element,
+                    record_name="HETATM",
+                )
+            )
+            serial += 1
+    return GeneratedPolymerFragment.from_atom_records(
+        atoms,
+        bonds=((2, 3), (5, 6)),
+        bond_orders=((2, 3, 2.0), (5, 6, 2.0)),
+        reactive_atom_serial=1,
+        name="repeated_4yb",
+    )
+
+
+def _repeated_glycan_product_pdb() -> str:
+    """Return a product PDB whose emitted residue numbers differ from the source."""
+    lines = [*_product_protein_atoms()]
+    serial = 200
+    serial_by_residue_atom = {}
+    residue_names = {10: "Z11", 11: "Z22"}
+    for residue_number in (10, 11):
+        for atom_name, element in (("C1", "C"), ("C2N", "C"), ("O2N", "O")):
+            lines.append(
+                _pdb_atom(
+                    serial,
+                    atom_name,
+                    residue_names[residue_number],
+                    "C",
+                    residue_number,
+                    element,
+                    record="HETATM",
+                )
+            )
+            serial_by_residue_atom[(residue_number, atom_name)] = serial
+            serial += 1
+    lines.append(f"CONECT    9{serial_by_residue_atom[(10, 'C1')]:5d}\n")
+    for residue_number in (10, 11):
+        c2n = serial_by_residue_atom[(residue_number, "C2N")]
+        o2n = serial_by_residue_atom[(residue_number, "O2N")]
+        lines.append(f"CONECT{c2n:5d}{o2n:5d}\n")
+        lines.append(f"CONECT{o2n:5d}{c2n:5d}\n")
+    lines.append("END\n")
+    return "".join(lines)
 
 
 def _product_pdb() -> str:

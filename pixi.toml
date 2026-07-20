@@ -132,6 +132,7 @@ pytorch               = "2.6.*"
 
 [feature.builder.pypi-dependencies]
 polymerist   = ">=1.1.0"
+openmmforcefields = ">=0.15.1, <0.16"
 openff-pablo = { git = "https://github.com/openforcefield/openff-pablo.git", tag = "v0.2.2" }
 # NOTE: espaloma-charge is intentionally excluded. polymerist eagerly imports
 # it at module level (_toolkits.py), which triggers a broken dgl -> graphbolt
