@@ -124,6 +124,9 @@ consistent model and validate it again.
 | Failure near residues reported in `REMARK 465` | Missing-coordinate residues or missing heavy atoms affect chemistry or termini | Read PDB header and visualize gaps | Model missing regions with an external tool when scientifically appropriate | PolyzyMD should receive a curated result |
 | `declared leaving atoms {'HZ3', 'HZ2'} not found in any LYX residue` or similar Pablo crosslink leaving-atom error | A product-state modified PDB was passed to Pablo with reactant-state leaving atom names after PolyzyMD had already removed those atoms | Inspect the emitted product PDB for exact product residue and atom names, for example `LYX:NZ` to `NHX:C047`, and confirm the leaving atoms are absent from the linked residue | Use a product-state `ccd_pablo.crosslinks` entry with exact emitted residue and atom names and `leaving_atoms: [[], []]` when PolyzyMD has already removed the leaving atoms | Do not hardcode canonical lysine names such as `HZ2`/`HZ3`; generated hydrogens may be named `H11`/`H13`, and product PDBs should not ask Pablo to remove them again |
 | `Atom A:LYX23.NZ ... has 1 radical electrons, formal charge +1, and 3 bonds` followed by `does not currently support parsing molecules with S- and P-block radicals` | Product-state residue definitions carried protonated lysine `NZ+` charge into an acylated lysine with only `CE`, one `HZ`, and the amide carbon bonded | Inspect the Pablo product definition for `LYX:NZ` charge and bonds; confirm product PDB has removed the extra lysine hydrogens and contains the `LYX:NZ` to `NHX:C047` bond | Generate the product-state `LYX` definition with neutral `NZ` when the crosslinked nitrogen has been deprotonated by leaving-hydrogen removal | Do not treat this as an SBMA sulfonate radical until the atom-level OpenFF diagnostic identifies sulfur or oxygen |
+| Repeated GLYCAM endpoint atoms such as `POU`/`PIN` fail during Pablo matching | Repeated canonical residue names or identical endpoint atom names make product-state matching ambiguous | Inspect `assembled_crosslinked.pablo_scoped.pdb` and the attachment `product_residue_mappings` in workflow diagnostics | Current PolyzyMD uses attachment-scoped Pablo aliases and restores canonical names after Pablo. If the failure persists, curate the glycan graph or provide less ambiguous residue/atom identities | Scoped `Z##` aliases are internal and must not be treated as final GLYCAM names |
+| `Product-state Pablo glycan graph for attachment-local residue ... has degree ...` or `... plus a reserved protein crosslink` | A branched/repeated glycan exceeds Pablo's representable prior/posterior/crosslink degree for one residue | Locate the attachment-local residue and listed atoms in the glycan PDB | Move the branch away from the reducing residue, split/curate the glycan, or wait for broader Pablo support | Strict GLYCAM does not flatten topology or fall back to Sage |
+| `Product-state Pablo definitions are ambiguous: residue ... has the same non-leaving atom-name selector ... but different chemistry` | Same residue selector is associated with different leaving/linking chemistry | Compare generated product-state definitions and the residues sharing the selector | Use distinct residue names or atom names for chemically different product-state templates, or rely on scoped aliases for identical repeated chemistry | This error prevents accidental residue collapse before a lower-level Pablo failure |
 
 ## Product-state modified residues
 
@@ -184,6 +187,13 @@ chemistry. For the audited G42666 CONECT fixture, the selected transformation is
 anomeric carbon serial 4, leaving oxygen/hydrogen serials 1 and 2, retained ring
 oxygen serial 14, removal of one Asn `ND2` hydrogen, and formation of a single
 `ND2`-C1 bond.
+
+For strict GLYCAM production builds, the accepted glycan PDB must also preserve
+canonical GLYCAM residue and atom names. PolyzyMD may temporarily replace residue
+names with attachment-scoped Pablo aliases in an internal
+`assembled_crosslinked.pablo_scoped.pdb` file, but it restores canonical names
+before native OpenMM GLYCAM parameterization and records the alias mapping in
+workflow provenance.
 
 ## Disulfides
 

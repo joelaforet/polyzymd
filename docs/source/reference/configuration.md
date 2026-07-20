@@ -631,6 +631,8 @@ output:
 force_field:
   protein: "ff14sb_off_impropers_0.0.4.offxml"  # Protein force field
   small_molecule: "openff-2.0.0.offxml"          # Ligand/polymer force field
+  glycan_policy: "sage_fallback"                 # sage_fallback or strict_glycam
+  conjugate_parameterization: "openff_interchange" # or native_openmm_glycam
 ```
 
 ### Available Force Fields
@@ -641,6 +643,32 @@ force_field:
 **Small Molecule:**
 - `openff-2.0.0.offxml` - OpenFF Sage 2.0 (recommended)
 - `openff-2.1.0.offxml` - OpenFF Sage 2.1
+
+**Conjugated glycans:**
+
+| Field | Values | Default | Notes |
+|-------|--------|---------|-------|
+| `glycan_policy` | `sage_fallback`, `strict_glycam` | `sage_fallback` | `sage_fallback` preserves the backward-compatible OpenFF Sage/Interchange route. `strict_glycam` requires explicit native OpenMM GLYCAM/NLN handling for glycan-domain moieties. |
+| `conjugate_parameterization` | `openff_interchange`, `native_openmm_glycam` | `openff_interchange` | `native_openmm_glycam` is the exact OpenMM GLYCAM route for canonical N-linked glycans. It requires `glycan_policy: strict_glycam`. |
+
+For strict GLYCAM N-glycosylation, use:
+
+```yaml
+force_field:
+  protein: ff14sb_off_impropers_0.0.4.offxml
+  small_molecule: openff-2.0.0.offxml
+  glycan_policy: strict_glycam
+  conjugate_parameterization: native_openmm_glycam
+```
+
+Migration note: existing configs that omit these keys continue to use
+`glycan_policy: sage_fallback` with
+`conjugate_parameterization: openff_interchange`. To migrate a canonical
+GLYCAM-named CONECT PDB N-glycan build to strict native GLYCAM, set both
+`glycan_policy: strict_glycam` and
+`conjugate_parameterization: native_openmm_glycam`. Strict GLYCAM never silently
+falls back to Sage. See {doc}`glycam_exact_export` for exact OpenMM/GROMACS
+sidecar and audit semantics.
 
 ### Key Collision Warnings
 

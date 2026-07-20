@@ -1,30 +1,45 @@
-# Build an N-glycosylated coordinate artifact from a glycan PDB
+# Build an N-glycosylated GLYCAM/OpenMM system
 
-Use this guide when you have a residue-resolved multi-residue glycan PDB that
-PolyzyMD can attach to an asparagine site with the current PDB-fragment
-N-glycosylation workflow. GlyGen/RCSB is shown as one acquisition workflow, not
-as a provenance requirement.
+Use this guide when you have one or more residue-resolved, canonical
+GLYCAM-named glycan PDB fragments and want PolyzyMD to attach them to Asn sites,
+parameterize the product with native OpenMM GLYCAM, and run or export through the
+PolyzyMD exact OpenMM/GROMACS paths.
 
 ```{important}
-This workflow is **coordinate-only by default**. It writes a residue-resolved
-crosslinked PDB plus provenance, but it does not perform GLYCAM, CHARMM, OpenFF,
-or Pablo parameterization. Treat the output as an inspected structural handoff
-for external workflows.
+This is an explicit opt-in production route for strict GLYCAM systems. It is not
+the backward-compatible default Sage/Interchange route. Existing configs that do
+not opt in keep `force_field.glycan_policy: sage_fallback` with
+`force_field.conjugate_parameterization: openff_interchange`. Strict GLYCAM
+requires both `glycan_policy: strict_glycam` and
+`conjugate_parameterization: native_openmm_glycam`.
+```
+
+```{warning}
+In this workflow, **exact** means PolyzyMD owns exact force-field parameter
+assignment and exact transfer of local OpenMM exception/exclusion semantics into
+the PolyzyMD GROMACS export. It does not mean bitwise-identical full PME total
+energies between OpenMM and GROMACS. PME mesh, interpolation order, tolerances,
+cutoff modifiers, and related engine settings are engine hyperparameters that
+users must configure deliberately and validate for their ensemble.
 ```
 
 ## Prerequisites
 
-- A cleaned protein PDB containing the target Asn with explicit hydrogens.
-- A residue-resolved glycan PDB for the desired glycan. The reducing-end
-  anomeric `C1` must have explicit hydroxyl O/H atoms, either as an ordinary
-  residue-local hydroxyl or as the supported separate-residue `ROH` cap with
-  `O1`/`HO1` atom names.
+- A cleaned protein PDB containing the target Asn residue or residues with
+  explicit hydrogens.
+- One residue-resolved glycan PDB per attachment. The glycan must use canonical
+  GLYCAM residue and atom names and must contain complete curated `CONECT`
+  records for the glycan graph.
+- The reducing-end anomeric `C1` must have explicit hydroxyl O/H atoms, either
+  as an ordinary residue-local hydroxyl or as the supported separate-residue
+  `ROH` cap with `O1`/`HO1` atom names.
 - A PolyzyMD configuration that enables `conjugation` and defines one
-  `n_glycosylation` attachment using `moiety.input_path`.
+  `n_glycosylation` attachment per Asn site using `moiety.input_path`.
 
-The current PDB-fragment ingestion MVP supports one residue-resolved glycan PDB
-attachment per coordinate-only build and does not mix PDB-fragment inputs with
-SMILES or polymer moiety sources.
+The exact GLYCAM route supports multiple glycan attachments, for example Asn25
+and Asn60 in the same protein. Each glycan attachment is scoped internally so
+Pablo can parse repeated or branched residue names without collapsing identities;
+PolyzyMD restores the canonical GLYCAM names after the Pablo-only matching step.
 
 ## 1. Find the glycan on RCSB PDB
 
@@ -70,92 +85,287 @@ SMILES or polymer moiety sources.
   explicit hydroxyl O/H group. The `ROH:O1`/`ROH:HO1` cap is accepted, but not
   required when an ordinary residue-local hydroxyl is present.
 
-## 3. Configure the N-glycosylation attachment
+## 3. Configure strict native GLYCAM parameterization
 
-Add one enabled attachment under `conjugation.attachments`. Use the cleaned
-protein's Asn chain and residue number, and point `moiety.input_path` at the
-downloaded glycan PDB.
+Set the force-field route explicitly. `native_openmm_glycam` requires
+`strict_glycam`; the schema rejects `native_openmm_glycam` combined with
+`sage_fallback`.
 
 ```yaml
-enzyme:
-  name: 5fyj_example
-  pdb_path: structures/5fyj_clean_asn.pdb
+force_field:
+  protein: ff14sb_off_impropers_0.0.4.offxml
+  small_molecule: openff-2.0.0.offxml
+  glycan_policy: strict_glycam
+  conjugate_parameterization: native_openmm_glycam
+```
 
+This route uses the OpenMM-vendored Amber14 XML stack for ff14SB protein,
+GLYCAM_06j-1 glycan residues, GLYCAM NLN for modified Asn, and TIP3P water.
+The native OpenMM system is built with fixed route invariants: PME nonbonded
+method, 1.0 nm nonbonded cutoff, `HBonds` constraints, and rigid water. These
+invariants are recorded in the native GLYCAM audit and exact sidecar.
+Disconnected precharged Sage components such as DMSO, free polymer molecules,
+and other disconnected organics are admitted through `SMIRNOFFTemplateGenerator`
+when they have Sage-domain provenance and assigned partial charges. Covalently
+attached Sage polymer on the same protein as a GLYCAM glycan is unsupported.
+
+Disconnected multi-residue Sage polymers are represented internally as one
+OpenMM residue only for `SMIRNOFFTemplateGenerator` template matching. The
+original monomer segmentation and component provenance remain in the audit
+artifacts.
+
+## 4. Configure one or more N-glycosylation attachments
+
+Add one enabled attachment under `conjugation.attachments` for each Asn site. Use
+the cleaned protein's Asn chain and residue number, set
+`moiety.force_field_domain: glycan`, and point `moiety.input_path` at the
+canonical GLYCAM-named CONECT PDB.
+
+```yaml
 conjugation:
   enabled: true
+  ccd_pablo:
+    enabled: true
+    lookup_policy: auto_download
+    use_canonical_atom_names: false
   attachments:
-    - name: asn60_residue_resolved_glycan
+    - name: asn25_glycan
+      site:
+        chain_id: A
+        residue_name: ASN
+        residue_number: 25
+        atom_name: ND2
+      moiety:
+        name: G42666_asn25
+        force_field_domain: glycan
+        input_path: structures/G42666_asn25_glycam.pdb
+      mechanism:
+        name: n_glycosylation
+    - name: asn60_glycan
       site:
         chain_id: A
         residue_name: ASN
         residue_number: 60
         atom_name: ND2
       moiety:
-        name: G80966KZ
-        input_path: structures/G80966KZ_glycam.pdb
+        name: G80966_asn60
+        force_field_domain: glycan
+        input_path: structures/G80966_asn60_glycam.pdb
       mechanism:
         name: n_glycosylation
 ```
 
 The built-in mechanism forms an Asn `ND2`--glycan reducing-end `C1` bond. It
 removes one Asn `ND2` hydrogen and the validated glycan hydroxyl O/H leaving
-atoms, renames the protein-site residue to `ASX`, and preserves the remaining
-glycan residue labels in chain `C`.
+atoms. PolyzyMD uses attachment-scoped internal residue aliases while Pablo parses
+the full modified topology, then restores canonical glycan names and routes the
+modified Asn residue to the GLYCAM `NLN` template during OpenMM system creation.
 
-## 4. Run the coordinate-only build through the Python API
+## 5. Use a tested YAML shape
 
-Use the public config-driven conjugation API. The default
-`pdb_fragment_output_mode` is `coordinate_only`; the explicit settings below make
-that choice visible.
+The following configuration uses only implemented fields. Adjust file paths,
+durations, and counts for your system.
 
-```python
-from pathlib import Path
+```yaml
+name: glycam_asn25_asn60
+description: Strict GLYCAM N-glycosylated OpenMM build
 
-from polyzymd.builders.conjugation import build_conjugate_from_config
-from polyzymd.builders.conjugation import ConjugatedPolymerSystemSettings
+enzyme:
+  name: enzyme
+  pdb_path: structures/enzyme_prepared.pdb
 
-result = build_conjugate_from_config(
-    "config.yaml",
-    output_dir=Path("artifacts/nglycan_asn60"),
-    settings=ConjugatedPolymerSystemSettings(
-        pdb_fragment_output_mode="coordinate_only",
-    ),
-)
+substrate: null
 
-print(result.status)
-print(result.artifact_paths["pdb_fragment_coordinate_only_pdb"])
-print(result.artifact_paths["pdb_fragment_pdb_fragment_ingestion"])
+polymers:
+  enabled: true
+  generation_mode: cached
+  type_prefix: FREEPOLY
+  monomers:
+    - label: A
+      probability: 1.0
+      name: EGPMA
+      residue_name: EGP
+  length: 4
+  count: 2
+  sdf_directory: structures/free_polymers
+
+conjugation:
+  enabled: true
+  ccd_pablo:
+    enabled: true
+    lookup_policy: auto_download
+    use_canonical_atom_names: false
+  attachments:
+    - name: asn25_glycan
+      site:
+        chain_id: A
+        residue_name: ASN
+        residue_number: 25
+        atom_name: ND2
+      moiety:
+        name: G42666_asn25
+        force_field_domain: glycan
+        input_path: structures/G42666_asn25_glycam.pdb
+      mechanism:
+        name: n_glycosylation
+    - name: asn60_glycan
+      site:
+        chain_id: A
+        residue_name: ASN
+        residue_number: 60
+        atom_name: ND2
+      moiety:
+        name: G80966_asn60
+        force_field_domain: glycan
+        input_path: structures/G80966_asn60_glycam.pdb
+      mechanism:
+        name: n_glycosylation
+
+solvent:
+  primary:
+    type: water
+    model: tip3p
+  co_solvents:
+    - name: dmso
+      mole_fraction: 0.10
+      residue_name: DMS
+  ions:
+    neutralize: false
+    nacl_concentration: 0.0
+    kcl_concentration: 0.0
+    mgcl2_concentration: 0.0
+  box:
+    padding: 1.2
+    shape: rhombic_dodecahedron
+    target_density: 1.0
+    tolerance: 2.0
+
+thermodynamics:
+  temperature: 300.0
+  pressure: 1.0
+
+simulation_phases:
+  equilibration_stages:
+    - name: heat
+      duration: 0.1
+      samples: 10
+      ensemble: NVT
+      temperature: 300.0
+      position_restraints:
+        - group: protein_heavy
+          force_constant: 4184.0
+    - name: density
+      duration: 0.1
+      samples: 10
+      ensemble: NPT
+      temperature: 300.0
+      barostat: MC
+  production:
+    ensemble: NPT
+    duration: 1.0
+    samples: 100
+    report_interval: 5000
+    time_step: 2.0
+    checkpoint_interval: 600.0
+
+output:
+  projects_directory: outputs/projects
+  scratch_directory: outputs/scratch
+  naming_template: "{enzyme}_{duration}ns_{temperature}K_run{replicate}"
+  trajectory_format: dcd
+
+force_field:
+  protein: ff14sb_off_impropers_0.0.4.offxml
+  small_molecule: openff-2.0.0.offxml
+  glycan_policy: strict_glycam
+  conjugate_parameterization: native_openmm_glycam
+
+engine: openmm
+openmm:
+  platform: CUDA
+  precision: mixed
 ```
 
-Do not use the coordinate-only result as a ready-to-run OpenMM system. It has no
-final Interchange, no `system.xml`, and no solvated topology.
+Automatic ion placement and neutralization are not audited for this strict native
+GLYCAM route. Keep ion settings at zero unless the implementation explicitly
+accepts your ion templates.
 
-## 5. Inspect the artifacts
+## 6. Run the build
 
-The default coordinate-only paths are:
+Use the normal PolyzyMD build entry point for your project. The config above
+selects the native GLYCAM handoff internally; the returned conjugation result
+contains an `ExactExportBundle` rather than a public vanilla Interchange.
+
+```bash
+pixi run -e build polyzymd build -c config.yaml
+```
+
+The OpenMM execution path uses the authoritative native OpenMM `System`,
+`Topology`, and positions from that bundle.
+
+## 7. Inspect provenance artifacts
+
+The important exact-route artifacts are:
 
 | Artifact | Typical path | What to check |
 |----------|--------------|---------------|
-| Crosslinked PDB | `artifacts/nglycan_asn60/conjugate-construction/pdb_fragment_coordinate_only_conjugate.pdb` | Asn site is `ASX`; glycan residues are in chain `C`; hydroxyl leaving atoms are absent; the PDB contains linkage `CONECT`/`LINK` evidence. |
-| PDB-fragment ingestion sidecar | `artifacts/nglycan_asn60/conjugate-polymerist-cache/asn60_residue_resolved_glycan_pdb_fragment_ingestion.json` | `connectivity_provenance`, residue mapping, and the `n_glycosylation_profile` with reducing `C1`, removed hydroxyl atoms, and linkage diagnostics. |
-| Workflow JSON | `artifacts/nglycan_asn60/conjugated_polymer_system_workflow.json` | `status: coordinate_only` and artifact path metadata. |
+| Solvated PDB | `.../solvated_conjugate.pdb` | Canonical glycan residue and atom names are restored after Pablo-only scoped aliasing. |
+| Native GLYCAM audit | `.../native_openmm_glycam_audit.json` | `route: native_openmm_glycam`, `residue_templates` maps each modified Asn/ASX residue to `NLN`, `glycam_template_matches` lists matched GLYCAM residues, and `sage_template_generator.proof_no_glycan_entered_sage` is `true`. |
+| Exact exception sidecar | `.../exact_openmm_exceptions.json` | Schema v2 sidecar with authoritative OpenMM atoms, bonds, nonbonded particles, exceptions, constraints, route invariants, and normalized GROMACS output identity/hashes. |
+| Workflow JSON | `.../conjugated_polymer_system_workflow.json` | `artifact_paths.native_openmm_glycam_audit` and `artifact_paths.exact_openmm_exceptions` point to the audit and sidecar. |
 
-Raw glycan PDBs must include complete curated `CONECT` records. PolyzyMD
-rejects missing or detectably invalid explicit graphs, but cannot prove every
-expected chemical bond is present; for accepted fragments, confirm the sidecar
-reports explicit `CONECT` provenance and inspect the linkage diagnostics before
-parameterizing elsewhere.
+For quick inspection:
 
-## Experimental Pablo/OpenFF continuation
+```bash
+python -m json.tool outputs/scratch/.../native_openmm_glycam_audit.json | less
+python -m json.tool outputs/scratch/.../exact_openmm_exceptions.json | less
+```
 
-`ConjugatedPolymerSystemSettings(pdb_fragment_output_mode="experimental_pablo")`
-continues past the coordinate artifact into the current Pablo/OpenFF path. This
-mode is experimental for residue-resolved glycan PDB fragments and is not a GLYCAM or CHARMM
-parameterization workflow. Prefer `coordinate_only` unless you are explicitly
-testing the Pablo/OpenFF continuation and are prepared to validate failures and
-charge/parameter provenance yourself.
+## 8. Export exact GROMACS files only through PolyzyMD
+
+For `engine: gromacs`, or when using `GromacsExporter` with an exact bundle,
+PolyzyMD writes a baseline topology through a private Interchange and then patches
+it with the authoritative OpenMM exception sidecar. Before patching, the exporter
+checks count, atom-order identity, topology-bond identity, and normalized GROMACS
+hashes against the sidecar and fails closed on mismatch. The patched topology
+sets `gen-pairs` to `no`, disables automatic bonded exclusions per molecule type,
+adds explicit function-2 `[ pairs ]` rows for every nonzero OpenMM exception, and
+adds exact `[ exclusions ]` rows. It then writes an audit such as
+`<prefix>_exact_gromacs_audit.json`.
+
+Do not call raw `Interchange.to_gromacs()` on the underlying private Interchange.
+That raw export loses exact GLYCAM mixed scaled/unscaled explicit 1-4 exception
+semantics.
+
+After export, compare short OpenMM and GROMACS smoke trajectories or energy/force
+checks under your chosen PME settings. Treat differences from PME grid/order or
+modifier choices as engine configuration differences to manage, not as evidence
+that PolyzyMD changed local bonded or exception parameters.
+
+## Limitations
+
+- The glycan input must be a canonical GLYCAM-named PDB with complete `CONECT`
+  records. PolyzyMD rejects missing or detectably invalid explicit graphs and
+  does not infer bonds from coordinates.
+- Strict GLYCAM never silently falls back to Sage. Use `sage_fallback` only as an
+  explicit OpenFF/Sage route, not as a hidden rescue path.
+- Covalently attached Sage polymer on the same protein as a GLYCAM glycan is
+  unsupported because cross-boundary bonded and exception provenance is not
+  audited. Disconnected Sage components are supported when precharged and routed
+  through `SMIRNOFFTemplateGenerator`.
+- Pablo topology representability has degree and residue-template limits. If the
+  full modified topology is not representable, PolyzyMD fails closed.
+- Only PolyzyMD's exact OpenMM and exact GROMACS paths are guaranteed for this
+  workflow. Arbitrary vanilla Interchange exporters are not guaranteed.
+- Exact GROMACS export currently rejects `component_info` position-restraint
+  postprocessing because it cannot be proven without changing exact topology
+  semantics. If position restraints are required, use the exact OpenMM route with
+  staged `position_restraints` in `simulation_phases.equilibration_stages`, or
+  use the explicit Sage/OpenFF route for GROMACS position-restraint workflows.
 
 ## Related reference
 
 - {doc}`../reference/protein_modification_config`
 - {doc}`../reference/conjugation_support_matrix`
+- {doc}`../reference/glycam_exact_export`
+- {doc}`../reference/openff_pdb_ingestion`

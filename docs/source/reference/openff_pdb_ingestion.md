@@ -66,6 +66,12 @@ Do not collapse the whole polymer chain into one residue to make ingestion easie
 Each monomer residue identity should remain explicit so custom residue definitions
 and OpenFF parameterization can reason about the actual product graph.
 
+For strict GLYCAM N-glycosylation, PolyzyMD may write a Pablo-only product PDB
+using attachment-scoped internal residue aliases. This avoids repeated-residue
+and branched-residue ambiguity while Pablo parses the full modified topology.
+After Pablo succeeds, PolyzyMD restores canonical GLYCAM residue names and atom
+names on the topology metadata before native OpenMM GLYCAM parameterization.
+
 ## PDB-fragment glycan ingestion contract
 
 Residue-resolved glycan moieties supplied through `moiety.input_path` are treated
@@ -163,6 +169,10 @@ narrow custom-substructure proof of concept. Do not suppress the error.
 | `PDB fragment ingestion requires complete CONECT records; coordinate inference is disabled` | A residue-resolved fragment PDB lacks explicit graph connectivity | Count `CONECT` records and inspect source serial coverage | Add curated complete `CONECT` records upstream | PolyzyMD will not infer bonds from coordinates |
 | `PDB fragment CONECT graph connectivity was accepted, but bond orders could not be assigned` | The graph is explicit but the PDB lacks enough chemically consistent information for radical-free bond-order assignment | Inspect explicit hydrogens, formal charges, and ambiguous valences; compare against an SDF/OpenFF source | Provide an SDF/OpenFF-native fragment source or curate the PDB graph and charges | Connectivity is not repaired or altered during this step |
 | `Ambiguous glycan anomeric motif assignments` | More than one graph-valid reducing-end motif exists in a glycan fragment | Inspect candidate serials in the error message | Configure `moiety.link_site` to select the intended anomeric carbon | Do not rely on atom names such as `C1` to break ties |
+| Product-state failure involving repeated glycan endpoint atoms such as `POU`/`PIN`, or repeated residue names in a branched glycan | Pablo residue matching could not distinguish repeated canonical residue definitions or chain-C endpoint roles | Inspect `assembled_crosslinked.pablo_scoped.pdb`, attachment `product_residue_mappings`, and the canonical-to-scoped alias metadata | Current PolyzyMD writes attachment-scoped aliases and restores canonical names after Pablo. If the failure persists, curate distinct residue/atom identities or reduce ambiguity in the input glycan graph | Do not export or simulate the Pablo-scoped names; they are internal parsing identities only |
+| `Product-state Pablo glycan graph for attachment-local residue ... has degree ...` or `... has ... glycan neighbors ... plus a reserved protein crosslink` | The branched glycan exceeds the topology degree Pablo 0.2.2 can represent for a residue definition | Locate the attachment-local residue key and listed atoms in the glycan PDB and product mappings | Move the branch away from the reducing residue, split/curate the glycan, or wait for broader Pablo representability | Strict GLYCAM fails closed; PolyzyMD does not flatten the graph or silently route the glycan through Sage |
+| `Product-state Pablo definitions are ambiguous: residue ... has the same non-leaving atom-name selector ... but different chemistry` | Same residue name and retained atom-name selector occurs with different leaving/linking chemistry | Compare generated product-state definitions and repeated residue instances | Use distinct residue names or atom names for chemically different product-state templates, or rely on PolyzyMD scoped aliases when the chemistry is identical | This guards against lower-level Pablo matching failures and prevents accidental residue collapse |
+| `Product-state scoped Pablo aliasing could not find emitted residue ...` | Attachment residue mapping points to a residue not present in the emitted product PDB | Inspect `product_residue_mappings`, product PDB residue numbers, insertion codes, and attachment endpoint provenance | Fix the source glycan `CONECT`, site selection, or product assembly so each mapped residue is emitted exactly once | This is a mapping/provenance error, not a force-field fallback opportunity |
 
 ## Catalog maintenance rule
 
