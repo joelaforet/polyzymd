@@ -956,10 +956,6 @@ def _build_phases_config(metadata: SimMetadata) -> dict:
             "ensemble": prod.ensemble,
             "duration": prod.duration_ns,
             "samples": prod.samples,
-            "report_interval": max(
-                1,
-                int(prod.duration_ns * 1e6 / prod.time_step_fs) // prod.samples,
-            ),
             "checkpoint_interval": 60.0,
             "time_step": prod.time_step_fs,
             "thermostat": prod.thermostat,

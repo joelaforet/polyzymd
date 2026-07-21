@@ -831,6 +831,15 @@ def _convert_to_fs(value: float, unit: str) -> float:
 # ---------------------------------------------------------------------------
 
 
+def calculate_report_interval(total_steps: int, total_samples: int) -> int:
+    """Calculate a trajectory reporter interval from the requested frame count."""
+    if total_steps <= 0:
+        raise ValueError("total_steps must be positive")
+    if total_samples <= 0:
+        raise ValueError("total_samples must be positive")
+    return max(1, total_steps // total_samples)
+
+
 def get_next_segment_info(
     progress: SimulationProgress,
     total_steps: int,
@@ -866,8 +875,8 @@ def get_next_segment_info(
         return None
 
     # Fixed interval from the global config — same for every segment
-    report_interval = max(1, total_steps // total_samples)
-    samples = remaining // report_interval
+    report_interval = calculate_report_interval(total_steps, total_samples)
+    samples = total_steps // report_interval - completed // report_interval
 
     return {
         "segment_index": progress.next_segment_index,

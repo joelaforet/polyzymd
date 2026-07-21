@@ -25,13 +25,12 @@ Even if your protocol is minimal, represent it as one or more named stages.
 simulation_phases:
   equilibration_stages:
     - name: "heating"
-      duration: 0.288
       samples: 50
       ensemble: "NVT"
       temperature_start: 60.0
       temperature_end: 293.0
       temperature_increment: 1.0
-      temperature_interval: 1200.0
+      temperature_interval_steps: 600  # increase temperature by `temperature_increment` every this many steps
       position_restraints:
         - group: "protein_heavy"
           force_constant: 4184.0
@@ -69,8 +68,18 @@ simulation_phases:
 ### Heating stage
 
 Use a heating stage when you want a gentler start for a crowded or fragile
-system. Set `temperature_start`, `temperature_end`, and optionally the ramp
-increment and interval.
+system. Set `temperature_start`, `temperature_end`, and
+`temperature_increment` in K, plus `temperature_interval_steps` in MD steps. PolyzyMD calculates the number of updates needed to reach
+the endpoint and derives the duration. If the final update would overshoot,
+PolyzyMD shortens only that final temperature increase. Validation and
+simulation logs report the derived duration before the stage runs.
+
+The ramp ends when the target reaches `temperature_end`; it does not include a
+hold at that temperature. Add a following constant-temperature stage when the
+system should equilibrate at the endpoint. Both engines hold each target for
+the requested step interval and change it at the same integration-step
+boundary. GROMACS encodes each boundary change over one MD timestep because its
+annealing schedule is piecewise linear.
 
 ### Restrained relaxation stage
 
@@ -98,10 +107,11 @@ Omit `position_restraints` when you want the stage to run fully unrestrained.
 simulation_phases:
   equilibration_stages:
     - name: "heating"
-      duration: 0.288
       ensemble: "NVT"
       temperature_start: 60.0
       temperature_end: 300.0
+      temperature_increment: 1.0
+      temperature_interval_steps: 600
       position_restraints:
         - group: "protein_heavy"
           force_constant: 4184.0
@@ -118,10 +128,11 @@ simulation_phases:
 simulation_phases:
   equilibration_stages:
     - name: "heating"
-      duration: 0.288
       ensemble: "NVT"
       temperature_start: 60.0
       temperature_end: 300.0
+      temperature_increment: 1.0
+      temperature_interval_steps: 600
       position_restraints:
         - group: "protein_heavy"
           force_constant: 4184.0
@@ -172,7 +183,7 @@ position restraints.
 
 ### temperature overshoots the target
 
-Use a smaller `temperature_increment` or a longer `temperature_interval`.
+Use a smaller `temperature_increment` or a larger `temperature_interval_steps`.
 
 ### protein moves too much while polymers relax
 
