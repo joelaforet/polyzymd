@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -332,6 +333,39 @@ class GeneratedPolymerFragment(BaseModel):
             reactive_atom_index=self.reactive_atom_index,
             reactive_atom_name=self.reactive_atom_name,
             name=name or self.name,
+        )
+
+
+class PreparedFragment(GeneratedPolymerFragment):
+    """Authoritative provider-neutral fragment used by conjugation construction."""
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    source_identity: str = Field(..., min_length=1)
+    source_kind: Literal["polymer", "smiles", "pdb_fragment"]
+    sidecars: dict[str, Path] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    diagnostics: tuple[str, ...] = Field(default_factory=tuple)
+
+    @classmethod
+    def from_generated_fragment(
+        cls,
+        fragment: GeneratedPolymerFragment,
+        *,
+        source_identity: str,
+        source_kind: Literal["polymer", "smiles", "pdb_fragment"],
+        sidecars: Mapping[str, Path] | None = None,
+        provenance: Mapping[str, Any] | None = None,
+        diagnostics: Sequence[str] = (),
+    ) -> PreparedFragment:
+        """Promote generation output into the construction contract once."""
+        return cls(
+            **fragment.model_dump(),
+            source_identity=source_identity,
+            source_kind=source_kind,
+            sidecars=dict(sidecars or {}),
+            provenance=dict(provenance or {}),
+            diagnostics=tuple(diagnostics),
         )
 
 

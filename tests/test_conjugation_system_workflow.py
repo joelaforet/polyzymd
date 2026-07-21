@@ -1559,8 +1559,8 @@ def test_attachment_spec_uses_generic_reaction_and_smiles_provider(monkeypatch, 
     )
 
     assert spec.reaction_name == "n_glycosylation"
-    assert spec.fragment.source_kind == "moiety"
-    assert spec.source_fragment is source_fragment
+    assert spec.fragment.source_kind == "smiles"
+    assert spec.fragment.source_identity == str(tmp_path / "nag.sdf")
     assert spec.generated_fragment is generated_fragment
     assert generation is None
     assert reactive_index == 0

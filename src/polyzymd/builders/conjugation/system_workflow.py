@@ -252,7 +252,7 @@ def build_conjugated_polymer_system_from_config(
     generations = tuple(payload[1] for payload in spec_payloads)
     reactive_sequence_indices = tuple(payload[2] for payload in spec_payloads)
     reactive_selectors = tuple(payload[3] for payload in spec_payloads)
-    modifiers = tuple(spec.generated_fragment for spec in specs)
+    modifiers = tuple(spec.fragment for spec in specs)
     resolved_plans = tuple(spec.resolved_plan for spec in specs)
     resolved_force_fields = resolve_conjugate_force_fields(config)
     use_native_glycam = native_glycam_enabled(config)
@@ -558,8 +558,8 @@ def build_direct_moiety_conjugate(
         relaxed_conjugate_pdb_path=relaxed_pdb,
         solvated_pdb_path=solvated_pdb_path,
         final_interchange_created=builder.interchange is not None,
-        modifier=specs[0].generated_fragment,
-        modifiers=tuple(spec.generated_fragment for spec in specs),
+        modifier=specs[0].fragment,
+        modifiers=tuple(spec.fragment for spec in specs),
         attachment_specs=tuple(specs),
         relaxed_conjugate_topology=relaxed_topology,
         solvated_topology=builder.solvated_topology,
@@ -680,8 +680,7 @@ def _build_attachment_spec(
             attachment_index=attachment_index,
             reaction_name=attachment.mechanism.name,
             charged_sdf_path=source.sidecars.get("charged_sdf"),
-            source_kind="polymer" if source.source_kind == "polymer" else "moiety",
-            source_fragment=source.source_fragment,
+            source_kind=source.source_kind,
             sidecars=source.sidecars,
         ),
         source.generation,
@@ -760,13 +759,13 @@ def _build_pdb_fragment_coordinate_only_result(
         crosslinked_conjugate_pdb_path=output_path,
         construction=construction,
         attachment_specs=specs,
-        generated_sequence=getattr(specs[0].generated_fragment, "sequence", None),
+        generated_sequence=getattr(specs[0].fragment, "sequence", None),
         reactive_sequence_index=0,
         reactive_residue_selector={
             "chain_id": "C",
-            "atom_serial": getattr(specs[0].generated_fragment, "reactive_atom_serial", None) or 0,
-            "atom_index": getattr(specs[0].generated_fragment, "reactive_atom_index", None) or 0,
-            "atom_name": getattr(specs[0].generated_fragment, "reactive_atom_name", None) or "C1",
+            "atom_serial": getattr(specs[0].fragment, "reactive_atom_serial", None) or 0,
+            "atom_index": getattr(specs[0].fragment, "reactive_atom_index", None) or 0,
+            "atom_name": getattr(specs[0].fragment, "reactive_atom_name", None) or "C1",
         },
         generated_sequences=tuple(
             fragment.sequence

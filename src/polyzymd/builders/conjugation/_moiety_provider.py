@@ -14,6 +14,7 @@ from polyzymd.builders.conjugation.polymer import (
     GeneratedPolymerFragment,
     MultiResidueGenerationResult,
     PolymerRecipe,
+    PreparedFragment,
     build_smiles_moiety_fragment,
     generate_multi_residue_molecule,
 )
@@ -264,13 +265,24 @@ def _resolve_pdb_fragment_source(
 def generated_fragment_for_resolved_source(
     source: ResolvedMoietySource,
     plan: Any,
-) -> GeneratedPolymerFragment:
+) -> PreparedFragment:
     """Return the construction fragment updated with resolved reactive atoms."""
     if isinstance(source.source_fragment, GeneratedMoietyFragment):
-        return _generated_fragment_from_moiety_plan(source.source_fragment, plan)
-    if source.fragment is None:
+        fragment = _generated_fragment_from_moiety_plan(source.source_fragment, plan)
+    elif source.fragment is None:
         raise RuntimeError("Resolved moiety source is missing a construction fragment")
-    return source.fragment
+    else:
+        fragment = source.fragment
+    return PreparedFragment.from_generated_fragment(
+        fragment,
+        source_identity=str(
+            source.sidecars.get("sdf") or source.sidecars.get("pdb") or fragment.name
+        ),
+        source_kind=source.source_kind,
+        sidecars=source.sidecars,
+        provenance={"reactive_selector": source.reactive_selector or {}},
+        diagnostics=getattr(source, "diagnostics", ()),
+    )
 
 
 def _annotate_pdb_fragment_sidecar(sidecar_path: Path, annotation: dict[str, Any]) -> None:

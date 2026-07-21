@@ -16,7 +16,6 @@ from polyzymd.builders.conjugation._linkage import (
     ResolvedAttachmentPlan,
 )
 from polyzymd.builders.conjugation._specs import (
-    ConjugationFragment,
     attachment_spec_from_generated_polymer_plan,
     attachment_spec_from_moiety_plan,
 )
@@ -26,6 +25,7 @@ from polyzymd.builders.conjugation.polymer import (
     GeneratedPolymerFragment,
     PolymerFragmentAtom,
     PolymerFragmentResidue,
+    PreparedFragment,
 )
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
@@ -60,7 +60,8 @@ def test_moiety_adapter_preserves_fragment_data_and_generated_adapter(tmp_path: 
     )
 
     assert spec.attachment_id == "glycan_1"
-    assert spec.fragment.source_kind == "moiety"
+    assert isinstance(spec.fragment, PreparedFragment)
+    assert spec.fragment.source_kind == "smiles"
     assert spec.fragment.atoms == moiety.atoms
     assert spec.fragment.bonds == moiety.bonds
     assert spec.fragment.bond_orders == moiety.bond_orders
@@ -70,7 +71,7 @@ def test_moiety_adapter_preserves_fragment_data_and_generated_adapter(tmp_path: 
     assert spec.generated_fragment.reactive_atom_index == 0
     assert spec.generated_fragment.leaving_atom_serials == (2,)
     assert spec.generated_fragment.leaving_atom_indices == (1,)
-    assert spec.source_fragment is moiety
+    assert spec.fragment.source_identity == str(sdf_path)
 
 
 def test_polymer_adapter_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_path: Path):
@@ -111,14 +112,14 @@ def test_polymer_adapter_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_pa
         "charged_sdf": charged_sdf_path,
     }
 
-    assert isinstance(spec.fragment, ConjugationFragment)
+    assert isinstance(spec.fragment, PreparedFragment)
     assert spec.fragment.source_kind == "polymer"
     assert len(spec.fragment.residues) == 2
     assert spec.fragment.sequence == "AC"
     assert spec.fragment.sidecars == expected_sidecars
     assert spec.source_sidecars == expected_sidecars
     assert spec.generated_fragment is polymer
-    assert spec.fragment.to_generated_polymer_fragment().residues == polymer.residues
+    assert spec.fragment.residues == polymer.residues
 
 
 def test_nhs_lys_polymer_spec_carries_sdf_sidecar_to_product_library(
