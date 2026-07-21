@@ -161,6 +161,7 @@ ignore = [
 markers = [
     "slow: tests that require optional slow resources",
     "conjugation_stack: tests that require the external conjugation chemistry stack",
+    "final_e2e: opt-in final end-to-end acceptance test",
 ]
 
 [tool.mypy]

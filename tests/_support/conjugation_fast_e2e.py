@@ -295,7 +295,7 @@ def _run_cuda_smoke(interchange: Any, output_dir: Path, steps: int) -> dict[str,
         platform,
     )
     simulation.context.setPositions(interchange.positions.to_openmm())
-    simulation.minimizeEnergy(maxIterations=200)
+    simulation.minimizeEnergy(maxIterations=0)
     checkpoint_path = output_dir / "cuda.chk"
     simulation.reporters.append(CheckpointReporter(str(checkpoint_path), max(1, steps // 2)))
     simulation.reporters.append(
