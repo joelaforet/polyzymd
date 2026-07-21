@@ -315,8 +315,11 @@ class ExactExportBundle(BaseModel):
         """Write the authoritative OpenMM topology and positions to PDB."""
         from openmm.app import PDBFile
 
+        from polyzymd.builders._pdb_identity import require_classic_pdb_atom_capacity
+
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        require_classic_pdb_atom_capacity(self.topology)
         with output_path.open("w", encoding="utf-8") as handle:
             PDBFile.writeFile(self.topology, self.positions, handle, keepIds=True)
         return output_path

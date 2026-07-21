@@ -21,6 +21,7 @@ LOGGER = logging.getLogger(__name__)
 
 _TOKEN_UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
 _TOKEN_UNDERSCORES = re.compile(r"_+")
+_MOIETY_GLYCAM_FORCE_FIELD_ALIASES = {"glycam06", "glycam_06", "glycam-06", "glycam", "glycam06j"}
 
 
 def _format_safe_token(value: object) -> str:
@@ -57,6 +58,34 @@ def _format_decimal_token(value: float) -> str:
     """
     formatted = f"{value:g}"
     return formatted.replace(".", "p")
+
+
+def _canonicalize_moiety_force_field(value: str | None) -> str | None:
+    """Return a canonical attachment-scoped moiety force-field value.
+
+    Missing values intentionally remain ``None`` so the resolver can inherit
+    ``force_field.small_molecule``. Explicit unknown labels fail here rather than
+    falling back silently to a generic force field.
+    """
+
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("moiety.force_field must not be blank")
+    label = normalized.lower().replace("_", "-")
+    alias_key = normalized.lower().replace("-", "_")
+    if (
+        label in _MOIETY_GLYCAM_FORCE_FIELD_ALIASES
+        or alias_key in _MOIETY_GLYCAM_FORCE_FIELD_ALIASES
+    ):
+        return "glycam06"
+    if normalized.lower().endswith(".offxml") or Path(normalized).suffix.lower() == ".offxml":
+        return normalized
+    raise ValueError(
+        "Unknown moiety.force_field "
+        f"{value!r}; use canonical 'glycam06' or an OpenFF .offxml force-field source"
+    )
 
 
 class ChargeMethod(str, Enum):
@@ -671,11 +700,12 @@ class ConjugationMoietyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., description="Moiety identifier")
-    force_field_domain: Literal["glycan", "sage"] | None = Field(
+    force_field: str | None = Field(
         None,
         description=(
-            "Optional force-field domain for final conjugate routing. Use glycan for "
-            "strict native GLYCAM/NLN handling and sage for explicit OpenFF Sage fallback."
+            "Optional attachment-scoped moiety force field. Missing values inherit "
+            "force_field.small_molecule. Use canonical 'glycam06' for GLYCAM; OpenFF "
+            "OFFXML names and paths use the generic Interchange route."
         ),
     )
     residue_name: str | None = Field(None, max_length=4, description="Residue name for the moiety")
@@ -720,6 +750,12 @@ class ConjugationMoietyConfig(BaseModel):
     def normalize_optional_moiety_residue_name(cls, value: str | None) -> str | None:
         """Normalize optional moiety residue names."""
         return value.strip().upper() if value is not None else None
+
+    @field_validator("force_field")
+    @classmethod
+    def canonicalize_force_field(cls, value: str | None) -> str | None:
+        """Canonicalize approved moiety force-field values."""
+        return _canonicalize_moiety_force_field(value)
 
 
 class ConjugationProductResiduesConfig(BaseModel):
@@ -1683,36 +1719,10 @@ class ForceFieldConfig(BaseModel):
         water: Water model force field (derived from solvent config)
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     protein: str = Field("ff14sb_off_impropers_0.0.4.offxml", description="Protein force field")
     small_molecule: str = Field("openff-2.0.0.offxml", description="Small molecule force field")
-    glycan_policy: Literal["strict_glycam", "sage_fallback"] = Field(
-        "sage_fallback",
-        description=(
-            "Policy for glycan-domain conjugation moieties. sage_fallback preserves the "
-            "backward-compatible OpenFF/Sage Interchange route. strict_glycam is an "
-            "explicit opt-in required only for native OpenMM GLYCAM/NLN parameterization."
-        ),
-    )
-    conjugate_parameterization: Literal["openff_interchange", "native_openmm_glycam"] = Field(
-        "openff_interchange",
-        description=(
-            "Explicit final conjugate parameterization route. The native_openmm_glycam route is "
-            "an explicit opt-in OpenMM-only GLYCAM route for canonical N-linked glycans."
-        ),
-    )
-
-    @model_validator(mode="after")
-    def validate_glycan_policy_route(self) -> "ForceFieldConfig":
-        """Validate glycan policy compatibility with the conjugate route."""
-        if (
-            self.conjugate_parameterization == "native_openmm_glycam"
-            and self.glycan_policy != "strict_glycam"
-        ):
-            raise ValueError(
-                "native_openmm_glycam requires force_field.glycan_policy='strict_glycam'; "
-                "use openff_interchange with glycan_policy='sage_fallback' for explicit Sage fallback"
-            )
-        return self
 
 
 # =============================================================================
@@ -1967,42 +1977,6 @@ class SimulationConfig(BaseModel):
     gromacs: GromacsEngineConfig = Field(
         default_factory=GromacsEngineConfig, description="GROMACS engine settings"
     )
-
-    @model_validator(mode="after")
-    def validate_conjugate_force_field_domains(self) -> "SimulationConfig":
-        """Validate force-field domain routing for conjugation moieties."""
-        attachments = tuple(getattr(self.conjugation, "attachments", ()) or ())
-        enabled = tuple(
-            attachment for attachment in attachments if getattr(attachment, "enabled", True)
-        )
-        glycan_domain = tuple(
-            attachment
-            for attachment in enabled
-            if getattr(getattr(attachment, "moiety", None), "force_field_domain", None) == "glycan"
-        )
-        sage_domain = tuple(
-            attachment
-            for attachment in enabled
-            if getattr(getattr(attachment, "moiety", None), "force_field_domain", None) == "sage"
-        )
-        if (
-            glycan_domain
-            and self.force_field.glycan_policy == "strict_glycam"
-            and self.force_field.conjugate_parameterization != "native_openmm_glycam"
-        ):
-            raise ValueError(
-                "glycan-domain conjugation moieties with strict_glycam policy require "
-                "force_field.conjugate_parameterization='native_openmm_glycam'; select "
-                "glycan_policy='sage_fallback' explicitly to preserve the Sage/Interchange route"
-            )
-        if sage_domain and self.force_field.conjugate_parameterization == "native_openmm_glycam":
-            names = ", ".join(attachment.name for attachment in sage_domain)
-            raise ValueError(
-                "Covalently attached Sage-domain moieties are unsupported in strict native GLYCAM "
-                f"routing ({names}); disconnected precharged Sage components may coexist, but "
-                "cross-boundary bonded and exception provenance is not audited"
-            )
-        return self
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SimulationConfig":

@@ -210,9 +210,16 @@ def _charged_template_from_source(
         _validate_charge_identity(identity, source.source)
         charge = source.charges.get(identity)
         if charge is None:
+            charge = _charge_by_residue_position_and_atom(source.charges, identity)
+        if charge is None:
             missing.append(identity)
             continue
         charges.append(charge)
+    if missing:
+        fallback = _existing_validated_molecule_charges(molecule)
+        if fallback is not None:
+            charges = fallback
+            missing = []
     if missing:
         preview = "; ".join(_format_identity(identity) for identity in missing[:12])
         suffix = "" if len(missing) <= 12 else f"; ... {len(missing) - 12} more"
@@ -233,6 +240,46 @@ def _charged_template_from_source(
     template = copy.deepcopy(molecule)
     template.partial_charges = _as_openff_quantity(charges)
     return template
+
+
+def _charge_by_residue_position_and_atom(
+    charges: dict[_AtomIdentity, float], identity: _AtomIdentity
+) -> float | None:
+    """Return a unique charge match after residue-name normalization changed names."""
+
+    matches = [
+        charge
+        for candidate, charge in charges.items()
+        if candidate.chain_id == identity.chain_id
+        and candidate.residue_number == identity.residue_number
+        and candidate.insertion_code == identity.insertion_code
+        and candidate.atom_name == identity.atom_name
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _existing_validated_molecule_charges(molecule: Any) -> list[float] | None:
+    """Return existing molecule charges from charged moiety artifacts when present."""
+
+    partial_charges = getattr(molecule, "partial_charges", None)
+    if partial_charges is None:
+        return None
+    values = _charge_values(partial_charges)
+    atoms = tuple(getattr(molecule, "atoms", ()) or ())
+    if len(values) != len(atoms):
+        return None
+    if not all(math.isfinite(value) for value in values):
+        return None
+    provenance = str(
+        getattr(molecule, "properties", {}).get("polyzymd_charge_provenance", "")
+        if isinstance(getattr(molecule, "properties", None), dict)
+        else ""
+    )
+    if provenance and _is_formal_source(provenance):
+        return None
+    return list(values)
 
 
 def _product_residue_names(product_state_pablo_library: Any) -> set[str]:

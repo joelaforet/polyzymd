@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from collections.abc import Iterable, MutableMapping
+from collections.abc import Iterable, Mapping, MutableMapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -33,6 +33,8 @@ from polyzymd.builders.conjugation.construction import (
     ModifierConstructionSettings,
 )
 from polyzymd.builders.conjugation.final_interchange import create_final_conjugated_interchange
+from polyzymd.builders.conjugation.force_fields import resolve_conjugate_force_fields
+from polyzymd.builders.conjugation.glycam_overlay import infer_glycam_particles_from_topology
 from polyzymd.builders.conjugation.models import ConjugationResult
 from polyzymd.builders.conjugation.native_openmm_glycam import (
     create_native_openmm_glycam_handoff,
@@ -101,6 +103,7 @@ from polyzymd.config.schema import (
     ConjugationConfig,
     SimulationConfig,
 )
+from polyzymd.exporters.exact_openmm import create_exact_export_bundle
 
 _ATOM_RECORD_PREFIXES = ATOM_RECORD_PREFIXES
 _NHS_LYS_REACTION = get_reaction("nhs_lys")
@@ -251,11 +254,14 @@ def build_conjugated_polymer_system_from_config(
     reactive_selectors = tuple(payload[3] for payload in spec_payloads)
     modifiers = tuple(spec.generated_fragment for spec in specs)
     resolved_plans = tuple(spec.resolved_plan for spec in specs)
+    resolved_force_fields = resolve_conjugate_force_fields(config)
     use_native_glycam = native_glycam_enabled(config)
+    use_mixed_overlay = resolved_force_fields.route == "mixed_overlay"
     if (
         _uses_pdb_fragment_sources(attachments)
         and workflow_settings.pdb_fragment_output_mode == "coordinate_only"
         and not use_native_glycam
+        and resolved_force_fields.route != "mixed_overlay"
     ):
         result = _build_pdb_fragment_coordinate_only_result(
             protein_pdb_path=protein_pdb_path,
@@ -342,6 +348,7 @@ def build_conjugated_polymer_system_from_config(
     )
     solvated_pdb_path = artifact_dir / workflow_settings.solvated_pdb_name
     exact_export_bundle = None
+    overlay_artifact_paths: dict[str, Path] = {}
     if use_native_glycam:
         LOGGER.info("Creating native OpenMM GLYCAM handoff")
         exact_export_bundle = create_native_openmm_glycam_handoff(
@@ -351,10 +358,20 @@ def build_conjugated_polymer_system_from_config(
             output_dir=artifact_dir,
         )
         exact_export_bundle.write_pdb(solvated_pdb_path)
+    elif use_mixed_overlay and workflow_settings.create_final_interchange:
+        LOGGER.info("Creating mixed GLYCAM/OpenFF overlay exact handoff")
+        exact_export_bundle, overlay_artifact_paths = _create_mixed_overlay_exact_handoff(
+            builder,
+            config=config,
+            construction=construction,
+            output_dir=artifact_dir,
+            workflow_settings=workflow_settings,
+        )
+        exact_export_bundle.write_pdb(solvated_pdb_path)
     else:
         builder.save_topology(solvated_pdb_path)
     LOGGER.info("Wrote final solvated conjugate PDB to %s", solvated_pdb_path)
-    if workflow_settings.preserve_reference_atom_names and not use_native_glycam:
+    if workflow_settings.preserve_reference_atom_names and exact_export_bundle is None:
         _restore_pdb_atom_name_fields(solvated_pdb_path, construction.crosslinked_pdb_path)
 
     result = ConjugationResult(
@@ -376,12 +393,15 @@ def build_conjugated_polymer_system_from_config(
         protein_canonicalization=protein_canonicalization,
         relaxed_conjugate_pdb_path=relaxed_pdb,
         solvated_pdb_path=solvated_pdb_path,
-        final_interchange_created=False if use_native_glycam else builder.interchange is not None,
+        final_interchange_created=(
+            exact_export_bundle is not None
+            or (False if use_native_glycam else builder.interchange is not None)
+        ),
         modifier=modifiers[0],
         modifiers=modifiers,
         relaxed_conjugate_topology=relaxed_topology,
         solvated_topology=builder.solvated_topology,
-        final_interchange=None if use_native_glycam else builder.interchange,
+        final_interchange=None if exact_export_bundle is not None else builder.interchange,
         exact_export_bundle=exact_export_bundle,
         system_builder=builder,
     )
@@ -390,6 +410,13 @@ def build_conjugated_polymer_system_from_config(
         sidecar_path = getattr(exact_export_bundle, "sidecar_path", None)
         if sidecar_path is not None:
             result.artifact_paths["exact_openmm_exceptions"] = sidecar_path
+        result.artifact_paths.update(overlay_artifact_paths)
+        _refresh_final_parameter_validation(
+            construction=construction,
+            resolved_plans=resolved_plans,
+            exact_export_bundle=exact_export_bundle,
+            artifact_paths=result.artifact_paths,
+        )
     workflow_path = artifact_dir / workflow_settings.workflow_json_name
     result.workflow_json_path = workflow_path
     result.artifact_paths["workflow_json"] = workflow_path
@@ -397,6 +424,41 @@ def build_conjugated_polymer_system_from_config(
     LOGGER.info("Saved conjugation workflow JSON to %s", workflow_path)
     LOGGER.info("Completed config conjugation build in %s", artifact_dir)
     return result
+
+
+def _refresh_final_parameter_validation(
+    *,
+    construction: Any,
+    resolved_plans: tuple[Any, ...],
+    exact_export_bundle: Any,
+    artifact_paths: Mapping[str, Path],
+) -> None:
+    """Rewrite only validation evidence after the final OpenMM System exists."""
+
+    final_system = exact_export_bundle.to_openmm()
+    evidence_paths = {
+        key: value
+        for key, value in artifact_paths.items()
+        if key
+        in {
+            "ownership_manifest",
+            "overlay_diagnostics",
+            "mixed_overlay_charge_audit",
+            "exact_openmm_exceptions",
+            "native_openmm_glycam_audit",
+        }
+    }
+    validation_report = build_conjugate_validation_report(
+        product_pdb_path=construction.crosslinked_pdb_path,
+        resolved_plans=resolved_plans,
+        assembly=construction.assembly,
+        output_dir=construction.output_dir,
+        openmm_system=final_system,
+        expected_particle_count=final_system.getNumParticles(),
+        parameter_evidence_paths=evidence_paths,
+        write=True,
+    )
+    construction.validation_report_path = validation_report.report_path
 
 
 def build_direct_moiety_conjugate(
@@ -655,10 +717,6 @@ def _enabled_supported_attachments(
             getattr(attachment, "moiety", None),
             mechanism_name=getattr(getattr(attachment, "mechanism", None), "name", None),
         )
-    if any(attachment_uses_pdb_fragment(attachment) for attachment in attachments) and not all(
-        attachment_uses_pdb_fragment(attachment) for attachment in attachments
-    ):
-        raise ValueError("PDB-fragment input attachments cannot be mixed with other moiety sources")
     return attachments
 
 
@@ -2070,6 +2128,338 @@ def _build_direct_solvated_system(
             settings=parameterization_settings,
         )
     return builder
+
+
+def _create_mixed_overlay_exact_handoff(
+    builder: SystemBuilder,
+    *,
+    config: Any,
+    construction: Any,
+    output_dir: Path | str,
+    workflow_settings: ConjugatedPolymerSystemSettings,
+) -> tuple[Any, dict[str, Path]]:
+    """Create an exact bundle from a merged mixed GLYCAM/OpenFF OpenMM System.
+
+    The baseline Interchange is fully parameterized first and supplies all generic
+    protein/polymer/linkage terms. A native GLYCAM reference is then generated for
+    the same solvated topology, scoped GLYCAM terms are overlaid, and the final
+    exact bundle is created from the merged System rather than the stale baseline.
+    """
+
+    from openmm import unit
+
+    from polyzymd.builders.conjugation.system_overlay import merge_openmm_system_overlay
+
+    if builder.interchange is None:
+        raise RuntimeError("Mixed overlay requires a complete baseline OpenFF Interchange")
+
+    baseline_topology = builder.interchange.to_openmm_topology()
+    baseline_positions = builder.interchange.positions.to_openmm()
+    baseline_system = builder.interchange.to_openmm_system()
+    native_audit: dict[str, Any]
+    native_audit_path: Path | None
+    native_bundle = _build_mixed_overlay_native_reference(
+        config=config,
+        output_dir=Path(output_dir) / "mixed_overlay_native_reference",
+        free_polymer_seed=None,
+        workflow_settings=workflow_settings,
+    )
+    native_system = native_bundle.system
+    native_topology = native_bundle.topology
+    native_audit = native_bundle.audit
+    native_audit_path = native_bundle.audit_path
+    glycam_particles = _glycam_particles_from_native_audit(native_topology, native_audit)
+    if not glycam_particles:
+        raise RuntimeError("Mixed overlay could not infer any GLYCAM-owned particles")
+    atom_mapping = _build_native_to_baseline_atom_mapping(
+        baseline_topology,
+        native_topology,
+        required_native_indices=glycam_particles,
+        allow_scoped_fallback=True,
+    )
+    attachments = tuple(
+        resolved.to_dict() for resolved in resolve_conjugate_force_fields(config).attachments
+    )
+    overlay = merge_openmm_system_overlay(
+        baseline_system=baseline_system,
+        native_system=native_system,
+        glycam_particles=glycam_particles,
+        atom_mapping=atom_mapping,
+        attachments=attachments,
+    )
+    charge_audit_path = _write_mixed_overlay_charge_audit(
+        overlay.system,
+        Path(output_dir) / "mixed_overlay_charge_audit.json",
+        unit_module=unit,
+    )
+    overlay_paths = overlay.save_artifacts(output_dir)
+    overlay_paths["mixed_overlay_charge_audit"] = charge_audit_path
+    audit = {
+        "route": "mixed_overlay",
+        "native_reference_audit": str(native_audit_path) if native_audit_path is not None else None,
+        "ownership_manifest": str(overlay_paths["ownership_manifest"]),
+        "overlay_diagnostics": str(overlay_paths["overlay_diagnostics"]),
+        "charge_audit": str(charge_audit_path),
+        "glycam_particle_count": len(glycam_particles),
+        "native_audit": native_audit,
+        "overlay": overlay.diagnostics,
+    }
+    _stringify_openmm_topology_ids(baseline_topology)
+    exact_bundle = create_exact_export_bundle(
+        topology=baseline_topology,
+        system=overlay.system,
+        positions=baseline_positions,
+        output_dir=output_dir,
+        audit_path=overlay_paths["overlay_diagnostics"],
+        audit=audit,
+    )
+    builder._exact_export_bundle = exact_bundle
+    return exact_bundle, overlay_paths
+
+
+def _stringify_openmm_topology_ids(topology: Any) -> None:
+    """Normalize OpenMM topology IDs to strings for PDB writing."""
+
+    for chain in topology.chains():
+        chain.id = str(chain.id)
+    for residue in topology.residues():
+        residue.id = str(residue.id)
+
+
+def _write_mixed_overlay_charge_audit(
+    system: Any,
+    path: Path,
+    *,
+    unit_module: Any,
+) -> Path:
+    """Write final charge audit for a mixed overlay System."""
+
+    total_charge = 0.0
+    particle_count = system.getNumParticles()
+    for force in system.getForces():
+        if force.__class__.__name__ != "NonbondedForce":
+            continue
+        for index in range(force.getNumParticles()):
+            charge, _sigma, _epsilon = force.getParticleParameters(index)
+            total_charge += float(charge.value_in_unit(unit_module.elementary_charge))
+        payload = {
+            "particle_count": particle_count,
+            "nonbonded_particle_count": force.getNumParticles(),
+            "total_charge_e": total_charge,
+            "rounded_total_charge_e": round(total_charge),
+            "charge_mismatch_e": total_charge - round(total_charge),
+        }
+        if abs(payload["charge_mismatch_e"]) > 1e-4:
+            raise RuntimeError(
+                "Mixed overlay final charge is not integral: " f"{payload['total_charge_e']:.8f} e"
+            )
+        path.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+        return path
+    raise RuntimeError("Mixed overlay charge audit requires a NonbondedForce")
+
+
+def _build_mixed_overlay_native_reference(
+    *,
+    config: Any,
+    output_dir: Path,
+    free_polymer_seed: int | None,
+    workflow_settings: ConjugatedPolymerSystemSettings,
+) -> Any:
+    """Build an isolated native GLYCAM reference from GLYCAM attachments only."""
+
+    reference_config = _mixed_overlay_native_reference_config(config)
+    reference_settings = ConjugatedPolymerSystemSettings(
+        create_final_interchange=False,
+        preserve_reference_atom_names=True,
+        run_relaxation=False,
+        pdb_fragment_output_mode="experimental_pablo",
+        relaxation=workflow_settings.relaxation,
+        conjugate_parameterization=workflow_settings.conjugate_parameterization,
+    )
+    reference_result = build_conjugated_polymer_system_from_config(
+        reference_config,
+        output_dir=output_dir,
+        settings=reference_settings,
+        free_polymer_seed=free_polymer_seed,
+    )
+    if reference_result.exact_export_bundle is None:
+        raise RuntimeError("Mixed overlay native reference did not produce an exact OpenMM bundle")
+    return reference_result.exact_export_bundle
+
+
+def _mixed_overlay_native_reference_config(config: Any) -> Any:
+    """Return config with only GLYCAM attachments enabled for native reference build."""
+
+    resolved = resolve_conjugate_force_fields(config)
+    glycam_names = {
+        attachment.attachment_name for attachment in resolved.attachments if attachment.is_glycam
+    }
+    if not glycam_names:
+        raise RuntimeError("Mixed overlay native reference requires at least one GLYCAM attachment")
+    reference_config = (
+        config.model_copy(deep=True) if hasattr(config, "model_copy") else copy.deepcopy(config)
+    )
+    conjugation = getattr(reference_config, "conjugation", None)
+    if conjugation is None:
+        raise RuntimeError("Mixed overlay native reference requires conjugation config")
+    filtered_attachments = []
+    for attachment in getattr(conjugation, "attachments", ()) or ():
+        enabled = str(getattr(attachment, "name", "attachment")) in glycam_names
+        if hasattr(attachment, "model_copy"):
+            filtered_attachments.append(
+                attachment.model_copy(update={"enabled": enabled}, deep=True)
+            )
+        else:
+            cloned = copy.deepcopy(attachment)
+            cloned.enabled = enabled
+            filtered_attachments.append(cloned)
+    reference_config.conjugation = conjugation.model_copy(
+        update={"attachments": filtered_attachments}, deep=True
+    )
+    polymers = getattr(reference_config, "polymers", None)
+    if polymers is not None and hasattr(polymers, "model_copy"):
+        reference_config.polymers = polymers.model_copy(update={"enabled": False}, deep=True)
+    return reference_config
+
+
+def _build_native_to_baseline_atom_mapping(
+    baseline_topology: Any,
+    native_topology: Any,
+    *,
+    required_native_indices: set[int] | frozenset[int] | None = None,
+    allow_scoped_fallback: bool = False,
+) -> dict[int, int]:
+    """Build native-reference to baseline atom mapping from stable PDB identities."""
+
+    baseline_by_key: dict[tuple[str, str, str, str], list[int]] = {}
+    baseline_scoped = _scoped_residue_atom_index(baseline_topology)["key_to_atom"]
+    native_atom_to_scoped_key = _scoped_residue_atom_index(native_topology)["atom_to_key"]
+    for atom in baseline_topology.atoms():
+        for key in _overlay_atom_identity_keys(atom):
+            baseline_by_key.setdefault(key, []).append(atom.index)
+    mapping: dict[int, int] = {}
+    used_baseline_indices: set[int] = set()
+    unmapped: list[str] = []
+    required = set(required_native_indices) if required_native_indices is not None else None
+    for atom in native_topology.atoms():
+        is_required = required is None or atom.index in required
+        candidates: set[int] = set()
+        for key in _overlay_atom_identity_keys(atom):
+            candidates.update(baseline_by_key.get(key, ()))
+        if len(candidates) > 1 and is_required:
+            raise ValueError(
+                "Ambiguous native-to-baseline overlay atom mapping for "
+                f"{_openmm_atom_label(atom)}: candidates={sorted(candidates)}"
+            )
+        if len(candidates) > 1:
+            continue
+        mapped = next(iter(candidates), None)
+        if mapped is None and allow_scoped_fallback:
+            scoped_key = native_atom_to_scoped_key[atom.index]
+            scoped_candidates = baseline_scoped.get(scoped_key, ())
+            if len(scoped_candidates) > 1:
+                raise ValueError(
+                    "Ambiguous scoped native-to-baseline overlay atom mapping for "
+                    f"{_openmm_atom_label(atom)}: candidates={sorted(scoped_candidates)}"
+                )
+            mapped = scoped_candidates[0] if scoped_candidates else None
+        if mapped is None:
+            if is_required:
+                unmapped.append(_openmm_atom_label(atom))
+            continue
+        if mapped in used_baseline_indices:
+            if not is_required:
+                continue
+            raise ValueError(
+                "Duplicate native-to-baseline overlay atom mapping targets baseline atom "
+                f"{mapped} while mapping {_openmm_atom_label(atom)}"
+            )
+        mapping[atom.index] = mapped
+        used_baseline_indices.add(mapped)
+    if unmapped:
+        raise ValueError(
+            "Native-to-baseline overlay atom mapping could not map native atoms: "
+            f"{unmapped[:20]}"
+        )
+    return mapping
+
+
+def _scoped_residue_atom_index(topology: Any) -> dict[str, dict[Any, Any]]:
+    """Return residue-occurrence scoped atom identity indexes."""
+
+    residue_ordinals: dict[tuple[str, str], int] = {}
+    residue_keys: dict[Any, tuple[str, str, int]] = {}
+    for residue in topology.residues():
+        residue_name = str(residue.name).strip().upper()
+        base_key = (str(residue.chain.id).strip(), residue_name)
+        residue_ordinals[base_key] = residue_ordinals.get(base_key, 0) + 1
+        residue_keys[residue] = (*base_key, residue_ordinals[base_key])
+    atom_to_key = {}
+    key_to_atom = {}
+    for atom in topology.atoms():
+        scoped_key = (*residue_keys[atom.residue], str(atom.name).strip().upper())
+        atom_to_key[atom.index] = scoped_key
+        key_to_atom.setdefault(scoped_key, []).append(atom.index)
+    return {"atom_to_key": atom_to_key, "key_to_atom": key_to_atom}
+
+
+def _overlay_atom_identity_keys(atom: Any) -> tuple[tuple[str, str, str, str], ...]:
+    """Return equivalent stable keys for cross-route atom mapping."""
+
+    residue = atom.residue
+    chain_id = str(residue.chain.id).strip()
+    residue_id = str(residue.id).strip()
+    residue_name = str(residue.name).strip().upper()
+    atom_name = str(atom.name).strip().upper()
+    keys = [(chain_id, residue_id, residue_name, atom_name)]
+    if residue_name in {"ASX", "NLN", "ASN"}:
+        residue_aliases = ("ASX", "NLN", "ASN")
+        atom_aliases = ("HD21", "HD22") if atom_name in {"HD21", "HD22"} else (atom_name,)
+        keys.extend(
+            (chain_id, residue_id, alias, atom_alias)
+            for alias in residue_aliases
+            for atom_alias in atom_aliases
+        )
+    if residue_name in {"LYS", "LYX"}:
+        keys.extend((chain_id, residue_id, alias, atom_name) for alias in ("LYS", "LYX"))
+    return tuple(dict.fromkeys(keys))
+
+
+def _glycam_particles_from_native_audit(
+    native_topology: Any, native_audit: dict[str, Any]
+) -> frozenset[int]:
+    """Return native GLYCAM-owned particles from native audit domain assignments."""
+
+    labels = {
+        str(entry.get("residue"))
+        for entry in (
+            native_audit.get("domain_assignments", {}).get("residues", ())
+            if isinstance(native_audit.get("domain_assignments"), dict)
+            else ()
+        )
+        if str(entry.get("domain", "")).strip().lower() in {"glycan", "protein_modified_nln"}
+    }
+    particles = {
+        atom.index
+        for atom in native_topology.atoms()
+        if _openmm_residue_label(atom.residue) in labels
+    }
+    if particles:
+        return frozenset(particles)
+    return infer_glycam_particles_from_topology(native_topology)
+
+
+def _openmm_atom_label(atom: Any) -> str:
+    """Return a concise OpenMM atom label for diagnostics."""
+
+    return f"{_openmm_residue_label(atom.residue)}:{atom.name}#{atom.index}"
+
+
+def _openmm_residue_label(residue: Any) -> str:
+    """Return the residue label format used by native GLYCAM audit records."""
+
+    insertion = getattr(residue, "insertionCode", "") or ""
+    return f"{residue.chain.id}:{residue.name}{residue.id}{insertion}"
 
 
 def _build_and_pack_free_polymers(

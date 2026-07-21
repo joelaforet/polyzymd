@@ -5,7 +5,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
+from polyzymd.builders.conjugation.force_fields import resolve_conjugate_force_fields
 from polyzymd.builders.conjugation.native_openmm_glycam import (
     _annotate_force_field_domains_from_config,
     _build_native_glycam_audit,
@@ -30,53 +32,44 @@ from polyzymd.exporters.exact_openmm import ExactExportBundle
 from tests.test_exact_openmm_export import _sidecar
 
 
-def test_force_field_native_glycam_is_explicit_opt_in() -> None:
-    """Keep the OpenFF route as the default unless explicitly configured."""
-    assert ForceFieldConfig().conjugate_parameterization == "openff_interchange"
-    assert ForceFieldConfig().glycan_policy == "sage_fallback"
-    assert ForceFieldConfig(
-        conjugate_parameterization="native_openmm_glycam", glycan_policy="strict_glycam"
+def test_force_field_native_glycam_is_attachment_scoped() -> None:
+    """Keep the OpenFF route as default unless an attachment requests GLYCAM."""
+    config = _native_config(
+        force_field=ForceFieldConfig(), conjugation=_conjugation_with_domain(None)
     )
-    assert ForceFieldConfig(glycan_policy="sage_fallback")
+    resolved = resolve_conjugate_force_fields(config)
+    assert resolved.route == "standard_interchange"
+    config = _native_config(conjugation=_conjugation_with_domain("glycam06"))
+    resolved = resolve_conjugate_force_fields(config)
+    assert resolved.route == "native_exact"
+    assert resolved.attachments[0].source == "glycam06"
 
 
-def test_force_field_rejects_native_sage_fallback_combo() -> None:
-    """Strict native GLYCAM must never silently become a Sage fallback route."""
-    with pytest.raises(ValueError, match="native_openmm_glycam requires"):
-        ForceFieldConfig(
-            conjugate_parameterization="native_openmm_glycam",
-            glycan_policy="sage_fallback",
-        )
+def test_force_field_rejects_unknown_moiety_label() -> None:
+    """Unknown moiety labels must never silently fall back to Sage."""
+    with pytest.raises(ValidationError, match="Unknown moiety.force_field"):
+        _native_config(conjugation=_conjugation_with_domain("glycam-special"))
+
+    config = _native_config(conjugation=_conjugation_with_domain(None))
+    resolved = resolve_conjugate_force_fields(config)
+    assert resolved.route == "standard_interchange"
+    assert resolved.attachments[0].source == config.force_field.small_molecule
+    assert resolved.attachments[0].inherited is True
 
 
-def test_simulation_config_validates_glycan_and_sage_attachment_domains() -> None:
-    """Conjugation moiety domains must be compatible with the configured route."""
-    assert _native_config(
-        force_field=ForceFieldConfig(),
-        conjugation=_conjugation_with_domain("glycan"),
-    )
-    with pytest.raises(ValueError, match="Covalently attached Sage-domain"):
-        _native_config(conjugation=_conjugation_with_domain("sage"))
-    assert _native_config(
-        force_field=ForceFieldConfig(glycan_policy="sage_fallback"),
-        conjugation=_conjugation_with_domain("glycan"),
-    )
+def test_simulation_config_rejects_removed_routing_fields() -> None:
+    """Removed mixed-force-field UX fields are forbidden by the schema."""
+    with pytest.raises(ValueError, match="force_field_domain"):
+        _conjugation_with_removed_domain_field()
+    with pytest.raises(ValueError, match="glycan_policy"):
+        ForceFieldConfig.model_validate({"glycan_policy": "strict_glycam"})
 
 
 def test_native_glycam_enabled_reads_force_field_mode() -> None:
-    """Detect only the explicit native GLYCAM force-field mode."""
-    assert not native_glycam_enabled(SimpleNamespace(force_field=ForceFieldConfig()))
-    assert native_glycam_enabled(
-        SimpleNamespace(
-            force_field=ForceFieldConfig(
-                conjugate_parameterization="native_openmm_glycam",
-                glycan_policy="strict_glycam",
-            )
-        )
-    )
-    assert not native_glycam_enabled(
-        SimpleNamespace(force_field=ForceFieldConfig(glycan_policy="sage_fallback"))
-    )
+    """Detect only the attachment-scoped native GLYCAM-only route."""
+    assert not native_glycam_enabled(_native_config(conjugation=_conjugation_with_domain(None)))
+    assert native_glycam_enabled(_native_config(conjugation=_conjugation_with_domain("glycam06")))
+    assert not native_glycam_enabled(_native_config(conjugation=_mixed_conjugation()))
 
 
 def test_exact_bundle_exposes_authoritative_openmm_methods() -> None:
@@ -420,6 +413,30 @@ def test_sage_molecule_with_explicit_glycam_boundary_bond_is_rejected() -> None:
         )
 
 
+def test_native_conversion_reuses_one_openmm_chain_per_chain_id_for_waters(tmp_path) -> None:
+    """Native conversion should not create one OpenMM chain and TER per water."""
+
+    from openmm.app import PDBFile
+
+    base = _fake_native_source_topology(asx_hydrogens=("HD22",)).molecules[0]
+    waters = [_water_molecule(index) for index in range(1, 4)]
+    topology = _FakeMultiMoleculeTopology([base, *waters])
+
+    converted = _openff_topology_to_openmm_for_glycam(topology, construction=SimpleNamespace())
+    pdb_path = tmp_path / "native_waters.pdb"
+    with pdb_path.open("w", encoding="utf-8") as handle:
+        PDBFile.writeFile(converted.topology, converted.positions, handle, keepIds=True)
+    reloaded = PDBFile(str(pdb_path)).topology
+
+    chain_ids = [chain.id for chain in converted.topology.chains()]
+    water_residues = [residue for residue in reloaded.residues() if residue.name == "HOH"]
+
+    assert chain_ids.count("D") == 1
+    assert len(water_residues) == 3
+    assert all(len(list(residue.atoms())) == 3 for residue in water_residues)
+    assert pdb_path.read_text(encoding="utf-8").count("TER") == len(chain_ids)
+
+
 def _native_config(**updates):
     """Return a minimal native GLYCAM-compatible config double."""
     solvent = SolventConfig()
@@ -448,41 +465,40 @@ def _native_config(**updates):
                 checkpoint_interval=60.0,
             ),
         ),
-        "force_field": ForceFieldConfig(
-            conjugate_parameterization="native_openmm_glycam",
-            glycan_policy="strict_glycam",
-        ),
+        "force_field": ForceFieldConfig(),
         "engine": "openmm",
     }
     data.update(updates)
     return SimulationConfig.model_validate(data)
 
 
-def _conjugation_with_domain(domain: str) -> ConjugationConfig:
-    """Return a minimal enabled conjugation config with one domain-labeled moiety."""
+def _conjugation_with_domain(force_field: str | None) -> ConjugationConfig:
+    """Return a minimal enabled conjugation config with one force-field-labeled moiety."""
+    moiety = {
+        "name": force_field or "generic",
+        "input_path": "glycan.pdb",
+        "link_site": {
+            "chain_id": "C",
+            "residue_name": "4YB",
+            "residue_number": 1,
+            "atom_name": "C1",
+        },
+    }
+    if force_field is not None:
+        moiety["force_field"] = force_field
     return ConjugationConfig.model_validate(
         {
             "enabled": True,
             "attachments": [
                 {
-                    "name": f"{domain}-attachment",
+                    "name": f"{force_field or 'generic'}-attachment",
                     "site": {
                         "chain_id": "A",
                         "residue_name": "ASN",
                         "residue_number": 60,
                         "atom_name": "ND2",
                     },
-                    "moiety": {
-                        "name": domain,
-                        "force_field_domain": domain,
-                        "input_path": "glycan.pdb",
-                        "link_site": {
-                            "chain_id": "C",
-                            "residue_name": "4YB",
-                            "residue_number": 1,
-                            "atom_name": "C1",
-                        },
-                    },
+                    "moiety": moiety,
                     "mechanism": {
                         "name": "explicit_linkage",
                         "product_residues": {"site": "ASX", "moiety": "4YB"},
@@ -491,6 +507,28 @@ def _conjugation_with_domain(domain: str) -> ConjugationConfig:
             ],
         }
     )
+
+
+def _conjugation_with_removed_domain_field() -> ConjugationConfig:
+    """Return a config payload using a removed moiety routing field."""
+
+    data = _conjugation_with_domain("glycam06").model_dump(mode="json")
+    data["attachments"][0]["moiety"].pop("force_field")
+    data["attachments"][0]["moiety"]["force_field_domain"] = "glycan"
+    return ConjugationConfig.model_validate(data)
+
+
+def _mixed_conjugation() -> ConjugationConfig:
+    """Return one GLYCAM and one generic attachment config."""
+
+    data = _conjugation_with_domain("glycam06").model_dump(mode="json")
+    generic = data["attachments"][0].copy()
+    generic["name"] = "generic-attachment"
+    generic["moiety"] = generic["moiety"].copy()
+    generic["moiety"]["name"] = "generic"
+    generic["moiety"]["force_field"] = "openff-2.0.0.offxml"
+    data["attachments"].append(generic)
+    return ConjugationConfig.model_validate(data)
 
 
 class _FakeAtom:
@@ -712,6 +750,17 @@ def _fake_native_source_topology_with_sage(
     """Build an ASX--glycan source topology plus disconnected Sage molecules."""
     base = _fake_native_source_topology(asx_hydrogens=("HD22",)).molecules[0]
     return _FakeMultiMoleculeTopology([*sage_molecules, base])
+
+
+def _water_molecule(residue_number: int) -> _FakeMolecule:
+    """Return a canonical chain-D water molecule double."""
+
+    oxygen = _FakeAtom("O", "HOH", str(residue_number), 8)
+    h1 = _FakeAtom("H1", "HOH", str(residue_number), 1)
+    h2 = _FakeAtom("H2", "HOH", str(residue_number), 1)
+    for atom in (oxygen, h1, h2):
+        atom.metadata["chain_id"] = "D"
+    return _FakeMolecule([oxygen, h1, h2], [_FakeBond(oxygen, h1), _FakeBond(oxygen, h2)])
 
 
 def _multi_residue_sage_molecule(start_residue_number: int = 1) -> _FakeMolecule:

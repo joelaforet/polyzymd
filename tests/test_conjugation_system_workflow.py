@@ -43,6 +43,7 @@ from polyzymd.builders.conjugation.system_workflow import (
     _apply_pdb_atom_identity_to_topology,
     _apply_pdb_atom_names_to_topology,
     _build_direct_solvated_system,
+    _build_native_to_baseline_atom_mapping,
     _build_solvated_system,
     _policy_with_resolved_crosslink,
     _prepared_protein_pdb_path,
@@ -198,6 +199,86 @@ def test_system_workflow_settings_enable_public_product_state_defaults():
     assert settings.use_product_state_pablo_library is True
     assert settings.run_relaxation is True
     assert settings.protein_canonicalization.ph == pytest.approx(7.0)
+
+
+def test_native_reference_overlay_mapping_is_strict() -> None:
+    """Native-to-baseline mapping should reject unmapped and ambiguous atoms."""
+
+    baseline = _openmm_mapping_topology([("A", "1", "NAG", ("C1",)), ("A", "2", "NAG", ("C1",))])
+    native = _openmm_mapping_topology([("A", "1", "NAG", ("C1",))])
+    assert _build_native_to_baseline_atom_mapping(baseline, native) == {0: 0}
+
+    missing_native = _openmm_mapping_topology([("A", "3", "NAG", ("C1",))])
+    with pytest.raises(ValueError, match="could not map native atoms"):
+        _build_native_to_baseline_atom_mapping(baseline, missing_native)
+
+    ambiguous_baseline = _openmm_mapping_topology(
+        [("A", "1", "NAG", ("C1",)), ("A", "1", "NAG", ("C1",))]
+    )
+    with pytest.raises(ValueError, match="Ambiguous native-to-baseline"):
+        _build_native_to_baseline_atom_mapping(ambiguous_baseline, native)
+
+
+def test_mixed_overlay_native_reference_build_disables_relaxation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Native reference construction should not perform a second relaxation pass."""
+
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    captured: dict[str, object] = {}
+
+    def fake_resolve(_config: object) -> object:
+        return SimpleNamespace(
+            attachments=(
+                SimpleNamespace(attachment_name="glycan", is_glycam=True),
+                SimpleNamespace(attachment_name="polymer", is_glycam=False),
+            )
+        )
+
+    def fake_build(_config: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return SimpleNamespace(exact_export_bundle=SimpleNamespace(system="system"))
+
+    monkeypatch.setattr(workflow_module, "resolve_conjugate_force_fields", fake_resolve)
+    monkeypatch.setattr(workflow_module, "build_conjugated_polymer_system_from_config", fake_build)
+    config = SimpleNamespace(
+        model_copy=lambda deep=True: SimpleNamespace(
+            conjugation=SimpleNamespace(
+                attachments=[
+                    SimpleNamespace(
+                        name="glycan",
+                        enabled=True,
+                        model_copy=lambda update, deep=True: SimpleNamespace(
+                            name="glycan", enabled=update["enabled"]
+                        ),
+                    ),
+                    SimpleNamespace(
+                        name="polymer",
+                        enabled=True,
+                        model_copy=lambda update, deep=True: SimpleNamespace(
+                            name="polymer", enabled=update["enabled"]
+                        ),
+                    ),
+                ],
+                model_copy=lambda update, deep=True: SimpleNamespace(
+                    attachments=update["attachments"]
+                ),
+            ),
+            polymers=SimpleNamespace(
+                model_copy=lambda update, deep=True: SimpleNamespace(enabled=update["enabled"])
+            ),
+        )
+    )
+
+    workflow_module._build_mixed_overlay_native_reference(
+        config=config,
+        output_dir=tmp_path,
+        free_polymer_seed=None,
+        workflow_settings=workflow_module.ConjugatedPolymerSystemSettings(),
+    )
+
+    assert captured["settings"].run_relaxation is False
 
 
 def test_relaxed_conjugate_pdb_prefers_final_conjugate_relaxation_artifact(tmp_path):
@@ -1195,6 +1276,10 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     )
     config = SimpleNamespace(
         enzyme=SimpleNamespace(pdb_path=source),
+        force_field=SimpleNamespace(
+            protein="amber14/protein.ff14SB.xml",
+            small_molecule="openff-2.2.0.offxml",
+        ),
         conjugation=SimpleNamespace(
             enabled=True,
             attachments=attachments,
@@ -1322,6 +1407,10 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
     attachment = _config_nhs_attachment("nhs_polymer", residue_number=23)
     config = SimpleNamespace(
         enzyme=SimpleNamespace(pdb_path=source),
+        force_field=SimpleNamespace(
+            protein="amber14/protein.ff14SB.xml",
+            small_molecule="openff-2.2.0.offxml",
+        ),
         conjugation=SimpleNamespace(
             enabled=True,
             attachments=(attachment,),
@@ -1829,6 +1918,22 @@ def _generic_resolved_plan(
         pablo_crosslink_requirement=requirement,
         target_bond_length_angstrom=1.45,
     )
+
+
+def _openmm_mapping_topology(
+    residues: list[tuple[str, str, str, tuple[str, ...]]],
+) -> object:
+    """Return a minimal OpenMM topology for overlay mapping tests."""
+
+    from openmm import app
+
+    topology = app.Topology()
+    for chain_id, residue_id, residue_name, atom_names in residues:
+        chain = topology.addChain(chain_id)
+        residue = topology.addResidue(residue_name, chain, residue_id)
+        for atom_name in atom_names:
+            topology.addAtom(atom_name, app.Element.getBySymbol("C"), residue)
+    return topology
 
 
 def _product_mapping_specs() -> tuple[SimpleNamespace, SimpleNamespace]:

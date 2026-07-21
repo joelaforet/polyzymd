@@ -1723,24 +1723,32 @@ def _normalized_authoritative_atoms_for_gromacs(
 ) -> tuple[tuple[int, str, str, str], ...]:
     """Return authoritative atom identities under documented GROMACS normalization."""
 
+    residue_id_offset = _gromacs_residue_id_offset(authoritative_atoms, parsed_atoms)
     return tuple(
-        _normalized_authoritative_atom(authoritative, parsed)
+        _normalized_authoritative_atom(authoritative, parsed, residue_id_offset=residue_id_offset)
         for authoritative, parsed in zip(authoritative_atoms, parsed_atoms, strict=True)
     )
 
 
 def _normalized_authoritative_atom(
-    authoritative: AtomIdentity, parsed: AtomIdentity
+    authoritative: AtomIdentity, parsed: AtomIdentity, *, residue_id_offset: int | None = None
 ) -> tuple[int, str, str, str]:
     """Normalize one authoritative atom for comparison with parsed GROMACS rows."""
 
     if _is_water_residue(authoritative.residue_name) and _is_water_residue(parsed.residue_name):
         return (authoritative.index, authoritative.name, "HOH", "")
+    if _is_standard_ion_residue(authoritative.residue_name) and _is_standard_ion_residue(
+        parsed.residue_name
+    ):
+        return (authoritative.index, authoritative.name.upper(), authoritative.residue_name, "")
+    residue_id = authoritative.residue_id
+    if residue_id_offset is not None and _integer_string(residue_id):
+        residue_id = str(int(residue_id) + residue_id_offset)
     return (
         authoritative.index,
         authoritative.name,
         authoritative.residue_name,
-        authoritative.residue_id,
+        residue_id,
     )
 
 
@@ -1749,13 +1757,52 @@ def _normalized_gromacs_atom(atom: AtomIdentity) -> tuple[int, str, str, str]:
 
     if _is_water_residue(atom.residue_name):
         return (atom.index, atom.name, "HOH", "")
+    if _is_standard_ion_residue(atom.residue_name):
+        return (atom.index, atom.name.upper(), atom.residue_name, "")
     return (atom.index, atom.name, atom.residue_name, atom.residue_id)
+
+
+def _gromacs_residue_id_offset(
+    authoritative_atoms: tuple[AtomIdentity, ...], parsed_atoms: list[AtomIdentity]
+) -> int | None:
+    """Return a uniform GROMACS residue-id offset when Interchange renumbers residues."""
+
+    offsets = set()
+    for authoritative, parsed in zip(authoritative_atoms, parsed_atoms, strict=True):
+        if _is_water_residue(authoritative.residue_name) or _is_standard_ion_residue(
+            authoritative.residue_name
+        ):
+            continue
+        if authoritative.name != parsed.name or authoritative.residue_name != parsed.residue_name:
+            return None
+        if not (_integer_string(authoritative.residue_id) and _integer_string(parsed.residue_id)):
+            return None
+        offsets.add(int(parsed.residue_id) - int(authoritative.residue_id))
+        if len(offsets) > 1:
+            return None
+    return offsets.pop() if offsets else None
+
+
+def _integer_string(value: str) -> bool:
+    """Return whether a string contains an integer value."""
+
+    try:
+        int(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _is_water_residue(residue_name: str) -> bool:
     """Return whether a residue name is an accepted water alias."""
 
     return residue_name.upper() in {"HOH", "WAT", "SOL", "TIP3", "TIP3P"}
+
+
+def _is_standard_ion_residue(residue_name: str) -> bool:
+    """Return whether a residue name is a standard monoatomic ion alias."""
+
+    return residue_name.upper() in {"NA", "NA+", "CL", "CL-", "K", "K+"}
 
 
 def _topology_bond_pairs(

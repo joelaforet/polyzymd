@@ -783,6 +783,38 @@ def test_conjugate_relaxation_stage_b_uses_fresh_fixed_system(monkeypatch, tmp_p
     assert interchange.systems[1].masses == [12.0, 16.0]
     assert sys.modules["openmm"] is openmm
     assert sys.modules["openmm.app"] is openmm_app
+    assert openmm.minimize_calls[0]["maxIterations"] == 0
+
+
+def test_conjugate_relaxation_uses_uncapped_minimization(monkeypatch, tmp_path):
+    """Stage A minimization should pass the OpenMM uncapped iteration sentinel."""
+    calls: list[tuple[str, str, tuple[float, ...]]] = []
+    openmm, _openmm_app = _install_fake_openmm(monkeypatch, calls)
+    monkeypatch.setattr(
+        relaxation_workflows,
+        "_select_platform",
+        lambda *_args: SimpleNamespace(getName=lambda: "CPU"),
+    )
+    monkeypatch.setattr(relaxation_workflows, "_assign_force_groups", lambda _system: {})
+    monkeypatch.setattr(
+        relaxation_workflows, "_force_group_labels", lambda _system, *, existing_labels: {}
+    )
+    monkeypatch.setattr(relaxation_workflows, "_force_group_energies", lambda *_args: {})
+    monkeypatch.setattr(relaxation_workflows, "_add_linkage_anchor_restraints", lambda *_args: 0)
+    monkeypatch.setattr(
+        relaxation_workflows, "_write_relaxed_product_pdb", lambda *_args, **_kwargs: None
+    )
+
+    relax_conjugate(
+        _RelaxationInterchange(_relaxation_topology()),
+        tmp_path,
+        product_pdb_path=tmp_path / "product.pdb",
+        attachment_specs=(),
+        settings=ConjugateRelaxationSettings(md_steps=1),
+    )
+
+    assert openmm.minimize_calls
+    assert openmm.minimize_calls[0]["maxIterations"] == 0
 
 
 def test_conjugate_relaxation_restores_masses_after_stage_b_error(monkeypatch, tmp_path):
@@ -1137,11 +1169,19 @@ def _install_fake_openmm(monkeypatch, calls: list[tuple[str, str, tuple[float, .
             """Record masses used during MD integration."""
             calls.append((self.system.label, "step", tuple(self.system.masses)))
 
+    minimize_calls = []
+
+    def minimize(*_args, **kwargs) -> None:
+        """Record minimization kwargs."""
+
+        minimize_calls.append(kwargs)
+
     openmm = SimpleNamespace(
         VerletIntegrator=lambda *_args: object(),
         LangevinMiddleIntegrator=lambda *_args: object(),
-        LocalEnergyMinimizer=SimpleNamespace(minimize=lambda *_args, **_kwargs: None),
+        LocalEnergyMinimizer=SimpleNamespace(minimize=minimize),
         OpenMMException=RuntimeError,
+        minimize_calls=minimize_calls,
     )
     openmm_app = SimpleNamespace(
         Simulation=FakeSimulation,

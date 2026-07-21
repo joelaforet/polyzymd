@@ -24,6 +24,7 @@ from polyzymd.exporters.exact_openmm import (
     particle_hash,
 )
 from polyzymd.exporters.gromacs import GromacsExporter, patch_gromacs_topology_with_exact_exceptions
+from polyzymd.exporters.parity import parse_gromacs_energy_xvg
 
 
 def _sidecar() -> ExactExceptionSidecar:
@@ -708,3 +709,17 @@ def test_exact_bundle_export_rejects_component_info_before_writes(tmp_path) -> N
         exporter.export(tmp_path, prefix="exact")
 
     assert not any(tmp_path.iterdir())
+
+
+def test_parse_gromacs_energy_xvg_reads_final_row(tmp_path) -> None:
+    """GROMACS parity helper should parse final energy values by requested term."""
+
+    xvg = tmp_path / "energy.xvg"
+    xvg.write_text(
+        '@ title "Energy"\n' "# comment\n" "0.0 1.0 2.0 3.0\n" "1.0 4.0 5.0 6.0\n",
+        encoding="utf-8",
+    )
+
+    values = parse_gromacs_energy_xvg(xvg, ("Bond", "Angle", "Potential"))
+
+    assert values == {"Bond": 4.0, "Angle": 5.0, "Potential": 6.0}

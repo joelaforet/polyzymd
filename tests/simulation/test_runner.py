@@ -4,10 +4,20 @@ These tests verify runner logic using mocks to avoid requiring a full
 OpenMM simulation setup (GPU, topology, system, etc.).
 """
 
+import inspect
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+
+def test_final_minimization_default_is_uncapped() -> None:
+    """Production minimization should default to OpenMM convergence with no iteration cap."""
+
+    from polyzymd.simulation.runner import SimulationRunner
+
+    signature = inspect.signature(SimulationRunner.minimize)
+    assert signature.parameters["max_iterations"].default == 0
 
 
 class TestThermostatTimescaleFriction:
