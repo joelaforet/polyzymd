@@ -226,7 +226,7 @@ With `--format gromacs`, the build command creates a build-only handoff in
 - `{system}.gro` - GROMACS coordinate file
 - `{system}.top` - GROMACS topology file
 - `*.itp` - Molecule parameter files (one per component)
-- Position restraints (`#ifdef POSRES_PROTEIN`, etc.) appended into molecule `.itp` files
+- Position restraints (`#ifdef POSRES_PROTEIN`, etc.) appended into molecule `.itp` files for supported non-exact exports
 
 PolyzyMD may also generate convenience defaults:
 

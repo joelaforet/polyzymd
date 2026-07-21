@@ -6,12 +6,11 @@ parameterize the product with native OpenMM GLYCAM, and run or export through th
 PolyzyMD exact OpenMM/GROMACS paths.
 
 ```{important}
-This is an explicit opt-in production route for strict GLYCAM systems. It is not
-the backward-compatible default Sage/Interchange route. Existing configs that do
-not opt in keep `force_field.glycan_policy: sage_fallback` with
-`force_field.conjugate_parameterization: openff_interchange`. Strict GLYCAM
-requires both `glycan_policy: strict_glycam` and
-`conjugate_parameterization: native_openmm_glycam`.
+This is an explicit per-moiety route. Mark each glycan moiety with
+`moiety.force_field: glycam06`. Moieties that omit `force_field` inherit the
+top-level `force_field.small_molecule` setting and use the generic OpenFF route.
+Unknown force-field labels fail loudly; PolyzyMD does not silently fall back from
+GLYCAM to OpenFF.
 ```
 
 ```{warning}
@@ -85,29 +84,32 @@ PolyzyMD restores the canonical GLYCAM names after the Pablo-only matching step.
   explicit hydroxyl O/H group. The `ROH:O1`/`ROH:HO1` cap is accepted, but not
   required when an ordinary residue-local hydroxyl is present.
 
-## 3. Configure strict native GLYCAM parameterization
+## 3. Configure force-field ownership
 
-Set the force-field route explicitly. `native_openmm_glycam` requires
-`strict_glycam`; the schema rejects `native_openmm_glycam` combined with
-`sage_fallback`.
+Set the ordinary protein and small-molecule force fields once. The GLYCAM route
+is selected by `moiety.force_field: glycam06` on each glycan attachment, not by a
+global glycan policy knob.
 
 ```yaml
 force_field:
   protein: ff14sb_off_impropers_0.0.4.offxml
   small_molecule: openff-2.0.0.offxml
-  glycan_policy: strict_glycam
-  conjugate_parameterization: native_openmm_glycam
 ```
 
 This route uses the OpenMM-vendored Amber14 XML stack for ff14SB protein,
-GLYCAM_06j-1 glycan residues, GLYCAM NLN for modified Asn, and TIP3P water.
-The native OpenMM system is built with fixed route invariants: PME nonbonded
-method, 1.0 nm nonbonded cutoff, `HBonds` constraints, and rigid water. These
-invariants are recorded in the native GLYCAM audit and exact sidecar.
-Disconnected precharged Sage components such as DMSO, free polymer molecules,
-and other disconnected organics are admitted through `SMIRNOFFTemplateGenerator`
-when they have Sage-domain provenance and assigned partial charges. Covalently
-attached Sage polymer on the same protein as a GLYCAM glycan is unsupported.
+GLYCAM_06j-1 glycan residues, GLYCAM NLN for modified Asn, and TIP3P water. The
+native GLYCAM reference records its route invariants in the audit and exact
+sidecar. In mixed GLYCAM/OpenFF overlays, the baseline/user simulation globals
+such as PME method, cutoff, switching, and tolerance remain authoritative;
+native-reference differences are diagnostics and do not change exact particle,
+bonded, constraint, or exception transfer.
+Disconnected precharged OpenFF components such as DMSO or ethanol, free polymer
+molecules, and other disconnected organics can coexist with GLYCAM glycans when
+they have complete provenance and assigned partial charges. Ions and water are
+also included in the final solvated system. Covalently attached OpenFF polymer on
+the same protein as a GLYCAM glycan is handled by the mixed overlay route, which
+audits ownership and fails closed on unknown baseline parameter forces that touch
+GLYCAM atoms.
 
 Disconnected multi-residue Sage polymers are represented internally as one
 OpenMM residue only for `SMIRNOFFTemplateGenerator` template matching. The
@@ -118,8 +120,11 @@ artifacts.
 
 Add one enabled attachment under `conjugation.attachments` for each Asn site. Use
 the cleaned protein's Asn chain and residue number, set
-`moiety.force_field_domain: glycan`, and point `moiety.input_path` at the
-canonical GLYCAM-named CONECT PDB.
+`moiety.force_field: glycam06`, and point `moiety.input_path` at the canonical
+GLYCAM-named CONECT PDB. The built-in N-glycosylation mechanism infers the
+canonical Asn `ND2`--glycan reducing-end `C1` linkage and validates the hydroxyl
+leaving atoms. Use explicit atom selectors only when you need to override that
+canonical inference.
 
 ```yaml
 conjugation:
@@ -137,7 +142,7 @@ conjugation:
         atom_name: ND2
       moiety:
         name: G42666_asn25
-        force_field_domain: glycan
+        force_field: glycam06
         input_path: structures/G42666_asn25_glycam.pdb
       mechanism:
         name: n_glycosylation
@@ -149,7 +154,7 @@ conjugation:
         atom_name: ND2
       moiety:
         name: G80966_asn60
-        force_field_domain: glycan
+        force_field: glycam06
         input_path: structures/G80966_asn60_glycam.pdb
       mechanism:
         name: n_glycosylation
@@ -204,7 +209,7 @@ conjugation:
         atom_name: ND2
       moiety:
         name: G42666_asn25
-        force_field_domain: glycan
+        force_field: glycam06
         input_path: structures/G42666_asn25_glycam.pdb
       mechanism:
         name: n_glycosylation
@@ -216,7 +221,7 @@ conjugation:
         atom_name: ND2
       moiety:
         name: G80966_asn60
-        force_field_domain: glycan
+        force_field: glycam06
         input_path: structures/G80966_asn60_glycam.pdb
       mechanism:
         name: n_glycosylation
@@ -277,8 +282,6 @@ output:
 force_field:
   protein: ff14sb_off_impropers_0.0.4.offxml
   small_molecule: openff-2.0.0.offxml
-  glycan_policy: strict_glycam
-  conjugate_parameterization: native_openmm_glycam
 
 engine: openmm
 openmm:
@@ -286,9 +289,9 @@ openmm:
   precision: mixed
 ```
 
-Automatic ion placement and neutralization are not audited for this strict native
-GLYCAM route. Keep ion settings at zero unless the implementation explicitly
-accepts your ion templates.
+The final solvated system may contain the attached glycans, attached OpenFF
+polymers, free OpenFF polymer chains, organic cosolvent, ions, and water. The
+final periodic E2E acceptance test exercises this mixed component set.
 
 ## 6. Run the build
 
@@ -301,7 +304,10 @@ pixi run -e build polyzymd build -c config.yaml
 ```
 
 The OpenMM execution path uses the authoritative native OpenMM `System`,
-`Topology`, and positions from that bundle.
+`Topology`, and positions from that bundle. Production minimization should be
+convergence-driven. Use uncapped OpenMM minimization (`maxIterations=0`) when
+validating final exact-bundle stability rather than treating an arbitrary
+iteration cap as convergence evidence.
 
 ## 7. Inspect provenance artifacts
 
@@ -342,13 +348,24 @@ checks under your chosen PME settings. Treat differences from PME grid/order or
 modifier choices as engine configuration differences to manage, not as evidence
 that PolyzyMD changed local bonded or exception parameters.
 
+Exact GROMACS export currently does not generate glycan-specific position
+restraints. If you need glycan restraints, use the exact OpenMM path with staged
+post-overlay `position_restraints`, or provide and validate a separate GROMACS
+restraint workflow outside the exact exporter.
+
+The periodic final acceptance test is opt-in:
+
+```bash
+POLYZYMD_RUN_FINAL_E2E=1 pixi run -e build pytest tests/test_conjugation_final_e2e.py -m final_e2e -v
+```
+
 ## Limitations
 
 - The glycan input must be a canonical GLYCAM-named PDB with complete `CONECT`
   records. PolyzyMD rejects missing or detectably invalid explicit graphs and
   does not infer bonds from coordinates.
-- Strict GLYCAM never silently falls back to Sage. Use `sage_fallback` only as an
-  explicit OpenFF/Sage route, not as a hidden rescue path.
+- Strict GLYCAM never silently falls back to OpenFF. Omit `moiety.force_field`
+  only for moieties that should inherit `force_field.small_molecule`.
 - Covalently attached Sage polymer on the same protein as a GLYCAM glycan is
   unsupported because cross-boundary bonded and exception provenance is not
   audited. Disconnected Sage components are supported when precharged and routed
@@ -357,11 +374,11 @@ that PolyzyMD changed local bonded or exception parameters.
   full modified topology is not representable, PolyzyMD fails closed.
 - Only PolyzyMD's exact OpenMM and exact GROMACS paths are guaranteed for this
   workflow. Arbitrary vanilla Interchange exporters are not guaranteed.
-- Exact GROMACS export currently rejects `component_info` position-restraint
-  postprocessing because it cannot be proven without changing exact topology
-  semantics. If position restraints are required, use the exact OpenMM route with
-  staged `position_restraints` in `simulation_phases.equilibration_stages`, or
-  use the explicit Sage/OpenFF route for GROMACS position-restraint workflows.
+- Exact GROMACS export currently does not generate glycan-specific position
+  restraints and rejects `component_info` position-restraint postprocessing. If
+  glycan position restraints are required, use the exact OpenMM route with staged
+  post-overlay `position_restraints`, or provide a separately validated GROMACS
+  restraint workflow.
 
 ## Related reference
 

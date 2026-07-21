@@ -383,3 +383,22 @@ description: "Description of your simulation system"
 # force_field:
 #   protein: "ff14sb_off_impropers_0.0.4.offxml"
 #   small_molecule: "openff-2.0.0.offxml"
+#
+# Conjugation moiety force fields are attachment scoped:
+#
+# conjugation:
+#   enabled: true
+#   attachments:
+#     - name: "asn60_glycan"
+#       moiety:
+#         name: "n_glycan"
+#         force_field: "glycam06"          # Canonical GLYCAM value
+#     - name: "lys63_polymer"
+#       moiety:
+#         name: "polymer"
+#         # Omit force_field to inherit force_field.small_molecule
+#
+# Unknown moiety.force_field values fail loudly; PolyzyMD does not fall back from
+# GLYCAM to OpenFF. Post-overlay restraints may target glycans and other atoms.
+# Exact mixed-overlay builds write ownership_manifest.json and
+# overlay_diagnostics.json; final OpenMM minimization uses maxIterations=0.
