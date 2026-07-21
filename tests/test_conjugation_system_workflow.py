@@ -1728,7 +1728,11 @@ def _config_nhs_attachment(
     return SimpleNamespace(
         name=name,
         enabled=True,
-        moiety=SimpleNamespace(name=name, polymer_recipe=recipe),
+        moiety=SimpleNamespace(
+            name=name,
+            force_field="openff-2.2.0.offxml",
+            polymer_recipe=recipe,
+        ),
         mechanism=SimpleNamespace(name="nhs_lys_amide", reaction_smarts=None),
         site=SimpleNamespace(
             chain_id="A",

@@ -27,8 +27,6 @@ class ResolvedAttachmentForceField:
     attachment_name: str
     source: str
     source_kind: ForceFieldSourceKind
-    inherited: bool
-    provenance: str
 
     @property
     def is_glycam(self) -> bool:
@@ -43,8 +41,6 @@ class ResolvedAttachmentForceField:
             "attachment_name": self.attachment_name,
             "source": self.source,
             "source_kind": self.source_kind,
-            "inherited": self.inherited,
-            "provenance": self.provenance,
         }
 
 
@@ -55,7 +51,6 @@ class ResolvedConjugateForceFields:
     route: ConjugateForceFieldRoute
     attachments: tuple[ResolvedAttachmentForceField, ...]
     protein_force_field: str
-    default_small_molecule_force_field: str
 
     @property
     def has_glycam(self) -> bool:
@@ -75,7 +70,6 @@ class ResolvedConjugateForceFields:
         return {
             "route": self.route,
             "protein_force_field": self.protein_force_field,
-            "default_small_molecule_force_field": self.default_small_molecule_force_field,
             "attachments": [attachment.to_dict() for attachment in self.attachments],
         }
 
@@ -83,36 +77,27 @@ class ResolvedConjugateForceFields:
 def resolve_conjugate_force_fields(config: Any) -> ResolvedConjugateForceFields:
     """Resolve enabled conjugation attachments to force-field sources and a route.
 
-    Missing attachment-level values inherit ``config.force_field.small_molecule``.
-    Canonical GLYCAM is requested with ``glycam06``. OpenFF OFFXML names and
-    filesystem paths use the generic Interchange route. Unknown labels fail closed.
+    Every enabled attachment must explicitly declare its owner. Canonical GLYCAM
+    is requested with ``glycam06``. OpenFF OFFXML names and filesystem paths use
+    the generic Interchange route. Missing, blank, and unknown values fail closed.
     """
 
     force_field = getattr(config, "force_field", None)
     protein_force_field = str(getattr(force_field, "protein", ""))
-    default_small_molecule = str(getattr(force_field, "small_molecule", ""))
-    if not default_small_molecule:
-        raise ValueError(
-            "force_field.small_molecule is required for conjugation force-field routing"
-        )
 
+    conjugation = getattr(config, "conjugation", None)
     attachments = tuple(
         attachment
-        for attachment in tuple(
-            getattr(getattr(config, "conjugation", None), "attachments", ()) or ()
-        )
+        for attachment in tuple(getattr(conjugation, "attachments", ()) or ())
+        if getattr(conjugation, "enabled", True)
         if getattr(attachment, "enabled", True)
     )
-    resolved = tuple(
-        _resolve_attachment_force_field(attachment, default_small_molecule)
-        for attachment in attachments
-    )
+    resolved = tuple(_resolve_attachment_force_field(attachment) for attachment in attachments)
     route = _route_from_resolved_attachments(resolved)
     return ResolvedConjugateForceFields(
         route=route,
         attachments=resolved,
         protein_force_field=protein_force_field,
-        default_small_molecule_force_field=default_small_molecule,
     )
 
 
@@ -128,29 +113,23 @@ def mixed_overlay_route(config: Any) -> bool:
     return resolve_conjugate_force_fields(config).route == "mixed_overlay"
 
 
-def _resolve_attachment_force_field(
-    attachment: Any,
-    default_small_molecule: str,
-) -> ResolvedAttachmentForceField:
+def _resolve_attachment_force_field(attachment: Any) -> ResolvedAttachmentForceField:
     """Resolve one attachment force-field value."""
 
     moiety = getattr(attachment, "moiety", None)
     raw_value = getattr(moiety, "force_field", None)
-    inherited = raw_value is None
-    value = default_small_molecule if inherited else str(raw_value)
-    source, source_kind = _canonical_source(value)
     attachment_name = str(getattr(attachment, "name", "attachment"))
-    provenance = (
-        "inherited from force_field.small_molecule"
-        if inherited
-        else "configured on conjugation attachment moiety"
-    )
+    if raw_value is None:
+        raise ValueError(
+            f"Enabled conjugation attachment {attachment_name!r} must explicitly declare "
+            "moiety.force_field"
+        )
+    value = str(raw_value)
+    source, source_kind = _canonical_source(value)
     return ResolvedAttachmentForceField(
         attachment_name=attachment_name,
         source=source,
         source_kind=source_kind,
-        inherited=inherited,
-        provenance=provenance,
     )
 
 

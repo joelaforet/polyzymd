@@ -15,22 +15,61 @@ from polyzymd.config.schema import ConjugationMoietyConfig
 def test_resolver_mixed_overlay_and_no_fallback() -> None:
     """Resolve mixed attachment sources and reject unknown labels."""
 
-    config = _config(_attachment("glycan", "glycam_06"), _attachment("polymer", None))
+    config = _config(
+        _attachment("glycan", "glycam_06"),
+        _attachment("polymer", "openff-2.0.0.offxml"),
+    )
     resolved = resolve_conjugate_force_fields(config)
     assert resolved.route == "mixed_overlay"
     assert resolved.attachments[0].source == "glycam06"
     assert resolved.attachments[1].source == "openff-2.0.0.offxml"
-    assert resolved.attachments[1].inherited is True
+    assert "inherited" not in resolved.attachments[1].to_dict()
+    assert "default_small_molecule_force_field" not in resolved.to_dict()
+
+    with pytest.raises(ValueError, match="must explicitly declare moiety.force_field"):
+        resolve_conjugate_force_fields(_config(_attachment("missing", None)))
 
     with pytest.raises(ValueError, match="Unknown conjugation moiety force_field"):
         resolve_conjugate_force_fields(_config(_attachment("bad", "glycan-special")))
 
 
+@pytest.mark.parametrize(
+    ("sources", "expected_route"),
+    [
+        (("glycam06", "glycam-06"), "native_exact"),
+        (("openff-2.0.0.offxml", "/tmp/custom.offxml"), "standard_interchange"),
+        (("glycam06", "openff-2.0.0.offxml"), "mixed_overlay"),
+    ],
+)
+def test_route_is_derived_only_from_explicit_attachment_owners(
+    sources: tuple[str, str], expected_route: str
+) -> None:
+    """Explicit all-GLYCAM, all-OpenFF, and mixed owners select the route."""
+
+    config = _config(
+        *(_attachment(f"attachment-{index}", source) for index, source in enumerate(sources))
+    )
+
+    assert resolve_conjugate_force_fields(config).route == expected_route
+
+
+def test_disabled_conjugation_is_inert_without_attachment_owner() -> None:
+    """A disabled conjugation block does not resolve attachment ownership."""
+
+    config = _config(_attachment("disabled", None))
+    config.conjugation.enabled = False
+
+    resolved = resolve_conjugate_force_fields(config)
+
+    assert resolved.route == "standard_interchange"
+    assert resolved.attachments == ()
+
+
 def test_schema_canonicalizes_moiety_force_field_and_forbids_legacy_fields() -> None:
     """Schema validation should normalize approved values and reject unknown fields."""
 
-    inherited = ConjugationMoietyConfig.model_validate({"name": "polymer"})
-    assert inherited.force_field is None
+    inert = ConjugationMoietyConfig.model_validate({"name": "polymer"})
+    assert inert.force_field is None
     glycam = ConjugationMoietyConfig.model_validate({"name": "glycan", "force_field": "GLYCAM_06"})
     assert glycam.force_field == "glycam06"
     offxml = ConjugationMoietyConfig.model_validate(
@@ -39,6 +78,8 @@ def test_schema_canonicalizes_moiety_force_field_and_forbids_legacy_fields() -> 
     assert offxml.force_field == "openff-2.0.0.offxml"
     with pytest.raises(ValueError, match="Unknown moiety.force_field"):
         ConjugationMoietyConfig.model_validate({"name": "bad", "force_field": "glycan-special"})
+    with pytest.raises(ValueError, match="must not be blank"):
+        ConjugationMoietyConfig.model_validate({"name": "bad", "force_field": "  "})
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         ConjugationMoietyConfig.model_validate({"name": "bad", "glycan_force_field": "glycam06"})
 
