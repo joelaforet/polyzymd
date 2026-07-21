@@ -26,6 +26,8 @@ from pydantic import (
     model_validator,
 )
 
+import warnings
+
 LOGGER = logging.getLogger(__name__)
 
 _TOKEN_UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
@@ -880,6 +882,12 @@ class EquilibrationStageConfig(BaseModel):
     @classmethod
     def migrate_temperature_ramp_config(cls, data: Any) -> Any:
         """Migrate legacy ramp fields before validating the derived duration."""
+        warnings.warn(
+        "migrate_temperature_ramp_config is deprecated and will be removed; users must update their config files.",
+        category=DeprecationWarning,
+        stacklevel=2
+        )
+        
         if not isinstance(data, dict):
             return data
 
