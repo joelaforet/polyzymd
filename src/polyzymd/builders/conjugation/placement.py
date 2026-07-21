@@ -13,7 +13,7 @@ from polyzymd.builders.conjugation._linkage import (
     ProteinLinkSite,
     ResolvedAttachmentPlan,
 )
-from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymer import PreparedFragment
 from polyzymd.builders.conjugation.structure.parsing import (
     parse_pdb_atom_records as parse_structure_pdb_atom_records,
 )
@@ -118,7 +118,7 @@ class PackmolModifierPlacementResult(BaseModel):
 
 def place_modifier_with_packmol(
     protein_pdb_path: Path | str,
-    modifier: GeneratedPolymerFragment,
+    modifier: PreparedFragment,
     linker: ModifierLinker,
     output_dir: Path | str,
     *,
@@ -172,7 +172,7 @@ def place_modifier_with_packmol(
 
 def place_modifier_with_resolved_plan(
     protein_pdb_path: Path | str,
-    modifier: GeneratedPolymerFragment,
+    modifier: PreparedFragment,
     plan: ResolvedAttachmentPlan,
     output_dir: Path | str,
     *,
@@ -303,7 +303,7 @@ def place_modifier_with_resolved_plan(
 
 def place_modifiers_with_resolved_plans(
     protein_pdb_path: Path | str,
-    modifiers: tuple[GeneratedPolymerFragment, ...],
+    modifiers: tuple[PreparedFragment, ...],
     plans: tuple[ResolvedAttachmentPlan, ...],
     output_dir: Path | str,
     *,
@@ -532,7 +532,7 @@ def _protein_steric_atoms_from_plans(
 
 
 def _retained_modifier_atoms(
-    modifier: GeneratedPolymerFragment,
+    modifier: PreparedFragment,
     *,
     plan: ResolvedAttachmentPlan | None = None,
 ) -> tuple[PdbAtomRecord, ...]:
@@ -716,7 +716,7 @@ def _snap_reactive_atom_to_bond_length(
 
 
 def _placed_fragment_from_coords(
-    modifier: GeneratedPolymerFragment, coords: np.ndarray
+    modifier: PreparedFragment, coords: np.ndarray
 ) -> PlacedPolymerFragment:
     """Build a placed fragment preserving atom identity and connectivity."""
     placed_atoms = []

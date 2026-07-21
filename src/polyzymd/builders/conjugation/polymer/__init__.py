@@ -4,6 +4,7 @@ from polyzymd.builders.conjugation.polymer.fragment import (
     GeneratedPolymerFragment,
     PolymerFragmentAtom,
     PolymerFragmentResidue,
+    PreparedFragment,
 )
 from polyzymd.builders.conjugation.polymer.moiety import (
     GeneratedMoietyFragment,
@@ -19,6 +20,7 @@ from polyzymd.builders.conjugation.polymer.recipe import (
 __all__ = [
     "GeneratedMoietyFragment",
     "GeneratedPolymerFragment",
+    "PreparedFragment",
     "PolymerFragmentAtom",
     "PolymerFragmentResidue",
     "build_smiles_moiety_fragment",
