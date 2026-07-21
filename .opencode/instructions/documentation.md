@@ -1,5 +1,70 @@
 # Documentation Rules
 
+## Audience and Purpose
+
+Read the Docs is the canonical interface through which humans and agents learn
+what PolyzyMD can do, how to use it, and where its implementation lives. Write
+for undergraduate learners, PhD researchers, industry users, experimentalists,
+and readers who use English as an additional language.
+
+- Keep documentation synchronized whenever code changes commands,
+  configuration, outputs, workflows, public contracts, or scientific meaning.
+- Prefer direct, concrete language, short sentences, explicit prerequisites,
+  copyable commands, expected outcomes, and clear next steps.
+- Remove repetitive summaries, generic claims, canned transitions, and vague
+  adjectives that make prose sound machine-generated.
+- Use `docs/source/get_started/quickstart.md` as the primary voice and workflow
+  reference.
+
+## Diataxis Roles
+
+Keep each page centered on one Diataxis purpose:
+
+- `get_started/` and `tutorials/`: learning-oriented guided experiences.
+- `how_to/`: task-oriented procedures for a known goal.
+- `reference/`: factual lookup, schemas, commands, compatibility, and code maps.
+- `explanation/`: concepts, design decisions, tradeoffs, and scientific context.
+
+Do not turn a tutorial into an API inventory or hide required procedure inside
+an explanation page. Link between page types instead of duplicating content.
+
+## Workflow and Usability Review
+
+Canonical workflows must show prerequisites, exact commands, expected
+artifacts, success criteria, common recovery paths, and the next likely task.
+Show OpenMM and GROMACS paths with equal visibility when both are supported.
+
+For a new or materially changed workflow page, use a fresh-context, read-only
+reviewer to follow the documented task as a novice. Give the reviewer the page
+and necessary environment, not the intended verdict. Fix factual gaps,
+ambiguous steps, hidden prerequisites, and unnecessary cognitive load before
+calling the documentation complete.
+
+Audit prose in separate passes for:
+
+1. Fidelity to current code and tested behavior.
+2. Diataxis structure and completeness.
+3. Plain English and removal of machine-like filler.
+4. Novice task completion and navigation.
+
+## Source Navigation for Agents
+
+Use stable semantic references instead of fragile line links:
+
+- Name repository paths and public symbols explicitly, for example
+  `src/polyzymd/builders/solvent.py` and `SolventBuilder.solvate_from_config()`.
+- Use MyST Python roles for rendered API links.
+- Link to packages or symbols, not exact source line numbers.
+- Avoid handwritten GitHub blob links when a repository path or Sphinx
+  cross-reference is sufficient.
+- End implementation-heavy pages with a compact `Implementation references`
+  section that routes to the CLI, configuration, public API, implementation,
+  and tests without interrupting the user workflow.
+
+Maintain a reference-oriented code map that connects user tasks to canonical
+documentation, CLI commands or public APIs, implementation packages, and test
+locations. Do not catalog every private helper.
+
 ## Stack
 
 - **Engine:** Sphinx 8.x
