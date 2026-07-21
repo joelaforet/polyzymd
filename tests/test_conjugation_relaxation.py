@@ -225,11 +225,10 @@ def test_resolve_product_linkage_pairs_uses_generic_assembly_metadata(tmp_path):
             _topology_atom(1, "Z9", "MNO", "C", "42"),
         )
     )
-    plan = type("PlanDouble", (), {"target_bond_length_angstrom": 1.4})()
     spec = type(
         "SpecDouble",
         (),
-        {"resolved_plan": plan, "attachment_id": "x", "attachment_index": 1},
+        {"target_bond_length_angstrom": 1.4, "attachment_id": "x", "attachment_index": 1},
     )()
     assembly = type("AssemblyDouble", (), {"added_conect_pairs": ((1, 2),)})()
 
@@ -573,7 +572,7 @@ def test_resolve_product_linkage_pairs_rejects_multi_attachment_unresolved_pair(
     """Multi-attachment products should not accept positional pairs without endpoint proof."""
     product, topology = _write_mapped_multi_attachment_product(tmp_path)
     specs = _product_mapped_relaxation_specs()
-    specs[0].resolved_plan.protein_link_atom.residue_number = 999
+    specs[0].protein_link_atom.residue_number = 999
     assembly = SimpleNamespace(added_conect_pairs=((1, 2), (3, 4)))
 
     with pytest.raises(RuntimeError, match="expected pair could not be resolved"):
@@ -1243,27 +1242,25 @@ def _generic_product_mapped_relaxation_spec(
     return SimpleNamespace(
         attachment_id=attachment_id,
         attachment_index=attachment_index,
-        resolved_plan=SimpleNamespace(
-            protein_link_atom=SimpleNamespace(
-                serial=protein_serial,
-                chain_id="A",
-                residue_name="ABC",
-                residue_number=protein_residue_number,
-                insertion_code="",
-                atom_name="Q1",
-            ),
-            modifier_link_atom=SimpleNamespace(
-                serial=modifier_serial,
-                chain_id="C",
-                residue_name="MNO",
-                residue_number=modifier_residue_number,
-                insertion_code="",
-                atom_name="Z9",
-            ),
-            protein_product_residue_name="ABC",
-            modifier_product_residue_name="MNO",
-            target_bond_length_angstrom=1.4,
+        protein_link_atom=SimpleNamespace(
+            serial=protein_serial,
+            chain_id="A",
+            residue_name="ABC",
+            residue_number=protein_residue_number,
+            insertion_code="",
+            atom_name="Q1",
         ),
+        modifier_link_atom=SimpleNamespace(
+            serial=modifier_serial,
+            chain_id="C",
+            residue_name="MNO",
+            residue_number=modifier_residue_number,
+            insertion_code="",
+            atom_name="Z9",
+        ),
+        protein_product_residue_name="ABC",
+        modifier_product_residue_name="MNO",
+        target_bond_length_angstrom=1.4,
     )
 
 
@@ -1273,52 +1270,48 @@ def _product_mapped_relaxation_specs() -> tuple[SimpleNamespace, SimpleNamespace
         SimpleNamespace(
             attachment_id="first",
             attachment_index=1,
-            resolved_plan=SimpleNamespace(
-                protein_link_atom=SimpleNamespace(
-                    serial=1,
-                    chain_id="A",
-                    residue_name="ASX",
-                    residue_number=42,
-                    insertion_code="",
-                    atom_name="ND2",
-                ),
-                modifier_link_atom=SimpleNamespace(
-                    serial=2,
-                    chain_id="C",
-                    residue_name="NAG",
-                    residue_number=10,
-                    insertion_code="",
-                    atom_name="C1",
-                ),
-                protein_product_residue_name="ASX",
-                modifier_product_residue_name="NAG",
-                target_bond_length_angstrom=1.4,
+            protein_link_atom=SimpleNamespace(
+                serial=1,
+                chain_id="A",
+                residue_name="ASX",
+                residue_number=42,
+                insertion_code="",
+                atom_name="ND2",
             ),
+            modifier_link_atom=SimpleNamespace(
+                serial=2,
+                chain_id="C",
+                residue_name="NAG",
+                residue_number=10,
+                insertion_code="",
+                atom_name="C1",
+            ),
+            protein_product_residue_name="ASX",
+            modifier_product_residue_name="NAG",
+            target_bond_length_angstrom=1.4,
         ),
         SimpleNamespace(
             attachment_id="second",
             attachment_index=2,
-            resolved_plan=SimpleNamespace(
-                protein_link_atom=SimpleNamespace(
-                    serial=3,
-                    chain_id="A",
-                    residue_name="ASX",
-                    residue_number=87,
-                    insertion_code="",
-                    atom_name="ND2",
-                ),
-                modifier_link_atom=SimpleNamespace(
-                    serial=4,
-                    chain_id="C",
-                    residue_name="NAG",
-                    residue_number=20,
-                    insertion_code="",
-                    atom_name="C1",
-                ),
-                protein_product_residue_name="ASX",
-                modifier_product_residue_name="NAG",
-                target_bond_length_angstrom=1.6,
+            protein_link_atom=SimpleNamespace(
+                serial=3,
+                chain_id="A",
+                residue_name="ASX",
+                residue_number=87,
+                insertion_code="",
+                atom_name="ND2",
             ),
+            modifier_link_atom=SimpleNamespace(
+                serial=4,
+                chain_id="C",
+                residue_name="NAG",
+                residue_number=20,
+                insertion_code="",
+                atom_name="C1",
+            ),
+            protein_product_residue_name="ASX",
+            modifier_product_residue_name="NAG",
+            target_bond_length_angstrom=1.6,
         ),
     )
 
@@ -1332,29 +1325,27 @@ def _single_product_mapped_relaxation_spec(
     return SimpleNamespace(
         attachment_id="single",
         attachment_index=1,
-        resolved_plan=SimpleNamespace(
-            protein_link_atom=SimpleNamespace(
-                serial=protein_serial,
-                chain_id="A",
-                residue_name="ASX",
-                residue_number=42,
-                insertion_code="",
-                atom_name="ND2",
-                element="N",
-            ),
-            modifier_link_atom=SimpleNamespace(
-                serial=modifier_serial,
-                chain_id="C",
-                residue_name="NAG",
-                residue_number=10,
-                insertion_code="",
-                atom_name="C1",
-                element="C",
-            ),
-            protein_product_residue_name="ASX",
-            modifier_product_residue_name="NAG",
-            target_bond_length_angstrom=1.4,
+        protein_link_atom=SimpleNamespace(
+            serial=protein_serial,
+            chain_id="A",
+            residue_name="ASX",
+            residue_number=42,
+            insertion_code="",
+            atom_name="ND2",
+            element="N",
         ),
+        modifier_link_atom=SimpleNamespace(
+            serial=modifier_serial,
+            chain_id="C",
+            residue_name="NAG",
+            residue_number=10,
+            insertion_code="",
+            atom_name="C1",
+            element="C",
+        ),
+        protein_product_residue_name="ASX",
+        modifier_product_residue_name="NAG",
+        target_bond_length_angstrom=1.4,
     )
 
 

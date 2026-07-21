@@ -1,17 +1,11 @@
-"""Internal resolved attachment build specifications.
-
-These records bridge reaction/linkage resolution and the current construction
-functions without changing the public conjugation API.
-"""
+"""Reaction-product enrichment from prepared modifier sources."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
-
-from polyzymd.builders.conjugation._linkage import ResolvedAttachmentPlan
+from polyzymd.builders.conjugation._linkage import ReactionProduct
 from polyzymd.builders.conjugation.polymer.fragment import (
     GeneratedPolymerFragment,
     PreparedFragment,
@@ -19,35 +13,14 @@ from polyzymd.builders.conjugation.polymer.fragment import (
 from polyzymd.builders.conjugation.polymer.moiety import GeneratedMoietyFragment
 
 
-class AttachmentBuildSpec(BaseModel):
-    """Resolved build input for one enabled conjugation attachment."""
-
-    model_config = {"arbitrary_types_allowed": True}
-
-    attachment_id: str
-    attachment_index: int = Field(..., ge=1)
-    attachment_config: Any = Field(exclude=True)
-    reaction_name: str
-    fragment: PreparedFragment
-    resolved_plan: ResolvedAttachmentPlan
-    source_sidecars: dict[str, Path] = Field(default_factory=dict)
-    product_residue_mappings: dict[str, dict[str, int | str]] = Field(
-        default_factory=dict,
-        exclude=True,
-    )
-    endpoint_provenance: dict[str, Any] = Field(default_factory=dict)
-    scoped_residue_aliases: dict[str, str] = Field(default_factory=dict)
-    diagnostics: tuple[str, ...] = Field(default_factory=tuple)
-
-
-def attachment_spec_from_moiety_plan(
+def reaction_product_from_moiety(
     fragment: GeneratedMoietyFragment,
-    plan: ResolvedAttachmentPlan,
+    plan: ReactionProduct,
     *,
     attachment_config: Any,
     attachment_index: int,
     reaction_name: str,
-) -> AttachmentBuildSpec:
+) -> ReactionProduct:
     """Adapt a one-residue moiety and resolved plan into a build spec."""
     generated_fragment = _generated_fragment_from_moiety_plan(fragment, plan)
     sidecars = _moiety_sidecars(fragment)
@@ -59,22 +32,24 @@ def attachment_spec_from_moiety_plan(
         provenance={"residue_name": fragment.residue_name},
         diagnostics=("Prepared SMILES moiety fragment",),
     )
-    return AttachmentBuildSpec(
-        attachment_id=_attachment_id(attachment_config, attachment_index),
-        attachment_index=attachment_index,
-        attachment_config=attachment_config,
-        reaction_name=reaction_name,
-        fragment=generic_fragment,
-        resolved_plan=plan,
-        source_sidecars=sidecars,
-        diagnostics=("Resolved moiety attachment build spec",),
+    return plan.model_copy(
+        update={
+            "attachment_id": _attachment_id(attachment_config, attachment_index),
+            "attachment_index": attachment_index,
+            "attachment_config": attachment_config,
+            "reaction_name": reaction_name,
+            "fragment": generic_fragment,
+            "source_sidecars": sidecars,
+            "attachment_force_field_domain": _attachment_force_field_domain(attachment_config),
+            "diagnostics": (*plan.diagnostics, "Resolved moiety reaction product"),
+        }
     )
 
 
-def attachment_spec_from_generated_polymer_plan(
+def reaction_product_from_generated_fragment(
     fragment: GeneratedPolymerFragment,
     sdf_path: Path | str | None,
-    plan: ResolvedAttachmentPlan,
+    plan: ReactionProduct,
     *,
     attachment_config: Any,
     attachment_index: int,
@@ -82,7 +57,7 @@ def attachment_spec_from_generated_polymer_plan(
     charged_sdf_path: Path | str | None = None,
     source_kind: Literal["polymer", "smiles", "pdb_fragment"] = "polymer",
     sidecars: dict[str, Path] | None = None,
-) -> AttachmentBuildSpec:
+) -> ReactionProduct:
     """Adapt a generated polymer fragment and resolved plan into a build spec."""
     resolved_sidecars = dict(sidecars or {})
     if sdf_path is not None:
@@ -103,21 +78,23 @@ def attachment_spec_from_generated_polymer_plan(
             diagnostics=(f"Prepared {source_kind} fragment",),
         )
     )
-    return AttachmentBuildSpec(
-        attachment_id=_attachment_id(attachment_config, attachment_index),
-        attachment_index=attachment_index,
-        attachment_config=attachment_config,
-        reaction_name=reaction_name,
-        fragment=generic_fragment,
-        resolved_plan=plan,
-        source_sidecars=resolved_sidecars,
-        diagnostics=(f"Resolved {source_kind} attachment build spec",),
+    return plan.model_copy(
+        update={
+            "attachment_id": _attachment_id(attachment_config, attachment_index),
+            "attachment_index": attachment_index,
+            "attachment_config": attachment_config,
+            "reaction_name": reaction_name,
+            "fragment": generic_fragment,
+            "source_sidecars": resolved_sidecars,
+            "attachment_force_field_domain": _attachment_force_field_domain(attachment_config),
+            "diagnostics": (*plan.diagnostics, f"Resolved {source_kind} reaction product"),
+        }
     )
 
 
 def _generated_fragment_from_moiety_plan(
     fragment: GeneratedMoietyFragment,
-    plan: ResolvedAttachmentPlan,
+    plan: ReactionProduct,
 ) -> GeneratedPolymerFragment:
     """Adapt a one-residue moiety fragment to the existing placement fragment model."""
     return GeneratedPolymerFragment(
@@ -152,3 +129,9 @@ def _moiety_sidecars(fragment: GeneratedMoietyFragment) -> dict[str, Path]:
 def _attachment_id(attachment_config: Any, attachment_index: int) -> str:
     name = str(getattr(attachment_config, "name", "") or "").strip()
     return name or f"attachment_{attachment_index:02d}"
+
+
+def _attachment_force_field_domain(attachment_config: Any) -> str:
+    """Return the configured modifier force-field domain for this product."""
+    moiety = getattr(attachment_config, "moiety", None)
+    return str(getattr(moiety, "force_field", "") or "").strip()

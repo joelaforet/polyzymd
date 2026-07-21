@@ -16,7 +16,7 @@ from polyzymd.builders.conjugation._linkage import (
     ReactiveEndpoint,
     resolve_explicit_linkage_contract,
 )
-from polyzymd.builders.conjugation._specs import attachment_spec_from_generated_polymer_plan
+from polyzymd.builders.conjugation._specs import reaction_product_from_generated_fragment
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
@@ -29,7 +29,7 @@ def test_legacy_assembly_module_and_single_linker_apis_are_removed():
 
 
 def test_attachment_build_spec_is_the_construction_boundary(monkeypatch, tmp_path: Path):
-    """Specs-first construction should consume resolved ``AttachmentBuildSpec`` objects."""
+    """Specs-first construction should consume resolved ``ReactionProduct`` objects."""
     protein_path = _protein_pdb(tmp_path)
     modifier = _generated_modifier()
     plan = resolve_explicit_linkage_contract(
@@ -37,7 +37,7 @@ def test_attachment_build_spec_is_the_construction_boundary(monkeypatch, tmp_pat
         modifier,
         _explicit_contract(),
     )
-    spec = attachment_spec_from_generated_polymer_plan(
+    spec = reaction_product_from_generated_fragment(
         modifier,
         None,
         plan,

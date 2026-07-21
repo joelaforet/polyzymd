@@ -14,8 +14,8 @@ from polyzymd.builders.conjugation._linkage import (
     LinkageBond,
     PabloCrosslinkRequirement,
     PdbAtomSelector,
+    ReactionProduct,
     ReactiveEndpoint,
-    ResolvedAttachmentPlan,
 )
 from polyzymd.builders.conjugation.construction import ModifierConstructionSettings
 from polyzymd.builders.conjugation.pablo.ingestion import PabloAvailability, PabloIngestionResult
@@ -567,14 +567,14 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     )
 
     specs = tuple(
-        SimpleNamespace(
-            attachment_id=f"attachment_{index:02d}",
-            attachment_index=index,
-            reaction_name="n_glycosylation",
-            source_fragment=moiety,
-            resolved_plan=plan,
-            source_sidecars={},
-            fragment=modifier,
+        plan.model_copy(
+            update={
+                "attachment_id": f"attachment_{index:02d}",
+                "attachment_index": index,
+                "reaction_name": "n_glycosylation",
+                "source_sidecars": {},
+                "fragment": modifier,
+            }
         )
         for index, (modifier, moiety, plan) in enumerate(
             zip(modifiers, moieties, plans, strict=True),
@@ -593,7 +593,7 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     )
 
     assert topology is not None
-    assert len(construction.resolved_plans) == 2
+    assert len(construction.reaction_products) == 2
     assert calls["placements"] == 1
     assert calls["placed_modifier_count"] == 2
     assert calls["placed_plan_count"] == 2
@@ -653,9 +653,9 @@ def test_product_state_specs_use_exact_assembly_serial_pairs(tmp_path: Path):
         product_pdb_path=product_pdb,
     )
 
-    assert [spec.resolved_plan.protein_link_atom.serial for spec in updated] == [1, 3]
-    assert [spec.resolved_plan.modifier_link_atom.serial for spec in updated] == [2, 4]
-    assert [spec.resolved_plan.modifier_link_atom.residue_number for spec in updated] == [10, 20]
+    assert [spec.protein_link_atom.serial for spec in updated] == [1, 3]
+    assert [spec.modifier_link_atom.serial for spec in updated] == [2, 4]
+    assert [spec.modifier_link_atom.residue_number for spec in updated] == [10, 20]
     assert updated[0].endpoint_provenance["conect_pair"] == {
         "protein_serial": 1,
         "modifier_serial": 2,
@@ -796,8 +796,8 @@ def test_product_state_specs_are_idempotent_after_product_mapping(tmp_path: Path
         product_pdb_path=product_pdb,
     )
 
-    assert [spec.resolved_plan.modifier_link_atom.serial for spec in twice] == [2, 4]
-    assert [spec.resolved_plan.modifier_link_atom.residue_number for spec in twice] == [10, 20]
+    assert [spec.modifier_link_atom.serial for spec in twice] == [2, 4]
+    assert [spec.modifier_link_atom.residue_number for spec in twice] == [10, 20]
 
 
 @pytest.mark.parametrize(
@@ -832,13 +832,14 @@ def test_relaxation_receives_product_path_and_attachment_specs(
         modifier_atom="C001",
     )
     modifier = _generated_fragment(residue_name="NAG", residue_number=1)
-    spec = SimpleNamespace(
-        attachment_id="n_gly_attachment_01",
-        attachment_index=1,
-        reaction_name="n_glycosylation",
-        resolved_plan=plan,
-        source_sidecars={},
-        fragment=modifier,
+    spec = plan.model_copy(
+        update={
+            "attachment_id": "n_gly_attachment_01",
+            "attachment_index": 1,
+            "reaction_name": "n_glycosylation",
+            "source_sidecars": {},
+            "fragment": modifier,
+        }
     )
     calls = {}
 
@@ -975,8 +976,8 @@ def test_relaxation_receives_product_path_and_attachment_specs(
         assert calls["relaxation_product_pdb_path"] == construction.crosslinked_pdb_path
         relaxation_spec = calls["relaxation_attachment_specs"][0]
         assert relaxation_spec.attachment_id == spec.attachment_id
-        assert relaxation_spec.resolved_plan.protein_link_atom.serial == 1
-        assert relaxation_spec.resolved_plan.modifier_link_atom.serial == 2
+        assert relaxation_spec.protein_link_atom.serial == 1
+        assert relaxation_spec.modifier_link_atom.serial == 2
     assert "interchange" not in calls["validation_kwargs"]
 
 
@@ -997,13 +998,14 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
         modifier_atom="C001",
     )
     modifier = _generated_fragment(residue_name="NAG", residue_number=1)
-    spec = SimpleNamespace(
-        attachment_id="n_gly_attachment_01",
-        attachment_index=1,
-        reaction_name="n_glycosylation",
-        resolved_plan=plan,
-        source_sidecars={},
-        fragment=modifier,
+    spec = plan.model_copy(
+        update={
+            "attachment_id": "n_gly_attachment_01",
+            "attachment_index": 1,
+            "reaction_name": "n_glycosylation",
+            "source_sidecars": {},
+            "fragment": modifier,
+        }
     )
     protein_template = _charged_molecule_like("protein", residue_name="ASX")
     protein_template.atoms[0].metadata["atom_name"] = "ND2"
@@ -1160,7 +1162,7 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
     attachments = tuple(_direct_n_gly_attachment(index) for index in (1, 2))
     built_specs = []
     calls = {}
-    real_spec_builder = workflow_module.attachment_spec_from_generated_polymer_plan
+    real_spec_builder = workflow_module.reaction_product_from_generated_fragment
 
     class FakeReaction:
         coordinate_backend_mechanism = "n_glycosylation"
@@ -1182,7 +1184,7 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
         calls["construct_spec_count"] = len(built_specs)
         calls["spec_count"] = len(kwargs["specs"])
         calls["attachment_specs"] = kwargs["specs"]
-        calls["resolved_plan_count"] = len([spec.resolved_plan for spec in kwargs["specs"]])
+        calls["resolved_plan_count"] = len(kwargs["specs"])
         return (
             SimpleNamespace(
                 relaxation=SimpleNamespace(minimized_pdb_path=relaxed, relaxed_pdb_path=relaxed),
@@ -1212,7 +1214,7 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
     monkeypatch.setattr(workflow_module, "resolve_moiety_source", fake_resolve_source)
     monkeypatch.setattr(
         workflow_module,
-        "attachment_spec_from_generated_polymer_plan",
+        "reaction_product_from_generated_fragment",
         counting_spec_builder,
     )
     monkeypatch.setattr(
@@ -1296,7 +1298,7 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     )
     built_specs = []
     calls = {}
-    real_spec_builder = workflow_module.attachment_spec_from_generated_polymer_plan
+    real_spec_builder = workflow_module.reaction_product_from_generated_fragment
 
     class FakeReaction:
         name = "nhs_lys"
@@ -1345,7 +1347,7 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     )
     monkeypatch.setattr(
         workflow_module,
-        "attachment_spec_from_generated_polymer_plan",
+        "reaction_product_from_generated_fragment",
         counting_spec_builder,
     )
     monkeypatch.setattr(workflow_module, "_construct_conjugate_from_specs", fake_construct)
@@ -1760,7 +1762,7 @@ def _pdb_line(
     )
 
 
-def _resolved_plan(requirement: PabloCrosslinkRequirement) -> ResolvedAttachmentPlan:
+def _resolved_plan(requirement: PabloCrosslinkRequirement) -> ReactionProduct:
     protein_selector = PdbAtomSelector(
         chain_id="A",
         residue_name="LYS",
@@ -1773,7 +1775,7 @@ def _resolved_plan(requirement: PabloCrosslinkRequirement) -> ResolvedAttachment
         residue_number=5,
         atom_name="C047",
     )
-    return ResolvedAttachmentPlan(
+    return ReactionProduct(
         contract=ExplicitLinkageContract(
             protein_endpoint=ReactiveEndpoint(
                 participant="protein",
@@ -1847,7 +1849,7 @@ def _generic_resolved_plan(
     residue_number: int,
     modifier_residue_number: int,
     modifier_atom: str,
-) -> ResolvedAttachmentPlan:
+) -> ReactionProduct:
     requirement = PabloCrosslinkRequirement(
         residues=("ASX", "NAG"),
         linking_atoms=("ND2", modifier_atom),
@@ -1888,7 +1890,7 @@ def _generic_resolved_plan(
         ),
         mechanism_name="n_glycosylation",
     )
-    return ResolvedAttachmentPlan(
+    return ReactionProduct(
         contract=contract,
         protein_link_atom=PdbAtomRecord(
             serial=residue_number,
@@ -1937,27 +1939,19 @@ def _openmm_mapping_topology(
     return topology
 
 
-def _product_mapping_specs() -> tuple[SimpleNamespace, SimpleNamespace]:
-    """Return two simple specs with repeated modifier atom names."""
+def _product_mapping_specs() -> tuple[ReactionProduct, ReactionProduct]:
+    """Return two reaction products with repeated modifier atom names."""
     return (
-        SimpleNamespace(
-            attachment_id="attachment_01",
-            attachment_index=1,
-            resolved_plan=_generic_resolved_plan(
-                residue_number=42,
-                modifier_residue_number=1,
-                modifier_atom="C001",
-            ),
-        ),
-        SimpleNamespace(
-            attachment_id="attachment_02",
-            attachment_index=2,
-            resolved_plan=_generic_resolved_plan(
-                residue_number=87,
-                modifier_residue_number=1,
-                modifier_atom="C001",
-            ),
-        ),
+        _generic_resolved_plan(
+            residue_number=42,
+            modifier_residue_number=1,
+            modifier_atom="C001",
+        ).model_copy(update={"attachment_id": "attachment_01", "attachment_index": 1}),
+        _generic_resolved_plan(
+            residue_number=87,
+            modifier_residue_number=1,
+            modifier_atom="C001",
+        ).model_copy(update={"attachment_id": "attachment_02", "attachment_index": 2}),
     )
 
 

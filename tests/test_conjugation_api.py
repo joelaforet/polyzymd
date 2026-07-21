@@ -21,8 +21,8 @@ from polyzymd.builders.conjugation._linkage import (
     LinkageBond,
     PabloCrosslinkRequirement,
     PdbAtomSelector,
+    ReactionProduct,
     ReactiveEndpoint,
-    ResolvedAttachmentPlan,
 )
 from polyzymd.builders.conjugation.polymer import (
     GeneratedMoietyFragment,
@@ -341,7 +341,7 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
     def fake_construct(**kwargs):
         calls["construct"] += 1
         assert len(kwargs["specs"]) == 2
-        assert len([spec.resolved_plan for spec in kwargs["specs"]]) == 2
+        assert len(kwargs["specs"]) == 2
         crosslinked = Path(kwargs["output_dir"]) / "assembled_crosslinked.pdb"
         relaxed = Path(kwargs["output_dir"]) / "conjugate_relaxed.pdb"
         crosslinked.write_text("END\n", encoding="utf-8")
@@ -579,7 +579,7 @@ def _resolved_plan(
     residue_number: int,
     modifier_residue_name: str,
     modifier_atom_name: str,
-) -> ResolvedAttachmentPlan:
+) -> ReactionProduct:
     protein_selector = PdbAtomSelector(
         chain_id="A",
         residue_name="ASN",
@@ -636,7 +636,7 @@ def _resolved_plan(
         leaving_atoms=((), ()),
         bond_order=1,
     )
-    return ResolvedAttachmentPlan(
+    return ReactionProduct(
         contract=contract,
         protein_link_atom=protein_atom,
         modifier_link_atom=modifier_atom,

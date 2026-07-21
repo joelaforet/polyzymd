@@ -12,12 +12,12 @@ from polyzymd.builders.conjugation._linkage import (
     LinkageBond,
     PabloCrosslinkRequirement,
     PdbAtomSelector,
+    ReactionProduct,
     ReactiveEndpoint,
-    ResolvedAttachmentPlan,
 )
 from polyzymd.builders.conjugation._specs import (
-    attachment_spec_from_generated_polymer_plan,
-    attachment_spec_from_moiety_plan,
+    reaction_product_from_generated_fragment,
+    reaction_product_from_moiety,
 )
 from polyzymd.builders.conjugation.pablo import product as product_pablo_module
 from polyzymd.builders.conjugation.polymer import (
@@ -51,7 +51,7 @@ def test_moiety_plan_builds_one_authoritative_prepared_fragment(tmp_path: Path):
     )
     plan = _resolved_plan(modifier_residue_name="NAG")
 
-    spec = attachment_spec_from_moiety_plan(
+    spec = reaction_product_from_moiety(
         moiety,
         plan,
         attachment_config=SimpleNamespace(name="glycan_1"),
@@ -96,7 +96,7 @@ def test_polymer_plan_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_path:
     )
     plan = _resolved_plan(modifier_residue_name="NHS", modifier_atom_name="RC")
 
-    spec = attachment_spec_from_generated_polymer_plan(
+    spec = reaction_product_from_generated_fragment(
         polymer,
         sdf_path,
         plan,
@@ -141,7 +141,7 @@ def test_nhs_lys_polymer_spec_carries_sdf_sidecar_to_product_library(
         name="sbm_nhs",
     )
     plan = _resolved_plan(modifier_residue_name="NHS", modifier_atom_name="RC")
-    spec = attachment_spec_from_generated_polymer_plan(
+    spec = reaction_product_from_generated_fragment(
         polymer,
         sdf_path,
         plan,
@@ -159,7 +159,7 @@ def test_nhs_lys_polymer_spec_carries_sdf_sidecar_to_product_library(
 
     assert captured["polymer_sdf"] == sdf_path
     assert captured["generated_fragment"] is spec.fragment
-    assert captured["resolved_plan"] is plan
+    assert captured["resolved_plan"] is spec
 
 
 def test_n_gly_smiles_spec_carries_sdf_sidecar_to_product_library(
@@ -184,7 +184,7 @@ def test_n_gly_smiles_spec_carries_sdf_sidecar_to_product_library(
         sdf_path=sdf_path,
     )
     plan = _resolved_plan(modifier_residue_name="NAG")
-    spec = attachment_spec_from_moiety_plan(
+    spec = reaction_product_from_moiety(
         moiety,
         plan,
         attachment_config=SimpleNamespace(name="glycan"),
@@ -201,7 +201,7 @@ def test_n_gly_smiles_spec_carries_sdf_sidecar_to_product_library(
 
     assert captured["polymer_sdf"] == sdf_path
     assert captured["generated_fragment"] is spec.fragment
-    assert captured["resolved_plan"] is plan
+    assert captured["resolved_plan"] is spec
 
 
 def test_polymer_product_library_requires_sdf_when_bond_orders_are_incomplete(tmp_path: Path):
@@ -217,7 +217,7 @@ def test_polymer_product_library_requires_sdf_when_bond_orders_are_incomplete(tm
         name="sbm_nhs",
     )
     plan = _resolved_plan(modifier_residue_name="NHS", modifier_atom_name="RC")
-    spec = attachment_spec_from_generated_polymer_plan(
+    spec = reaction_product_from_generated_fragment(
         polymer,
         None,
         plan,
@@ -290,7 +290,7 @@ def _resolved_plan(
     *,
     modifier_residue_name: str,
     modifier_atom_name: str = "C001",
-) -> ResolvedAttachmentPlan:
+) -> ReactionProduct:
     protein_selector = PdbAtomSelector(
         chain_id="A",
         residue_name="ASN",
@@ -311,7 +311,7 @@ def _resolved_plan(
         leaving_atoms=((), ("O002",)),
         bond_order=1,
     )
-    return ResolvedAttachmentPlan(
+    return ReactionProduct(
         contract=ExplicitLinkageContract(
             protein_endpoint=ReactiveEndpoint(
                 participant="protein",

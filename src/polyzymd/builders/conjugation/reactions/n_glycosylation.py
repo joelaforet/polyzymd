@@ -11,8 +11,8 @@ from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
     LinkageBond,
     PdbAtomSelector,
+    ReactionProduct,
     ReactiveEndpoint,
-    ResolvedAttachmentPlan,
     parse_pdb_atom_records,
     resolve_explicit_linkage_contract,
 )
@@ -332,7 +332,7 @@ class NGlycosylationReaction(ReactionTemplate):
         moiety_fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
         *,
         settings: NGlycosylationReactionSettings | None = None,
-    ) -> ResolvedAttachmentPlan:
+    ) -> ReactionProduct:
         """Resolve an Asn-glycan attachment plan against protein and moiety records."""
         contract = cls.build_contract(
             site_config,
@@ -353,7 +353,7 @@ class NGlycosylationReaction(ReactionTemplate):
         fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
         *,
         settings: NGlycosylationReactionSettings | None = None,
-    ) -> ResolvedAttachmentPlan:
+    ) -> ReactionProduct:
         """Resolve an experimental N-glycosylation generic attachment plan."""
         return self.resolve_plan(
             protein_pdb_path,

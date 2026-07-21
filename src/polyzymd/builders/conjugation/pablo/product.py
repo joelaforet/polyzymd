@@ -310,7 +310,7 @@ def build_product_state_pablo_library_for_specs(
                 polymer_sdf=sdf_path,
                 charged_polymer_sdf=charged_sdf_path,
                 generated_fragment=fragment,
-                resolved_plan=getattr(spec, "resolved_plan", None),
+                resolved_plan=spec,
                 product_residue_mappings=_spec_product_residue_mappings(spec),
                 endpoint_provenance=getattr(spec, "endpoint_provenance", None) or None,
                 allow_legacy_direct_fallback=allow_legacy_direct_fallback,
@@ -336,7 +336,7 @@ def build_product_state_pablo_library_for_specs(
         residue_library=pablo.STD_CCD_CACHE.with_(definitions),
         definitions=definitions,
         summaries=summaries,
-        crosslink_requirement=attachment_specs[0].resolved_plan.pablo_crosslink_requirement,
+        crosslink_requirement=attachment_specs[0].pablo_crosslink_requirement,
         diagnostics=diagnostics,
     )
 

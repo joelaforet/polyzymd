@@ -518,7 +518,7 @@ def test_coordinate_only_places_glycan_at_n_glycosylation_bond_length(
     bond_length = _distance(_xyz(nd2), _xyz(c1))
 
     assert 1.35 <= bond_length <= 1.65
-    assert not np.allclose(_xyz(c1), _xyz(spec.resolved_plan.modifier_link_atom), atol=1.0e-3)
+    assert not np.allclose(_xyz(c1), _xyz(spec.modifier_link_atom), atol=1.0e-3)
 
 
 def test_coordinate_only_accepts_generic_local_hydroxyl_glycan(tmp_path: Path) -> None:

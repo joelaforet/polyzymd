@@ -264,7 +264,7 @@ def _spec(*, residue_number: int = 10) -> SimpleNamespace:
     )
     return SimpleNamespace(
         name="lys_patch",
-        resolved_plan=plan,
+        **plan.__dict__,
         fragment=fragment,
         product_residue_mappings={
             "1": {"target_chain": "C", "target_residue_name": "NHX", "target_residue_number": 1}
@@ -309,7 +309,7 @@ def _g42666_like_spec(
     )
     return SimpleNamespace(
         name="g42666_patch",
-        resolved_plan=plan,
+        **plan.__dict__,
         fragment=fragment,
         product_residue_mappings={
             "1": {

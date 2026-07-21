@@ -881,7 +881,7 @@ def _log_lys_product_record_diagnostics(
 
 def _spec_site_identifier(spec: Any) -> str:
     """Return a compact attachment site identifier for diagnostics."""
-    plan = getattr(spec, "resolved_plan", None)
+    plan = spec
     atom = getattr(plan, "protein_link_atom", None) if plan is not None else None
     if atom is None:
         return "unknown"

@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from polyzymd.builders.conjugation._linkage import CrosslinkValidationResult, ResolvedAttachmentPlan
+from polyzymd.builders.conjugation._linkage import CrosslinkValidationResult, ReactionProduct
 from polyzymd.builders.conjugation.pablo.ingestion import PabloIngestionResult
 from polyzymd.builders.conjugation.pablo.parameterization import (
     InterchangeParameterizationResult,
@@ -44,7 +44,7 @@ class ModifierConstructionResult(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     output_dir: Path
-    resolved_plan: ResolvedAttachmentPlan
+    reaction_product: ReactionProduct
     crosslink_validation: CrosslinkValidationResult
     placement: PackmolModifierPlacementResult
     assembly: CrosslinkedPdbAssemblyResult
