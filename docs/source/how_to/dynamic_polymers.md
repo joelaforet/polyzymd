@@ -256,7 +256,7 @@ simulation_phases:
       temperature_start: 60.0
       temperature_end: 300.0
       temperature_increment: 1.0
-      temperature_interval_steps: 600  # duration is derived
+      temperature_interval_steps: 600  # increase temperature by `temperature_increment` every this many steps
       position_restraints:
         - group: "protein_heavy"
           force_constant: 4184.0
