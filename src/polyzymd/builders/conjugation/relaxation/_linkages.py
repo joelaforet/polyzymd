@@ -23,9 +23,9 @@ def _matching_topology_atom_index(
     if source_atom is None:
         return None
     target_resname = (
-        getattr(plan, "protein_product_residue_name", None)
+        plan.protein_product_residue_name
         if role == "protein"
-        else getattr(plan, "modifier_product_residue_name", None)
+        else plan.modifier_product_residue_name
     )
     source_chain = str(getattr(source_atom, "chain_id", "") or "").strip()
     source_number = getattr(source_atom, "residue_number", None)
@@ -72,10 +72,7 @@ def resolve_product_linkage_pairs(
     product_atoms = parse_pdb_atom_records(Path(product_pdb_path))
     topology_atoms = tuple(topology.atoms())
     serial_to_index = _product_serial_to_topology_index(product_atoms, topology_atoms)
-    assembly_pairs = tuple(getattr(assembly, "added_conect_pairs", ()) or ())
-    if not assembly_pairs:
-        pair = getattr(assembly, "added_conect_pair", None)
-        assembly_pairs = (pair,) if pair is not None else ()
+    assembly_pairs = tuple(assembly.added_conect_pairs) if assembly is not None else ()
 
     resolved: list[ProductLinkage] = []
     require_validated_assembly_pairs = len(attachment_specs) > 1
@@ -99,7 +96,7 @@ def resolve_product_linkage_pairs(
                 "Product linkage serials could not be mapped to OpenMM topology indices: "
                 f"{protein_serial}, {modifier_serial}"
             )
-        target = getattr(plan, "target_bond_length_angstrom", None)
+        target = plan.target_bond_length_angstrom
         used_fallback = False
         if target is None:
             used_fallback = True
@@ -111,8 +108,8 @@ def resolve_product_linkage_pairs(
                 )
         resolved.append(
             ProductLinkage(
-                attachment_id=getattr(spec, "attachment_id", None),
-                attachment_index=getattr(spec, "attachment_index", plan_index),
+                attachment_id=spec.attachment_id,
+                attachment_index=spec.attachment_index,
                 protein_atom_index=serial_to_index[protein_serial],
                 modifier_atom_index=serial_to_index[modifier_serial],
                 protein_serial=protein_serial,
@@ -227,10 +224,10 @@ def _serial_pair_for_attachment(
 
 def _raise_unresolved_multi_attachment_pair(plan: Any, spec: Any, *, plan_index: int) -> None:
     """Raise when a multi-attachment product lacks resolvable endpoint serials."""
-    attachment_id = getattr(spec, "attachment_id", None) or f"attachment_{plan_index}"
-    attachment_index = getattr(spec, "attachment_index", plan_index)
-    protein_detail = _pdb_atom_identity(getattr(plan, "protein_link_atom", None))
-    modifier_detail = _pdb_atom_identity(getattr(plan, "modifier_link_atom", None))
+    attachment_id = spec.attachment_id
+    attachment_index = spec.attachment_index
+    protein_detail = _pdb_atom_identity(plan.protein_link_atom)
+    modifier_detail = _pdb_atom_identity(plan.modifier_link_atom)
     raise RuntimeError(
         "Could not validate multi-attachment product linkage endpoints: "
         f"attachment_id={attachment_id!r}, attachment_index={attachment_index}, "
@@ -247,8 +244,8 @@ def _raise_missing_multi_attachment_pair(
     expected: tuple[int, int] | None,
 ) -> None:
     """Raise when multi-attachment assembly metadata cannot validate one pair."""
-    attachment_id = getattr(spec, "attachment_id", None) or f"attachment_{plan_index}"
-    attachment_index = getattr(spec, "attachment_index", plan_index)
+    attachment_id = spec.attachment_id
+    attachment_index = spec.attachment_index
     raise RuntimeError(
         "Could not validate multi-attachment product linkage pair from assembly metadata: "
         f"attachment_id={attachment_id!r}, attachment_index={attachment_index}, "
@@ -261,12 +258,10 @@ def _spec_endpoint_serial_pair(
     product_atoms: tuple[PdbAtomRecord, ...],
 ) -> tuple[int, int] | None:
     """Resolve exact product PDB endpoint serials from one mapped attachment spec."""
-    protein = _matching_product_atom(
-        product_atoms, getattr(plan, "protein_link_atom", None), plan, role="protein"
-    )
+    protein = _matching_product_atom(product_atoms, plan.protein_link_atom, plan, role="protein")
     modifier = _matching_product_atom(
         product_atoms,
-        getattr(plan, "modifier_link_atom", None),
+        plan.modifier_link_atom,
         plan,
         role="modifier",
     )
@@ -284,10 +279,10 @@ def _raise_linkage_pair_mismatch(
     expected: tuple[int, int],
 ) -> None:
     """Raise a strict attachment-pair mismatch with endpoint diagnostics."""
-    attachment_id = getattr(spec, "attachment_id", None) or f"attachment_{plan_index}"
-    attachment_index = getattr(spec, "attachment_index", plan_index)
-    protein_detail = _pdb_atom_identity(getattr(plan, "protein_link_atom", None))
-    modifier_detail = _pdb_atom_identity(getattr(plan, "modifier_link_atom", None))
+    attachment_id = spec.attachment_id
+    attachment_index = spec.attachment_index
+    protein_detail = _pdb_atom_identity(plan.protein_link_atom)
+    modifier_detail = _pdb_atom_identity(plan.modifier_link_atom)
     raise RuntimeError(
         "Assembly CONECT pair does not match attachment spec endpoints: "
         f"attachment_id={attachment_id!r}, attachment_index={attachment_index}, "
@@ -355,9 +350,9 @@ def _expected_product_atom_identity(
 ) -> tuple[str, str, int | None, str, str, str]:
     """Return normalized product identity expected for one mapped link atom."""
     target_resname = (
-        getattr(plan, "protein_product_residue_name", None)
+        plan.protein_product_residue_name
         if role == "protein"
-        else getattr(plan, "modifier_product_residue_name", None)
+        else plan.modifier_product_residue_name
     )
     source_chain = str(getattr(source_atom, "chain_id", "") or "").strip()
     source_number = getattr(source_atom, "residue_number", None)

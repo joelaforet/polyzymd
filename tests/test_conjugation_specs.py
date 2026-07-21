@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -16,8 +15,8 @@ from polyzymd.builders.conjugation._linkage import (
     ReactiveEndpoint,
 )
 from polyzymd.builders.conjugation._specs import (
-    reaction_product_from_generated_fragment,
-    reaction_product_from_moiety,
+    prepare_generated_fragment,
+    prepared_fragment_from_moiety,
 )
 from polyzymd.builders.conjugation.pablo import product as product_pablo_module
 from polyzymd.builders.conjugation.polymer import (
@@ -49,29 +48,18 @@ def test_moiety_plan_builds_one_authoritative_prepared_fragment(tmp_path: Path):
         pdb_path=pdb_path,
         sdf_path=sdf_path,
     )
-    plan = _resolved_plan(modifier_residue_name="NAG")
+    fragment = prepared_fragment_from_moiety(moiety)
 
-    spec = reaction_product_from_moiety(
-        moiety,
-        plan,
-        attachment_config=SimpleNamespace(name="glycan_1"),
-        attachment_index=1,
-        reaction_name="n_glycosylation",
-    )
-
-    assert spec.attachment_id == "glycan_1"
-    assert isinstance(spec.fragment, PreparedFragment)
-    assert spec.fragment.source_kind == "smiles"
-    assert spec.fragment.atoms == moiety.atoms
-    assert spec.fragment.bonds == moiety.bonds
-    assert spec.fragment.bond_orders == moiety.bond_orders
-    assert spec.fragment.atoms[0].formal_charge == 1
-    assert spec.fragment.sidecars == {"pdb": pdb_path, "sdf": sdf_path}
-    assert spec.fragment.reactive_atom_serial == 1
-    assert spec.fragment.reactive_atom_index == 0
-    assert spec.fragment.leaving_atom_serials == (2,)
-    assert spec.fragment.leaving_atom_indices == (1,)
-    assert spec.fragment.source_identity == str(sdf_path)
+    assert isinstance(fragment, PreparedFragment)
+    assert fragment.source_kind == "smiles"
+    assert fragment.atoms == moiety.atoms
+    assert fragment.bonds == moiety.bonds
+    assert fragment.bond_orders == moiety.bond_orders
+    assert fragment.atoms[0].formal_charge == 1
+    assert fragment.sidecars == {"pdb": pdb_path, "sdf": sdf_path}
+    assert fragment.reactive_atom_serial is None
+    assert fragment.leaving_atom_serials == ()
+    assert fragment.source_identity == str(sdf_path)
 
 
 def test_polymer_plan_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_path: Path):
@@ -94,15 +82,9 @@ def test_polymer_plan_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_path:
         leaving_atom_serials=(12,),
         name="sbm_nhs",
     )
-    plan = _resolved_plan(modifier_residue_name="NHS", modifier_atom_name="RC")
-
-    spec = reaction_product_from_generated_fragment(
+    fragment = prepare_generated_fragment(
         polymer,
         sdf_path,
-        plan,
-        attachment_config=SimpleNamespace(name="polymer_1"),
-        attachment_index=1,
-        reaction_name="nhs_lys",
         charged_sdf_path=charged_sdf_path,
     )
 
@@ -112,13 +94,12 @@ def test_polymer_plan_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_path:
         "charged_sdf": charged_sdf_path,
     }
 
-    assert isinstance(spec.fragment, PreparedFragment)
-    assert spec.fragment.source_kind == "polymer"
-    assert len(spec.fragment.residues) == 2
-    assert spec.fragment.sequence == "AC"
-    assert spec.fragment.sidecars == expected_sidecars
-    assert spec.source_sidecars == expected_sidecars
-    assert spec.fragment.residues == polymer.residues
+    assert isinstance(fragment, PreparedFragment)
+    assert fragment.source_kind == "polymer"
+    assert len(fragment.residues) == 2
+    assert fragment.sequence == "AC"
+    assert fragment.sidecars == expected_sidecars
+    assert fragment.residues == polymer.residues
 
 
 def test_nhs_lys_polymer_spec_carries_sdf_sidecar_to_product_library(
@@ -140,16 +121,14 @@ def test_nhs_lys_polymer_spec_carries_sdf_sidecar_to_product_library(
         leaving_atom_serials=(12,),
         name="sbm_nhs",
     )
-    plan = _resolved_plan(modifier_residue_name="NHS", modifier_atom_name="RC")
-    spec = reaction_product_from_generated_fragment(
-        polymer,
-        sdf_path,
-        plan,
-        attachment_config=SimpleNamespace(name="nhs_polymer"),
-        attachment_index=1,
-        reaction_name="nhs_lys",
+    fragment = prepare_generated_fragment(polymer, sdf_path)
+    spec = _resolved_plan(
+        fragment=fragment,
+        modifier_residue_name="NHS",
+        modifier_atom_name="RC",
+        source_sidecars=fragment.sidecars,
     )
-    captured = _capture_singular_product_library_call(monkeypatch, plan.pablo_crosslink_requirement)
+    captured = _capture_singular_product_library_call(monkeypatch, spec.pablo_crosslink_requirement)
 
     product_pablo_module.build_product_state_pablo_library_for_specs(
         tmp_path / "product.pdb",
@@ -158,8 +137,7 @@ def test_nhs_lys_polymer_spec_carries_sdf_sidecar_to_product_library(
     )
 
     assert captured["polymer_sdf"] == sdf_path
-    assert captured["generated_fragment"] is spec.fragment
-    assert captured["resolved_plan"] is spec
+    assert captured["product"] is spec
 
 
 def test_n_gly_smiles_spec_carries_sdf_sidecar_to_product_library(
@@ -183,15 +161,13 @@ def test_n_gly_smiles_spec_carries_sdf_sidecar_to_product_library(
         pdb_path=pdb_path,
         sdf_path=sdf_path,
     )
-    plan = _resolved_plan(modifier_residue_name="NAG")
-    spec = reaction_product_from_moiety(
-        moiety,
-        plan,
-        attachment_config=SimpleNamespace(name="glycan"),
-        attachment_index=1,
-        reaction_name="n_glycosylation",
+    fragment = prepared_fragment_from_moiety(moiety)
+    spec = _resolved_plan(
+        fragment=fragment,
+        modifier_residue_name="NAG",
+        source_sidecars=fragment.sidecars,
     )
-    captured = _capture_singular_product_library_call(monkeypatch, plan.pablo_crosslink_requirement)
+    captured = _capture_singular_product_library_call(monkeypatch, spec.pablo_crosslink_requirement)
 
     product_pablo_module.build_product_state_pablo_library_for_specs(
         tmp_path / "product.pdb",
@@ -200,8 +176,7 @@ def test_n_gly_smiles_spec_carries_sdf_sidecar_to_product_library(
     )
 
     assert captured["polymer_sdf"] == sdf_path
-    assert captured["generated_fragment"] is spec.fragment
-    assert captured["resolved_plan"] is spec
+    assert captured["product"] is spec
 
 
 def test_polymer_product_library_requires_sdf_when_bond_orders_are_incomplete(tmp_path: Path):
@@ -216,14 +191,11 @@ def test_polymer_product_library_requires_sdf_when_bond_orders_are_incomplete(tm
         reactive_atom_serial=11,
         name="sbm_nhs",
     )
-    plan = _resolved_plan(modifier_residue_name="NHS", modifier_atom_name="RC")
-    spec = reaction_product_from_generated_fragment(
-        polymer,
-        None,
-        plan,
-        attachment_config=SimpleNamespace(name="nhs_polymer"),
-        attachment_index=1,
-        reaction_name="nhs_lys",
+    fragment = prepare_generated_fragment(polymer, None)
+    spec = _resolved_plan(
+        fragment=fragment,
+        modifier_residue_name="NHS",
+        modifier_atom_name="RC",
     )
 
     with pytest.raises(ValueError, match="requires an SDF sidecar"):
@@ -288,8 +260,10 @@ def _residue(sequence_index: int, residue_name: str, residue_number: int) -> Pol
 
 def _resolved_plan(
     *,
+    fragment: PreparedFragment,
     modifier_residue_name: str,
     modifier_atom_name: str = "C001",
+    source_sidecars: dict[str, Path] | None = None,
 ) -> ReactionProduct:
     protein_selector = PdbAtomSelector(
         chain_id="A",
@@ -368,4 +342,8 @@ def _resolved_plan(
         protein_product_residue_name="ASX",
         modifier_product_residue_name=modifier_residue_name,
         pablo_crosslink_requirement=requirement,
+        fragment=fragment,
+        attachment_id="test_attachment",
+        reaction_name="test_reaction",
+        source_sidecars=source_sidecars or {},
     )

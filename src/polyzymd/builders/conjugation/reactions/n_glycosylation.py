@@ -331,9 +331,18 @@ class NGlycosylationReaction(ReactionTemplate):
         site_config: Any,
         moiety_fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
         *,
+        prepared_fragment: Any | None = None,
+        attachment_id: str = "",
+        attachment_index: int = 1,
+        attachment_config: Any = None,
+        source_sidecars: dict[str, Path] | None = None,
+        attachment_force_field_domain: str = "",
+        diagnostics: tuple[str, ...] = (),
         settings: NGlycosylationReactionSettings | None = None,
     ) -> ReactionProduct:
         """Resolve an Asn-glycan attachment plan against protein and moiety records."""
+        from polyzymd.builders.conjugation._specs import prepare_reaction_fragment
+
         contract = cls.build_contract(
             site_config,
             moiety_fragment,
@@ -344,6 +353,14 @@ class NGlycosylationReaction(ReactionTemplate):
             protein_pdb_path,
             _moiety_pdb_atoms(moiety_fragment),
             contract,
+            fragment=prepared_fragment or prepare_reaction_fragment(moiety_fragment),
+            attachment_id=attachment_id,
+            attachment_index=attachment_index,
+            attachment_config=attachment_config,
+            reaction_name=cls.name,
+            source_sidecars=source_sidecars,
+            attachment_force_field_domain=attachment_force_field_domain,
+            diagnostics=diagnostics,
         )
 
     def resolve_attachment(
@@ -352,6 +369,7 @@ class NGlycosylationReaction(ReactionTemplate):
         site_config: Any,
         fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
         *,
+        prepared_fragment: Any | None = None,
         settings: NGlycosylationReactionSettings | None = None,
     ) -> ReactionProduct:
         """Resolve an experimental N-glycosylation generic attachment plan."""
@@ -359,6 +377,7 @@ class NGlycosylationReaction(ReactionTemplate):
             protein_pdb_path,
             site_config,
             fragment,
+            prepared_fragment=prepared_fragment,
             settings=settings,
         )
 

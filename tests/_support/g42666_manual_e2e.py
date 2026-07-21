@@ -269,7 +269,7 @@ def _attachment_diagnostics(specs: tuple[Any, ...]) -> list[dict[str, Any]]:
     """Return compact resolved-plan diagnostics for attachment assertions."""
     diagnostics = []
     for spec in specs:
-        plan = spec.resolved_plan
+        plan = spec
         diagnostics.append(
             {
                 "mechanism_name": plan.contract.mechanism_name,

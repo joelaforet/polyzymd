@@ -1071,11 +1071,9 @@ def _local_nagl_patch_records(
 
 def _source_sdf_path(spec: Any) -> Path | None:
     """Return the validated charged SDF path from an attachment spec."""
-    if getattr(getattr(spec, "fragment", None), "source_kind", None) == "moiety":
+    if spec.fragment.source_kind == "smiles":
         return None
-    sidecars = getattr(spec, "source_sidecars", {}) or {}
-    if not isinstance(sidecars, Mapping):
-        return None
+    sidecars = spec.source_sidecars
     path = sidecars.get("charged_sdf")
     if path is not None:
         return Path(path)
@@ -1090,13 +1088,13 @@ def _source_sdf_path(spec: Any) -> Path | None:
 
 def _charged_sdf_atom_charges(path: Path, *, generated_fragment: Any) -> tuple[float, ...]:
     """Read partial charges from a validated charged SDF."""
-    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    fragment_atoms = generated_fragment.atoms
     return charged_sdf_partial_charges(path, fragment_atoms=fragment_atoms)
 
 
 def _validate_charged_sdf_matches_fragment(path: Path, *, generated_fragment: Any) -> None:
     """Validate that a charged SDF preserves generated-fragment atom order."""
-    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    fragment_atoms = generated_fragment.atoms
     if not fragment_atoms:
         raise ValueError("Attached polymer charge transfer requires generated-fragment atoms")
     validated_charged_sdf_molecule(

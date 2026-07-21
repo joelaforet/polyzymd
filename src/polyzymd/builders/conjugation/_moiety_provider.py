@@ -8,7 +8,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from polyzymd.builders.conjugation._pdb_fragment import PdbFragmentLoadResult, load_pdb_fragment
-from polyzymd.builders.conjugation._specs import _generated_fragment_from_moiety_plan
+from polyzymd.builders.conjugation._specs import (
+    prepare_generated_fragment,
+    prepared_fragment_from_moiety,
+)
 from polyzymd.builders.conjugation.polymer import (
     GeneratedMoietyFragment,
     GeneratedPolymerFragment,
@@ -27,8 +30,7 @@ class ResolvedMoietySource(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    fragment: GeneratedPolymerFragment | None = Field(default=None, exclude=True)
-    source_fragment: Any | None = Field(default=None, exclude=True)
+    reaction_fragment: GeneratedMoietyFragment | GeneratedPolymerFragment = Field(exclude=True)
     source_kind: Literal["polymer", "smiles", "pdb_fragment"]
     sidecars: dict[str, Path] = Field(default_factory=dict)
     generation: MultiResidueGenerationResult | None = None
@@ -189,8 +191,7 @@ def _resolve_polymer_recipe_source(
     if charged_sdf_path is not None:
         sidecars["charged_sdf"] = Path(charged_sdf_path)
     return ResolvedMoietySource(
-        fragment=fragment,
-        source_fragment=fragment,
+        reaction_fragment=fragment,
         source_kind="polymer",
         sidecars=sidecars,
         generation=generation,
@@ -218,8 +219,7 @@ def _resolve_smiles_source(
     )
     sidecars = _moiety_sidecars(source_fragment)
     return ResolvedMoietySource(
-        fragment=None,
-        source_fragment=source_fragment,
+        reaction_fragment=source_fragment,
         source_kind="smiles",
         sidecars=sidecars,
         diagnostics=("Resolved SMILES moiety source",),
@@ -251,8 +251,7 @@ def _resolve_pdb_fragment_source(
     _annotate_pdb_fragment_sidecar(sidecar_path, compatibility.sidecar_payload)
     sidecars = {"pdb": source_path, "pdb_fragment_ingestion": sidecar_path}
     return ResolvedMoietySource(
-        fragment=compatibility.fragment,
-        source_fragment=compatibility.fragment,
+        reaction_fragment=compatibility.fragment,
         source_kind="pdb_fragment",
         sidecars=sidecars,
         reactive_sequence_index=compatibility.reactive_sequence_index,
@@ -262,26 +261,33 @@ def _resolve_pdb_fragment_source(
     )
 
 
-def generated_fragment_for_resolved_source(
-    source: ResolvedMoietySource,
-    plan: Any,
-) -> PreparedFragment:
-    """Return the construction fragment updated with resolved reactive atoms."""
-    if isinstance(source.source_fragment, GeneratedMoietyFragment):
-        fragment = _generated_fragment_from_moiety_plan(source.source_fragment, plan)
-    elif source.fragment is None:
-        raise RuntimeError("Resolved moiety source is missing a construction fragment")
-    else:
-        fragment = source.fragment
-    return PreparedFragment.from_generated_fragment(
-        fragment,
-        source_identity=str(
-            source.sidecars.get("sdf") or source.sidecars.get("pdb") or fragment.name
-        ),
+def prepare_resolved_moiety_source(source: ResolvedMoietySource) -> PreparedFragment:
+    """Return a prepared source fragment without reaction-derived identity."""
+    if isinstance(source.reaction_fragment, GeneratedMoietyFragment):
+        prepared = prepared_fragment_from_moiety(source.reaction_fragment)
+        sidecars = {**prepared.sidecars, **source.sidecars}
+        return prepared.model_copy(
+            update={
+                "source_identity": str(
+                    sidecars.get("sdf") or sidecars.get("pdb") or prepared.source_identity
+                ),
+                "sidecars": sidecars,
+                "provenance": {
+                    **prepared.provenance,
+                    **source.provenance,
+                    "reactive_selector": source.reactive_selector or {},
+                },
+                "diagnostics": (*prepared.diagnostics, *source.diagnostics),
+            }
+        )
+    return prepare_generated_fragment(
+        source.reaction_fragment,
+        source.sidecars.get("sdf"),
+        charged_sdf_path=source.sidecars.get("charged_sdf"),
         source_kind=source.source_kind,
         sidecars=source.sidecars,
         provenance={"reactive_selector": source.reactive_selector or {}},
-        diagnostics=getattr(source, "diagnostics", ()),
+        diagnostics=source.diagnostics,
     )
 
 

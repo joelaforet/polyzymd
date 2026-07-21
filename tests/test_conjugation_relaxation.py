@@ -228,7 +228,31 @@ def test_resolve_product_linkage_pairs_uses_generic_assembly_metadata(tmp_path):
     spec = type(
         "SpecDouble",
         (),
-        {"target_bond_length_angstrom": 1.4, "attachment_id": "x", "attachment_index": 1},
+        {
+            "target_bond_length_angstrom": 1.4,
+            "attachment_id": "x",
+            "attachment_index": 1,
+            "protein_product_residue_name": "ABC",
+            "modifier_product_residue_name": "MNO",
+            "protein_link_atom": SimpleNamespace(
+                serial=1,
+                atom_index=0,
+                atom_name="Q1",
+                residue_name="ABC",
+                chain_id="A",
+                residue_number=7,
+                insertion_code="",
+            ),
+            "modifier_link_atom": SimpleNamespace(
+                serial=2,
+                atom_index=1,
+                atom_name="Z9",
+                residue_name="MNO",
+                chain_id="C",
+                residue_number=42,
+                insertion_code="",
+            ),
+        },
     )()
     assembly = type("AssemblyDouble", (), {"added_conect_pairs": ((1, 2),)})()
 

@@ -228,10 +228,18 @@ class NhsLysReaction(ReactionTemplate):
         site_config: Any,
         fragment: Any,
         *,
+        prepared_fragment: Any | None = None,
+        attachment_id: str = "",
+        attachment_index: int = 1,
+        attachment_config: Any = None,
+        source_sidecars: dict[str, Path] | None = None,
+        attachment_force_field_domain: str = "",
+        diagnostics: tuple[str, ...] = (),
         settings: NhsLysReactionSettings | None = None,
     ) -> Any:
         """Resolve an NHS-Lys attachment plan through the generic contract path."""
         from polyzymd.builders.conjugation._linkage import resolve_explicit_linkage_contract
+        from polyzymd.builders.conjugation._specs import prepare_reaction_fragment
 
         contract = cls.build_contract(
             site_config,
@@ -239,7 +247,19 @@ class NhsLysReaction(ReactionTemplate):
             protein_pdb_path=protein_pdb_path,
             settings=settings,
         )
-        return resolve_explicit_linkage_contract(protein_pdb_path, fragment, contract)
+        return resolve_explicit_linkage_contract(
+            protein_pdb_path,
+            fragment,
+            contract,
+            fragment=prepared_fragment or prepare_reaction_fragment(fragment),
+            attachment_id=attachment_id,
+            attachment_index=attachment_index,
+            attachment_config=attachment_config,
+            reaction_name=cls.name,
+            source_sidecars=source_sidecars,
+            attachment_force_field_domain=attachment_force_field_domain,
+            diagnostics=diagnostics,
+        )
 
     def resolve_attachment(
         self,
@@ -247,6 +267,7 @@ class NhsLysReaction(ReactionTemplate):
         site_config: Any,
         fragment: Any,
         *,
+        prepared_fragment: Any | None = None,
         settings: NhsLysReactionSettings | None = None,
     ) -> Any:
         """Resolve an NHS-Lys attachment plan for the generic construction flow."""
@@ -254,6 +275,7 @@ class NhsLysReaction(ReactionTemplate):
             protein_pdb_path,
             site_config,
             fragment,
+            prepared_fragment=prepared_fragment,
             settings=settings,
         )
 

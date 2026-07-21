@@ -279,7 +279,7 @@ def place_modifier_with_resolved_plan(
     )
     placed_fragment = _placed_fragment_from_coords(modifier, transformed_full_coords)
 
-    placed_reactive = _coord(resolve_modifier_reactive_atom_from_placed(placed_fragment))
+    placed_reactive = _coord(_product_modifier_atom(placed_fragment, plan))
     placed_bond_length = float(np.linalg.norm(placed_reactive - _coord(plan.protein_link_atom)))
     min_distance = _minimum_distance(
         _coords_from_atoms(tuple(placed_fragment.atoms)),
@@ -435,7 +435,7 @@ def place_modifiers_with_resolved_plans(
         )
         placed_fragment = _placed_fragment_from_coords(modifier, transformed_full_coords)
 
-        placed_reactive = _coord(resolve_modifier_reactive_atom_from_placed(placed_fragment))
+        placed_reactive = _coord(_product_modifier_atom(placed_fragment, plan))
         placed_bond_length = float(np.linalg.norm(placed_reactive - _coord(plan.protein_link_atom)))
         min_distance = _minimum_distance(
             _coords_from_atoms(tuple(placed_fragment.atoms)),
@@ -460,26 +460,14 @@ def place_modifiers_with_resolved_plans(
     return tuple(results)
 
 
-def resolve_modifier_reactive_atom_from_placed(fragment: PlacedPolymerFragment) -> PdbAtomRecord:
-    """Resolve a reactive atom from a placed fragment."""
-    matches = [
-        atom
-        for atom in fragment.atoms
-        if (
-            fragment.reactive_atom_serial is not None
-            and atom.serial == fragment.reactive_atom_serial
-        )
-        or (
-            fragment.reactive_atom_index is not None
-            and atom.atom_index == fragment.reactive_atom_index
-        )
-        or (
-            fragment.reactive_atom_name is not None
-            and atom.atom_name.upper() == fragment.reactive_atom_name.upper()
-        )
-    ]
+def _product_modifier_atom(
+    fragment: PlacedPolymerFragment, product: ReactionProduct
+) -> PdbAtomRecord:
+    """Return the placed atom matching the resolved product endpoint."""
+    identity = _atom_identity(product.modifier_link_atom)
+    matches = [atom for atom in fragment.atoms if _atom_identity(atom) == identity]
     if len(matches) != 1:
-        raise ValueError(f"Placed modifier reactive atom selector resolved {len(matches)} atoms")
+        raise ValueError(f"Reaction product modifier endpoint resolved {len(matches)} placed atoms")
     return matches[0]
 
 
@@ -534,28 +522,12 @@ def _protein_steric_atoms_from_plans(
 def _retained_modifier_atoms(
     modifier: PreparedFragment,
     *,
-    plan: ReactionProduct | None = None,
+    plan: ReactionProduct,
 ) -> tuple[PdbAtomRecord, ...]:
     """Return modifier atoms retained for Packmol placement."""
     placed = modifier.to_placed_fragment()
-    if plan is not None:
-        leaving_identities = {_atom_identity(atom) for atom in plan.modifier_leaving_atoms}
-        return tuple(
-            atom for atom in placed.atoms if _atom_identity(atom) not in leaving_identities
-        )
-
-    leaving_serials = set(placed.leaving_atom_serials)
-    leaving_indices = set(placed.leaving_atom_indices)
-    leaving_names = {name.upper() for name in placed.leaving_atom_names}
-    return tuple(
-        atom
-        for atom in placed.atoms
-        if not (
-            (atom.serial is not None and atom.serial in leaving_serials)
-            or atom.atom_index in leaving_indices
-            or atom.atom_name.upper() in leaving_names
-        )
-    )
+    leaving_identities = {_atom_identity(atom) for atom in plan.modifier_leaving_atoms}
+    return tuple(atom for atom in placed.atoms if _atom_identity(atom) not in leaving_identities)
 
 
 def _coords_from_atoms(atoms: tuple[PdbAtomRecord, ...]) -> np.ndarray:

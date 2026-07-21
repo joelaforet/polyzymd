@@ -802,6 +802,7 @@ def _attachment(glycan_path: Path) -> SimpleNamespace:
             smiles=None,
             residue_name=None,
             polymer_recipe=None,
+            force_field="glycam06",
         ),
         mechanism=SimpleNamespace(
             name="n_glycosylation",

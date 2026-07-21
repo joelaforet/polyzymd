@@ -332,6 +332,8 @@ class PdbLinkageAttachment(BaseModel):
     target_insertion_code: str = Field("", max_length=1)
     target_atom_name: str
     protein_leaving_atoms_to_remove: tuple[PdbAtomRecord, ...] = Field(default_factory=tuple)
+    modifier_link_atom: PdbAtomRecord
+    modifier_leaving_atoms_to_remove: tuple[PdbAtomRecord, ...] = Field(default_factory=tuple)
     protein_target_resname: str
     modifier_target_resname: str
 
@@ -590,11 +592,14 @@ def _append_polymer_fragment(
     warnings: list[str],
 ) -> _PolymerAppendResult:
     """Append retained polymer atoms and internal connectivity for one fragment."""
-    _validate_polymer_leaving_selectors(fragment)
-    removed_atoms = [atom for atom in fragment.atoms if _is_removed_polymer_atom(atom, fragment)]
+    if isinstance(attachment, NhsLysPdbAttachment):
+        _validate_polymer_leaving_selectors(fragment)
+    removed_atoms = [
+        atom for atom in fragment.atoms if _is_removed_polymer_atom(atom, fragment, attachment)
+    ]
     removed_keys = {_atom_identity(atom) for atom in removed_atoms}
     kept_atoms = [atom for atom in fragment.atoms if _atom_identity(atom) not in removed_keys]
-    reactive_atom = _resolve_reactive_polymer_atom(fragment)
+    reactive_atom = _resolve_reactive_polymer_atom(fragment, attachment)
     if _atom_identity(reactive_atom) in removed_keys:
         raise ValueError("The polymer reactive atom cannot be listed as a leaving-group atom")
     kept_atoms = _order_polymer_atoms_by_connectivity(
@@ -1076,8 +1081,15 @@ def _is_hydrogen_atom(atom: PdbAtomRecord) -> bool:
     return (atom.element or "").upper() == "H" or atom.atom_name.upper().startswith("H")
 
 
-def _is_removed_polymer_atom(atom: PdbAtomRecord, fragment: PlacedPolymerFragment) -> bool:
+def _is_removed_polymer_atom(
+    atom: PdbAtomRecord,
+    fragment: PlacedPolymerFragment,
+    attachment: PdbAssemblyAttachment,
+) -> bool:
     """Return whether a polymer atom is selected as leaving group."""
+    if isinstance(attachment, PdbLinkageAttachment):
+        leaving = {_atom_identity(item) for item in attachment.modifier_leaving_atoms_to_remove}
+        return _atom_identity(atom) in leaving
     if fragment.leaving_atom_serials:
         return atom.serial is not None and atom.serial in fragment.leaving_atom_serials
     if fragment.leaving_atom_indices:
@@ -1087,9 +1099,14 @@ def _is_removed_polymer_atom(atom: PdbAtomRecord, fragment: PlacedPolymerFragmen
     return False
 
 
-def _resolve_reactive_polymer_atom(fragment: PlacedPolymerFragment) -> PdbAtomRecord:
+def _resolve_reactive_polymer_atom(
+    fragment: PlacedPolymerFragment, attachment: PdbAssemblyAttachment
+) -> PdbAtomRecord:
     """Resolve the polymer reactive atom from explicit selectors."""
-    if fragment.reactive_atom_serial is not None:
+    if isinstance(attachment, PdbLinkageAttachment):
+        target = _atom_identity(attachment.modifier_link_atom)
+        matches = [atom for atom in fragment.atoms if _atom_identity(atom) == target]
+    elif fragment.reactive_atom_serial is not None:
         matches = [atom for atom in fragment.atoms if atom.serial == fragment.reactive_atom_serial]
     elif fragment.reactive_atom_index is not None:
         matches = [

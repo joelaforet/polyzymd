@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from polyzymd.builders.conjugation._linkage import ReactionProduct
 from polyzymd.builders.conjugation.polymer.fragment import (
     GeneratedPolymerFragment,
     PreparedFragment,
@@ -13,52 +12,38 @@ from polyzymd.builders.conjugation.polymer.fragment import (
 from polyzymd.builders.conjugation.polymer.moiety import GeneratedMoietyFragment
 
 
-def reaction_product_from_moiety(
+def prepared_fragment_from_moiety(
     fragment: GeneratedMoietyFragment,
-    plan: ReactionProduct,
-    *,
-    attachment_config: Any,
-    attachment_index: int,
-    reaction_name: str,
-) -> ReactionProduct:
-    """Adapt a one-residue moiety and resolved plan into a build spec."""
-    generated_fragment = _generated_fragment_from_moiety_plan(fragment, plan)
+) -> PreparedFragment:
+    """Prepare a one-residue moiety without reaction-derived selectors."""
     sidecars = _moiety_sidecars(fragment)
-    generic_fragment = PreparedFragment.from_generated_fragment(
-        generated_fragment,
+    generic_fragment = PreparedFragment(
+        atoms=fragment.atoms,
+        bonds=fragment.bonds,
+        bond_orders=fragment.bond_orders,
+        residues=fragment.residues,
+        sequence=None,
+        name=fragment.name,
         source_identity=str(fragment.sdf_path or fragment.pdb_path or fragment.name),
         source_kind="smiles",
         sidecars=sidecars,
         provenance={"residue_name": fragment.residue_name},
         diagnostics=("Prepared SMILES moiety fragment",),
     )
-    return plan.model_copy(
-        update={
-            "attachment_id": _attachment_id(attachment_config, attachment_index),
-            "attachment_index": attachment_index,
-            "attachment_config": attachment_config,
-            "reaction_name": reaction_name,
-            "fragment": generic_fragment,
-            "source_sidecars": sidecars,
-            "attachment_force_field_domain": _attachment_force_field_domain(attachment_config),
-            "diagnostics": (*plan.diagnostics, "Resolved moiety reaction product"),
-        }
-    )
+    return generic_fragment
 
 
-def reaction_product_from_generated_fragment(
+def prepare_generated_fragment(
     fragment: GeneratedPolymerFragment,
     sdf_path: Path | str | None,
-    plan: ReactionProduct,
     *,
-    attachment_config: Any,
-    attachment_index: int,
-    reaction_name: str,
     charged_sdf_path: Path | str | None = None,
     source_kind: Literal["polymer", "smiles", "pdb_fragment"] = "polymer",
     sidecars: dict[str, Path] | None = None,
-) -> ReactionProduct:
-    """Adapt a generated polymer fragment and resolved plan into a build spec."""
+    provenance: dict[str, object] | None = None,
+    diagnostics: tuple[str, ...] = (),
+) -> PreparedFragment:
+    """Prepare a generated fragment without reaction-derived selectors."""
     resolved_sidecars = dict(sidecars or {})
     if sdf_path is not None:
         resolved_sidecars["sdf"] = Path(sdf_path)
@@ -75,45 +60,24 @@ def reaction_product_from_generated_fragment(
             ),
             source_kind=source_kind,
             sidecars=resolved_sidecars,
-            diagnostics=(f"Prepared {source_kind} fragment",),
+            provenance=provenance,
+            diagnostics=diagnostics or (f"Prepared {source_kind} fragment",),
         )
     )
-    return plan.model_copy(
-        update={
-            "attachment_id": _attachment_id(attachment_config, attachment_index),
-            "attachment_index": attachment_index,
-            "attachment_config": attachment_config,
-            "reaction_name": reaction_name,
-            "fragment": generic_fragment,
-            "source_sidecars": resolved_sidecars,
-            "attachment_force_field_domain": _attachment_force_field_domain(attachment_config),
-            "diagnostics": (*plan.diagnostics, f"Resolved {source_kind} reaction product"),
-        }
-    )
+    return generic_fragment
 
 
-def _generated_fragment_from_moiety_plan(
-    fragment: GeneratedMoietyFragment,
-    plan: ReactionProduct,
-) -> GeneratedPolymerFragment:
-    """Adapt a one-residue moiety fragment to the existing placement fragment model."""
-    return GeneratedPolymerFragment(
-        atoms=fragment.atoms,
-        bonds=fragment.bonds,
-        bond_orders=fragment.bond_orders,
-        residues=fragment.residues,
-        sequence=None,
-        reactive_atom_serial=plan.modifier_link_atom.serial,
-        reactive_atom_index=plan.modifier_link_atom.atom_index,
-        reactive_atom_name=None,
-        leaving_atom_serials=tuple(
-            atom.serial for atom in plan.modifier_leaving_atoms if atom.serial is not None
-        ),
-        leaving_atom_indices=tuple(
-            atom.atom_index for atom in plan.modifier_leaving_atoms if atom.atom_index is not None
-        ),
-        leaving_atom_names=(),
-        name=fragment.name,
+def prepare_reaction_fragment(fragment: Any) -> PreparedFragment:
+    """Normalize a public reaction input into the construction fragment contract."""
+    if isinstance(fragment, PreparedFragment):
+        return fragment
+    if isinstance(fragment, GeneratedMoietyFragment):
+        return prepared_fragment_from_moiety(fragment)
+    if isinstance(fragment, GeneratedPolymerFragment):
+        return prepare_generated_fragment(fragment, None)
+    raise TypeError(
+        "Reaction fragments must be GeneratedMoietyFragment, "
+        "GeneratedPolymerFragment, or PreparedFragment instances"
     )
 
 
@@ -124,14 +88,3 @@ def _moiety_sidecars(fragment: GeneratedMoietyFragment) -> dict[str, Path]:
     if fragment.sdf_path is not None:
         sidecars["sdf"] = fragment.sdf_path
     return sidecars
-
-
-def _attachment_id(attachment_config: Any, attachment_index: int) -> str:
-    name = str(getattr(attachment_config, "name", "") or "").strip()
-    return name or f"attachment_{attachment_index:02d}"
-
-
-def _attachment_force_field_domain(attachment_config: Any) -> str:
-    """Return the configured modifier force-field domain for this product."""
-    moiety = getattr(attachment_config, "moiety", None)
-    return str(getattr(moiety, "force_field", "") or "").strip()

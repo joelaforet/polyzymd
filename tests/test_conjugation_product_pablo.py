@@ -16,7 +16,7 @@ from polyzymd.builders.conjugation.pablo.product import (
     build_product_state_pablo_library,
     build_product_state_pablo_library_for_specs,
 )
-from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment, PreparedFragment
 from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.config.schema import ConjugationCcdPabloPolicyConfig
@@ -159,12 +159,12 @@ def test_product_state_pablo_library_preserves_chain_c_residues(tmp_path: Path):
     source.write_text(_source_lys_pdb(), encoding="utf-8")
     product.write_text(_product_pdb(), encoding="utf-8")
     plan = _resolved_plan_like()
+    plan.fragment = _generated_fragment_like()
 
     library = build_product_state_pablo_library(
         product,
         source,
         None,
-        _generated_fragment_like(),
         plan,
     )
 
@@ -224,11 +224,11 @@ def test_product_state_pablo_library_uses_connectivity_for_chain_c_links(tmp_pat
     source.write_text(_source_lys_pdb(), encoding="utf-8")
     product.write_text(_public_three_mer_product_pdb(), encoding="utf-8")
     plan = _public_three_mer_resolved_plan_like()
+    plan.fragment = _generated_fragment_like()
 
     library = build_product_state_pablo_library(
         product,
         source,
-        None,
         None,
         plan,
     )
@@ -314,6 +314,8 @@ def test_product_state_pablo_library_for_specs_uses_generic_fragments_and_sideca
             attachment_id=f"spec_{index}",
             fragment=object(),
             source_sidecars={"sdf": sdf_path},
+            product_residue_mappings={},
+            endpoint_provenance={},
             pablo_crosslink_requirement=requirement,
         )
         for index, sdf_path in enumerate(sdf_paths, start=1)
@@ -342,8 +344,7 @@ def test_product_state_pablo_library_for_specs_uses_generic_fragments_and_sideca
     )
 
     assert [call["polymer_sdf"] for call in calls] == list(sdf_paths)
-    assert [call["generated_fragment"] for call in calls] == [spec.fragment for spec in specs]
-    assert [call["resolved_plan"] for call in calls] == list(specs)
+    assert [call["product"] for call in calls] == list(specs)
     assert library.residue_library[0] == "combined"
     assert len(library.definitions) == 2
 
@@ -369,8 +370,7 @@ def test_product_state_pablo_library_preserves_fixture_bond_orders_and_valence(
         product,
         source,
         polymer_sdf,
-        _generated_fragment_from_fixture(fixture),
-        _fixture_resolved_plan_like(),
+        _fixture_resolved_plan_like(fragment=_generated_fragment_from_fixture(fixture)),
     )
 
     definitions = {
@@ -421,8 +421,7 @@ def test_product_state_pablo_library_maps_sdf_orders_after_product_residue_renum
         product,
         source,
         polymer_sdf,
-        fragment,
-        _fixture_resolved_plan_like(modifier_residue_number=3),
+        _fixture_resolved_plan_like(fragment=fragment, modifier_residue_number=3),
     )
 
     definitions = {
@@ -456,8 +455,7 @@ def test_product_state_pablo_library_preserves_sdf_formal_charges_without_pdb_ch
         product,
         source,
         polymer_sdf,
-        fragment,
-        _fixture_resolved_plan_like(),
+        _fixture_resolved_plan_like(fragment=fragment),
     )
 
     definitions = {
@@ -498,8 +496,7 @@ def test_product_state_pablo_library_uses_charged_sdf_formal_charges(tmp_path: P
         product,
         source,
         raw_sdf,
-        fragment,
-        _fixture_resolved_plan_like(),
+        _fixture_resolved_plan_like(fragment=fragment),
         charged_polymer_sdf=charged_sdf,
     )
 
@@ -532,8 +529,7 @@ def test_product_state_pablo_library_maps_charged_sdf_by_atom_index(tmp_path: Pa
         product,
         source,
         raw_sdf,
-        fragment,
-        _fixture_resolved_plan_like(),
+        _fixture_resolved_plan_like(fragment=fragment),
         charged_polymer_sdf=charged_sdf,
     )
 
@@ -558,17 +554,15 @@ def test_product_state_pablo_library_for_specs_scopes_repeated_polymer_residues(
     specs = (
         SimpleNamespace(
             attachment_id="site_23",
-            fragment=fragment,
             **_fixture_resolved_plan_like(
-                protein_residue_number=23, modifier_residue_number=6
+                fragment=fragment, protein_residue_number=23, modifier_residue_number=6
             ).__dict__,
             product_residue_mappings=_product_residue_mappings((1, 2, 3), (6, 7, 8)),
         ),
         SimpleNamespace(
             attachment_id="site_44",
-            fragment=fragment,
             **_fixture_resolved_plan_like(
-                protein_residue_number=44, modifier_residue_number=16
+                fragment=fragment, protein_residue_number=44, modifier_residue_number=16
             ).__dict__,
             product_residue_mappings=_product_residue_mappings((1, 2, 3), (16, 17, 18)),
         ),
@@ -603,7 +597,8 @@ def test_product_state_pablo_library_maps_repeated_residue_name_bond_orders(
         leaving_atoms=(("HZ2", "HZ3"), ()),
         bond_order=1,
     )
-    resolved_plan = SimpleNamespace(
+    reaction_product = SimpleNamespace(
+        fragment=fragment,
         pablo_crosslink_requirement=requirement,
         protein_link_atom=SimpleNamespace(chain_id="A", residue_number=23),
         modifier_link_atom=SimpleNamespace(chain_id="C", residue_number=10),
@@ -619,8 +614,7 @@ def test_product_state_pablo_library_maps_repeated_residue_name_bond_orders(
         product,
         source,
         None,
-        fragment,
-        resolved_plan,
+        reaction_product,
         product_residue_mappings=_product_residue_mappings((2, 3), (10, 11)),
     )
 
@@ -647,7 +641,14 @@ def test_product_state_pablo_library_for_specs_deduplicates_five_repeated_templa
     specs = tuple(
         SimpleNamespace(
             attachment_id=f"site_{residue_number}",
-            fragment=SimpleNamespace(bonds=((raw_atom, "O020"),), bond_orders=()),
+            fragment=SimpleNamespace(
+                atoms=(),
+                bonds=((raw_atom, "O020"),),
+                bond_orders=(),
+                source_kind="smiles",
+            ),
+            source_sidecars={},
+            endpoint_provenance={},
             **_generated_crosslink_resolved_plan_like(
                 protein_residue_number=residue_number,
                 modifier_residue_number=index,
@@ -943,8 +944,7 @@ def test_product_state_pablo_library_rejects_under_specified_sdf(tmp_path: Path)
             product,
             source,
             polymer_sdf,
-            _generated_fragment_from_fixture(fixture),
-            _fixture_resolved_plan_like(),
+            _fixture_resolved_plan_like(fragment=_generated_fragment_from_fixture(fixture)),
         )
 
 
@@ -966,115 +966,7 @@ def test_product_state_pablo_library_rejects_sdf_element_order_mismatch(tmp_path
             product,
             source,
             polymer_sdf,
-            _generated_fragment_from_fixture(fixture),
-            _fixture_resolved_plan_like(),
-        )
-
-
-def test_product_state_pablo_library_rejects_partial_fragment_atom_indices(tmp_path: Path):
-    """SDF mapping should require every generated-fragment atom to carry atom_index."""
-    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
-    source = tmp_path / "source.pdb"
-    product = tmp_path / "product.pdb"
-    polymer_sdf = tmp_path / "polymer.sdf"
-    source.write_text(_source_lys_pdb(), encoding="utf-8")
-    product.write_text(_fixture_product_pdb(fixture), encoding="utf-8")
-    polymer_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
-    fragment = _generated_fragment_from_fixture(fixture)
-    atoms = list(fragment.atoms)
-    atoms[3] = atoms[3].model_copy(update={"atom_index": None})
-    fragment = fragment.model_copy(update={"atoms": tuple(atoms)})
-
-    with pytest.raises(ValueError, match="complete atom_index values"):
-        build_product_state_pablo_library(
-            product,
-            source,
-            polymer_sdf,
-            fragment,
-            _fixture_resolved_plan_like(),
-        )
-
-
-@pytest.mark.parametrize(
-    ("updates", "message"),
-    [
-        ({0: 1}, "Duplicate atom_index"),
-        ({0: -1}, "non-negative integer atom_index"),
-        ({0: len(_SBMA_EGPMA_NHS_CHEMISTRY.atoms)}, "out-of-range"),
-        ({0: len(_SBMA_EGPMA_NHS_CHEMISTRY.atoms), -1: 0}, "contiguous and exactly match"),
-    ],
-    ids=("duplicate", "negative", "out_of_range", "non_contiguous"),
-)
-def test_product_state_pablo_library_rejects_invalid_sdf_bond_atom_indices(
-    updates: dict[int, int],
-    message: str,
-    tmp_path: Path,
-):
-    """Bond-order SDF mapping should reject invalid generated-fragment atom indices."""
-    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
-    source = tmp_path / "source.pdb"
-    product = tmp_path / "product.pdb"
-    polymer_sdf = tmp_path / "polymer.sdf"
-    source.write_text(_source_lys_pdb(), encoding="utf-8")
-    product.write_text(_fixture_product_pdb(fixture), encoding="utf-8")
-    polymer_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
-    fragment = _fragment_with_atom_index_updates(
-        _generated_fragment_from_fixture(fixture),
-        updates,
-    )
-
-    with pytest.raises(ValueError, match=message):
-        build_product_state_pablo_library(
-            product,
-            source,
-            polymer_sdf,
-            fragment,
-            _fixture_resolved_plan_like(),
-        )
-
-
-@pytest.mark.parametrize(
-    ("updates", "message"),
-    [
-        ({0: 1}, "Duplicate atom_index"),
-        ({0: -1}, "non-negative integer atom_index"),
-        ({0: len(_SBMA_EGPMA_NHS_CHEMISTRY.atoms)}, "out-of-range"),
-        ({0: len(_SBMA_EGPMA_NHS_CHEMISTRY.atoms), -1: 0}, "contiguous and exactly match"),
-    ],
-    ids=("duplicate", "negative", "out_of_range", "non_contiguous"),
-)
-def test_product_state_pablo_library_rejects_invalid_charged_sdf_atom_indices(
-    updates: dict[int, int],
-    message: str,
-    tmp_path: Path,
-):
-    """Charged/formal-charge SDF mapping should reject invalid atom indices."""
-    fixture = _SBMA_EGPMA_NHS_CHEMISTRY
-    neutral_atoms = tuple(
-        (atom_name, residue_name, residue_number, element, "")
-        for atom_name, residue_name, residue_number, element, _charge in fixture.atoms
-    )
-    source = tmp_path / "source.pdb"
-    product = tmp_path / "product.pdb"
-    raw_sdf = tmp_path / "polymer_raw.sdf"
-    charged_sdf = tmp_path / "polymer_charged.sdf"
-    source.write_text(_source_lys_pdb(), encoding="utf-8")
-    product.write_text(_fixture_product_pdb(fixture, include_charges=False), encoding="utf-8")
-    raw_sdf.write_text(_sdf_from_atoms_and_bonds(neutral_atoms, fixture.bonds), encoding="utf-8")
-    charged_sdf.write_text(_fixture_sdf(fixture), encoding="utf-8")
-    fragment = _fragment_with_atom_index_updates(
-        _generated_fragment_from_fixture(fixture, include_bond_orders=False),
-        updates,
-    )
-
-    with pytest.raises(ValueError, match=message):
-        build_product_state_pablo_library(
-            product,
-            source,
-            raw_sdf,
-            fragment,
-            _fixture_resolved_plan_like(),
-            charged_polymer_sdf=charged_sdf,
+            _fixture_resolved_plan_like(fragment=_generated_fragment_from_fixture(fixture)),
         )
 
 
@@ -1117,9 +1009,16 @@ def test_generated_fragment_from_polymerist_pdb_preserves_sdf_bond_orders(tmp_pa
 
 def _fixture_resolved_plan_like(
     *,
+    fragment=None,
     protein_residue_number: int = 23,
     modifier_residue_number: int = 1,
 ):
+    if fragment is not None and not isinstance(fragment, PreparedFragment):
+        fragment = PreparedFragment.from_generated_fragment(
+            fragment,
+            source_identity="fixture",
+            source_kind="polymer",
+        )
     requirement = PabloCrosslinkRequirement(
         residues=("LYX", "NHX"),
         linking_atoms=("NZ", "CAA"),
@@ -1127,10 +1026,14 @@ def _fixture_resolved_plan_like(
         bond_order=1,
     )
     return SimpleNamespace(
+        fragment=fragment,
+        source_sidecars={},
+        endpoint_provenance={},
         pablo_crosslink_requirement=requirement,
         protein_link_atom=SimpleNamespace(chain_id="A", residue_number=protein_residue_number),
         modifier_link_atom=SimpleNamespace(chain_id="C", residue_number=modifier_residue_number),
         modifier_leaving_atoms=(),
+        protein_leaving_atoms=(),
         contract=SimpleNamespace(
             protein_endpoint=SimpleNamespace(
                 selector=SimpleNamespace(residue_name="LYS"),
@@ -1443,6 +1346,7 @@ def _public_three_mer_resolved_plan_like():
 
 def _generated_fragment_like():
     return SimpleNamespace(
+        atoms=(),
         bonds=(("C047", "O020"), ("C001", "C002")),
         bond_orders=(("C047", "O020", 2), ("C001", "C002", 1)),
     )

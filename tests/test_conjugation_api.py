@@ -310,9 +310,11 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
         )
         return SimpleNamespace(
             fragment=fragment,
-            source_fragment=fragment,
+            reaction_fragment=fragment,
             source_kind="smiles",
             sidecars={},
+            provenance={},
+            diagnostics=(),
             generation=None,
             reactive_sequence_index=None,
             reactive_selector=None,
@@ -326,13 +328,15 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
             return SimpleNamespace(target_atom_name="ND2")
 
         @staticmethod
-        def resolve_plan(protein, site, fragment, *, settings=None):
+        def resolve_plan(protein, site, fragment, *, settings=None, **kwargs):
             calls["plans"].append((Path(protein), site.residue_number, site.atom_name, settings))
+            prepared_fragment = kwargs.pop("prepared_fragment")
             return _resolved_plan(
                 residue_number=site.residue_number,
                 modifier_residue_name=fragment.residue_name,
                 modifier_atom_name="C001",
-            )
+                fragment=prepared_fragment,
+            ).model_copy(update=kwargs)
 
     def fake_get_reaction(name):
         assert name == "n_glycosylation"
@@ -579,6 +583,7 @@ def _resolved_plan(
     residue_number: int,
     modifier_residue_name: str,
     modifier_atom_name: str,
+    fragment,
 ) -> ReactionProduct:
     protein_selector = PdbAtomSelector(
         chain_id="A",
@@ -644,6 +649,7 @@ def _resolved_plan(
         modifier_product_residue_name=modifier_residue_name,
         pablo_crosslink_requirement=requirement,
         target_bond_length_angstrom=1.45,
+        fragment=fragment,
     )
 
 
