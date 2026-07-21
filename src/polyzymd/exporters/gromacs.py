@@ -651,12 +651,23 @@ class MDPGenerator:
 
         ref_p = self._pressure * 1.01325
 
-        # GROMACS interpolates between update points separated by the requested steps.
+        # GROMACS annealing is piecewise linear. Pair each hold point with the
+        # following boundary so the reference temperature stays constant and
+        # changes over exactly one MD timestep, matching OpenMM at every
+        # integration step.
         interval_ps = interval_steps * dt_ps
-        annealing_time = [i * interval_ps for i in range(stage.temperature_ramp_updates + 1)]
-        annealing_temp = [
-            min(t_end, t_start + i * increment) for i in range(stage.temperature_ramp_updates + 1)
-        ]
+        annealing_time = [0.0]
+        annealing_temp = [t_start]
+        for update in range(1, stage.temperature_ramp_updates + 1):
+            boundary_ps = update * interval_ps
+            hold_end_ps = boundary_ps - dt_ps
+            previous_temp = min(t_end, t_start + (update - 1) * increment)
+            next_temp = min(t_end, t_start + update * increment)
+            if hold_end_ps > annealing_time[-1]:
+                annealing_time.append(hold_end_ps)
+                annealing_temp.append(previous_temp)
+            annealing_time.append(boundary_ps)
+            annealing_temp.append(next_temp)
 
         return MDPParameters(
             title=f"Temperature Ramping: {stage.name} ({t_start}K -> {t_end}K)",

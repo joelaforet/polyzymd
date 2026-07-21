@@ -4,6 +4,8 @@ These tests verify runner logic using mocks to avoid requiring a full
 OpenMM simulation setup (GPU, topology, system, etc.).
 """
 
+import gc
+import struct
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -206,44 +208,105 @@ class TestRampResumeFastForward:
 class TestRampResumeIntegrity:
     """Protect synchronized state and output handling for interrupted ramps."""
 
-    def test_stage_zero_resume_preserves_velocities(self):
-        import inspect
+    def test_reference_platform_interrupt_and_resume_appends_outputs(self, tmp_path, monkeypatch):
+        from openmm import System, Vec3, unit
+        from openmm.app import Element, Topology
 
+        from polyzymd.config.schema import EquilibrationStageConfig
+        from polyzymd.simulation import signals
         from polyzymd.simulation.runner import SimulationRunner
 
-        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
+        class DeterministicRunner(SimulationRunner):
+            def _create_integrator(self, *args, **kwargs):
+                integrator = super()._create_integrator(*args, **kwargs)
+                integrator.setRandomNumberSeed(20260721)
+                return integrator
 
-        assert "stage_index == 0 and resume_from_step == 0" in source
+        class EmptyResolver:
+            @staticmethod
+            def resolve(_group):
+                return []
 
-    def test_interruption_checkpoint_precedes_marker(self):
-        import inspect
+        topology = Topology()
+        chain = topology.addChain("A")
+        residue = topology.addResidue("MOL", chain)
+        topology.addAtom("C", Element.getBySymbol("C"), residue)
+        system = System()
+        system.addParticle(12.0 * unit.dalton)
+        system.setDefaultPeriodicBoxVectors(
+            Vec3(2.0, 0.0, 0.0),
+            Vec3(0.0, 2.0, 0.0),
+            Vec3(0.0, 0.0, 2.0),
+        )
+        positions = [Vec3(0.0, 0.0, 0.0)] * unit.nanometer
+        stage = EquilibrationStageConfig(
+            name="heating",
+            temperature_start=100.0,
+            temperature_end=102.0,
+            temperature_increment=1.0,
+            temperature_interval_steps=5,
+            time_step=1.0,
+            samples=5,
+        )
 
-        from polyzymd.simulation.runner import SimulationRunner
+        monkeypatch.setattr(signals, "is_interrupted", lambda: True)
+        monkeypatch.setattr(signals, "get_interrupt_signal", lambda: 15)
+        runner = DeterministicRunner(
+            topology=topology,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+        with pytest.raises(signals.GracefulExit):
+            runner.run_equilibration_stage(
+                stage=stage,
+                reference_positions=positions,
+                atom_group_resolver=EmptyResolver(),
+                stage_index=0,
+            )
 
-        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
-        helper = source[source.index("def _save_eq_interrupted") :]
+        stage_dir = tmp_path / "equilibration_0_heating"
+        marker = (stage_dir / "EQ_INTERRUPTED").read_text()
+        assert "steps_completed=5" in marker
+        assert "current_temperature=101.0" in marker
+        assert (stage_dir / "equilibration_0_heating_checkpoint.chk").is_file()
+        assert (stage_dir / "equilibration_0_heating_state.xml").is_file()
 
-        assert helper.index("saveCheckpoint") < helper.index("marker_path.write_text")
+        del runner
+        gc.collect()
+        monkeypatch.setattr(signals, "is_interrupted", lambda: False)
+        resumed = DeterministicRunner(
+            topology=topology,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+        resumed._load_eq_stage_state(0, "heating")
+        result = resumed.run_equilibration_stage(
+            stage=stage,
+            reference_positions=positions,
+            atom_group_resolver=EmptyResolver(),
+            stage_index=0,
+            resume_from_step=5,
+            resume_temperature=101.0,
+        )
 
-    def test_resume_appends_existing_reporter_outputs(self):
-        import inspect
-
-        from polyzymd.simulation.runner import SimulationRunner
-
-        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
-
-        assert "append=append_trajectory" in source
-        assert "append=append_state_data" in source
-
-    def test_resume_restores_saved_step_and_time(self):
-        import inspect
-
-        from polyzymd.simulation.runner import SimulationRunner
-
-        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
-
-        assert "self._simulation.currentStep = self._current_step_count" in source
-        assert "self._simulation.context.setTime(self._current_time)" in source
+        assert result["total_steps"] == 10
+        assert not (stage_dir / "EQ_INTERRUPTED").exists()
+        state_lines = (
+            (stage_dir / "equilibration_0_heating_state_data.csv").read_text().splitlines()
+        )
+        reported_steps = [
+            int(line.split(",", 1)[0]) for line in state_lines if not line.startswith("#")
+        ]
+        assert reported_steps == [2, 4, 6, 8, 10]
+        trajectory = stage_dir / "equilibration_0_heating_trajectory.dcd"
+        with trajectory.open("rb") as handle:
+            header = handle.read(12)
+        assert header[4:8] == b"CORD"
+        assert struct.unpack("<i", header[8:12])[0] == 5
 
 
 # ---------------------------------------------------------------------------

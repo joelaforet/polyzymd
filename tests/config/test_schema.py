@@ -580,30 +580,51 @@ class TestEquilibrationTemperatureRamp:
     def test_migrates_legacy_increment_and_interval(self, caplog):
         from polyzymd.config.schema import EquilibrationStageConfig
 
-        stage = EquilibrationStageConfig(
-            name="heating",
-            duration=0.1,
-            temperature_start=60.0,
-            temperature_end=300.0,
-            temperature_increment=1.0,
-            temperature_interval=1200.0,
-        )
+        with pytest.warns(DeprecationWarning, match="temperature_interval_steps"):
+            stage = EquilibrationStageConfig(
+                name="heating",
+                duration=0.1,
+                temperature_start=60.0,
+                temperature_end=300.0,
+                temperature_increment=1.0,
+                temperature_interval=1200.0,
+            )
 
         assert stage.temperature_increment == pytest.approx(1.0)
         assert stage.temperature_interval_steps == 600
         assert stage.resolved_duration == pytest.approx(0.288)
         assert "converted to temperature_interval_steps=600" in caplog.text
 
-    def test_rejects_duration_only_ramp(self):
+    def test_migrates_duration_only_ramp_with_legacy_defaults(self, caplog):
         from polyzymd.config.schema import EquilibrationStageConfig
 
-        with pytest.raises(ValidationError, match="Do not specify 'duration'"):
-            EquilibrationStageConfig(
+        with pytest.warns(DeprecationWarning, match="legacy 1200 fs default"):
+            stage = EquilibrationStageConfig(
                 name="heating",
                 duration=0.3,
                 temperature_start=60.0,
                 temperature_end=300.0,
             )
+
+        assert stage.temperature_increment == pytest.approx(1.0)
+        assert stage.temperature_interval_steps == 600
+        assert stage.resolved_duration == pytest.approx(0.288)
+        assert "legacy 1200 fs default" in caplog.text
+
+    def test_constant_stage_does_not_emit_ramp_deprecation_warning(self):
+        import warnings
+
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            stage = EquilibrationStageConfig(
+                name="equilibration",
+                duration=0.1,
+                temperature=300.0,
+            )
+
+        assert stage.resolved_duration == pytest.approx(0.1)
 
     def test_rejects_decimal_rate(self):
         from polyzymd.config.schema import EquilibrationStageConfig

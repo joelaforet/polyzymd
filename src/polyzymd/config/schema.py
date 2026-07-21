@@ -11,6 +11,7 @@ import logging
 import math
 import re
 import shlex
+import warnings
 from enum import Enum
 from pathlib import Path
 from string import Formatter
@@ -25,8 +26,6 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
-
-import warnings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -882,12 +881,6 @@ class EquilibrationStageConfig(BaseModel):
     @classmethod
     def migrate_temperature_ramp_config(cls, data: Any) -> Any:
         """Migrate legacy ramp fields before validating the derived duration."""
-        warnings.warn(
-        "migrate_temperature_ramp_config is deprecated and will be removed; users must update their config files.",
-        category=DeprecationWarning,
-        stacklevel=2
-        )
-        
         if not isinstance(data, dict):
             return data
 
@@ -914,12 +907,21 @@ class EquilibrationStageConfig(BaseModel):
                 "Cannot specify both legacy 'temperature_interval' and 'temperature_interval_steps'"
             )
 
-        if duration is not None and interval_fs is None:
+        if duration is not None and interval_steps is not None:
             raise ValueError(
                 "Do not specify 'duration' for a temperature ramp; it is derived from "
                 "'temperature_start', 'temperature_end', 'temperature_increment', "
                 "and 'temperature_interval_steps'"
             )
+
+        used_legacy_interval_default = (
+            duration is not None and interval_fs is None and interval_steps is None
+        )
+        if used_legacy_interval_default:
+            # The former schema required duration and defaulted the interval to
+            # 1200 fs. Preserve that behavior long enough to migrate existing
+            # configuration files to the step-based schedule.
+            interval_fs = 1200.0
 
         timestep_fs = float(values.get("time_step") or 2.0)
         if interval_fs is not None:
@@ -945,8 +947,20 @@ class EquilibrationStageConfig(BaseModel):
                     )
                 values["temperature_increment"] = increment_value
                 values["temperature_interval_steps"] = max(1, rounded_interval_steps)
+                legacy_source = (
+                    "the legacy 1200 fs default"
+                    if used_legacy_interval_default
+                    else f"temperature_interval={interval_value:g} fs"
+                )
+                warnings.warn(
+                    f"Deprecated temperature-ramp configuration using {legacy_source} "
+                    "was converted to 'temperature_interval_steps'; update the "
+                    "configuration file and remove the ramp 'duration' field",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
                 LOGGER.warning(
-                    f"Deprecated 'temperature_interval={interval_value:g} fs' was "
+                    f"Deprecated temperature-ramp configuration using {legacy_source} was "
                     f"converted to temperature_interval_steps="
                     f"{values['temperature_interval_steps']}; any supplied ramp "
                     "duration is ignored"
