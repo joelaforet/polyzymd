@@ -88,6 +88,8 @@ scientific assumptions, validation, documentation, artifact paths, limitations,
 linked issues, and dependencies. Codex never merges PRs; Joe reads and merges
 every PR manually.
 
+The GitHub connector lacked PR-write permission, so I used the authenticated gh fallback. I will not merge it.
+
 ## Release Flow
 
 - `main` contains released code.
