@@ -25,7 +25,8 @@ chemistry into a supported workflow.
 | Multiple NHS-lysine polymer attachments | Executable | Multi-site attachment metadata is handled by the validation report and shared conjugate relaxation. Treat scientific validation as system-specific. |
 | SMILES moiety with `mechanism.name: n_glycosylation` | Wired, experimental | The path uses the generic moiety provider, resolved attachment plans, attachment specs, product-state charge patching, and validation hooks. It is not the same validated vertical slice as NHS-Lys polymer conjugation. |
 | Residue-resolved PDB-fragment input through `moiety.input_path` | Executable loader; mechanism-gated assembly | The generic loader validates one single-model, serial-safe, connected PDB fragment with complete curated `CONECT` records and residue mapping. PolyzyMD rejects missing and detectably invalid explicit graphs, including unknown endpoints, self-bonds, disconnected or isolated atoms, invalid explicit-H degree, and obvious overvalence where applicable. It cannot prove every expected chemical bond is present and never repairs or infers omitted connectivity from coordinates. RDKit assigns bond orders only on the accepted exact connectivity. Mechanisms decide compatibility. N-glycosylation accepts residue-resolved multi-residue glycan PDB fragments that contain a structurally valid reducing-end anomeric C1 with explicit hydroxyl O/H atoms, including the supported separate-residue `ROH` hydroxyl-cap convention. |
-| Strict native GLYCAM N-glycosylation with `force_field.conjugate_parameterization: native_openmm_glycam` | Validated vertical slice for the stated route | Requires explicit opt-in with `glycan_policy: strict_glycam`, canonical GLYCAM-named glycan PDBs with complete `CONECT`, `moiety.force_field_domain: glycan`, TIP3P water, and no automatic ion placement. PolyzyMD attaches to Asn, uses scoped internal Pablo aliases for repeated or branched residue matching, restores canonical names, maps modified Asn to GLYCAM `NLN`, builds an authoritative native OpenMM System from ff14SB + GLYCAM_06j-1 + TIP3P with PME, 1.0 nm cutoff, `HBonds` constraints, and rigid water, then writes exact OpenMM/GROMACS sidecars. Exact means local OpenMM exception/exclusion semantics, not bitwise full PME equality. Multi-glycan Asn25/Asn60-style systems are supported. |
+| GLYCAM N-glycosylation with `moiety.force_field: glycam06` | Validated vertical slice for the stated route | Use canonical `glycam06`; harmless aliases normalize internally. Omitted `moiety.force_field` inherits `force_field.small_molecule`. Unknown labels fail with no fallback. PolyzyMD attaches to Asn, uses scoped internal Pablo aliases for repeated or branched residue matching, restores canonical names, maps modified Asn to GLYCAM `NLN`, and writes exact OpenMM/GROMACS sidecars. Exact means local OpenMM exception/exclusion semantics, not bitwise full PME equality. Multi-glycan Asn25/Asn60-style systems are supported. |
+| Mixed GLYCAM/OpenFF overlay | Wired, experimental with strict audits | A config can combine GLYCAM glycans and generic OpenFF polymer/moiety attachments. PolyzyMD preserves baseline/user nonbonded globals and force metadata, overlays GLYCAM-owned terms, records ownership/parity diagnostics, and rejects unknown baseline parameter forces that touch GLYCAM-owned atoms. Post-overlay PolyzyMD restraints may target any atoms, including glycans. |
 | Mixed mechanisms in one config | Wired, experimental | Shared assembly and validation can handle multiple resolved plans, but mixed-chemistry scientific validation remains mechanism-specific. |
 | O-glycosylation | Planned | Vocabulary/design area only. |
 | Arbitrary SMARTS-defined chemistry | Planned | SMARTS can describe roles for future mechanisms, but does not by itself provide placement, product residues, charge patches, templates, or validation. |
@@ -82,6 +83,8 @@ Common conjugation reliability artifacts include:
 | `product_state_charge_bridge.json` | Charge bridge provenance, charge totals, formal charge, and correction summary. |
 | `product_state_charge_bridge_local_reconciliation.json` | Local reconciliation evidence for the patch charge bridge. |
 | `conjugate_relaxation.json` | Restrained OpenMM relaxation evidence for the conjugate product. |
+| `ownership_manifest.json` | Mixed-overlay atom and term ownership for GLYCAM versus generic domains. |
+| `overlay_diagnostics.json` | Mixed-overlay force settings, parity audit, conflict counts, and mapping diagnostics. |
 
 ## Limits and caveats
 
@@ -94,21 +97,26 @@ Common conjugation reliability artifacts include:
   N-glycosylation is the documented production path for canonical GLYCAM-named
   glycan PDB fragments; arbitrary PDB-fragment continuations remain
   mechanism-specific.
-- Existing configs that omit glycan route fields continue the backward-compatible
-  Sage/Interchange route. Strict GLYCAM requires explicit `glycan_policy:
-  strict_glycam` plus `conjugate_parameterization: native_openmm_glycam`.
+- Existing attachment configs that omit `moiety.force_field` inherit
+  `force_field.small_molecule`. Set `moiety.force_field: glycam06` explicitly for
+  GLYCAM-owned glycans; there is no silent Sage fallback for unknown labels.
 - Raw vanilla Interchange exporters are not guaranteed for native GLYCAM exact
   bundles. Use PolyzyMD's authoritative OpenMM path or exact GROMACS exporter.
 - OpenMM and GROMACS PME mesh/order/tolerance/modifier settings are engine
-  hyperparameters. Configure and validate them deliberately; differences there do
-  not imply a PolyzyMD local parameter or exception-transfer mismatch.
+  hyperparameters. Baseline/user PME, cutoff, switch, and tolerance globals stay
+  authoritative for mixed overlays; native-reference differences are diagnostics
+  and do not change exact particle, bonded, or exception transfer. Configure and
+  validate engine settings deliberately.
 - Disconnected multi-residue Sage polymers are internally collapsed to one OpenMM
   residue only for Sage template matching, with monomer provenance retained in
   audits. Covalently attached Sage polymer across Amber/GLYCAM remains
   unsupported.
-- Exact GROMACS export currently rejects `component_info` position-restraint
-  postprocessing. Use exact OpenMM staged `position_restraints` or the explicit
-  Sage/OpenFF route when GROMACS position restraints are required.
+- Exact GROMACS export currently does not generate glycan-specific position
+  restraints and rejects `component_info` position-restraint postprocessing. Use
+  exact OpenMM staged `position_restraints` or the explicit Sage/OpenFF route
+  when GROMACS position restraints are required.
 - Platform fail-fast behavior for CUDA/OpenMM incompatibilities is a follow-up;
   validate the pixi environment and OpenMM platform before submitting production
   jobs.
+- The periodic final acceptance test is opt-in:
+  `POLYZYMD_RUN_FINAL_E2E=1 pixi run -e build pytest tests/test_conjugation_final_e2e.py -m final_e2e -v`.

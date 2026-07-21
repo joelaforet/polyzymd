@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added strict mixed GLYCAM/OpenFF overlay diagnostics, ownership artifacts, and
+  an opt-in `final_e2e` acceptance test gate for the compact periodic 1UBQ
+  glycan/polymer system.
+
+### Changed
+
+- Canonical `moiety.force_field: glycam06` now selects GLYCAM; omitted moiety
+  force fields inherit `force_field.small_molecule`, supported `.offxml` sources
+  remain generic, and unknown labels fail without fallback.
+- Mixed overlay now preserves baseline nonbonded global settings and force
+  metadata while rejecting unsupported baseline custom forces that touch
+  GLYCAM-owned atoms.
+
 ## [1.3.0] - 2026-04-09 — Analysis Plugin System & OCP Compliance
 
 Large-scale refactoring of the analysis and comparison subsystems to achieve
