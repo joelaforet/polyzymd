@@ -906,13 +906,9 @@ def _polymer_template_records(
         sidecar = _source_sdf_path(spec)
         if sidecar is None:
             continue
-        generated_fragment = getattr(spec, "generated_fragment", None)
-        if generated_fragment is None:
-            raise ValueError(
-                "Attached polymer charge transfer requires generated_fragment metadata"
-            )
-        fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
-        template_charges = _charged_sdf_atom_charges(sidecar, generated_fragment=generated_fragment)
+        fragment = spec.fragment
+        fragment_atoms = tuple(fragment.atoms)
+        template_charges = _charged_sdf_atom_charges(sidecar, generated_fragment=fragment)
         if len(template_charges) != len(fragment_atoms):
             raise ValueError(
                 "Attached polymer charged SDF atom count does not match generated fragment: "
@@ -920,9 +916,7 @@ def _polymer_template_records(
             )
         fragment_atoms_by_sdf_order = fragment_atoms_in_sdf_order(fragment_atoms)
         mappings = getattr(spec, "product_residue_mappings", {}) or {}
-        leaving_names = {
-            str(name).strip() for name in getattr(generated_fragment, "leaving_atom_names", ())
-        }
+        leaving_names = {str(name).strip() for name in fragment.leaving_atom_names}
         retained_count = 0
         retained_total = 0.0
         leaving_count = 0

@@ -571,11 +571,10 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
             attachment_id=f"attachment_{index:02d}",
             attachment_index=index,
             reaction_name="n_glycosylation",
-            generated_fragment=modifier,
             source_fragment=moiety,
             resolved_plan=plan,
             source_sidecars={},
-            fragment=SimpleNamespace(source_kind="moiety"),
+            fragment=modifier,
         )
         for index, (modifier, moiety, plan) in enumerate(
             zip(modifiers, moieties, plans, strict=True),
@@ -837,10 +836,9 @@ def test_relaxation_receives_product_path_and_attachment_specs(
         attachment_id="n_gly_attachment_01",
         attachment_index=1,
         reaction_name="n_glycosylation",
-        generated_fragment=modifier,
         resolved_plan=plan,
         source_sidecars={},
-        fragment=SimpleNamespace(source_kind="moiety"),
+        fragment=modifier,
     )
     calls = {}
 
@@ -1003,10 +1001,9 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
         attachment_id="n_gly_attachment_01",
         attachment_index=1,
         reaction_name="n_glycosylation",
-        generated_fragment=modifier,
         resolved_plan=plan,
         source_sidecars={},
-        fragment=SimpleNamespace(source_kind="moiety"),
+        fragment=modifier,
     )
     protein_template = _charged_molecule_like("protein", residue_name="ASX")
     protein_template.atoms[0].metadata["atom_name"] = "ND2"
@@ -1381,7 +1378,7 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     assert calls["specs"] == tuple(built_specs)
     assert result.generated_sequences == ("AA", "AA")
     assert result.reactive_sequence_indices == (0, 0)
-    assert result.modifiers == tuple(spec.generated_fragment for spec in built_specs)
+    assert result.modifiers == tuple(spec.fragment for spec in built_specs)
     assert result.workflow_json_path.exists()
     payload = json.loads(result.workflow_json_path.read_text(encoding="utf-8"))
     assert payload["workflow_json_path"] == str(result.workflow_json_path)
@@ -1561,7 +1558,7 @@ def test_attachment_spec_uses_generic_reaction_and_smiles_provider(monkeypatch, 
     assert spec.reaction_name == "n_glycosylation"
     assert spec.fragment.source_kind == "smiles"
     assert spec.fragment.source_identity == str(tmp_path / "nag.sdf")
-    assert spec.generated_fragment is generated_fragment
+    assert spec.fragment.atoms == generated_fragment.atoms
     assert generation is None
     assert reactive_index == 0
     assert reactive_selector == {}

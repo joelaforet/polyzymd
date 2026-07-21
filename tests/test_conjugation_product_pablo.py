@@ -312,7 +312,7 @@ def test_product_state_pablo_library_for_specs_uses_generic_fragments_and_sideca
     specs = tuple(
         SimpleNamespace(
             attachment_id=f"spec_{index}",
-            generated_fragment=object(),
+            fragment=object(),
             source_sidecars={"sdf": sdf_path},
             resolved_plan=SimpleNamespace(pablo_crosslink_requirement=requirement),
         )
@@ -342,9 +342,7 @@ def test_product_state_pablo_library_for_specs_uses_generic_fragments_and_sideca
     )
 
     assert [call["polymer_sdf"] for call in calls] == list(sdf_paths)
-    assert [call["generated_fragment"] for call in calls] == [
-        spec.generated_fragment for spec in specs
-    ]
+    assert [call["generated_fragment"] for call in calls] == [spec.fragment for spec in specs]
     assert [call["resolved_plan"] for call in calls] == [spec.resolved_plan for spec in specs]
     assert library.residue_library[0] == "combined"
     assert len(library.definitions) == 2
@@ -560,7 +558,7 @@ def test_product_state_pablo_library_for_specs_scopes_repeated_polymer_residues(
     specs = (
         SimpleNamespace(
             attachment_id="site_23",
-            generated_fragment=fragment,
+            fragment=fragment,
             resolved_plan=_fixture_resolved_plan_like(
                 protein_residue_number=23,
                 modifier_residue_number=6,
@@ -569,7 +567,7 @@ def test_product_state_pablo_library_for_specs_scopes_repeated_polymer_residues(
         ),
         SimpleNamespace(
             attachment_id="site_44",
-            generated_fragment=fragment,
+            fragment=fragment,
             resolved_plan=_fixture_resolved_plan_like(
                 protein_residue_number=44,
                 modifier_residue_number=16,
@@ -651,7 +649,7 @@ def test_product_state_pablo_library_for_specs_deduplicates_five_repeated_templa
     specs = tuple(
         SimpleNamespace(
             attachment_id=f"site_{residue_number}",
-            generated_fragment=SimpleNamespace(bonds=((raw_atom, "O020"),), bond_orders=()),
+            fragment=SimpleNamespace(bonds=((raw_atom, "O020"),), bond_orders=()),
             resolved_plan=_generated_crosslink_resolved_plan_like(
                 protein_residue_number=residue_number,
                 modifier_residue_number=index,

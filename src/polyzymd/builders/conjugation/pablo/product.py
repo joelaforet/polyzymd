@@ -299,17 +299,17 @@ def build_product_state_pablo_library_for_specs(
     libraries = []
     allow_legacy_direct_fallback = len(attachment_specs) == 1
     for spec in attachment_specs:
-        generated_fragment = _spec_generated_fragment(spec)
+        fragment = spec.fragment
         sdf_path = _spec_sdf_path(spec)
         charged_sdf_path = _spec_charged_sdf_path(spec)
-        _validate_spec_sidecars(spec, sdf_path=sdf_path, generated_fragment=generated_fragment)
+        _validate_spec_sidecars(spec, sdf_path=sdf_path, generated_fragment=fragment)
         libraries.append(
             build_product_state_pablo_library(
                 product_pdb=product_pdb,
                 source_protein_pdb=source_protein_pdb,
                 polymer_sdf=sdf_path,
                 charged_polymer_sdf=charged_sdf_path,
-                generated_fragment=generated_fragment,
+                generated_fragment=fragment,
                 resolved_plan=getattr(spec, "resolved_plan", None),
                 product_residue_mappings=_spec_product_residue_mappings(spec),
                 endpoint_provenance=getattr(spec, "endpoint_provenance", None) or None,
@@ -339,18 +339,6 @@ def build_product_state_pablo_library_for_specs(
         crosslink_requirement=attachment_specs[0].resolved_plan.pablo_crosslink_requirement,
         diagnostics=diagnostics,
     )
-
-
-def _spec_generated_fragment(spec: Any) -> Any:
-    """Return a product-library-compatible fragment adapter from a resolved spec."""
-    generated_fragment = getattr(spec, "generated_fragment", None)
-    if generated_fragment is not None:
-        return generated_fragment
-    fragment = getattr(spec, "fragment", None)
-    to_generated = getattr(fragment, "to_generated_polymer_fragment", None)
-    if callable(to_generated):
-        return to_generated()
-    return fragment
 
 
 def _spec_sdf_path(spec: Any) -> Path | None:

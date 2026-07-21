@@ -88,7 +88,7 @@ def build_local_product_charge_patch_records(
 def _validate_supported_spec(spec: Any, *, product_atoms: Sequence[Any]) -> None:
     """Reject unsupported first-release charge-patch cases before NAGL charging."""
     plan = getattr(spec, "resolved_plan", None)
-    fragment = getattr(spec, "generated_fragment", None)
+    fragment = getattr(spec, "fragment", None)
     if plan is None:
         raise LocalChargePatchError("Product charge patch requires a resolved Pablo identity plan")
     if fragment is None or not tuple(getattr(fragment, "atoms", ()) or ()):  # noqa: SIM102
@@ -130,7 +130,7 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
     from rdkit import Chem
 
     plan = spec.resolved_plan
-    fragment = spec.generated_fragment
+    fragment = spec.fragment
     protein_link = plan.protein_link_atom
     modifier_link = plan.modifier_link_atom
     resolved_modifier_link = _resolve_retained_modifier_link_atom(spec, fragment)

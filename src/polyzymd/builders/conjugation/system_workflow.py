@@ -769,17 +769,17 @@ def _build_pdb_fragment_coordinate_only_result(
         },
         generated_sequences=tuple(
             fragment.sequence
-            for fragment in (spec.generated_fragment for spec in specs)
+            for fragment in (spec.fragment for spec in specs)
             if fragment.sequence is not None
         ),
         reactive_sequence_indices=tuple(range(len(specs))),
         reactive_residue_selectors=(
-            *(_reactive_selector_for_fragment(spec.generated_fragment) for spec in specs),
+            *(_reactive_selector_for_fragment(spec.fragment) for spec in specs),
         ),
         conjugate_generations=(),
         protein_canonicalization=protein_canonicalization,
-        modifier=specs[0].generated_fragment,
-        modifiers=tuple(spec.generated_fragment for spec in specs),
+        modifier=specs[0].fragment,
+        modifiers=tuple(spec.fragment for spec in specs),
         final_interchange_created=False,
     )
     result.artifact_paths.update(
@@ -825,7 +825,7 @@ def _write_pdb_fragment_coordinate_artifact(
     output_path = construction_dir / "pdb_fragment_coordinate_only_conjugate.pdb"
     placement, assembly = _place_pdb_fragment_coordinate_only_with_packmol(
         protein_pdb_path,
-        spec.generated_fragment,
+        spec.fragment,
         spec.resolved_plan,
         construction_dir,
         output_path=output_path,
@@ -858,7 +858,7 @@ def _write_pdb_fragment_coordinate_artifacts(
     output_path = construction_dir / "pdb_fragment_coordinate_only_conjugate.pdb"
     placements = place_modifiers_with_resolved_plans(
         protein_pdb_path,
-        tuple(spec.generated_fragment for spec in specs),
+        tuple(spec.fragment for spec in specs),
         tuple(spec.resolved_plan for spec in specs),
         construction_dir,
         settings=_pdb_fragment_coordinate_only_placement_settings(placement_settings),
@@ -867,9 +867,7 @@ def _write_pdb_fragment_coordinate_artifacts(
     placed_fragments = tuple(
         placed_fragment_from_resolved_plan(
             placement.placed_modifier, spec.resolved_plan
-        ).model_copy(
-            update={"name": getattr(spec.generated_fragment, "name", f"pdb_fragment_{index}")}
-        )
+        ).model_copy(update={"name": getattr(spec.fragment, "name", f"pdb_fragment_{index}")})
         for index, (placement, spec) in enumerate(zip(placements, specs, strict=True), start=1)
     )
     assembly = write_crosslinked_pdb(
@@ -1289,7 +1287,7 @@ def _construct_conjugate_from_specs(
     if not specs:
         raise ValueError("Conjugate construction requires at least one attachment spec")
 
-    modifiers = tuple(spec.generated_fragment for spec in specs)
+    modifiers = tuple(spec.fragment for spec in specs)
     resolved_plans = tuple(spec.resolved_plan for spec in specs)
     if len(modifiers) != len(resolved_plans):
         raise ValueError("Conjugate construction requires aligned attachment specs")
