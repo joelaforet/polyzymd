@@ -29,7 +29,6 @@ class AttachmentBuildSpec(BaseModel):
     attachment_config: Any = Field(exclude=True)
     reaction_name: str
     fragment: PreparedFragment
-    generated_fragment: GeneratedPolymerFragment = Field(exclude=True)
     resolved_plan: ResolvedAttachmentPlan
     source_sidecars: dict[str, Path] = Field(default_factory=dict)
     product_residue_mappings: dict[str, dict[str, int | str]] = Field(
@@ -66,7 +65,6 @@ def attachment_spec_from_moiety_plan(
         attachment_config=attachment_config,
         reaction_name=reaction_name,
         fragment=generic_fragment,
-        generated_fragment=generated_fragment,
         resolved_plan=plan,
         source_sidecars=sidecars,
         diagnostics=("Resolved moiety attachment build spec",),
@@ -111,7 +109,6 @@ def attachment_spec_from_generated_polymer_plan(
         attachment_config=attachment_config,
         reaction_name=reaction_name,
         fragment=generic_fragment,
-        generated_fragment=fragment,
         resolved_plan=plan,
         source_sidecars=resolved_sidecars,
         diagnostics=(f"Resolved {source_kind} attachment build spec",),

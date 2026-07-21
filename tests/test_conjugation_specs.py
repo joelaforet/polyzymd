@@ -30,7 +30,7 @@ from polyzymd.builders.conjugation.polymer import (
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 
-def test_moiety_adapter_preserves_fragment_data_and_generated_adapter(tmp_path: Path):
+def test_moiety_plan_builds_one_authoritative_prepared_fragment(tmp_path: Path):
     """One-residue moieties should retain chemistry metadata in build specs."""
     pdb_path = tmp_path / "nag.pdb"
     sdf_path = tmp_path / "nag.sdf"
@@ -67,14 +67,14 @@ def test_moiety_adapter_preserves_fragment_data_and_generated_adapter(tmp_path: 
     assert spec.fragment.bond_orders == moiety.bond_orders
     assert spec.fragment.atoms[0].formal_charge == 1
     assert spec.fragment.sidecars == {"pdb": pdb_path, "sdf": sdf_path}
-    assert spec.generated_fragment.reactive_atom_serial == 1
-    assert spec.generated_fragment.reactive_atom_index == 0
-    assert spec.generated_fragment.leaving_atom_serials == (2,)
-    assert spec.generated_fragment.leaving_atom_indices == (1,)
+    assert spec.fragment.reactive_atom_serial == 1
+    assert spec.fragment.reactive_atom_index == 0
+    assert spec.fragment.leaving_atom_serials == (2,)
+    assert spec.fragment.leaving_atom_indices == (1,)
     assert spec.fragment.source_identity == str(sdf_path)
 
 
-def test_polymer_adapter_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_path: Path):
+def test_polymer_plan_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_path: Path):
     """Generated polymer specs should preserve residue count independently of attachments."""
     sdf_path = tmp_path / "polymer.sdf"
     charged_sdf_path = tmp_path / "polymer_charged.sdf"
@@ -118,7 +118,6 @@ def test_polymer_adapter_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_pa
     assert spec.fragment.sequence == "AC"
     assert spec.fragment.sidecars == expected_sidecars
     assert spec.source_sidecars == expected_sidecars
-    assert spec.generated_fragment is polymer
     assert spec.fragment.residues == polymer.residues
 
 
@@ -159,7 +158,7 @@ def test_nhs_lys_polymer_spec_carries_sdf_sidecar_to_product_library(
     )
 
     assert captured["polymer_sdf"] == sdf_path
-    assert captured["generated_fragment"] is polymer
+    assert captured["generated_fragment"] is spec.fragment
     assert captured["resolved_plan"] is plan
 
 
@@ -201,7 +200,7 @@ def test_n_gly_smiles_spec_carries_sdf_sidecar_to_product_library(
     )
 
     assert captured["polymer_sdf"] == sdf_path
-    assert captured["generated_fragment"] is spec.generated_fragment
+    assert captured["generated_fragment"] is spec.fragment
     assert captured["resolved_plan"] is plan
 
 

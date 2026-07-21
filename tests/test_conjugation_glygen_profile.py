@@ -765,8 +765,8 @@ def test_coordinate_only_high_serial_graph_avoids_raw_index_endpoint_ambiguity(
     protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
     result, spec = _build_coordinate_only_fixture_result(tmp_path, protein_path, glycan_path)
 
-    assert spec.generated_fragment.bonds[0] == (101, 102)
-    assert all(endpoint >= 101 for bond in spec.generated_fragment.bonds for endpoint in bond)
+    assert spec.fragment.bonds[0] == (101, 102)
+    assert all(endpoint >= 101 for bond in spec.fragment.bonds for endpoint in bond)
 
     output_edges = {
         frozenset(edge) for edge in parse_pdb_conect_pairs(result.crosslinked_conjugate_pdb_path)

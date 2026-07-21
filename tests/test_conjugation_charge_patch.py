@@ -156,11 +156,11 @@ def test_g42666_modifier_link_prefers_source_serial_and_index_with_duplicate_c1_
     """Glycan-like C1 duplicates should resolve through source serial and index first."""
     spec = _g42666_like_spec()
 
-    resolved = charge_patch._resolve_retained_modifier_link_atom(spec, spec.generated_fragment)
-    retained = charge_patch._retained_fragment_atoms(spec, spec.generated_fragment)
+    resolved = charge_patch._resolve_retained_modifier_link_atom(spec, spec.fragment)
+    retained = charge_patch._retained_fragment_atoms(spec, spec.fragment)
     mapped = charge_patch._retained_modifier_atoms(
         spec,
-        spec.generated_fragment,
+        spec.fragment,
         product_atoms=_g42666_product_atoms(),
     )
 
@@ -177,7 +177,7 @@ def test_g42666_modifier_link_rejects_ambiguous_name_only_reactive_atom():
     spec = _g42666_like_spec(reactive_atom_serial=None, reactive_atom_index=None)
 
     with pytest.raises(charge_patch.LocalChargePatchError, match="ambiguous"):
-        charge_patch._resolve_retained_modifier_link_atom(spec, spec.generated_fragment)
+        charge_patch._resolve_retained_modifier_link_atom(spec, spec.fragment)
 
 
 def test_g42666_modifier_link_rejects_explicit_mapping_mismatch():
@@ -187,7 +187,7 @@ def test_g42666_modifier_link_rejects_explicit_mapping_mismatch():
     with pytest.raises(charge_patch.LocalChargePatchError, match="exact product atom identity"):
         charge_patch._retained_modifier_atoms(
             spec,
-            spec.generated_fragment,
+            spec.fragment,
             product_atoms=_g42666_product_atoms(),
         )
 
@@ -197,7 +197,7 @@ def test_g42666_modifier_link_respects_explicit_non_c_target_chain():
     spec = _g42666_like_spec(mapping_chain_id="D")
     mapped = charge_patch._retained_modifier_atoms(
         spec,
-        spec.generated_fragment,
+        spec.fragment,
         product_atoms=_g42666_product_atoms(chain_id="D"),
     )
 
@@ -224,7 +224,7 @@ def test_unmapped_modifier_name_fallback_does_not_match_protein_chain_a():
 
     mapped = charge_patch._retained_modifier_atoms(
         spec,
-        spec.generated_fragment,
+        spec.fragment,
         product_atoms=protein_only_name_match
         + (_atom(30, 30, "C001", "ALA", 11, element="C", chain_id="A"),),
     )
@@ -238,7 +238,7 @@ def test_g42666_modifier_link_rejects_reactive_serial_index_mismatch():
     spec = _g42666_like_spec(reactive_atom_index=4)
 
     with pytest.raises(charge_patch.LocalChargePatchError, match="different source atoms"):
-        charge_patch._resolve_retained_modifier_link_atom(spec, spec.generated_fragment)
+        charge_patch._resolve_retained_modifier_link_atom(spec, spec.fragment)
 
 
 def _spec(*, residue_number: int = 10) -> SimpleNamespace:
@@ -265,7 +265,7 @@ def _spec(*, residue_number: int = 10) -> SimpleNamespace:
     return SimpleNamespace(
         name="lys_patch",
         resolved_plan=plan,
-        generated_fragment=fragment,
+        fragment=fragment,
         product_residue_mappings={
             "1": {"target_chain": "C", "target_residue_name": "NHX", "target_residue_number": 1}
         },
@@ -310,7 +310,7 @@ def _g42666_like_spec(
     return SimpleNamespace(
         name="g42666_patch",
         resolved_plan=plan,
-        generated_fragment=fragment,
+        fragment=fragment,
         product_residue_mappings={
             "1": {
                 "target_chain": mapping_chain_id,

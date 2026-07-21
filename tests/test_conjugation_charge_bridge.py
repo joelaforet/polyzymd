@@ -456,7 +456,7 @@ def test_polymer_records_refine_duplicate_atom_names_by_residue_mapping(monkeypa
     )
     spec = SimpleNamespace(
         source_sidecars={"charged_sdf": charged_sdf},
-        generated_fragment=fragment,
+        fragment=fragment,
         product_residue_mappings={
             "5": {"target_chain": "C", "target_residue_number": 6},
         },
@@ -508,7 +508,7 @@ def test_polymer_records_assign_charged_sdf_charges_by_atom_index(monkeypatch, t
     )
     spec = SimpleNamespace(
         source_sidecars={"charged_sdf": charged_sdf},
-        generated_fragment=fragment,
+        fragment=fragment,
         product_residue_mappings={},
     )
     monkeypatch.setattr(
