@@ -30,7 +30,7 @@ simulation_phases:
       temperature_start: 60.0
       temperature_end: 293.0
       temperature_increment: 1.0
-      temperature_interval_steps: 600  # duration is derived
+      temperature_interval_steps: 600  # increase temperature by `temperature_increment` every this many steps
       position_restraints:
         - group: "protein_heavy"
           force_constant: 4184.0
@@ -69,8 +69,7 @@ simulation_phases:
 
 Use a heating stage when you want a gentler start for a crowded or fragile
 system. Set `temperature_start`, `temperature_end`, and
-`temperature_increment` in K, plus `temperature_interval_steps` in MD steps. Do
-not set `duration`; PolyzyMD calculates the number of updates needed to reach
+`temperature_increment` in K, plus `temperature_interval_steps` in MD steps. PolyzyMD calculates the number of updates needed to reach
 the endpoint and derives the duration. If the final update would overshoot,
 PolyzyMD shortens only that final temperature increase. Validation and
 simulation logs report the derived duration before the stage runs.
