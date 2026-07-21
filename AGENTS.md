@@ -47,6 +47,17 @@ outside the managed pixi environment.
 See `.opencode/instructions/development-workflow.md` for collaboration,
 scope, validation, authorship, push, and PR rules.
 
+## Harness Capabilities and Living Guidance
+
+The GitHub connector lacked PR-write permission, so I used the authenticated gh fallback. I will not merge it.
+
+Treat `AGENTS.md`, `.opencode/instructions/`, and the personal PolyzyMD Skills
+as living guidance. When repository behavior, scientific contracts, branch
+names, tools, permissions, or recurring workflows change, update the affected
+guidance in the same atomic task so future agents do not follow stale rules.
+Validate edited Skills and run the relevant repository documentation or static
+checks before committing.
+
 ## Architecture Quick Reference
 
 ```

@@ -90,6 +90,25 @@ every PR manually.
 
 The GitHub connector lacked PR-write permission, so I used the authenticated gh fallback. I will not merge it.
 
+## Maintain Living Guidance
+
+At the end of each change, compare every loaded repository instruction, Skill,
+and reference against the behavior and tool access observed during the task.
+When code, scientific contracts, commands, branch names, release policy,
+documentation structure, tools, permissions, or recurring workflows change:
+
+1. Update the affected repository guidance and personal PolyzyMD Skill in the
+   same atomic task when access and scope permit.
+2. Remove or revise obsolete branch aliases, commands, limitations, and
+   workarounds instead of accumulating contradictory history.
+3. Validate edited Skills with the Skill validator and run the relevant
+   repository documentation or static gates.
+4. If the guidance cannot be updated, report the exact stale file and proposed
+   replacement text to Joe before closing the task.
+
+Only persist evidence-backed, reusable knowledge. Do not turn a one-off failure
+or system-specific tuning choice into a universal rule.
+
 ## Release Flow
 
 - `main` contains released code.
