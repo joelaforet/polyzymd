@@ -11,7 +11,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from polyzymd.builders.conjugation.polymer.fragment import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymer.fragment import (
+    GeneratedPolymerFragment,
+    PreparedFragment,
+)
 from polyzymd.builders.conjugation.structure.parsing import parse_pdb_atom_records as _parse_atoms
 from polyzymd.builders.conjugation.structure.pdb import (
     NhsLysPdbAttachment,
@@ -197,8 +200,10 @@ class ExplicitLinkageContract(BaseModel):
         return self
 
 
-class ResolvedAttachmentPlan(BaseModel):
-    """Resolved atom-level attachment plan for PDB assembly and Pablo."""
+class ReactionProduct(BaseModel):
+    """Canonical resolved product state shared by construction stages."""
+
+    model_config = {"arbitrary_types_allowed": True}
 
     contract: ExplicitLinkageContract
     protein_link_atom: PdbAtomRecord
@@ -209,6 +214,21 @@ class ResolvedAttachmentPlan(BaseModel):
     modifier_product_residue_name: str
     pablo_crosslink_requirement: PabloCrosslinkRequirement
     target_bond_length_angstrom: float = Field(1.33, gt=0)
+    fragment: PreparedFragment | None = None
+    attachment_id: str = ""
+    attachment_index: int = Field(1, ge=1)
+    attachment_config: Any = Field(default=None, exclude=True)
+    reaction_name: str = ""
+    source_sidecars: dict[str, Path] = Field(default_factory=dict)
+    product_residue_mappings: dict[str, dict[str, int | str]] = Field(
+        default_factory=dict,
+        exclude=True,
+    )
+    attachment_force_field_owner: str = "modifier"
+    attachment_force_field_domain: str = ""
+    endpoint_provenance: dict[str, Any] = Field(default_factory=dict)
+    scoped_residue_aliases: dict[str, str] = Field(default_factory=dict)
+    diagnostics: tuple[str, ...] = Field(default_factory=tuple)
 
     def to_nhs_lys_pdb_attachment(self) -> NhsLysPdbAttachment:
         """Convert this resolved plan to the legacy NHS-Lys assembly adapter.
@@ -338,7 +358,7 @@ def resolve_explicit_linkage_contract(
         Path | str | GeneratedPolymerFragment | PlacedPolymerFragment | Sequence[PdbAtomRecord]
     ),
     contract: ExplicitLinkageContract,
-) -> ResolvedAttachmentPlan:
+) -> ReactionProduct:
     """Resolve an explicit PDB linkage contract against protein and modifier atoms.
 
     Parameters
@@ -352,7 +372,7 @@ def resolve_explicit_linkage_contract(
 
     Returns
     -------
-    ResolvedAttachmentPlan
+    ReactionProduct
         Atom-level plan with selected atoms, scoped leaving atoms, and the Pablo
         crosslink requirement.
     """
@@ -392,7 +412,7 @@ def resolve_explicit_linkage_contract(
         ),
         bond_order=contract.bond.bond_order,
     )
-    return ResolvedAttachmentPlan(
+    return ReactionProduct(
         contract=contract,
         protein_link_atom=protein_link_atom,
         modifier_link_atom=modifier_link_atom,
@@ -423,7 +443,7 @@ def parse_pdb_atom_records(path: Path | str) -> tuple[PdbAtomRecord, ...]:
 
 def placed_fragment_from_resolved_plan(
     fragment: PlacedPolymerFragment,
-    plan: ResolvedAttachmentPlan,
+    plan: ReactionProduct,
 ) -> PlacedPolymerFragment:
     """Return a placed fragment with resolved generic linkage selectors.
 
@@ -431,7 +451,7 @@ def placed_fragment_from_resolved_plan(
     ----------
     fragment : PlacedPolymerFragment
         Existing placed fragment whose atom identities match the resolved plan.
-    plan : ResolvedAttachmentPlan
+    plan : ReactionProduct
         Resolved generic linkage plan.
 
     Returns
@@ -796,7 +816,7 @@ class ModifierLinker(ABC):
 
     def resolve_plan(
         self, protein_pdb_path: Path | str, modifier: GeneratedPolymerFragment
-    ) -> ResolvedAttachmentPlan:
+    ) -> ReactionProduct:
         """Resolve this linker to a generic attachment plan.
 
         Parameters
@@ -808,7 +828,7 @@ class ModifierLinker(ABC):
 
         Returns
         -------
-        ResolvedAttachmentPlan
+        ReactionProduct
             Generic atom-level linkage plan.
         """
         raise NotImplementedError("This linker does not provide a generic attachment plan")
@@ -994,7 +1014,7 @@ class NhsLysModifierLinker(ModifierLinker):
 
     def resolve_plan(
         self, protein_pdb_path: Path | str, modifier: GeneratedPolymerFragment
-    ) -> ResolvedAttachmentPlan:
+    ) -> ReactionProduct:
         """Resolve the NHS-Lys helper through the generic PDB contract."""
         return resolve_explicit_linkage_contract(
             protein_pdb_path,

@@ -80,7 +80,7 @@ def resolve_product_linkage_pairs(
     resolved: list[ProductLinkage] = []
     require_validated_assembly_pairs = len(attachment_specs) > 1
     for plan_index, spec in enumerate(attachment_specs, start=1):
-        plan = getattr(spec, "resolved_plan", spec)
+        plan = spec
         serial_pair = _serial_pair_for_attachment(
             plan,
             spec,

@@ -87,7 +87,7 @@ def build_local_product_charge_patch_records(
 
 def _validate_supported_spec(spec: Any, *, product_atoms: Sequence[Any]) -> None:
     """Reject unsupported first-release charge-patch cases before NAGL charging."""
-    plan = getattr(spec, "resolved_plan", None)
+    plan = spec
     fragment = getattr(spec, "fragment", None)
     if plan is None:
         raise LocalChargePatchError("Product charge patch requires a resolved Pablo identity plan")
@@ -129,7 +129,7 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
     """Build the capped product graph with mapped product atoms and unmapped caps."""
     from rdkit import Chem
 
-    plan = spec.resolved_plan
+    plan = spec
     fragment = spec.fragment
     protein_link = plan.protein_link_atom
     modifier_link = plan.modifier_link_atom
@@ -483,7 +483,7 @@ def _log_patch_diagnostics(
     diagnostic_ledgers: list[dict[str, Any]] | None,
 ) -> None:
     """Persist success diagnostics for the peptide-capped charge patch."""
-    plan = spec.resolved_plan
+    plan = spec
     affected = [_describe_mapped_atom(atom) for atom in reference.mapped_atoms.values()]
     payload = {
         "site": _site_identifier(plan),
@@ -571,7 +571,7 @@ def _retained_modifier_atoms(
 
 def _retained_fragment_atoms(spec: Any, fragment: Any) -> tuple[Any, ...]:
     """Return generated-fragment atoms after removing resolved leaving atoms."""
-    leaving = _leaving_keys(getattr(spec, "resolved_plan", None), fragment)
+    leaving = _leaving_keys(spec, fragment)
     return tuple(
         atom
         for atom in tuple(getattr(fragment, "atoms", ()) or ())
@@ -585,7 +585,7 @@ def _resolve_retained_modifier_link_atom(spec: Any, fragment: Any) -> Any:
     The generated-fragment source identity is authoritative for RDKit graph keys. Product PDB
     identities are applied later only when emitting charge records.
     """
-    plan = getattr(spec, "resolved_plan", None)
+    plan = spec
     modifier_link = getattr(plan, "modifier_link_atom", None)
     atoms = tuple(getattr(fragment, "atoms", ()) or ())
     retained = tuple(_retained_fragment_atoms(spec, fragment))
@@ -666,7 +666,7 @@ def _validate_mapped_modifier_link_identity(spec: Any, atom: Any) -> None:
     mapping = _mapping_for_atom(spec, atom)
     if not mapping:
         return
-    plan = getattr(spec, "resolved_plan", None)
+    plan = spec
     modifier_link = getattr(plan, "modifier_link_atom", None)
     expected_name = _atom_name(modifier_link).upper() if modifier_link is not None else ""
     if expected_name and _atom_name(atom).upper() != expected_name:
@@ -744,7 +744,7 @@ def _mapped_modifier_product_identity(
 ) -> dict[str, Any]:
     """Return final product identity for a generated-fragment atom."""
     mapping = _mapping_for_atom(spec, atom)
-    plan = getattr(spec, "resolved_plan", None)
+    plan = spec
     atom_name = _atom_name(atom)
     chain_id = str(mapping.get("target_chain", getattr(atom, "chain_id", "C") or "C"))
     residue_name = str(

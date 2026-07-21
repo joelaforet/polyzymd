@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from polyzymd.builders.conjugation._linkage import (
     ModifierLinker,
     ProteinLinkSite,
-    ResolvedAttachmentPlan,
+    ReactionProduct,
 )
 from polyzymd.builders.conjugation.polymer import PreparedFragment
 from polyzymd.builders.conjugation.structure.parsing import (
@@ -173,7 +173,7 @@ def place_modifier_with_packmol(
 def place_modifier_with_resolved_plan(
     protein_pdb_path: Path | str,
     modifier: PreparedFragment,
-    plan: ResolvedAttachmentPlan,
+    plan: ReactionProduct,
     output_dir: Path | str,
     *,
     settings: PackmolModifierPlacementSettings | None = None,
@@ -187,7 +187,7 @@ def place_modifier_with_resolved_plan(
         Protein PDB containing the resolved protein link atom.
     modifier : GeneratedPolymerFragment
         Generated modifier or polymer fragment before placement.
-    plan : ResolvedAttachmentPlan
+    plan : ReactionProduct
         Resolved atom-level protein/modifier linkage plan.
     output_dir : pathlib.Path or str
         Directory for Packmol artifacts.
@@ -304,7 +304,7 @@ def place_modifier_with_resolved_plan(
 def place_modifiers_with_resolved_plans(
     protein_pdb_path: Path | str,
     modifiers: tuple[PreparedFragment, ...],
-    plans: tuple[ResolvedAttachmentPlan, ...],
+    plans: tuple[ReactionProduct, ...],
     output_dir: Path | str,
     *,
     settings: PackmolModifierPlacementSettings | None = None,
@@ -504,7 +504,7 @@ def _protein_steric_atoms(
 
 
 def _protein_steric_atoms_from_plan(
-    atoms: tuple[PdbAtomRecord, ...], plan: ResolvedAttachmentPlan
+    atoms: tuple[PdbAtomRecord, ...], plan: ReactionProduct
 ) -> tuple[tuple[PdbAtomRecord, ...], tuple[str, ...]]:
     """Return fixed protein sterics after excluding resolved linkage atoms."""
     excluded_identities = {_atom_identity(plan.protein_link_atom)}
@@ -517,7 +517,7 @@ def _protein_steric_atoms_from_plan(
 
 
 def _protein_steric_atoms_from_plans(
-    atoms: tuple[PdbAtomRecord, ...], plans: tuple[ResolvedAttachmentPlan, ...]
+    atoms: tuple[PdbAtomRecord, ...], plans: tuple[ReactionProduct, ...]
 ) -> tuple[tuple[PdbAtomRecord, ...], tuple[str, ...]]:
     """Return fixed protein sterics after excluding all resolved linkage atoms."""
     excluded_identities = set()
@@ -534,7 +534,7 @@ def _protein_steric_atoms_from_plans(
 def _retained_modifier_atoms(
     modifier: PreparedFragment,
     *,
-    plan: ResolvedAttachmentPlan | None = None,
+    plan: ReactionProduct | None = None,
 ) -> tuple[PdbAtomRecord, ...]:
     """Return modifier atoms retained for Packmol placement."""
     placed = modifier.to_placed_fragment()

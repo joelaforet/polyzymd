@@ -314,7 +314,7 @@ def test_product_state_pablo_library_for_specs_uses_generic_fragments_and_sideca
             attachment_id=f"spec_{index}",
             fragment=object(),
             source_sidecars={"sdf": sdf_path},
-            resolved_plan=SimpleNamespace(pablo_crosslink_requirement=requirement),
+            pablo_crosslink_requirement=requirement,
         )
         for index, sdf_path in enumerate(sdf_paths, start=1)
     )
@@ -343,7 +343,7 @@ def test_product_state_pablo_library_for_specs_uses_generic_fragments_and_sideca
 
     assert [call["polymer_sdf"] for call in calls] == list(sdf_paths)
     assert [call["generated_fragment"] for call in calls] == [spec.fragment for spec in specs]
-    assert [call["resolved_plan"] for call in calls] == [spec.resolved_plan for spec in specs]
+    assert [call["resolved_plan"] for call in calls] == list(specs)
     assert library.residue_library[0] == "combined"
     assert len(library.definitions) == 2
 
@@ -559,19 +559,17 @@ def test_product_state_pablo_library_for_specs_scopes_repeated_polymer_residues(
         SimpleNamespace(
             attachment_id="site_23",
             fragment=fragment,
-            resolved_plan=_fixture_resolved_plan_like(
-                protein_residue_number=23,
-                modifier_residue_number=6,
-            ),
+            **_fixture_resolved_plan_like(
+                protein_residue_number=23, modifier_residue_number=6
+            ).__dict__,
             product_residue_mappings=_product_residue_mappings((1, 2, 3), (6, 7, 8)),
         ),
         SimpleNamespace(
             attachment_id="site_44",
             fragment=fragment,
-            resolved_plan=_fixture_resolved_plan_like(
-                protein_residue_number=44,
-                modifier_residue_number=16,
-            ),
+            **_fixture_resolved_plan_like(
+                protein_residue_number=44, modifier_residue_number=16
+            ).__dict__,
             product_residue_mappings=_product_residue_mappings((1, 2, 3), (16, 17, 18)),
         ),
     )
@@ -650,11 +648,11 @@ def test_product_state_pablo_library_for_specs_deduplicates_five_repeated_templa
         SimpleNamespace(
             attachment_id=f"site_{residue_number}",
             fragment=SimpleNamespace(bonds=((raw_atom, "O020"),), bond_orders=()),
-            resolved_plan=_generated_crosslink_resolved_plan_like(
+            **_generated_crosslink_resolved_plan_like(
                 protein_residue_number=residue_number,
                 modifier_residue_number=index,
                 modifier_link_atom=raw_atom,
-            ),
+            ).__dict__,
             product_residue_mappings=_product_residue_mappings((1,), (index,)),
         )
         for index, (residue_number, raw_atom) in enumerate(

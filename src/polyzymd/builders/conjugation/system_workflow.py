@@ -14,7 +14,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from polyzymd.builders.conjugation._linkage import (
-    ResolvedAttachmentPlan,
+    ReactionProduct,
     placed_fragment_from_resolved_plan,
     require_pablo_crosslink_requirement,
 )
@@ -24,10 +24,7 @@ from polyzymd.builders.conjugation._moiety_provider import (
     resolve_moiety_source,
     validate_moiety_source_config,
 )
-from polyzymd.builders.conjugation._specs import (
-    AttachmentBuildSpec,
-    attachment_spec_from_generated_polymer_plan,
-)
+from polyzymd.builders.conjugation._specs import reaction_product_from_generated_fragment
 from polyzymd.builders.conjugation.construction import (
     ModifierConstructionResult,
     ModifierConstructionSettings,
@@ -167,9 +164,8 @@ class ConjugateConstructionResult(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     output_dir: Path
-    resolved_plan: ResolvedAttachmentPlan
-    resolved_plans: tuple[ResolvedAttachmentPlan, ...]
-    attachment_specs: tuple[Any, ...] = Field(default_factory=tuple, exclude=True)
+    reaction_product: ReactionProduct
+    reaction_products: tuple[ReactionProduct, ...]
     crosslink_validation: Any
     crosslink_validations: tuple[Any, ...]
     placement: Any
@@ -253,7 +249,7 @@ def build_conjugated_polymer_system_from_config(
     reactive_sequence_indices = tuple(payload[2] for payload in spec_payloads)
     reactive_selectors = tuple(payload[3] for payload in spec_payloads)
     modifiers = tuple(spec.fragment for spec in specs)
-    resolved_plans = tuple(spec.resolved_plan for spec in specs)
+    resolved_plans = tuple(specs)
     resolved_force_fields = resolve_conjugate_force_fields(config)
     use_native_glycam = native_glycam_enabled(config)
     use_mixed_overlay = resolved_force_fields.route == "mixed_overlay"
@@ -508,7 +504,7 @@ def build_direct_moiety_conjugate(
         )[0]
         for index, attachment in enumerate(enabled_attachments, start=1)
     ]
-    resolved_plans = tuple(spec.resolved_plan for spec in specs)
+    resolved_plans = tuple(specs)
 
     policy = _policy_with_resolved_crosslinks(
         ccd_pablo or ConjugationCcdPabloPolicyConfig(),
@@ -634,7 +630,7 @@ def _build_attachment_spec(
     random_seed: int | None = None,
     use_cache_dir: bool = True,
 ) -> tuple[
-    AttachmentBuildSpec,
+    ReactionProduct,
     MultiResidueGenerationResult | None,
     int,
     dict[str, int | str],
@@ -672,7 +668,7 @@ def _build_attachment_spec(
     )
     modifier = generated_fragment_for_resolved_source(source, resolved_plan)
     return (
-        attachment_spec_from_generated_polymer_plan(
+        reaction_product_from_generated_fragment(
             modifier,
             source.sidecars.get("sdf"),
             resolved_plan,
@@ -727,7 +723,7 @@ def _uses_pdb_fragment_sources(attachments: tuple[Any, ...]) -> bool:
 def _build_pdb_fragment_coordinate_only_result(
     *,
     protein_pdb_path: Path | str,
-    specs: tuple[AttachmentBuildSpec, ...],
+    specs: tuple[ReactionProduct, ...],
     output_dir: Path,
     construction_dir: Path,
     protein_canonicalization: ProteinCanonicalizationResult | None,
@@ -802,7 +798,7 @@ def _reactive_selector_for_fragment(fragment: Any) -> dict[str, int | str]:
     }
 
 
-def _pdb_fragment_sidecar_artifacts(specs: tuple[AttachmentBuildSpec, ...]) -> dict[str, Path]:
+def _pdb_fragment_sidecar_artifacts(specs: tuple[ReactionProduct, ...]) -> dict[str, Path]:
     """Return namespaced PDB-fragment sidecar artifact paths."""
     artifacts: dict[str, Path] = {}
     for index, spec in enumerate(specs, start=1):
@@ -816,7 +812,7 @@ def _pdb_fragment_sidecar_artifacts(specs: tuple[AttachmentBuildSpec, ...]) -> d
 def _write_pdb_fragment_coordinate_artifact(
     *,
     protein_pdb_path: Path | str,
-    spec: AttachmentBuildSpec,
+    spec: ReactionProduct,
     construction_dir: Path,
     placement_settings: PackmolModifierPlacementSettings | None = None,
     run_packmol_func: Any | None = None,
@@ -826,7 +822,7 @@ def _write_pdb_fragment_coordinate_artifact(
     placement, assembly = _place_pdb_fragment_coordinate_only_with_packmol(
         protein_pdb_path,
         spec.fragment,
-        spec.resolved_plan,
+        spec,
         construction_dir,
         output_path=output_path,
         settings=_pdb_fragment_coordinate_only_placement_settings(placement_settings),
@@ -841,7 +837,7 @@ def _write_pdb_fragment_coordinate_artifact(
 def _write_pdb_fragment_coordinate_artifacts(
     *,
     protein_pdb_path: Path | str,
-    specs: tuple[AttachmentBuildSpec, ...],
+    specs: tuple[ReactionProduct, ...],
     construction_dir: Path,
     placement_settings: PackmolModifierPlacementSettings | None = None,
     run_packmol_func: Any | None = None,
@@ -859,21 +855,21 @@ def _write_pdb_fragment_coordinate_artifacts(
     placements = place_modifiers_with_resolved_plans(
         protein_pdb_path,
         tuple(spec.fragment for spec in specs),
-        tuple(spec.resolved_plan for spec in specs),
+        specs,
         construction_dir,
         settings=_pdb_fragment_coordinate_only_placement_settings(placement_settings),
         run_packmol_func=run_packmol_func,
     )
     placed_fragments = tuple(
-        placed_fragment_from_resolved_plan(
-            placement.placed_modifier, spec.resolved_plan
-        ).model_copy(update={"name": getattr(spec.fragment, "name", f"pdb_fragment_{index}")})
+        placed_fragment_from_resolved_plan(placement.placed_modifier, spec).model_copy(
+            update={"name": getattr(spec.fragment, "name", f"pdb_fragment_{index}")}
+        )
         for index, (placement, spec) in enumerate(zip(placements, specs, strict=True), start=1)
     )
     assembly = write_crosslinked_pdb(
         protein_pdb_path,
         placed_fragments,
-        tuple(spec.resolved_plan.to_pdb_linkage_attachment() for spec in specs),
+        tuple(spec.to_pdb_linkage_attachment() for spec in specs),
         output_path,
         CrosslinkedPdbAssemblyOptions(
             protein_chain="A",
@@ -908,7 +904,7 @@ def _pdb_fragment_coordinate_only_placement_settings(
 def _place_pdb_fragment_coordinate_only_with_packmol(
     protein_pdb_path: Path | str,
     modifier: Any,
-    plan: ResolvedAttachmentPlan,
+    plan: ReactionProduct,
     construction_dir: Path,
     *,
     output_path: Path,
@@ -994,7 +990,7 @@ def _write_pdb_fragment_placed_artifact(
     *,
     protein_pdb_path: Path | str,
     placed_modifier: Any,
-    plan: ResolvedAttachmentPlan,
+    plan: ReactionProduct,
     output_path: Path,
     attachment_id: str,
 ) -> Any:
@@ -1234,7 +1230,7 @@ def _require_supported_coordinate_backend(attachment: Any) -> None:
 
 def _policy_with_resolved_crosslink(
     policy: Any,
-    resolved_plan: ResolvedAttachmentPlan,
+    resolved_plan: ReactionProduct,
 ) -> Any:
     requirement = _product_state_crosslink_requirement(resolved_plan)
     try:
@@ -1260,7 +1256,7 @@ def _policy_with_resolved_crosslink(
     return SimpleNamespace(**data)
 
 
-def _product_state_crosslink_requirement(resolved_plan: ResolvedAttachmentPlan):
+def _product_state_crosslink_requirement(resolved_plan: ReactionProduct):
     """Return the Pablo crosslink requirement for an already-modified product PDB.
 
     The resolved attachment plan records reactant-state leaving atoms for graph
@@ -1275,7 +1271,7 @@ def _product_state_crosslink_requirement(resolved_plan: ResolvedAttachmentPlan):
 def _construct_conjugate_from_specs(
     *,
     protein_pdb_path: Path | str,
-    specs: tuple[AttachmentBuildSpec, ...],
+    specs: tuple[ReactionProduct, ...],
     ccd_pablo_policy: Any,
     output_dir: Path | str,
     chain_policy: Any | None,
@@ -1288,7 +1284,7 @@ def _construct_conjugate_from_specs(
         raise ValueError("Conjugate construction requires at least one attachment spec")
 
     modifiers = tuple(spec.fragment for spec in specs)
-    resolved_plans = tuple(spec.resolved_plan for spec in specs)
+    resolved_plans = specs
     if len(modifiers) != len(resolved_plans):
         raise ValueError("Conjugate construction requires aligned attachment specs")
 
@@ -1434,9 +1430,8 @@ def _construct_conjugate_from_specs(
     return (
         ConjugateConstructionResult(
             output_dir=artifact_dir,
-            resolved_plan=resolved_plans[0],
-            resolved_plans=resolved_plans,
-            attachment_specs=product_state_specs,
+            reaction_product=product_state_specs[0],
+            reaction_products=product_state_specs,
             crosslink_validation=crosslink_validations[0],
             crosslink_validations=crosslink_validations,
             placement=placements[0],
@@ -1473,7 +1468,7 @@ def _product_state_specs_with_assembly_mappings(
     updated_specs = []
     alias_cursor = 1
     for fragment_index, (spec, pair) in enumerate(zip(specs, added_pairs, strict=True), start=1):
-        plan = spec.resolved_plan
+        plan = spec
         fragment_prefix = f"fragment_{fragment_index}:"
         fragment_mappings = {
             key.removeprefix(fragment_prefix): value
@@ -1501,14 +1496,12 @@ def _product_state_specs_with_assembly_mappings(
             modifier_atom=modifier_atom,
             conect_pair=pair,
         )
-        updated_plan = plan.model_copy(
-            update={"protein_link_atom": protein_atom, "modifier_link_atom": modifier_atom}
-        )
         updated_specs.append(
             _copy_spec_with_product_mappings(
                 spec,
                 fragment_mappings,
-                resolved_plan=updated_plan,
+                protein_link_atom=protein_atom,
+                modifier_link_atom=modifier_atom,
                 endpoint_provenance=endpoint_provenance,
                 scoped_residue_aliases=alias_map,
             )
@@ -1663,7 +1656,7 @@ def _validate_product_pair_for_spec(
     fragment_mappings: dict[str, dict[str, int | str]],
 ) -> None:
     """Validate an ordered product linkage pair against one attachment spec."""
-    plan = spec.resolved_plan
+    plan = spec
     _validate_product_protein_atom(plan, protein_atom, fragment_index)
     _validate_product_modifier_atom(plan, modifier_atom, fragment_index, fragment_mappings)
 
@@ -1769,7 +1762,7 @@ def _namespace_copy(obj: Any, **updates: Any) -> Any:
 
 def _policy_with_resolved_crosslinks(
     policy: Any,
-    resolved_plans: tuple[ResolvedAttachmentPlan, ...],
+    resolved_plans: tuple[ReactionProduct, ...],
 ) -> Any:
     """Return a Pablo policy containing product-state crosslinks for all plans."""
     updated = policy
@@ -1782,7 +1775,7 @@ def _product_state_pablo_library_for_specs(
     *,
     product_pdb: Path,
     source_protein_pdb: Path | str,
-    specs: tuple[AttachmentBuildSpec, ...],
+    specs: tuple[ReactionProduct, ...],
 ) -> Any:
     """Build product-state residue definitions for one or more attachment specs."""
     from polyzymd.builders.conjugation.pablo.product import (
@@ -1875,7 +1868,7 @@ def _safe_attachment_token(name: str) -> str:
 def _save_direct_workflow_summary(
     result: Any,
     attachments: tuple[Any, ...],
-    resolved_plans: list[ResolvedAttachmentPlan],
+    resolved_plans: list[ReactionProduct],
     path: Path,
 ) -> None:
     """Write a JSON summary for direct public conjugation requests."""
