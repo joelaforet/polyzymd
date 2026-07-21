@@ -396,7 +396,7 @@ description: "Description of your simulation system"
 #     - name: "lys63_polymer"
 #       moiety:
 #         name: "polymer"
-#         # Omit force_field to inherit force_field.small_molecule
+#         force_field: "openff-2.0.0.offxml" # Explicit OpenFF owner
 #
 # Unknown moiety.force_field values fail loudly; PolyzyMD does not fall back from
 # GLYCAM to OpenFF. Post-overlay restraints may target glycans and other atoms.

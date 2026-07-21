@@ -35,7 +35,8 @@ from tests.test_exact_openmm_export import _sidecar
 def test_force_field_native_glycam_is_attachment_scoped() -> None:
     """Keep the OpenFF route as default unless an attachment requests GLYCAM."""
     config = _native_config(
-        force_field=ForceFieldConfig(), conjugation=_conjugation_with_domain(None)
+        force_field=ForceFieldConfig(),
+        conjugation=_conjugation_with_domain("openff-2.0.0.offxml"),
     )
     resolved = resolve_conjugate_force_fields(config)
     assert resolved.route == "standard_interchange"
@@ -50,11 +51,8 @@ def test_force_field_rejects_unknown_moiety_label() -> None:
     with pytest.raises(ValidationError, match="Unknown moiety.force_field"):
         _native_config(conjugation=_conjugation_with_domain("glycam-special"))
 
-    config = _native_config(conjugation=_conjugation_with_domain(None))
-    resolved = resolve_conjugate_force_fields(config)
-    assert resolved.route == "standard_interchange"
-    assert resolved.attachments[0].source == config.force_field.small_molecule
-    assert resolved.attachments[0].inherited is True
+    with pytest.raises(ValidationError, match="explicitly declare moiety.force_field"):
+        _conjugation_with_missing_owner()
 
 
 def test_simulation_config_rejects_removed_routing_fields() -> None:
@@ -67,7 +65,9 @@ def test_simulation_config_rejects_removed_routing_fields() -> None:
 
 def test_native_glycam_enabled_reads_force_field_mode() -> None:
     """Detect only the attachment-scoped native GLYCAM-only route."""
-    assert not native_glycam_enabled(_native_config(conjugation=_conjugation_with_domain(None)))
+    assert not native_glycam_enabled(
+        _native_config(conjugation=_conjugation_with_domain("openff-2.0.0.offxml"))
+    )
     assert native_glycam_enabled(_native_config(conjugation=_conjugation_with_domain("glycam06")))
     assert not native_glycam_enabled(_native_config(conjugation=_mixed_conjugation()))
 
@@ -515,6 +515,14 @@ def _conjugation_with_removed_domain_field() -> ConjugationConfig:
     data = _conjugation_with_domain("glycam06").model_dump(mode="json")
     data["attachments"][0]["moiety"].pop("force_field")
     data["attachments"][0]["moiety"]["force_field_domain"] = "glycan"
+    return ConjugationConfig.model_validate(data)
+
+
+def _conjugation_with_missing_owner() -> ConjugationConfig:
+    """Return an enabled attachment payload without force-field ownership."""
+
+    data = _conjugation_with_domain("openff-2.0.0.offxml").model_dump(mode="json")
+    data["attachments"][0]["moiety"].pop("force_field")
     return ConjugationConfig.model_validate(data)
 
 

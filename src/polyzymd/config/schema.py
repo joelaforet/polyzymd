@@ -63,9 +63,8 @@ def _format_decimal_token(value: float) -> str:
 def _canonicalize_moiety_force_field(value: str | None) -> str | None:
     """Return a canonical attachment-scoped moiety force-field value.
 
-    Missing values intentionally remain ``None`` so the resolver can inherit
-    ``force_field.small_molecule``. Explicit unknown labels fail here rather than
-    falling back silently to a generic force field.
+    Missing values intentionally remain ``None`` so disabled conjugation and
+    attachments can remain inert. Enabled attachments are validated separately.
     """
 
     if value is None:
@@ -703,9 +702,9 @@ class ConjugationMoietyConfig(BaseModel):
     force_field: str | None = Field(
         None,
         description=(
-            "Optional attachment-scoped moiety force field. Missing values inherit "
-            "force_field.small_molecule. Use canonical 'glycam06' for GLYCAM; OpenFF "
-            "OFFXML names and paths use the generic Interchange route."
+            "Attachment-scoped moiety force field, required for enabled attachments. "
+            "Use canonical 'glycam06' for GLYCAM; OpenFF OFFXML names and paths use "
+            "the generic Interchange route."
         ),
     )
     residue_name: str | None = Field(None, max_length=4, description="Residue name for the moiety")
@@ -1025,6 +1024,17 @@ class ConjugationConfig(BaseModel):
 
         if not any(attachment.enabled for attachment in self.attachments):
             raise ValueError("enabled conjugation requires at least one enabled attachment")
+        missing_owners = [
+            attachment.name
+            for attachment in self.attachments
+            if attachment.enabled and attachment.moiety.force_field is None
+        ]
+        if missing_owners:
+            names = ", ".join(repr(name) for name in missing_owners)
+            raise ValueError(
+                "enabled conjugation attachments must explicitly declare "
+                f"moiety.force_field; missing for: {names}"
+            )
         return self
 
 
