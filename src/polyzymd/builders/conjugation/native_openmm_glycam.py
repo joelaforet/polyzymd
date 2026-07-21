@@ -25,6 +25,7 @@ from typing import Any
 
 import numpy as np
 
+from polyzymd.builders._pdb_identity import normalize_topology_pdb_identifiers
 from polyzymd.exporters.exact_openmm import create_exact_export_bundle
 
 LOGGER = logging.getLogger(__name__)
@@ -49,11 +50,9 @@ SUPPORTED_ION_RESIDUES = {"NA", "CL", "K", "MG", "CA"}
 
 def native_glycam_enabled(config: Any) -> bool:
     """Return whether a config explicitly requests native OpenMM GLYCAM."""
-    force_field = getattr(config, "force_field", None)
-    return (
-        getattr(force_field, "conjugate_parameterization", None) == "native_openmm_glycam"
-        and getattr(force_field, "glycan_policy", "sage_fallback") == "strict_glycam"
-    )
+    from polyzymd.builders.conjugation.force_fields import native_glycam_only_route
+
+    return native_glycam_only_route(config)
 
 
 def create_native_openmm_glycam_handoff(
@@ -90,6 +89,13 @@ def create_native_openmm_glycam_handoff(
     solvated_topology = getattr(builder, "_solvated_topology", None)
     if solvated_topology is None:
         raise RuntimeError("Native GLYCAM handoff requires a solvated topology")
+    normalize_topology_pdb_identifiers(
+        solvated_topology,
+        n_enzyme_molecules=int(getattr(builder, "_n_enzyme_molecules", 0) or 0),
+        n_substrate_molecules=int(getattr(builder, "_n_substrate_molecules", 0) or 0),
+        n_polymer_chains=int(getattr(builder, "_n_polymer_chains", 0) or 0),
+        preserve_enzyme_chain_ids=bool(getattr(builder, "_preserve_enzyme_chain_ids", False)),
+    )
     _annotate_force_field_domains_from_config(solvated_topology, construction, config)
 
     sage_residue_names = _sage_residue_names_from_config(config)
@@ -199,15 +205,10 @@ def _validate_native_glycam_mvp_config(config: Any) -> None:
         raise ValueError("Native GLYCAM mode supports only TIP3P water")
     ions = getattr(solvent, "ions", None)
     if ions is not None and (
-        getattr(ions, "neutralize", True)
-        or float(getattr(ions, "nacl_concentration", 0.0)) != 0.0
-        or float(getattr(ions, "kcl_concentration", 0.0)) != 0.0
+        float(getattr(ions, "kcl_concentration", 0.0)) != 0.0
         or float(getattr(ions, "mgcl2_concentration", 0.0)) != 0.0
     ):
-        raise ValueError(
-            "Native GLYCAM mode supports only ions that match Amber/TIP3P templates; "
-            "automatic ion placement and neutralization are not yet audited for this route"
-        )
+        raise ValueError("Native GLYCAM mode currently supports standard Na/Cl ions only")
 
 
 def _load_native_glycam_force_field() -> Any:
@@ -220,8 +221,14 @@ def _load_native_glycam_force_field() -> Any:
 def _annotate_force_field_domains_from_config(
     topology: Any, construction: Any, config: Any
 ) -> None:
-    """Copy config-level attachment domains onto OpenFF atom metadata when possible."""
+    """Copy resolved attachment domains onto OpenFF atom metadata when possible."""
     _ = construction
+    from polyzymd.builders.conjugation.force_fields import resolve_conjugate_force_fields
+
+    resolved_by_name = {
+        resolved.attachment_name: ("glycan" if resolved.is_glycam else "sage")
+        for resolved in resolve_conjugate_force_fields(config).attachments
+    }
     conjugation = getattr(config, "conjugation", None)
     sage_residue_names = _sage_residue_names_from_config(config)
     residue_domains: dict[str, str] = {}
@@ -231,7 +238,7 @@ def _annotate_force_field_domains_from_config(
         for attachment in getattr(conjugation, "attachments", ()) or ():
             if not getattr(attachment, "enabled", True):
                 continue
-            domain = getattr(getattr(attachment, "moiety", None), "force_field_domain", None)
+            domain = resolved_by_name.get(str(getattr(attachment, "name", "attachment")))
             if domain is None:
                 continue
             product_residues = getattr(
@@ -590,11 +597,11 @@ def _openff_topology_to_openmm_for_glycam(
     omm_topology = Topology()
     atom_map: dict[Any, Any] = {}
     residue_map: dict[tuple[str, str, str, str], Any] = {}
+    chain_by_id: dict[str, Any] = {}
     renamed_atoms: list[dict[str, Any]] = []
     sage_template_units: list[dict[str, Any]] = []
 
     for molecule_index, molecule in enumerate(topology.molecules):
-        chain_by_id: dict[str, Any] = {}
         molecule_domain = _molecule_force_field_domain(molecule)
         if molecule_domain is None and _molecule_matches_sage_residue_name(
             molecule, sage_residue_names or set()
@@ -612,6 +619,7 @@ def _openff_topology_to_openmm_for_glycam(
                 molecule,
                 molecule_index=molecule_index,
                 atom_map=atom_map,
+                chain_by_id=chain_by_id,
             )
             sage_template_units.append(template_unit)
             continue
@@ -633,11 +641,14 @@ def _openff_topology_to_openmm_for_glycam(
             )
             residue = residue_map.get(residue_key)
             if residue is None:
-                residue = omm_topology.addResidue(
+                residue = _add_residue_with_contiguous_fallback(
+                    omm_topology,
                     identity["residue_name"],
                     chain,
-                    id=identity["residue_number"],
-                    insertionCode=identity["insertion_code"],
+                    residue_id=identity["residue_number"],
+                    insertion_code=identity["insertion_code"],
+                    chain_by_id=chain_by_id,
+                    chain_id=identity["chain_id"],
                 )
                 _copy_residue_domain_metadata(residue, atom)
                 residue_map[residue_key] = residue
@@ -683,6 +694,7 @@ def _add_disconnected_sage_template_unit(
     *,
     molecule_index: int,
     atom_map: dict[Any, Any],
+    chain_by_id: dict[str, Any],
 ) -> dict[str, Any]:
     """Add one OpenMM residue containing a complete disconnected Sage molecule.
 
@@ -696,13 +708,19 @@ def _add_disconnected_sage_template_unit(
     if not atoms:
         raise ValueError(f"Sage-domain molecule {molecule_index} contains no atoms")
     first_identity = _atom_identity(atoms[0])
-    chain = omm_topology.addChain(first_identity["chain_id"])
+    chain = chain_by_id.get(first_identity["chain_id"])
+    if chain is None:
+        chain = omm_topology.addChain(first_identity["chain_id"])
+        chain_by_id[first_identity["chain_id"]] = chain
     residue_name = _sage_template_residue_name(molecule, first_identity)
-    residue = omm_topology.addResidue(
+    residue = _add_residue_with_contiguous_fallback(
+        omm_topology,
         residue_name,
         chain,
-        id=_sage_template_residue_id(molecule_index, first_identity),
-        insertionCode="",
+        residue_id=_sage_template_residue_id(molecule_index, first_identity),
+        insertion_code="",
+        chain_by_id=chain_by_id,
+        chain_id=first_identity["chain_id"],
     )
     try:
         residue.force_field_domain = "sage"
@@ -723,6 +741,38 @@ def _add_disconnected_sage_template_unit(
         "atom_count": len(atoms),
         "source_residue_segments": _molecule_source_residue_segments(molecule),
     }
+
+
+def _add_residue_with_contiguous_fallback(
+    omm_topology: Any,
+    residue_name: str,
+    chain: Any,
+    *,
+    residue_id: str,
+    insertion_code: str,
+    chain_by_id: dict[str, Any],
+    chain_id: str,
+) -> Any:
+    """Add a residue while preferring one global chain per chain ID."""
+
+    try:
+        return omm_topology.addResidue(
+            residue_name,
+            chain,
+            id=residue_id,
+            insertionCode=insertion_code,
+        )
+    except ValueError as exc:
+        if "contiguous" not in str(exc):
+            raise
+    fallback_chain = omm_topology.addChain(chain_id)
+    chain_by_id[chain_id] = fallback_chain
+    return omm_topology.addResidue(
+        residue_name,
+        fallback_chain,
+        id=residue_id,
+        insertionCode=insertion_code,
+    )
 
 
 def _sage_template_residue_name(molecule: Any, first_identity: dict[str, Any]) -> str:
@@ -1033,8 +1083,8 @@ def _attachment_provenance_audit(construction: Any) -> tuple[dict[str, Any], ...
             {
                 "index": index,
                 "name": str(getattr(attachment, "name", f"attachment-{index}")),
-                "force_field_domain": str(
-                    getattr(getattr(attachment, "moiety", None), "force_field_domain", "glycan")
+                "force_field": str(
+                    getattr(getattr(attachment, "moiety", None), "force_field", "glycam06")
                 ),
             }
         )

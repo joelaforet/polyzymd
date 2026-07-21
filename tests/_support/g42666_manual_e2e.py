@@ -61,8 +61,9 @@ def run_g42666_manual_e2e(
     runtime_config = _runtime_config_path(output_dir, glycan_path=glycan_path)
     config = load_config(runtime_config)
     if native_glycam:
-        config.force_field.conjugate_parameterization = "native_openmm_glycam"
-        config.force_field.glycan_policy = "strict_glycam"
+        for attachment in config.conjugation.attachments:
+            if attachment.enabled:
+                attachment.moiety.force_field = "glycam06"
         config.solvent.ions.neutralize = False
     settings = ConjugatedPolymerSystemSettings(
         create_final_interchange=True,

@@ -188,6 +188,8 @@ class ParameterCoverageReport(BaseModel):
     checks: tuple[ConjugateValidationCheck, ...] = Field(default_factory=tuple)
     expected_particle_count: int | None = None
     observed_particle_count: int | None = None
+    force_counts: dict[str, int] = Field(default_factory=dict)
+    evidence_paths: dict[str, str] = Field(default_factory=dict)
 
 
 class LinkageGeometryReport(BaseModel):
@@ -292,6 +294,7 @@ def build_conjugate_validation_report(
     output_dir: Path | str | None = None,
     openmm_system: Any | None = None,
     expected_particle_count: int | None = None,
+    parameter_evidence_paths: Mapping[str, str | Path | None] | None = None,
     write: bool = True,
 ) -> ConjugateValidationReport:
     """Build and optionally write the canonical conjugate validation report.
@@ -310,6 +313,8 @@ def build_conjugate_validation_report(
         Production-created OpenMM System-like object for particle-count coverage checks.
     expected_particle_count : int or None, optional
         Expected OpenMM particle count, by default ``None``.
+    parameter_evidence_paths : Mapping[str, str or Path or None], optional
+        Sidecar paths that prove the final parameterized System route.
     write : bool, optional
         Whether to write ``conjugate_validation_report.json``, by default ``True``.
 
@@ -337,6 +342,7 @@ def build_conjugate_validation_report(
         parameter_coverage=audit_parameter_coverage(
             openmm_system=openmm_system,
             expected_particle_count=expected_particle_count,
+            evidence_paths=parameter_evidence_paths,
         ),
         linkage_geometry=audit_linkage_geometry(
             atoms,
@@ -663,6 +669,7 @@ def audit_parameter_coverage(
     *,
     openmm_system: Any | None = None,
     expected_particle_count: int | None = None,
+    evidence_paths: Mapping[str, str | Path | None] | None = None,
 ) -> ParameterCoverageReport:
     """Audit parameter coverage from production-created OpenMM System evidence.
 
@@ -673,25 +680,29 @@ def audit_parameter_coverage(
         ``None``.
     expected_particle_count : int or None, optional
         Expected particle count from the product topology, by default ``None``.
+    evidence_paths : Mapping[str, str or Path or None], optional
+        Sidecar paths to include as proof references, by default ``None``.
 
     Returns
     -------
     ParameterCoverageReport
         Particle-count coverage report, or a skipped report when production evidence is unavailable.
     """
+    paths = _json_safe_evidence_paths(evidence_paths)
     if openmm_system is None:
         check = _skipped_check(
             "parameter_coverage",
             "No production OpenMM System evidence was available",
         )
-        return ParameterCoverageReport(status=check.status, checks=(check,))
+        return ParameterCoverageReport(status=check.status, checks=(check,), evidence_paths=paths)
     if not hasattr(openmm_system, "getNumParticles"):
         check = _skipped_check(
             "parameter_coverage",
             "Production OpenMM System evidence does not expose getNumParticles()",
         )
-        return ParameterCoverageReport(status=check.status, checks=(check,))
+        return ParameterCoverageReport(status=check.status, checks=(check,), evidence_paths=paths)
     observed_count = int(openmm_system.getNumParticles())
+    force_counts = _openmm_force_counts(openmm_system)
     if expected_particle_count is not None and observed_count != expected_particle_count:
         check = _check(
             "parameter_particle_count",
@@ -704,19 +715,61 @@ def audit_parameter_coverage(
             checks=(check,),
             expected_particle_count=expected_particle_count,
             observed_particle_count=observed_count,
+            force_counts=force_counts,
+            evidence_paths=paths,
         )
     check = _check(
         "parameter_coverage",
         ValidationStatus.PASS,
         "Production OpenMM System particle count evidence is available",
-        evidence={"observed_particle_count": observed_count},
+        evidence={
+            "observed_particle_count": observed_count,
+            "force_counts": force_counts,
+            "evidence_paths": paths,
+        },
     )
     return ParameterCoverageReport(
         status=check.status,
         checks=(check,),
         expected_particle_count=expected_particle_count,
         observed_particle_count=observed_count,
+        force_counts=force_counts,
+        evidence_paths=paths,
     )
+
+
+def _openmm_force_counts(openmm_system: Any) -> dict[str, int]:
+    """Return force-class term counts for validation evidence."""
+
+    counts: dict[str, int] = {"particles": int(openmm_system.getNumParticles())}
+    if hasattr(openmm_system, "getNumConstraints"):
+        counts["constraints"] = int(openmm_system.getNumConstraints())
+    if not hasattr(openmm_system, "getForces"):
+        counts["force_inventory_available"] = 0
+        return counts
+    for force in openmm_system.getForces():
+        name = force.__class__.__name__
+        counts[name] = counts.get(name, 0) + 1
+        if name == "NonbondedForce":
+            counts["NonbondedForce.particles"] = int(force.getNumParticles())
+            counts["NonbondedForce.exceptions"] = int(force.getNumExceptions())
+        elif name == "HarmonicBondForce":
+            counts["HarmonicBondForce.bonds"] = int(force.getNumBonds())
+        elif name == "HarmonicAngleForce":
+            counts["HarmonicAngleForce.angles"] = int(force.getNumAngles())
+        elif name == "PeriodicTorsionForce":
+            counts["PeriodicTorsionForce.torsions"] = int(force.getNumTorsions())
+    return counts
+
+
+def _json_safe_evidence_paths(
+    evidence_paths: Mapping[str, str | Path | None] | None,
+) -> dict[str, str]:
+    """Return a JSON-safe path mapping without missing values."""
+
+    if evidence_paths is None:
+        return {}
+    return {str(key): str(value) for key, value in evidence_paths.items() if value is not None}
 
 
 def audit_linkage_geometry(

@@ -704,6 +704,7 @@ def test_parameter_coverage_pass_and_fail_with_fakes():
     failed = audit_parameter_coverage(openmm_system=FakeSystem(4), expected_particle_count=5)
 
     assert passed.status == ValidationStatus.PASS
+    assert passed.force_counts == {"particles": 5, "force_inventory_available": 0}
     assert failed.status == ValidationStatus.FAIL
     assert failed.observed_particle_count == 4
 
