@@ -80,6 +80,7 @@ class ReactionTemplate(ABC):
         site_config: Any,
         fragment: Any,
         *,
+        prepared_fragment: Any | None = None,
         settings: Any | None = None,
     ) -> Any:
         """Resolve a generic attachment plan for construction.

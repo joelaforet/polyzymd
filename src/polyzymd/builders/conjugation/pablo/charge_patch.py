@@ -87,21 +87,16 @@ def build_local_product_charge_patch_records(
 
 def _validate_supported_spec(spec: Any, *, product_atoms: Sequence[Any]) -> None:
     """Reject unsupported first-release charge-patch cases before NAGL charging."""
-    plan = spec
-    fragment = getattr(spec, "fragment", None)
-    if plan is None:
-        raise LocalChargePatchError("Product charge patch requires a resolved Pablo identity plan")
-    if fragment is None or not tuple(getattr(fragment, "atoms", ()) or ()):  # noqa: SIM102
+    fragment = spec.fragment
+    if not fragment.atoms:
         raise LocalChargePatchError(
             "Product charge patch requires a complete product graph/SDF-derived moiety fragment"
         )
-    protein_link = getattr(plan, "protein_link_atom", None)
-    modifier_link = getattr(plan, "modifier_link_atom", None)
-    if protein_link is None or modifier_link is None:
-        raise LocalChargePatchError("Product charge patch requires mapped Pablo link atoms")
-    residue_number = getattr(protein_link, "residue_number", None)
-    residue_name = str(getattr(protein_link, "residue_name", "") or "").upper()
-    atom_name = str(getattr(protein_link, "atom_name", "") or "").upper()
+    protein_link = spec.protein_link_atom
+    modifier_link = spec.modifier_link_atom
+    residue_number = protein_link.residue_number
+    residue_name = str(protein_link.residue_name or "").upper()
+    atom_name = str(protein_link.atom_name or "").upper()
     if residue_number in {None, 1}:
         raise LocalChargePatchError(
             "Terminal product-state modifications are not supported in the first release"
@@ -110,13 +105,13 @@ def _validate_supported_spec(spec: Any, *, product_atoms: Sequence[Any]) -> None
         raise LocalChargePatchError(
             "Only Lys NZ and Asn ND2 side-chain product-state charge patches are supported"
         )
-    if str(getattr(modifier_link, "chain_id", "") or "").strip() == "A":
+    if str(modifier_link.chain_id or "").strip() == "A":
         raise LocalChargePatchError("Protein-protein crosslinks are not supported")
     matching_sites = [
         atom
         for atom in product_atoms
         if str(getattr(atom, "chain_id", "") or "").strip()
-        == str(getattr(protein_link, "chain_id", "") or "").strip()
+        == str(protein_link.chain_id or "").strip()
         and getattr(atom, "residue_number", None) == residue_number
     ]
     if not matching_sites:
@@ -183,7 +178,7 @@ def _build_reference_product(spec: Any, *, product_atoms: tuple[Any, ...]) -> _R
         _modifier_link_key(
             modifier_link, rd_indices, resolved_modifier_link=resolved_modifier_link
         ),
-        int(round(float(getattr(plan.pablo_crosslink_requirement, "bond_order", 1)))),
+        int(round(float(plan.pablo_crosslink_requirement.bond_order))),
     )
     mol = rwmol.GetMol()
     mol.UpdatePropertyCache(strict=False)
@@ -487,8 +482,8 @@ def _log_patch_diagnostics(
     affected = [_describe_mapped_atom(atom) for atom in reference.mapped_atoms.values()]
     payload = {
         "site": _site_identifier(plan),
-        "attachment": getattr(spec, "name", None) or getattr(plan, "attachment_name", None),
-        "reaction": getattr(getattr(plan, "contract", None), "mechanism_name", None),
+        "attachment": plan.attachment_id,
+        "reaction": plan.reaction_name,
         "cap_model": "ACE-GLY-modified-residue(moiety)-GLY-NME",
         "nagl_model": DEFAULT_PATCH_NAGL_MODEL,
         "nagl_version": "pre-production NAGLCharger default",
@@ -573,9 +568,7 @@ def _retained_fragment_atoms(spec: Any, fragment: Any) -> tuple[Any, ...]:
     """Return generated-fragment atoms after removing resolved leaving atoms."""
     leaving = _leaving_keys(spec, fragment)
     return tuple(
-        atom
-        for atom in tuple(getattr(fragment, "atoms", ()) or ())
-        if _product_key(atom, role="modifier") not in leaving
+        atom for atom in fragment.atoms if _product_key(atom, role="modifier") not in leaving
     )
 
 
@@ -586,79 +579,27 @@ def _resolve_retained_modifier_link_atom(spec: Any, fragment: Any) -> Any:
     identities are applied later only when emitting charge records.
     """
     plan = spec
-    modifier_link = getattr(plan, "modifier_link_atom", None)
-    atoms = tuple(getattr(fragment, "atoms", ()) or ())
+    modifier_link = plan.modifier_link_atom
+    atoms = tuple(fragment.atoms)
     retained = tuple(_retained_fragment_atoms(spec, fragment))
-    serial_atom = _single_fragment_match(
-        atoms,
-        attr="serial",
-        value=getattr(fragment, "reactive_atom_serial", None),
-        label="reactive atom serial",
-    )
-    index_atom = _single_fragment_match(
-        atoms,
-        attr="atom_index",
-        value=getattr(fragment, "reactive_atom_index", None),
-        label="reactive atom index",
-    )
-    has_serial = getattr(fragment, "reactive_atom_serial", None) not in (None, "")
-    has_index = getattr(fragment, "reactive_atom_index", None) not in (None, "")
-    if (
-        has_serial
-        and has_index
-        and (serial_atom is None or index_atom is None or serial_atom is not index_atom)
-    ):
+    matches = [
+        atom
+        for atom in atoms
+        if atom.serial == modifier_link.serial
+        and atom.atom_index == modifier_link.atom_index
+        and _atom_name(atom).upper() == _atom_name(modifier_link).upper()
+    ]
+    if len(matches) != 1:
         raise LocalChargePatchError(
-            "Generated-fragment reactive atom serial and index resolve to different source atoms"
+            "ReactionProduct modifier link identity does not resolve exactly once in its fragment"
         )
-    resolved = serial_atom or index_atom
-    if resolved is None:
-        resolved = _unique_name_fragment_match(
-            retained,
-            getattr(fragment, "reactive_atom_name", None)
-            or getattr(modifier_link, "atom_name", None),
-        )
-    if resolved is None:
-        raise LocalChargePatchError(
-            "Generated-fragment reactive atom identity is missing or ambiguous for the modifier link"
-        )
+    resolved = matches[0]
     if all(resolved is not atom for atom in retained):
         raise LocalChargePatchError(
             "Generated-fragment reactive atom resolves to a leaving atom, not a retained modifier atom"
         )
-    expected_name = _atom_name(modifier_link).upper() if modifier_link is not None else ""
-    if expected_name and _atom_name(resolved).upper() != expected_name:
-        raise LocalChargePatchError(
-            "Generated-fragment reactive atom name does not match the Pablo modifier link atom name"
-        )
     _validate_mapped_modifier_link_identity(spec, resolved)
     return resolved
-
-
-def _single_fragment_match(
-    atoms: Sequence[Any], *, attr: str, value: Any, label: str
-) -> Any | None:
-    """Return a single source-fragment atom selected by a scalar identity."""
-    if value in (None, ""):
-        return None
-    target = int(value)
-    matches = [atom for atom in atoms if getattr(atom, attr, None) == target]
-    if len(matches) > 1:
-        raise LocalChargePatchError(f"Generated-fragment {label} {target!r} is ambiguous")
-    return matches[0] if matches else None
-
-
-def _unique_name_fragment_match(atoms: Sequence[Any], name: Any) -> Any | None:
-    """Return a source-fragment atom only when the fallback name is unique."""
-    if name in (None, ""):
-        return None
-    target = str(name).strip().upper()
-    matches = [atom for atom in atoms if _atom_name(atom).upper() == target]
-    if len(matches) > 1:
-        raise LocalChargePatchError(
-            f"Generated-fragment reactive atom name {target!r} is ambiguous among retained atoms"
-        )
-    return matches[0] if matches else None
 
 
 def _validate_mapped_modifier_link_identity(spec: Any, atom: Any) -> None:
@@ -667,8 +608,7 @@ def _validate_mapped_modifier_link_identity(spec: Any, atom: Any) -> None:
     if not mapping:
         return
     plan = spec
-    modifier_link = getattr(plan, "modifier_link_atom", None)
-    expected_name = _atom_name(modifier_link).upper() if modifier_link is not None else ""
+    expected_name = _atom_name(plan.modifier_link_atom).upper()
     if expected_name and _atom_name(atom).upper() != expected_name:
         raise LocalChargePatchError(
             "Mapped modifier reactive atom source name does not match product link atom name"
@@ -677,17 +617,17 @@ def _validate_mapped_modifier_link_identity(spec: Any, atom: Any) -> None:
 
 def _fragment_bonds(fragment: Any) -> tuple[tuple[Any, Any, float], ...]:
     """Return generated-fragment bonds with bond-order metadata."""
-    atoms = tuple(getattr(fragment, "atoms", ()) or ())
+    atoms = tuple(fragment.atoms)
     lookup = _fragment_atom_lookup(atoms)
     bonds: list[tuple[Any, Any, float]] = []
     seen: set[frozenset[int]] = set()
-    for left, right, order in tuple(getattr(fragment, "bond_orders", ()) or ()):  # noqa: B007
+    for left, right, order in fragment.bond_orders:  # noqa: B007
         left_atom = _resolve_fragment_atom(left, lookup)
         right_atom = _resolve_fragment_atom(right, lookup)
         if left_atom is not None and right_atom is not None:
             seen.add(frozenset((id(left_atom), id(right_atom))))
             bonds.append((left_atom, right_atom, float(order)))
-    for left, right in tuple(getattr(fragment, "bonds", ()) or ()):  # noqa: B007
+    for left, right in fragment.bonds:  # noqa: B007
         left_atom = _resolve_fragment_atom(left, lookup)
         right_atom = _resolve_fragment_atom(right, lookup)
         if left_atom is None or right_atom is None:
@@ -721,22 +661,8 @@ def _resolve_fragment_atom(value: Any, lookup: Mapping[Any, Any]) -> Any | None:
 
 def _leaving_keys(plan: Any, fragment: Any) -> set[tuple[str, int | None, str]]:
     """Return modifier-side leaving atom keys."""
-    if plan is None:
-        return set()
-    keys = {
-        _product_key(atom, role="modifier") for atom in getattr(plan, "modifier_leaving_atoms", ())
-    }
-    names = {str(name).strip().upper() for name in getattr(fragment, "leaving_atom_names", ())}
-    indices = {int(index) for index in getattr(fragment, "leaving_atom_indices", ())}
-    serials = {int(serial) for serial in getattr(fragment, "leaving_atom_serials", ())}
-    for atom in tuple(getattr(fragment, "atoms", ()) or ()):
-        if (
-            _atom_name(atom).upper() in names
-            or getattr(atom, "atom_index", None) in indices
-            or getattr(atom, "serial", None) in serials
-        ):
-            keys.add(_product_key(atom, role="modifier"))
-    return keys
+    del fragment
+    return {_product_key(atom, role="modifier") for atom in plan.modifier_leaving_atoms}
 
 
 def _mapped_modifier_product_identity(
@@ -750,8 +676,7 @@ def _mapped_modifier_product_identity(
     residue_name = str(
         mapping.get(
             "target_residue_name",
-            getattr(plan, "modifier_product_residue_name", None)
-            or getattr(atom, "residue_name", ""),
+            plan.modifier_product_residue_name or getattr(atom, "residue_name", ""),
         )
     ).upper()
     residue_number = _optional_int(
@@ -907,7 +832,7 @@ def _atom_element(atom: Any) -> str:
 
 def _mapping_for_atom(spec: Any, atom: Any) -> Mapping[str, Any]:
     """Return product residue mapping for a generated-fragment atom."""
-    mappings = getattr(spec, "product_residue_mappings", {}) or {}
+    mappings = spec.product_residue_mappings
     source_number = str(getattr(atom, "residue_number", "") or "")
     return (
         mappings.get(source_number)
@@ -940,10 +865,7 @@ def _add_bond(rwmol: Any, indices: Mapping[Any, int], left: Any, right: Any, ord
 
 def _site_identifier(plan: Any) -> str:
     """Return a compact site identifier for diagnostics."""
-    atom = getattr(plan, "protein_link_atom", None)
-    if atom is None:
-        return "unknown"
-    return _describe_source_atom(atom)
+    return _describe_source_atom(plan.protein_link_atom)
 
 
 def _describe_source_atom(atom: Any) -> str:

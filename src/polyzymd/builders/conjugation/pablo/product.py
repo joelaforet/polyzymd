@@ -96,14 +96,12 @@ def build_product_state_pablo_library(
     product_pdb: Path | str,
     source_protein_pdb: Path | str | None = None,
     polymer_sdf: Path | str | None = None,
-    generated_fragment: Any | None = None,
-    resolved_plan: Any | None = None,
+    product: Any = None,
     product_residue_mappings: Mapping[str, Mapping[str, Any]] | None = None,
     endpoint_provenance: Mapping[str, Any] | None = None,
     *,
     charged_polymer_sdf: Path | str | None = None,
     pablo_module: Any | None = None,
-    allow_legacy_direct_fallback: bool | None = None,
 ) -> ProductStatePabloLibrary:
     """Build POC product-state Pablo residue definitions for an emitted PDB.
 
@@ -124,33 +122,31 @@ def build_product_state_pablo_library(
     product_atoms = parse_pdb_atom_records(product_path)
     source_atoms = parse_pdb_atom_records(source_path) if source_path is not None else []
     conect_pairs = parse_pdb_conect_pairs(product_path)
-    requirement = _coerce_requirement(resolved_plan)
+    if product is None:
+        raise ValueError("ReactionProduct is required")
+    generated_fragment = product.fragment
+    requirement = product.pablo_crosslink_requirement
     diagnostics: list[str] = []
-    allow_legacy_serial_fallback = (
-        not product_residue_mappings
-        if allow_legacy_direct_fallback is None
-        else allow_legacy_direct_fallback
-    )
 
     protein_key = _locate_residue_key(
         product_atoms,
         residue_name=requirement.residues[0],
         atom_name=requirement.linking_atoms[0],
-        resolved_atom=getattr(resolved_plan, "protein_link_atom", None),
+        resolved_atom=product.protein_link_atom,
         endpoint_provenance=endpoint_provenance,
         endpoint_role="protein",
         diagnostics=diagnostics,
-        allow_legacy_serial_fallback=allow_legacy_serial_fallback,
+        allow_legacy_serial_fallback=False,
     )
     modifier_key = _locate_residue_key(
         product_atoms,
         residue_name=requirement.residues[1],
         atom_name=requirement.linking_atoms[1],
-        resolved_atom=getattr(resolved_plan, "modifier_link_atom", None),
+        resolved_atom=product.modifier_link_atom,
         endpoint_provenance=endpoint_provenance,
         endpoint_role="modifier",
         diagnostics=diagnostics,
-        allow_legacy_serial_fallback=allow_legacy_serial_fallback,
+        allow_legacy_serial_fallback=False,
     )
 
     definitions: list[Any] = []
@@ -164,7 +160,7 @@ def build_product_state_pablo_library(
         product_atoms=_atoms_for_key(product_atoms, protein_key),
         source_atoms=source_atoms,
         requirement=requirement,
-        source_residue_name=_source_protein_residue_name(resolved_plan, source_atoms),
+        source_residue_name=_source_protein_residue_name(product, source_atoms),
         modifier_crosslink_atom=_pablo_modifier_crosslink_atom(requirement.linking_atoms[1]),
     )
     definitions.append(protein_definition)
@@ -244,7 +240,7 @@ def build_product_state_pablo_library(
                 formal_charges=product_formal_charges.get(key, {}),
                 linking_bond=link_plan.linking_bond,
                 leaving_atoms=_leaving_atoms_for_residue(
-                    resolved_plan,
+                    product,
                     side="modifier" if is_modified else "none",
                 ),
                 crosslink=(
@@ -297,7 +293,6 @@ def build_product_state_pablo_library_for_specs(
         raise ValueError("Product-state Pablo library generation requires at least one spec")
 
     libraries = []
-    allow_legacy_direct_fallback = len(attachment_specs) == 1
     for spec in attachment_specs:
         fragment = spec.fragment
         sdf_path = _spec_sdf_path(spec)
@@ -309,11 +304,9 @@ def build_product_state_pablo_library_for_specs(
                 source_protein_pdb=source_protein_pdb,
                 polymer_sdf=sdf_path,
                 charged_polymer_sdf=charged_sdf_path,
-                generated_fragment=fragment,
-                resolved_plan=spec,
+                product=spec,
                 product_residue_mappings=_spec_product_residue_mappings(spec),
-                endpoint_provenance=getattr(spec, "endpoint_provenance", None) or None,
-                allow_legacy_direct_fallback=allow_legacy_direct_fallback,
+                endpoint_provenance=spec.endpoint_provenance or None,
                 pablo_module=pablo_module,
             )
         )
@@ -343,31 +336,25 @@ def build_product_state_pablo_library_for_specs(
 
 def _spec_sdf_path(spec: Any) -> Path | None:
     """Return the bond-order SDF sidecar recorded on a resolved spec, if present."""
-    for sidecars in (
-        getattr(spec, "source_sidecars", None),
-        getattr(getattr(spec, "fragment", None), "sidecars", None),
-    ):
-        if sidecars and sidecars.get("bond_sdf") is not None:
-            return Path(sidecars["bond_sdf"])
-        if sidecars and sidecars.get("sdf") is not None:
-            return Path(sidecars["sdf"])
+    sidecars = spec.source_sidecars
+    if sidecars.get("bond_sdf") is not None:
+        return Path(sidecars["bond_sdf"])
+    if sidecars.get("sdf") is not None:
+        return Path(sidecars["sdf"])
     return None
 
 
 def _spec_charged_sdf_path(spec: Any) -> Path | None:
     """Return the validated charged SDF sidecar recorded on a resolved spec."""
-    for sidecars in (
-        getattr(spec, "source_sidecars", None),
-        getattr(getattr(spec, "fragment", None), "sidecars", None),
-    ):
-        if sidecars and sidecars.get("charged_sdf") is not None:
-            return Path(sidecars["charged_sdf"])
+    sidecars = spec.source_sidecars
+    if sidecars.get("charged_sdf") is not None:
+        return Path(sidecars["charged_sdf"])
     return None
 
 
 def _spec_product_residue_mappings(spec: Any) -> Mapping[str, Mapping[str, Any]] | None:
     """Return assembly residue mappings recorded for one attachment spec."""
-    mappings = getattr(spec, "product_residue_mappings", None)
+    mappings = spec.product_residue_mappings
     return mappings or None
 
 
@@ -383,11 +370,11 @@ def _validate_spec_sidecars(
             raise ValueError(f"Product-state Pablo SDF sidecar does not exist: {sdf_path}")
         return
 
-    fragment = getattr(spec, "fragment", None)
-    if getattr(fragment, "source_kind", None) != "polymer":
+    fragment = spec.fragment
+    if fragment.source_kind != "polymer":
         return
     if not _fragment_has_complete_bond_orders(generated_fragment):
-        attachment_id = getattr(spec, "attachment_id", "<unknown>")
+        attachment_id = spec.attachment_id
         raise ValueError(
             "Product-state Pablo library generation for polymer attachment "
             f"{attachment_id!r} requires an SDF sidecar or complete generated-fragment "
@@ -398,14 +385,12 @@ def _validate_spec_sidecars(
 
 def _fragment_has_complete_bond_orders(generated_fragment: Any) -> bool:
     """Return whether every generated-fragment bond has an explicit bond order."""
-    bonds = {
-        frozenset((atom1, atom2)) for atom1, atom2 in getattr(generated_fragment, "bonds", ()) or ()
-    }
+    bonds = {frozenset((atom1, atom2)) for atom1, atom2 in generated_fragment.bonds}
     if not bonds:
         return True
     bond_orders = {
         frozenset((entry[0], entry[1]))
-        for entry in getattr(generated_fragment, "bond_orders", ()) or ()
+        for entry in generated_fragment.bond_orders
         if len(entry) >= 3
     }
     return bonds.issubset(bond_orders)
@@ -417,16 +402,6 @@ def _pablo_residue_module(pablo_module: Any) -> Any:
     if residue_mod is not None:
         return residue_mod
     return importlib.import_module("openff.pablo.residue")
-
-
-def _coerce_requirement(resolved_plan: Any | None) -> PabloCrosslinkRequirement:
-    """Extract the reactant-state Pablo requirement from a resolved plan."""
-    requirement = getattr(resolved_plan, "pablo_crosslink_requirement", None)
-    if requirement is None:
-        raise ValueError("resolved_plan.pablo_crosslink_requirement is required")
-    if isinstance(requirement, PabloCrosslinkRequirement):
-        return requirement
-    return PabloCrosslinkRequirement.model_validate(requirement)
 
 
 def _residue_key(atom: PdbAtomRecord) -> tuple[str, str, int, str]:
@@ -577,21 +552,15 @@ def _atoms_for_key(
     return tuple(atom for atom in atoms if _residue_key(atom) == key)
 
 
-def _source_protein_residue_name(
-    resolved_plan: Any | None, source_atoms: list[PdbAtomRecord]
-) -> str:
+def _source_protein_residue_name(product: Any, source_atoms: list[PdbAtomRecord]) -> str:
     """Return the source protein residue name used to seed LYX definitions."""
-    selector = getattr(getattr(resolved_plan, "contract", None), "protein_endpoint", None)
-    selector = getattr(selector, "selector", None)
-    if selector is not None:
-        return str(getattr(selector, "residue_name", "LYS") or "LYS").upper()
-    link_atom = getattr(resolved_plan, "protein_link_atom", None)
-    if link_atom is not None:
-        for atom in source_atoms:
-            if atom.chain_id == getattr(
-                link_atom, "chain_id", None
-            ) and atom.residue_number == getattr(link_atom, "residue_number", None):
-                return atom.residue_name.upper()
+    selector = product.contract.protein_endpoint.selector
+    if selector is not None and selector.residue_name:
+        return str(selector.residue_name).upper()
+    link_atom = product.protein_link_atom
+    for atom in source_atoms:
+        if atom.chain_id == link_atom.chain_id and atom.residue_number == link_atom.residue_number:
+            return atom.residue_name.upper()
     return "LYS"
 
 
@@ -729,13 +698,13 @@ def _fragment_bonds(generated_fragment: Any | None) -> tuple[tuple[Any, Any, int
     atom_lookup = _fragment_atom_lookup(generated_fragment)
     unique_atom_names = _unique_fragment_atom_names(generated_fragment)
     order_lookup: dict[frozenset[Any], int] = {}
-    for entry in getattr(generated_fragment, "bond_orders", ()) or ():
+    for entry in generated_fragment.bond_orders:
         if len(entry) >= 3:
             order_lookup[frozenset((entry[0], entry[1]))] = explicit_bond_order(
                 entry[2], source="generated polymer fragment"
             )
     bonds = []
-    for atom1, atom2 in getattr(generated_fragment, "bonds", ()) or ():
+    for atom1, atom2 in generated_fragment.bonds:
         resolved1 = (
             _fragment_atom_descriptor(atom_lookup.get(atom1), unique_atom_names=unique_atom_names)
             or atom1
@@ -766,7 +735,7 @@ def _polymer_sdf_bonds(
         raise ValueError(f"Polymer SDF sidecar does not exist: {sdf_path}")
 
     molecules = read_sdf_molecules(sdf_path, source_label="Polymer SDF")
-    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    fragment_atoms = generated_fragment.atoms
     atoms_by_index = validate_fragment_atom_indices(
         fragment_atoms,
         source_label="Generated polymer fragment atoms for SDF bond orders",
@@ -900,10 +869,10 @@ def _product_formal_charges(
         source_residue_aliases=source_residue_aliases,
     )
     charges: dict[tuple[str, str, int, str], dict[str, int]] = defaultdict(dict)
-    for fallback_index, atom in enumerate(getattr(generated_fragment, "atoms", ()) or ()):
-        raw_atom_index = getattr(atom, "atom_index", None)
+    for fallback_index, atom in enumerate(generated_fragment.atoms):
+        raw_atom_index = atom.atom_index
         atom_index = int(raw_atom_index) if raw_atom_index is not None else fallback_index
-        charge = charged_formal_charges.get(atom_index, getattr(atom, "formal_charge", None))
+        charge = charged_formal_charges.get(atom_index, atom.formal_charge)
         if charge in (None, 0):
             continue
         descriptor = _fragment_atom_descriptor(atom, unique_atom_names=unique_atom_names)
@@ -924,7 +893,7 @@ def _charged_sdf_formal_charges(
     """Return non-zero formal charges from a validated charged SDF sidecar."""
     if charged_polymer_sdf is None:
         return {}
-    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    fragment_atoms = generated_fragment.atoms
     return charged_sdf_formal_charges(charged_polymer_sdf, fragment_atoms=fragment_atoms)
 
 
@@ -935,14 +904,14 @@ def _explicit_bond_order(value: Any, *, source: str) -> int:
 
 def _fragment_atom_lookup(generated_fragment: Any) -> dict[Any, Any]:
     """Build lookups for generated-fragment atom references."""
-    atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
-    atom_names = [getattr(atom, "atom_name", None) for atom in atoms]
+    atoms = generated_fragment.atoms
+    atom_names = [atom.atom_name for atom in atoms]
     unique_atom_names = {name for name in atom_names if name and atom_names.count(name) == 1}
     lookup: dict[Any, Any] = {}
     for atom in atoms:
-        serial = getattr(atom, "serial", None)
-        atom_index = getattr(atom, "atom_index", None)
-        atom_name = getattr(atom, "atom_name", None)
+        serial = atom.serial
+        atom_index = atom.atom_index
+        atom_name = atom.atom_name
         if serial is not None:
             lookup.setdefault(serial, atom)
         if atom_index is not None:
@@ -956,9 +925,7 @@ def _unique_fragment_atom_names(generated_fragment: Any | None) -> set[str]:
     """Return atom names that uniquely identify generated-fragment atoms."""
     if generated_fragment is None:
         return set()
-    atom_names = [
-        getattr(atom, "atom_name", None) for atom in getattr(generated_fragment, "atoms", ()) or ()
-    ]
+    atom_names = [atom.atom_name for atom in generated_fragment.atoms]
     return {name for name in atom_names if name and atom_names.count(name) == 1}
 
 
@@ -1635,14 +1602,12 @@ def _product_polymer_residues(
     return tuple((key, tuple(atoms)) for key, atoms in grouped.items())
 
 
-def _leaving_atoms_for_residue(
-    resolved_plan: Any | None, *, side: str
-) -> tuple[PdbAtomRecord, ...]:
+def _leaving_atoms_for_residue(product: Any, *, side: str) -> tuple[PdbAtomRecord, ...]:
     """Return reactant-state leaving atoms for one product residue side."""
     if side == "modifier":
-        return tuple(getattr(resolved_plan, "modifier_leaving_atoms", ()) or ())
+        return tuple(product.modifier_leaving_atoms)
     if side == "protein":
-        return tuple(getattr(resolved_plan, "protein_leaving_atoms", ()) or ())
+        return tuple(product.protein_leaving_atoms)
     return ()
 
 

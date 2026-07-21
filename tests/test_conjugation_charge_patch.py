@@ -172,14 +172,6 @@ def test_g42666_modifier_link_prefers_source_serial_and_index_with_duplicate_c1_
     assert {mapped_atom.residue_number for _atom, mapped_atom in mapped} == {42666, 42667}
 
 
-def test_g42666_modifier_link_rejects_ambiguous_name_only_reactive_atom():
-    """Name fallback should fail when retained source atom names are not unique."""
-    spec = _g42666_like_spec(reactive_atom_serial=None, reactive_atom_index=None)
-
-    with pytest.raises(charge_patch.LocalChargePatchError, match="ambiguous"):
-        charge_patch._resolve_retained_modifier_link_atom(spec, spec.fragment)
-
-
 def test_g42666_modifier_link_rejects_explicit_mapping_mismatch():
     """Explicit source-to-product residue mappings should not use global name fallback."""
     spec = _g42666_like_spec(mapping_residue_number=99999)
@@ -233,14 +225,6 @@ def test_unmapped_modifier_name_fallback_does_not_match_protein_chain_a():
     assert mapped[0][1].residue_name == "NHX"
 
 
-def test_g42666_modifier_link_rejects_reactive_serial_index_mismatch():
-    """Source reactive serial and index should identify the same retained atom."""
-    spec = _g42666_like_spec(reactive_atom_index=4)
-
-    with pytest.raises(charge_patch.LocalChargePatchError, match="different source atoms"):
-        charge_patch._resolve_retained_modifier_link_atom(spec, spec.fragment)
-
-
 def _spec(*, residue_number: int = 10) -> SimpleNamespace:
     """Build a generic supported Lys linkage spec."""
     protein = _atom(10, 10, "NZ", "LYS", residue_number, element="N", chain_id="A")
@@ -264,6 +248,8 @@ def _spec(*, residue_number: int = 10) -> SimpleNamespace:
     )
     return SimpleNamespace(
         name="lys_patch",
+        attachment_id="lys_patch",
+        reaction_name="nhs_lys_amide",
         **plan.__dict__,
         fragment=fragment,
         product_residue_mappings={
@@ -309,6 +295,8 @@ def _g42666_like_spec(
     )
     return SimpleNamespace(
         name="g42666_patch",
+        attachment_id="g42666_patch",
+        reaction_name="n_glycosylation",
         **plan.__dict__,
         fragment=fragment,
         product_residue_mappings={

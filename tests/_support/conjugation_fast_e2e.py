@@ -168,7 +168,7 @@ def _build_summary(
     atoms = _pdb_atom_records(solvated_pdb)
     crosslinked_atoms = _pdb_atom_records(crosslinked_pdb)
     export_paths = _flatten_paths(exported)
-    resolved = [spec.resolved_plan.model_dump(mode="json") for spec in result.attachment_specs]
+    resolved = [product.model_dump(mode="json") for product in result.attachment_specs]
     return {
         "fixture_config": str(FIXTURE_CONFIG),
         "fixture_glycan": _glycan_fixture_evidence(),

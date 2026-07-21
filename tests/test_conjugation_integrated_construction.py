@@ -16,7 +16,7 @@ from polyzymd.builders.conjugation._linkage import (
     ReactiveEndpoint,
     resolve_explicit_linkage_contract,
 )
-from polyzymd.builders.conjugation._specs import reaction_product_from_generated_fragment
+from polyzymd.builders.conjugation._specs import prepare_generated_fragment
 from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
@@ -32,16 +32,13 @@ def test_attachment_build_spec_is_the_construction_boundary(monkeypatch, tmp_pat
     """Specs-first construction should consume resolved ``ReactionProduct`` objects."""
     protein_path = _protein_pdb(tmp_path)
     modifier = _generated_modifier()
-    plan = resolve_explicit_linkage_contract(
+    prepared = prepare_generated_fragment(modifier, None)
+    spec = resolve_explicit_linkage_contract(
         protein_path,
         modifier,
         _explicit_contract(),
-    )
-    spec = reaction_product_from_generated_fragment(
-        modifier,
-        None,
-        plan,
-        attachment_config=SimpleNamespace(name="spec-only"),
+        fragment=prepared,
+        attachment_id="spec-only",
         attachment_index=1,
         reaction_name="explicit_linkage",
     )

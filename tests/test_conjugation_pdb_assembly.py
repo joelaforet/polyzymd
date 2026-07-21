@@ -275,6 +275,7 @@ def test_generic_writer_removes_resolved_non_hydrogen_leaving_atom(tmp_path):
         target_residue_name="CYS",
         target_residue_number=10,
         target_atom_name="SG",
+        modifier_link_atom=_generic_polymer_fragment().atoms[1],
         protein_leaving_atoms_to_remove=(
             PdbAtomRecord(
                 serial=4,
@@ -321,6 +322,8 @@ def test_generic_writer_preserves_unlinked_modifier_residue_names(tmp_path):
         target_residue_name="CYS",
         target_residue_number=10,
         target_atom_name="SG",
+        modifier_link_atom=_generic_polymer_fragment().atoms[1],
+        modifier_leaving_atoms_to_remove=(_generic_polymer_fragment().atoms[2],),
         protein_target_resname="CYX",
         modifier_target_resname="MXL",
     )
@@ -350,6 +353,8 @@ def test_duplicate_modifier_names_use_serial_selectors_for_reactive_and_leaving(
         target_residue_name="CYS",
         target_residue_number=10,
         target_atom_name="SG",
+        modifier_link_atom=fragment.atoms[2],
+        modifier_leaving_atoms_to_remove=(fragment.atoms[1],),
         protein_target_resname="CYX",
         modifier_target_resname="MXL",
     )

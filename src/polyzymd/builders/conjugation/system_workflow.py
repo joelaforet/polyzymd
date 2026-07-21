@@ -15,16 +15,14 @@ from pydantic import BaseModel, Field
 
 from polyzymd.builders.conjugation._linkage import (
     ReactionProduct,
-    placed_fragment_from_resolved_plan,
     require_pablo_crosslink_requirement,
 )
 from polyzymd.builders.conjugation._moiety_provider import (
     attachment_uses_pdb_fragment,
-    generated_fragment_for_resolved_source,
+    prepare_resolved_moiety_source,
     resolve_moiety_source,
     validate_moiety_source_config,
 )
-from polyzymd.builders.conjugation._specs import reaction_product_from_generated_fragment
 from polyzymd.builders.conjugation.construction import (
     ModifierConstructionResult,
     ModifierConstructionSettings,
@@ -660,25 +658,22 @@ def _build_attachment_spec(
     reaction_template = get_reaction(attachment.mechanism.name)
     settings_builder = getattr(reaction_template, "settings_from_attachment", None)
     reaction_settings = settings_builder(attachment) if callable(settings_builder) else None
-    resolved_plan = reaction_template.resolve_plan(
+    prepared_fragment = prepare_resolved_moiety_source(source)
+    reaction_product = reaction_template.resolve_plan(
         protein_pdb_path,
         attachment.site,
-        source.source_fragment or source.fragment,
+        source.reaction_fragment,
+        prepared_fragment=prepared_fragment,
+        attachment_id=str(attachment.name or f"attachment_{attachment_index:02d}"),
+        attachment_index=attachment_index,
+        attachment_config=attachment,
+        source_sidecars=source.sidecars,
+        attachment_force_field_domain=str(attachment.moiety.force_field or ""),
+        diagnostics=(*source.diagnostics, f"Resolved {source.source_kind} reaction product"),
         settings=reaction_settings,
     )
-    modifier = generated_fragment_for_resolved_source(source, resolved_plan)
     return (
-        reaction_product_from_generated_fragment(
-            modifier,
-            source.sidecars.get("sdf"),
-            resolved_plan,
-            attachment_config=attachment,
-            attachment_index=attachment_index,
-            reaction_name=attachment.mechanism.name,
-            charged_sdf_path=source.sidecars.get("charged_sdf"),
-            source_kind=source.source_kind,
-            sidecars=source.sidecars,
-        ),
+        reaction_product,
         source.generation,
         source.reactive_sequence_index if source.reactive_sequence_index is not None else 0,
         source.reactive_selector or {},
@@ -755,13 +750,13 @@ def _build_pdb_fragment_coordinate_only_result(
         crosslinked_conjugate_pdb_path=output_path,
         construction=construction,
         attachment_specs=specs,
-        generated_sequence=getattr(specs[0].fragment, "sequence", None),
+        generated_sequence=specs[0].fragment.sequence,
         reactive_sequence_index=0,
         reactive_residue_selector={
             "chain_id": "C",
-            "atom_serial": getattr(specs[0].fragment, "reactive_atom_serial", None) or 0,
-            "atom_index": getattr(specs[0].fragment, "reactive_atom_index", None) or 0,
-            "atom_name": getattr(specs[0].fragment, "reactive_atom_name", None) or "C1",
+            "atom_serial": specs[0].modifier_link_atom.serial or 0,
+            "atom_index": specs[0].modifier_link_atom.atom_index or 0,
+            "atom_name": specs[0].modifier_link_atom.atom_name,
         },
         generated_sequences=tuple(
             fragment.sequence
@@ -769,9 +764,7 @@ def _build_pdb_fragment_coordinate_only_result(
             if fragment.sequence is not None
         ),
         reactive_sequence_indices=tuple(range(len(specs))),
-        reactive_residue_selectors=(
-            *(_reactive_selector_for_fragment(spec.fragment) for spec in specs),
-        ),
+        reactive_residue_selectors=(*(_reactive_selector_for_product(spec) for spec in specs),),
         conjugate_generations=(),
         protein_canonicalization=protein_canonicalization,
         modifier=specs[0].fragment,
@@ -788,13 +781,14 @@ def _build_pdb_fragment_coordinate_only_result(
     return result
 
 
-def _reactive_selector_for_fragment(fragment: Any) -> dict[str, int | str]:
+def _reactive_selector_for_product(product: ReactionProduct) -> dict[str, int | str]:
     """Return a compact reactive atom selector for coordinate-only artifacts."""
+    atom = product.modifier_link_atom
     return {
-        "chain_id": "C",
-        "atom_serial": getattr(fragment, "reactive_atom_serial", None) or 0,
-        "atom_index": getattr(fragment, "reactive_atom_index", None) or 0,
-        "atom_name": getattr(fragment, "reactive_atom_name", None) or "C1",
+        "chain_id": atom.chain_id,
+        "atom_serial": atom.serial or 0,
+        "atom_index": atom.atom_index or 0,
+        "atom_name": atom.atom_name,
     }
 
 
@@ -861,9 +855,7 @@ def _write_pdb_fragment_coordinate_artifacts(
         run_packmol_func=run_packmol_func,
     )
     placed_fragments = tuple(
-        placed_fragment_from_resolved_plan(placement.placed_modifier, spec).model_copy(
-            update={"name": getattr(spec.fragment, "name", f"pdb_fragment_{index}")}
-        )
+        placement.placed_modifier.model_copy(update={"name": spec.fragment.name})
         for index, (placement, spec) in enumerate(zip(placements, specs, strict=True), start=1)
     )
     assembly = write_crosslinked_pdb(
@@ -995,7 +987,7 @@ def _write_pdb_fragment_placed_artifact(
     attachment_id: str,
 ) -> Any:
     """Write one candidate final PDB-fragment coordinate-only artifact."""
-    placed_fragment = placed_fragment_from_resolved_plan(placed_modifier, plan)
+    placed_fragment = placed_modifier
     return write_crosslinked_pdb(
         protein_pdb_path,
         placed_fragment.model_copy(update={"name": attachment_id}),
@@ -1309,10 +1301,7 @@ def _construct_conjugate_from_specs(
         settings=settings.placement,
     )
     placed_modifiers = tuple(
-        placed_fragment_from_resolved_plan(
-            placement.placed_modifier,
-            plan,
-        )
+        placement.placed_modifier
         for placement, plan in zip(placements, resolved_plans, strict=True)
     )
 
@@ -1456,8 +1445,8 @@ def _product_state_specs_with_assembly_mappings(
     product_pdb_path: Path | str,
 ) -> tuple[Any, ...]:
     """Return specs whose plans point at exact product-PDB linkage atoms."""
-    mappings = getattr(assembly_result, "residue_mappings", {}) or {}
-    added_pairs = tuple(getattr(assembly_result, "added_conect_pairs", ()) or ())
+    mappings = assembly_result.residue_mappings
+    added_pairs = tuple(assembly_result.added_conect_pairs)
     if len(added_pairs) != len(specs):
         raise ValueError(
             "Product-state spec mapping requires one ordered assembly CONECT pair per "
@@ -1500,8 +1489,6 @@ def _product_state_specs_with_assembly_mappings(
             _copy_spec_with_product_mappings(
                 spec,
                 fragment_mappings,
-                protein_link_atom=protein_atom,
-                modifier_link_atom=modifier_atom,
                 endpoint_provenance=endpoint_provenance,
                 scoped_residue_aliases=alias_map,
             )
@@ -1516,7 +1503,7 @@ def _validate_added_conect_pairs(
     assembly_result: Any,
 ) -> None:
     """Verify every assembly endpoint pair is present in the emitted CONECT graph."""
-    if not tuple(getattr(assembly_result, "attachment_endpoint_records", ()) or ()):
+    if not assembly_result.attachment_endpoint_records:
         return
     conect_pairs = {frozenset(pair) for pair in parse_pdb_conect_pairs(Path(product_pdb_path))}
     for pair in added_pairs:
@@ -1590,7 +1577,7 @@ def _endpoint_provenance_for_spec(
     conect_pair: tuple[int, int],
 ) -> dict[str, Any]:
     """Return serial-first endpoint provenance for one attachment spec."""
-    endpoint_records = tuple(getattr(assembly_result, "attachment_endpoint_records", ()) or ())
+    endpoint_records = tuple(assembly_result.attachment_endpoint_records)
     record = next(
         (
             item
@@ -1608,7 +1595,7 @@ def _endpoint_provenance_for_spec(
         "modifier_endpoint": (
             record.get("modifier_endpoint") if record else _pdb_atom_payload(modifier_atom)
         ),
-        "atom_mappings": dict(getattr(assembly_result, "atom_mappings", {}) or {}),
+        "atom_mappings": dict(assembly_result.atom_mappings),
     }
 
 
@@ -1742,22 +1729,12 @@ def _copy_spec_with_product_mappings(
 ) -> Any:
     """Copy a spec while attaching assembly residue mappings for Pablo templating."""
     updates["product_residue_mappings"] = product_residue_mappings
-    copier = getattr(spec, "model_copy", None)
-    if callable(copier):
-        return copier(update=updates)
-    return _namespace_copy(spec, **updates)
+    return spec.model_copy(update=updates)
 
 
 def _modifier_source_residue_key(atom: PdbAtomRecord) -> str:
     """Return the residue-mapping key suffix used by the PDB assembly writer."""
     return f"{atom.residue_number}{atom.insertion_code or ''}"
-
-
-def _namespace_copy(obj: Any, **updates: Any) -> Any:
-    """Copy a simple object namespace while replacing selected attributes."""
-    data = getattr(obj, "__dict__", {}).copy()
-    data.update(updates)
-    return SimpleNamespace(**data)
 
 
 def _policy_with_resolved_crosslinks(

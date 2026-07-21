@@ -214,7 +214,7 @@ class ReactionProduct(BaseModel):
     modifier_product_residue_name: str
     pablo_crosslink_requirement: PabloCrosslinkRequirement
     target_bond_length_angstrom: float = Field(1.33, gt=0)
-    fragment: PreparedFragment | None = None
+    fragment: PreparedFragment
     attachment_id: str = ""
     attachment_index: int = Field(1, ge=1)
     attachment_config: Any = Field(default=None, exclude=True)
@@ -279,6 +279,8 @@ class ReactionProduct(BaseModel):
             target_insertion_code=selector.insertion_code,
             target_atom_name=self.protein_link_atom.atom_name.upper(),
             protein_leaving_atoms_to_remove=self.protein_leaving_atoms,
+            modifier_link_atom=self.modifier_link_atom,
+            modifier_leaving_atoms_to_remove=self.modifier_leaving_atoms,
             protein_target_resname=self.protein_product_residue_name,
             modifier_target_resname=self.modifier_product_residue_name,
         )
@@ -358,6 +360,15 @@ def resolve_explicit_linkage_contract(
         Path | str | GeneratedPolymerFragment | PlacedPolymerFragment | Sequence[PdbAtomRecord]
     ),
     contract: ExplicitLinkageContract,
+    *,
+    fragment: PreparedFragment,
+    attachment_id: str = "",
+    attachment_index: int = 1,
+    attachment_config: Any = None,
+    reaction_name: str = "",
+    source_sidecars: dict[str, Path] | None = None,
+    attachment_force_field_domain: str = "",
+    diagnostics: tuple[str, ...] = (),
 ) -> ReactionProduct:
     """Resolve an explicit PDB linkage contract against protein and modifier atoms.
 
@@ -422,6 +433,14 @@ def resolve_explicit_linkage_contract(
         modifier_product_residue_name=contract.modifier_endpoint.product_residue_name,
         pablo_crosslink_requirement=requirement,
         target_bond_length_angstrom=contract.bond.target_bond_length_angstrom,
+        fragment=fragment,
+        attachment_id=attachment_id,
+        attachment_index=attachment_index,
+        attachment_config=attachment_config,
+        reaction_name=reaction_name or contract.mechanism_name or "",
+        source_sidecars=dict(source_sidecars or {}),
+        attachment_force_field_domain=attachment_force_field_domain,
+        diagnostics=diagnostics,
     )
 
 
@@ -439,43 +458,6 @@ def parse_pdb_atom_records(path: Path | str) -> tuple[PdbAtomRecord, ...]:
         Parsed atom records with zero-based ``atom_index`` values.
     """
     return _parse_atoms(path, require_atoms=True)
-
-
-def placed_fragment_from_resolved_plan(
-    fragment: PlacedPolymerFragment,
-    plan: ReactionProduct,
-) -> PlacedPolymerFragment:
-    """Return a placed fragment with resolved generic linkage selectors.
-
-    Parameters
-    ----------
-    fragment : PlacedPolymerFragment
-        Existing placed fragment whose atom identities match the resolved plan.
-    plan : ReactionProduct
-        Resolved generic linkage plan.
-
-    Returns
-    -------
-    PlacedPolymerFragment
-        Fragment whose reactive and leaving selectors are scoped by resolved
-        atom serials/indices instead of global names.
-    """
-    return fragment.model_copy(
-        update={
-            "reactive_atom_serial": plan.modifier_link_atom.serial,
-            "reactive_atom_index": plan.modifier_link_atom.atom_index,
-            "reactive_atom_name": None,
-            "leaving_atom_serials": tuple(
-                atom.serial for atom in plan.modifier_leaving_atoms if atom.serial is not None
-            ),
-            "leaving_atom_indices": tuple(
-                atom.atom_index
-                for atom in plan.modifier_leaving_atoms
-                if atom.atom_index is not None
-            ),
-            "leaving_atom_names": (),
-        }
-    )
 
 
 def _modifier_atom_records(
@@ -1020,6 +1002,11 @@ class NhsLysModifierLinker(ModifierLinker):
             protein_pdb_path,
             modifier,
             self.generic_contract(modifier, protein_pdb_path=protein_pdb_path),
+            fragment=PreparedFragment.from_generated_fragment(
+                modifier,
+                source_identity=modifier.name,
+                source_kind="polymer",
+            ),
         )
 
     def attachment(self, protein_pdb_path: Path | str) -> NhsLysPdbAttachment:

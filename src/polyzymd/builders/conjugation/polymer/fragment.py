@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -132,6 +132,8 @@ def _pdb_formal_charge(value: str) -> int | None:
 
 class GeneratedPolymerFragment(BaseModel):
     """Generated multi-residue polymer fragment with assembly selectors."""
+
+    requires_reactive_selector: ClassVar[bool] = True
 
     atoms: tuple[PolymerFragmentAtom, ...] = Field(..., min_length=1)
     bonds: tuple[tuple[int | str, int | str], ...] = Field(default_factory=tuple)
@@ -297,6 +299,8 @@ class GeneratedPolymerFragment(BaseModel):
             and self.reactive_atom_index is None
             and self.reactive_atom_name is None
         ):
+            if not self.requires_reactive_selector:
+                return self
             raise ValueError("Generated polymer fragments require a reactive atom selector")
 
         if len(_matching_atoms(self, reactive=True)) != 1:
@@ -338,6 +342,8 @@ class GeneratedPolymerFragment(BaseModel):
 
 class PreparedFragment(GeneratedPolymerFragment):
     """Authoritative provider-neutral fragment used by conjugation construction."""
+
+    requires_reactive_selector: ClassVar[bool] = False
 
     model_config = {"arbitrary_types_allowed": True}
 

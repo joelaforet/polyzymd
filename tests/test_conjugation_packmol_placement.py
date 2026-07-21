@@ -23,7 +23,7 @@ from polyzymd.builders.conjugation.placement import (
     place_modifier_with_resolved_plan,
     place_modifiers_with_resolved_plans,
 )
-from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment, PreparedFragment
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 
@@ -91,6 +91,7 @@ def test_resolved_plan_placement_uses_resolved_atoms_and_target_length(tmp_path:
         protein_path,
         modifier,
         _explicit_contract(target_bond_length=1.45),
+        fragment=_prepared(modifier),
     )
 
     def fake_run_packmol(input_text: str, work_dir: Path) -> Path:
@@ -136,6 +137,7 @@ def test_glygen_coordinate_only_packmol_input_constrains_only_c1(tmp_path: Path)
         protein_path,
         modifier,
         _explicit_contract(target_bond_length=1.45, modifier_atom_name="C1"),
+        fragment=_prepared(modifier),
     )
 
     def fake_run_packmol(input_text: str, work_dir: Path) -> Path:
@@ -185,6 +187,7 @@ def test_joint_resolved_plan_placement_uses_one_packmol_run_for_two_fragments(
             protein_path,
             modifier,
             _explicit_contract(target_bond_length=1.45),
+            fragment=_prepared(modifier),
         )
         for modifier in modifiers
     )
@@ -477,4 +480,12 @@ def _pdb_atom(
         f"ATOM  {serial:5d} {atom_name:<4} {residue_name:>3} {chain_id:1}"
         f"{residue_number:4d}    {x_coord:8.3f}{y_coord:8.3f}{z_coord:8.3f}"
         f"  1.00  0.00          {element:>2}\n"
+    )
+
+
+def _prepared(fragment: GeneratedPolymerFragment) -> PreparedFragment:
+    return PreparedFragment.from_generated_fragment(
+        fragment,
+        source_identity=fragment.name,
+        source_kind="polymer",
     )
