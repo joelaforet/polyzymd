@@ -482,6 +482,19 @@ def _require_maximal_cuda_environment() -> None:
         )
 
 
+def _write_state_pdb(topology: Any, state: Any, path: Path) -> None:
+    """Write positions and periodic vectors from one state without mutating topology."""
+    from openmm.app import PDBFile
+
+    original_box_vectors = topology.getPeriodicBoxVectors()
+    topology.setPeriodicBoxVectors(state.getPeriodicBoxVectors())
+    try:
+        with path.open("w", encoding="utf-8") as handle:
+            PDBFile.writeFile(topology, state.getPositions(), handle, keepIds=True)
+    finally:
+        topology.setPeriodicBoxVectors(original_box_vectors)
+
+
 def _run_explicit_cuda(
     bundle: Any, output_dir: Path, protocol: MaximalMdProtocol
 ) -> dict[str, Any]:
@@ -492,7 +505,6 @@ def _run_explicit_cuda(
     from openmm.app import (
         CheckpointReporter,
         DCDReporter,
-        PDBFile,
         Simulation,
         StateDataReporter,
     )
@@ -514,10 +526,7 @@ def _run_explicit_cuda(
     simulation.minimizeEnergy(maxIterations=0)
     minimized_state = simulation.context.getState(getPositions=True, getEnergy=True)
     minimized_pdb = output_dir / "minimized.pdb"
-    with minimized_pdb.open("w", encoding="utf-8") as handle:
-        PDBFile.writeFile(
-            bundle.to_openmm_topology(), minimized_state.getPositions(), handle, keepIds=True
-        )
+    _write_state_pdb(bundle.to_openmm_topology(), minimized_state, minimized_pdb)
     restraint = openmm.CustomExternalForce("k*periodicdistance(x, y, z, x0, y0, z0)^2")
     restraint.addGlobalParameter(
         "k", protocol.restraint_k_kj_mol_nm2 * unit.kilojoule_per_mole / unit.nanometer**2
@@ -551,10 +560,7 @@ def _run_explicit_cuda(
     simulation.step(protocol.unrestrained_npt_steps)
     start_state = simulation.context.getState(getPositions=True, getVelocities=True, getEnergy=True)
     start_pdb = output_dir / "start.pdb"
-    with start_pdb.open("w", encoding="utf-8") as handle:
-        PDBFile.writeFile(
-            bundle.to_openmm_topology(), start_state.getPositions(), handle, keepIds=True
-        )
+    _write_state_pdb(bundle.to_openmm_topology(), start_state, start_pdb)
     dcd = output_dir / "production.dcd"
     state_csv = output_dir / "state.csv"
     checkpoint = output_dir / "production.chk"
@@ -578,14 +584,17 @@ def _run_explicit_cuda(
     simulation.step(protocol.production_steps)
     final_state = simulation.context.getState(getPositions=True, getVelocities=True, getEnergy=True)
     final_pdb = output_dir / "final.pdb"
-    with final_pdb.open("w", encoding="utf-8") as handle:
-        PDBFile.writeFile(
-            bundle.to_openmm_topology(), final_state.getPositions(), handle, keepIds=True
-        )
+    _write_state_pdb(bundle.to_openmm_topology(), final_state, final_pdb)
     system_xml = output_dir / "system.xml"
-    state_xml = output_dir / "final_state.xml"
+    minimized_state_xml = output_dir / "minimized_state.xml"
+    start_state_xml = output_dir / "start_state.xml"
+    final_state_xml = output_dir / "final_state.xml"
     system_xml.write_text(openmm.XmlSerializer.serialize(system), encoding="utf-8")
-    state_xml.write_text(openmm.XmlSerializer.serialize(final_state), encoding="utf-8")
+    minimized_state_xml.write_text(
+        openmm.XmlSerializer.serialize(minimized_state), encoding="utf-8"
+    )
+    start_state_xml.write_text(openmm.XmlSerializer.serialize(start_state), encoding="utf-8")
+    final_state_xml.write_text(openmm.XmlSerializer.serialize(final_state), encoding="utf-8")
     frame_count = len(mda.Universe(str(minimized_pdb), str(dcd)).trajectory)
     if frame_count != protocol.expected_frames:
         raise AssertionError(
@@ -599,7 +608,10 @@ def _run_explicit_cuda(
         "start_pdb": start_pdb,
         "final_pdb": final_pdb,
         "system_xml": system_xml,
-        "state_xml": state_xml,
+        "minimized_state_xml": minimized_state_xml,
+        "start_state_xml": start_state_xml,
+        "final_state_xml": final_state_xml,
+        "state_xml": final_state_xml,
     }
     energy_unit = unit.kilojoule_per_mole
     return {
