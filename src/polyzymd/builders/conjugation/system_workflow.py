@@ -2053,6 +2053,10 @@ def _build_solvated_system(
     builder._solvent_builder.solvate_from_config(builder._combined_topology, config.solvent)
     builder._solvated_topology = builder._solvent_builder.solvated_topology
 
+    # Exact OpenMM handoffs snapshot the parameterized topology, so canonical
+    # PDB identities must exist before parameterization rather than only at export.
+    builder._assign_pdb_identifiers()
+
     if create_interchange:
         LOGGER.info("Creating final solvated OpenFF Interchange")
         create_final_conjugated_interchange(
@@ -2084,6 +2088,7 @@ def _build_direct_solvated_system(
     builder.combine_solutes()
     LOGGER.info("Solvating direct conjugated system")
     builder.solvate(padding=padding, box_shape=box_shape)
+    builder._assign_pdb_identifiers()
     if create_interchange:
         LOGGER.info("Creating final solvated OpenFF Interchange")
         create_final_conjugated_interchange(

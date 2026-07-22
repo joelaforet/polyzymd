@@ -105,6 +105,52 @@ def test_solvent_residue_rollover_from_d9999_to_e1() -> None:
     assert (overflow["chain_id"], overflow["residue_number"]) == ("E", "1")
 
 
+def test_conjugate_preserves_attached_chain_c_and_normalizes_free_components() -> None:
+    """Mixed conjugates should retain moieties on C and canonicalize packed molecules."""
+
+    protein_atom = _Atom(7, name="N", residue_name="ALA")
+    protein_atom.metadata.update(chain_id="A", residue_number="1")
+    attached_atom = _Atom(6, name="C1", residue_name="NAG")
+    attached_atom.metadata.update(chain_id="C", residue_number="12")
+    conjugate = _Molecule([protein_atom, attached_atom])
+    free_polymer = _Molecule(
+        [_Atom(6, name="C1", residue_name="SBM"), _Atom(6, name="C2", residue_name="SBM")]
+    )
+    for atom in free_polymer.atoms:
+        atom.metadata.update(chain_id="1", residue_number="1")
+    dmso = _Molecule([_Atom(6, name="C1", residue_name="DMS")])
+    ion = _Molecule([_Atom(11, name="NA", residue_name="Na+")])
+    for molecule in (dmso, ion):
+        for atom in molecule.atoms:
+            atom.metadata.update(chain_id="X", residue_number="1")
+    topology = _Topology([conjugate, free_polymer, dmso, ion])
+
+    atom_order = tuple(id(atom) for molecule in topology.molecules for atom in molecule.atoms)
+    normalize_topology_pdb_identifiers(
+        topology,
+        n_enzyme_molecules=1,
+        n_polymer_chains=1,
+        preserve_enzyme_chain_ids=True,
+    )
+
+    assert protein_atom.metadata["chain_id"] == "A"
+    assert (attached_atom.metadata["chain_id"], attached_atom.metadata["residue_number"]) == (
+        "C",
+        "12",
+    )
+    assert {atom.metadata["chain_id"] for atom in free_polymer.atoms} == {"C"}
+    assert {atom.metadata["residue_number"] for atom in free_polymer.atoms} == {"13"}
+    assert (dmso.atoms[0].metadata["chain_id"], dmso.atoms[0].metadata["residue_number"]) == (
+        "D",
+        "1",
+    )
+    assert (ion.atoms[0].metadata["chain_id"], ion.atoms[0].metadata["residue_number"]) == (
+        "D",
+        "2",
+    )
+    assert tuple(id(atom) for molecule in topology.molecules for atom in molecule.atoms) == atom_order
+
+
 def test_solvent_capacity_and_atom_limit_errors_are_actionable() -> None:
     """Classic PDB capacity failures should recommend mmCIF or GRO output."""
 

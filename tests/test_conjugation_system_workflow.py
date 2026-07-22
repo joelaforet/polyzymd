@@ -349,6 +349,8 @@ def test_build_solvated_system_uses_conjugation_final_interchange(monkeypatch, t
 
     assert result is fake_builder
     assert fake_builder.create_interchange_calls == 0
+    assert fake_builder.assign_pdb_identifiers_calls == 1
+    assert fake_builder.identifiers_assigned_before_interchange is True
     assert calls["builder"] is fake_builder
     assert calls["product_state_pablo_library"] is product_library
 
@@ -382,6 +384,8 @@ def test_build_direct_solvated_system_uses_conjugation_final_interchange(
 
     assert result is fake_builder
     assert fake_builder.create_interchange_calls == 0
+    assert fake_builder.assign_pdb_identifiers_calls == 1
+    assert fake_builder.identifiers_assigned_before_interchange is True
     assert fake_builder.solvation_settings == {
         "padding": 1.7,
         "box_shape": "truncated_octahedron",
@@ -1662,6 +1666,8 @@ class _NoKwargInterchangeBuilder(_FakeSystemBuilder):
             solvate_from_config=lambda topology, solvent: None,
         )
         self.create_interchange_calls = 0
+        self.assign_pdb_identifiers_calls = 0
+        self.identifiers_assigned_before_interchange = False
 
     def combine_solutes(self):
         """Record solute combination without building real OpenFF objects."""
@@ -1670,6 +1676,11 @@ class _NoKwargInterchangeBuilder(_FakeSystemBuilder):
     def solvate(self, *, padding, box_shape):
         """Record direct solvation without building real OpenFF objects."""
         self.solvation_settings = {"padding": padding, "box_shape": box_shape}
+
+    def _assign_pdb_identifiers(self):
+        """Record canonical identity assignment before final parameterization."""
+        self.assign_pdb_identifiers_calls += 1
+        self.identifiers_assigned_before_interchange = getattr(self, "_interchange", None) is None
 
     def create_interchange(self):
         """Record final Interchange creation while accepting no kwargs."""
