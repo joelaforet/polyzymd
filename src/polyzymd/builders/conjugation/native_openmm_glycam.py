@@ -1,4 +1,4 @@
-"""Native OpenMM GLYCAM handoff for strict N-linked glycan builds.
+"""Native OpenMM GLYCAM handoff for strict glycoprotein builds.
 
 The exact bundle exists because OpenFF Interchange cannot yet preserve the
 complete OpenMM ``NonbondedForce`` exception table needed by GLYCAM. GLYCAM uses
@@ -46,6 +46,11 @@ NATIVE_GLYCAM_ROUTE_INVARIANTS = {
 }
 SUPPORTED_WATER_RESIDUES = {"HOH", "WAT", "H2O"}
 SUPPORTED_ION_RESIDUES = {"NA", "CL", "K", "MG", "CA"}
+GLYCAM_MODIFIED_SITE_TEMPLATES: dict[str, tuple[str, str]] = {
+    "ASX": ("ND2", "NLN"),
+    "OLS": ("OG", "OLS"),
+    "OLT": ("OG1", "OLT"),
+}
 
 
 def native_glycam_enabled(config: Any) -> bool:
@@ -62,7 +67,7 @@ def create_native_openmm_glycam_handoff(
     construction: Any,
     output_dir: Path | str,
 ) -> Any:
-    """Create a direct OpenMM GLYCAM handoff for a solvated N-linked glycan.
+    """Create a direct OpenMM GLYCAM handoff for a solvated glycoprotein.
 
     Parameters
     ----------
@@ -110,7 +115,7 @@ def create_native_openmm_glycam_handoff(
     )
     template_matches = _preflight_glycam_template_matches(force_field, converted.topology)
 
-    asx_residues = _converted_asx_residues(converted)
+    modified_site_residues = converted.modified_site_residues
     crosslink_pairs = _converted_crosslink_pairs(converted)
     system = force_field.createSystem(
         converted.topology,
@@ -118,12 +123,12 @@ def create_native_openmm_glycam_handoff(
         nonbondedCutoff=NATIVE_GLYCAM_NONBONDED_CUTOFF_NM * unit.nanometer,
         constraints=HBonds,
         rigidWater=NATIVE_GLYCAM_RIGID_WATER,
-        residueTemplates=dict.fromkeys(asx_residues, "NLN"),
+        residueTemplates=_modified_site_template_map(modified_site_residues),
     )
     audit = _build_native_glycam_audit(
         converted.topology,
         system,
-        asx_residues,
+        modified_site_residues,
         crosslink_pairs,
         renamed_atoms=converted.renamed_atoms,
         template_matches=template_matches,
@@ -151,38 +156,20 @@ class _ConvertedTopology:
 
     topology: Any
     positions: Any
-    asx_residues: tuple[Any, ...]
+    modified_site_residues: tuple[Any, ...]
     crosslink_pairs: tuple[tuple[Any, Any], ...]
     renamed_atoms: tuple[dict[str, Any], ...]
     sage_template_units: tuple[dict[str, Any], ...] = ()
 
-    @property
-    def asx_residue(self) -> Any:
-        """Return the single ASX residue for legacy tests and callers."""
-        if len(self.asx_residues) != 1:
-            raise ValueError(f"Expected one ASX/NLN residue; found {len(self.asx_residues)}")
-        return self.asx_residues[0]
 
-    @property
-    def crosslink_atoms(self) -> tuple[Any, Any]:
-        """Return the single crosslink for legacy tests and callers."""
-        if len(self.crosslink_pairs) != 1:
-            raise ValueError(f"Expected one GLYCAM crosslink; found {len(self.crosslink_pairs)}")
-        return self.crosslink_pairs[0]
-
-
-def _converted_asx_residues(converted: Any) -> tuple[Any, ...]:
-    """Return ASX/NLN residues from current or legacy converted topology objects."""
-    if hasattr(converted, "asx_residues"):
-        return tuple(converted.asx_residues)
-    return (converted.asx_residue,)
+def _modified_site_template_map(residues: tuple[Any, ...]) -> dict[Any, str]:
+    """Return explicit GLYCAM template ownership for modified protein sites."""
+    return {residue: GLYCAM_MODIFIED_SITE_TEMPLATES[residue.name][1] for residue in residues}
 
 
 def _converted_crosslink_pairs(converted: Any) -> tuple[tuple[Any, Any], ...]:
-    """Return crosslink pairs from current or legacy converted topology objects."""
-    if hasattr(converted, "crosslink_pairs"):
-        return tuple(converted.crosslink_pairs)
-    return (converted.crosslink_atoms,)
+    """Return converted GLYCAM crosslink pairs."""
+    return tuple(converted.crosslink_pairs)
 
 
 def _validate_native_glycam_mvp_config(config: Any) -> None:
@@ -397,7 +384,7 @@ def _sage_molecule_has_amber_glycam_boundary_bond(molecule: Any) -> bool:
     """Return whether a Sage molecule has an explicit Amber/GLYCAM boundary bond."""
     if _molecule_is_covalently_connected_to_strict_domain(molecule):
         return True
-    strict_domains = {"protein", "amber", "glycan", "glycam", "protein_modified_nln"}
+    strict_domains = {"protein", "amber", "glycan", "glycam", "protein_modified_glycam"}
     for bond in getattr(molecule, "bonds", ()) or ():
         domain1 = _atom_force_field_domain(getattr(bond, "atom1", None))
         domain2 = _atom_force_field_domain(getattr(bond, "atom2", None))
@@ -412,8 +399,8 @@ def _atom_force_field_domain(atom: Any) -> str | None:
     value = metadata.get("force_field_domain")
     if value is None:
         residue_name = str(metadata.get("residue_name", "") or "").strip().upper()
-        if residue_name == "ASX":
-            return "protein_modified_nln"
+        if residue_name in GLYCAM_MODIFIED_SITE_TEMPLATES:
+            return "protein_modified_glycam"
         if residue_name[:1].isdigit():
             return "glycan"
         return None
@@ -505,7 +492,7 @@ def _openmmforcefields_version() -> str | None:
 def _preflight_glycam_template_matches(
     force_field: Any, topology: Any
 ) -> tuple[dict[str, Any], ...]:
-    """Use OpenMM template matching to verify GLYCAM/NLN residues before system creation."""
+    """Use OpenMM template matching to verify GLYCAM residues before system creation."""
     if not hasattr(force_field, "getMatchingTemplates"):
         return ()
     residues = list(topology.residues())
@@ -533,7 +520,7 @@ def _preflight_glycam_template_matches(
                 {
                     "residue": _residue_label(residue),
                     "template": template_name,
-                    "domain": "glycan" if residue.name != "ASX" else "protein_modified_nln",
+                    "domain": _strict_glycam_domain(residue),
                 }
             )
     return tuple(diagnostics)
@@ -556,7 +543,7 @@ def _strict_glycam_preflight_blocked_by_non_strict_residue(
         {
             "residue": _residue_label(residue),
             "template": "not_evaluated_non_strict_residue_blocked_global_preflight",
-            "domain": "glycan" if residue.name != "ASX" else "protein_modified_nln",
+            "domain": _strict_glycam_domain(residue),
             "blocked_by": reason,
         }
         for residue in residues
@@ -565,7 +552,7 @@ def _strict_glycam_preflight_blocked_by_non_strict_residue(
 
 
 def _is_strict_glycam_residue(residue: Any) -> bool:
-    """Return whether a residue is owned by strict GLYCAM/NLN routing."""
+    """Return whether a residue is owned by strict GLYCAM routing."""
     if _strict_glycam_residue_name(residue.name):
         return True
     domain = getattr(residue, "force_field_domain", None)
@@ -578,9 +565,16 @@ def _is_strict_glycam_residue(residue: Any) -> bool:
 
 
 def _strict_glycam_residue_name(residue_name: str) -> bool:
-    """Return whether a residue name is intrinsically strict GLYCAM/NLN."""
+    """Return whether a residue name is intrinsically strict GLYCAM."""
     residue_name = residue_name.strip().upper()
-    return residue_name == "ASX" or residue_name[:1].isdigit()
+    return residue_name in GLYCAM_MODIFIED_SITE_TEMPLATES or residue_name[:1].isdigit()
+
+
+def _strict_glycam_domain(residue: Any) -> str:
+    """Return the audit domain for a strict GLYCAM residue."""
+    if residue.name in GLYCAM_MODIFIED_SITE_TEMPLATES:
+        return "protein_modified_glycam"
+    return "glycan"
 
 
 def _openff_topology_to_openmm_for_glycam(
@@ -674,14 +668,14 @@ def _openff_topology_to_openmm_for_glycam(
             omm_topology.addBond(atom1, atom2)
     _set_box_vectors(omm_topology, topology)
 
-    asx_residues = _require_asx_residues(omm_topology)
-    _require_asx_canonical_atoms(asx_residues, renamed_atoms)
+    modified_site_residues = _require_modified_site_residues(omm_topology)
+    _require_modified_site_canonical_atoms(modified_site_residues, renamed_atoms)
     crosslink_pairs = _require_crosslinks(omm_topology, construction)
     positions = [Vec3(float(x), float(y), float(z)) for x, y, z in kept_positions] * unit.nanometer
     return _ConvertedTopology(
         topology=omm_topology,
         positions=positions,
-        asx_residues=asx_residues,
+        modified_site_residues=modified_site_residues,
         crosslink_pairs=crosslink_pairs,
         renamed_atoms=tuple(renamed_atoms),
         sage_template_units=tuple(sage_template_units),
@@ -850,32 +844,44 @@ def _set_box_vectors(omm_topology: Any, topology: Any) -> None:
     omm_topology.setPeriodicBoxVectors(tuple(Vec3(*row) for row in matrix) * unit.nanometer)
 
 
-def _require_asx_residues(omm_topology: Any) -> tuple[Any, ...]:
-    """Return ASX residues that will be mapped to GLYCAM NLN templates."""
-    residues = [residue for residue in omm_topology.residues() if residue.name == "ASX"]
+def _require_modified_site_residues(omm_topology: Any) -> tuple[Any, ...]:
+    """Return modified protein residues owned by GLYCAM templates."""
+    residues = [
+        residue
+        for residue in omm_topology.residues()
+        if residue.name in GLYCAM_MODIFIED_SITE_TEMPLATES
+    ]
     if not residues:
-        raise ValueError("Strict native GLYCAM mode requires at least one modified ASX residue")
+        supported = ", ".join(GLYCAM_MODIFIED_SITE_TEMPLATES)
+        raise ValueError(
+            f"Strict native GLYCAM mode requires at least one modified protein residue "
+            f"({supported})"
+        )
     return tuple(residues)
 
 
-def _require_asx_canonical_atoms(
-    asx_residues: tuple[Any, ...], renamed_atoms: list[dict[str, Any]]
+def _require_modified_site_canonical_atoms(
+    modified_site_residues: tuple[Any, ...], renamed_atoms: list[dict[str, Any]]
 ) -> None:
-    """Validate ASX atom names required for native GLYCAM NLN mapping."""
+    """Validate linkage atom names and the NLN hydrogen naming exception."""
     expected_renames = 0
-    for asx_residue in asx_residues:
-        atom_name_list = [atom.name for atom in asx_residue.atoms()]
+    for residue in modified_site_residues:
+        atom_name_list = [atom.name for atom in residue.atoms()]
         atom_names = set(atom_name_list)
-        if "ND2" not in atom_names:
+        link_atom_name, _ = GLYCAM_MODIFIED_SITE_TEMPLATES[residue.name]
+        if link_atom_name not in atom_names:
             raise ValueError(
-                f"Native GLYCAM ASX residue {_residue_label(asx_residue)} must use atom ND2"
+                f"Native GLYCAM {residue.name} residue {_residue_label(residue)} must use "
+                f"atom {link_atom_name}"
             )
+        if residue.name != "ASX":
+            continue
         retained_hydrogens = atom_names.intersection({"HD21", "HD22"})
         expected_renames += 1
         if retained_hydrogens != {"HD21"} or atom_name_list.count("HD21") != 1:
             raise ValueError(
                 "Native GLYCAM ASX residue must contain exactly one retained amide hydrogen: "
-                f"source HD22 renamed to native HD21 at {_residue_label(asx_residue)}"
+                f"source HD22 renamed to native HD21 at {_residue_label(residue)}"
             )
     if len(renamed_atoms) != expected_renames:
         raise ValueError(
@@ -885,22 +891,53 @@ def _require_asx_canonical_atoms(
 
 
 def _require_crosslinks(omm_topology: Any, construction: Any) -> tuple[tuple[Any, Any], ...]:
-    """Return and validate all ASX ND2 to GLYCAM residue crosslink atoms."""
+    """Require exactly one GLYCAM glycan crosslink per modified protein site."""
     _ = construction
-    crosslinks = []
+    modified_sites = {
+        residue: next(atom for atom in residue.atoms() if _is_modified_site_link_atom(atom))
+        for residue in omm_topology.residues()
+        if _is_modified_site_residue(residue)
+    }
+    crosslinks_by_site: dict[Any, list[tuple[Any, Any]]] = {
+        residue: [] for residue in modified_sites
+    }
     for atom1, atom2 in omm_topology.bonds():
-        if _is_asx_link_atom(atom1) and atom2.residue.name != "ASX":
-            crosslinks.append((atom1, atom2))
-        elif _is_asx_link_atom(atom2) and atom1.residue.name != "ASX":
-            crosslinks.append((atom2, atom1))
-    if not crosslinks:
-        raise ValueError("Native GLYCAM topology is missing explicit ASX ND2--glycan link bond")
-    return tuple(crosslinks)
+        if _is_modified_site_link_atom(atom1) and atom2.residue is not atom1.residue:
+            site_atom, counterpart = atom1, atom2
+        elif _is_modified_site_link_atom(atom2) and atom1.residue is not atom2.residue:
+            site_atom, counterpart = atom2, atom1
+        else:
+            continue
+        if not _is_strict_glycam_residue(counterpart.residue) or _is_modified_site_residue(
+            counterpart.residue
+        ):
+            raise ValueError(
+                f"Native GLYCAM modified site {_atom_label(site_atom)} is bonded to "
+                f"non-glycan counterpart {_atom_label(counterpart)}"
+            )
+        crosslinks_by_site[site_atom.residue].append((site_atom, counterpart))
+    invalid = {
+        _residue_label(residue): len(pairs)
+        for residue, pairs in crosslinks_by_site.items()
+        if len(pairs) != 1
+    }
+    if invalid:
+        raise ValueError(
+            "Native GLYCAM requires exactly one glycan crosslink per modified protein site; "
+            f"observed {invalid}"
+        )
+    return tuple(pairs[0] for pairs in crosslinks_by_site.values())
 
 
-def _is_asx_link_atom(atom: Any) -> bool:
-    """Return whether an atom is the modified ASN/NLN linkage nitrogen."""
-    return atom.residue.name == "ASX" and atom.name == "ND2"
+def _is_modified_site_residue(residue: Any) -> bool:
+    """Return whether a residue is a GLYCAM-modified protein site."""
+    return residue.name in GLYCAM_MODIFIED_SITE_TEMPLATES
+
+
+def _is_modified_site_link_atom(atom: Any) -> bool:
+    """Return whether an atom is the linkage atom of a modified protein site."""
+    site = GLYCAM_MODIFIED_SITE_TEMPLATES.get(atom.residue.name)
+    return site is not None and atom.name == site[0]
 
 
 def _single_atom(atoms: list[Any], *, residue_name: str, atom_name: str) -> Any:
@@ -919,7 +956,7 @@ def _single_atom(atoms: list[Any], *, residue_name: str, atom_name: str) -> Any:
 def _build_native_glycam_audit(
     topology: Any,
     system: Any,
-    asx_residues: tuple[Any, ...],
+    modified_site_residues: tuple[Any, ...],
     crosslink_pairs: tuple[tuple[Any, Any], ...],
     *,
     renamed_atoms: tuple[dict[str, Any], ...],
@@ -936,16 +973,19 @@ def _build_native_glycam_audit(
     residue_counts = Counter(residue.name for residue in residues)
     nonbonded = _nonbonded_force(system)
     linkage_audits = []
-    for linkage_index, (nd2, glycan_atom) in enumerate(crosslink_pairs):
-        bonded_terms = _local_bonded_terms(system, atoms, nd2.index, glycan_atom.index)
+    for linkage_index, (site_atom, glycan_atom) in enumerate(crosslink_pairs):
+        bonded_terms = _local_bonded_terms(system, atoms, site_atom.index, glycan_atom.index)
         exceptions = _local_nonbonded_exceptions(
-            topology, nonbonded, atoms, nd2.index, glycan_atom.index
+            topology, nonbonded, atoms, site_atom.index, glycan_atom.index
         )
         linkage_audits.append(
             {
                 "index": linkage_index,
-                "identity": f"{nd2.residue.name} {nd2.name}--{glycan_atom.residue.name} {glycan_atom.name}",
-                "atoms": [_atom_label(nd2), _atom_label(glycan_atom)],
+                "identity": (
+                    f"{site_atom.residue.name} {site_atom.name}--"
+                    f"{glycan_atom.residue.name} {glycan_atom.name}"
+                ),
+                "atoms": [_atom_label(site_atom), _atom_label(glycan_atom)],
                 "bond_present": True,
                 "adjacent_terms": bonded_terms,
                 "local_exclusions_and_14_exceptions": exceptions,
@@ -977,7 +1017,10 @@ def _build_native_glycam_audit(
                 "NonbondedForce exceptions for covalently attached Sage plus GLYCAM domains."
             ),
         },
-        "residue_templates": {_residue_label(asx_residue): "NLN" for asx_residue in asx_residues},
+        "residue_templates": {
+            _residue_label(residue): GLYCAM_MODIFIED_SITE_TEMPLATES[residue.name][1]
+            for residue in modified_site_residues
+        },
         "counts": {
             "atoms": topology.getNumAtoms(),
             "residues": len(residues),
@@ -1033,8 +1076,8 @@ def _residue_domain(residue: Any) -> str:
     domain = getattr(residue, "force_field_domain", None)
     if domain is not None and str(domain).strip().lower() == "sage":
         return "sage"
-    if residue.name == "ASX":
-        return "protein_modified_nln"
+    if residue.name in GLYCAM_MODIFIED_SITE_TEMPLATES:
+        return "protein_modified_glycam"
     if residue.name in SUPPORTED_WATER_RESIDUES:
         return "water"
     if residue.name in SUPPORTED_ION_RESIDUES:
@@ -1061,8 +1104,8 @@ def _residue_source_force_field(residue: Any) -> str:
     domain = _residue_domain(residue)
     if domain == "protein":
         return "Amber ff14SB"
-    if domain == "protein_modified_nln":
-        return "GLYCAM06 NLN"
+    if domain == "protein_modified_glycam":
+        return f"GLYCAM06 {GLYCAM_MODIFIED_SITE_TEMPLATES[residue.name][1]}"
     if domain == "glycan":
         return "GLYCAM06"
     if domain == "water":
@@ -1242,22 +1285,22 @@ def _shortest_pair_distance(
     return distances.get(target)
 
 
-def _angle_category(i: int, j: int, k_index: int, nd2_index: int, c1_index: int) -> str:
+def _angle_category(i: int, j: int, k_index: int, site_index: int, c1_index: int) -> str:
     """Classify a crosslink angle by its central atom."""
-    if j == nd2_index and c1_index in {i, k_index}:
-        return "asx_side_angle"
-    if j == c1_index and nd2_index in {i, k_index}:
+    if j == site_index and c1_index in {i, k_index}:
+        return "protein_side_angle"
+    if j == c1_index and site_index in {i, k_index}:
         return "glycan_side_angle"
     return "other_crosslink_angle"
 
 
 def _torsion_category(
-    i: int, j: int, k_index: int, l_index: int, nd2_index: int, c1_index: int
+    i: int, j: int, k_index: int, l_index: int, site_index: int, c1_index: int
 ) -> str:
     """Classify a crosslink torsion by whether the linkage is the central bond."""
-    if (j, k_index) in {(nd2_index, c1_index), (c1_index, nd2_index)}:
+    if (j, k_index) in {(site_index, c1_index), (c1_index, site_index)}:
         return "proper_crosslink_torsion"
-    if {nd2_index, c1_index}.issubset({i, j, k_index, l_index}):
+    if {site_index, c1_index}.issubset({i, j, k_index, l_index}):
         return "other_crosslink_torsion"
     return "unrelated_torsion"
 
@@ -1296,7 +1339,7 @@ def _require_single_linkage_terms(linkage: dict[str, Any]) -> None:
     if not terms["bonds"]:
         raise RuntimeError(f"Native GLYCAM audit missing category: {prefix}crosslink_bond")
     angle_categories = {term["category"] for term in terms["angles"]}
-    for category in ("asx_side_angle", "glycan_side_angle"):
+    for category in ("protein_side_angle", "glycan_side_angle"):
         if category not in angle_categories:
             raise RuntimeError(f"Native GLYCAM audit missing category: {prefix}{category}")
     torsion_categories = {term["category"] for term in terms["torsions"]}

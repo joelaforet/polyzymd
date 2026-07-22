@@ -29,7 +29,6 @@ from polyzymd.builders.conjugation.construction import (
 )
 from polyzymd.builders.conjugation.final_interchange import create_final_conjugated_interchange
 from polyzymd.builders.conjugation.force_fields import resolve_conjugate_force_fields
-from polyzymd.builders.conjugation.glycam_overlay import infer_glycam_particles_from_topology
 from polyzymd.builders.conjugation.models import ConjugationResult
 from polyzymd.builders.conjugation.native_openmm_glycam import (
     create_native_openmm_glycam_handoff,
@@ -1710,8 +1709,7 @@ def _validate_product_modifier_atom(
         )
     if has_mapping and (atom.insertion_code or "").upper() != expected_insertion_code:
         mismatches.append(
-            "insertion code expected="
-            f"{expected_insertion_code!r} observed={atom.insertion_code!r}"
+            f"insertion code expected={expected_insertion_code!r} observed={atom.insertion_code!r}"
         )
     if mismatches:
         raise ValueError(
@@ -2217,7 +2215,7 @@ def _write_mixed_overlay_charge_audit(
         }
         if abs(payload["charge_mismatch_e"]) > 1e-4:
             raise RuntimeError(
-                "Mixed overlay final charge is not integral: " f"{payload['total_charge_e']:.8f} e"
+                f"Mixed overlay final charge is not integral: {payload['total_charge_e']:.8f} e"
             )
         path.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")
         return path
@@ -2344,8 +2342,7 @@ def _build_native_to_baseline_atom_mapping(
         used_baseline_indices.add(mapped)
     if unmapped:
         raise ValueError(
-            "Native-to-baseline overlay atom mapping could not map native atoms: "
-            f"{unmapped[:20]}"
+            f"Native-to-baseline overlay atom mapping could not map native atoms: {unmapped[:20]}"
         )
     return mapping
 
@@ -2396,23 +2393,33 @@ def _glycam_particles_from_native_audit(
 ) -> frozenset[int]:
     """Return native GLYCAM-owned particles from native audit domain assignments."""
 
+    assignments = (
+        native_audit.get("domain_assignments", {}).get("residues", ())
+        if isinstance(native_audit.get("domain_assignments"), dict)
+        else ()
+    )
     labels = {
         str(entry.get("residue"))
-        for entry in (
-            native_audit.get("domain_assignments", {}).get("residues", ())
-            if isinstance(native_audit.get("domain_assignments"), dict)
-            else ()
-        )
-        if str(entry.get("domain", "")).strip().lower() in {"glycan", "protein_modified_nln"}
+        for entry in assignments
+        if str(entry.get("domain", "")).strip().lower() in {"glycan", "protein_modified_glycam"}
     }
+    if not labels:
+        raise ValueError("Native GLYCAM audit contains no explicit GLYCAM-owned residue labels")
+    topology_labels = {_openmm_residue_label(residue) for residue in native_topology.residues()}
+    missing_labels = sorted(labels - topology_labels)
+    if missing_labels:
+        raise ValueError(
+            "Native GLYCAM audit residue labels are absent from the native topology: "
+            f"{missing_labels}"
+        )
     particles = {
         atom.index
         for atom in native_topology.atoms()
         if _openmm_residue_label(atom.residue) in labels
     }
-    if particles:
-        return frozenset(particles)
-    return infer_glycam_particles_from_topology(native_topology)
+    if not particles:
+        raise ValueError("Native GLYCAM audit labels resolved to zero topology particles")
+    return frozenset(particles)
 
 
 def _openmm_atom_label(atom: Any) -> str:
