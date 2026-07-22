@@ -12,16 +12,6 @@ import pytest
 from polyzymd.builders.system_builder import SystemBuilder
 
 
-def test_solute_scope_rejects_unowned_heterogens(tmp_path: Path) -> None:
-    """Isolated primary input must fail closed on HETATM components."""
-    pdb_path = tmp_path / "enzyme.pdb"
-    pdb_path.write_text("HETATM    1  O   HOH A   1\nEND\n", encoding="utf-8")
-    config = types.SimpleNamespace(enzyme=types.SimpleNamespace(name="enzyme", pdb_path=pdb_path))
-
-    with pytest.raises(ValueError, match="primary-structure-only"):
-        SystemBuilder().build_isolated_primary_from_config(config)
-
-
 class FakeAtom:
     """Minimal atom object with mutable OpenFF-style metadata."""
 

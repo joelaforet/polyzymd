@@ -967,15 +967,6 @@ class SystemBuilder:
         stages are intentionally not entered.
         """
         LOGGER.info("Building isolated primary component: %s", config.enzyme.name)
-        source_pdb = Path(config.enzyme.pdb_path)
-        if any(
-            line.startswith("HETATM")
-            for line in source_pdb.read_text(encoding="utf-8").splitlines()
-        ):
-            raise ValueError(
-                "build scope 'solute' requires a primary-structure-only enzyme PDB; remove "
-                "unowned HETATM components such as crystallographic water, ions, or ligands"
-            )
         self.build_enzyme(config.enzyme.pdb_path)
         self.combine_solutes()
         self._solvated_topology = self._combined_topology

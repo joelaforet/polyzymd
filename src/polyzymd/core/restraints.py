@@ -346,6 +346,7 @@ class RestraintDefinition:
         else:
             raise ValueError(f"Unknown restraint type: {self.restraint_type}")
 
+        force.setName(f"PolyzyMD restraint: {self.name}")
         force_idx = system.addForce(force)
 
         logger.info(

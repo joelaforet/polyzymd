@@ -22,6 +22,11 @@ from polyzymd.config.schema import BuildScope
 
 SOLVATED_SYSTEM_PDB = "solvated_system.pdb"
 SOLVATED_CONJUGATE_PDB = "solvated_conjugate_free_polymers.pdb"
+_RESTRAINT_FORCE_PREFIX = "PolyzyMD restraint:"
+_RESTRAINT_CUSTOM_BOND_EXPRESSIONS = {
+    "step(r - r0) * 0.5 * k * (r - r0)^2",
+    "step(r0 - r) * 0.5 * k * (r0 - r)^2",
+}
 
 
 @dataclass(frozen=True)
@@ -219,11 +224,17 @@ def _write_solute_audit(
 
     system = XmlSerializer.deserialize(system_path.read_text(encoding="utf-8"))
     force_classes = Counter(type(system.getForce(i)).__name__ for i in range(system.getNumForces()))
-    restraint_force_count = sum(
-        type(system.getForce(i)).__name__ == "CustomExternalForce"
-        or "restraint" in str(system.getForce(i).getName()).lower()
-        for i in range(system.getNumForces())
-    )
+    restraint_force_count = 0
+    for index in range(system.getNumForces()):
+        force = system.getForce(index)
+        force_class = type(force).__name__
+        tagged = str(force.getName()).startswith(_RESTRAINT_FORCE_PREFIX)
+        legacy_custom_bond = force_class == "CustomBondForce" and (
+            force.getEnergyFunction() in _RESTRAINT_CUSTOM_BOND_EXPRESSIONS
+        )
+        restraint_force_count += int(
+            tagged or force_class == "CustomExternalForce" or legacy_custom_bond
+        )
     if restraint_force_count:
         raise RuntimeError(
             "Solute-scope parameterization unexpectedly contains "

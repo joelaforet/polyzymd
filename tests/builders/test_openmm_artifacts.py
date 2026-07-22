@@ -360,6 +360,7 @@ def test_standard_solute_scope_emits_only_isolated_audited_artifacts(
     calls: list[str] = []
     system = System()
     system.addParticle(12.0)
+    system.addParticle(12.0)
 
     class FakeBuilder:
         interchange = "primary-interchange"
@@ -373,7 +374,9 @@ def test_standard_solute_scope_emits_only_isolated_audited_artifacts(
 
         def save_topology(self, path: Path) -> None:
             path.write_text(
-                "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\nEND\n",
+                "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\n"
+                "HETATM    2  C1  LIG C   1       1.500   0.000   0.000  1.00  0.00           C\n"
+                "CONECT    1    2\nEND\n",
                 encoding="utf-8",
             )
 
@@ -403,7 +406,7 @@ def test_standard_solute_scope_emits_only_isolated_audited_artifacts(
     }
     assert not (tmp_path / "system.xml").exists()
     audit = json.loads((solute_dir / "openmm_build_audit.json").read_text(encoding="utf-8"))
-    assert audit["pdb_atom_count"] == audit["system_particle_count"] == 1
+    assert audit["pdb_atom_count"] == audit["system_particle_count"] == 2
     assert audit["component_counts"] == {
         "substrate": 0,
         "free_polymers": 0,
@@ -430,21 +433,34 @@ def test_assembled_solute_rejects_disconnected_lig_hetatm(tmp_path: Path) -> Non
     _reject_disconnected_hetatm(pdb_path)
 
 
-def test_solute_audit_rejects_injected_custom_external_force(tmp_path: Path) -> None:
-    """Audit restraint counts must come from the serialized System."""
-    from openmm import CustomExternalForce, System, XmlSerializer
+def test_solute_audit_rejects_real_distance_restraint(tmp_path: Path) -> None:
+    """Audit restraint counts must detect a force created through the real apply path."""
+    from openmm import System, XmlSerializer
+    from openmm.app import Element, Topology
+
+    from polyzymd.core.restraints import AtomSelection, RestraintDefinition, RestraintType
 
     pdb_path = tmp_path / "solute.pdb"
     pdb_path.write_text(
-        "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\nEND\n",
+        "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\n"
+        "ATOM      2  CB  ALA A   1       1.500   0.000   0.000  1.00  0.00           C\nEND\n",
         encoding="utf-8",
     )
     system = System()
     system.addParticle(12.0)
-    force = CustomExternalForce("k*x^2")
-    force.addGlobalParameter("k", 1.0)
-    force.addParticle(0, [])
-    system.addForce(force)
+    system.addParticle(12.0)
+    topology = Topology()
+    residue = topology.addResidue("ALA", topology.addChain("A"), "1")
+    topology.addAtom("CA", Element.getBySymbol("C"), residue)
+    topology.addAtom("CB", Element.getBySymbol("C"), residue)
+    restraint = RestraintDefinition(
+        restraint_type=RestraintType.HARMONIC,
+        name="audit-test",
+        atom1=AtomSelection("index 0"),
+        atom2=AtomSelection("index 1"),
+    )
+    restraint.apply(topology, system)
+    assert system.getForce(0).getName() == "PolyzyMD restraint: audit-test"
     system_path = tmp_path / "system.xml"
     system_path.write_text(XmlSerializer.serialize(system), encoding="utf-8")
 
