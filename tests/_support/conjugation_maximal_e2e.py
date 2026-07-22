@@ -211,6 +211,7 @@ def run_maximal_mixed_acceptance(
     output_dir: Path, *, protocol: MaximalMdProtocol
 ) -> dict[str, Any]:
     """Build, exactly export, and run the explicit CUDA acceptance case."""
+    _require_maximal_cuda_environment()
     output_dir.mkdir(parents=True, exist_ok=True)
     runtime_config = write_maximal_runtime_config(output_dir, protocol)
     config = load_config(runtime_config)
@@ -245,11 +246,18 @@ def run_maximal_mixed_acceptance(
         build_seconds=time.perf_counter() - started,
     )
     manifest["cuda"] = _run_explicit_cuda(bundle, output_dir / "cuda", protocol)
-    validate_maximal_manifest(manifest, protocol=protocol, require_cuda=True)
+    _persist_and_validate_manifest(output_dir, manifest, protocol=protocol)
+    return manifest
+
+
+def _persist_and_validate_manifest(
+    output_dir: Path, manifest: dict[str, Any], *, protocol: MaximalMdProtocol
+) -> None:
+    """Persist completed-run evidence before applying final acceptance assertions."""
     (output_dir / SUMMARY_NAME).write_text(
         json.dumps(manifest, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
-    return manifest
+    validate_maximal_manifest(manifest, protocol=protocol, require_cuda=True)
 
 
 def build_maximal_manifest(
@@ -318,7 +326,7 @@ def build_maximal_manifest(
 def composition_evidence(
     atoms: list[dict[str, Any]], config_payload: dict[str, Any]
 ) -> dict[str, Any]:
-    """Summarize solvent/ion/free-polymer evidence and integer rounding."""
+    """Summarize packed components without trusting reused PDB residue identities."""
     residues: dict[tuple[str, int, str], str] = {}
     for atom in atoms:
         key = (str(atom["chain_id"]), int(atom["residue_number"]), str(atom["residue_name"]))
@@ -326,19 +334,29 @@ def composition_evidence(
     counts: dict[str, int] = {}
     for residue_name in residues.values():
         counts[residue_name] = counts.get(residue_name, 0) + 1
-    water_count = sum(counts.get(name, 0) for name in ("HOH", "WAT", "SOL"))
-    dmso_count = sum(counts.get(name, 0) for name in ("DMS", "DMSO"))
+    water_count = _packed_anchor_count(
+        atoms,
+        residue_names={"HOH", "WAT", "SOL"},
+        anchor_atom_names={"O", "OW", "O1", "O1x"},
+    )
+    dmso_count = _packed_anchor_count(
+        atoms,
+        residue_names={"DMS", "DMSO"},
+        anchor_atom_names={"S", "S1", "S1x"},
+    )
+    polymer_evidence = _free_polymer_multiplicity_evidence(atoms)
     neutral_solvent_count = water_count + dmso_count
     achieved = dmso_count / neutral_solvent_count if neutral_solvent_count else None
     target = float(config_payload["solvent"]["co_solvents"][0]["mole_fraction"])
     max_rounding_error = 0.5 / neutral_solvent_count if neutral_solvent_count else None
-    ion_count = sum(counts.get(name, 0) for name in ("NA", "Na+", "CL", "Cl-"))
+    ion_count = sum(1 for atom in atoms if str(atom["residue_name"]) in {"NA", "Na+", "CL", "Cl-"})
     return {
-        "residue_molecule_counts": counts,
+        "generic_residue_identity_counts": counts,
         "water_count": water_count,
         "dmso_count": dmso_count,
         "ion_count": ion_count,
         "free_polymer_count_requested": int(config_payload["polymers"]["count"]),
+        **polymer_evidence,
         "dmso_target_mole_fraction": target,
         "dmso_achieved_mole_fraction": achieved,
         "dmso_integer_rounding_bound": max_rounding_error,
@@ -347,6 +365,49 @@ def composition_evidence(
         and abs(achieved - target) <= max_rounding_error + 1e-12,
         "neutralize": bool(config_payload["solvent"]["ions"]["neutralize"]),
         "nacl_concentration": float(config_payload["solvent"]["ions"]["nacl_concentration"]),
+    }
+
+
+def _packed_anchor_count(
+    atoms: list[dict[str, Any]],
+    *,
+    residue_names: set[str],
+    anchor_atom_names: set[str],
+) -> int:
+    """Count packed molecules by one chemically unique atom-name anchor."""
+    return sum(
+        1
+        for atom in atoms
+        if str(atom["residue_name"]) in residue_names
+        and str(atom["atom_name"]) in anchor_atom_names
+    )
+
+
+def _free_polymer_multiplicity_evidence(atoms: list[dict[str, Any]]) -> dict[str, Any]:
+    """Infer free SBM count from repeated per-molecule unique atom names."""
+    atom_name_counts: dict[str, int] = {}
+    for atom in atoms:
+        if str(atom["residue_name"]) == "SBM":
+            atom_name = str(atom["atom_name"])
+            atom_name_counts[atom_name] = atom_name_counts.get(atom_name, 0) + 1
+    if not atom_name_counts:
+        return {
+            "free_polymer_count_achieved": 0,
+            "free_polymer_anchor_atom_name": None,
+            "free_polymer_unique_atom_name_count": 0,
+            "free_polymer_atom_name_multiplicity_consistent": False,
+        }
+    multiplicities = set(atom_name_counts.values())
+    anchor = min(atom_name_counts)
+    return {
+        "free_polymer_count_achieved": (
+            atom_name_counts[anchor] if len(multiplicities) == 1 else None
+        ),
+        "free_polymer_anchor_atom_name": anchor,
+        "free_polymer_unique_atom_name_count": len(atom_name_counts),
+        "free_polymer_atom_name_multiplicity_consistent": len(multiplicities) == 1,
+        "free_polymer_atom_name_multiplicity_min": min(multiplicities),
+        "free_polymer_atom_name_multiplicity_max": max(multiplicities),
     }
 
 
@@ -379,6 +440,8 @@ def validate_maximal_manifest(
     assert manifest["charge_ownership"]["success"] is True
     composition = manifest["composition"]
     assert composition["free_polymer_count_requested"] == 3
+    assert composition["free_polymer_atom_name_multiplicity_consistent"] is True
+    assert composition["free_polymer_count_achieved"] == composition["free_polymer_count_requested"]
     assert composition["water_count"] > 0 and composition["dmso_count"] > 0
     assert composition["ion_count"] > 0
     assert composition["dmso_within_integer_rounding"] is True
@@ -404,6 +467,19 @@ def validate_maximal_manifest(
         assert math.isfinite(cuda["minimized_potential_energy_kj_mol"])
         assert math.isfinite(cuda["start_potential_energy_kj_mol"])
         assert math.isfinite(cuda["final_potential_energy_kj_mol"])
+
+
+def _require_maximal_cuda_environment() -> None:
+    """Fail before construction unless the PTX-compatible pixi environment is active."""
+    pixi_environment = os.environ.get("PIXI_ENVIRONMENT_NAME")
+    conda_prefix_name = Path(os.environ.get("CONDA_PREFIX", "")).name
+    if "build-cuda-12-6" not in {pixi_environment, conda_prefix_name}:
+        raise RuntimeError(
+            "Maximal CUDA acceptance must run via "
+            "'/home/joelaforet/.pixi/bin/pixi run -e build-cuda-12-6'. "
+            "The ordinary build environment reproduced "
+            "CUDA_ERROR_UNSUPPORTED_PTX_VERSION."
+        )
 
 
 def _run_explicit_cuda(

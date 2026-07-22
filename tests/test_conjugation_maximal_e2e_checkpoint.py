@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -9,7 +10,10 @@ import pytest
 
 from polyzymd.config.loader import load_config
 from tests._support.conjugation_maximal_e2e import (
+    SUMMARY_NAME,
     MaximalMdProtocol,
+    _persist_and_validate_manifest,
+    _require_maximal_cuda_environment,
     composition_evidence,
     maximal_config_payload,
     run_maximal_mixed_acceptance,
@@ -120,10 +124,12 @@ def test_composition_evidence_audits_integer_rounding() -> None:
     """Composition summary should accept the nearest-integer 20 mol% count."""
     atoms = []
     for residue_number in range(1, 9):
-        atoms.append(_atom("HOH", residue_number))
+        atoms.append(_atom("HOH", residue_number, "O1x"))
     for residue_number in range(9, 11):
-        atoms.append(_atom("DMS", residue_number))
-    atoms.append(_atom("NA", 11))
+        atoms.append(_atom("DMS", residue_number, "S1x"))
+    for _ in range(3):
+        atoms.extend([_atom("SBM", 12, "C1x"), _atom("SBM", 12, "N1x")])
+    atoms.append(_atom("NA", 11, "NA"))
     payload = {
         "polymers": {"count": 3},
         "solvent": {
@@ -137,16 +143,84 @@ def test_composition_evidence_audits_integer_rounding() -> None:
     assert evidence["water_count"] == 8
     assert evidence["dmso_count"] == 2
     assert evidence["ion_count"] == 1
+    assert evidence["free_polymer_count_achieved"] == 3
     assert evidence["dmso_achieved_mole_fraction"] == pytest.approx(0.2)
     assert evidence["dmso_within_integer_rounding"] is True
 
 
-def _atom(residue_name: str, residue_number: int) -> dict[str, object]:
+def test_composition_evidence_handles_reused_packed_residue_identity() -> None:
+    """Packed HOH, DMS, and SBM counts must come from atom anchors, not residue IDs."""
+    atoms = [_atom("HOH", 1, "O1x") for _ in range(5_162)]
+    atoms.extend(_atom("DMS", 1, "S1x") for _ in range(1_291))
+    for _ in range(3):
+        atoms.extend(
+            [
+                _atom("SBM", 1, "C1x"),
+                _atom("SBM", 1, "N1x"),
+                _atom("SBM", 1, "S1x"),
+            ]
+        )
+
+    evidence = composition_evidence(atoms, _composition_config())
+
+    assert evidence["generic_residue_identity_counts"] == {"HOH": 1, "DMS": 1, "SBM": 1}
+    assert evidence["water_count"] == 5_162
+    assert evidence["dmso_count"] == 1_291
+    assert evidence["dmso_achieved_mole_fraction"] == pytest.approx(1_291 / (5_162 + 1_291))
+    assert evidence["dmso_within_integer_rounding"] is True
+    assert evidence["free_polymer_count_achieved"] == 3
+    assert evidence["free_polymer_atom_name_multiplicity_consistent"] is True
+
+
+def test_maximal_cuda_preflight_rejects_ordinary_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The known PTX-incompatible ordinary build environment should fail before construction."""
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "build")
+    monkeypatch.setenv("CONDA_PREFIX", "/repo/.pixi/envs/build")
+
+    with pytest.raises(RuntimeError, match="build-cuda-12-6"):
+        _require_maximal_cuda_environment()
+
+
+def test_maximal_cuda_preflight_accepts_cuda_12_6(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The environment that completed CUDA execution should pass preflight."""
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "build-cuda-12-6")
+    monkeypatch.setenv("CONDA_PREFIX", "/repo/.pixi/envs/build-cuda-12-6")
+
+    _require_maximal_cuda_environment()
+
+
+def test_manifest_is_persisted_before_final_validation(tmp_path: Path) -> None:
+    """A post-run assertion failure must not discard completed CUDA evidence."""
+    protocol = MaximalMdProtocol()
+    manifest = _manifest_payload(tmp_path, protocol)
+    manifest["composition"]["free_polymer_count_achieved"] = 2
+
+    with pytest.raises(AssertionError):
+        _persist_and_validate_manifest(tmp_path, manifest, protocol=protocol)
+
+    saved = json.loads((tmp_path / SUMMARY_NAME).read_text(encoding="utf-8"))
+    assert saved["cuda"]["frame_count"] == 150
+    assert saved["composition"]["free_polymer_count_achieved"] == 2
+
+
+def _atom(residue_name: str, residue_number: int, atom_name: str) -> dict[str, object]:
     """Return one residue-identifying atom record."""
     return {
         "chain_id": "D",
         "residue_number": residue_number,
         "residue_name": residue_name,
+        "atom_name": atom_name,
+    }
+
+
+def _composition_config() -> dict[str, object]:
+    """Return the minimal composition configuration payload."""
+    return {
+        "polymers": {"count": 3},
+        "solvent": {
+            "co_solvents": [{"mole_fraction": 0.2}],
+            "ions": {"neutralize": True, "nacl_concentration": 0.0},
+        },
     }
 
 
@@ -170,6 +244,8 @@ def _manifest_payload(tmp_path: Path, protocol: MaximalMdProtocol) -> dict[str, 
         "charge_ownership": {"success": True},
         "composition": {
             "free_polymer_count_requested": 3,
+            "free_polymer_count_achieved": 3,
+            "free_polymer_atom_name_multiplicity_consistent": True,
             "water_count": 80,
             "dmso_count": 20,
             "ion_count": 1,
