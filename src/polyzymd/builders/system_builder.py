@@ -31,6 +31,8 @@ from polyzymd.builders.substrate import SubstrateBuilder
 
 LOGGER = logging.getLogger(__name__)
 
+_ORIGINAL_RESIDUE_TOKEN_KEY = "_polyzymd_original_residue_token"
+
 
 class SystemBuilder:
     """Orchestrator for building complete simulation systems.
@@ -118,14 +120,30 @@ class SystemBuilder:
     def build_enzyme(self, pdb_path: Union[str, Path]) -> Topology:
         """Build the enzyme component.
 
-        Args:
-            pdb_path: Path to enzyme PDB file.
+        Parameters
+        ----------
+        pdb_path : str or Path
+            Path to enzyme PDB file.
 
-        Returns:
+        Returns
+        -------
+        Topology
             Enzyme topology.
+
+        Raises
+        ------
+        RuntimeError
+            If OpenFF loads the enzyme PDB without any molecules.
         """
         self._enzyme_topology = self._enzyme_builder.build(pdb_path)
-        self._n_enzyme_molecules = 1
+        self._n_enzyme_molecules = self._enzyme_topology.n_molecules
+        if self._n_enzyme_molecules <= 0:
+            raise RuntimeError("OpenFF enzyme topology contains no molecules")
+        if self._n_enzyme_molecules > 1:
+            LOGGER.info(
+                "Enzyme topology contains %d protein molecules; retaining all on chain A",
+                self._n_enzyme_molecules,
+            )
         return self._enzyme_topology
 
     def build_substrate(
@@ -226,11 +244,19 @@ class SystemBuilder:
     def combine_solutes(self) -> Topology:
         """Combine enzyme, substrate, and polymers into a single topology.
 
-        Returns:
+        All OpenFF enzyme topology molecules are retained in their original
+        order before substrate and polymer components are added. During export,
+        every enzyme molecule is assigned to PolyzyMD protein chain ``A``.
+
+        Returns
+        -------
+        Topology
             Combined topology ready for solvation.
 
-        Raises:
-            RuntimeError: If enzyme has not been built.
+        Raises
+        ------
+        RuntimeError
+            If enzyme has not been built or contains no molecules.
         """
         if self._enzyme_topology is None:
             raise RuntimeError("Enzyme must be built before combining solutes")
@@ -239,8 +265,13 @@ class SystemBuilder:
 
         from openff.toolkit import Topology
 
-        # Start with enzyme
-        molecules = [self._enzyme_topology.molecule(0)]
+        enzyme_molecule_count = self._enzyme_topology.n_molecules
+        if enzyme_molecule_count <= 0:
+            raise RuntimeError("OpenFF enzyme topology contains no molecules")
+        self._n_enzyme_molecules = enzyme_molecule_count
+
+        # Retain all enzyme molecules before substrate and polymers
+        molecules = [self._enzyme_topology.molecule(i) for i in range(self._n_enzyme_molecules)]
 
         # Add substrate if present
         if self._substrate_molecule is not None:
@@ -408,6 +439,10 @@ class SystemBuilder:
         from polyzymd.data.solvent_molecules import get_solvent_molecule
 
         LOGGER.info("Creating Interchange")
+
+        # Canonical metadata must be present before OpenFF serializes topology
+        # identifiers into downstream coordinate and topology exports
+        self._assign_pdb_identifiers()
 
         ff = ForceField(self._protein_ff, self._sm_ff)
 
@@ -627,7 +662,8 @@ class SystemBuilder:
         source of truth for what each molecule represents.
 
         Chain assignment uses FIXED letters regardless of component presence:
-        - Chain A: Protein (preserves original residue numbers from input PDB)
+
+        - Chain A: Protein/enzyme molecules (continuous residues across molecules)
         - Chain B: Substrate (residue 1; letter reserved even if no substrate)
         - Chain C: Polymers (preserves per-monomer residue numbers)
         - Chain D+: Solvent (overflow at 9999 residues per chain)
@@ -660,6 +696,44 @@ class SystemBuilder:
             f"substrate={self._n_substrate_molecules}, polymers={self._n_polymer_chains}, "
             f"solvent molecules start at chain {CHAIN_LETTERS[SOLVENT_START_CHAIN_INDEX]}"
         )
+
+    @staticmethod
+    def _get_original_residue_token(atom: Any, atom_index: int) -> str:
+        """Return a stable residue grouping token for a protein atom.
+
+        The first call stores source residue metadata before PolyzyMD writes
+        canonical output residue numbers. Later calls reuse that stored token so
+        protein residue numbering is idempotent and does not cascade from
+        already-renumbered output metadata.
+
+        Parameters
+        ----------
+        atom : Any
+            OpenFF-like atom with mutable ``metadata``.
+        atom_index : int
+            Atom index within the molecule, used only for deterministic fallback
+            metadata when residue fields are absent.
+
+        Returns
+        -------
+        str
+            Stable token identifying the atom's original residue group.
+        """
+        metadata = atom.metadata
+        residue_token = metadata.get(_ORIGINAL_RESIDUE_TOKEN_KEY)
+        if residue_token is not None:
+            return str(residue_token)
+
+        residue_number = metadata.get("residue_number")
+        residue_name = metadata.get("residue_name") or metadata.get("residue_name_3") or ""
+        insertion_code = metadata.get("insertion_code") or ""
+        if residue_number is None:
+            residue_token = f"missing-residue-metadata:{atom_index}"
+        else:
+            residue_token = f"{residue_number!s}|{residue_name!s}|{insertion_code!s}"
+
+        metadata[_ORIGINAL_RESIDUE_TOKEN_KEY] = residue_token
+        return residue_token
 
     def _next_residue_number_for_chain(self, chain_id: str, *, end_mol_idx: int) -> int:
         """Return the next residue number after preserved solute residues on a chain."""
@@ -995,6 +1069,9 @@ class SystemBuilder:
                 )
         else:
             export_source = self._interchange
+
+        if self._solvated_topology is not None:
+            self._assign_pdb_identifiers()
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)

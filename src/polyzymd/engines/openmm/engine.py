@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from polyzymd.engines.base import EngineSubmitRequest, SimulationEngine, TrajectoryLayout
-from polyzymd.simulation.progress import SimulationProgress
+from polyzymd.simulation.progress import (
+    SegmentStatus,
+    SimulationProgress,
+    calculate_report_interval,
+    load_progress,
+)
 
 
 class OpenMMEngine(SimulationEngine):
@@ -57,6 +62,8 @@ class OpenMMEngine(SimulationEngine):
         from polyzymd.cli.main import _run_initial_segment
 
         prod = self._config.simulation_phases.production
+        total_steps = int(prod.duration * 1e6 / prod.time_step)
+        report_interval = calculate_report_interval(total_steps, prod.samples)
         _run_initial_segment(
             sim_config=self._config,
             working_dir=working_dir,
@@ -65,7 +72,7 @@ class OpenMMEngine(SimulationEngine):
             duration_ns=prod.duration,
             num_samples=prod.samples,
             timestep_fs=prod.time_step,
-            report_interval=prod.report_interval,
+            report_interval=report_interval,
             checkpoint_interval_s=prod.checkpoint_interval,
         )
 
@@ -242,11 +249,25 @@ class OpenMMEngine(SimulationEngine):
         if segment_dirs:
             max_index = max(segment_dirs)
             trajectory_paths = []
+            progress = load_progress(working_dir)
+            zero_frame_segments = (
+                {
+                    segment.index
+                    for segment in progress.segments
+                    if segment.status == SegmentStatus.COMPLETED and segment.samples_written == 0
+                }
+                if progress is not None
+                else set()
+            )
             for index in range(max_index + 1):
                 segment_dir = working_dir / f"production_{index}"
                 file_path = segment_dir / f"production_{index}_trajectory.dcd"
                 if not segment_dir.is_dir():
                     raise ValueError(f"Missing OpenMM production segment directory: {segment_dir}")
+                if index in zero_frame_segments and (
+                    not file_path.is_file() or file_path.stat().st_size == 0
+                ):
+                    continue
                 if not file_path.is_file():
                     raise ValueError(f"Missing OpenMM trajectory segment: {file_path}")
                 if file_path.stat().st_size == 0:

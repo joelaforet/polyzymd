@@ -16,7 +16,7 @@ import yaml
 from click.testing import CliRunner
 from jinja2 import UndefinedError
 
-from polyzymd.cli.main import _resolve_replicates_option, cli
+from polyzymd.cli.main import _resolve_replicates_option, _run_openmm_impl, cli
 from polyzymd.utils.templates import render_package_template
 
 BRANDING_LINE = "PolyzyMD: Created by Joseph R. Laforet Jr."
@@ -50,8 +50,18 @@ def _make_dry_run_config() -> SimpleNamespace:
         thermodynamics=SimpleNamespace(temperature=300.0, pressure=1.0),
         simulation_phases=SimpleNamespace(
             equilibration_stages=[
-                SimpleNamespace(name="heating", duration=0.2, ensemble="NVT"),
-                SimpleNamespace(name="free_equilibration", duration=0.8, ensemble="NPT"),
+                SimpleNamespace(
+                    name="heating",
+                    resolved_duration=0.2,
+                    ensemble="NVT",
+                    is_temperature_ramping=False,
+                ),
+                SimpleNamespace(
+                    name="free_equilibration",
+                    resolved_duration=0.8,
+                    ensemble="NPT",
+                    is_temperature_ramping=False,
+                ),
             ],
             production=SimpleNamespace(duration=10.0, samples=250),
         ),
@@ -108,7 +118,6 @@ def _minimal_cli_config_data(pdb_path: str | Path) -> dict[str, object]:
                 "ensemble": "NPT",
                 "duration": 1.0,
                 "samples": 10,
-                "report_interval": 50000,
                 "checkpoint_interval": 60.0,
             },
         },
@@ -263,6 +272,29 @@ class TestValidateCommandReferenceWarnings:
         assert "Configuration is valid!" in result.output
         assert "Referenced file warnings" in result.output
         assert "Missing enzyme PDB" in result.output
+
+    def test_validate_reports_derived_temperature_ramp_duration(self, tmp_path: Path) -> None:
+        """Validation clearly reports rate-based heating duration."""
+        data = _minimal_cli_config_data("missing.pdb")
+        data["simulation_phases"]["equilibration_stages"] = [
+            {
+                "name": "heating",
+                "ensemble": "NVT",
+                "temperature_start": 60.0,
+                "temperature_end": 300.0,
+                "temperature_increment": 1.0,
+                "temperature_interval_steps": 600,
+                "time_step": 2.0,
+            }
+        ]
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code == 0
+        assert "60 -> 300 K, +1 K every 600 steps" in result.output
+        assert "derived duration 0.288000 ns" in result.output
 
 
 class TestBuildCommandReplicateFlags:
@@ -825,15 +857,49 @@ class TestBuildDryRunEndToEnd:
         assert "No such option: --replicate" in result.output
 
 
+class TestOpenMMRunImplementation:
+    """Regression tests for local OpenMM production configuration."""
+
+    @patch("polyzymd.cli.main._run_initial_segment")
+    def test_derives_report_interval_from_samples(
+        self, run_initial_segment, tmp_path: Path
+    ) -> None:
+        """Local OpenMM runs use samples as the trajectory frame control."""
+        production = SimpleNamespace(
+            duration=1000.0,
+            samples=2500,
+            time_step=2.0,
+            checkpoint_interval=60.0,
+        )
+        config = SimpleNamespace(
+            simulation_phases=SimpleNamespace(production=production),
+            get_working_directory=lambda replicate: tmp_path / f"run_{replicate}",
+        )
+
+        _run_openmm_impl(config, replicate=1)
+
+        run_initial_segment.assert_called_once_with(
+            sim_config=config,
+            working_dir=tmp_path / "run_1",
+            replicate=1,
+            skip_build=False,
+            duration_ns=1000.0,
+            num_samples=2500,
+            timestep_fs=2.0,
+            report_interval=200000,
+            checkpoint_interval_s=60.0,
+        )
+
+
 class TestCliExceptionHandlingNarrowing:
     """Regression tests for narrowed run/submit exception handling."""
 
     @patch("polyzymd.cli.main._run_initial_segment")
-    def test_run_openmm_impl_forwards_production_intervals(
+    def test_run_openmm_impl_derives_reporting_and_forwards_checkpoint(
         self,
         mock_run_initial_segment,
     ) -> None:
-        """OpenMM local run should pass production reporter and checkpoint intervals."""
+        """OpenMM local runs derive reporting from samples and pass checkpoint cadence."""
         from polyzymd.cli.main import _run_openmm_impl
 
         production = SimpleNamespace(
@@ -858,7 +924,7 @@ class TestCliExceptionHandlingNarrowing:
             duration_ns=0.5,
             num_samples=25,
             timestep_fs=2.0,
-            report_interval=1000,
+            report_interval=10000,
             checkpoint_interval_s=30.0,
         )
 

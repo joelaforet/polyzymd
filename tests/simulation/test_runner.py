@@ -4,7 +4,9 @@ These tests verify runner logic using mocks to avoid requiring a full
 OpenMM simulation setup (GPU, topology, system, etc.).
 """
 
+import gc
 import inspect
+import struct
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -145,229 +147,176 @@ class TestBarostatTemperatureRampUpdate:
 
 
 class TestRampInterruptTemperature:
-    """Verify the EQ_INTERRUPTED marker records the correct temperature (B4).
+    """Verify interrupted ramps recover temperature from completed steps."""
 
-    Before the fix, current_temp was incremented *before* the interrupt
-    check, so the marker would record a temperature one increment higher
-    than what was actually simulated.
-    """
+    @staticmethod
+    def _make_ramp():
+        from polyzymd.config.schema import EquilibrationStageConfig
 
-    def test_increment_after_interrupt_check(self):
-        """current_temp must be incremented AFTER the interrupt check, not before.
-
-        We verify by inspecting the source code structure: in the ramp
-        ``while`` loop, ``is_interrupted()`` must appear before
-        ``current_temp += stage.temperature_increment``.
-        """
-        import inspect
-
-        from polyzymd.simulation.runner import SimulationRunner
-
-        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
-        lines = source.split("\n")
-
-        # Find the ramp while-loop body (contains "while current_temp <")
-        in_ramp_loop = False
-        interrupt_line = None
-        increment_line = None
-
-        for i, line in enumerate(lines):
-            if "while current_temp < stage.temperature_end:" in line:
-                in_ramp_loop = True
-                continue
-            if in_ramp_loop:
-                # Detect end of while loop (de-indented line that isn't blank)
-                stripped = line.strip()
-                if stripped.startswith("# Final temperature"):
-                    break
-                if "is_interrupted()" in stripped and interrupt_line is None:
-                    interrupt_line = i
-                if "current_temp += stage.temperature_increment" in stripped:
-                    if increment_line is None or i > (interrupt_line or 0):
-                        increment_line = i
-
-        assert interrupt_line is not None, "is_interrupted() not found in ramp loop"
-        assert increment_line is not None, "current_temp increment not found in ramp loop"
-        assert increment_line > interrupt_line, (
-            f"current_temp increment (line {increment_line}) must come AFTER "
-            f"is_interrupted() check (line {interrupt_line})"
+        return EquilibrationStageConfig(
+            name="heating",
+            temperature_start=100.0,
+            temperature_end=400.0,
+            temperature_increment=10.0,
+            temperature_interval_steps=5000,
+            samples=10,
         )
 
-    def test_save_eq_interrupted_uses_current_not_next_temp(self):
-        """_save_eq_interrupted must be called with the temperature of the
-        last-run chunk, not the next chunk's temperature.
+    def test_completed_step_temperature_is_recorded(self):
+        stage = self._make_ramp()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
 
-        We verify by checking that _save_eq_interrupted(steps_done, current_temp)
-        appears between is_interrupted() and current_temp += increment.
-        """
-        import inspect
+        assert stage.temperature_at_step(total_steps // 4, total_steps) == pytest.approx(170.0)
 
-        from polyzymd.simulation.runner import SimulationRunner
+    def test_temperature_changes_at_requested_step_boundary(self):
+        stage = self._make_ramp()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
 
-        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
-        lines = source.split("\n")
+        assert stage.temperature_at_step(4999, total_steps) == pytest.approx(100.0)
+        assert stage.temperature_at_step(5000, total_steps) == pytest.approx(110.0)
 
-        in_ramp_loop = False
-        interrupt_idx = None
-        save_marker_idx = None
-        increment_idx = None
+    def test_temperature_schedule_clamps_to_endpoints(self):
+        stage = self._make_ramp()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
 
-        for i, line in enumerate(lines):
-            if "while current_temp < stage.temperature_end:" in line:
-                in_ramp_loop = True
-                continue
-            if in_ramp_loop:
-                stripped = line.strip()
-                if stripped.startswith("# Final temperature"):
-                    break
-                if "is_interrupted()" in stripped and interrupt_idx is None:
-                    interrupt_idx = i
-                if "_save_eq_interrupted(steps_done, current_temp)" in stripped:
-                    save_marker_idx = i
-                if "current_temp += stage.temperature_increment" in stripped:
-                    increment_idx = i
-
-        assert interrupt_idx is not None
-        assert save_marker_idx is not None
-        assert increment_idx is not None
-        assert interrupt_idx < save_marker_idx < increment_idx, (
-            f"Expected order: is_interrupted ({interrupt_idx}) < "
-            f"_save_eq_interrupted ({save_marker_idx}) < "
-            f"temp increment ({increment_idx})"
-        )
+        assert stage.temperature_at_step(-1, total_steps) == pytest.approx(100.0)
+        assert stage.temperature_at_step(total_steps + 1, total_steps) == pytest.approx(400.0)
 
 
 class TestRampResumeFastForward:
-    """Verify temperature ramp resume starts from temperature_start, not resume_temperature (B5).
+    """Verify resumed ramps calculate temperature directly from elapsed steps."""
 
-    Before the fix, the ramp loop initialized current_temp from the
-    resume_temperature (saved in the EQ_INTERRUPTED marker) and then
-    ALSO fast-forwarded by incrementing during skipped chunks, causing a
-    double-count that made the simulation jump ahead in temperature.
-    """
+    def test_resume_uses_elapsed_fraction(self):
+        from polyzymd.config.schema import EquilibrationStageConfig
 
-    def test_resume_starts_from_temperature_start(self):
-        """On resume, current_temp must start from stage.temperature_start,
-        not from resume_temperature.
-        """
-        import inspect
+        stage = EquilibrationStageConfig(
+            name="heating",
+            temperature_start=200.0,
+            temperature_end=500.0,
+            temperature_increment=10.0,
+            temperature_interval_steps=10000,
+        )
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
 
+        assert stage.temperature_at_step(total_steps // 2, total_steps) == pytest.approx(350.0)
+
+    def test_completed_ramp_uses_final_temperature(self):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        stage = EquilibrationStageConfig(
+            name="heating",
+            temperature_start=100.0,
+            temperature_end=130.0,
+            temperature_increment=10.0,
+            temperature_interval_steps=5000,
+        )
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        assert stage.temperature_at_step(total_steps, total_steps) == pytest.approx(130.0)
+
+
+class TestRampResumeIntegrity:
+    """Protect synchronized state and output handling for interrupted ramps."""
+
+    def test_reference_platform_interrupt_and_resume_appends_outputs(self, tmp_path, monkeypatch):
+        from openmm import System, Vec3, unit
+        from openmm.app import Element, Topology
+
+        from polyzymd.config.schema import EquilibrationStageConfig
+        from polyzymd.simulation import signals
         from polyzymd.simulation.runner import SimulationRunner
 
-        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
-        lines = source.split("\n")
+        class DeterministicRunner(SimulationRunner):
+            def _create_integrator(self, *args, **kwargs):
+                integrator = super()._create_integrator(*args, **kwargs)
+                integrator.setRandomNumberSeed(20260721)
+                return integrator
 
-        # Find the ramp section (between "is_temperature_ramping" and the while loop)
-        in_ramp_section = False
-        found_unconditional_start = False
+        class EmptyResolver:
+            @staticmethod
+            def resolve(_group):
+                return []
 
-        for line in lines:
-            stripped = line.strip()
-            if "if stage.is_temperature_ramping:" in stripped:
-                in_ramp_section = True
-                continue
-            if in_ramp_section:
-                # Check that current_temp is set to temperature_start unconditionally
-                if "current_temp = stage.temperature_start" in stripped:
-                    found_unconditional_start = True
-                # Make sure we don't find current_temp = resume_temperature
-                if "current_temp = resume_temperature" in stripped:
-                    pytest.fail(
-                        "current_temp should NOT be set from resume_temperature; "
-                        "fast-forward loop handles temperature advancement"
-                    )
-                if "while current_temp < stage.temperature_end:" in stripped:
-                    break
-
-        assert found_unconditional_start, (
-            "current_temp must be set to stage.temperature_start unconditionally "
-            "before the ramp while-loop"
+        topology = Topology()
+        chain = topology.addChain("A")
+        residue = topology.addResidue("MOL", chain)
+        topology.addAtom("C", Element.getBySymbol("C"), residue)
+        system = System()
+        system.addParticle(12.0 * unit.dalton)
+        system.setDefaultPeriodicBoxVectors(
+            Vec3(2.0, 0.0, 0.0),
+            Vec3(0.0, 2.0, 0.0),
+            Vec3(0.0, 0.0, 2.0),
+        )
+        positions = [Vec3(0.0, 0.0, 0.0)] * unit.nanometer
+        stage = EquilibrationStageConfig(
+            name="heating",
+            temperature_start=100.0,
+            temperature_end=102.0,
+            temperature_increment=1.0,
+            temperature_interval_steps=5,
+            time_step=1.0,
+            samples=5,
         )
 
-    def test_fast_forward_produces_correct_temperature(self):
-        """Simulate the fast-forward loop logic and verify the resumed
-        temperature is correct.
-        """
-        # Ramp parameters
-        temp_start = 100.0
-        temp_end = 400.0
-        temp_increment = 10.0
-        steps_per_update = 1000
-
-        # Simulate: ran chunks at 100, 110, 120 K (3000 steps completed)
-        resume_from_step = 3000
-
-        # --- Replicate the fixed resume logic ---
-        current_temp = temp_start  # always start from temp_start
-        ramp_step_count = 0
-        first_run_temp = None
-
-        while current_temp < temp_end:
-            chunk_end = ramp_step_count + steps_per_update
-            if chunk_end <= resume_from_step:
-                ramp_step_count = chunk_end
-                current_temp += temp_increment
-                continue
-
-            # This is the first non-skipped chunk
-            first_run_temp = current_temp
-            break
-
-        # After running 100, 110, 120, the next should be 130
-        message = (
-            f"Expected next temperature 130.0 K after running 100, 110, 120 K; got {first_run_temp}"
+        monkeypatch.setattr(signals, "is_interrupted", lambda: True)
+        monkeypatch.setattr(signals, "get_interrupt_signal", lambda: 15)
+        runner = DeterministicRunner(
+            topology=topology,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
         )
-        assert first_run_temp == pytest.approx(130.0), message
+        with pytest.raises(signals.GracefulExit):
+            runner.run_equilibration_stage(
+                stage=stage,
+                reference_positions=positions,
+                atom_group_resolver=EmptyResolver(),
+                stage_index=0,
+            )
 
-    def test_fast_forward_handles_no_resume(self):
-        """Fresh start (no resume) should begin at temperature_start."""
-        temp_start = 200.0
-        temp_end = 500.0
-        temp_increment = 5.0
-        steps_per_update = 500
-        resume_from_step = 0
+        stage_dir = tmp_path / "equilibration_0_heating"
+        marker = (stage_dir / "EQ_INTERRUPTED").read_text()
+        assert "steps_completed=5" in marker
+        assert "current_temperature=101.0" in marker
+        assert (stage_dir / "equilibration_0_heating_checkpoint.chk").is_file()
+        assert (stage_dir / "equilibration_0_heating_state.xml").is_file()
 
-        current_temp = temp_start
-        ramp_step_count = 0
-        first_run_temp = None
+        del runner
+        gc.collect()
+        monkeypatch.setattr(signals, "is_interrupted", lambda: False)
+        resumed = DeterministicRunner(
+            topology=topology,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+        resumed._load_eq_stage_state(0, "heating")
+        result = resumed.run_equilibration_stage(
+            stage=stage,
+            reference_positions=positions,
+            atom_group_resolver=EmptyResolver(),
+            stage_index=0,
+            resume_from_step=5,
+            resume_temperature=101.0,
+        )
 
-        while current_temp < temp_end:
-            chunk_end = ramp_step_count + steps_per_update
-            if chunk_end <= resume_from_step:
-                ramp_step_count = chunk_end
-                current_temp += temp_increment
-                continue
-            first_run_temp = current_temp
-            break
-
-        assert first_run_temp == pytest.approx(200.0)
-
-    def test_fast_forward_all_chunks_done(self):
-        """If all ramp chunks are done, the loop should exit and go to final temp."""
-        temp_start = 100.0
-        temp_end = 130.0
-        temp_increment = 10.0
-        steps_per_update = 1000
-        # 3 chunks: 100, 110, 120 → 3000 steps
-        resume_from_step = 3000
-
-        current_temp = temp_start
-        ramp_step_count = 0
-        first_run_temp = None
-
-        while current_temp < temp_end:
-            chunk_end = ramp_step_count + steps_per_update
-            if chunk_end <= resume_from_step:
-                ramp_step_count = chunk_end
-                current_temp += temp_increment
-                continue
-            first_run_temp = current_temp
-            break
-
-        # All ramp chunks completed, should go to final temp section
-        assert first_run_temp is None, "Expected no non-skipped chunk (all ramp chunks done)"
-        message = f"current_temp should equal temp_end ({temp_end}) after fast-forward"
-        assert current_temp == pytest.approx(130.0), message
+        assert result["total_steps"] == 10
+        assert not (stage_dir / "EQ_INTERRUPTED").exists()
+        state_lines = (
+            (stage_dir / "equilibration_0_heating_state_data.csv").read_text().splitlines()
+        )
+        reported_steps = [
+            int(line.split(",", 1)[0]) for line in state_lines if not line.startswith("#")
+        ]
+        assert reported_steps == [2, 4, 6, 8, 10]
+        trajectory = stage_dir / "equilibration_0_heating_trajectory.dcd"
+        with trajectory.open("rb") as handle:
+            header = handle.read(12)
+        assert header[4:8] == b"CORD"
+        assert struct.unpack("<i", header[8:12])[0] == 5
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +346,127 @@ class TestLoadCheckpointRestoresVelocities:
         src = inspect.getsource(SimulationRunner.load_checkpoint)
         assert "_current_velocities" in src, "load_checkpoint must update self._current_velocities"
         assert "getVelocities()" in src, "load_checkpoint must call state.getVelocities()"
+
+
+class TestEquilibrationPortableState:
+    """Portable equilibration state avoids binary System compatibility issues."""
+
+    def test_load_prefers_portable_state(self, tmp_path):
+        from unittest.mock import patch
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage_dir = tmp_path / "equilibration_0_heating"
+        stage_dir.mkdir()
+        (stage_dir / "equilibration_0_heating_state.xml").write_text("<State/>")
+        state = MagicMock()
+        state.getPositions.return_value = "positions"
+        state.getVelocities.return_value = "velocities"
+        state.getPeriodicBoxVectors.return_value = "box"
+        state.getStepCount.return_value = 1234
+        state.getTime.return_value = "time"
+        runner = SimulationRunner.__new__(SimulationRunner)
+        runner._working_dir = tmp_path
+        serializer = MagicMock()
+        serializer.deserialize.return_value = state
+
+        with patch("polyzymd.simulation.runner.XmlSerializer", serializer):
+            runner._load_eq_stage_state(0, "heating")
+
+        assert runner._current_positions == "positions"
+        assert runner._current_velocities == "velocities"
+        assert runner._current_box_vectors == "box"
+        assert runner._current_step_count == 1234
+        assert runner._current_time == "time"
+
+
+class TestEquilibrationResumeMetadata:
+    """Resume markers must match the current derived stage schedule."""
+
+    @staticmethod
+    def _stage():
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        return EquilibrationStageConfig(
+            name="heating",
+            temperature_start=60.0,
+            temperature_end=300.0,
+            temperature_increment=1.0,
+            temperature_interval_steps=500,
+            time_step=2.0,
+        )
+
+    def test_rejects_changed_total_steps(self):
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage = self._stage()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        with pytest.raises(RuntimeError, match="current configuration"):
+            SimulationRunner._validate_eq_resume_metadata(
+                stage,
+                resume_step=100,
+                saved_total_steps=total_steps + 1,
+                saved_temperature=stage.temperature_at_step(100, total_steps),
+                saved_temperature_start=stage.temperature_start,
+                saved_temperature_end=stage.temperature_end,
+                saved_temperature_increment=stage.temperature_increment,
+                saved_temperature_interval_steps=stage.temperature_interval_steps,
+            )
+
+    def test_rejects_changed_ramp_temperature(self):
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage = self._stage()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        with pytest.raises(RuntimeError, match="current schedule"):
+            SimulationRunner._validate_eq_resume_metadata(
+                stage,
+                resume_step=100,
+                saved_total_steps=total_steps,
+                saved_temperature=100.0,
+                saved_temperature_start=stage.temperature_start,
+                saved_temperature_end=stage.temperature_end,
+                saved_temperature_increment=stage.temperature_increment,
+                saved_temperature_interval_steps=stage.temperature_interval_steps,
+            )
+
+    def test_rejects_changed_increment_schedule(self):
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage = self._stage()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        with pytest.raises(RuntimeError, match="marker schedule"):
+            SimulationRunner._validate_eq_resume_metadata(
+                stage,
+                resume_step=100,
+                saved_total_steps=total_steps,
+                saved_temperature=stage.temperature_at_step(100, total_steps),
+                saved_temperature_start=stage.temperature_start,
+                saved_temperature_end=stage.temperature_end,
+                saved_temperature_increment=2.0,
+                saved_temperature_interval_steps=stage.temperature_interval_steps,
+            )
+
+    def test_accepts_matching_schedule(self):
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage = self._stage()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+        resume_step = total_steps // 2
+
+        SimulationRunner._validate_eq_resume_metadata(
+            stage,
+            resume_step=resume_step,
+            saved_total_steps=total_steps,
+            saved_temperature=stage.temperature_at_step(resume_step, total_steps),
+            saved_temperature_start=stage.temperature_start,
+            saved_temperature_end=stage.temperature_end,
+            saved_temperature_increment=stage.temperature_increment,
+            saved_temperature_interval_steps=stage.temperature_interval_steps,
+        )
 
 
 def _write_eq_stage(
@@ -575,7 +645,7 @@ class TestFindInterruptedEqStage:
         assert info is None
 
     def test_interrupted_without_checkpoint_returns_none(self, tmp_path):
-        """EQ_INTERRUPTED marker without checkpoint can't resume."""
+        """EQ_INTERRUPTED marker without state or checkpoint can't resume."""
         stages = [self._make_stage("heating")]
         dir_name = "equilibration_0_heating"
         stage_dir = tmp_path / dir_name
@@ -588,6 +658,24 @@ class TestFindInterruptedEqStage:
         runner = self._make_runner(tmp_path)
         info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
         assert info is None
+
+    def test_interrupted_with_portable_state_can_resume(self, tmp_path):
+        stages = [self._make_stage("heating")]
+        dir_name = "equilibration_0_heating"
+        stage_dir = tmp_path / dir_name
+        stage_dir.mkdir()
+        (stage_dir / "EQ_INTERRUPTED").write_text(
+            "stage_index=0\nstage_name=heating\n"
+            "steps_completed=5000\ntotal_steps=10000\n"
+            "current_temperature=200.0\nis_temperature_ramping=True\n"
+        )
+        (stage_dir / f"{dir_name}_state.xml").write_text("<State/>")
+        runner = self._make_runner(tmp_path)
+
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
+
+        assert info is not None
+        assert info["steps_completed"] == 5000
 
     def test_temperature_ramping_metadata(self, tmp_path):
         stages = [self._make_stage("ramp")]

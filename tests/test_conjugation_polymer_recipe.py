@@ -405,15 +405,19 @@ def test_polymer_generator_forwards_energy_minimize_flag(monkeypatch, tmp_path):
     def fake_write_pdb(path, chain, *, resname_map=None):
         path.write_text("END\n")
 
-    monkeypatch.setattr(polymer_generator_module, "MonomerGroup", FakeMonomerGroup)
     monkeypatch.setattr(
         polymer_generator_module,
-        "build_linear_polymer",
+        "_make_monomer_group",
+        lambda monomers: FakeMonomerGroup(monomers),
+    )
+    monkeypatch.setattr(
+        polymer_generator_module,
+        "_build_linear_polymer",
         fake_build_linear_polymer,
     )
-    monkeypatch.setattr(polymer_generator_module, "mbmol_to_rdmol", lambda chain: object())
-    monkeypatch.setattr(polymer_generator_module, "summarize_ring_piercing", lambda mol: {})
-    monkeypatch.setattr(polymer_generator_module, "mbmol_to_openmm_pdb", fake_write_pdb)
+    monkeypatch.setattr(polymer_generator_module, "_mbmol_to_rdmol", lambda chain: object())
+    monkeypatch.setattr(polymer_generator_module, "_summarize_ring_piercing", lambda mol: {})
+    monkeypatch.setattr(polymer_generator_module, "_mbmol_to_openmm_pdb", fake_write_pdb)
 
     generator = polymer_generator_module.PolymerGenerator.__new__(
         polymer_generator_module.PolymerGenerator

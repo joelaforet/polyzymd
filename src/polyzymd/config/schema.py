@@ -8,14 +8,25 @@ providing validation, type safety, and YAML/JSON serialization support.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import shlex
+import warnings
 from enum import Enum
 from pathlib import Path
 from string import Formatter
 from typing import Any, Literal, Self
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -449,6 +460,12 @@ class PolymerConfig(BaseModel):
             return self
 
         if self.generation_mode == PolymerGenerationMode.DYNAMIC:
+            if self.length < 3:
+                raise ValueError(
+                    "Dynamic generation mode requires 'length' >= 3 because Polymerist "
+                    "requires a non-empty middle sequence"
+                )
+
             # Dynamic mode requires SMILES for all monomers
             missing_smiles = [m.label for m in self.monomers if m.smiles is None]
             if missing_smiles:
@@ -1112,8 +1129,7 @@ class CoSolventSpec(BaseModel):
 
         if not has_mole_fraction and not has_conc:
             raise ValueError(
-                f"Co-solvent '{self.name}': Must specify either 'mole_fraction' "
-                f"or 'concentration'"
+                f"Co-solvent '{self.name}': Must specify either 'mole_fraction' or 'concentration'"
             )
         if has_mole_fraction and has_conc:
             raise ValueError(
@@ -1282,7 +1298,6 @@ class SimulationPhaseConfig(BaseModel):
         ensemble: Thermodynamic ensemble (NVT, NPT)
         duration: Simulation duration in nanoseconds
         samples: Number of trajectory frames to save
-        report_interval: Explicit reporter interval in MD steps
         time_step: Integration time step in femtoseconds
         thermostat: Thermostat type
         thermostat_timescale: Thermostat coupling timescale in ps
@@ -1295,7 +1310,6 @@ class SimulationPhaseConfig(BaseModel):
     ensemble: Ensemble = Field(..., description="Thermodynamic ensemble")
     duration: float = Field(..., gt=0.0, description="Duration (ns)")
     samples: int = Field(..., ge=1, description="Trajectory frames to save")
-    report_interval: int = Field(..., ge=1, description="Reporter interval in MD steps")
     time_step: float = Field(2.0, gt=0.0, description="Time step (fs)")
     thermostat: ThermostatType = Field(
         ThermostatType.LANGEVIN_MIDDLE, description="Thermostat type"
@@ -1314,6 +1328,18 @@ class SimulationPhaseConfig(BaseModel):
             "unexpected termination recovery remains enabled."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_report_interval(cls, data: Any) -> Any:
+        """Ignore the obsolete reporter interval in existing configurations."""
+        if isinstance(data, dict) and "report_interval" in data:
+            LOGGER.warning(
+                "Ignoring deprecated production 'report_interval'; trajectory "
+                "cadence is derived from 'samples'"
+            )
+            return {key: value for key, value in data.items() if key != "report_interval"}
+        return data
 
     @model_validator(mode="after")
     def validate_ensemble_barostat(self) -> "SimulationPhaseConfig":
@@ -1372,22 +1398,23 @@ class EquilibrationStageConfig(BaseModel):
     Supports two temperature modes:
 
     1. Constant temperature: Set 'temperature' field.
-    2. Temperature ramping (simulated annealing): Set 'temperature_start'
-       and 'temperature_end' fields.
+    2. Temperature ramping (simulated annealing): Set 'temperature_start',
+       'temperature_end', 'temperature_increment', and
+       'temperature_interval_steps'. The duration is derived.
 
     Position restraints can be applied to hold specific atom groups in place
     during the stage.
 
     Attributes:
         name: Stage identifier (used in output paths)
-        duration: Stage duration in nanoseconds
+        duration: Stage duration in nanoseconds (constant-temperature stages only)
         samples: Number of trajectory frames to save
         ensemble: Thermodynamic ensemble (NVT or NPT)
         temperature: Constant temperature in K (mutually exclusive with ramping)
         temperature_start: Starting temperature for ramping in K
         temperature_end: Ending temperature for ramping in K
-        temperature_increment: Temperature increment per update in K
-        temperature_interval: Time between temperature updates in fs
+        temperature_increment: Temperature increase per update in K
+        temperature_interval_steps: MD steps between temperature updates
         position_restraints: List of position restraints for this stage
         time_step: Optional time step override in fs
         thermostat: Optional thermostat type override
@@ -1397,7 +1424,11 @@ class EquilibrationStageConfig(BaseModel):
     """
 
     name: str = Field(..., description="Stage identifier (used in output paths)")
-    duration: float = Field(..., gt=0.0, description="Duration (ns)")
+    duration: float | None = Field(
+        None,
+        gt=0.0,
+        description="Duration (ns). Required for constant-temperature stages; derived for ramps.",
+    )
     samples: int = Field(100, ge=1, description="Trajectory frames to save")
     ensemble: Ensemble = Field(Ensemble.NVT, description="Thermodynamic ensemble")
 
@@ -1415,11 +1446,15 @@ class EquilibrationStageConfig(BaseModel):
     temperature_end: float | None = Field(
         None, gt=0.0, description="Ending temperature for ramping (K)"
     )
-    temperature_increment: float = Field(
-        1.0, gt=0.0, description="Temperature increment per update (K)"
+    temperature_increment: float | None = Field(
+        None,
+        gt=0.0,
+        description="Temperature increase per update (K)",
     )
-    temperature_interval: float = Field(
-        1200.0, gt=0.0, description="Time between temperature updates (fs)"
+    temperature_interval_steps: int | None = Field(
+        None,
+        ge=1,
+        description="MD steps between temperature updates",
     )
 
     # Position restraints
@@ -1436,30 +1471,138 @@ class EquilibrationStageConfig(BaseModel):
     barostat: BarostatType | None = Field(None, description="Barostat type (for NPT)")
     barostat_frequency: int | None = Field(None, ge=1, description="Barostat update frequency")
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_temperature_ramp_config(cls, data: Any) -> Any:
+        """Migrate legacy ramp fields before validating the derived duration."""
+        if not isinstance(data, dict):
+            return data
+
+        values = dict(data)
+        start = values.get("temperature_start")
+        end = values.get("temperature_end")
+        if start is None and end is None:
+            return values
+
+        rate = values.pop("temperature_ramp_rate", None)
+        duration = values.get("duration")
+        increment = values.get("temperature_increment")
+        interval_steps = values.get("temperature_interval_steps")
+        interval_fs = values.pop("temperature_interval", None)
+
+        if rate is not None:
+            raise ValueError(
+                "'temperature_ramp_rate' is not supported; specify "
+                "'temperature_increment' and 'temperature_interval_steps'"
+            )
+
+        if interval_fs is not None and interval_steps is not None:
+            raise ValueError(
+                "Cannot specify both legacy 'temperature_interval' and 'temperature_interval_steps'"
+            )
+
+        if duration is not None and interval_steps is not None:
+            raise ValueError(
+                "Do not specify 'duration' for a temperature ramp; it is derived from "
+                "'temperature_start', 'temperature_end', 'temperature_increment', "
+                "and 'temperature_interval_steps'"
+            )
+
+        used_legacy_interval_default = (
+            duration is not None and interval_fs is None and interval_steps is None
+        )
+        if used_legacy_interval_default:
+            # The former schema required duration and defaulted the interval to
+            # 1200 fs. Preserve that behavior long enough to migrate existing
+            # configuration files to the step-based schedule.
+            interval_fs = 1200.0
+
+        timestep_fs = float(values.get("time_step") or 2.0)
+        if interval_fs is not None:
+            try:
+                increment_value = float(increment if increment is not None else 1.0)
+                interval_value = float(interval_fs)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "Legacy 'temperature_increment' and 'temperature_interval' must be numeric"
+                ) from exc
+            if increment_value > 0 and interval_value > 0:
+                exact_interval_steps = interval_value / timestep_fs
+                rounded_interval_steps = round(exact_interval_steps)
+                if not math.isclose(
+                    exact_interval_steps,
+                    rounded_interval_steps,
+                    rel_tol=1e-12,
+                    abs_tol=1e-9,
+                ):
+                    raise ValueError(
+                        "Legacy 'temperature_interval' must be an exact multiple "
+                        "of the stage timestep"
+                    )
+                values["temperature_increment"] = increment_value
+                values["temperature_interval_steps"] = max(1, rounded_interval_steps)
+                legacy_source = (
+                    "the legacy 1200 fs default"
+                    if used_legacy_interval_default
+                    else f"temperature_interval={interval_value:g} fs"
+                )
+                warnings.warn(
+                    f"Deprecated temperature-ramp configuration using {legacy_source} "
+                    "was converted to 'temperature_interval_steps'; update the "
+                    "configuration file and remove the ramp 'duration' field",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                LOGGER.warning(
+                    f"Deprecated temperature-ramp configuration using {legacy_source} was "
+                    f"converted to temperature_interval_steps="
+                    f"{values['temperature_interval_steps']}; any supplied ramp "
+                    "duration is ignored"
+                )
+        return values
+
     @model_validator(mode="after")
     def validate_temperature_mode(self) -> "EquilibrationStageConfig":
         """Ensure valid temperature specification."""
-        has_constant = self.temperature is not None
-        has_start = self.temperature_start is not None
-        has_end = self.temperature_end is not None
+        if self.temperature is not None:
+            if self.temperature_start is not None or self.temperature_end is not None:
+                raise ValueError(
+                    "Cannot specify both 'temperature' and temperature ramping "
+                    "('temperature_start'/'temperature_end')"
+                )
+            if (
+                self.temperature_increment is not None
+                or self.temperature_interval_steps is not None
+            ):
+                raise ValueError(
+                    "'temperature_increment' and 'temperature_interval_steps' are only "
+                    "valid for temperature ramps"
+                )
+            if self.duration is None:
+                raise ValueError("Constant-temperature stages require 'duration'")
+            return self
 
-        if has_constant and (has_start or has_end):
-            raise ValueError(
-                "Cannot specify both 'temperature' and temperature ramping "
-                "('temperature_start'/'temperature_end')"
-            )
-
-        if not has_constant and not (has_start and has_end):
+        if self.temperature_start is None or self.temperature_end is None:
             raise ValueError(
                 "Must specify either 'temperature' for constant temperature, "
-                "or both 'temperature_start' and 'temperature_end' for ramping"
+                "or 'temperature_start', 'temperature_end', 'temperature_increment', "
+                "and 'temperature_interval_steps' for ramping"
             )
 
-        if has_start and has_end and self.temperature_start > self.temperature_end:
+        if self.temperature_increment is None or self.temperature_interval_steps is None:
             raise ValueError(
-                f"temperature_start ({self.temperature_start}) must be <= "
+                "Temperature ramps require 'temperature_increment' and 'temperature_interval_steps'"
+            )
+
+        if self.temperature_start >= self.temperature_end:
+            raise ValueError(
+                f"temperature_start ({self.temperature_start}) must be < "
                 f"temperature_end ({self.temperature_end})"
             )
+
+        timestep_fs = self.time_step or 2.0
+        total_steps = self.temperature_ramp_updates * self.temperature_interval_steps
+        self.duration = total_steps * timestep_fs / 1e6
 
         return self
 
@@ -1470,6 +1613,14 @@ class EquilibrationStageConfig(BaseModel):
             self.barostat = BarostatType.MONTE_CARLO
         return self
 
+    @model_serializer(mode="wrap")
+    def serialize_stage(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Omit internally derived ramp duration from saved configurations."""
+        data = handler(self)
+        if self.is_temperature_ramping:
+            data.pop("duration", None)
+        return data
+
     @property
     def is_temperature_ramping(self) -> bool:
         """Check if this stage uses temperature ramping."""
@@ -1478,14 +1629,56 @@ class EquilibrationStageConfig(BaseModel):
     def get_start_temperature(self) -> float:
         """Get the starting temperature of this stage."""
         if self.is_temperature_ramping:
+            assert self.temperature_start is not None
             return self.temperature_start
+        assert self.temperature is not None
         return self.temperature
 
     def get_final_temperature(self) -> float:
         """Get the final temperature of this stage."""
         if self.is_temperature_ramping:
+            assert self.temperature_end is not None
             return self.temperature_end
+        assert self.temperature is not None
         return self.temperature
+
+    @property
+    def resolved_duration(self) -> float:
+        """Return the validated stage duration in nanoseconds."""
+        if self.duration is None:
+            raise RuntimeError(f"Equilibration stage '{self.name}' has no resolved duration")
+        return self.duration
+
+    @property
+    def temperature_ramp_updates(self) -> int:
+        """Return the number of discrete updates needed to reach the endpoint."""
+        if not self.is_temperature_ramping:
+            return 0
+        assert self.temperature_start is not None
+        assert self.temperature_end is not None
+        assert self.temperature_increment is not None
+        exact_updates = (self.temperature_end - self.temperature_start) / self.temperature_increment
+        nearest_updates = round(exact_updates)
+        if math.isclose(exact_updates, nearest_updates, rel_tol=1e-12, abs_tol=1e-9):
+            return max(1, nearest_updates)
+        return max(1, math.ceil(exact_updates))
+
+    def temperature_at_step(self, step: int, total_steps: int) -> float:
+        """Return the scheduled ramp temperature at an integration step."""
+        if not self.is_temperature_ramping:
+            return self.get_start_temperature()
+        if total_steps <= 0:
+            raise ValueError("total_steps must be positive")
+        assert self.temperature_start is not None
+        assert self.temperature_end is not None
+        assert self.temperature_increment is not None
+        assert self.temperature_interval_steps is not None
+        bounded_step = min(max(step, 0), total_steps)
+        completed_updates = bounded_step // self.temperature_interval_steps
+        return min(
+            self.temperature_end,
+            self.temperature_start + completed_updates * self.temperature_increment,
+        )
 
 
 class SimulationPhasesConfig(BaseModel):
@@ -1525,7 +1718,7 @@ class SimulationPhasesConfig(BaseModel):
 
         Returns the sum of all stage durations.
         """
-        return sum(stage.duration for stage in self.equilibration_stages)
+        return sum(stage.resolved_duration for stage in self.equilibration_stages or [])
 
     @property
     def total_equilibration_samples(self) -> int:
@@ -1533,7 +1726,7 @@ class SimulationPhasesConfig(BaseModel):
 
         Returns the sum of all stage samples.
         """
-        return sum(stage.samples for stage in self.equilibration_stages)
+        return sum(stage.samples for stage in self.equilibration_stages or [])
 
 
 # =============================================================================
@@ -2046,7 +2239,7 @@ class SimulationConfig(BaseModel):
             name = _format_safe_token(cosolvent.name)
             if cosolvent.mole_fraction is not None:
                 percent = _format_decimal_token(cosolvent.mole_fraction * 100)
-                token = f"{name}_{percent}pctv"
+                token = f"{name}_{percent}molpct"
             elif cosolvent.concentration is not None:
                 concentration = _format_decimal_token(cosolvent.concentration)
                 token = f"{name}_{concentration}M"

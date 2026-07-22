@@ -300,6 +300,7 @@ def test_generate_config_yaml_includes_engine_and_loads(
 
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert data["engine"] == "openmm"
+    assert "report_interval" not in data["simulation_phases"]["production"]
     config = SimulationConfig.from_yaml(config_path)
     assert config.engine == "openmm"
 

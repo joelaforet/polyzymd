@@ -518,6 +518,16 @@ class TestGetNextSegmentInfo:
         assert info["samples_to_write"] == 125  # Half the samples
         assert info["report_interval"] == 40000  # Same interval as full run
 
+    def test_non_boundary_resume_counts_absolute_report_steps(self):
+        seg = _make_segment(0, steps=25)
+        p = _make_progress(segments=[seg], total_steps=100, total_samples=10)
+
+        info = get_next_segment_info(p, total_steps=100, total_samples=10)
+
+        assert info is not None
+        assert info["report_interval"] == 10
+        assert info["samples_to_write"] == 8  # Frames at steps 30 through 100
+
     def test_complete_returns_none(self):
         segs = [_make_segment(0, steps=5000000), _make_segment(1, steps=5000000)]
         p = _make_progress(segments=segs, total_steps=10000000)
@@ -559,6 +569,18 @@ class TestGetNextSegmentInfo:
         assert info2 is not None
         assert info2["report_interval"] == expected_interval
         assert info2["samples_to_write"] == 25  # 250_000 // 10_000
+
+
+class TestCalculateReportInterval:
+    """Derive reporter cadence from requested trajectory frames."""
+
+    def test_rejects_nonpositive_inputs(self):
+        from polyzymd.simulation.progress import calculate_report_interval
+
+        with pytest.raises(ValueError, match="total_steps"):
+            calculate_report_interval(0, 10)
+        with pytest.raises(ValueError, match="total_samples"):
+            calculate_report_interval(100, 0)
 
 
 # ---------------------------------------------------------------------------

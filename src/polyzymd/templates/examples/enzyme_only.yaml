@@ -94,13 +94,12 @@ thermodynamics:
 simulation_phases:
   equilibration_stages:
     - name: "heating"
-      duration: 0.1  # nanoseconds
       samples: 10
       ensemble: "NVT"
       temperature_start: 60.0
       temperature_end: 293.0
       temperature_increment: 1.0
-      temperature_interval: 1200.0
+      temperature_interval_steps: 600  # increase temperature by `temperature_increment` every this many steps
       position_restraints:
         - group: "protein_heavy"
           force_constant: 4184.0
@@ -116,7 +115,6 @@ simulation_phases:
     ensemble: "NPT"
     duration: 100.0  # nanoseconds total
     samples: 2500  # frames to save (total across all segments)
-    report_interval: 20000  # MD steps between trajectory/report writes
     checkpoint_interval: 60.0  # seconds between restart checkpoints
     time_step: 2.0  # femtoseconds
     thermostat: "LangevinMiddle"

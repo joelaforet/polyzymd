@@ -29,11 +29,36 @@ outside the managed pixi environment.
 
 ## Git Workflow
 
-- **Branches:** `main` (stable), `dev` (integration), `feature/*` (work)
-- Resolve the current branch dynamically with `git branch --show-current`; do not rely on a static branch name in this file.
-- Commit messages: imperative mood, 50-char subject, reference issues (`#20`)
+- **Branches:** `main` (released), `release/*` (release integration), short-lived
+  `fix/*` and `feature/*` branches (atomic work)
+- Resolve the current branch dynamically with `git branch --show-current`; do
+  not rely on a static branch name in this file.
+- Until the branch migration is complete, treat `feature/v1.3.0-rc5` as
+  `release/1.3` and `conjugation-engine-refactor` as `release/1.4`.
+- Mark beta snapshots with immutable SemVer prerelease tags such as
+  `v1.3.0-rc.1`; do not create a new mutable branch for each snapshot.
+- Forward-integrate stabilized v1.3 fixes into the v1.4 integration branch so
+  conjugation work does not drift. Prefer merges for published/shared stacks
+  and rebases for unpublished local work.
+- Use conventional commits with an imperative subject near 50 characters.
+  Keep each commit atomic and explain important reasoning in the body.
 - Run `ruff check` and `black --check` before committing
-- Never force-push to `main` or `dev`
+- Never force-push to `main`, `dev`, or `release/*`.
+- Never merge a pull request. Joe reviews every PR and merges it manually.
+
+See `.opencode/instructions/development-workflow.md` for collaboration,
+scope, validation, authorship, push, and PR rules.
+
+## Harness Capabilities and Living Guidance
+
+The GitHub connector lacked PR-write permission, so I used the authenticated gh fallback. I will not merge it.
+
+Treat `AGENTS.md`, `.opencode/instructions/`, and the personal PolyzyMD Skills
+as living guidance. When repository behavior, scientific contracts, branch
+names, tools, permissions, or recurring workflows change, update the affected
+guidance in the same atomic task so future agents do not follow stale rules.
+Validate edited Skills and run the relevant repository documentation or static
+checks before committing.
 
 ## Architecture Quick Reference
 
@@ -204,6 +229,8 @@ See `.opencode/instructions/` for detailed rules on specific topics:
 - `architecture.md` — module structure, design patterns, extension points
 - `environment.md` — pixi environment setup, dependency management, CI
 - `testing.md` — test infrastructure, running tests, writing new tests
+- `development-workflow.md` — release flow, atomic scope, agent
+  collaboration, commits, pushes, and PR handoff
 - `analysis-module.md` — analysis plugin system patterns and contracts
 - `documentation.md` — Sphinx/MyST conventions, API docs, zero-warning build gate, `:no-index:` rules
 - `openff-pdb-ingestion.md` — OpenFF protein/PDB ingestion troubleshooting and living error-log rules

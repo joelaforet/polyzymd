@@ -677,8 +677,17 @@ def build(
             if eq_stages:
                 colored_echo(f"  Equilibration: {len(eq_stages)} stage(s)", phase="build")
                 for i, stage in enumerate(eq_stages, 1):
+                    if stage.is_temperature_ramping:
+                        ramp_info = (
+                            f", {stage.temperature_start:g}->{stage.temperature_end:g} K, "
+                            f"+{stage.temperature_increment:g} K every "
+                            f"{stage.temperature_interval_steps} steps (derived)"
+                        )
+                    else:
+                        ramp_info = ""
                     colored_echo(
-                        f"    Stage {i}: {stage.duration} ns, {stage.ensemble}",
+                        f"    Stage {i}: {stage.resolved_duration:.6f} ns, "
+                        f"{stage.ensemble}{ramp_info}",
                         phase="build",
                     )
             colored_echo(
@@ -1195,8 +1204,12 @@ def _run_openmm_impl(
     replicate : int
         Replicate number.
     """
+    from polyzymd.simulation.progress import calculate_report_interval
+
     production = sim_config.simulation_phases.production
     working_dir = sim_config.get_working_directory(replicate)
+    total_steps = int(production.duration * 1e6 / production.time_step)
+    report_interval = calculate_report_interval(total_steps, production.samples)
 
     colored_echo(f"Building and running OpenMM in {working_dir}", phase="simulation")
     _run_initial_segment(
@@ -1207,7 +1220,7 @@ def _run_openmm_impl(
         duration_ns=production.duration,
         num_samples=production.samples,
         timestep_fs=production.time_step,
-        report_interval=production.report_interval,
+        report_interval=report_interval,
         checkpoint_interval_s=production.checkpoint_interval,
     )
     colored_echo("OpenMM simulation completed successfully.", phase="simulation")
@@ -1936,7 +1949,7 @@ def run_segment(
     seg_idx = seg_info["segment_index"]
     steps_to_run = seg_info["steps_to_run"]
     samples_to_write = seg_info["samples_to_write"]
-    report_interval = prod.report_interval
+    report_interval = seg_info["report_interval"]
     duration_ns = (steps_to_run * timestep_fs) / 1e6
 
     colored_echo(
@@ -2534,11 +2547,23 @@ def validate(config: str) -> None:
         colored_echo("Simulation phases:")
         eq_stages = sim_config.simulation_phases.equilibration_stages
         colored_echo(
-            f"  Equilibration: {sim_config.simulation_phases.total_equilibration_duration} ns "
+            f"  Equilibration: "
+            f"{sim_config.simulation_phases.total_equilibration_duration:.6f} ns "
             f"across {len(eq_stages)} stage(s)"
         )
         for stage in eq_stages:
-            colored_echo(f"    - {stage.name}: {stage.duration} ns ({stage.ensemble.value})")
+            if stage.is_temperature_ramping:
+                colored_echo(
+                    f"    - {stage.name}: {stage.temperature_start:g} -> "
+                    f"{stage.temperature_end:g} K, +{stage.temperature_increment:g} K "
+                    f"every {stage.temperature_interval_steps} steps; "
+                    f"derived duration {stage.resolved_duration:.6f} ns "
+                    f"({stage.ensemble.value})"
+                )
+            else:
+                colored_echo(
+                    f"    - {stage.name}: {stage.resolved_duration:g} ns ({stage.ensemble.value})"
+                )
         prod = sim_config.simulation_phases.production
         colored_echo(f"  Production: {prod.duration} ns ({prod.ensemble.value})")
 
