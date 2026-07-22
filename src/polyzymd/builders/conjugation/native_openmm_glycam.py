@@ -66,6 +66,7 @@ def create_native_openmm_glycam_handoff(
     config: Any,
     construction: Any,
     output_dir: Path | str,
+    solute_scope: bool = False,
 ) -> Any:
     """Create a direct OpenMM GLYCAM handoff for a solvated glycoprotein.
 
@@ -90,7 +91,7 @@ def create_native_openmm_glycam_handoff(
     from openmm import unit
     from openmm.app import PME, HBonds
 
-    _validate_native_glycam_mvp_config(config)
+    _validate_native_glycam_mvp_config(config, solute_scope=solute_scope)
     solvated_topology = getattr(builder, "_solvated_topology", None)
     if solvated_topology is None:
         raise RuntimeError("Native GLYCAM handoff requires a solvated topology")
@@ -117,6 +118,9 @@ def create_native_openmm_glycam_handoff(
 
     modified_site_residues = converted.modified_site_residues
     crosslink_pairs = _converted_crosslink_pairs(converted)
+    if solute_scope:
+        padding_nm = float(config.solvent.box.padding)
+        converted = _center_in_orthorhombic_box(converted, padding_nm=padding_nm)
     system = force_field.createSystem(
         converted.topology,
         nonbondedMethod=PME,
@@ -125,6 +129,8 @@ def create_native_openmm_glycam_handoff(
         rigidWater=NATIVE_GLYCAM_RIGID_WATER,
         residueTemplates=_modified_site_template_map(modified_site_residues),
     )
+    if solute_scope:
+        system.setDefaultPeriodicBoxVectors(*converted.topology.getPeriodicBoxVectors())
     audit = _build_native_glycam_audit(
         converted.topology,
         system,
@@ -135,6 +141,26 @@ def create_native_openmm_glycam_handoff(
         sage_components=sage_components,
         construction=construction,
     )
+    if solute_scope:
+        audit.update(
+            {
+                "scope": "solute",
+                "component_counts": {
+                    "substrate": 0,
+                    "free_polymers": 0,
+                    "water": 0,
+                    "ions": 0,
+                    "liquids": 0,
+                },
+                "restraint_force_count": 0,
+                "barostat_count": 0,
+                "preparation_only_warning": (
+                    "A charged PME solute is a preparation/export artifact; it is not "
+                    "neutralized, solvated, or NPT-ready."
+                ),
+            }
+        )
+        LOGGER.warning(audit["preparation_only_warning"])
     _require_essential_linkage_terms(audit)
     audit_path = Path(output_dir) / NATIVE_GLYCAM_AUDIT_NAME
     audit_path.write_text(json.dumps(audit, indent=2, allow_nan=False) + "\n", encoding="utf-8")
@@ -172,10 +198,12 @@ def _converted_crosslink_pairs(converted: Any) -> tuple[tuple[Any, Any], ...]:
     return tuple(converted.crosslink_pairs)
 
 
-def _validate_native_glycam_mvp_config(config: Any) -> None:
+def _validate_native_glycam_mvp_config(config: Any, *, solute_scope: bool = False) -> None:
     """Reject unsupported components before native GLYCAM parameterization."""
     if getattr(config, "engine", None) not in {"openmm", "gromacs"}:
         raise ValueError("Native GLYCAM mode supports only engine='openmm' or engine='gromacs'")
+    if solute_scope:
+        return
     polymers = getattr(config, "polymers", None)
     if polymers is not None and getattr(polymers, "enabled", False):
         LOGGER.info("Native GLYCAM mode will admit only disconnected precharged Sage polymers")
@@ -196,6 +224,39 @@ def _validate_native_glycam_mvp_config(config: Any) -> None:
         or float(getattr(ions, "mgcl2_concentration", 0.0)) != 0.0
     ):
         raise ValueError("Native GLYCAM mode currently supports standard Na/Cl ions only")
+
+
+def _center_in_orthorhombic_box(
+    converted: _ConvertedTopology, *, padding_nm: float
+) -> _ConvertedTopology:
+    """Center finite solute coordinates in a periodic box with per-face padding."""
+    from openmm import Vec3, unit
+
+    coordinates = np.asarray(converted.positions.value_in_unit(unit.nanometer), dtype=float)
+    if coordinates.shape != (converted.topology.getNumAtoms(), 3):
+        raise ValueError("Native solute coordinates do not match the authoritative topology")
+    if not np.isfinite(coordinates).all():
+        raise ValueError("Native solute coordinates must all be finite")
+    lower = coordinates.min(axis=0)
+    upper = coordinates.max(axis=0)
+    lengths = upper - lower + 2.0 * padding_nm
+    if not np.isfinite(lengths).all() or np.any(lengths <= 0.0):
+        raise ValueError("Native solute orthorhombic box lengths must be finite and positive")
+    centered = coordinates - (lower + upper) / 2.0 + lengths / 2.0
+    vectors = (
+        Vec3(float(lengths[0]), 0.0, 0.0),
+        Vec3(0.0, float(lengths[1]), 0.0),
+        Vec3(0.0, 0.0, float(lengths[2])),
+    ) * unit.nanometer
+    converted.topology.setPeriodicBoxVectors(vectors)
+    return _ConvertedTopology(
+        topology=converted.topology,
+        positions=centered * unit.nanometer,
+        modified_site_residues=converted.modified_site_residues,
+        crosslink_pairs=converted.crosslink_pairs,
+        renamed_atoms=converted.renamed_atoms,
+        sage_template_units=converted.sage_template_units,
+    )
 
 
 def _load_native_glycam_force_field() -> Any:

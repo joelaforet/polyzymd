@@ -11,6 +11,8 @@ from polyzymd.builders.conjugation.force_fields import resolve_conjugate_force_f
 from polyzymd.builders.conjugation.native_openmm_glycam import (
     _annotate_force_field_domains_from_config,
     _build_native_glycam_audit,
+    _center_in_orthorhombic_box,
+    _ConvertedTopology,
     _domain_assignment_audit,
     _openff_topology_to_openmm_for_glycam,
     _register_disconnected_sage_template_generator,
@@ -87,6 +89,47 @@ def test_exact_bundle_exposes_authoritative_openmm_methods() -> None:
     assert bundle.to_openmm_topology() is bundle.topology
     assert bundle.to_openmm_positions() is bundle.positions
     assert bundle.is_exact_export_bundle is True
+
+
+def test_native_solute_box_is_centered_and_has_finite_energy_forces() -> None:
+    """A minimal periodic solute should be centered and numerically evaluable."""
+    import numpy as np
+    from openmm import Context, NonbondedForce, Platform, System, VerletIntegrator, unit
+    from openmm.app import Element, Topology
+
+    topology = Topology()
+    residue = topology.addResidue("ALA", topology.addChain("A"), "1")
+    topology.addAtom("C1", Element.getBySymbol("C"), residue)
+    topology.addAtom("C2", Element.getBySymbol("C"), residue)
+    system = System()
+    nonbonded = NonbondedForce()
+    nonbonded.setNonbondedMethod(NonbondedForce.PME)
+    nonbonded.setCutoffDistance(1.0 * unit.nanometer)
+    for charge in (-0.2, 0.2):
+        system.addParticle(12.0)
+        nonbonded.addParticle(charge, 0.3, 0.1)
+    system.addForce(nonbonded)
+    converted = _ConvertedTopology(
+        topology=topology,
+        positions=np.asarray([[1.0, -1.0, 0.5], [2.0, -1.0, 0.5]]) * unit.nanometer,
+        modified_site_residues=(),
+        crosslink_pairs=(),
+        renamed_atoms=(),
+    )
+
+    boxed = _center_in_orthorhombic_box(converted, padding_nm=1.1)
+    system.setDefaultPeriodicBoxVectors(*boxed.topology.getPeriodicBoxVectors())
+
+    coordinates = boxed.positions.value_in_unit(unit.nanometer)
+    assert np.allclose(coordinates.min(axis=0), [1.1, 1.1, 1.1])
+    assert np.allclose(coordinates.max(axis=0), [2.1, 1.1, 1.1])
+    context = Context(system, VerletIntegrator(0.001), Platform.getPlatformByName("Reference"))
+    context.setPositions(boxed.positions)
+    state = context.getState(getEnergy=True, getForces=True)
+    assert np.isfinite(state.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole))
+    assert np.isfinite(
+        state.getForces(asNumpy=True).value_in_unit(unit.kilojoule_per_mole / unit.nanometer)
+    ).all()
 
 
 def test_create_native_handoff_uses_nln_template_and_writes_audit(monkeypatch, tmp_path) -> None:

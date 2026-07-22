@@ -276,13 +276,10 @@ def build_conjugated_polymer_system_from_config(
     resolved_force_fields = resolve_conjugate_force_fields(config)
     use_native_glycam = native_glycam_enabled(config)
     use_mixed_overlay = resolved_force_fields.route == "mixed_overlay"
-    if workflow_settings.build_scope is BuildScope.SOLUTE and (
-        use_native_glycam or use_mixed_overlay
-    ):
-        route = "native_openmm_glycam" if use_native_glycam else resolved_force_fields.route
+    if workflow_settings.build_scope is BuildScope.SOLUTE and use_mixed_overlay:
         raise NotImplementedError(
-            "build scope 'solute' supports only the generic OpenFF parameterization route; "
-            f"resolved native/exact route '{route}' is not yet supported"
+            "build scope 'solute' fails closed for mixed-overlay parameterization because "
+            "isolated scope cannot yet be propagated without full-system recursion"
         )
     if (
         _uses_pdb_fragment_sources(attachments)
@@ -371,9 +368,21 @@ def build_conjugated_polymer_system_from_config(
             working_dir=artifact_dir,
             product_state_pablo_library=getattr(construction, "product_state_pablo_library", None),
             parameterization_settings=workflow_settings.conjugate_parameterization,
+            create_interchange=not use_native_glycam,
         )
         solute_pdb_path = artifact_dir / "solute.pdb"
-        builder.save_topology(solute_pdb_path)
+        exact_export_bundle = None
+        if use_native_glycam:
+            exact_export_bundle = create_native_openmm_glycam_handoff(
+                builder,
+                config=config,
+                construction=construction,
+                output_dir=artifact_dir,
+                solute_scope=True,
+            )
+            exact_export_bundle.write_pdb(solute_pdb_path)
+        else:
+            builder.save_topology(solute_pdb_path)
         result = ConjugationResult(
             status="solute",
             output_dir=artifact_dir,
@@ -387,9 +396,13 @@ def build_conjugated_polymer_system_from_config(
             attachment_specs=specs,
             relaxed_conjugate_topology=relaxed_topology,
             solvated_topology=builder.solvated_topology,
-            final_interchange=builder.interchange,
+            final_interchange=None if exact_export_bundle is not None else builder.interchange,
+            exact_export_bundle=exact_export_bundle,
             system_builder=builder,
         )
+        if exact_export_bundle is not None:
+            result.artifact_paths["native_openmm_glycam_audit"] = exact_export_bundle.audit_path
+            result.artifact_paths["exact_openmm_exceptions"] = exact_export_bundle.sidecar_path
         return result
 
     builder = _build_solvated_system(
@@ -2314,6 +2327,7 @@ def _build_isolated_conjugate_system(
     working_dir: Path,
     product_state_pablo_library: Any | None = None,
     parameterization_settings: InterchangeParameterizationSettings | None = None,
+    create_interchange: bool = True,
 ) -> SystemBuilder:
     """Parameterize the assembled conjugate without secondary components."""
     builder = SystemBuilder.from_config(config)
@@ -2324,11 +2338,12 @@ def _build_isolated_conjugate_system(
     builder.combine_solutes()
     builder._solvated_topology = builder._combined_topology
     builder._assign_pdb_identifiers()
-    create_final_conjugated_interchange(
-        builder,
-        product_state_pablo_library=product_state_pablo_library,
-        settings=parameterization_settings,
-    )
+    if create_interchange:
+        create_final_conjugated_interchange(
+            builder,
+            product_state_pablo_library=product_state_pablo_library,
+            settings=parameterization_settings,
+        )
     return builder
 
 

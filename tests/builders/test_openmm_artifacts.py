@@ -417,6 +417,100 @@ def test_standard_solute_scope_emits_only_isolated_audited_artifacts(
     assert audit["barostat_count"] == audit["restraint_force_count"] == 0
 
 
+def test_native_exact_solute_materializes_authoritative_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Native solute scope must persist the exact System, PDB, sidecar, and audits."""
+    import numpy as np
+    from openmm import NonbondedForce, System, Vec3, XmlSerializer, unit
+    from openmm.app import Element, Topology
+
+    from polyzymd.exporters.exact_openmm import ExactExportBundle, collect_exact_exception_sidecar
+
+    topology = Topology()
+    residue = topology.addResidue("ALA", topology.addChain("A"), "1")
+    topology.addAtom("C1", Element.getBySymbol("C"), residue)
+    topology.addAtom("C2", Element.getBySymbol("C"), residue)
+    topology.addBond(*tuple(topology.atoms()))
+    vectors = (Vec3(3, 0, 0), Vec3(0, 2.2, 0), Vec3(0, 0, 2.2)) * unit.nanometer
+    topology.setPeriodicBoxVectors(vectors)
+    positions = np.asarray([[1.1, 1.1, 1.1], [1.8, 1.1, 1.1]]) * unit.nanometer
+    system = System()
+    nonbonded = NonbondedForce()
+    nonbonded.setNonbondedMethod(NonbondedForce.PME)
+    nonbonded.setCutoffDistance(1.0 * unit.nanometer)
+    for charge in (-0.2, 0.2):
+        system.addParticle(12.0)
+        nonbonded.addParticle(charge, 0.3, 0.1)
+    system.addForce(nonbonded)
+    system.setDefaultPeriodicBoxVectors(*vectors)
+    audit = {
+        "scope": "solute",
+        "preparation_only_warning": "charged PME preparation/export-only; not NPT-ready",
+    }
+    sidecar = collect_exact_exception_sidecar(topology, system, audit=audit)
+    bundle = ExactExportBundle(
+        topology=topology,
+        system=system,
+        positions=positions,
+        private_baseline_interchange=object(),
+        sidecar=sidecar,
+        audit=audit,
+    )
+    builder = SimpleNamespace(interchange=None)
+    result = SimpleNamespace(
+        system_builder=builder,
+        exact_export_bundle=bundle,
+        require_final_interchange=lambda: bundle,
+        get_component_info=lambda: {},
+    )
+
+    class FakeSettings:
+        def __init__(self, **values: object) -> None:
+            self.__dict__.update(values)
+
+        def model_copy(self, *, update: dict[str, object]) -> "FakeSettings":
+            return FakeSettings(**{**self.__dict__, **update})
+
+    conjugation_module = types.ModuleType("polyzymd.builders.conjugation")
+    conjugation_module.build_conjugate_from_config = lambda *args, **kwargs: result
+    workflow_module = types.ModuleType("polyzymd.builders.conjugation.system_workflow")
+    workflow_module.ConjugatedPolymerSystemSettings = FakeSettings
+    native_module = types.ModuleType("polyzymd.builders.conjugation.native_openmm_glycam")
+    native_module.native_glycam_enabled = lambda _config: True
+    monkeypatch.setitem(sys.modules, "polyzymd.builders.conjugation", conjugation_module)
+    monkeypatch.setitem(
+        sys.modules, "polyzymd.builders.conjugation.system_workflow", workflow_module
+    )
+    monkeypatch.setitem(
+        sys.modules, "polyzymd.builders.conjugation.native_openmm_glycam", native_module
+    )
+
+    artifacts = build_openmm_artifacts(
+        sim_config=_config(conjugation_enabled=True),
+        working_dir=tmp_path,
+        polymer_seed=1,
+        scope=BuildScope.SOLUTE,
+    )
+
+    solute_dir = tmp_path / "solute"
+    assert artifacts.exact_export_bundle is bundle
+    assert {path.name for path in solute_dir.iterdir()} == {
+        "solute.pdb",
+        "system.xml",
+        "exact_openmm_exceptions.json",
+        "native_openmm_glycam_audit.json",
+        "openmm_build_audit.json",
+    }
+    serialized = XmlSerializer.deserialize((solute_dir / "system.xml").read_text())
+    assert serialized.getNumParticles() == topology.getNumAtoms() == sidecar.particle_count
+    build_audit = json.loads((solute_dir / "openmm_build_audit.json").read_text())
+    assert build_audit["route"] == "native_openmm_glycam"
+    assert build_audit["exact_hashes"]["atom_order"] == sidecar.atom_order_hash
+    assert build_audit["barostat_count"] == build_audit["restraint_force_count"] == 0
+
+
 def test_assembled_solute_rejects_disconnected_lig_hetatm(tmp_path: Path) -> None:
     """An unowned assembled LIG must fail even when its residue name is not allowlisted."""
     pdb_path = tmp_path / "assembled.pdb"

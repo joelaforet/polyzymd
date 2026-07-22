@@ -5,6 +5,7 @@ from __future__ import annotations
 import filecmp
 import hashlib
 import json
+import math
 import shutil
 import tempfile
 from collections import Counter
@@ -217,7 +218,12 @@ def write_openmm_system_xml(
 
 
 def _write_solute_audit(
-    *, builder: Any, solute_dir: Path, pdb_path: Path, system_path: Path
+    *,
+    builder: Any,
+    solute_dir: Path,
+    pdb_path: Path,
+    system_path: Path,
+    exact_export_bundle: Any | None = None,
 ) -> Path:
     """Write deterministic evidence for an isolated-primary OpenMM build."""
     from openmm import XmlSerializer, unit
@@ -263,6 +269,28 @@ def _write_solute_audit(
             "Solute coordinate atom count does not match serialized OpenMM System particle "
             f"count: PDB={pdb_atom_count}, System={particle_count}"
         )
+    coordinates = [
+        tuple(float(line[start:end]) for start, end in ((30, 38), (38, 46), (46, 54)))
+        for line in atom_lines
+    ]
+    if not all(math.isfinite(value) for coordinate in coordinates for value in coordinate):
+        raise RuntimeError("Solute coordinate artifact contains non-finite coordinates")
+    if exact_export_bundle is not None:
+        topology_atoms = int(exact_export_bundle.topology.getNumAtoms())
+        sidecar = exact_export_bundle.sidecar
+        if topology_atoms != particle_count or sidecar.particle_count != particle_count:
+            raise RuntimeError("Exact solute topology, sidecar, and System counts do not match")
+        pdb_identities = tuple(
+            (line[12:16].strip(), line[17:20].strip(), line[21].strip(), line[22:26].strip())
+            for line in atom_lines
+        )
+        exact_identities = tuple(
+            (atom.name, atom.residue_name, atom.chain_id, atom.residue_id) for atom in sidecar.atoms
+        )
+        if pdb_identities != exact_identities:
+            raise RuntimeError("Exact solute PDB atom identities/order do not match the sidecar")
+        # Re-validation proves the stored order/topology/parameter hashes are exact.
+        type(sidecar).model_validate(sidecar.model_dump())
 
     def digest(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -281,7 +309,7 @@ def _write_solute_audit(
         )
     audit = {
         "scope": "solute",
-        "route": "generic_openff",
+        "route": "native_openmm_glycam" if exact_export_bundle is not None else "generic_openff",
         "supported": True,
         "pdb_path": pdb_path.name,
         "system_path": system_path.name,
@@ -295,6 +323,18 @@ def _write_solute_audit(
         "box_vectors_nm": box_vectors_nm,
         "sha256": {"solute.pdb": digest(pdb_path), "system.xml": digest(system_path)},
     }
+    if exact_export_bundle is not None:
+        if not periodic:
+            raise RuntimeError("Exact native solute must retain its periodic PME box")
+        audit["exact_hashes"] = {
+            "atom_order": sidecar.atom_order_hash,
+            "topology": sidecar.topology_hash,
+            "particles": sidecar.particle_hash,
+            "exceptions": sidecar.exception_hash,
+        }
+        audit["preparation_only_warning"] = exact_export_bundle.audit.get(
+            "preparation_only_warning"
+        )
     if audit["barostat_count"] != 0:
         raise RuntimeError("Solute-scope parameterization unexpectedly contains a barostat")
     audit_path = solute_dir / "openmm_build_audit.json"
@@ -403,26 +443,51 @@ def build_openmm_artifacts(
                 scope=scope,
             )
         if scope is BuildScope.SOLUTE:
+            exact_bundle = getattr(result, "exact_export_bundle", None)
             if builder is None:
-                raise RuntimeError("Solute-scope generic route did not return a SystemBuilder")
+                raise RuntimeError("Solute-scope route did not return a SystemBuilder")
             solute_dir = working_dir / "solute"
             solute_dir.mkdir(parents=True, exist_ok=True)
             pdb_path = solute_dir / "solute.pdb"
-            builder.save_topology(pdb_path)
+            if exact_bundle is not None:
+                exact_bundle.write_pdb(pdb_path)
+            else:
+                builder.save_topology(pdb_path)
             _reject_disconnected_hetatm(pdb_path)
-            system_path = write_openmm_system_xml(
-                builder=builder,
-                sim_config=sim_config,
-                working_dir=solute_dir,
-                apply_configured_restraints=False,
-            )
+            if exact_bundle is not None:
+                from openmm import XmlSerializer
+
+                system_path = solute_dir / "system.xml"
+                system_path.write_text(
+                    XmlSerializer.serialize(exact_bundle.to_openmm()), encoding="utf-8"
+                )
+                exact_bundle.sidecar_path = exact_bundle.sidecar.save(
+                    solute_dir / "exact_openmm_exceptions.json"
+                )
+                exact_bundle.audit_path = solute_dir / "native_openmm_glycam_audit.json"
+                exact_bundle.audit_path.write_text(
+                    json.dumps(exact_bundle.audit, indent=2, allow_nan=False) + "\n",
+                    encoding="utf-8",
+                )
+            else:
+                system_path = write_openmm_system_xml(
+                    builder=builder,
+                    sim_config=sim_config,
+                    working_dir=solute_dir,
+                    apply_configured_restraints=False,
+                )
             _write_solute_audit(
-                builder=builder, solute_dir=solute_dir, pdb_path=pdb_path, system_path=system_path
+                builder=builder,
+                solute_dir=solute_dir,
+                pdb_path=pdb_path,
+                system_path=system_path,
+                exact_export_bundle=exact_bundle,
             )
             return OpenMMBuildArtifacts(
                 builder=builder,
-                interchange=builder.interchange,
+                interchange=None if exact_bundle is not None else builder.interchange,
                 result=result,
+                exact_export_bundle=exact_bundle,
                 pdb_path=pdb_path,
                 system_path=system_path,
                 conjugation_enabled=True,
