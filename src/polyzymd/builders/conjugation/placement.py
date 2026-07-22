@@ -464,8 +464,8 @@ def _product_modifier_atom(
     fragment: PlacedPolymerFragment, product: ReactionProduct
 ) -> PdbAtomRecord:
     """Return the placed atom matching the resolved product endpoint."""
-    identity = _atom_identity(product.modifier_link_atom)
-    matches = [atom for atom in fragment.atoms if _atom_identity(atom) == identity]
+    endpoint_key = _modifier_source_atom_key(product.modifier_link_atom)
+    matches = [atom for atom in fragment.atoms if _modifier_source_atom_key(atom) == endpoint_key]
     if len(matches) != 1:
         raise ValueError(f"Reaction product modifier endpoint resolved {len(matches)} placed atoms")
     return matches[0]
@@ -525,9 +525,11 @@ def _retained_modifier_atoms(
     plan: ReactionProduct,
 ) -> tuple[PdbAtomRecord, ...]:
     """Return modifier atoms retained for Packmol placement."""
-    leaving_identities = {_atom_identity(atom) for atom in plan.modifier_leaving_atoms}
+    leaving_identities = {_modifier_source_atom_key(atom) for atom in plan.modifier_leaving_atoms}
     atoms = tuple(atom.to_pdb_atom() for atom in modifier.atoms)
-    return tuple(atom for atom in atoms if _atom_identity(atom) not in leaving_identities)
+    return tuple(
+        atom for atom in atoms if _modifier_source_atom_key(atom) not in leaving_identities
+    )
 
 
 def _coords_from_atoms(atoms: tuple[PdbAtomRecord, ...]) -> np.ndarray:
@@ -816,4 +818,17 @@ def _atom_identity(atom: PdbAtomRecord) -> tuple[int | None, int | None, str, in
         atom.insertion_code.upper(),
         atom.residue_name.upper(),
         atom.chain_id.upper(),
+    )
+
+
+def _modifier_source_atom_key(atom: PdbAtomRecord) -> tuple[str, int | str]:
+    """Return a chain-independent atom key within one prepared modifier source."""
+    if atom.atom_index is not None:
+        return ("index", atom.atom_index)
+    if atom.serial is not None:
+        return ("serial", atom.serial)
+    return (
+        "pdb",
+        f"{atom.residue_name.upper()}:{atom.residue_number}:"
+        f"{atom.insertion_code.upper()}:{atom.atom_name.upper()}",
     )

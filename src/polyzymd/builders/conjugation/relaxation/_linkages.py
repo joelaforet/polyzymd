@@ -258,6 +258,19 @@ def _spec_endpoint_serial_pair(
     product_atoms: tuple[PdbAtomRecord, ...],
 ) -> tuple[int, int] | None:
     """Resolve exact product PDB endpoint serials from one mapped attachment spec."""
+    provenance = plan.endpoint_provenance
+    conect_pair = provenance.get("conect_pair", {})
+    protein_serial = conect_pair.get("protein_serial")
+    modifier_serial = conect_pair.get("modifier_serial")
+    if protein_serial is not None and modifier_serial is not None:
+        pair = (int(protein_serial), int(modifier_serial))
+        serials = {atom.serial for atom in product_atoms}
+        if pair[0] not in serials or pair[1] not in serials:
+            raise RuntimeError(
+                "Attachment endpoint provenance references serials absent from product PDB: "
+                f"{pair}"
+            )
+        return pair
     protein = _matching_product_atom(product_atoms, plan.protein_link_atom, plan, role="protein")
     modifier = _matching_product_atom(
         product_atoms,

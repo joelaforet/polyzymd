@@ -36,6 +36,7 @@ class ResolvedMoietySource(BaseModel):
     generation: MultiResidueGenerationResult | None = None
     reactive_sequence_index: int | None = None
     reactive_selector: dict[str, int | str] | None = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
     pdb_fragment: PdbFragmentLoadResult | None = None
 
