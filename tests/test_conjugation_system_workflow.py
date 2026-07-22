@@ -340,7 +340,7 @@ def test_build_solvated_system_uses_conjugation_final_interchange(monkeypatch, t
 
     result = _build_solvated_system(
         config,
-        relaxed_conjugate_topology=object(),
+        relaxed_conjugate_topology=SimpleNamespace(n_molecules=2),
         working_dir=tmp_path,
         polymer_seed=123,
         create_interchange=True,
@@ -348,6 +348,7 @@ def test_build_solvated_system_uses_conjugation_final_interchange(monkeypatch, t
     )
 
     assert result is fake_builder
+    assert fake_builder._n_enzyme_molecules == 2
     assert fake_builder.create_interchange_calls == 0
     assert fake_builder.assign_pdb_identifiers_calls == 1
     assert fake_builder.identifiers_assigned_before_interchange is True
@@ -374,7 +375,7 @@ def test_build_direct_solvated_system_uses_conjugation_final_interchange(
     )
 
     result = _build_direct_solvated_system(
-        relaxed_conjugate_topology=object(),
+        relaxed_conjugate_topology=SimpleNamespace(n_molecules=2),
         working_dir=tmp_path,
         create_interchange=True,
         product_state_pablo_library=product_library,
@@ -383,6 +384,7 @@ def test_build_direct_solvated_system_uses_conjugation_final_interchange(
     )
 
     assert result is fake_builder
+    assert fake_builder._n_enzyme_molecules == 2
     assert fake_builder.create_interchange_calls == 0
     assert fake_builder.assign_pdb_identifiers_calls == 1
     assert fake_builder.identifiers_assigned_before_interchange is True
@@ -672,6 +674,38 @@ def test_product_state_specs_use_exact_assembly_serial_pairs(tmp_path: Path):
         updated[0].product_residue_mappings["1"]["scoped_residue_name"]
         != updated[1].product_residue_mappings["1"]["scoped_residue_name"]
     )
+
+
+def test_product_endpoint_validation_maps_source_chain_b_to_canonical_chain_a() -> None:
+    """A user-facing chain-B selector should validate against canonical protein chain A."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    plan = _generic_resolved_plan(
+        residue_number=567,
+        modifier_residue_number=1,
+        modifier_atom="C001",
+    )
+    plan.protein_link_atom.chain_id = "B"
+    plan.contract.protein_endpoint.selector.chain_id = "B"
+    output_atom = plan.protein_link_atom.model_copy(
+        update={"serial": 8794, "chain_id": "A", "residue_name": "ASX"}
+    )
+
+    workflow_module._validate_product_protein_atom(
+        plan,
+        output_atom,
+        19,
+        expected_chain_id="A",
+    )
+
+
+def test_scoped_pablo_residue_aliases_remain_pdb_width_at_decimal_boundary() -> None:
+    """Large glycans must not produce four-character PDB residue aliases."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    assert workflow_module._scoped_pablo_residue_name(99) == "Z99"
+    assert workflow_module._scoped_pablo_residue_name(100) == "Y00"
+    assert workflow_module._scoped_pablo_residue_name(899) == "R99"
 
 
 def test_product_state_specs_reject_missing_provenance_conect_pair(tmp_path: Path):

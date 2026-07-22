@@ -110,9 +110,11 @@ def test_conjugate_preserves_attached_chain_c_and_normalizes_free_components() -
 
     protein_atom = _Atom(7, name="N", residue_name="ALA")
     protein_atom.metadata.update(chain_id="A", residue_number="1")
+    second_chain_atom = _Atom(7, name="N", residue_name="VAL")
+    second_chain_atom.metadata.update(chain_id="B", residue_number="474")
     attached_atom = _Atom(6, name="C1", residue_name="NAG")
     attached_atom.metadata.update(chain_id="C", residue_number="12")
-    conjugate = _Molecule([protein_atom, attached_atom])
+    conjugate = _Molecule([protein_atom, second_chain_atom, attached_atom])
     free_polymer = _Molecule(
         [_Atom(6, name="C1", residue_name="SBM"), _Atom(6, name="C2", residue_name="SBM")]
     )
@@ -134,6 +136,13 @@ def test_conjugate_preserves_attached_chain_c_and_normalizes_free_components() -
     )
 
     assert protein_atom.metadata["chain_id"] == "A"
+    assert (
+        second_chain_atom.metadata["chain_id"],
+        second_chain_atom.metadata["residue_number"],
+    ) == (
+        "B",
+        "474",
+    )
     assert (attached_atom.metadata["chain_id"], attached_atom.metadata["residue_number"]) == (
         "C",
         "12",
@@ -148,7 +157,9 @@ def test_conjugate_preserves_attached_chain_c_and_normalizes_free_components() -
         "D",
         "2",
     )
-    assert tuple(id(atom) for molecule in topology.molecules for atom in molecule.atoms) == atom_order
+    assert (
+        tuple(id(atom) for molecule in topology.molecules for atom in molecule.atoms) == atom_order
+    )
 
 
 def test_solvent_capacity_and_atom_limit_errors_are_actionable() -> None:
