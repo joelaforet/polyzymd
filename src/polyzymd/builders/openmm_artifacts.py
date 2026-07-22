@@ -369,6 +369,52 @@ def _reject_disconnected_hetatm(pdb_path: Path) -> None:
         )
 
 
+def _materialize_exact_solute_bundle(exact_bundle: Any, solute_dir: Path) -> Path:
+    """Write and revalidate an exact bundle from its serialized OpenMM System."""
+    from openmm import XmlSerializer
+
+    from polyzymd.exporters.exact_openmm import collect_exact_exception_sidecar
+
+    system_path = solute_dir / "system.xml"
+    system_path.write_text(XmlSerializer.serialize(exact_bundle.to_openmm()), encoding="utf-8")
+    serialized_system = XmlSerializer.deserialize(system_path.read_text(encoding="utf-8"))
+    recollected = collect_exact_exception_sidecar(
+        exact_bundle.topology,
+        serialized_system,
+        audit=exact_bundle.audit,
+    )
+    invariant_fields = (
+        "particle_count",
+        "exception_count",
+        "constraint_count",
+        "nonzero_exception_count",
+        "zero_exception_count",
+        "atom_order_hash",
+        "topology_hash",
+        "particle_hash",
+        "exception_hash",
+        "nonbonded_metadata",
+        "constraints",
+    )
+    expected = exact_bundle.sidecar.model_dump(mode="json", include=set(invariant_fields))
+    observed = recollected.model_dump(mode="json", include=set(invariant_fields))
+    if observed != expected:
+        changed = sorted(field for field in invariant_fields if observed[field] != expected[field])
+        raise RuntimeError(
+            "Serialized exact solute System changed authoritative sidecar invariants: "
+            + ", ".join(changed)
+        )
+    exact_bundle.system = serialized_system
+    exact_bundle.sidecar = recollected
+    exact_bundle.sidecar_path = recollected.save(solute_dir / "exact_openmm_exceptions.json")
+    exact_bundle.audit_path = solute_dir / "native_openmm_glycam_audit.json"
+    exact_bundle.audit_path.write_text(
+        json.dumps(exact_bundle.audit, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    return system_path
+
+
 def build_openmm_artifacts(
     *,
     sim_config: object,
@@ -455,20 +501,11 @@ def build_openmm_artifacts(
                 builder.save_topology(pdb_path)
             _reject_disconnected_hetatm(pdb_path)
             if exact_bundle is not None:
-                from openmm import XmlSerializer
-
-                system_path = solute_dir / "system.xml"
-                system_path.write_text(
-                    XmlSerializer.serialize(exact_bundle.to_openmm()), encoding="utf-8"
-                )
-                exact_bundle.sidecar_path = exact_bundle.sidecar.save(
-                    solute_dir / "exact_openmm_exceptions.json"
-                )
-                exact_bundle.audit_path = solute_dir / "native_openmm_glycam_audit.json"
-                exact_bundle.audit_path.write_text(
-                    json.dumps(exact_bundle.audit, indent=2, allow_nan=False) + "\n",
-                    encoding="utf-8",
-                )
+                system_path = _materialize_exact_solute_bundle(exact_bundle, solute_dir)
+                artifact_paths = getattr(result, "artifact_paths", None)
+                if artifact_paths is not None:
+                    artifact_paths["exact_openmm_exceptions"] = exact_bundle.sidecar_path
+                    artifact_paths["native_openmm_glycam_audit"] = exact_bundle.audit_path
             else:
                 system_path = write_openmm_system_xml(
                     builder=builder,

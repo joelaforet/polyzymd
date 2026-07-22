@@ -154,6 +154,7 @@ def create_native_openmm_glycam_handoff(
                 },
                 "restraint_force_count": 0,
                 "barostat_count": 0,
+                "solute_box": _solute_box_audit(converted, requested_padding_nm=padding_nm),
                 "preparation_only_warning": (
                     "A charged PME solute is a preparation/export artifact; it is not "
                     "neutralized, solvated, or NPT-ready."
@@ -239,7 +240,9 @@ def _center_in_orthorhombic_box(
         raise ValueError("Native solute coordinates must all be finite")
     lower = coordinates.min(axis=0)
     upper = coordinates.max(axis=0)
-    lengths = upper - lower + 2.0 * padding_nm
+    requested_lengths = upper - lower + 2.0 * padding_nm
+    minimum_periodic_length = 2.0 * NATIVE_GLYCAM_NONBONDED_CUTOFF_NM + 1.0e-6
+    lengths = np.maximum(requested_lengths, minimum_periodic_length)
     if not np.isfinite(lengths).all() or np.any(lengths <= 0.0):
         raise ValueError("Native solute orthorhombic box lengths must be finite and positive")
     centered = coordinates - (lower + upper) / 2.0 + lengths / 2.0
@@ -257,6 +260,29 @@ def _center_in_orthorhombic_box(
         renamed_atoms=converted.renamed_atoms,
         sage_template_units=converted.sage_template_units,
     )
+
+
+def _solute_box_audit(
+    converted: _ConvertedTopology, *, requested_padding_nm: float
+) -> dict[str, Any]:
+    """Return actual centered-box clearances for exact-solute audit."""
+    from openmm import unit
+
+    coordinates = np.asarray(converted.positions.value_in_unit(unit.nanometer), dtype=float)
+    vectors = converted.topology.getPeriodicBoxVectors().value_in_unit(unit.nanometer)
+    lengths = np.asarray([vectors[index][index] for index in range(3)], dtype=float)
+    lower_clearance = coordinates.min(axis=0)
+    upper_clearance = lengths - coordinates.max(axis=0)
+    return {
+        "requested_padding_nm": requested_padding_nm,
+        "box_lengths_nm": lengths.tolist(),
+        "pme_cutoff_nm": NATIVE_GLYCAM_NONBONDED_CUTOFF_NM,
+        "strictly_greater_than_twice_cutoff": bool(
+            np.all(lengths > 2.0 * NATIVE_GLYCAM_NONBONDED_CUTOFF_NM)
+        ),
+        "lower_face_clearance_nm": lower_clearance.tolist(),
+        "upper_face_clearance_nm": upper_clearance.tolist(),
+    }
 
 
 def _load_native_glycam_force_field() -> Any:

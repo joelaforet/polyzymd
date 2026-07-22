@@ -18,6 +18,7 @@ from polyzymd.builders.conjugation.native_openmm_glycam import (
     _register_disconnected_sage_template_generator,
     _require_crosslinks,
     _require_essential_linkage_terms,
+    _solute_box_audit,
     create_native_openmm_glycam_handoff,
     native_glycam_enabled,
 )
@@ -91,8 +92,8 @@ def test_exact_bundle_exposes_authoritative_openmm_methods() -> None:
     assert bundle.is_exact_export_bundle is True
 
 
-def test_native_solute_box_is_centered_and_has_finite_energy_forces() -> None:
-    """A minimal periodic solute should be centered and numerically evaluable."""
+def test_low_padding_native_solute_box_has_finite_energy_forces() -> None:
+    """Low requested padding must expand to a valid finite periodic PME box."""
     import numpy as np
     from openmm import Context, NonbondedForce, Platform, System, VerletIntegrator, unit
     from openmm.app import Element, Topology
@@ -117,12 +118,16 @@ def test_native_solute_box_is_centered_and_has_finite_energy_forces() -> None:
         renamed_atoms=(),
     )
 
-    boxed = _center_in_orthorhombic_box(converted, padding_nm=1.1)
+    boxed = _center_in_orthorhombic_box(converted, padding_nm=0.1)
     system.setDefaultPeriodicBoxVectors(*boxed.topology.getPeriodicBoxVectors())
 
     coordinates = boxed.positions.value_in_unit(unit.nanometer)
-    assert np.allclose(coordinates.min(axis=0), [1.1, 1.1, 1.1])
-    assert np.allclose(coordinates.max(axis=0), [2.1, 1.1, 1.1])
+    box_audit = _solute_box_audit(boxed, requested_padding_nm=0.1)
+    assert box_audit["strictly_greater_than_twice_cutoff"] is True
+    assert np.all(np.asarray(box_audit["box_lengths_nm"]) > 2.0)
+    assert np.all(np.asarray(box_audit["lower_face_clearance_nm"]) >= 0.1)
+    assert np.all(np.asarray(box_audit["upper_face_clearance_nm"]) >= 0.1)
+    assert np.allclose(coordinates.mean(axis=0), np.asarray(box_audit["box_lengths_nm"]) / 2.0)
     context = Context(system, VerletIntegrator(0.001), Platform.getPlatformByName("Reference"))
     context.setPositions(boxed.positions)
     state = context.getState(getEnergy=True, getForces=True)

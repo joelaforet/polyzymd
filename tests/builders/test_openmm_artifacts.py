@@ -462,6 +462,10 @@ def test_native_exact_solute_materializes_authoritative_bundle(
     result = SimpleNamespace(
         system_builder=builder,
         exact_export_bundle=bundle,
+        artifact_paths={
+            "exact_openmm_exceptions": Path("/temporary/exact_openmm_exceptions.json"),
+            "native_openmm_glycam_audit": Path("/temporary/native_openmm_glycam_audit.json"),
+        },
         require_final_interchange=lambda: bundle,
         get_component_info=lambda: {},
     )
@@ -509,6 +513,22 @@ def test_native_exact_solute_materializes_authoritative_bundle(
     assert build_audit["route"] == "native_openmm_glycam"
     assert build_audit["exact_hashes"]["atom_order"] == sidecar.atom_order_hash
     assert build_audit["barostat_count"] == build_audit["restraint_force_count"] == 0
+    assert result.artifact_paths == {
+        "exact_openmm_exceptions": solute_dir / "exact_openmm_exceptions.json",
+        "native_openmm_glycam_audit": solute_dir / "native_openmm_glycam_audit.json",
+    }
+
+    charge, sigma, epsilon = bundle.system.getForce(0).getParticleParameters(0)
+    bundle.system.getForce(0).setParticleParameters(
+        0, charge + 0.1 * unit.elementary_charge, sigma, epsilon
+    )
+    with pytest.raises(RuntimeError, match="particle_hash"):
+        build_openmm_artifacts(
+            sim_config=_config(conjugation_enabled=True),
+            working_dir=tmp_path / "mutated",
+            polymer_seed=1,
+            scope=BuildScope.SOLUTE,
+        )
 
 
 def test_assembled_solute_rejects_disconnected_lig_hetatm(tmp_path: Path) -> None:
