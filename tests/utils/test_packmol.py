@@ -7,6 +7,8 @@ require a Packmol binary or any heavy simulation dependencies.
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -26,6 +28,33 @@ class _CompletedPackmol:
 
     returncode = 0
     stdout = b"Success!\n"
+
+
+class _TimedOutPackmol:
+    """Minimal Popen process that times out, then terminates cleanly."""
+
+    returncode = -15
+
+    def __init__(self, *, require_kill: bool = False) -> None:
+        self.communicate_calls = 0
+        self.terminated = False
+        self.killed = False
+        self.require_kill = require_kill
+
+    def communicate(self, timeout=None):
+        """Raise immediately on the bounded run and return after terminate."""
+        self.communicate_calls += 1
+        if self.communicate_calls == 1 or (self.communicate_calls == 2 and self.require_kill):
+            raise subprocess.TimeoutExpired("packmol", timeout)
+        return b"Packmol partial progress\n", None
+
+    def terminate(self) -> None:
+        """Record graceful termination."""
+        self.terminated = True
+
+    def kill(self) -> None:
+        """Record forced termination."""
+        self.killed = True
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +369,65 @@ class TestRunPackmol:
         assert output_path.is_absolute()
         assert output_path == (tmp_path / "relative_packmol_work" / _PACKMOL_OUTPUT_FILE).resolve()
         assert (tmp_path / "relative_packmol_work" / "packmol_input.txt").exists()
+
+    @pytest.mark.parametrize("require_kill", [False, True])
+    def test_timeout_preserves_candidate_and_writes_explicit_status(
+        self, monkeypatch, tmp_path, caplog, require_kill
+    ):
+        """A timeout should stop Packmol and retain a candidate for validation."""
+        from polyzymd.utils import packmol
+
+        monkeypatch.setattr(packmol.shutil, "which", MagicMock(return_value="packmol"))
+        process = _TimedOutPackmol(require_kill=require_kill)
+
+        def fake_popen(_binary: str, *, stdin, stdout, stderr):
+            """Create a complete best candidate before the simulated timeout."""
+            del stdin, stdout, stderr
+            Path(_PACKMOL_OUTPUT_FILE).write_text("END\n", encoding="utf-8")
+            return process
+
+        monkeypatch.setattr(packmol.subprocess, "Popen", fake_popen)
+
+        output_path = packmol.run_packmol(
+            "timeout input\n",
+            tmp_path,
+            timeout_seconds=0.01,
+        )
+
+        status = json.loads((tmp_path / "packmol_run_status.json").read_text())
+        assert output_path == (tmp_path / _PACKMOL_OUTPUT_FILE).resolve()
+        assert process.terminated is True
+        assert process.killed is require_kill
+        assert process.communicate_calls == (3 if require_kill else 2)
+        assert status == {
+            "accepted_after_validation": None,
+            "outcome": "timeout_candidate",
+            "output_exists": True,
+            "output_path": str(output_path),
+            "return_code": -15,
+            "timed_out": True,
+        }
+        assert "mandatory structural validation" in caplog.text
+
+    def test_exit_173_writes_explicit_candidate_status(self, monkeypatch, tmp_path, caplog):
+        """Exit 173 should be retained as an imperfect candidate, not inferred from text."""
+        from polyzymd.utils import packmol
+
+        result = _CompletedPackmol()
+        result.returncode = 173
+        result.stdout = b"Packmol stopped without a perfect packing\n"
+        monkeypatch.setattr(packmol.shutil, "which", MagicMock(return_value="packmol"))
+        monkeypatch.setattr(packmol.subprocess, "run", MagicMock(return_value=result))
+
+        output_path = packmol.run_packmol("imperfect input\n", tmp_path)
+        status = json.loads((tmp_path / "packmol_run_status.json").read_text())
+
+        assert output_path == (tmp_path / _PACKMOL_OUTPUT_FILE).resolve()
+        assert status["timed_out"] is False
+        assert status["return_code"] == 173
+        assert status["outcome"] == "imperfect_candidate"
+        assert status["accepted_after_validation"] is None
+        assert "imperfect packing" in caplog.text
 
 
 class _MockTopology:

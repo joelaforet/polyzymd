@@ -146,6 +146,13 @@ def _settings_with_config_defaults(
 ) -> ConjugatedPolymerSystemSettings:
     """Return workflow settings with missing runtime defaults copied from config."""
     workflow_settings = settings or ConjugatedPolymerSystemSettings()
+    if settings is None:
+        conjugation_placement = getattr(getattr(config, "conjugation", None), "placement", None)
+        if conjugation_placement is not None:
+            placement = workflow_settings.placement.model_copy(
+                update={"timeout_seconds": conjugation_placement.timeout_seconds}
+            )
+            workflow_settings = workflow_settings.model_copy(update={"placement": placement})
     platform_name = getattr(getattr(config, "openmm", None), "platform", None)
     if platform_name is None or workflow_settings.relaxation.platform_name is not None:
         return workflow_settings
@@ -867,6 +874,55 @@ def _write_pdb_fragment_coordinate_artifacts(
             include_link_records=True,
         ),
     )
+    try:
+        summary = _summarize_pdb_fragment_true_nonbonded_contacts(
+            output_path,
+            assembly=assembly,
+        )
+    except RuntimeError as error:
+        for placement in placements:
+            _record_final_packmol_validation(
+                placement,
+                accepted=False,
+                diagnostics={
+                    "final_conect_graph_valid": False,
+                    "final_validation_error": str(error),
+                },
+            )
+        raise
+    pair = _format_nonbonded_contact_pair(summary.min_contact)
+    accepted = summary.contact_count == 0
+    diagnostics = {
+        "final_conect_graph_valid": True,
+        "true_nonbonded_heavy_contact_count_below_2_angstrom": summary.contact_count,
+        "min_true_nonbonded_heavy_distance_angstrom": summary.min_distance_angstrom,
+        "min_true_nonbonded_heavy_pair": pair,
+    }
+    for placement in placements:
+        _record_final_packmol_validation(
+            placement,
+            accepted=accepted,
+            diagnostics=diagnostics,
+        )
+    if not accepted:
+        raise RuntimeError(
+            "Joint Packmol placement produced severe final protein-fragment or "
+            "fragment-fragment heavy-atom clashes below "
+            f"{_PDB_FRAGMENT_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM:.1f} A: "
+            f"minimum {summary.min_distance_angstrom:.3f} A for {pair} with "
+            f"{summary.contact_count} true contacts"
+        )
+    placements = tuple(
+        placement.model_copy(
+            update={
+                "min_true_nonbonded_heavy_distance_angstrom": summary.min_distance_angstrom,
+                "min_true_nonbonded_heavy_pair": pair,
+                "true_nonbonded_heavy_contact_count_below_2_angstrom": summary.contact_count,
+                "final_conect_graph_valid": True,
+            }
+        )
+        for placement in placements
+    )
     for spec in specs:
         sidecar_path = spec.fragment.sidecars.get("pdb_fragment_ingestion")
         if sidecar_path is not None:
@@ -938,10 +994,30 @@ def _place_pdb_fragment_coordinate_only_with_packmol(
             output_path=attempt_path,
             attachment_id=getattr(modifier, "name", "pdb_fragment"),
         )
-        summary = _summarize_pdb_fragment_true_nonbonded_contacts(attempt_path)
+        try:
+            summary = _summarize_pdb_fragment_true_nonbonded_contacts(attempt_path)
+        except RuntimeError as error:
+            _record_final_packmol_validation(
+                placement,
+                accepted=False,
+                diagnostics={
+                    "final_conect_graph_valid": False,
+                    "final_validation_error": str(error),
+                },
+            )
+            raise
         min_distance = summary.min_distance_angstrom or float("inf")
         pair = _format_nonbonded_contact_pair(summary.min_contact)
         if summary.contact_count == 0:
+            _record_final_packmol_validation(
+                placement,
+                accepted=True,
+                diagnostics={
+                    "final_conect_graph_valid": True,
+                    "true_nonbonded_heavy_contact_count_below_2_angstrom": 0,
+                    "min_true_nonbonded_heavy_distance_angstrom": summary.min_distance_angstrom,
+                },
+            )
             placement = placement.model_copy(
                 update={
                     "min_true_nonbonded_heavy_distance_angstrom": summary.min_distance_angstrom,
@@ -959,6 +1035,16 @@ def _place_pdb_fragment_coordinate_only_with_packmol(
                     attachment_id=getattr(modifier, "name", "pdb_fragment"),
                 )
             return placement, assembly
+        _record_final_packmol_validation(
+            placement,
+            accepted=False,
+            diagnostics={
+                "final_conect_graph_valid": True,
+                "true_nonbonded_heavy_contact_count_below_2_angstrom": summary.contact_count,
+                "min_true_nonbonded_heavy_distance_angstrom": summary.min_distance_angstrom,
+                "min_true_nonbonded_heavy_pair": pair,
+            },
+        )
         failures.append(
             _format_pdb_fragment_packmol_attempt_diagnostic(
                 attempt_index=attempt_index,
@@ -973,6 +1059,23 @@ def _place_pdb_fragment_coordinate_only_with_packmol(
         "protein-fragment heavy-atom clashes below "
         f"{_PDB_FRAGMENT_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM:.1f} A. "
         + "; ".join(failures)
+    )
+
+
+def _record_final_packmol_validation(
+    placement: Any,
+    *,
+    accepted: bool,
+    diagnostics: dict[str, object],
+) -> Path:
+    """Persist final-graph and graph-aware clash validation for a candidate."""
+    from polyzymd.utils.packmol import record_packmol_validation
+
+    work_dir = Path(placement.packmol_input_path).parent
+    return record_packmol_validation(
+        work_dir,
+        accepted=accepted,
+        diagnostics=diagnostics,
     )
 
 
@@ -999,7 +1102,11 @@ def _write_pdb_fragment_placed_artifact(
     )
 
 
-def _summarize_pdb_fragment_true_nonbonded_contacts(output_path: Path) -> Any:
+def _summarize_pdb_fragment_true_nonbonded_contacts(
+    output_path: Path,
+    *,
+    assembly: Any | None = None,
+) -> Any:
     """Return graph-distance-aware clash metrics for a final PDB-fragment PDB."""
     atoms = tuple(parse_structure_pdb_atom_records(output_path))
     bonds = _pdb_fragment_final_clash_graph_bonds(output_path, atoms)
@@ -1007,13 +1114,44 @@ def _summarize_pdb_fragment_true_nonbonded_contacts(output_path: Path) -> Any:
         raise RuntimeError(
             f"PDB-fragment coordinate-only CONECT graph has unknown endpoints: {output_path}"
         )
+    include_pair = _is_protein_fragment_pair
+    if assembly is not None:
+        include_pair = _multi_fragment_clash_pair_filter(atoms, assembly)
     return summarize_nonbonded_heavy_clashes(
         atoms,
         bonds,
         cutoff_angstrom=_PDB_FRAGMENT_COORDINATE_ONLY_MIN_HEAVY_NONBONDED_ANGSTROM,
         excluded_bond_depth=3,
-        include_pair=_is_protein_fragment_pair,
+        include_pair=include_pair,
     )
+
+
+def _multi_fragment_clash_pair_filter(atoms: tuple[PdbAtomRecord, ...], assembly: Any) -> Any:
+    """Return a filter covering protein-fragment and cross-fragment atom pairs."""
+    fragment_by_serial: dict[int, str] = {}
+    for source_key, mapping in assembly.atom_mappings.items():
+        if not source_key.startswith("fragment_"):
+            continue
+        target_serial = mapping.get("target_serial")
+        if isinstance(target_serial, int):
+            fragment_by_serial[target_serial] = source_key.split(":", maxsplit=1)[0]
+    fragment_serials = {
+        atom.serial for atom in atoms if atom.chain_id.strip().upper() == "C" and atom.serial
+    }
+    if fragment_serials != set(fragment_by_serial):
+        raise RuntimeError(
+            "Final multi-fragment clash validation could not map every chain C atom to its "
+            "source fragment"
+        )
+
+    def include_pair(left: PdbAtomRecord, right: PdbAtomRecord) -> bool:
+        if _is_protein_fragment_pair(left, right):
+            return True
+        if left.chain_id.strip().upper() != "C" or right.chain_id.strip().upper() != "C":
+            return False
+        return fragment_by_serial[left.serial] != fragment_by_serial[right.serial]
+
+    return include_pair
 
 
 def _format_nonbonded_contact_pair(contact: Any | None) -> str:
@@ -1058,6 +1196,12 @@ def _safe_pdb_atom_count(path: Path) -> int | None:
 
 def _packmol_exit_code_from_log(error_log_path: Path) -> int | None:
     """Return the Packmol exit code recorded in a retained error log."""
+    from polyzymd.utils.packmol import load_packmol_status
+
+    status = load_packmol_status(error_log_path.parent)
+    return_code = status.get("return_code")
+    if isinstance(return_code, int):
+        return return_code
     if not error_log_path.exists():
         return 0
     text = error_log_path.read_text(encoding="utf-8", errors="replace")

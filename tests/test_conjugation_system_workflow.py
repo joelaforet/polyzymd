@@ -202,6 +202,37 @@ def test_system_workflow_settings_enable_public_product_state_defaults():
     assert settings.protein_canonicalization.ph == pytest.approx(7.0)
 
 
+def test_system_workflow_reads_packmol_timeout_from_public_config():
+    """A YAML-backed conjugation placement timeout should reach the Packmol settings."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    config = SimpleNamespace(
+        conjugation=SimpleNamespace(placement=SimpleNamespace(timeout_seconds=12.5)),
+        openmm=None,
+    )
+
+    settings = workflow_module._settings_with_config_defaults(None, config)
+
+    assert settings.placement.timeout_seconds == pytest.approx(12.5)
+
+
+def test_explicit_workflow_settings_override_public_packmol_timeout():
+    """Programmatic workflow settings should retain their historical override priority."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    config = SimpleNamespace(
+        conjugation=SimpleNamespace(placement=SimpleNamespace(timeout_seconds=12.5)),
+        openmm=None,
+    )
+    explicit = workflow_module.ConjugatedPolymerSystemSettings(
+        placement=workflow_module.PackmolModifierPlacementSettings(timeout_seconds=44.0)
+    )
+
+    settings = workflow_module._settings_with_config_defaults(explicit, config)
+
+    assert settings.placement.timeout_seconds == pytest.approx(44.0)
+
+
 def test_native_reference_overlay_mapping_is_strict() -> None:
     """Native-to-baseline mapping should reject unmapped and ambiguous atoms."""
 
@@ -605,6 +636,105 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     assert calls["protein_products"] == ("ASX", "ASX")
     assert calls["parameterize"] == 1
     assert calls["validation"] == 0
+
+
+@pytest.mark.parametrize("overlap", [True, False])
+@pytest.mark.parametrize("outcome", ["timeout_candidate", "imperfect_candidate"])
+def test_multi_fragment_coordinate_output_validates_joint_clashes(
+    monkeypatch, tmp_path: Path, overlap: bool, outcome: str
+) -> None:
+    """Joint placement acceptance must include cross-fragment final-graph clashes."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    work_dir = tmp_path / "construction" / "packmol_modifier_placement"
+    work_dir.mkdir(parents=True)
+    status_path = work_dir / "packmol_run_status.json"
+    status_path.write_text(
+        json.dumps(
+            {
+                "timed_out": outcome == "timeout_candidate",
+                "return_code": -15 if outcome == "timeout_candidate" else 173,
+                "outcome": outcome,
+                "accepted_after_validation": True,
+            }
+        )
+    )
+    fragments = tuple(
+        _generated_fragment(residue_name="NAG", residue_number=index) for index in (1, 2)
+    )
+    placements = tuple(
+        PackmolModifierPlacementResult(
+            placed_modifier=fragment.to_placed_fragment(),
+            packmol_input_path=work_dir / "packmol.inp",
+            packmol_output_path=work_dir / "packmol_output.pdb",
+            protein_sterics_pdb_path=work_dir / "protein.pdb",
+            modifier_pdb_path=work_dir / f"modifier_{index}.pdb",
+            packmol_input_text="",
+            target_bond_length_angstrom=1.45,
+            placed_bond_length_angstrom=1.45,
+            min_modifier_protein_distance_angstrom=2.5,
+            packmol_exit_status=(
+                "timeout_accepted" if outcome == "timeout_candidate" else "173_imperfect_accepted"
+            ),
+        )
+        for index, fragment in enumerate(fragments, start=1)
+    )
+    specs = tuple(
+        SimpleNamespace(
+            fragment=SimpleNamespace(name=fragment.name, sidecars={}),
+            to_pdb_linkage_attachment=lambda: object(),
+        )
+        for fragment in fragments
+    )
+
+    def fake_write(_protein, _fragments, _attachments, output_path, _options):
+        second_x = 1.45 if overlap else 11.45
+        Path(output_path).write_text(
+            _pdb_line(1, "ND2 ", "NLN", "A", 1, x=0.0, element="N")
+            + _pdb_line(2, "ND2 ", "NLN", "A", 2, x=10.0, element="N")
+            + _pdb_line(3, "C1  ", "NAG", "C", 3, x=1.45, element="C")
+            + _pdb_line(4, "C1  ", "NAG", "C", 4, x=second_x, element="C")
+            + "CONECT    1    3\nCONECT    2    4\nEND\n"
+        )
+        return CrosslinkedPdbAssemblyResult(
+            output_path=Path(output_path),
+            protein_atom_count=2,
+            polymer_atom_count=2,
+            removed_protein_atom_count=0,
+            removed_polymer_atom_count=0,
+            removed_atom_serials=(),
+            removed_atom_names=(),
+            added_conect_pair=(1, 3),
+            added_conect_pairs=((1, 3), (2, 4)),
+            atom_mappings={
+                "fragment_1:1:C1": {"target_serial": 3},
+                "fragment_2:1:C1": {"target_serial": 4},
+            },
+        )
+
+    monkeypatch.setattr(
+        workflow_module, "place_modifiers_with_resolved_plans", lambda *args, **kwargs: placements
+    )
+    monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
+
+    def call():
+        return workflow_module._write_pdb_fragment_coordinate_artifacts(
+            protein_pdb_path=tmp_path / "protein.pdb",
+            specs=specs,
+            construction_dir=tmp_path / "construction",
+        )
+
+    if overlap:
+        with pytest.raises(RuntimeError, match="fragment-fragment"):
+            call()
+    else:
+        _, _, accepted_placements = call()
+        assert all(item.final_conect_graph_valid is True for item in accepted_placements)
+    status = json.loads(status_path.read_text())
+    assert status["accepted_after_validation"] is not overlap
+    assert status["validation"]["final_conect_graph_valid"] is True
+    contact_count = status["validation"]["true_nonbonded_heavy_contact_count_below_2_angstrom"]
+    assert (contact_count > 0) is overlap
 
 
 def test_product_state_specs_use_exact_assembly_serial_pairs(tmp_path: Path):
@@ -1799,10 +1929,11 @@ def _pdb_line(
     residue_number: int,
     *,
     element: str = "C",
+    x: float = 0.0,
 ) -> str:
     return (
         f"ATOM  {serial:5d} {atom_name_field[:4]} {residue_name:>3} {chain_id}"
-        f"{residue_number:4d}       0.000   0.000   0.000  1.00  0.00"
+        f"{residue_number:4d}    {x:8.3f}   0.000   0.000  1.00  0.00"
         f"          {element:>2}  \n"
     )
 

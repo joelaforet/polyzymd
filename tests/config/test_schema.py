@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from polyzymd.config.schema import SimulationConfig
+from polyzymd.config.schema import ConjugationConfig, SimulationConfig
 
 
 @pytest.fixture
@@ -100,6 +100,29 @@ class TestImports:
         assert len(parts) >= 2, f"Version {version} should have at least major.minor"
         assert parts[0].isdigit(), f"Major version should be numeric: {parts[0]}"
         assert parts[1].isdigit(), f"Minor version should be numeric: {parts[1]}"
+
+
+class TestConjugationPlacementConfig:
+    """Test the public Packmol timeout policy."""
+
+    def test_packmol_timeout_defaults_to_fifteen_minutes(self):
+        """Conjugation placement should be bounded by default."""
+        config = ConjugationConfig()
+
+        assert config.placement.timeout_seconds == pytest.approx(900.0)
+
+    def test_packmol_timeout_accepts_seconds_or_null(self):
+        """Users should be able to shorten or explicitly disable the timeout."""
+        bounded = ConjugationConfig(placement={"timeout_seconds": 30.0})
+        unbounded = ConjugationConfig(placement={"timeout_seconds": None})
+
+        assert bounded.placement.timeout_seconds == pytest.approx(30.0)
+        assert unbounded.placement.timeout_seconds is None
+
+    def test_packmol_timeout_rejects_nonpositive_values(self):
+        """A configured timeout must be positive."""
+        with pytest.raises(ValidationError, match="timeout_seconds"):
+            ConjugationConfig(placement={"timeout_seconds": 0.0})
 
 
 class TestConfigValidation:

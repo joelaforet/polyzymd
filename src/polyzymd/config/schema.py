@@ -906,7 +906,7 @@ class ConjugationMechanismConfig(BaseModel):
 
 
 class ConjugationPlacementConfig(BaseModel):
-    """Placeholder for covalent moiety placement settings."""
+    """User-facing covalent moiety placement policy."""
 
     strategy: str = Field("preserve_existing", description="Placement strategy placeholder")
     target_bond_length_angstrom: float | None = Field(
@@ -918,6 +918,14 @@ class ConjugationPlacementConfig(BaseModel):
         1.5,
         gt=0.0,
         description="Steric clash cutoff for future placement workflows",
+    )
+    timeout_seconds: float | None = Field(
+        900.0,
+        gt=0.0,
+        description=(
+            "Maximum wall time for each Packmol placement attempt; null disables the timeout. "
+            "A timed-out best candidate proceeds only after structural validation."
+        ),
     )
 
 
@@ -1017,6 +1025,10 @@ class ConjugationConfig(BaseModel):
     chain_policy: ConjugationChainPolicyConfig = Field(
         default_factory=ConjugationChainPolicyConfig,
         description="Component chain assignment policy",
+    )
+    placement: ConjugationPlacementConfig = Field(
+        default_factory=ConjugationPlacementConfig,
+        description="Global placement execution policy for all enabled attachments",
     )
     attachments: list[ConjugationAttachmentConfig] = Field(
         default_factory=list,

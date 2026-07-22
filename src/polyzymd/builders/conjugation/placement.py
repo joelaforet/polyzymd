@@ -93,6 +93,7 @@ class PackmolModifierPlacementSettings(BaseModel):
     target_bond_length_angstrom: float = Field(1.33, gt=0)
     movebadrandom: bool = True
     nloop: int = Field(500, gt=0)
+    timeout_seconds: float | None = Field(900.0, gt=0)
     work_dir_name: str = "packmol_modifier_placement"
 
 
@@ -255,12 +256,20 @@ def place_modifier_with_resolved_plan(
     packmol_input_path = work_dir / "packmol.inp"
     packmol_input_path.write_text(packmol_input_text, encoding="utf-8")
 
-    executor = run_packmol_func or run_packmol
-    packmol_output_path = Path(executor(packmol_input_text, work_dir))
+    packmol_output_path = Path(
+        _execute_packmol(
+            packmol_input_text,
+            work_dir,
+            timeout_seconds=placement_settings.timeout_seconds,
+            run_packmol_func=run_packmol_func,
+            default_executor=run_packmol,
+        )
+    )
     expected_atoms = len(shifted_protein) + len(retained_modifier_atoms)
     packed_coords = _read_packmol_output_coords(
         packmol_output_path,
         expected_atom_count=expected_atoms,
+        expected_structure_paths=(protein_sterics_path, modifier_path),
         input_path=packmol_input_path,
         error_log_path=work_dir / "packmol_error.log",
     )
@@ -281,11 +290,17 @@ def place_modifier_with_resolved_plan(
 
     placed_reactive = _coord(_product_modifier_atom(placed_fragment, plan))
     placed_bond_length = float(np.linalg.norm(placed_reactive - _coord(plan.protein_link_atom)))
+    _validate_placed_bond_length(placed_bond_length, plan.target_bond_length_angstrom)
     min_distance = _minimum_distance(
         _coords_from_atoms(tuple(placed_fragment.atoms)),
         _coords_from_atoms(protein_steric_atoms),
     )
 
+    _record_validated_packmol_candidate(
+        work_dir,
+        atom_count=expected_atoms,
+        placed_bond_lengths=(placed_bond_length,),
+    )
     return PackmolModifierPlacementResult(
         placed_modifier=placed_fragment,
         packmol_input_path=packmol_input_path,
@@ -397,18 +412,27 @@ def place_modifiers_with_resolved_plans(
     packmol_input_path = work_dir / "packmol.inp"
     packmol_input_path.write_text(packmol_input_text, encoding="utf-8")
 
-    executor = run_packmol_func or run_packmol
-    packmol_output_path = Path(executor(packmol_input_text, work_dir))
+    packmol_output_path = Path(
+        _execute_packmol(
+            packmol_input_text,
+            work_dir,
+            timeout_seconds=placement_settings.timeout_seconds,
+            run_packmol_func=run_packmol_func,
+            default_executor=run_packmol,
+        )
+    )
     retained_counts = tuple(len(atoms) for atoms in retained_atom_groups)
     expected_atoms = len(shifted_protein) + sum(retained_counts)
     packed_coords = _read_packmol_output_coords(
         packmol_output_path,
         expected_atom_count=expected_atoms,
+        expected_structure_paths=(protein_sterics_path, *modifier_paths),
         input_path=packmol_input_path,
         error_log_path=work_dir / "packmol_error.log",
     )
 
     results: list[PackmolModifierPlacementResult] = []
+    placed_bond_lengths: list[float] = []
     start = len(shifted_protein)
     for modifier, plan, retained_coords, full_coords, count, modifier_path in zip(
         modifiers,
@@ -437,6 +461,8 @@ def place_modifiers_with_resolved_plans(
 
         placed_reactive = _coord(_product_modifier_atom(placed_fragment, plan))
         placed_bond_length = float(np.linalg.norm(placed_reactive - _coord(plan.protein_link_atom)))
+        _validate_placed_bond_length(placed_bond_length, plan.target_bond_length_angstrom)
+        placed_bond_lengths.append(placed_bond_length)
         min_distance = _minimum_distance(
             _coords_from_atoms(tuple(placed_fragment.atoms)),
             _coords_from_atoms(protein_steric_atoms),
@@ -457,6 +483,11 @@ def place_modifiers_with_resolved_plans(
             )
         )
 
+    _record_validated_packmol_candidate(
+        work_dir,
+        atom_count=expected_atoms,
+        placed_bond_lengths=tuple(placed_bond_lengths),
+    )
     return tuple(results)
 
 
@@ -592,6 +623,7 @@ def _read_packmol_output_coords(
     path: Path,
     *,
     expected_atom_count: int,
+    expected_structure_paths: tuple[Path, ...],
     input_path: Path,
     error_log_path: Path,
 ) -> np.ndarray:
@@ -605,8 +637,9 @@ def _read_packmol_output_coords(
     output_exists = output_path.exists()
     atom_count: int | None = None
     try:
-        coords = _read_pdb_coords(output_path)
-        atom_count = int(len(coords))
+        output_atoms = parse_structure_pdb_atom_records(output_path, require_atoms=True)
+        coords = _coords_from_atoms(output_atoms)
+        atom_count = int(len(output_atoms))
     except (OSError, ValueError) as error:
         raise PackmolOutputValidationError(
             message=str(error),
@@ -629,7 +662,94 @@ def _read_packmol_output_coords(
             atom_count=atom_count,
             expected_atom_count=expected_atom_count,
         )
+    expected_atoms = tuple(
+        atom
+        for structure_path in expected_structure_paths
+        for atom in parse_structure_pdb_atom_records(structure_path, require_atoms=True)
+    )
+    expected_order = tuple(_packmol_atom_order_identity(atom) for atom in expected_atoms)
+    observed_order = tuple(_packmol_atom_order_identity(atom) for atom in output_atoms)
+    if observed_order != expected_order:
+        raise PackmolOutputValidationError(
+            message="Packmol output atom identities or ordering differ from its input structures",
+            output_path=output_path,
+            input_path=input_path,
+            error_log_path=error_log_path,
+            exit_code=_packmol_exit_code(error_log_path),
+            output_exists=output_exists,
+            atom_count=atom_count,
+            expected_atom_count=expected_atom_count,
+        )
+    if not np.isfinite(coords).all():
+        raise PackmolOutputValidationError(
+            message="Packmol output contains non-finite coordinates",
+            output_path=output_path,
+            input_path=input_path,
+            error_log_path=error_log_path,
+            exit_code=_packmol_exit_code(error_log_path),
+            output_exists=output_exists,
+            atom_count=atom_count,
+            expected_atom_count=expected_atom_count,
+        )
     return coords
+
+
+def _packmol_atom_order_identity(atom: PdbAtomRecord) -> tuple[str, str]:
+    """Return the atom fields Packmol must preserve in input order.
+
+    Residue labels are intentionally excluded because Packmol and established
+    test executors may rewrite placeholder residue names while preserving the
+    ordered atoms themselves.
+    """
+    return (
+        atom.atom_name.strip().upper(),
+        (atom.element or "").strip().upper(),
+    )
+
+
+def _execute_packmol(
+    input_text: str,
+    work_dir: Path,
+    *,
+    timeout_seconds: float | None,
+    run_packmol_func: Any | None,
+    default_executor: Any,
+) -> Path:
+    """Run Packmol while preserving the historical two-argument test hook."""
+    if run_packmol_func is not None:
+        return Path(run_packmol_func(input_text, work_dir))
+    return Path(default_executor(input_text, work_dir, timeout_seconds=timeout_seconds))
+
+
+def _validate_placed_bond_length(observed: float, expected: float) -> None:
+    """Require a finite post-snap covalent endpoint distance."""
+    if not np.isfinite(observed) or not np.isclose(observed, expected, atol=1.0e-6, rtol=0.0):
+        raise RuntimeError(
+            "Placed modifier reactive endpoint failed post-snap bond validation: "
+            f"observed={observed!r} A, expected={expected:.6f} A"
+        )
+
+
+def _record_validated_packmol_candidate(
+    work_dir: Path,
+    *,
+    atom_count: int,
+    placed_bond_lengths: tuple[float, ...],
+) -> Path:
+    """Persist placement-level validation for a Packmol candidate."""
+    from polyzymd.utils.packmol import record_packmol_validation
+
+    return record_packmol_validation(
+        work_dir,
+        accepted=True,
+        diagnostics={
+            "atom_count": atom_count,
+            "atom_order_valid": True,
+            "coordinates_finite": True,
+            "placed_bond_lengths_angstrom": list(placed_bond_lengths),
+            "placed_bond_lengths_valid": True,
+        },
+    )
 
 
 def _retained_local_index(
@@ -780,6 +900,15 @@ def _minimum_distance_numpy(points_a: np.ndarray, points_b: np.ndarray) -> float
 
 def _packmol_exit_status(work_dir: Path) -> str:
     """Return the accepted Packmol exit status from retained Packmol artifacts."""
+    from polyzymd.utils.packmol import load_packmol_status
+
+    status = load_packmol_status(work_dir)
+    if status.get("timed_out") is True:
+        return "timeout_accepted"
+    if status.get("return_code") == 173:
+        return "173_imperfect_accepted"
+    if status.get("return_code") == 0:
+        return "0_success"
     error_log_path = work_dir / "packmol_error.log"
     if not error_log_path.exists():
         return "0_success"
@@ -791,6 +920,12 @@ def _packmol_exit_status(work_dir: Path) -> str:
 
 def _packmol_exit_code(error_log_path: Path) -> int | None:
     """Return the Packmol exit code recorded in an error log when available."""
+    from polyzymd.utils.packmol import load_packmol_status
+
+    status = load_packmol_status(error_log_path.parent)
+    return_code = status.get("return_code")
+    if isinstance(return_code, int):
+        return return_code
     if not error_log_path.exists():
         return 0
     text = error_log_path.read_text(encoding="utf-8", errors="replace")

@@ -18,6 +18,7 @@ from polyzymd.builders.conjugation._linkage import (
     resolve_explicit_linkage_contract,
 )
 from polyzymd.builders.conjugation.placement import (
+    PackmolOutputValidationError,
     _minimum_distance,
     place_modifier_with_packmol,
     place_modifier_with_resolved_plan,
@@ -234,6 +235,51 @@ def test_joint_resolved_plan_placement_uses_one_packmol_run_for_two_fragments(
     assert input_text.count("inside sphere") == 2
     assert "outside sphere" not in input_text
     assert all(abs(result.placed_bond_length_angstrom - 1.45) < 1.0e-6 for result in results)
+
+
+@pytest.mark.parametrize("corruption", ["reordered", "nonfinite"])
+def test_placement_rejects_complete_but_invalid_best_candidate(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    """Count-complete candidates must still preserve order and finite coordinates."""
+    protein_path = _protein_pdb(tmp_path)
+    modifier = _generated_modifier()
+    plan = resolve_explicit_linkage_contract(
+        protein_path,
+        modifier,
+        _explicit_contract(target_bond_length=1.45),
+        fragment=_prepared(modifier),
+    )
+
+    def fake_run_packmol(_input_text: str, work_dir: Path) -> Path:
+        """Write a count-complete candidate with one structural defect."""
+        output_path = work_dir / "packmol_output.pdb"
+        protein_lines = [
+            line
+            for line in (work_dir / "protein_fixed_sterics.pdb").read_text().splitlines(True)
+            if line.startswith(("ATOM", "HETATM"))
+        ]
+        modifier_lines = [
+            line
+            for line in (work_dir / "modifier_retained.pdb").read_text().splitlines(True)
+            if line.startswith(("ATOM", "HETATM"))
+        ]
+        if corruption == "reordered":
+            modifier_lines = list(reversed(modifier_lines))
+        else:
+            modifier_lines[0] = f"{modifier_lines[0][:30]}{'nan':>8s}{modifier_lines[0][38:]}"
+        output_path.write_text("".join([*protein_lines, *modifier_lines, "END\n"]))
+        return output_path
+
+    with pytest.raises(PackmolOutputValidationError):
+        place_modifier_with_resolved_plan(
+            protein_path,
+            modifier,
+            plan,
+            tmp_path,
+            run_packmol_func=fake_run_packmol,
+        )
 
 
 def test_minimum_distance_uses_mdanalysis_distance_array(monkeypatch):

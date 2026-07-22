@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -645,6 +646,58 @@ def test_coordinate_only_accepts_valid_code_173_packmol_output(tmp_path: Path) -
     assert calls == [tmp_path / "construction" / "packmol_modifier_placement"]
     assert result.construction.placement.packmol_exit_status == "173_imperfect_accepted"
     assert result.construction.placement.final_conect_graph_valid is True
+
+
+def test_coordinate_only_accepts_valid_timeout_candidate_with_audit(tmp_path: Path) -> None:
+    """A complete timeout candidate should proceed only after full placement validation."""
+    glycan_path = _write_glygen_fixture(tmp_path / "glycan_conect.pdb", include_conect=True)
+    protein_path = _write_asn_fixture(tmp_path / "asn.pdb")
+    calls: list[Path] = []
+    valid_executor = _fake_packmol_executor(calls)
+
+    def fake_packmol(input_text: str, work_dir: Path | str) -> Path:
+        """Write a valid candidate and explicit simulated timeout status."""
+        output_path = valid_executor(input_text, work_dir)
+        directory = Path(work_dir)
+        (directory / "packmol_error.log").write_text(
+            "Packmol stopped after configured timeout\n", encoding="utf-8"
+        )
+        (directory / "packmol_run_status.json").write_text(
+            json.dumps(
+                {
+                    "timed_out": True,
+                    "return_code": -15,
+                    "outcome": "timeout_candidate",
+                    "output_path": str(output_path),
+                    "output_exists": True,
+                    "accepted_after_validation": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return output_path
+
+    result, _spec = _build_coordinate_only_fixture_result_with_executor(
+        tmp_path,
+        protein_path,
+        glycan_path,
+        fake_packmol,
+    )
+
+    placement = result.construction.placement
+    status_path = Path(placement.packmol_input_path).with_name("packmol_run_status.json")
+    status = json.loads(status_path.read_text())
+    assert calls == [tmp_path / "construction" / "packmol_modifier_placement"]
+    assert placement.packmol_exit_status == "timeout_accepted"
+    assert placement.final_conect_graph_valid is True
+    assert status["timed_out"] is True
+    assert status["return_code"] == -15
+    assert status["accepted_after_validation"] is True
+    assert status["validation"]["atom_order_valid"] is True
+    assert status["validation"]["coordinates_finite"] is True
+    assert status["validation"]["placed_bond_lengths_valid"] is True
+    assert status["validation"]["final_conect_graph_valid"] is True
+    assert status["validation"]["true_nonbonded_heavy_contact_count_below_2_angstrom"] == 0
 
 
 def test_coordinate_only_classifies_glycosidic_neighbors_by_graph_distance(
