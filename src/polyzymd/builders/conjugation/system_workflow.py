@@ -276,6 +276,14 @@ def build_conjugated_polymer_system_from_config(
     resolved_force_fields = resolve_conjugate_force_fields(config)
     use_native_glycam = native_glycam_enabled(config)
     use_mixed_overlay = resolved_force_fields.route == "mixed_overlay"
+    if workflow_settings.build_scope is BuildScope.SOLUTE and (
+        use_native_glycam or use_mixed_overlay
+    ):
+        route = "native_openmm_glycam" if use_native_glycam else resolved_force_fields.route
+        raise NotImplementedError(
+            "build scope 'solute' supports only the generic OpenFF parameterization route; "
+            f"resolved native/exact route '{route}' is not yet supported"
+        )
     if (
         _uses_pdb_fragment_sources(attachments)
         and workflow_settings.pdb_fragment_output_mode == "coordinate_only"
@@ -355,6 +363,34 @@ def build_conjugated_polymer_system_from_config(
             else None
         ),
     )
+
+    if workflow_settings.build_scope is BuildScope.SOLUTE:
+        builder = _build_isolated_conjugate_system(
+            config,
+            relaxed_conjugate_topology=relaxed_topology,
+            working_dir=artifact_dir,
+            product_state_pablo_library=getattr(construction, "product_state_pablo_library", None),
+            parameterization_settings=workflow_settings.conjugate_parameterization,
+        )
+        solute_pdb_path = artifact_dir / "solute.pdb"
+        builder.save_topology(solute_pdb_path)
+        result = ConjugationResult(
+            status="solute",
+            output_dir=artifact_dir,
+            construction=construction,
+            protein_canonicalization=protein_canonicalization,
+            relaxed_conjugate_pdb_path=relaxed_pdb,
+            solvated_pdb_path=solute_pdb_path,
+            final_interchange_created=True,
+            modifier=modifiers[0],
+            modifiers=modifiers,
+            attachment_specs=specs,
+            relaxed_conjugate_topology=relaxed_topology,
+            solvated_topology=builder.solvated_topology,
+            final_interchange=builder.interchange,
+            system_builder=builder,
+        )
+        return result
 
     builder = _build_solvated_system(
         config,
@@ -2268,6 +2304,31 @@ def _build_solvated_system(
             settings=parameterization_settings,
         )
 
+    return builder
+
+
+def _build_isolated_conjugate_system(
+    config: SimulationConfig,
+    *,
+    relaxed_conjugate_topology: Any,
+    working_dir: Path,
+    product_state_pablo_library: Any | None = None,
+    parameterization_settings: InterchangeParameterizationSettings | None = None,
+) -> SystemBuilder:
+    """Parameterize the assembled conjugate without secondary components."""
+    builder = SystemBuilder.from_config(config)
+    builder._working_dir = working_dir
+    builder._enzyme_topology = relaxed_conjugate_topology
+    builder._n_enzyme_molecules = _topology_molecule_count(relaxed_conjugate_topology)
+    builder._preserve_enzyme_chain_ids = True
+    builder.combine_solutes()
+    builder._solvated_topology = builder._combined_topology
+    builder._assign_pdb_identifiers()
+    create_final_conjugated_interchange(
+        builder,
+        product_state_pablo_library=product_state_pablo_library,
+        settings=parameterization_settings,
+    )
     return builder
 
 

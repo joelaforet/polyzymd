@@ -614,8 +614,6 @@ def build(
         colored_echo(f"Configuration validated: {sim_config.name}", phase="build")
         configured_scope = getattr(getattr(sim_config, "build", None), "scope", BuildScope.SYSTEM)
         build_scope = BuildScope(scope) if scope is not None else BuildScope(configured_scope)
-        if build_scope is BuildScope.SOLUTE:
-            raise NotImplementedError("build scope 'solute' is not yet implemented")
         if build_scope is BuildScope.STRUCTURE and not _conjugation_enabled(sim_config):
             raise ValueError("build scope 'structure' requires conjugation.enabled: true")
         if build_scope is not BuildScope.SYSTEM and export_format is not None:
@@ -744,7 +742,13 @@ def build(
                     colored_echo(f"    Export dir:  {export_dir}", phase="build")
             colored_echo(phase="build")
 
-            if build_scope is BuildScope.STRUCTURE:
+            if build_scope is BuildScope.SOLUTE:
+                colored_echo("Files to Generate (Isolated Primary Component):", phase="build")
+                colored_echo("  Per replicate:", phase="build")
+                colored_echo("    - solute/solute.pdb", phase="build")
+                colored_echo("    - solute/system.xml", phase="build")
+                colored_echo("    - solute/openmm_build_audit.json", phase="build")
+            elif build_scope is BuildScope.STRUCTURE:
                 colored_echo("Files to Generate (Conjugate Structure):", phase="build")
                 colored_echo("  Per replicate:", phase="build")
                 colored_echo(
@@ -858,7 +862,10 @@ def build(
                 )
 
             else:
-                if build_scope is BuildScope.STRUCTURE:
+                if build_scope is BuildScope.SOLUTE:
+                    colored_echo("Isolated primary component built successfully!", phase="build")
+                    colored_echo(f"Output directory: {working_dir / 'solute'}", phase="build")
+                elif build_scope is BuildScope.STRUCTURE:
                     _print_conjugation_structure_build_summary(artifacts, working_dir)
                 elif artifacts.conjugation_enabled:
                     _print_conjugation_openmm_build_summary(artifacts.result, working_dir)

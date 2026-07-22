@@ -959,6 +959,29 @@ class SystemBuilder:
 
         return self._interchange
 
+    def build_isolated_primary_from_config(self, config: "SimulationConfig") -> Interchange:
+        """Parameterize only the configured primary component.
+
+        The primary component for the standard route is the assembled enzyme
+        topology. Optional substrate, free-polymer, packing, solvent, and ion
+        stages are intentionally not entered.
+        """
+        LOGGER.info("Building isolated primary component: %s", config.enzyme.name)
+        source_pdb = Path(config.enzyme.pdb_path)
+        if any(
+            line.startswith("HETATM")
+            for line in source_pdb.read_text(encoding="utf-8").splitlines()
+        ):
+            raise ValueError(
+                "build scope 'solute' requires a primary-structure-only enzyme PDB; remove "
+                "unowned HETATM components such as crystallographic water, ions, or ligands"
+            )
+        self.build_enzyme(config.enzyme.pdb_path)
+        self.combine_solutes()
+        self._solvated_topology = self._combined_topology
+        self.create_interchange()
+        return self._interchange
+
     def get_openmm_components(self) -> Tuple[Any, Any, Any]:
         """Extract OpenMM components from the Interchange.
 

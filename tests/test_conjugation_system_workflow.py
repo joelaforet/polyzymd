@@ -44,6 +44,7 @@ from polyzymd.builders.conjugation.system_workflow import (
     _apply_pdb_atom_identity_to_topology,
     _apply_pdb_atom_names_to_topology,
     _build_direct_solvated_system,
+    _build_isolated_conjugate_system,
     _build_native_to_baseline_atom_mapping,
     _build_solvated_system,
     _policy_with_resolved_crosslink,
@@ -127,6 +128,59 @@ def test_structure_scope_stops_before_parameterization_and_system_build(
     assert result.crosslinked_conjugate_pdb_path == assembled
     assert result.workflow_json_path is not None and result.workflow_json_path.is_file()
     assert forbidden_calls == []
+
+
+def test_isolated_conjugate_parameterizes_primary_without_full_assembly(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The solute helper must not build secondary components or solvate."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    primary = SimpleNamespace(n_molecules=1)
+    calls: list[str] = []
+
+    class FakeBuilder:
+        interchange = None
+        solvated_topology = None
+
+        def combine_solutes(self) -> object:
+            calls.append("combine_primary")
+            self._combined_topology = self._enzyme_topology
+            return self._combined_topology
+
+        def _assign_pdb_identifiers(self) -> None:
+            calls.append("assign_ids")
+
+        def build_substrate(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("substrate build entered")
+
+        def solvate(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("solvation entered")
+
+    builder = FakeBuilder()
+    monkeypatch.setattr(
+        workflow_module.SystemBuilder,
+        "from_config",
+        lambda config: builder,
+    )
+
+    def fake_parameterize(target: FakeBuilder, **kwargs: object) -> None:
+        calls.append("parameterize")
+        target.interchange = "isolated-interchange"
+
+    monkeypatch.setattr(workflow_module, "create_final_conjugated_interchange", fake_parameterize)
+
+    result = _build_isolated_conjugate_system(
+        SimpleNamespace(substrate=object(), polymers=object(), solvent=object()),
+        relaxed_conjugate_topology=primary,
+        working_dir=tmp_path,
+    )
+
+    assert result is builder
+    assert builder._solvated_topology is primary
+    assert builder.interchange == "isolated-interchange"
+    assert calls == ["combine_primary", "assign_ids", "parameterize"]
 
 
 class _AtomDouble:

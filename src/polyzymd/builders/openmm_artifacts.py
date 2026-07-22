@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import filecmp
+import hashlib
+import json
 import shutil
+import tempfile
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from polyzymd.builders.conjugation.structure.inspection import (
+    COMMON_ION_RESIDUES,
+    COMMON_SOLVENT_RESIDUES,
+    WATER_RESIDUES,
+)
 from polyzymd.config.schema import BuildScope
 
 SOLVATED_SYSTEM_PDB = "solvated_system.pdb"
@@ -155,7 +164,13 @@ def resolve_skip_build_artifacts(sim_config: object, working_dir: Path) -> tuple
     )
 
 
-def write_openmm_system_xml(*, builder: Any, sim_config: object, working_dir: Path) -> Path:
+def write_openmm_system_xml(
+    *,
+    builder: Any,
+    sim_config: object,
+    working_dir: Path,
+    apply_configured_restraints: bool = True,
+) -> Path:
     """Serialize an OpenMM ``System`` from a prepared builder.
 
     Parameters
@@ -174,7 +189,7 @@ def write_openmm_system_xml(*, builder: Any, sim_config: object, working_dir: Pa
     """
     omm_topology, omm_system, _omm_positions = builder.get_openmm_components()
 
-    restraints = getattr(sim_config, "restraints", None)
+    restraints = getattr(sim_config, "restraints", None) if apply_configured_restraints else None
     if restraints:
         from polyzymd.core.restraints import RestraintFactory, apply_restraints
 
@@ -193,6 +208,76 @@ def write_openmm_system_xml(*, builder: Any, sim_config: object, working_dir: Pa
     with open(system_path, "w") as f:
         f.write(XmlSerializer.serialize(omm_system))
     return system_path
+
+
+def _write_solute_audit(
+    *, builder: Any, solute_dir: Path, pdb_path: Path, system_path: Path
+) -> Path:
+    """Write deterministic evidence for an isolated-primary OpenMM build."""
+    from openmm import XmlSerializer, unit
+
+    system = XmlSerializer.deserialize(system_path.read_text(encoding="utf-8"))
+    force_classes = Counter(type(system.getForce(i)).__name__ for i in range(system.getNumForces()))
+    periodic = any(
+        bool(system.getForce(i).usesPeriodicBoundaryConditions())
+        for i in range(system.getNumForces())
+    )
+    box_vectors_nm = None
+    if periodic:
+        vectors = system.getDefaultPeriodicBoxVectors()
+        box_vectors_nm = [
+            [float(vector[index].value_in_unit(unit.nanometer)) for index in range(3)]
+            for vector in vectors
+        ]
+    atom_lines = [
+        line
+        for line in pdb_path.read_text(encoding="utf-8").splitlines()
+        if line.startswith(("ATOM  ", "HETATM"))
+    ]
+    pdb_atom_count = len(atom_lines)
+    particle_count = int(system.getNumParticles())
+    if pdb_atom_count != particle_count:
+        raise RuntimeError(
+            "Solute coordinate atom count does not match serialized OpenMM System particle "
+            f"count: PDB={pdb_atom_count}, System={particle_count}"
+        )
+
+    def digest(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    residues = {(line[17:20].strip().upper(), line[21:27]) for line in atom_lines}
+    component_counts = {
+        "substrate": int(getattr(builder, "_n_substrate_molecules", 0)),
+        "free_polymers": int(getattr(builder, "_n_polymer_chains", 0)),
+        "water": sum(name in WATER_RESIDUES for name, _identity in residues),
+        "ions": sum(name in COMMON_ION_RESIDUES for name, _identity in residues),
+        "liquids": sum(name in COMMON_SOLVENT_RESIDUES for name, _identity in residues),
+    }
+    if any(component_counts.values()):
+        raise RuntimeError(
+            "Solute scope contains excluded secondary components: " f"{component_counts}"
+        )
+    audit = {
+        "scope": "solute",
+        "route": "generic_openff",
+        "supported": True,
+        "pdb_path": pdb_path.name,
+        "system_path": system_path.name,
+        "pdb_atom_count": pdb_atom_count,
+        "system_particle_count": particle_count,
+        "component_counts": component_counts,
+        "force_classes": dict(sorted(force_classes.items())),
+        "barostat_count": sum(count for name, count in force_classes.items() if "Barostat" in name),
+        "restraint_force_count": 0,
+        "periodic": periodic,
+        "box_vectors_nm": box_vectors_nm,
+        "sha256": {"solute.pdb": digest(pdb_path), "system.xml": digest(system_path)},
+    }
+    if audit["barostat_count"] != 0:
+        raise RuntimeError("Solute-scope parameterization unexpectedly contains a barostat")
+    audit_path = solute_dir / "openmm_build_audit.json"
+    audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return audit_path
 
 
 def build_openmm_artifacts(
@@ -222,8 +307,6 @@ def build_openmm_artifacts(
     OpenMMBuildArtifacts
         Build metadata and standardized OpenMM handoff paths.
     """
-    if scope is BuildScope.SOLUTE:
-        raise NotImplementedError("build scope 'solute' is not yet implemented")
     if scope is BuildScope.STRUCTURE and not conjugation_enabled(sim_config):
         raise ValueError("build scope 'structure' requires conjugation.enabled: true")
 
@@ -233,18 +316,27 @@ def build_openmm_artifacts(
         from polyzymd.builders.conjugation.system_workflow import ConjugatedPolymerSystemSettings
 
         workflow_settings = ConjugatedPolymerSystemSettings(create_final_interchange=True)
-        if scope is BuildScope.STRUCTURE:
+        if scope is not BuildScope.SYSTEM:
             workflow_settings = workflow_settings.model_copy(update={"build_scope": scope})
         if native_glycam_enabled(sim_config):
             workflow_settings = workflow_settings.model_copy(
                 update={"pdb_fragment_output_mode": "experimental_pablo"}
             )
-        result = build_conjugate_from_config(
-            sim_config,
-            output_dir=working_dir,
-            settings=workflow_settings,
-            free_polymer_seed=polymer_seed,
-        )
+        if scope is BuildScope.SOLUTE:
+            with tempfile.TemporaryDirectory(prefix="polyzymd-solute-") as temporary_dir:
+                result = build_conjugate_from_config(
+                    sim_config,
+                    output_dir=Path(temporary_dir),
+                    settings=workflow_settings,
+                    free_polymer_seed=polymer_seed,
+                )
+        else:
+            result = build_conjugate_from_config(
+                sim_config,
+                output_dir=working_dir,
+                settings=workflow_settings,
+                free_polymer_seed=polymer_seed,
+            )
         builder = result.system_builder
         if scope is BuildScope.STRUCTURE:
             pdb_path = result.crosslinked_conjugate_pdb_path
@@ -258,6 +350,31 @@ def build_openmm_artifacts(
                 result=result,
                 pdb_path=Path(pdb_path),
                 system_path=None,
+                conjugation_enabled=True,
+                scope=scope,
+            )
+        if scope is BuildScope.SOLUTE:
+            if builder is None:
+                raise RuntimeError("Solute-scope generic route did not return a SystemBuilder")
+            solute_dir = working_dir / "solute"
+            solute_dir.mkdir(parents=True, exist_ok=True)
+            pdb_path = solute_dir / "solute.pdb"
+            builder.save_topology(pdb_path)
+            system_path = write_openmm_system_xml(
+                builder=builder,
+                sim_config=sim_config,
+                working_dir=solute_dir,
+                apply_configured_restraints=False,
+            )
+            _write_solute_audit(
+                builder=builder, solute_dir=solute_dir, pdb_path=pdb_path, system_path=system_path
+            )
+            return OpenMMBuildArtifacts(
+                builder=builder,
+                interchange=builder.interchange,
+                result=result,
+                pdb_path=pdb_path,
+                system_path=system_path,
                 conjugation_enabled=True,
                 scope=scope,
             )
@@ -294,6 +411,31 @@ def build_openmm_artifacts(
     from polyzymd.builders.system_builder import SystemBuilder
 
     builder = SystemBuilder.from_config(sim_config)
+    if scope is BuildScope.SOLUTE:
+        builder.build_isolated_primary_from_config(sim_config)
+        solute_dir = working_dir / "solute"
+        solute_dir.mkdir(parents=True, exist_ok=True)
+        pdb_path = solute_dir / "solute.pdb"
+        builder.save_topology(pdb_path)
+        system_path = write_openmm_system_xml(
+            builder=builder,
+            sim_config=sim_config,
+            working_dir=solute_dir,
+            apply_configured_restraints=False,
+        )
+        _write_solute_audit(
+            builder=builder, solute_dir=solute_dir, pdb_path=pdb_path, system_path=system_path
+        )
+        return OpenMMBuildArtifacts(
+            builder=builder,
+            interchange=builder.interchange,
+            result=None,
+            exact_export_bundle=None,
+            pdb_path=pdb_path,
+            system_path=system_path,
+            conjugation_enabled=False,
+            scope=scope,
+        )
     interchange = builder.build_from_config(
         config=sim_config,
         working_dir=working_dir,

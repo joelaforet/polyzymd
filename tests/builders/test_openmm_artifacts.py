@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 from pathlib import Path
@@ -347,12 +348,65 @@ def test_nonconjugate_structure_scope_fails_before_system_builder(tmp_path: Path
         )
 
 
-def test_solute_scope_fails_with_stable_not_implemented_message(tmp_path: Path) -> None:
-    """The public enum may land before its separate implementation commit."""
-    with pytest.raises(NotImplementedError, match="scope 'solute' is not yet implemented"):
-        build_openmm_artifacts(
-            sim_config=_config(conjugation_enabled=True),
-            working_dir=tmp_path,
-            polymer_seed=1,
-            scope=BuildScope.SOLUTE,
-        )
+def test_standard_solute_scope_emits_only_isolated_audited_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Solute scope must use the primary-only branch and audit its serialized System."""
+    from openmm import System
+
+    calls: list[str] = []
+    system = System()
+    system.addParticle(12.0)
+
+    class FakeBuilder:
+        interchange = "primary-interchange"
+
+        def build_isolated_primary_from_config(self, config: object) -> object:
+            calls.append("isolated")
+            return self.interchange
+
+        def build_from_config(self, **kwargs: object) -> object:
+            raise AssertionError("full-system build entered for solute scope")
+
+        def save_topology(self, path: Path) -> None:
+            path.write_text(
+                "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\nEND\n",
+                encoding="utf-8",
+            )
+
+        def get_openmm_components(self) -> tuple[None, System, None]:
+            return None, system, None
+
+    builder = FakeBuilder()
+    module = types.ModuleType("polyzymd.builders.system_builder")
+    module.SystemBuilder = SimpleNamespace(from_config=lambda config: builder)
+    monkeypatch.setitem(sys.modules, "polyzymd.builders.system_builder", module)
+
+    artifacts = build_openmm_artifacts(
+        sim_config=_config(conjugation_enabled=False),
+        working_dir=tmp_path,
+        polymer_seed=1,
+        scope=BuildScope.SOLUTE,
+    )
+
+    solute_dir = tmp_path / "solute"
+    assert calls == ["isolated"]
+    assert artifacts.pdb_path == solute_dir / "solute.pdb"
+    assert artifacts.system_path == solute_dir / "system.xml"
+    assert {path.name for path in solute_dir.iterdir()} == {
+        "solute.pdb",
+        "system.xml",
+        "openmm_build_audit.json",
+    }
+    assert not (tmp_path / "system.xml").exists()
+    audit = json.loads((solute_dir / "openmm_build_audit.json").read_text(encoding="utf-8"))
+    assert audit["pdb_atom_count"] == audit["system_particle_count"] == 1
+    assert audit["component_counts"] == {
+        "substrate": 0,
+        "free_polymers": 0,
+        "water": 0,
+        "ions": 0,
+        "liquids": 0,
+    }
+    assert audit["barostat_count"] == audit["restraint_force_count"] == 0
