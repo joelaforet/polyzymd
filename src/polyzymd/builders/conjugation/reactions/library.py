@@ -5,10 +5,12 @@ from __future__ import annotations
 from polyzymd.builders.conjugation.reactions.base import ReactionTemplate
 from polyzymd.builders.conjugation.reactions.n_glycosylation import NGlycosylationReaction
 from polyzymd.builders.conjugation.reactions.nhs_lys import NhsLysReaction
+from polyzymd.builders.conjugation.reactions.o_glycosylation import OGlycosylationReaction
 
 _REACTIONS: dict[str, type[ReactionTemplate]] = {
     **dict.fromkeys(NhsLysReaction.identifiers(), NhsLysReaction),
     **dict.fromkeys(NGlycosylationReaction.identifiers(), NGlycosylationReaction),
+    **dict.fromkeys(OGlycosylationReaction.identifiers(), OGlycosylationReaction),
 }
 
 

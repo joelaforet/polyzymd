@@ -11,6 +11,7 @@ from polyzymd.builders.conjugation._linkage import PdbAtomSelector
 from polyzymd.builders.conjugation.polymer import build_smiles_moiety_fragment
 from polyzymd.builders.conjugation.reactions import (
     NGlycosylationReaction,
+    OGlycosylationReaction,
     ReactionTemplate,
     get_reaction,
     list_reactions,
@@ -43,6 +44,71 @@ def test_registry_exposes_n_glycosylation_template_and_aliases():
     assert get_reaction("n_glycan_asn") is NGlycosylationReaction
     assert get_reaction("asn_n_glycosylation") is NGlycosylationReaction
     assert issubclass(get_reaction("n_glycosylation"), ReactionTemplate)
+
+
+def test_registry_exposes_o_glycosylation_template_and_aliases():
+    """The built-in registry should expose O-glycosylation aliases."""
+    assert get_reaction("o_glycosylation") is OGlycosylationReaction
+    assert get_reaction("o_glycan") is OGlycosylationReaction
+
+
+@pytest.mark.parametrize(
+    ("residue_name", "site_atom", "site_hydrogen", "product_residue"),
+    (("SER", "OG", "HG", "OLS"), ("THR", "OG1", "HG1", "OLT")),
+)
+def test_o_glycosylation_resolves_ser_thr_products(
+    tmp_path: Path,
+    residue_name: str,
+    site_atom: str,
+    site_hydrogen: str,
+    product_residue: str,
+):
+    """Ser and Thr sites should use GLYCAM-compatible O-linked product labels."""
+    protein_path = _hydroxyl_site_pdb(
+        tmp_path,
+        residue_name=residue_name,
+        site_atom=site_atom,
+        site_hydrogen=site_hydrogen,
+    )
+    glycan = _glycan_fragment(tmp_path)
+    site = SimpleNamespace(
+        chain_id="A",
+        residue_name=residue_name,
+        residue_number=42,
+        atom_name=None,
+        insertion_code="",
+        atom_serial=None,
+        atom_index=None,
+    )
+    attachment = SimpleNamespace(
+        site=site,
+        mechanism=SimpleNamespace(product_residues=None, bond=None),
+    )
+    settings = OGlycosylationReaction.settings_from_attachment(attachment)
+
+    plan = OGlycosylationReaction.resolve_plan(
+        protein_path,
+        site,
+        glycan,
+        settings=settings,
+    )
+
+    assert plan.protein_product_residue_name == product_residue
+    assert plan.contract.protein_endpoint.selector.atom_name == site_atom
+    assert plan.pablo_crosslink_requirement.linking_atoms[0] == site_atom
+    assert plan.pablo_crosslink_requirement.leaving_atoms[0] == (site_hydrogen,)
+    assert plan.target_bond_length_angstrom == pytest.approx(1.43)
+
+
+def test_o_glycosylation_rejects_non_ser_thr_site():
+    """O-glycosylation should require an explicit Ser or Thr site."""
+    attachment = SimpleNamespace(
+        site=SimpleNamespace(residue_name="ASN"),
+        mechanism=SimpleNamespace(product_residues=None, bond=None),
+    )
+
+    with pytest.raises(ValueError, match="requires site.residue_name SER or THR"):
+        OGlycosylationReaction.settings_from_attachment(attachment)
 
 
 def test_site_atom_defaults_to_asn_nd2_when_omitted(tmp_path: Path):
@@ -254,6 +320,26 @@ def _asn_pdb(tmp_path: Path, *, hydrogens: tuple[str, ...] = ("HD21",)) -> Path:
                 element="H",
             )
         )
+    path.write_text("".join(lines) + "END\n", encoding="utf-8")
+    return path
+
+
+def _hydroxyl_site_pdb(
+    tmp_path: Path,
+    *,
+    residue_name: str,
+    site_atom: str,
+    site_hydrogen: str,
+) -> Path:
+    """Create a small Ser or Thr residue with its explicit hydroxyl hydrogen."""
+    path = tmp_path / f"{residue_name.lower()}.pdb"
+    lines = [
+        _pdb_atom(1, "N", residue_name, "A", 42, 0.0, 0.0, 0.0, element="N"),
+        _pdb_atom(2, "CA", residue_name, "A", 42, 1.0, 0.0, 0.0),
+        _pdb_atom(3, "CB", residue_name, "A", 42, 1.5, 0.7, 0.0),
+        _pdb_atom(4, site_atom, residue_name, "A", 42, 2.0, 1.2, 0.0, element="O"),
+        _pdb_atom(5, site_hydrogen, residue_name, "A", 42, 2.0, 2.0, 0.0, element="H"),
+    ]
     path.write_text("".join(lines) + "END\n", encoding="utf-8")
     return path
 

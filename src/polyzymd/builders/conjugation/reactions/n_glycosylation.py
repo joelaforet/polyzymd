@@ -129,6 +129,8 @@ class NGlycosylationReaction(ReactionTemplate):
     Settings: ClassVar[type[NGlycosylationReactionSettings]] = NGlycosylationReactionSettings
     coordinate_backend_mechanism: ClassVar[str] = "n_glycosylation"
     supports_coordinate_assembly: ClassVar[bool] = True
+    profile_sidecar_key: ClassVar[str] = "n_glycosylation_profile"
+    site_participant_name: ClassVar[str] = "asparagine site"
     mapped_reaction_smarts: ClassVar[str] = (
         "[N:1]([H:2]).[C:3]([O:4][H:5])([O:6])>>[N:1][C:3]([O:6])"
     )
@@ -220,7 +222,7 @@ class NGlycosylationReaction(ReactionTemplate):
             name=cls.coordinate_backend_mechanism,
             reaction_smarts=cls.reaction_smarts(),
             participants=(
-                ReactionParticipant(name="asparagine site", role="site", reactant_index=0),
+                ReactionParticipant(name=cls.site_participant_name, role="site", reactant_index=0),
                 ReactionParticipant(name="reducing-end glycan", role="moiety", reactant_index=1),
             ),
             atom_roles=tuple(AtomRoleSpec.model_validate(role) for role in cls.role_metadata()),
@@ -254,9 +256,9 @@ class NGlycosylationReaction(ReactionTemplate):
                 "atom_serial": profile.reducing_c1_serial,
             },
             sidecar_payload={
-                "n_glycosylation_profile": profile.model_dump(mode="json", exclude={"fragment"})
+                cls.profile_sidecar_key: profile.model_dump(mode="json", exclude={"fragment"})
             },
-            diagnostics=("Resolved residue-resolved glycan PDB fragment for N-glycosylation",),
+            diagnostics=(f"Resolved residue-resolved glycan PDB fragment for {cls.name}",),
         )
 
     @classmethod
