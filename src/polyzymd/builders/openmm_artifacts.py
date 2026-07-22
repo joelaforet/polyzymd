@@ -17,6 +17,7 @@ from polyzymd.builders.conjugation.structure.inspection import (
     COMMON_SOLVENT_RESIDUES,
     WATER_RESIDUES,
 )
+from polyzymd.builders.conjugation.structure.parsing import parse_pdb_conect_adjacency
 from polyzymd.config.schema import BuildScope
 
 SOLVATED_SYSTEM_PDB = "solvated_system.pdb"
@@ -218,6 +219,16 @@ def _write_solute_audit(
 
     system = XmlSerializer.deserialize(system_path.read_text(encoding="utf-8"))
     force_classes = Counter(type(system.getForce(i)).__name__ for i in range(system.getNumForces()))
+    restraint_force_count = sum(
+        type(system.getForce(i)).__name__ == "CustomExternalForce"
+        or "restraint" in str(system.getForce(i).getName()).lower()
+        for i in range(system.getNumForces())
+    )
+    if restraint_force_count:
+        raise RuntimeError(
+            "Solute-scope parameterization unexpectedly contains "
+            f"{restraint_force_count} restraint-like force(s)"
+        )
     periodic = any(
         bool(system.getForce(i).usesPeriodicBoundaryConditions())
         for i in range(system.getNumForces())
@@ -268,7 +279,7 @@ def _write_solute_audit(
         "component_counts": component_counts,
         "force_classes": dict(sorted(force_classes.items())),
         "barostat_count": sum(count for name, count in force_classes.items() if "Barostat" in name),
-        "restraint_force_count": 0,
+        "restraint_force_count": restraint_force_count,
         "periodic": periodic,
         "box_vectors_nm": box_vectors_nm,
         "sha256": {"solute.pdb": digest(pdb_path), "system.xml": digest(system_path)},
@@ -278,6 +289,33 @@ def _write_solute_audit(
     audit_path = solute_dir / "openmm_build_audit.json"
     audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return audit_path
+
+
+def _reject_disconnected_hetatm(pdb_path: Path) -> None:
+    """Fail when any HETATM atom is outside the primary covalent graph."""
+    lines = pdb_path.read_text(encoding="utf-8").splitlines()
+    atom_serials = {
+        int(line[6:11]) for line in lines if line.startswith("ATOM  ") and line[6:11].strip()
+    }
+    hetatm_serials = {
+        int(line[6:11]) for line in lines if line.startswith("HETATM") and line[6:11].strip()
+    }
+    if not hetatm_serials:
+        return
+    adjacency = parse_pdb_conect_adjacency(pdb_path)
+    reachable = set(atom_serials)
+    pending = list(atom_serials)
+    while pending:
+        for neighbor in adjacency.get(pending.pop(), ()):
+            if neighbor not in reachable:
+                reachable.add(neighbor)
+                pending.append(neighbor)
+    disconnected = sorted(hetatm_serials - reachable)
+    if disconnected:
+        raise ValueError(
+            "build scope 'solute' found disconnected/unowned HETATM atoms in the assembled "
+            f"primary component (serials: {disconnected}); supply a primary-structure-only input"
+        )
 
 
 def build_openmm_artifacts(
@@ -360,6 +398,7 @@ def build_openmm_artifacts(
             solute_dir.mkdir(parents=True, exist_ok=True)
             pdb_path = solute_dir / "solute.pdb"
             builder.save_topology(pdb_path)
+            _reject_disconnected_hetatm(pdb_path)
             system_path = write_openmm_system_xml(
                 builder=builder,
                 sim_config=sim_config,
@@ -417,6 +456,7 @@ def build_openmm_artifacts(
         solute_dir.mkdir(parents=True, exist_ok=True)
         pdb_path = solute_dir / "solute.pdb"
         builder.save_topology(pdb_path)
+        _reject_disconnected_hetatm(pdb_path)
         system_path = write_openmm_system_xml(
             builder=builder,
             sim_config=sim_config,

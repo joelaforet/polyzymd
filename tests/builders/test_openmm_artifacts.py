@@ -14,6 +14,8 @@ import pytest
 from polyzymd.builders.openmm_artifacts import (
     SOLVATED_CONJUGATE_PDB,
     SOLVATED_SYSTEM_PDB,
+    _reject_disconnected_hetatm,
+    _write_solute_audit,
     build_openmm_artifacts,
     ensure_conjugation_pdb_alias,
     resolve_skip_build_artifacts,
@@ -410,3 +412,46 @@ def test_standard_solute_scope_emits_only_isolated_audited_artifacts(
         "liquids": 0,
     }
     assert audit["barostat_count"] == audit["restraint_force_count"] == 0
+
+
+def test_assembled_solute_rejects_disconnected_lig_hetatm(tmp_path: Path) -> None:
+    """An unowned assembled LIG must fail even when its residue name is not allowlisted."""
+    pdb_path = tmp_path / "assembled.pdb"
+    pdb_path.write_text(
+        "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\n"
+        "HETATM    2  C1  LIG C   1       4.000   0.000   0.000  1.00  0.00           C\nEND\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="disconnected/unowned HETATM"):
+        _reject_disconnected_hetatm(pdb_path)
+
+    pdb_path.write_text(pdb_path.read_text(encoding="utf-8") + "CONECT    1    2\n")
+    _reject_disconnected_hetatm(pdb_path)
+
+
+def test_solute_audit_rejects_injected_custom_external_force(tmp_path: Path) -> None:
+    """Audit restraint counts must come from the serialized System."""
+    from openmm import CustomExternalForce, System, XmlSerializer
+
+    pdb_path = tmp_path / "solute.pdb"
+    pdb_path.write_text(
+        "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\nEND\n",
+        encoding="utf-8",
+    )
+    system = System()
+    system.addParticle(12.0)
+    force = CustomExternalForce("k*x^2")
+    force.addGlobalParameter("k", 1.0)
+    force.addParticle(0, [])
+    system.addForce(force)
+    system_path = tmp_path / "system.xml"
+    system_path.write_text(XmlSerializer.serialize(system), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="restraint-like force"):
+        _write_solute_audit(
+            builder=SimpleNamespace(),
+            solute_dir=tmp_path,
+            pdb_path=pdb_path,
+            system_path=system_path,
+        )
