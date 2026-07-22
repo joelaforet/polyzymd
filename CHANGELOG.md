@@ -287,6 +287,10 @@ dropping a module or package in `analyses/` with no modifications to core code.
 
 ### Fixed
 
+- **Co-solvent mole-fraction naming no longer uses stale volume-fraction
+  access.**  Solvent composition placeholders now render DMSO mole fractions
+  correctly as `molpct` tokens, fixing the DMSO `mole_fraction` naming
+  regression.  (`config/schema.py`)
 - **`"default"` reaction template paths no longer rejected during config
   loading.**  When a user specified `initiation: "default"` (or
   `polymerization` / `termination`) in the YAML config, `_expand_paths()`

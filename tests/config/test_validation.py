@@ -29,7 +29,6 @@ def _minimal_config_data(tmp_path: Path) -> dict[str, object]:
                 "ensemble": "NPT",
                 "duration": 1.0,
                 "samples": 10,
-                "report_interval": 50000,
                 "checkpoint_interval": 60.0,
             },
         },
