@@ -119,6 +119,7 @@ class WaterModel(str, Enum):
 class BoxShape(str, Enum):
     """Supported simulation box shapes."""
 
+    ORTHORHOMBIC = "orthorhombic"
     CUBE = "cube"
     RHOMBIC_DODECAHEDRON = "rhombic_dodecahedron"
     TRUNCATED_OCTAHEDRON = "truncated_octahedron"
@@ -1226,6 +1227,20 @@ class BoxConfig(BaseModel):
     shape: BoxShape = Field(BoxShape.RHOMBIC_DODECAHEDRON, description="Box shape")
     target_density: float = Field(1.0, gt=0.0, description="Target density (g/mL)")
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
+
+    @field_validator("shape", mode="before")
+    @classmethod
+    def migrate_legacy_cube_shape(cls, value: Any) -> Any:
+        """Map the legacy ``cube`` label to the rectangular box behavior."""
+        if value == "cube":
+            warnings.warn(
+                "Box shape 'cube' is deprecated because PolyzyMD preserves independent "
+                "axis lengths; use 'orthorhombic' instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return BoxShape.ORTHORHOMBIC
+        return value
 
 
 class SolventConfig(BaseModel):

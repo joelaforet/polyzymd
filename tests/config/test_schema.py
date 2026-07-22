@@ -1,11 +1,18 @@
 """Test that all public modules can be imported."""
 
+import warnings
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from polyzymd.config.schema import BuildScope, ConjugationConfig, SimulationConfig
+from polyzymd.config.schema import (
+    BoxConfig,
+    BoxShape,
+    BuildScope,
+    ConjugationConfig,
+    SimulationConfig,
+)
 
 
 @pytest.fixture
@@ -166,6 +173,28 @@ class TestBuildConfig:
 
         with pytest.raises(ValidationError, match="build.through"):
             SimulationConfig(**minimal_config_data)
+
+
+class TestBoxConfig:
+    """Test canonical rectangular-box configuration."""
+
+    def test_orthorhombic_is_canonical(self):
+        """The explicit rectangular name should validate without migration."""
+        config = BoxConfig(shape="orthorhombic")
+
+        assert config.shape is BoxShape.ORTHORHOMBIC
+        assert config.model_dump(mode="json")["shape"] == "orthorhombic"
+
+    def test_cube_migrates_with_one_deprecation_warning(self):
+        """Legacy cube input should retain behavior while naming it accurately."""
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            config = BoxConfig(shape="cube")
+
+        deprecations = [item for item in caught if item.category is DeprecationWarning]
+        assert len(deprecations) == 1
+        assert "orthorhombic" in str(deprecations[0].message)
+        assert config.shape is BoxShape.ORTHORHOMBIC
 
 
 class TestConfigValidation:

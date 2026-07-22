@@ -45,7 +45,12 @@ ION_CHARGE_TOLERANCE = 1.0e-5
 WaterModelType = Literal["tip3p", "spce", "tip4p", "tip4pew", "opc"]
 
 # Box shape type
-BoxShapeType = Literal["cube", "rhombic_dodecahedron", "truncated_octahedron"]
+BoxShapeType = Literal[
+    "orthorhombic",
+    "cube",
+    "rhombic_dodecahedron",
+    "truncated_octahedron",
+]
 
 
 @dataclass
@@ -729,7 +734,7 @@ class SolventBuilder:
         """
         import openff.packmol as packmol
 
-        if shape == "cube":
+        if shape in {"orthorhombic", "cube"}:
             return packmol.UNIT_CUBE
         elif shape == "rhombic_dodecahedron":
             return packmol.RHOMBIC_DODECAHEDRON
