@@ -726,22 +726,40 @@ class SolventBuilder:
     def _get_box_shape_matrix(self, shape: BoxShapeType) -> NDArray:
         """Get the transformation matrix for the box shape.
 
+        Triclinic transforms use row vectors ``a``, ``b``, and ``c`` in the
+        periodic-box convention documented by GROMACS: ``a_y = a_z = b_z = 0``
+        with positive diagonal components and reduced off-diagonal components.
+        See https://manual.gromacs.org/current/reference-manual/algorithms/
+        periodic-boundary-conditions.html.
+
         Args:
             shape: Box shape identifier.
 
         Returns:
             3x3 transformation matrix.
         """
-        import openff.packmol as packmol
-
         if shape in {"orthorhombic", "cube"}:
+            import openff.packmol as packmol
+
             return packmol.UNIT_CUBE
         elif shape == "rhombic_dodecahedron":
+            import openff.packmol as packmol
+
             return packmol.RHOMBIC_DODECAHEDRON
         elif shape == "truncated_octahedron":
-            return packmol.TRUNCATED_OCTAHEDRON
+            sqrt_two = np.sqrt(2.0)
+            return np.array(
+                [
+                    [1.0, 0.0, 0.0],
+                    [1.0 / 3.0, 2.0 * sqrt_two / 3.0, 0.0],
+                    [-1.0 / 3.0, sqrt_two / 3.0, np.sqrt(6.0) / 3.0],
+                ],
+                dtype=float,
+            )
         else:
             LOGGER.warning(f"Unknown box shape '{shape}', using cube")
+            import openff.packmol as packmol
+
             return packmol.UNIT_CUBE
 
     def _get_water_molecule(self, model: WaterModelType) -> Molecule:

@@ -29,6 +29,22 @@ def test_rectangular_shape_labels_use_identity_transform(shape) -> None:
     np.testing.assert_allclose(matrix, packmol.UNIT_CUBE)
 
 
+def test_truncated_octahedron_resolves_to_reduced_finite_lattice() -> None:
+    """Runtime shape resolution should return a valid GROMACS-style lattice."""
+    config = SolventConfig(box={"shape": "truncated_octahedron"})
+
+    matrix = SolventBuilder()._get_box_shape_matrix(config.box.shape.value)
+
+    assert np.isfinite(matrix).all()
+    np.testing.assert_allclose(matrix[0, 1:], 0.0)
+    assert matrix[1, 2] == pytest.approx(0.0)
+    assert np.all(np.diag(matrix) > 0.0)
+    assert abs(matrix[1, 0]) <= matrix[0, 0] / 2.0
+    assert abs(matrix[2, 0]) <= matrix[0, 0] / 2.0
+    assert abs(matrix[2, 1]) <= matrix[1, 1] / 2.0
+    assert np.linalg.det(matrix) == pytest.approx(np.sqrt(16.0 / 27.0))
+
+
 def test_concentration_count_uses_liters_and_avogadro() -> None:
     """Concentration counts should use volume in liters and Avogadro's constant."""
     count = SolventBuilder._count_concentration_molecules(
