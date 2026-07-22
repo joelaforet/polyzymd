@@ -403,6 +403,12 @@ class TestConjugationReactionSmartsConfig:
         assert len(attachment.mechanism.atom_roles) == 2
 
 
+def test_conjugation_rejects_attachment_sources_by_raw_key_presence():
+    """Even an empty inline list is ambiguous with attachments_file."""
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        ConjugationConfig.model_validate({"attachments_file": "attachments.csv", "attachments": []})
+
+
 class TestCoSolventCompositionValidation:
     """Test co-solvent mole fraction and concentration validation."""
 

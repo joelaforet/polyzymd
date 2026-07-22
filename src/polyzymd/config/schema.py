@@ -1043,10 +1043,32 @@ class ConjugationConfig(BaseModel):
         default_factory=list,
         description="Requested covalent attachments; at least one must be enabled when enabled=true",
     )
+    attachments_file: Path | None = Field(
+        None,
+        exclude=True,
+        description="Optional CSV source for covalent attachments",
+    )
     diagnostics: ConjugationDiagnosticsConfig = Field(
         default_factory=ConjugationDiagnosticsConfig,
         description="Diagnostics output policy",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def load_attachment_csv(cls, value: Any) -> Any:
+        """Materialize a CSV attachment source while preserving raw-key exclusivity."""
+        if not isinstance(value, dict):
+            return value
+        if "attachments_file" in value and "attachments" in value:
+            raise ValueError("attachments_file and attachments are mutually exclusive")
+        if "attachments_file" not in value or value["attachments_file"] is None:
+            return value
+
+        from polyzymd.config.loader import _load_attachments_csv
+
+        materialized = dict(value)
+        materialized["attachments"] = _load_attachments_csv(value["attachments_file"])
+        return materialized
 
     @model_validator(mode="after")
     def validate_enabled_attachment_contract(self) -> "ConjugationConfig":
