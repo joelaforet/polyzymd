@@ -174,6 +174,7 @@ uses the public conjugation workflow before writing the final system artifacts.
 polyzymd build --config <path> [options]
 polyzymd build -c <path> -r <replicates>
 polyzymd build -c <path> --format gromacs    # Export for GROMACS
+polyzymd build -c <path> --scope solute      # Parameterized primary component
 ```
 
 ### Options
@@ -185,6 +186,7 @@ polyzymd build -c <path> --format gromacs    # Export for GROMACS
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--dry-run` | - | No | false | Validate only, don't build |
+| `--scope` | - | No | `build.scope`, then `system` | Build endpoint (`structure`, `solute`, or `system`). The CLI value overrides YAML. |
 | `--format` | - | No | OpenMM | Export format (`gromacs`, `lammps` (planned), or `amber` (planned)) |
 
 ### Example
@@ -210,15 +212,55 @@ polyzymd build -c config.yaml
 
 # Build and export a conjugated system for GROMACS
 polyzymd build -c config.yaml --format gromacs
+
+# Stop after writing the assembled conjugate coordinates
+polyzymd build -c config.yaml --scope structure
+
+# Parameterize only the covalently modified primary component for OpenMM
+polyzymd build -c config.yaml --scope solute
+
+# Export only that component's GROMACS coordinates and topology
+polyzymd build -c config.yaml --scope solute --format gromacs
 ```
 
-### Output Files (OpenMM)
+(build-scope-artifacts)=
+### Build scopes and output files
+
+| Scope | Components included | OpenMM artifacts | GROMACS artifacts |
+|-------|---------------------|------------------|--------------------|
+| `structure` | Assembled conjugated coordinates | `conjugate-construction/assembled_crosslinked.pdb` plus construction workflow metadata | Not available |
+| `solute` | Protein/primary component and covalently attached moieties only | `solute/solute.pdb`, `solute/system.xml`, `solute/openmm_build_audit.json`, plus exact sidecar/audit files when required | Under `solute/gromacs/`: `.gro`, `.top`, `.itp` when split, plus exact sidecar/audit files when required |
+| `system` | Complete configured system, including solvent and ions | `solvated_system.pdb`, `system.xml`, and route-specific evidence | Standard build-only handoff under `gromacs/` |
+
+`structure` requires `conjugation.enabled: true` and cannot be exported because
+it is intentionally unparameterized. `solute` excludes substrate, free
+polymers, water, ions, barostats, and configured simulation-stage restraints.
+It is intended for inspection or transfer into another preparation workflow,
+not direct dynamics. `system` remains the default and is the only scope accepted
+by simulation, submission, and restart workflows.
+
+### OpenMM solute handoff
+
+The solute PDB and serialized OpenMM System have matching atom/particle order
+and counts. `openmm_build_audit.json` records component counts, force classes,
+barostat/restraint checks, periodicity, box vectors, and artifact hashes. Exact
+parameterization routes also emit their authoritative exception sidecar and a
+route-specific audit.
+
+```{warning}
+An exact charged solute may retain a periodic PME box so its parameters can be
+exported without approximation. That `system.xml` is a preparation artifact,
+not an NPT-ready physical system: it contains no solvent, no counterions, and
+no barostat. Inspect the audits and add an appropriate environment before MD.
+```
+
+### Output files (`system` scope, OpenMM)
 
 The build command creates:
 - `solvated_system.pdb` - Complete system with water and ions
 - `system.xml` - OpenMM serialized system with restraints
 
-### Output Files (GROMACS)
+### Output files (`system` scope, GROMACS)
 
 With `--format gromacs`, the build command creates a build-only handoff in
 `{projects_dir}/replicate_{N}/gromacs/`. The core handoff files are:
@@ -243,6 +285,12 @@ The `.mdp` files and run script are not required to continue outside PolyzyMD;
 you may replace them with your own GROMACS workflow. Use
 `polyzymd run --engine gromacs` when you want PolyzyMD to perform the full local
 build-and-run workflow.
+
+For `--scope solute --format gromacs`, PolyzyMD deliberately writes only the
+topology handoff: `.gro`, `.top`, and any split `.itp` files, plus exact
+sidecar/audit files when applicable. It does **not** write `.mdp` files, run
+scripts, or position-restraint artifacts. Those files would imply a runnable
+simulation protocol that a solvent-free primary component does not provide.
 
 ---
 

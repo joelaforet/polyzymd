@@ -186,7 +186,7 @@ solvent:
   ions:
     neutralize: true
   box:
-    shape: cube
+    shape: orthorhombic
     padding: 0.5
 ```
 

@@ -94,7 +94,7 @@ solvent:
   
   box:
     padding: 1.0  # Smaller padding for faster solvation
-    shape: "cube"  # Cube is faster than rhombic dodecahedron
+    shape: "orthorhombic"  # Independent per-axis padding; faster than rhombic dodecahedron
     target_density: 1.0
     tolerance: 2.0
 

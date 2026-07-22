@@ -10,6 +10,7 @@ A complete configuration file has these sections:
 name: "simulation_name"
 description: "optional description"
 
+build: { ... }            # Optional (defaults to full system)
 enzyme: { ... }           # Required
 substrate: { ... }        # Optional (null for apo)
 polymers: { ... }         # Optional (null to disable)
@@ -20,6 +21,30 @@ simulation_phases: { ... } # Required
 output: { ... }           # Required
 force_field: { ... }      # Optional (has defaults)
 ```
+
+---
+
+## Build Configuration
+
+The optional `build` block selects how far `polyzymd build` proceeds:
+
+```yaml
+build:
+  scope: "system"  # structure, solute, or system
+```
+
+| Scope | Result | Restrictions |
+|-------|--------|--------------|
+| `structure` | Covalently assembled coordinate structure | Requires enabled conjugation; stops before parameterization; cannot be combined with `--format`. |
+| `solute` | Parameterized primary covalent component only | Excludes substrate, free polymers, water, ions, barostats, and configured stage restraints. GROMACS is the only optional export format. |
+| `system` | Complete solvated, parameterized simulation system | Default; preserves the behavior of configurations that omit `build`. |
+
+The YAML default is `build.scope: system`. A command-line `--scope` value takes
+precedence for that invocation; it does not modify the YAML file. Partial
+artifacts are preparation handoffs, not simulation inputs: `run`, `submit`, and
+restart workflows require a `system`-scope build.
+
+See {ref}`build-scope-artifacts` for the exact files written by each scope.
 
 ---
 
@@ -240,9 +265,17 @@ Na+/Cl- ion concentration, not extra salt added after counter-ions.
 
 | Shape | Description |
 |-------|-------------|
-| `cube` | Cubic box |
+| `orthorhombic` | Rectangular box with independent per-axis padding. For coordinate extent $E_i$ and padding $p$, each length is $L_i = E_i + 2p$. |
 | `rhombic_dodecahedron` | Space-efficient (default) |
-| `truncated_octahedron` | Alternative space-efficient |
+| `truncated_octahedron` | Alternative space-efficient geometry; support remains local to the existing solvent-box construction path. |
+
+```{warning}
+`cube` is a deprecated compatibility label for `orthorhombic`. Historical
+PolyzyMD "cube" boxes preserved independent axis lengths and therefore were
+not necessarily cubic. Use `orthorhombic` for new configurations. PolyzyMD
+applies the requested padding independently to both faces of every axis; it
+does not enlarge all axes to match the longest one.
+```
 
 ### Co-solvents
 
