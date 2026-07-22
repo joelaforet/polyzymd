@@ -120,7 +120,7 @@ def test_site_atom_defaults_to_asn_nd2_when_omitted(tmp_path: Path):
 
     assert contract.protein_endpoint.selector.residue_name == "ASN"
     assert contract.protein_endpoint.selector.atom_name == "ND2"
-    assert contract.protein_endpoint.product_residue_name == "ASX"
+    assert contract.protein_endpoint.product_residue_name == "NLN"
     assert contract.bond.protein_atom_name == "ND2"
     assert contract.bond.target_bond_length_angstrom == pytest.approx(1.45)
 
@@ -182,8 +182,8 @@ def test_detects_validated_three_branch_glycan_checkpoint():
     assert group.leaving_atom_indices == (10, 126)
 
 
-def test_resolve_plan_builds_asx_to_user_glycan_residue_linkage(tmp_path: Path):
-    """Resolved plans should carry ASX, the user glycan residue, and exact leaving atoms."""
+def test_resolve_plan_builds_nln_to_user_glycan_residue_linkage(tmp_path: Path):
+    """Resolved plans should carry NLN, the user glycan residue, and exact leaving atoms."""
     protein_path = _asn_pdb(tmp_path)
     fragment = _glycan_fragment(tmp_path, residue_name="NAG")
     site = {"chain_id": "A", "residue_name": "ASN", "residue_number": 42}
@@ -192,10 +192,10 @@ def test_resolve_plan_builds_asx_to_user_glycan_residue_linkage(tmp_path: Path):
 
     assert plan.contract.mechanism_name == "n_glycosylation"
     assert plan.protein_link_atom.atom_name == "ND2"
-    assert plan.protein_product_residue_name == "ASX"
+    assert plan.protein_product_residue_name == "NLN"
     assert plan.modifier_product_residue_name == "NAG"
     assert tuple(atom.atom_name for atom in plan.protein_leaving_atoms) == ("HD21",)
-    assert plan.pablo_crosslink_requirement.residues == ("ASX", "NAG")
+    assert plan.pablo_crosslink_requirement.residues == ("NLN", "NAG")
     assert plan.pablo_crosslink_requirement.linking_atoms == (
         "ND2",
         plan.modifier_link_atom.atom_name,

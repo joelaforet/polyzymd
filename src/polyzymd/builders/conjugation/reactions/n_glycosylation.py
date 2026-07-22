@@ -77,7 +77,7 @@ class NGlycosylationReactionSettings(BaseModel):
         description="Input protein residue expected at the attachment site",
     )
     product_site_residue_name: str = Field(
-        "ASX",
+        "NLN",
         min_length=1,
         max_length=4,
         description="Product residue name for the linked asparagine site",
