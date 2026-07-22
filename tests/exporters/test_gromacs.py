@@ -1087,6 +1087,34 @@ class TestEnergyMinimizationHelpers:
         assert not (tmp_path / "em.mdp").exists()
         assert not (tmp_path / f"run_{prefix}_gromacs.sh").exists()
 
+    def test_standard_handoff_export_omits_dynamics_and_restraints(self, tmp_path) -> None:
+        """Topology-only standard export should retain only GRO/TOP/ITP artifacts."""
+        exporter = GromacsExporter(object(), object(), component_info=object())
+
+        def export_topology(output_dir: Path, prefix: str) -> tuple[Path, Path]:
+            gro = output_dir / f"{prefix}.gro"
+            top = output_dir / f"{prefix}.top"
+            itp = output_dir / f"{prefix}_MOL.itp"
+            gro.write_text("handoff\n1\n    1MOL     C1    1   0.000   0.000   0.000\n1 1 1\n")
+            top.write_text(f'#include "{itp.name}"\n[ system ]\nhandoff\n')
+            itp.write_text("[ moleculetype ]\nMOL 3\n[ atoms ]\n1 C 1 MOL C1 1 0 12\n")
+            return gro, top
+
+        exporter._export_interchange = export_topology
+        result = exporter.export(tmp_path, prefix="solute", handoff_only=True)
+
+        assert set(result) == {"gro", "top"}
+        assert {path.name for path in tmp_path.iterdir()} == {
+            "solute.gro",
+            "solute.top",
+            "solute_MOL.itp",
+        }
+        assert '#include "solute_MOL.itp"' in result["top"].read_text()
+        assert result["gro"].read_text().splitlines()[1] == "1"
+        assert not list(tmp_path.glob("*.mdp"))
+        assert not list(tmp_path.glob("*.sh"))
+        assert not list(tmp_path.glob("*posre*"))
+
     def test_run_script_template_resource_exists(self):
         """Local GROMACS run template should be packaged as a resource."""
         template = resources.files("polyzymd.engines.gromacs").joinpath(

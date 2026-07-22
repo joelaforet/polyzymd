@@ -2746,6 +2746,7 @@ class GromacsExporter:
         output_dir: Union[str, Path],
         prefix: Optional[str] = None,
         gmx_command: str = "gmx",
+        handoff_only: bool = False,
     ) -> Dict[str, Path]:
         """Export the complete GROMACS simulation setup.
 
@@ -2753,6 +2754,7 @@ class GromacsExporter:
             output_dir: Directory to write all files.
             prefix: Filename prefix. If None, generates from config.
             gmx_command: GROMACS command for run script.
+            handoff_only: Emit only coordinates, topology, and component files.
 
         Returns:
             Dictionary mapping file types to paths:
@@ -2773,13 +2775,17 @@ class GromacsExporter:
         result: Dict[str, any] = {}
 
         if getattr(self._interchange, "is_exact_export_bundle", False):
-            return self._export_exact_bundle(output_dir, prefix, gmx_command)
+            return self._export_exact_bundle(output_dir, prefix, gmx_command, handoff_only)
 
         # Step 1: Export coordinates and topology via Interchange
         logger.info("Exporting coordinates and topology...")
         gro_path, top_path = self._export_interchange(output_dir, prefix)
         result["gro"] = gro_path
         result["top"] = top_path
+
+        if handoff_only:
+            self._log_handoff_summary(result, output_dir)
+            return result
 
         # Step 2: Generate MDP files
         logger.info("Generating MDP files...")
@@ -2841,6 +2847,7 @@ class GromacsExporter:
         output_dir: Path,
         prefix: str,
         gmx_command: str,
+        handoff_only: bool = False,
     ) -> Dict[str, Any]:
         """Export a native GLYCAM exact bundle with explicit OpenMM exceptions.
 
@@ -2883,6 +2890,16 @@ class GromacsExporter:
         )
         audit_path = output_dir / f"{prefix}_exact_gromacs_audit.json"
         audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        if handoff_only:
+            result = {
+                "gro": gro_path,
+                "top": top_path,
+                "exact_exception_sidecar": bundle.sidecar_path,
+                "exact_gromacs_audit": audit_path,
+            }
+            self._log_handoff_summary(result, output_dir)
+            return result
 
         mdp_generator = MDPGenerator(self._config)
         em_path = output_dir / "em.mdp"
@@ -3315,6 +3332,14 @@ class GromacsExporter:
         logger.info(f"To run: cd {output_dir} && ./{result['run_script'].name}")
         logger.info("")
         logger.info(POLYZYMD_BRANDING)
+
+    def _log_handoff_summary(self, result: Dict[str, Any], output_dir: Path) -> None:
+        """Log a topology-only handoff without implying runnable dynamics."""
+        logger.info("GROMACS topology handoff complete")
+        logger.info(f"Output directory: {output_dir}")
+        logger.info(f"Coordinates: {result['gro'].name}")
+        logger.info(f"Topology: {result['top'].name}")
+        logger.info("No MDP, run-script, or position-restraint artifacts were generated.")
 
 
 # =============================================================================

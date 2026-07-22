@@ -214,6 +214,16 @@ def _print_build_export_summary(
     colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
     colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
     colored_echo("  - *.itp (molecule parameters)", phase="export")
+    if "run_script" not in export_result:
+        if export_result.get("exact_exception_sidecar") is not None:
+            colored_echo("  - exact OpenMM exception sidecar", phase="export")
+        if export_result.get("exact_gromacs_audit") is not None:
+            colored_echo(
+                f"  - {export_result['exact_gromacs_audit'].name} (semantic audit)",
+                phase="export",
+            )
+        colored_echo("Topology-only handoff; no runnable dynamics files generated.", phase="export")
+        return
     colored_echo("Convenience defaults generated:", phase="export")
     colored_echo(f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export")
     for eq_mdp in export_result.get("eq_mdps", []):
@@ -577,10 +587,10 @@ def build(
     artifacts for one or more replicates. No simulation is executed.
 
     By default, this prepares OpenMM inputs in the working directory. Use
-    ``--format gromacs`` to export core GROMACS handoff files (``.gro``,
-    ``.top``, ``.itp``). MDP files and a run script may also be generated as
-    convenience defaults, but they are not required to continue outside
-    PolyzyMD. AMBER and LAMMPS export are not yet supported.
+    ``--format gromacs`` to export GROMACS files. System scope retains the
+    complete setup defaults; solute scope emits a topology-only handoff
+    (``.gro``, ``.top``, ``.itp``) without runnable dynamics files. AMBER and
+    LAMMPS export are not yet supported.
 
     Use ``run --engine gromacs`` if you want PolyzyMD to build and then
     execute the full local GROMACS workflow. Use ``run --engine openmm`` for
@@ -624,8 +634,10 @@ def build(
             build_scope = BuildScope.SYSTEM
         if build_scope is BuildScope.STRUCTURE and not _conjugation_enabled(sim_config):
             raise ValueError("build scope 'structure' requires conjugation.enabled: true")
-        if build_scope is not BuildScope.SYSTEM and export_format is not None:
-            raise ValueError("--format export requires build scope 'system'")
+        if build_scope is BuildScope.STRUCTURE and export_format is not None:
+            raise ValueError("--format export is unavailable for build scope 'structure'")
+        if build_scope is BuildScope.SOLUTE and export_format not in (None, "gromacs"):
+            raise ValueError("build scope 'solute' supports only --format gromacs")
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -754,10 +766,24 @@ def build(
                 colored_echo(f"    Working dir: {working_dir}", phase="build")
                 if export_format:
                     export_dir = sim_config.get_working_directory(rep) / export_format
+                    if build_scope is BuildScope.SOLUTE:
+                        export_dir = (
+                            sim_config.get_working_directory(rep) / "solute" / export_format
+                        )
                     colored_echo(f"    Export dir:  {export_dir}", phase="build")
             colored_echo(phase="build")
 
-            if build_scope is BuildScope.SOLUTE:
+            if build_scope is BuildScope.SOLUTE and export_format == "gromacs":
+                colored_echo("Files to Generate (GROMACS Topology Handoff):", phase="build")
+                colored_echo("  Per replicate under solute/gromacs/:", phase="build")
+                colored_echo("    - *.gro (coordinates)", phase="build")
+                colored_echo("    - *.top (topology)", phase="build")
+                colored_echo("    - *.itp (component parameters, when split)", phase="build")
+                colored_echo("    - Exact sidecar/audit files when applicable", phase="build")
+                colored_echo(
+                    "    - No MDP, run-script, or position-restraint artifacts", phase="build"
+                )
+            elif build_scope is BuildScope.SOLUTE:
                 colored_echo("Files to Generate (Isolated Primary Component):", phase="build")
                 colored_echo("  Per replicate:", phase="build")
                 colored_echo("    - solute/solute.pdb", phase="build")
@@ -862,12 +888,17 @@ def build(
 
                 colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
                 export_dir = sim_config.get_working_directory(rep) / export_format
+                handoff_only = build_scope is BuildScope.SOLUTE
+                if handoff_only:
+                    export_dir = sim_config.get_working_directory(rep) / "solute" / export_format
+                export_kwargs = {"handoff_only": True} if handoff_only else {}
                 export_result = export_system(
                     interchange=artifacts.require_final_interchange(),
                     config=sim_config,
                     output_dir=export_dir,
                     fmt=export_format,
-                    component_info=artifacts.get_component_info(),
+                    component_info=None if handoff_only else artifacts.get_component_info(),
+                    **export_kwargs,
                 )
 
                 _print_build_export_summary(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -709,6 +710,51 @@ def test_exact_bundle_export_rejects_component_info_before_writes(tmp_path) -> N
         exporter.export(tmp_path, prefix="exact")
 
     assert not any(tmp_path.iterdir())
+
+
+def test_exact_handoff_export_keeps_semantic_audit_without_runtime_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Exact topology handoff should patch semantics but omit runnable dynamics."""
+
+    class Baseline:
+        def to_gromacs(self, *, prefix: str, **_kwargs: object) -> None:
+            Path(f"{prefix}.gro").write_text("exact\n0\n1 1 1\n")
+            Path(f"{prefix}.top").write_text(_topology_text(pair=_raw_pair()))
+            Path(f"{prefix}.mdp").write_text("stub\n")
+
+    sidecar_path = tmp_path / "exact_openmm_exceptions.json"
+    bundle = ExactExportBundle(
+        topology=object(),
+        system=object(),
+        positions=object(),
+        private_baseline_interchange=Baseline(),
+        sidecar=_sidecar(),
+        sidecar_path=sidecar_path,
+    )
+    exporter = GromacsExporter(bundle, object())
+    monkeypatch.setattr(exporter, "_fix_zero_indexed_residues", lambda: None)
+    monkeypatch.setattr(exporter, "_fix_gro_residue_numbering", lambda *_args: None)
+
+    output_dir = tmp_path / "gromacs"
+    result = exporter.export(output_dir, prefix="solute", handoff_only=True)
+
+    audit = json.loads(result["exact_gromacs_audit"].read_text())
+    assert audit["pair_mismatch_count"] == 0
+    assert audit["exclusion_mismatch_count"] == 0
+    assert audit["constraint_count"] == len(bundle.sidecar.constraints)
+    assert audit["nonbonded_metadata"] == bundle.sidecar.nonbonded_metadata.model_dump(mode="json")
+    assert result["exact_exception_sidecar"] == sidecar_path
+    assert sidecar_path.is_file()
+    assert " no " in result["top"].read_text()
+    assert {path.name for path in output_dir.iterdir()} == {
+        "solute.gro",
+        "solute.top",
+        "solute_exact_gromacs_audit.json",
+    }
+    assert not list(output_dir.glob("*.mdp"))
+    assert not list(output_dir.glob("*.sh"))
+    assert not list(output_dir.glob("*posre*"))
 
 
 def test_parse_gromacs_energy_xvg_reads_final_row(tmp_path) -> None:

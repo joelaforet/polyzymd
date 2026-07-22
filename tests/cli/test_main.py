@@ -432,6 +432,69 @@ class TestBuildCommandConjugationRouting:
         assert "Final Interchange" not in result.output
         assert "OpenMM/GROMACS" not in result.output
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_structure_scope_still_rejects_format(self, mock_from_yaml, tmp_path: Path) -> None:
+        """Structure checkpoints must remain unavailable to format exporters."""
+        sim_config = _make_build_config(conjugation_enabled=True)
+        sim_config.build = SimpleNamespace(scope="structure")
+        mock_from_yaml.return_value = sim_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            cli, ["build", "-c", str(config_path), "--format", "gromacs", "--dry-run"]
+        )
+
+        assert result.exit_code == 1
+        assert "unavailable for build scope 'structure'" in result.output
+
+    @patch("polyzymd.exporters.interchange.export_system")
+    @patch("polyzymd.builders.openmm_artifacts.build_openmm_artifacts")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_solute_gromacs_routes_to_topology_only_subtree(
+        self, mock_from_yaml, mock_build, mock_export, tmp_path: Path
+    ) -> None:
+        """CLI should isolate solute GROMACS output and request handoff-only export."""
+        from polyzymd.config.schema import BuildScope
+
+        sim_config = _make_build_config(conjugation_enabled=False)
+        sim_config.build = SimpleNamespace(scope="solute")
+        working_dir = tmp_path / "run_1"
+        sim_config.get_working_directory = lambda _rep: working_dir
+        mock_from_yaml.return_value = sim_config
+        interchange = object()
+        artifacts = MagicMock()
+        artifacts.require_final_interchange.return_value = interchange
+        mock_build.return_value = artifacts
+        export_dir = working_dir / "solute" / "gromacs"
+        mock_export.return_value = {
+            "gro": export_dir / "system.gro",
+            "top": export_dir / "system.top",
+        }
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path), "--format", "gromacs"])
+
+        assert result.exit_code == 0
+        mock_build.assert_called_once_with(
+            sim_config=sim_config,
+            working_dir=working_dir,
+            polymer_seed=1,
+            write_system=False,
+            scope=BuildScope.SOLUTE,
+        )
+        artifacts.get_component_info.assert_not_called()
+        mock_export.assert_called_once_with(
+            interchange=interchange,
+            config=sim_config,
+            output_dir=export_dir,
+            fmt="gromacs",
+            component_info=None,
+            handoff_only=True,
+        )
+        assert "no runnable dynamics files generated" in result.output
+
     @patch("polyzymd.exporters.interchange.export_system")
     @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
     @patch("polyzymd.builders.conjugation.build_conjugate_from_config")
