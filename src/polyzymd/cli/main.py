@@ -213,15 +213,15 @@ def _print_build_export_summary(
     colored_echo("Files generated:", phase="export")
     colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
     colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
-    colored_echo("  - *.itp (molecule parameters)", phase="export")
+    for component_itp in export_result.get("component_itps", []):
+        colored_echo(f"  - {component_itp.name} (component parameters)", phase="export")
     if "run_script" not in export_result:
-        if export_result.get("exact_exception_sidecar") is not None:
-            colored_echo("  - exact OpenMM exception sidecar", phase="export")
-        if export_result.get("exact_gromacs_audit") is not None:
-            colored_echo(
-                f"  - {export_result['exact_gromacs_audit'].name} (semantic audit)",
-                phase="export",
-            )
+        sidecar = export_result.get("exact_exception_sidecar")
+        if sidecar is not None:
+            colored_echo(f"  - {sidecar.name} (exact exception sidecar)", phase="export")
+        audit = export_result.get("exact_gromacs_audit")
+        if audit is not None:
+            colored_echo(f"  - {audit.name} (semantic audit)", phase="export")
         colored_echo("Topology-only handoff; no runnable dynamics files generated.", phase="export")
         return
     colored_echo("Convenience defaults generated:", phase="export")
@@ -867,56 +867,66 @@ def build(
         for rep in replicate_list:
             colored_echo(f"Building system for replicate {rep}...", phase="build")
             working_dir = sim_config.get_working_directory(rep)
+            handoff_only = build_scope is BuildScope.SOLUTE and export_format == "gromacs"
+            staging_dir = None
+            build_working_dir = working_dir
+            if handoff_only:
+                staging_dir = tempfile.TemporaryDirectory(prefix="polyzymd-gromacs-handoff-")
+                build_working_dir = Path(staging_dir.name)
 
             from polyzymd.builders.openmm_artifacts import build_openmm_artifacts
 
-            if _conjugation_enabled(sim_config):
-                colored_echo("Conjugation enabled; using conjugation workflow...", phase="build")
+            try:
+                if _conjugation_enabled(sim_config):
+                    colored_echo(
+                        "Conjugation enabled; using conjugation workflow...", phase="build"
+                    )
 
-            artifacts = build_openmm_artifacts(
-                sim_config=sim_config,
-                working_dir=working_dir,
-                polymer_seed=rep,
-                write_system=export_format is None,
-                scope=build_scope,
-            )
-
-            # Branch based on export format
-            if export_format:
-                # Export to requested engine format
-                from polyzymd.exporters.interchange import export_system
-
-                colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
-                export_dir = sim_config.get_working_directory(rep) / export_format
-                handoff_only = build_scope is BuildScope.SOLUTE
-                if handoff_only:
-                    export_dir = sim_config.get_working_directory(rep) / "solute" / export_format
-                export_kwargs = {"handoff_only": True} if handoff_only else {}
-                export_result = export_system(
-                    interchange=artifacts.require_final_interchange(),
-                    config=sim_config,
-                    output_dir=export_dir,
-                    fmt=export_format,
-                    component_info=None if handoff_only else artifacts.get_component_info(),
-                    **export_kwargs,
+                artifacts = build_openmm_artifacts(
+                    sim_config=sim_config,
+                    working_dir=build_working_dir,
+                    polymer_seed=rep,
+                    write_system=export_format is None,
+                    scope=build_scope,
                 )
 
-                _print_build_export_summary(
-                    export_format=export_format,
-                    export_dir=export_dir,
-                    export_result=export_result,
-                )
+                if export_format:
+                    from polyzymd.exporters.interchange import export_system
 
-            else:
-                if build_scope is BuildScope.SOLUTE:
-                    colored_echo("Isolated primary component built successfully!", phase="build")
-                    colored_echo(f"Output directory: {working_dir / 'solute'}", phase="build")
-                elif build_scope is BuildScope.STRUCTURE:
-                    _print_conjugation_structure_build_summary(artifacts, working_dir)
-                elif artifacts.conjugation_enabled:
-                    _print_conjugation_openmm_build_summary(artifacts.result, working_dir)
+                    colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
+                    export_dir = working_dir / export_format
+                    if handoff_only:
+                        export_dir = working_dir / "solute" / export_format
+                    export_kwargs = {"handoff_only": True} if handoff_only else {}
+                    export_result = export_system(
+                        interchange=artifacts.require_final_interchange(),
+                        config=sim_config,
+                        output_dir=export_dir,
+                        fmt=export_format,
+                        component_info=None if handoff_only else artifacts.get_component_info(),
+                        **export_kwargs,
+                    )
+
+                    _print_build_export_summary(
+                        export_format=export_format,
+                        export_dir=export_dir,
+                        export_result=export_result,
+                    )
                 else:
-                    _print_openmm_build_summary(working_dir)
+                    if build_scope is BuildScope.SOLUTE:
+                        colored_echo(
+                            "Isolated primary component built successfully!", phase="build"
+                        )
+                        colored_echo(f"Output directory: {working_dir / 'solute'}", phase="build")
+                    elif build_scope is BuildScope.STRUCTURE:
+                        _print_conjugation_structure_build_summary(artifacts, working_dir)
+                    elif artifacts.conjugation_enabled:
+                        _print_conjugation_openmm_build_summary(artifacts.result, working_dir)
+                    else:
+                        _print_openmm_build_summary(working_dir)
+            finally:
+                if staging_dir is not None:
+                    staging_dir.cleanup()
 
     except PydanticValidationError as e:
         colored_echo("Configuration error:", err=True, level=logging.ERROR)

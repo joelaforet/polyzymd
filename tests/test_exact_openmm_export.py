@@ -744,12 +744,13 @@ def test_exact_handoff_export_keeps_semantic_audit_without_runtime_files(
     assert audit["exclusion_mismatch_count"] == 0
     assert audit["constraint_count"] == len(bundle.sidecar.constraints)
     assert audit["nonbonded_metadata"] == bundle.sidecar.nonbonded_metadata.model_dump(mode="json")
-    assert result["exact_exception_sidecar"] == sidecar_path
-    assert sidecar_path.is_file()
+    assert result["exact_exception_sidecar"] == (output_dir / "solute_exact_openmm_exceptions.json")
+    assert not sidecar_path.exists()
     assert " no " in result["top"].read_text()
     assert {path.name for path in output_dir.iterdir()} == {
         "solute.gro",
         "solute.top",
+        "solute_exact_openmm_exceptions.json",
         "solute_exact_gromacs_audit.json",
     }
     assert not list(output_dir.glob("*.mdp"))

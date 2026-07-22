@@ -1103,7 +1103,8 @@ class TestEnergyMinimizationHelpers:
         exporter._export_interchange = export_topology
         result = exporter.export(tmp_path, prefix="solute", handoff_only=True)
 
-        assert set(result) == {"gro", "top"}
+        assert set(result) == {"gro", "top", "component_itps"}
+        assert result["component_itps"] == [tmp_path / "solute_MOL.itp"]
         assert {path.name for path in tmp_path.iterdir()} == {
             "solute.gro",
             "solute.top",

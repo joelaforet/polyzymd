@@ -2782,6 +2782,7 @@ class GromacsExporter:
         gro_path, top_path = self._export_interchange(output_dir, prefix)
         result["gro"] = gro_path
         result["top"] = top_path
+        result["component_itps"] = sorted(output_dir.glob("*.itp"))
 
         if handoff_only:
             self._log_handoff_summary(result, output_dir)
@@ -2881,8 +2882,11 @@ class GromacsExporter:
         self._fix_gro_residue_numbering(gro_path, top_path, output_dir, prefix)
 
         sidecar = _sidecar_with_parsed_gromacs_identity(top_path, bundle.sidecar)
-        if bundle.sidecar_path is not None:
-            sidecar.save(bundle.sidecar_path)
+        sidecar_path = bundle.sidecar_path
+        if handoff_only:
+            sidecar_path = output_dir / f"{prefix}_exact_openmm_exceptions.json"
+        if sidecar_path is not None:
+            bundle.sidecar_path = sidecar.save(sidecar_path)
 
         audit = patch_gromacs_topology_with_exact_exceptions(
             top_path=top_path,
@@ -2895,7 +2899,8 @@ class GromacsExporter:
             result = {
                 "gro": gro_path,
                 "top": top_path,
-                "exact_exception_sidecar": bundle.sidecar_path,
+                "component_itps": [],
+                "exact_exception_sidecar": sidecar_path,
                 "exact_gromacs_audit": audit_path,
             }
             self._log_handoff_summary(result, output_dir)
