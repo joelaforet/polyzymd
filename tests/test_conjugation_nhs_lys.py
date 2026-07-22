@@ -8,7 +8,11 @@ import pytest
 
 import polyzymd.builders.conjugation._linkage as linkers_module
 from polyzymd.builders.conjugation._linkage import NhsLysModifierLinker, resolve_modifier_nhs_atoms
-from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment, PolymerFragmentAtom
+from polyzymd.builders.conjugation.polymer import (
+    GeneratedPolymerFragment,
+    PolymerFragmentAtom,
+    PreparedFragment,
+)
 from polyzymd.builders.conjugation.reactions.nhs_lys import (
     NhsLysAttachmentSite,
     NhsLysReaction,
@@ -228,6 +232,43 @@ def test_nhs_lys_reaction_resolves_generic_attachment_plan(tmp_path):
     assert plan.pablo_crosslink_requirement.residues == ("LYX", "NHX")
     assert plan.pablo_crosslink_requirement.linking_atoms == ("NZ", "C1")
     assert plan.target_bond_length_angstrom == pytest.approx(1.33)
+
+
+def test_nhs_lys_reaction_rejects_mismatched_prepared_fragment(tmp_path):
+    """Reaction endpoints and the canonical prepared structure must share one atom graph."""
+    protein_path = _lysine_pdb(
+        tmp_path,
+        hydrogens=(("HZ1", 2.0, 0.7, 0.0), ("HZ2", 2.0, -0.7, 0.0), ("HZ3", 2.0, 0.0, 0.7)),
+    )
+    site = SimpleNamespace(chain_id="A", residue_name="LYS", residue_number=23, atom_name="NZ")
+    raw_modifier = _modifier_with_explicit_selectors(rdkit_mol=None)
+    modifier = GeneratedPolymerFragment(
+        atoms=raw_modifier.atoms,
+        reactive_atom_index=raw_modifier.reactive_atom_index,
+        leaving_atom_indices=raw_modifier.leaving_atom_indices,
+        name=raw_modifier.name,
+    )
+    mismatched = modifier.model_copy(
+        update={
+            "atoms": (
+                modifier.atoms[0].model_copy(update={"atom_name": "BAD"}),
+                *modifier.atoms[1:],
+            )
+        }
+    )
+    prepared = PreparedFragment.from_generated_fragment(
+        mismatched,
+        source_identity="mismatched",
+        source_kind="polymer",
+    )
+
+    with pytest.raises(ValueError, match="does not represent the reaction fragment"):
+        NhsLysReaction().resolve_attachment(
+            protein_path,
+            site,
+            modifier,
+            prepared_fragment=prepared,
+        )
 
 
 def test_nhs_lys_linker_resolves_canonical_hz_names_by_rdkit(tmp_path):

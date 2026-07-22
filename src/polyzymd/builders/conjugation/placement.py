@@ -277,7 +277,7 @@ def place_modifier_with_resolved_plan(
         plan.protein_link_atom,
         plan.target_bond_length_angstrom,
     )
-    placed_fragment = _placed_fragment_from_coords(modifier, transformed_full_coords)
+    placed_fragment = _placed_fragment_from_coords(modifier, transformed_full_coords, plan=plan)
 
     placed_reactive = _coord(_product_modifier_atom(placed_fragment, plan))
     placed_bond_length = float(np.linalg.norm(placed_reactive - _coord(plan.protein_link_atom)))
@@ -433,7 +433,7 @@ def place_modifiers_with_resolved_plans(
             plan.protein_link_atom,
             plan.target_bond_length_angstrom,
         )
-        placed_fragment = _placed_fragment_from_coords(modifier, transformed_full_coords)
+        placed_fragment = _placed_fragment_from_coords(modifier, transformed_full_coords, plan=plan)
 
         placed_reactive = _coord(_product_modifier_atom(placed_fragment, plan))
         placed_bond_length = float(np.linalg.norm(placed_reactive - _coord(plan.protein_link_atom)))
@@ -525,9 +525,9 @@ def _retained_modifier_atoms(
     plan: ReactionProduct,
 ) -> tuple[PdbAtomRecord, ...]:
     """Return modifier atoms retained for Packmol placement."""
-    placed = modifier.to_placed_fragment()
     leaving_identities = {_atom_identity(atom) for atom in plan.modifier_leaving_atoms}
-    return tuple(atom for atom in placed.atoms if _atom_identity(atom) not in leaving_identities)
+    atoms = tuple(atom.to_pdb_atom() for atom in modifier.atoms)
+    return tuple(atom for atom in atoms if _atom_identity(atom) not in leaving_identities)
 
 
 def _coords_from_atoms(atoms: tuple[PdbAtomRecord, ...]) -> np.ndarray:
@@ -688,19 +688,37 @@ def _snap_reactive_atom_to_bond_length(
 
 
 def _placed_fragment_from_coords(
-    modifier: PreparedFragment, coords: np.ndarray
+    modifier: PreparedFragment,
+    coords: np.ndarray,
+    *,
+    plan: ReactionProduct,
 ) -> PlacedPolymerFragment:
     """Build a placed fragment preserving atom identity and connectivity."""
     placed_atoms = []
-    for atom in modifier.to_placed_fragment().atoms:
+    for source_atom in modifier.atoms:
+        atom = source_atom.to_pdb_atom()
         if atom.atom_index is None:
             raise ValueError("Modifier atom_index is required to restore placed coordinates")
         x_coord, y_coord, z_coord = coords[atom.atom_index]
         placed_atoms.append(
             atom.model_copy(update={"x": float(x_coord), "y": float(y_coord), "z": float(z_coord)})
         )
-    placed = modifier.to_placed_fragment()
-    return placed.model_copy(update={"atoms": tuple(placed_atoms)})
+    return PlacedPolymerFragment(
+        atoms=tuple(placed_atoms),
+        bonds=modifier.bonds,
+        bond_orders=modifier.bond_orders,
+        reactive_atom_serial=plan.modifier_link_atom.serial,
+        reactive_atom_index=plan.modifier_link_atom.atom_index,
+        reactive_atom_name=plan.modifier_link_atom.atom_name,
+        leaving_atom_serials=tuple(
+            atom.serial for atom in plan.modifier_leaving_atoms if atom.serial is not None
+        ),
+        leaving_atom_indices=tuple(
+            atom.atom_index for atom in plan.modifier_leaving_atoms if atom.atom_index is not None
+        ),
+        leaving_atom_names=tuple(atom.atom_name for atom in plan.modifier_leaving_atoms),
+        name=modifier.name,
+    )
 
 
 def _minimum_distance(points_a: np.ndarray, points_b: np.ndarray) -> float:

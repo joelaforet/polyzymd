@@ -312,8 +312,7 @@ def test_product_state_pablo_library_for_specs_uses_generic_fragments_and_sideca
     specs = tuple(
         SimpleNamespace(
             attachment_id=f"spec_{index}",
-            fragment=object(),
-            source_sidecars={"sdf": sdf_path},
+            fragment=SimpleNamespace(sidecars={"sdf": sdf_path}),
             product_residue_mappings={},
             endpoint_provenance={},
             pablo_crosslink_requirement=requirement,
@@ -646,8 +645,8 @@ def test_product_state_pablo_library_for_specs_deduplicates_five_repeated_templa
                 bonds=((raw_atom, "O020"),),
                 bond_orders=(),
                 source_kind="smiles",
+                sidecars={},
             ),
-            source_sidecars={},
             endpoint_provenance={},
             **_generated_crosslink_resolved_plan_like(
                 protein_residue_number=residue_number,
@@ -1027,7 +1026,6 @@ def _fixture_resolved_plan_like(
     )
     return SimpleNamespace(
         fragment=fragment,
-        source_sidecars={},
         endpoint_provenance={},
         pablo_crosslink_requirement=requirement,
         protein_link_atom=SimpleNamespace(chain_id="A", residue_number=protein_residue_number),

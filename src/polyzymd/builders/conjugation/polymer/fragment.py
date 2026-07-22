@@ -353,6 +353,25 @@ class PreparedFragment(GeneratedPolymerFragment):
     provenance: dict[str, Any] = Field(default_factory=dict)
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
 
+    @model_validator(mode="after")
+    def reject_reaction_selectors(self) -> PreparedFragment:
+        """Keep reaction endpoints out of the provider-neutral fragment contract."""
+        if any(
+            (
+                self.reactive_atom_serial is not None,
+                self.reactive_atom_index is not None,
+                self.reactive_atom_name is not None,
+                bool(self.leaving_atom_serials),
+                bool(self.leaving_atom_indices),
+                bool(self.leaving_atom_names),
+            )
+        ):
+            raise ValueError(
+                "PreparedFragment cannot contain reactive or leaving-atom selectors; "
+                "reaction endpoints belong to ReactionProduct"
+            )
+        return self
+
     @classmethod
     def from_generated_fragment(
         cls,
@@ -366,7 +385,16 @@ class PreparedFragment(GeneratedPolymerFragment):
     ) -> PreparedFragment:
         """Promote generation output into the construction contract once."""
         return cls(
-            **fragment.model_dump(),
+            **fragment.model_dump(
+                exclude={
+                    "reactive_atom_serial",
+                    "reactive_atom_index",
+                    "reactive_atom_name",
+                    "leaving_atom_serials",
+                    "leaving_atom_indices",
+                    "leaving_atom_names",
+                }
+            ),
             source_identity=source_identity,
             source_kind=source_kind,
             sidecars=dict(sidecars or {}),

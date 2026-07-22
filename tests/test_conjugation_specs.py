@@ -59,6 +59,7 @@ def test_moiety_plan_builds_one_authoritative_prepared_fragment(tmp_path: Path):
     assert fragment.sidecars == {"pdb": pdb_path, "sdf": sdf_path}
     assert fragment.reactive_atom_serial is None
     assert fragment.leaving_atom_serials == ()
+
     assert fragment.source_identity == str(sdf_path)
 
 
@@ -88,18 +89,33 @@ def test_polymer_plan_preserves_multi_residue_fragment_and_sdf_sidecar(tmp_path:
         charged_sdf_path=charged_sdf_path,
     )
 
-    expected_sidecars = {
+    assert fragment.reactive_atom_serial is None
+    assert fragment.leaving_atom_serials == ()
+    assert fragment.sidecars == {
         "sdf": sdf_path,
         "bond_sdf": sdf_path,
         "charged_sdf": charged_sdf_path,
     }
-
     assert isinstance(fragment, PreparedFragment)
     assert fragment.source_kind == "polymer"
     assert len(fragment.residues) == 2
     assert fragment.sequence == "AC"
-    assert fragment.sidecars == expected_sidecars
     assert fragment.residues == polymer.residues
+
+
+def test_prepared_fragment_rejects_reaction_selectors():
+    """Prepared fragments must not duplicate reaction-owned endpoint selectors."""
+    polymer = GeneratedPolymerFragment(
+        atoms=(_atom(0, 10, "C1", "NHS"),),
+        reactive_atom_serial=10,
+    )
+
+    with pytest.raises(ValueError, match="endpoints belong to ReactionProduct"):
+        PreparedFragment(
+            **polymer.model_dump(),
+            source_identity="fixture",
+            source_kind="polymer",
+        )
 
 
 def test_nhs_lys_polymer_spec_carries_sdf_sidecar_to_product_library(
@@ -126,7 +142,6 @@ def test_nhs_lys_polymer_spec_carries_sdf_sidecar_to_product_library(
         fragment=fragment,
         modifier_residue_name="NHS",
         modifier_atom_name="RC",
-        source_sidecars=fragment.sidecars,
     )
     captured = _capture_singular_product_library_call(monkeypatch, spec.pablo_crosslink_requirement)
 
@@ -165,7 +180,6 @@ def test_n_gly_smiles_spec_carries_sdf_sidecar_to_product_library(
     spec = _resolved_plan(
         fragment=fragment,
         modifier_residue_name="NAG",
-        source_sidecars=fragment.sidecars,
     )
     captured = _capture_singular_product_library_call(monkeypatch, spec.pablo_crosslink_requirement)
 
@@ -263,7 +277,6 @@ def _resolved_plan(
     fragment: PreparedFragment,
     modifier_residue_name: str,
     modifier_atom_name: str = "C001",
-    source_sidecars: dict[str, Path] | None = None,
 ) -> ReactionProduct:
     protein_selector = PdbAtomSelector(
         chain_id="A",
@@ -345,5 +358,4 @@ def _resolved_plan(
         fragment=fragment,
         attachment_id="test_attachment",
         reaction_name="test_reaction",
-        source_sidecars=source_sidecars or {},
     )

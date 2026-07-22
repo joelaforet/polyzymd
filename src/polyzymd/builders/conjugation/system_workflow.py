@@ -667,7 +667,6 @@ def _build_attachment_spec(
         attachment_id=str(attachment.name or f"attachment_{attachment_index:02d}"),
         attachment_index=attachment_index,
         attachment_config=attachment,
-        source_sidecars=source.sidecars,
         attachment_force_field_domain=str(attachment.moiety.force_field or ""),
         diagnostics=(*source.diagnostics, f"Resolved {source.source_kind} reaction product"),
         settings=reaction_settings,
@@ -796,7 +795,7 @@ def _pdb_fragment_sidecar_artifacts(specs: tuple[ReactionProduct, ...]) -> dict[
     """Return namespaced PDB-fragment sidecar artifact paths."""
     artifacts: dict[str, Path] = {}
     for index, spec in enumerate(specs, start=1):
-        for name, path in spec.source_sidecars.items():
+        for name, path in spec.fragment.sidecars.items():
             artifacts[f"pdb_fragment_{index}_{name}"] = path
             if index == 1:
                 artifacts.setdefault(f"pdb_fragment_{name}", path)
@@ -822,7 +821,7 @@ def _write_pdb_fragment_coordinate_artifact(
         settings=_pdb_fragment_coordinate_only_placement_settings(placement_settings),
         run_packmol_func=run_packmol_func,
     )
-    sidecar_path = spec.source_sidecars.get("pdb_fragment_ingestion")
+    sidecar_path = spec.fragment.sidecars.get("pdb_fragment_ingestion")
     if sidecar_path is not None:
         _annotate_pdb_fragment_sidecar(sidecar_path, coordinate_artifact_path=output_path)
     return output_path, assembly, placement
@@ -870,7 +869,7 @@ def _write_pdb_fragment_coordinate_artifacts(
         ),
     )
     for spec in specs:
-        sidecar_path = spec.source_sidecars.get("pdb_fragment_ingestion")
+        sidecar_path = spec.fragment.sidecars.get("pdb_fragment_ingestion")
         if sidecar_path is not None:
             _annotate_pdb_fragment_sidecar(sidecar_path, coordinate_artifact_path=output_path)
     return output_path, assembly, placements
@@ -1869,7 +1868,7 @@ def _pablo_failure_message(result: Any, *, specs: tuple[Any, ...] = ()) -> str:
     details = []
     for spec in specs:
         endpoint = getattr(spec, "endpoint_provenance", {}) or {}
-        sidecars = getattr(spec, "source_sidecars", {}) or {}
+        sidecars = spec.fragment.sidecars
         details.append(
             {
                 "attachment_id": getattr(spec, "attachment_id", ""),

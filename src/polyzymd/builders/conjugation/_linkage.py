@@ -9,7 +9,7 @@ from math import dist
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from polyzymd.builders.conjugation.polymer.fragment import (
     GeneratedPolymerFragment,
@@ -210,16 +210,11 @@ class ReactionProduct(BaseModel):
     modifier_link_atom: PdbAtomRecord
     protein_leaving_atoms: tuple[PdbAtomRecord, ...] = Field(default_factory=tuple)
     modifier_leaving_atoms: tuple[PdbAtomRecord, ...] = Field(default_factory=tuple)
-    protein_product_residue_name: str
-    modifier_product_residue_name: str
-    pablo_crosslink_requirement: PabloCrosslinkRequirement
-    target_bond_length_angstrom: float = Field(1.33, gt=0)
     fragment: PreparedFragment
     attachment_id: str = ""
     attachment_index: int = Field(1, ge=1)
     attachment_config: Any = Field(default=None, exclude=True)
     reaction_name: str = ""
-    source_sidecars: dict[str, Path] = Field(default_factory=dict)
     product_residue_mappings: dict[str, dict[str, int | str]] = Field(
         default_factory=dict,
         exclude=True,
@@ -229,6 +224,41 @@ class ReactionProduct(BaseModel):
     endpoint_provenance: dict[str, Any] = Field(default_factory=dict)
     scoped_residue_aliases: dict[str, str] = Field(default_factory=dict)
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
+
+    @computed_field
+    @property
+    def protein_product_residue_name(self) -> str:
+        """Return the contract-owned protein product residue name."""
+        return self.contract.protein_endpoint.product_residue_name
+
+    @computed_field
+    @property
+    def modifier_product_residue_name(self) -> str:
+        """Return the contract-owned modifier product residue name."""
+        return self.contract.modifier_endpoint.product_residue_name
+
+    @computed_field
+    @property
+    def target_bond_length_angstrom(self) -> float:
+        """Return the contract-owned target linkage distance."""
+        return self.contract.bond.target_bond_length_angstrom
+
+    @computed_field
+    @property
+    def pablo_crosslink_requirement(self) -> PabloCrosslinkRequirement:
+        """Derive the Pablo requirement from the resolved atoms and contract."""
+        return PabloCrosslinkRequirement(
+            residues=(
+                self.protein_product_residue_name,
+                self.modifier_product_residue_name,
+            ),
+            linking_atoms=(self.protein_link_atom.atom_name, self.modifier_link_atom.atom_name),
+            leaving_atoms=(
+                tuple(atom.atom_name for atom in self.protein_leaving_atoms),
+                tuple(atom.atom_name for atom in self.modifier_leaving_atoms),
+            ),
+            bond_order=self.contract.bond.bond_order,
+        )
 
     def to_nhs_lys_pdb_attachment(self) -> NhsLysPdbAttachment:
         """Convert this resolved plan to the legacy NHS-Lys assembly adapter.
@@ -366,7 +396,6 @@ def resolve_explicit_linkage_contract(
     attachment_index: int = 1,
     attachment_config: Any = None,
     reaction_name: str = "",
-    source_sidecars: dict[str, Path] | None = None,
     attachment_force_field_domain: str = "",
     diagnostics: tuple[str, ...] = (),
 ) -> ReactionProduct:
@@ -411,34 +440,17 @@ def resolve_explicit_linkage_contract(
         label="modifier leaving atom",
     )
 
-    requirement = PabloCrosslinkRequirement(
-        residues=(
-            contract.protein_endpoint.product_residue_name,
-            contract.modifier_endpoint.product_residue_name,
-        ),
-        linking_atoms=(protein_link_atom.atom_name, modifier_link_atom.atom_name),
-        leaving_atoms=(
-            tuple(atom.atom_name for atom in protein_leaving_atoms),
-            tuple(atom.atom_name for atom in modifier_leaving_atoms),
-        ),
-        bond_order=contract.bond.bond_order,
-    )
     return ReactionProduct(
         contract=contract,
         protein_link_atom=protein_link_atom,
         modifier_link_atom=modifier_link_atom,
         protein_leaving_atoms=protein_leaving_atoms,
         modifier_leaving_atoms=modifier_leaving_atoms,
-        protein_product_residue_name=contract.protein_endpoint.product_residue_name,
-        modifier_product_residue_name=contract.modifier_endpoint.product_residue_name,
-        pablo_crosslink_requirement=requirement,
-        target_bond_length_angstrom=contract.bond.target_bond_length_angstrom,
         fragment=fragment,
         attachment_id=attachment_id,
         attachment_index=attachment_index,
         attachment_config=attachment_config,
         reaction_name=reaction_name or contract.mechanism_name or "",
-        source_sidecars=dict(source_sidecars or {}),
         attachment_force_field_domain=attachment_force_field_domain,
         diagnostics=diagnostics,
     )

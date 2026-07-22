@@ -232,14 +232,13 @@ class NhsLysReaction(ReactionTemplate):
         attachment_id: str = "",
         attachment_index: int = 1,
         attachment_config: Any = None,
-        source_sidecars: dict[str, Path] | None = None,
         attachment_force_field_domain: str = "",
         diagnostics: tuple[str, ...] = (),
         settings: NhsLysReactionSettings | None = None,
     ) -> Any:
         """Resolve an NHS-Lys attachment plan through the generic contract path."""
         from polyzymd.builders.conjugation._linkage import resolve_explicit_linkage_contract
-        from polyzymd.builders.conjugation._specs import prepare_reaction_fragment
+        from polyzymd.builders.conjugation._specs import resolve_prepared_reaction_fragment
 
         contract = cls.build_contract(
             site_config,
@@ -251,12 +250,11 @@ class NhsLysReaction(ReactionTemplate):
             protein_pdb_path,
             fragment,
             contract,
-            fragment=prepared_fragment or prepare_reaction_fragment(fragment),
+            fragment=resolve_prepared_reaction_fragment(fragment, prepared_fragment),
             attachment_id=attachment_id,
             attachment_index=attachment_index,
             attachment_config=attachment_config,
             reaction_name=cls.name,
-            source_sidecars=source_sidecars,
             attachment_force_field_domain=attachment_force_field_domain,
             diagnostics=diagnostics,
         )

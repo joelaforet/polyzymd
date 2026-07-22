@@ -336,7 +336,7 @@ def build_product_state_pablo_library_for_specs(
 
 def _spec_sdf_path(spec: Any) -> Path | None:
     """Return the bond-order SDF sidecar recorded on a resolved spec, if present."""
-    sidecars = spec.source_sidecars
+    sidecars = spec.fragment.sidecars
     if sidecars.get("bond_sdf") is not None:
         return Path(sidecars["bond_sdf"])
     if sidecars.get("sdf") is not None:
@@ -346,7 +346,7 @@ def _spec_sdf_path(spec: Any) -> Path | None:
 
 def _spec_charged_sdf_path(spec: Any) -> Path | None:
     """Return the validated charged SDF sidecar recorded on a resolved spec."""
-    sidecars = spec.source_sidecars
+    sidecars = spec.fragment.sidecars
     if sidecars.get("charged_sdf") is not None:
         return Path(sidecars["charged_sdf"])
     return None

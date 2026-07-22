@@ -409,11 +409,12 @@ def test_bridge_refuses_raw_sdf_as_validated_charge_source(tmp_path):
     raw_sdf = tmp_path / "polymer.sdf"
     raw_sdf.write_text("", encoding="utf-8")
     spec = SimpleNamespace(
-        fragment=SimpleNamespace(source_kind="polymer"),
-        source_sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf},
+        fragment=SimpleNamespace(
+            source_kind="polymer", sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf}
+        ),
     )
 
-    with pytest.raises(ValueError, match=r"requires source_sidecars\['charged_sdf'\]"):
+    with pytest.raises(ValueError, match=r"requires fragment.sidecars\['charged_sdf'\]"):
         charge_bridge._source_sdf_path(spec)
 
 
@@ -422,8 +423,9 @@ def test_bridge_skips_raw_sdf_for_smiles_moiety_patch(tmp_path):
     raw_sdf = tmp_path / "glycan.sdf"
     raw_sdf.write_text("", encoding="utf-8")
     spec = SimpleNamespace(
-        fragment=SimpleNamespace(source_kind="smiles"),
-        source_sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf},
+        fragment=SimpleNamespace(
+            source_kind="smiles", sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf}
+        ),
     )
 
     assert charge_bridge._source_sdf_path(spec) is None
@@ -434,8 +436,10 @@ def test_bridge_prefers_charged_sdf_source(tmp_path):
     raw_sdf = tmp_path / "polymer.sdf"
     charged_sdf = tmp_path / "polymer_charged.sdf"
     spec = SimpleNamespace(
-        fragment=SimpleNamespace(source_kind="polymer"),
-        source_sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf, "charged_sdf": charged_sdf},
+        fragment=SimpleNamespace(
+            source_kind="polymer",
+            sidecars={"sdf": raw_sdf, "bond_sdf": raw_sdf, "charged_sdf": charged_sdf},
+        ),
     )
 
     assert charge_bridge._source_sdf_path(spec) == charged_sdf
@@ -447,6 +451,7 @@ def test_polymer_records_refine_duplicate_atom_names_by_residue_mapping(monkeypa
     charged_sdf.write_text("", encoding="utf-8")
     fragment = SimpleNamespace(
         source_kind="polymer",
+        sidecars={"charged_sdf": charged_sdf},
         atoms=(
             SimpleNamespace(
                 atom_index=0,
@@ -460,7 +465,6 @@ def test_polymer_records_refine_duplicate_atom_names_by_residue_mapping(monkeypa
         leaving_atom_names=(),
     )
     spec = SimpleNamespace(
-        source_sidecars={"charged_sdf": charged_sdf},
         fragment=fragment,
         product_residue_mappings={
             "5": {"target_chain": "C", "target_residue_number": 6},
@@ -492,6 +496,7 @@ def test_polymer_records_assign_charged_sdf_charges_by_atom_index(monkeypatch, t
     charged_sdf.write_text("", encoding="utf-8")
     fragment = SimpleNamespace(
         source_kind="polymer",
+        sidecars={"charged_sdf": charged_sdf},
         atoms=(
             SimpleNamespace(
                 atom_index=1,
@@ -513,7 +518,6 @@ def test_polymer_records_assign_charged_sdf_charges_by_atom_index(monkeypatch, t
         leaving_atom_names=(),
     )
     spec = SimpleNamespace(
-        source_sidecars={"charged_sdf": charged_sdf},
         fragment=fragment,
         product_residue_mappings={},
     )

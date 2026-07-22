@@ -570,7 +570,6 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
                 "attachment_id": f"attachment_{index:02d}",
                 "attachment_index": index,
                 "reaction_name": "n_glycosylation",
-                "source_sidecars": {},
                 "fragment": modifier,
             }
         )
@@ -847,7 +846,6 @@ def test_relaxation_receives_product_path_and_attachment_specs(
             "attachment_id": "n_gly_attachment_01",
             "attachment_index": 1,
             "reaction_name": "n_glycosylation",
-            "source_sidecars": {},
             "fragment": modifier,
         }
     )
@@ -1014,7 +1012,6 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
             "attachment_id": "n_gly_attachment_01",
             "attachment_index": 1,
             "reaction_name": "n_glycosylation",
-            "source_sidecars": {},
             "fragment": modifier,
         }
     )
