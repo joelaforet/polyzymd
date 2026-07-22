@@ -18,7 +18,6 @@ from polyzymd.builders.conjugation._moiety_provider import (
 from polyzymd.builders.conjugation._pdb_fragment import load_pdb_fragment
 from polyzymd.builders.conjugation.reactions.n_glycosylation import (
     NGlycosylationReaction,
-    _resolve_asn_nd2_hydrogen,
     residue_resolved_glycan_pdb_profile_from_fragment,
 )
 from polyzymd.builders.conjugation.structure.parsing import (
@@ -138,7 +137,7 @@ def test_asn_nd2_hydrogen_resolution_uses_template_not_coordinates(tmp_path: Pat
     """Pablo ASN topology should select ND2 H even when coordinates are nonbondlike."""
     protein_path = _write_asn_fixture(tmp_path / "asn_far_h.pdb", hydrogens=("HD21",))
 
-    hydrogen = _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+    hydrogen = NGlycosylationReaction.resolve_protein_leaving_atom(protein_path, _asn_selector())
 
     assert hydrogen.atom_name == "HD21"
 
@@ -147,8 +146,8 @@ def test_asn_nd2_hydrogen_resolution_rejects_missing_template_h(tmp_path: Path) 
     """Missing Pablo-template ND2 H names should fail without geometry fallback."""
     protein_path = _write_asn_fixture(tmp_path / "asn_no_h.pdb", hydrogens=())
 
-    with pytest.raises(ValueError, match="exactly one explicit Asn ND2 hydrogen"):
-        _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+    with pytest.raises(ValueError, match="exactly one explicit hydrogen bonded to ASN ND2"):
+        NGlycosylationReaction.resolve_protein_leaving_atom(protein_path, _asn_selector())
 
 
 def test_asn_nd2_hydrogen_resolution_selects_hd21_from_canonical_template_pair(
@@ -157,7 +156,7 @@ def test_asn_nd2_hydrogen_resolution_selects_hd21_from_canonical_template_pair(
     """Canonical Pablo-template ND2 H names should resolve deterministically to HD21."""
     protein_path = _write_asn_fixture(tmp_path / "asn_two_h.pdb", hydrogens=("HD22", "HD21"))
 
-    hydrogen = _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+    hydrogen = NGlycosylationReaction.resolve_protein_leaving_atom(protein_path, _asn_selector())
 
     assert hydrogen.atom_name == "HD21"
 

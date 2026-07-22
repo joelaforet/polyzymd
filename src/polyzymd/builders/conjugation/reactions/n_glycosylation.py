@@ -266,6 +266,34 @@ class NGlycosylationReaction(ReactionTemplate):
         return detect_glycan_anomeric_group(mol)
 
     @classmethod
+    def site_selector_from_config(
+        cls,
+        site_config: Any,
+        *,
+        settings: NGlycosylationReactionSettings,
+    ) -> PdbAtomSelector:
+        """Resolve and validate this mechanism's protein endpoint."""
+        return _site_selector_from_config(
+            site_config,
+            settings=settings,
+            mechanism_name=cls.name,
+        )
+
+    @classmethod
+    def resolve_protein_leaving_atom(
+        cls,
+        protein_pdb_path: Path | str,
+        selector: PdbAtomSelector,
+    ) -> PdbAtomRecord:
+        """Resolve the deterministic Asn ND2 hydrogen removed by N-glycosylation."""
+        return _resolve_bonded_site_hydrogen(
+            protein_pdb_path,
+            selector,
+            mechanism_name=cls.name,
+            preferred_name="HD21",
+        )
+
+    @classmethod
     def build_contract(
         cls,
         site_config: Any,
@@ -276,7 +304,7 @@ class NGlycosylationReaction(ReactionTemplate):
     ) -> ExplicitLinkageContract:
         """Build a generic linkage contract for an Asn-glycan attachment."""
         resolved = settings or cls.default_settings()
-        site_selector = _site_selector_from_config(site_config, settings=resolved)
+        site_selector = cls.site_selector_from_config(site_config, settings=resolved)
         if isinstance(moiety_fragment, GeneratedMoietyFragment):
             group = cls.detect_anomeric_group(moiety_fragment)
         else:
@@ -292,7 +320,9 @@ class NGlycosylationReaction(ReactionTemplate):
         protein_leaving_selectors: tuple[PdbAtomSelector, ...] = ()
         if protein_pdb_path is not None:
             protein_leaving_selectors = (
-                _selector_from_pdb_atom(_resolve_asn_nd2_hydrogen(protein_pdb_path, site_selector)),
+                _selector_from_pdb_atom(
+                    cls.resolve_protein_leaving_atom(protein_pdb_path, site_selector)
+                ),
             )
 
         product_site, product_moiety = resolved.product_residue_names(reactive_atom.residue_name)
@@ -1037,20 +1067,21 @@ def _site_selector_from_config(
     site_config: Any,
     *,
     settings: NGlycosylationReactionSettings,
+    mechanism_name: str,
 ) -> PdbAtomSelector:
-    """Build the protein endpoint selector, defaulting the omitted atom to ND2."""
+    """Build and validate a glycosylation protein endpoint selector."""
     residue_name = _coalesce_text(
         _field(site_config, "residue_name"), settings.source_site_residue_name
     )
     atom_name = _coalesce_text(_field(site_config, "atom_name"), settings.target_atom_name)
     if residue_name != settings.source_site_residue_name:
         raise ValueError(
-            "N-glycosylation target residue must be "
+            f"{mechanism_name} target residue must be "
             f"{settings.source_site_residue_name}, got {residue_name}"
         )
     if atom_name != settings.target_atom_name:
         raise ValueError(
-            "N-glycosylation target atom must be " f"{settings.target_atom_name}, got {atom_name}"
+            f"{mechanism_name} target atom must be {settings.target_atom_name}, got {atom_name}"
         )
     return PdbAtomSelector(
         chain_id=_coalesce_text(_field(site_config, "chain_id"), "A"),
@@ -1063,26 +1094,33 @@ def _site_selector_from_config(
     )
 
 
-def _resolve_asn_nd2_hydrogen(
+def _resolve_bonded_site_hydrogen(
     protein_pdb_path: Path | str,
     selector: PdbAtomSelector,
     *,
+    mechanism_name: str,
+    preferred_name: str | None = None,
     residue_library: Any | None = None,
 ) -> PdbAtomRecord:
-    """Resolve one leaving hydrogen from Pablo ASN template connectivity."""
+    """Resolve one leaving hydrogen from Pablo residue-template connectivity."""
     from polyzymd.builders.conjugation.pablo.residue_library import bonded_hydrogen_names
 
     atoms = parse_pdb_atom_records(protein_pdb_path)
-    nd2_matches = [atom for atom in atoms if selector.matches(atom)]
-    if len(nd2_matches) != 1:
+    site_matches = [atom for atom in atoms if selector.matches(atom)]
+    if len(site_matches) != 1:
         raise ValueError(
-            "Expected exactly one ASN ND2 atom for N-glycosylation site "
+            f"Expected exactly one {selector.residue_name} {selector.atom_name} atom for "
+            f"{mechanism_name} site "
             f"{selector.chain_id}:{selector.residue_number}:{selector.atom_name}, "
-            f"found {len(nd2_matches)}"
+            f"found {len(site_matches)}"
         )
-    nd2_atom = nd2_matches[0]
-    template_hydrogen_names = bonded_hydrogen_names("ASN", "ND2", residue_library=residue_library)
-    residue_atoms = [atom for atom in atoms if _same_residue(atom, nd2_atom)]
+    site_atom = site_matches[0]
+    template_hydrogen_names = bonded_hydrogen_names(
+        selector.residue_name,
+        selector.atom_name,
+        residue_library=residue_library,
+    )
+    residue_atoms = [atom for atom in atoms if _same_residue(atom, site_atom)]
     observed = [
         atom
         for atom in residue_atoms
@@ -1091,20 +1129,21 @@ def _resolve_asn_nd2_hydrogen(
     if len(observed) == 1:
         return observed[0]
 
-    canonical_observed = {
-        atom.atom_name.strip().upper(): atom
-        for atom in observed
-        if atom.atom_name.strip().upper() in {"HD21", "HD22"}
-    }
-    if len(observed) == 2 and set(canonical_observed) == {"HD21", "HD22"}:
-        return canonical_observed["HD21"]
+    preferred = (preferred_name or "").strip().upper()
+    if preferred and len(observed) > 1:
+        preferred_matches = [
+            atom for atom in observed if atom.atom_name.strip().upper() == preferred
+        ]
+        if len(preferred_matches) == 1:
+            return preferred_matches[0]
 
     if len(observed) != 1:
         raise ValueError(
-            "N-glycosylation requires exactly one explicit Asn ND2 hydrogen to remove from "
-            "Pablo ASN template connectivity, or the canonical HD21/HD22 pair for "
-            "deterministic HD21 removal; "
-            f"found {len(observed)} for {selector.chain_id}:ASN{selector.residue_number}:ND2. "
+            f"{mechanism_name} requires exactly one explicit hydrogen bonded to "
+            f"{selector.residue_name} {selector.atom_name}"
+            + (f", or an unambiguous preferred {preferred} hydrogen; " if preferred else "; ")
+            + f"found {len(observed)} for {selector.chain_id}:{selector.residue_name}"
+            f"{selector.residue_number}:{selector.atom_name}. "
             f"Template bonded H names: {', '.join(template_hydrogen_names)}. No coordinate "
             "geometry fallback is used."
         )
