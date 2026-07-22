@@ -170,7 +170,8 @@ def test_prepared_fragment_preserves_source_identity_and_construction_data(tmp_p
     assert prepared.atoms == generated.atoms
     assert prepared.bond_orders == generated.bond_orders
     assert prepared.sidecars == {"sdf": sdf_path}
-    assert prepared.to_placed_fragment() == generated.to_placed_fragment()
+    assert prepared.reactive_atom_index is None
+    assert prepared.leaving_atom_indices == ()
 
 
 def test_generated_fragment_writes_crosslinked_nhx_lyx_pdb(tmp_path):

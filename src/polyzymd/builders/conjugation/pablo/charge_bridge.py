@@ -1073,14 +1073,14 @@ def _source_sdf_path(spec: Any) -> Path | None:
     """Return the validated charged SDF path from an attachment spec."""
     if spec.fragment.source_kind == "smiles":
         return None
-    sidecars = spec.source_sidecars
+    sidecars = spec.fragment.sidecars
     path = sidecars.get("charged_sdf")
     if path is not None:
         return Path(path)
     raw_path = sidecars.get("bond_sdf") or sidecars.get("sdf")
     if raw_path is not None:
         raise ValueError(
-            "Attached polymer validated charge transfer requires source_sidecars['charged_sdf']; "
+            "Attached polymer validated charge transfer requires fragment.sidecars['charged_sdf']; "
             f"refusing raw bond/geometry SDF {raw_path} as a partial-charge source"
         )
     return None

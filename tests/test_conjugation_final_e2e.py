@@ -340,7 +340,7 @@ def _final_e2e_summary(
                 1
                 for spec in result.attachment_specs
                 if getattr(spec, "reaction_name", "") == "n_glycosylation"
-                or "pdb" in (getattr(spec, "source_sidecars", {}) or {})
+                or "pdb" in spec.fragment.sidecars
             ),
         },
         "ownership": {

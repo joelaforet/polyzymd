@@ -81,6 +81,28 @@ def prepare_reaction_fragment(fragment: Any) -> PreparedFragment:
     )
 
 
+def resolve_prepared_reaction_fragment(
+    fragment: Any,
+    prepared_fragment: PreparedFragment | None = None,
+) -> PreparedFragment:
+    """Return one prepared fragment, rejecting mismatched explicit overrides."""
+    normalized = prepare_reaction_fragment(fragment)
+    if prepared_fragment is None:
+        return normalized
+    structural_fields = ("atoms", "bonds", "bond_orders", "residues", "sequence")
+    mismatched = [
+        field
+        for field in structural_fields
+        if getattr(prepared_fragment, field) != getattr(normalized, field)
+    ]
+    if mismatched:
+        raise ValueError(
+            "prepared_fragment does not represent the reaction fragment; mismatched "
+            f"fields: {', '.join(mismatched)}"
+        )
+    return prepared_fragment
+
+
 def _moiety_sidecars(fragment: GeneratedMoietyFragment) -> dict[str, Path]:
     sidecars = {}
     if fragment.pdb_path is not None:
