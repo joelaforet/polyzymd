@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import os
+from collections import Counter
+from pathlib import Path
 
 import pytest
 
 from tests._support.conjugation_fast_e2e import (
+    _pdb_atom_records,
     run_fast_mixed_build_export,
     validate_fast_mixed_o_summary,
     validate_fast_mixed_summary,
@@ -62,6 +66,41 @@ def test_fast_mixed_thr_o_glycosylation_build_export_checkpoint(tmp_path):
     validate_fast_mixed_o_summary(
         summary, product_residue="OLT", residue_number=60, site_atom="OG1"
     )
+    atoms = _pdb_atom_records(summary["solvated_pdb"])
+    assert {atom["chain_id"] for atom in atoms if atom["residue_name"] == "LYX"} == {"A"}
+    assert {
+        atom["chain_id"]
+        for atom in atoms
+        if atom["residue_name"] in {"SBM", "SB1", "EG1", "NHX", "0VA"}
+    } == {"C"}
+    solvent = [
+        atom
+        for atom in atoms
+        if atom["residue_name"] in {"HOH", "WAT", "DMS", "NA", "Na+", "CL", "Cl-"}
+    ]
+    assert solvent
+    assert {atom["chain_id"] for atom in solvent} <= set("DEFGHIJKLMNOPQRSTUVWXYZ")
+    solvent_identities = {
+        (atom["chain_id"], atom["residue_number"], atom["residue_name"]) for atom in solvent
+    }
+    solvent_atom_counts = Counter(atom["residue_name"] for atom in solvent)
+    expected_solvent_molecules = (
+        sum(solvent_atom_counts[name] for name in {"NA", "Na+", "CL", "Cl-"})
+        + sum(solvent_atom_counts[name] // 3 for name in {"HOH", "WAT"})
+        + solvent_atom_counts["DMS"] // 10
+    )
+    assert len(solvent_identities) == expected_solvent_molecules
+    assert not ({"", "X"} | set("0123456789")) & {atom["chain_id"] for atom in atoms}
+    sidecar = json.loads(
+        (Path(summary["solvated_pdb"]).parent / "exact_openmm_exceptions.json").read_text()
+    )
+    authoritative_atoms = sidecar["atoms"]
+    assert {atom["chain_id"] for atom in authoritative_atoms if atom["residue_name"] == "SBM"} == {
+        "C"
+    }
+    assert not ({"", "X"} | set("0123456789")) & {
+        atom["chain_id"] for atom in authoritative_atoms
+    }
 
 
 def test_fast_mixed_summary_validation_accepts_expected_payload():
