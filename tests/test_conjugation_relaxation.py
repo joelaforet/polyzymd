@@ -229,9 +229,10 @@ def test_resolve_product_linkage_pairs_uses_generic_assembly_metadata(tmp_path):
         "SpecDouble",
         (),
         {
-            "target_bond_length_angstrom": 1.4,
-            "attachment_id": "x",
-            "attachment_index": 1,
+                "target_bond_length_angstrom": 1.4,
+                "attachment_id": "x",
+                "attachment_index": 1,
+                "endpoint_provenance": {},
             "protein_product_residue_name": "ABC",
             "modifier_product_residue_name": "MNO",
             "protein_link_atom": SimpleNamespace(
@@ -1266,6 +1267,7 @@ def _generic_product_mapped_relaxation_spec(
     return SimpleNamespace(
         attachment_id=attachment_id,
         attachment_index=attachment_index,
+        endpoint_provenance={},
         protein_link_atom=SimpleNamespace(
             serial=protein_serial,
             chain_id="A",
@@ -1294,6 +1296,7 @@ def _product_mapped_relaxation_specs() -> tuple[SimpleNamespace, SimpleNamespace
         SimpleNamespace(
             attachment_id="first",
             attachment_index=1,
+            endpoint_provenance={},
             protein_link_atom=SimpleNamespace(
                 serial=1,
                 chain_id="A",
@@ -1317,6 +1320,7 @@ def _product_mapped_relaxation_specs() -> tuple[SimpleNamespace, SimpleNamespace
         SimpleNamespace(
             attachment_id="second",
             attachment_index=2,
+            endpoint_provenance={},
             protein_link_atom=SimpleNamespace(
                 serial=3,
                 chain_id="A",
@@ -1349,6 +1353,7 @@ def _single_product_mapped_relaxation_spec(
     return SimpleNamespace(
         attachment_id="single",
         attachment_index=1,
+        endpoint_provenance={},
         protein_link_atom=SimpleNamespace(
             serial=protein_serial,
             chain_id="A",
