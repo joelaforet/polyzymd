@@ -191,6 +191,28 @@ def _conjugation_enabled(sim_config: object) -> bool:
     return conjugation_enabled(sim_config)
 
 
+def _require_runtime_system_scope(sim_config: object) -> None:
+    """Require a complete system build for simulation execution commands.
+
+    Missing or duck-typed mock build settings retain the historical default
+    of ``system``. Concrete enum and string values are always enforced.
+    """
+    from polyzymd.config.schema import BuildScope
+
+    configured_scope = getattr(getattr(sim_config, "build", None), "scope", BuildScope.SYSTEM)
+    if isinstance(configured_scope, (BuildScope, str)):
+        build_scope = BuildScope(configured_scope)
+    else:
+        build_scope = BuildScope.SYSTEM
+
+    if build_scope is not BuildScope.SYSTEM:
+        raise click.UsageError(
+            "Simulation runtime commands require 'build.scope: system'; "
+            f"the configured scope is '{build_scope.value}'. Set 'build.scope: system' "
+            "before running or submitting simulations."
+        )
+
+
 def _print_build_export_summary(
     *,
     export_format: str,
@@ -1117,6 +1139,7 @@ def run(
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
+        _require_runtime_system_scope(sim_config)
         colored_echo(f"Running local simulation: {sim_config.name}", phase="simulation")
         colored_echo(f"Engine: {engine}", phase="simulation")
 
@@ -1619,6 +1642,7 @@ def submit(
         raise click.UsageError("Cannot use both --dry-run and --generate-only")
 
     sim_config = SimulationConfig.from_yaml(config)
+    _require_runtime_system_scope(sim_config)
     engine_name = _resolve_engine_name(sim_config, override=engine)
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
     _warn_for_submission_pixi_env(
@@ -1902,6 +1926,7 @@ def run_segment(
     except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
+    _require_runtime_system_scope(sim_config)
     engine_name = str(getattr(sim_config, "engine", "openmm") or "openmm").lower()
     if engine_name == "gromacs":
         warn_if_wrong_pixi_env(
@@ -3395,6 +3420,8 @@ def recover(
     except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         colored_echo(f"Failed to load config: {e}", err=True, phase="workflow", level=logging.ERROR)
         sys.exit(1)
+
+    _require_runtime_system_scope(sim_config)
 
     engine_name = _resolve_engine_name(sim_config, override=engine)
     engine_impl = create_engine(sim_config, override=engine_name, defer_binary=True)

@@ -238,6 +238,27 @@ class TestCheckProgress:
 
     @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_partial_build_scope_remains_readable(self, mock_from_yaml, mock_load, tmp_path):
+        """check-progress remains available for inspecting existing runtime artifacts."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config(working_dir)
+        sim_config.build.scope = "structure"
+        mock_from_yaml.return_value = sim_config
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=10000000, is_complete=True, n_segments=2
+        )
+
+        result = CliRunner().invoke(cli, ["check-progress", "-c", str(config_file), "-r", "1"])
+
+        assert result.exit_code == 0
+        assert "COMPLETE" in result.output
+
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_incomplete_exits_one(self, mock_from_yaml, mock_load, tmp_path):
         """check-progress should exit 1 when work remains."""
         config_file = tmp_path / "config.yaml"

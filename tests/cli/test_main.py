@@ -922,6 +922,73 @@ class TestInternalCommandsUnchanged:
         assert "--replicate" in result.output
 
 
+class TestRuntimeBuildScopeGuard:
+    """Runtime commands require artifacts from a complete system build."""
+
+    @pytest.mark.parametrize(
+        ("command", "scope"),
+        [
+            (["run", "--engine", "openmm"], "structure"),
+            (["run", "--engine", "openmm"], "solute"),
+            (["submit"], "structure"),
+            (["submit"], "solute"),
+            (["run-segment"], "structure"),
+            (["run-segment"], "solute"),
+            (["recover"], "structure"),
+            (["recover"], "solute"),
+        ],
+    )
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_partial_scopes_are_rejected_before_runtime_work(
+        self,
+        mock_from_yaml,
+        command: list[str],
+        scope: str,
+        tmp_path: Path,
+    ) -> None:
+        """Every execution path should reject structure and solute scopes early."""
+        from polyzymd.config.schema import BuildScope
+
+        configured_scope = BuildScope.STRUCTURE if scope == "structure" else scope
+        mock_from_yaml.return_value = SimpleNamespace(
+            build=SimpleNamespace(scope=configured_scope),
+        )
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, [*command, "-c", str(config_path)])
+
+        assert result.exit_code != 0
+        assert "require 'build.scope: system'" in result.output
+        assert f"configured scope is '{scope}'" in result.output
+
+    @pytest.mark.parametrize("configured_scope", ["system", None, MagicMock()])
+    @patch("polyzymd.cli.main._run_openmm_impl")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_run_accepts_system_and_default_scope(
+        self,
+        mock_from_yaml,
+        mock_run_openmm,
+        configured_scope: object,
+        tmp_path: Path,
+    ) -> None:
+        """Concrete system, absent, and mock-valued scopes retain runtime access."""
+        sim_config = _make_dry_run_config()
+        if configured_scope is not None:
+            sim_config.build = SimpleNamespace(scope=configured_scope)
+        mock_from_yaml.return_value = sim_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            cli,
+            ["run", "-c", str(config_path), "--engine", "openmm"],
+        )
+
+        assert result.exit_code == 0
+        mock_run_openmm.assert_called_once_with(sim_config=sim_config, replicate=1)
+
+
 class TestInitCommand:
     """Tests for the project initialization scaffold."""
 
