@@ -648,7 +648,14 @@ def build(
             colored_echo(f"  Scope: {build_scope.value}", phase="build")
             if _conjugation_enabled(sim_config):
                 colored_echo("  Conjugation workflow (enabled conjugation)", phase="build")
-                colored_echo("  Final Interchange: create for OpenMM/GROMACS output", phase="build")
+                if build_scope is BuildScope.STRUCTURE:
+                    colored_echo(
+                        "  Checkpoint: stops before parameterization and export", phase="build"
+                    )
+                else:
+                    colored_echo(
+                        "  Final Interchange: create for OpenMM/GROMACS output", phase="build"
+                    )
             else:
                 colored_echo("  Standard SystemBuilder workflow", phase="build")
             colored_echo(phase="build")

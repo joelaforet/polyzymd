@@ -428,6 +428,9 @@ class TestBuildCommandConjugationRouting:
         assert "assembled_crosslinked.pdb" in result.output
         assert "system.xml" not in result.output
         assert "solvated_conjugate_free_polymers.pdb" not in result.output
+        assert "stops before parameterization and export" in result.output
+        assert "Final Interchange" not in result.output
+        assert "OpenMM/GROMACS" not in result.output
 
     @patch("polyzymd.exporters.interchange.export_system")
     @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
