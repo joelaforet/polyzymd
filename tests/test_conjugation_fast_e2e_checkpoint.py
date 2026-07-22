@@ -8,11 +8,14 @@ import pytest
 
 from tests._support.conjugation_fast_e2e import (
     run_fast_mixed_build_export,
+    validate_fast_mixed_o_summary,
     validate_fast_mixed_summary,
 )
 
 RUN_FAST_E2E = "POLYZYMD_RUN_CONJUGATION_FAST_E2E"
 RUN_FAST_E2E_CUDA = "POLYZYMD_RUN_CONJUGATION_FAST_E2E_CUDA"
+RUN_FAST_O_E2E = "POLYZYMD_RUN_CONJUGATION_FAST_O_E2E"
+RUN_FAST_O_THR_E2E = "POLYZYMD_RUN_CONJUGATION_FAST_O_THR_E2E"
 
 
 @pytest.mark.slow
@@ -35,6 +38,30 @@ def test_fast_mixed_conjugation_cuda_checkpoint(tmp_path):
     summary = run_fast_mixed_build_export(tmp_path, run_cuda=True)
 
     validate_fast_mixed_summary(summary, require_cuda=True)
+
+
+@pytest.mark.slow
+def test_fast_mixed_o_glycosylation_build_export_checkpoint(tmp_path):
+    """Build the mixed NHS-Lys plus Ser O-glycosylation checkpoint when opted in."""
+    if os.environ.get(RUN_FAST_O_E2E) != "1":
+        pytest.skip(f"Set {RUN_FAST_O_E2E}=1 to run the O-glycosylation E2E checkpoint")
+
+    summary = run_fast_mixed_build_export(tmp_path, glycosylation="o_ser")
+
+    validate_fast_mixed_o_summary(summary)
+
+
+@pytest.mark.slow
+def test_fast_mixed_thr_o_glycosylation_build_export_checkpoint(tmp_path):
+    """Build the mixed NHS-Lys plus Thr O-glycosylation checkpoint when opted in."""
+    if os.environ.get(RUN_FAST_O_THR_E2E) != "1":
+        pytest.skip(f"Set {RUN_FAST_O_THR_E2E}=1 to run the Thr O-glycosylation E2E")
+
+    summary = run_fast_mixed_build_export(tmp_path, glycosylation="o_thr")
+
+    validate_fast_mixed_o_summary(
+        summary, product_residue="OLT", residue_number=60, site_atom="OG1"
+    )
 
 
 def test_fast_mixed_summary_validation_accepts_expected_payload():
@@ -84,7 +111,7 @@ def _summary_payload() -> dict[str, object]:
             "leaving_atom_indices": [10, 126],
             "leaving_atom_count": 2,
         },
-        "final_interchange_created": True,
+        "authoritative_system_created": True,
         "resolved_attachment_count": 2,
         "solvated_atom_count": 2_500,
         "crosslinked_atom_count": 1_500,
@@ -102,7 +129,7 @@ def _summary_payload() -> dict[str, object]:
             "protein_product_residue_name": "ASX",
             "modifier_product_residue_name": "NAG",
             "protein_link_atom_name": "ND2",
-            "product_asn60_nd2_present": True,
+            "product_site_atom_present": True,
             "protein_leaving_atom_names": ["HD21"],
             "modifier_leaving_atom_count": 2,
             "crosslink_residues": ["ASX", "NAG"],

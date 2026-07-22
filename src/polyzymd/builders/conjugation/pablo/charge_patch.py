@@ -101,9 +101,20 @@ def _validate_supported_spec(spec: Any, *, product_atoms: Sequence[Any]) -> None
         raise LocalChargePatchError(
             "Terminal product-state modifications are not supported in the first release"
         )
-    if residue_name not in {"LYS", "LYX", "ASN", "ASX"} or atom_name not in {"NZ", "ND2"}:
+    supported_sites = {
+        ("LYS", "NZ"),
+        ("LYX", "NZ"),
+        ("ASN", "ND2"),
+        ("ASX", "ND2"),
+        ("SER", "OG"),
+        ("OLS", "OG"),
+        ("THR", "OG1"),
+        ("OLT", "OG1"),
+    }
+    if (residue_name, atom_name) not in supported_sites:
         raise LocalChargePatchError(
-            "Only Lys NZ and Asn ND2 side-chain product-state charge patches are supported"
+            "Only Lys NZ, Asn ND2, Ser OG, and Thr OG1 side-chain product-state "
+            "charge patches are supported"
         )
     if str(modifier_link.chain_id or "").strip() == "A":
         raise LocalChargePatchError("Protein-protein crosslinks are not supported")
@@ -300,6 +311,10 @@ def _add_standard_residue_bonds(
         bonds += (("CB", "CG", 1), ("CG", "CD", 1), ("CD", "CE", 1), ("CE", "NZ", 1))
     elif residue_name == "ASX":
         bonds += (("CB", "CG", 1), ("CG", "OD1", 2), ("CG", "ND2", 1))
+    elif residue_name == "OLS":
+        bonds += (("CB", "OG", 1),)
+    elif residue_name == "OLT":
+        bonds += (("CB", "OG1", 1), ("CB", "CG2", 1))
     else:
         raise LocalChargePatchError(f"Unsupported product residue charge patch {residue_name!r}")
     for left, right, order in bonds:
@@ -326,6 +341,8 @@ def _add_product_hydrogen_bonds(
 def _hydrogen_parent_name(name: str, heavy_names: Sequence[str]) -> str | None:
     """Infer a PDB hydrogen parent from common residue atom naming."""
     candidates = []
+    if name.startswith("HG2"):
+        candidates.append("CG2")
     if name.startswith("HD2"):
         candidates.append("ND2")
     if len(name) >= 2 and name[1].isalpha():

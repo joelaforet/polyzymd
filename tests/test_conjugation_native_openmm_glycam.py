@@ -14,6 +14,7 @@ from polyzymd.builders.conjugation.native_openmm_glycam import (
     _domain_assignment_audit,
     _openff_topology_to_openmm_for_glycam,
     _register_disconnected_sage_template_generator,
+    _require_crosslinks,
     _require_essential_linkage_terms,
     create_native_openmm_glycam_handoff,
     native_glycam_enabled,
@@ -90,12 +91,12 @@ def test_exact_bundle_exposes_authoritative_openmm_methods() -> None:
 
 def test_create_native_handoff_maps_asx_to_nln_and_writes_audit(monkeypatch, tmp_path) -> None:
     """Create native handoff through the narrow seam with NLN residue mapping."""
-    asx_residue = object()
+    asx_residue = type("FakeResidue", (), {"name": "ASX"})()
     converted = SimpleNamespace(
         topology=SimpleNamespace(),
         positions=[object()],
-        asx_residue=asx_residue,
-        crosslink_atoms=(object(), object()),
+        modified_site_residues=(asx_residue,),
+        crosslink_pairs=((object(), object()),),
         renamed_atoms=({"atom_name": "HD22", "native_atom_name": "HD21"},),
     )
     calls = {}
@@ -120,7 +121,7 @@ def test_create_native_handoff_maps_asx_to_nln_and_writes_audit(monkeypatch, tmp
             "adjacent_terms": {
                 "bonds": [{"category": "crosslink_bond"}],
                 "angles": [
-                    {"category": "asx_side_angle"},
+                    {"category": "protein_side_angle"},
                     {"category": "glycan_side_angle"},
                 ],
                 "torsions": [{"category": "proper_crosslink_torsion"}],
@@ -165,11 +166,73 @@ def test_native_conversion_renames_source_hd22_to_native_hd21_without_mutating_s
     converted = _openff_topology_to_openmm_for_glycam(topology, construction=SimpleNamespace())
 
     source_names = [atom.metadata["atom_name"] for atom in topology.molecules[0].atoms]
-    native_names = [atom.name for atom in converted.asx_residue.atoms()]
+    native_names = [atom.name for atom in converted.modified_site_residues[0].atoms()]
     assert "HD22" in source_names
     assert "HD21" not in source_names
     assert "HD21" in native_names
     assert "HD22" not in native_names
+
+
+@pytest.mark.parametrize(("residue_name", "link_atom"), [("OLS", "OG"), ("OLT", "OG1")])
+def test_native_conversion_accepts_o_glycosylation_sites(residue_name: str, link_atom: str) -> None:
+    """Route canonical O-linked Ser and Thr products through native GLYCAM."""
+    topology = _fake_o_linked_source_topology(residue_name, link_atom)
+
+    converted = _openff_topology_to_openmm_for_glycam(topology, construction=SimpleNamespace())
+
+    assert [residue.name for residue in converted.modified_site_residues] == [residue_name]
+    assert converted.crosslink_pairs[0][0].name == link_atom
+    assert converted.renamed_atoms == ()
+
+
+def test_native_crosslinks_require_one_glycan_counterpart_per_modified_site() -> None:
+    """Reject missing or non-glycan modified-site boundary bonds."""
+    from openmm.app import Element, Topology
+
+    topology = Topology()
+    chain = topology.addChain("A")
+    ols = topology.addResidue("OLS", chain, id="2")
+    olt = topology.addResidue("OLT", chain, id="3")
+    alanine = topology.addResidue("ALA", chain, id="4")
+    og = topology.addAtom("OG", Element.getBySymbol("O"), ols)
+    topology.addAtom("OG1", Element.getBySymbol("O"), olt)
+    ca = topology.addAtom("CA", Element.getBySymbol("C"), alanine)
+    topology.addBond(og, ca)
+
+    with pytest.raises(ValueError, match="non-glycan counterpart"):
+        _require_crosslinks(topology, SimpleNamespace())
+
+
+def test_native_crosslinks_reject_unlinked_modified_site() -> None:
+    """Require every GLYCAM-modified protein residue to carry one glycan link."""
+    from openmm.app import Element, Topology
+
+    topology = Topology()
+    chain = topology.addChain("A")
+    ols = topology.addResidue("OLS", chain, id="2")
+    topology.addAtom("OG", Element.getBySymbol("O"), ols)
+
+    with pytest.raises(ValueError, match="exactly one glycan crosslink"):
+        _require_crosslinks(topology, SimpleNamespace())
+
+
+def test_native_crosslinks_reject_duplicate_glycan_links() -> None:
+    """Reject two glycan bonds from one modified protein linkage atom."""
+    from openmm.app import Element, Topology
+
+    topology = Topology()
+    chain = topology.addChain("A")
+    ols = topology.addResidue("OLS", chain, id="2")
+    glycan1 = topology.addResidue("0VA", chain, id="3")
+    glycan2 = topology.addResidue("4YB", chain, id="4")
+    og = topology.addAtom("OG", Element.getBySymbol("O"), ols)
+    c1 = topology.addAtom("C1", Element.getBySymbol("C"), glycan1)
+    c2 = topology.addAtom("C1", Element.getBySymbol("C"), glycan2)
+    topology.addBond(og, c1)
+    topology.addBond(og, c2)
+
+    with pytest.raises(ValueError, match="exactly one glycan crosslink"):
+        _require_crosslinks(topology, SimpleNamespace())
 
 
 @pytest.mark.parametrize("asx_hydrogens", [(), ("HD21",), ("HD21", "HD22")])
@@ -186,7 +249,7 @@ def test_native_audit_validation_identifies_missing_categories() -> None:
     audit = {
         "adjacent_terms": {
             "bonds": [{"category": "crosslink_bond"}],
-            "angles": [{"category": "asx_side_angle"}],
+            "angles": [{"category": "protein_side_angle"}],
             "torsions": [{"category": "proper_crosslink_torsion"}],
         },
         "local_exclusions_and_14_exceptions": [
@@ -625,7 +688,10 @@ def _complete_linkage_audit(index: int) -> dict[str, object]:
         "index": index,
         "adjacent_terms": {
             "bonds": [{"category": "crosslink_bond"}],
-            "angles": [{"category": "asx_side_angle"}, {"category": "glycan_side_angle"}],
+            "angles": [
+                {"category": "protein_side_angle"},
+                {"category": "glycan_side_angle"},
+            ],
             "torsions": [{"category": "proper_crosslink_torsion"}],
         },
         "local_exclusions_and_14_exceptions": [
@@ -750,6 +816,24 @@ def _fake_native_source_topology(*, asx_hydrogens: tuple[str, ...]) -> _FakeTopo
     for hydrogen in hydrogens:
         bonds.append(_FakeBond(nd2, hydrogen))
     return _FakeTopology(_FakeMolecule(atoms, bonds))
+
+
+def _fake_o_linked_source_topology(residue_name: str, link_atom_name: str) -> _FakeTopology:
+    """Build a minimal OLS/OLT--4YB source topology."""
+    link_atom = _FakeAtom(link_atom_name, residue_name, "60", 8)
+    cb = _FakeAtom("CB", residue_name, "60", 6)
+    c1 = _FakeAtom("C1", "4YB", "1", 6)
+    o4 = _FakeAtom("O4", "4YB", "1", 8)
+    return _FakeTopology(
+        _FakeMolecule(
+            [link_atom, cb, c1, o4],
+            [
+                _FakeBond(link_atom, cb),
+                _FakeBond(link_atom, c1),
+                _FakeBond(c1, o4),
+            ],
+        )
+    )
 
 
 def _fake_native_source_topology_with_sage(

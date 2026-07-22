@@ -9,6 +9,7 @@ import pytest
 from polyzymd.builders.conjugation.force_fields import resolve_conjugate_force_fields
 from polyzymd.builders.conjugation.ownership import build_particle_ownership_manifest
 from polyzymd.builders.conjugation.system_overlay import merge_openmm_system_overlay
+from polyzymd.builders.conjugation.system_workflow import _glycam_particles_from_native_audit
 from polyzymd.config.schema import ConjugationMoietyConfig
 
 
@@ -91,6 +92,49 @@ def test_ownership_manifest_requires_one_owner_per_particle() -> None:
     assert manifest.domains == {"glycam": [1], "generic": [0, 2]}
     with pytest.raises(ValueError, match="out of range"):
         build_particle_ownership_manifest(particle_count=3, glycam_particles={3})
+
+
+def test_native_audit_assigns_modified_protein_residue_to_glycam() -> None:
+    """Keep OLS/OLT/ASX particles in the same GLYCAM domain as their glycans."""
+    from openmm.app import Element, Topology
+
+    topology = Topology()
+    chain = topology.addChain("A")
+    ols = topology.addResidue("OLS", chain, id="2")
+    glycan = topology.addResidue("0VA", chain, id="3")
+    protein = topology.addResidue("ALA", chain, id="4")
+    topology.addAtom("OG", Element.getBySymbol("O"), ols)
+    topology.addAtom("C1", Element.getBySymbol("C"), glycan)
+    topology.addAtom("CA", Element.getBySymbol("C"), protein)
+    audit = {
+        "domain_assignments": {
+            "residues": (
+                {"residue": "A:OLS2", "domain": "protein_modified_glycam"},
+                {"residue": "A:0VA3", "domain": "glycan"},
+                {"residue": "A:ALA4", "domain": "protein"},
+            )
+        }
+    }
+
+    assert _glycam_particles_from_native_audit(topology, audit) == frozenset({0, 1})
+
+
+@pytest.mark.parametrize(
+    "residues",
+    [(), ({"residue": "A:OLS999", "domain": "protein_modified_glycam"},)],
+)
+def test_native_audit_ownership_fails_closed(residues: tuple[dict[str, str], ...]) -> None:
+    """Never infer GLYCAM ownership when explicit audit evidence is absent or stale."""
+    from openmm.app import Element, Topology
+
+    topology = Topology()
+    chain = topology.addChain("A")
+    ols = topology.addResidue("OLS", chain, id="2")
+    topology.addAtom("OG", Element.getBySymbol("O"), ols)
+    audit = {"domain_assignments": {"residues": residues}}
+
+    with pytest.raises(ValueError, match="audit"):
+        _glycam_particles_from_native_audit(topology, audit)
 
 
 def test_overlay_replaces_particles_terms_constraints_and_exceptions() -> None:

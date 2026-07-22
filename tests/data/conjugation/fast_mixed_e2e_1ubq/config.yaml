@@ -43,6 +43,7 @@ conjugation:
         atom_name: "NZ"
       moiety:
         name: "ABC_3mer"
+        force_field: "openff-2.3.0.offxml"
         polymer_recipe:
           name: "SBMA-EGPMA-NHS"
           length: 3
