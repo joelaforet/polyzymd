@@ -53,9 +53,80 @@ from polyzymd.builders.conjugation.system_workflow import (
 )
 from polyzymd.builders.conjugation.validation import ValidationStatus
 from polyzymd.config.schema import (
+    BuildScope,
     ConjugationCcdPabloPolicyConfig,
     ConjugationChainPolicyConfig,
 )
+
+
+def test_structure_scope_stops_before_parameterization_and_system_build(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The structure checkpoint must not enter Pablo, relaxation, or solvation stages."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+    from polyzymd.builders.conjugation.models import ConjugationResult
+
+    source = tmp_path / "protein.pdb"
+    source.write_text("END\n", encoding="utf-8")
+    assembled = tmp_path / "out" / "conjugate-construction" / "assembled_crosslinked.pdb"
+    forbidden_calls: list[str] = []
+
+    def forbid(name: str):
+        def fail(*args: object, **kwargs: object) -> object:
+            forbidden_calls.append(name)
+            raise AssertionError(f"forbidden structure-scope stage called: {name}")
+
+        return fail
+
+    def fake_structure_result(**kwargs: object) -> ConjugationResult:
+        assert kwargs["output_name"] == "assembled_crosslinked.pdb"
+        assert kwargs["status"] == "structure"
+        assembled.parent.mkdir(parents=True)
+        assembled.write_text("END\n", encoding="utf-8")
+        return ConjugationResult(
+            status="structure",
+            output_dir=tmp_path / "out",
+            crosslinked_conjugate_pdb_path=assembled,
+            final_interchange_created=False,
+        )
+
+    monkeypatch.setattr(
+        workflow_module, "_enabled_supported_attachments", lambda value: (object(),)
+    )
+    monkeypatch.setattr(workflow_module, "_log_attachment_additions", lambda value: None)
+    monkeypatch.setattr(
+        workflow_module,
+        "_prepared_protein_pdb_path",
+        lambda *args, **kwargs: (source, None),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "_build_attachment_spec",
+        lambda *args, **kwargs: (SimpleNamespace(fragment=object()), None, 0, {}),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "_build_pdb_fragment_coordinate_only_result",
+        fake_structure_result,
+    )
+    monkeypatch.setattr(workflow_module, "resolve_conjugate_force_fields", forbid("force_fields"))
+    monkeypatch.setattr(workflow_module, "native_glycam_enabled", forbid("native_glycam"))
+    monkeypatch.setattr(workflow_module, "_construct_conjugate_from_specs", forbid("pablo"))
+    monkeypatch.setattr(workflow_module, "_build_solvated_system", forbid("solvation"))
+
+    result = workflow_module.build_conjugated_polymer_system_from_config(
+        SimpleNamespace(enzyme=SimpleNamespace(pdb_path=source), conjugation=object()),
+        output_dir=tmp_path / "out",
+        settings=workflow_module.ConjugatedPolymerSystemSettings(
+            build_scope=BuildScope.STRUCTURE,
+            canonicalize_source_protein_hydrogens=False,
+        ),
+    )
+
+    assert result.crosslinked_conjugate_pdb_path == assembled
+    assert result.workflow_json_path is not None and result.workflow_json_path.is_file()
+    assert forbidden_calls == []
 
 
 class _AtomDouble:

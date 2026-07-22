@@ -294,6 +294,17 @@ def _print_conjugation_dry_run_file_summary() -> None:
     colored_echo("    - system.xml (OpenMM system with restraints)", phase="build")
 
 
+def _print_conjugation_structure_build_summary(artifacts: Any, working_dir: Path) -> None:
+    """Print the successful conjugate structure checkpoint."""
+    colored_echo("Conjugate structure built successfully!", phase="build")
+    colored_echo(f"Output directory: {working_dir}", phase="build")
+    colored_echo("Files saved:", phase="build")
+    colored_echo(f"  - assembled_crosslinked.pdb: {artifacts.pdb_path}", phase="build")
+    workflow_path = getattr(artifacts.result, "workflow_json_path", None)
+    if workflow_path is not None:
+        colored_echo(f"  - workflow_json: {workflow_path}", phase="build")
+
+
 def _print_conjugation_openmm_build_summary(result: Any, working_dir: Path) -> None:
     """Print the OpenMM build summary for conjugation workflow output.
 
@@ -535,6 +546,12 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     help="Validate config without building",
 )
 @click.option(
+    "--scope",
+    type=click.Choice(["structure", "solute", "system"], case_sensitive=False),
+    default=None,
+    help="Build endpoint. Overrides build.scope from YAML (default: system).",
+)
+@click.option(
     "--format",
     "export_format",
     default=None,
@@ -550,6 +567,7 @@ def build(
     scratch_dir: str | None,
     projects_dir: str | None,
     dry_run: bool,
+    scope: str | None,
     export_format: str | None,
 ) -> None:
     """Build simulation input files from configuration.
@@ -585,7 +603,7 @@ def build(
 
     from pydantic import ValidationError as PydanticValidationError
 
-    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.config.schema import BuildScope, SimulationConfig
 
     replicate_list = _resolve_replicates_option(replicates)
 
@@ -594,6 +612,14 @@ def build(
     try:
         sim_config = SimulationConfig.from_yaml(config)
         colored_echo(f"Configuration validated: {sim_config.name}", phase="build")
+        configured_scope = getattr(getattr(sim_config, "build", None), "scope", BuildScope.SYSTEM)
+        build_scope = BuildScope(scope) if scope is not None else BuildScope(configured_scope)
+        if build_scope is BuildScope.SOLUTE:
+            raise NotImplementedError("build scope 'solute' is not yet implemented")
+        if build_scope is BuildScope.STRUCTURE and not _conjugation_enabled(sim_config):
+            raise ValueError("build scope 'structure' requires conjugation.enabled: true")
+        if build_scope is not BuildScope.SYSTEM and export_format is not None:
+            raise ValueError("--format export requires build scope 'system'")
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -621,6 +647,7 @@ def build(
             colored_echo(phase="build")
 
             colored_echo("Build route:", phase="build")
+            colored_echo(f"  Scope: {build_scope.value}", phase="build")
             if _conjugation_enabled(sim_config):
                 colored_echo("  Conjugation workflow (enabled conjugation)", phase="build")
                 colored_echo("  Final Interchange: create for OpenMM/GROMACS output", phase="build")
@@ -717,7 +744,14 @@ def build(
                     colored_echo(f"    Export dir:  {export_dir}", phase="build")
             colored_echo(phase="build")
 
-            if export_format:
+            if build_scope is BuildScope.STRUCTURE:
+                colored_echo("Files to Generate (Conjugate Structure):", phase="build")
+                colored_echo("  Per replicate:", phase="build")
+                colored_echo(
+                    "    - conjugate-construction/assembled_crosslinked.pdb", phase="build"
+                )
+                colored_echo("    - conjugated_polymer_system_workflow.json", phase="build")
+            elif export_format:
                 colored_echo(f"Files to Generate ({export_format.upper()}):", phase="build")
                 colored_echo("  Per replicate:", phase="build")
                 if export_format == "gromacs":
@@ -799,6 +833,7 @@ def build(
                 working_dir=working_dir,
                 polymer_seed=rep,
                 write_system=export_format is None,
+                scope=build_scope,
             )
 
             # Branch based on export format
@@ -823,7 +858,9 @@ def build(
                 )
 
             else:
-                if artifacts.conjugation_enabled:
+                if build_scope is BuildScope.STRUCTURE:
+                    _print_conjugation_structure_build_summary(artifacts, working_dir)
+                elif artifacts.conjugation_enabled:
                     _print_conjugation_openmm_build_summary(artifacts.result, working_dir)
                 else:
                     _print_openmm_build_summary(working_dir)

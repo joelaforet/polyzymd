@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from polyzymd.config.schema import BuildScope
+
 SOLVATED_SYSTEM_PDB = "solvated_system.pdb"
 SOLVATED_CONJUGATE_PDB = "solvated_conjugate_free_polymers.pdb"
 
@@ -25,8 +27,9 @@ class OpenMMBuildArtifacts:
     interchange: Any | None
     result: Any | None
     pdb_path: Path
-    system_path: Path
+    system_path: Path | None
     conjugation_enabled: bool
+    scope: BuildScope = BuildScope.SYSTEM
     exact_export_bundle: Any | None = None
 
     def get_component_info(self) -> Any:
@@ -38,6 +41,8 @@ class OpenMMBuildArtifacts:
             Component metadata suitable for exporter calls.
         """
         if self.result is not None:
+            if self.scope is BuildScope.STRUCTURE:
+                raise RuntimeError("Structure-scope builds do not contain component parameters.")
             return self.result.get_component_info()
         return self.builder.get_component_info()
 
@@ -49,6 +54,11 @@ class OpenMMBuildArtifacts:
         Any
             Final Interchange object for export.
         """
+        if self.scope is BuildScope.STRUCTURE:
+            raise RuntimeError(
+                "Structure-scope builds do not contain a final Interchange. "
+                "Use build.scope: solute or system before exporting."
+            )
         if self.result is not None:
             return self.result.require_final_interchange()
         if self.exact_export_bundle is not None:
@@ -191,6 +201,7 @@ def build_openmm_artifacts(
     working_dir: Path,
     polymer_seed: int,
     write_system: bool = True,
+    scope: BuildScope = BuildScope.SYSTEM,
 ) -> OpenMMBuildArtifacts:
     """Build OpenMM handoff artifacts through the standard or conjugation route.
 
@@ -211,12 +222,19 @@ def build_openmm_artifacts(
     OpenMMBuildArtifacts
         Build metadata and standardized OpenMM handoff paths.
     """
+    if scope is BuildScope.SOLUTE:
+        raise NotImplementedError("build scope 'solute' is not yet implemented")
+    if scope is BuildScope.STRUCTURE and not conjugation_enabled(sim_config):
+        raise ValueError("build scope 'structure' requires conjugation.enabled: true")
+
     if conjugation_enabled(sim_config):
         from polyzymd.builders.conjugation import build_conjugate_from_config
         from polyzymd.builders.conjugation.native_openmm_glycam import native_glycam_enabled
         from polyzymd.builders.conjugation.system_workflow import ConjugatedPolymerSystemSettings
 
         workflow_settings = ConjugatedPolymerSystemSettings(create_final_interchange=True)
+        if scope is BuildScope.STRUCTURE:
+            workflow_settings = workflow_settings.model_copy(update={"build_scope": scope})
         if native_glycam_enabled(sim_config):
             workflow_settings = workflow_settings.model_copy(
                 update={"pdb_fragment_output_mode": "experimental_pablo"}
@@ -228,6 +246,21 @@ def build_openmm_artifacts(
             free_polymer_seed=polymer_seed,
         )
         builder = result.system_builder
+        if scope is BuildScope.STRUCTURE:
+            pdb_path = result.crosslinked_conjugate_pdb_path
+            if pdb_path is None or not Path(pdb_path).is_file():
+                raise RuntimeError(
+                    "Structure-scope conjugation did not produce assembled_crosslinked.pdb"
+                )
+            return OpenMMBuildArtifacts(
+                builder=None,
+                interchange=None,
+                result=result,
+                pdb_path=Path(pdb_path),
+                system_path=None,
+                conjugation_enabled=True,
+                scope=scope,
+            )
         if builder is not None:
             if write_system:
                 system_path = write_openmm_system_xml(
@@ -255,6 +288,7 @@ def build_openmm_artifacts(
             pdb_path=pdb_path,
             system_path=system_path,
             conjugation_enabled=True,
+            scope=scope,
         )
 
     from polyzymd.builders.system_builder import SystemBuilder
@@ -281,4 +315,5 @@ def build_openmm_artifacts(
         pdb_path=working_dir / SOLVATED_SYSTEM_PDB,
         system_path=system_path,
         conjugation_enabled=False,
+        scope=scope,
     )

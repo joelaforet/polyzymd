@@ -91,6 +91,7 @@ from polyzymd.builders.conjugation.validation import (
 )
 from polyzymd.builders.system_builder import SystemBuilder
 from polyzymd.config.schema import (
+    BuildScope,
     ConjugationCcdCrosslinkConfig,
     ConjugationCcdPabloPolicyConfig,
     ConjugationChainPolicyConfig,
@@ -138,6 +139,7 @@ class ConjugatedPolymerSystemSettings(BaseModel):
     )
     relaxation: ConjugateRelaxationSettings = Field(default_factory=ConjugateRelaxationSettings)
     pdb_fragment_output_mode: Literal["coordinate_only", "experimental_pablo"] = "coordinate_only"
+    build_scope: BuildScope = BuildScope.SYSTEM
 
 
 def _settings_with_config_defaults(
@@ -254,6 +256,23 @@ def build_conjugated_polymer_system_from_config(
     reactive_selectors = tuple(payload[3] for payload in spec_payloads)
     modifiers = tuple(spec.fragment for spec in specs)
     resolved_plans = tuple(specs)
+    if workflow_settings.build_scope is BuildScope.STRUCTURE:
+        result = _build_pdb_fragment_coordinate_only_result(
+            protein_pdb_path=protein_pdb_path,
+            specs=specs,
+            output_dir=artifact_dir,
+            construction_dir=construction_dir,
+            protein_canonicalization=protein_canonicalization,
+            placement_settings=workflow_settings.placement,
+            output_name="assembled_crosslinked.pdb",
+            status="structure",
+        )
+        workflow_path = artifact_dir / workflow_settings.workflow_json_name
+        result.workflow_json_path = workflow_path
+        result.artifact_paths["workflow_json"] = workflow_path
+        result.save(workflow_path)
+        LOGGER.info("Saved structure-scope conjugation workflow JSON to %s", workflow_path)
+        return result
     resolved_force_fields = resolve_conjugate_force_fields(config)
     use_native_glycam = native_glycam_enabled(config)
     use_mixed_overlay = resolved_force_fields.route == "mixed_overlay"
@@ -729,6 +748,8 @@ def _build_pdb_fragment_coordinate_only_result(
     protein_canonicalization: ProteinCanonicalizationResult | None,
     placement_settings: PackmolModifierPlacementSettings | None = None,
     run_packmol_func: Any | None = None,
+    output_name: str = "pdb_fragment_coordinate_only_conjugate.pdb",
+    status: str = "coordinate_only",
 ) -> ConjugationResult:
     """Write a coordinate-only residue-resolved PDB-fragment conjugate artifact."""
     output_path, assembly, placement = _write_pdb_fragment_coordinate_artifacts(
@@ -737,6 +758,7 @@ def _build_pdb_fragment_coordinate_only_result(
         construction_dir=construction_dir,
         placement_settings=placement_settings,
         run_packmol_func=run_packmol_func,
+        output_name=output_name,
     )
     construction = SimpleNamespace(
         crosslinked_pdb_path=output_path,
@@ -750,7 +772,7 @@ def _build_pdb_fragment_coordinate_only_result(
         diagnostics=("Coordinate-only PDB-fragment artifact; Pablo/OpenFF not run",),
     )
     result = ConjugationResult(
-        status="coordinate_only",
+        status=status,
         output_dir=output_dir,
         crosslinked_conjugate_pdb_path=output_path,
         construction=construction,
@@ -779,7 +801,11 @@ def _build_pdb_fragment_coordinate_only_result(
     result.artifact_paths.update(
         {
             "crosslinked_conjugate_pdb": output_path,
-            "pdb_fragment_coordinate_only_pdb": output_path,
+            **(
+                {"pdb_fragment_coordinate_only_pdb": output_path}
+                if status == "coordinate_only"
+                else {"structure_scope_pdb": output_path}
+            ),
             **_pdb_fragment_sidecar_artifacts(specs),
         }
     )
@@ -815,9 +841,10 @@ def _write_pdb_fragment_coordinate_artifact(
     construction_dir: Path,
     placement_settings: PackmolModifierPlacementSettings | None = None,
     run_packmol_func: Any | None = None,
+    output_name: str = "pdb_fragment_coordinate_only_conjugate.pdb",
 ) -> tuple[Path, Any, Any]:
     """Write the residue-preserved PDB-fragment coordinate artifact through Packmol placement."""
-    output_path = construction_dir / "pdb_fragment_coordinate_only_conjugate.pdb"
+    output_path = construction_dir / output_name
     placement, assembly = _place_pdb_fragment_coordinate_only_with_packmol(
         protein_pdb_path,
         spec.fragment,
@@ -840,6 +867,7 @@ def _write_pdb_fragment_coordinate_artifacts(
     construction_dir: Path,
     placement_settings: PackmolModifierPlacementSettings | None = None,
     run_packmol_func: Any | None = None,
+    output_name: str = "pdb_fragment_coordinate_only_conjugate.pdb",
 ) -> tuple[Path, Any, Any]:
     """Write one coordinate artifact for one or more independent PDB fragments."""
     if len(specs) == 1:
@@ -849,8 +877,9 @@ def _write_pdb_fragment_coordinate_artifacts(
             construction_dir=construction_dir,
             placement_settings=placement_settings,
             run_packmol_func=run_packmol_func,
+            output_name=output_name,
         )
-    output_path = construction_dir / "pdb_fragment_coordinate_only_conjugate.pdb"
+    output_path = construction_dir / output_name
     placements = place_modifiers_with_resolved_plans(
         protein_pdb_path,
         tuple(spec.fragment for spec in specs),

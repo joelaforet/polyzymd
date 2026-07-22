@@ -390,6 +390,45 @@ class TestBuildCommandReplicateFlags:
 class TestBuildCommandConjugationRouting:
     """Tests for build command conjugation workflow routing."""
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_scope_cli_override_takes_priority_over_yaml(
+        self, mock_from_yaml, tmp_path: Path
+    ) -> None:
+        """An explicit CLI endpoint should override the configured build endpoint."""
+        sim_config = _make_build_config(conjugation_enabled=True)
+        sim_config.build = SimpleNamespace(scope="structure")
+        mock_from_yaml.return_value = sim_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            cli,
+            ["build", "-c", str(config_path), "--scope", "system", "--dry-run"],
+        )
+
+        assert result.exit_code == 0
+        assert "Scope: system" in result.output
+        assert "system.xml" in result.output
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_structure_scope_dry_run_reports_only_checkpoint(
+        self, mock_from_yaml, tmp_path: Path
+    ) -> None:
+        """The YAML structure endpoint should preview only structure artifacts."""
+        sim_config = _make_build_config(conjugation_enabled=True)
+        sim_config.build = SimpleNamespace(scope="structure")
+        mock_from_yaml.return_value = sim_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path), "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "Scope: structure" in result.output
+        assert "assembled_crosslinked.pdb" in result.output
+        assert "system.xml" not in result.output
+        assert "solvated_conjugate_free_polymers.pdb" not in result.output
+
     @patch("polyzymd.exporters.interchange.export_system")
     @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
     @patch("polyzymd.builders.conjugation.build_conjugate_from_config")

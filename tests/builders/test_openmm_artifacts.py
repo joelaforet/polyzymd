@@ -17,6 +17,7 @@ from polyzymd.builders.openmm_artifacts import (
     ensure_conjugation_pdb_alias,
     resolve_skip_build_artifacts,
 )
+from polyzymd.config.schema import BuildScope
 
 
 def _config(*, conjugation_enabled: bool) -> SimpleNamespace:
@@ -293,3 +294,65 @@ def test_build_openmm_artifacts_routes_standard_system_builder(
     assert interchange == "interchange"
     assert kwargs == {"config": config, "working_dir": tmp_path, "polymer_seed": 3}
     assert artifacts.get_component_info() == {"standard": True}
+
+
+def test_structure_scope_returns_only_assembled_conjugate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Structure scope should expose the validated PDB without system handoff artifacts."""
+    assembled = tmp_path / "conjugate-construction" / "assembled_crosslinked.pdb"
+    assembled.parent.mkdir(parents=True)
+    assembled.write_text("END\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+    result = SimpleNamespace(
+        system_builder=None,
+        crosslinked_conjugate_pdb_path=assembled,
+        workflow_json_path=tmp_path / "conjugated_polymer_system_workflow.json",
+    )
+
+    def fake_build(*args: object, **kwargs: object) -> object:
+        captured["settings"] = kwargs["settings"]
+        return result
+
+    monkeypatch.setattr("polyzymd.builders.conjugation.build_conjugate_from_config", fake_build)
+
+    artifacts = build_openmm_artifacts(
+        sim_config=_config(conjugation_enabled=True),
+        working_dir=tmp_path,
+        polymer_seed=1,
+        scope=BuildScope.STRUCTURE,
+    )
+
+    assert artifacts.pdb_path == assembled
+    assert artifacts.system_path is None
+    assert artifacts.builder is None
+    assert artifacts.scope is BuildScope.STRUCTURE
+    settings = cast(Any, captured["settings"])
+    assert settings.build_scope is BuildScope.STRUCTURE
+    with pytest.raises(RuntimeError, match="do not contain a final Interchange"):
+        artifacts.require_final_interchange()
+    assert not (tmp_path / SOLVATED_SYSTEM_PDB).exists()
+    assert not (tmp_path / "system.xml").exists()
+
+
+def test_nonconjugate_structure_scope_fails_before_system_builder(tmp_path: Path) -> None:
+    """A bare protein cannot request the conjugation-only structure checkpoint."""
+    with pytest.raises(ValueError, match="requires conjugation.enabled"):
+        build_openmm_artifacts(
+            sim_config=_config(conjugation_enabled=False),
+            working_dir=tmp_path,
+            polymer_seed=1,
+            scope=BuildScope.STRUCTURE,
+        )
+
+
+def test_solute_scope_fails_with_stable_not_implemented_message(tmp_path: Path) -> None:
+    """The public enum may land before its separate implementation commit."""
+    with pytest.raises(NotImplementedError, match="scope 'solute' is not yet implemented"):
+        build_openmm_artifacts(
+            sim_config=_config(conjugation_enabled=True),
+            working_dir=tmp_path,
+            polymer_seed=1,
+            scope=BuildScope.SOLUTE,
+        )
