@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -258,6 +259,40 @@ def _print_build_export_summary(
     colored_echo(f"  - {export_result['run_script'].name} (convenience run script)", phase="export")
     colored_echo(phase="export")
     colored_echo(f"To run: cd {export_dir} && ./{export_result['run_script'].name}", phase="export")
+
+
+def _publish_staged_export(
+    staged_dir: Path,
+    export_dir: Path,
+    export_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Replace a live export tree and remap returned paths after success."""
+
+    def remap(value: Any) -> Any:
+        if isinstance(value, Path) and value.is_relative_to(staged_dir):
+            return export_dir / value.relative_to(staged_dir)
+        if isinstance(value, list):
+            return [remap(item) for item in value]
+        if isinstance(value, dict):
+            return {key: remap(item) for key, item in value.items()}
+        return value
+
+    backup_dir = None
+    if export_dir.exists():
+        backup_dir = Path(
+            tempfile.mkdtemp(prefix=f".{export_dir.name}-backup-", dir=export_dir.parent)
+        )
+        backup_dir.rmdir()
+        export_dir.replace(backup_dir)
+    try:
+        staged_dir.replace(export_dir)
+    except Exception:
+        if backup_dir is not None:
+            backup_dir.replace(export_dir)
+        raise
+    if backup_dir is not None:
+        shutil.rmtree(backup_dir)
+    return remap(export_result)
 
 
 def _write_openmm_build_artifacts(
@@ -917,17 +952,32 @@ def build(
 
                     colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
                     export_dir = working_dir / export_format
+                    staged_export_dir = None
                     if handoff_only:
                         export_dir = working_dir / "solute" / export_format
+                        export_dir.parent.mkdir(parents=True, exist_ok=True)
+                        staged_export_dir = Path(
+                            tempfile.mkdtemp(
+                                prefix=f".{export_format}-staging-", dir=export_dir.parent
+                            )
+                        )
                     export_kwargs = {"handoff_only": True} if handoff_only else {}
-                    export_result = export_system(
-                        interchange=artifacts.require_final_interchange(),
-                        config=sim_config,
-                        output_dir=export_dir,
-                        fmt=export_format,
-                        component_info=None if handoff_only else artifacts.get_component_info(),
-                        **export_kwargs,
-                    )
+                    try:
+                        export_result = export_system(
+                            interchange=artifacts.require_final_interchange(),
+                            config=sim_config,
+                            output_dir=staged_export_dir or export_dir,
+                            fmt=export_format,
+                            component_info=None if handoff_only else artifacts.get_component_info(),
+                            **export_kwargs,
+                        )
+                        if staged_export_dir is not None:
+                            export_result = _publish_staged_export(
+                                staged_export_dir, export_dir, export_result
+                            )
+                    finally:
+                        if staged_export_dir is not None and staged_export_dir.exists():
+                            shutil.rmtree(staged_export_dir)
 
                     _print_build_export_summary(
                         export_format=export_format,

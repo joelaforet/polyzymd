@@ -18,6 +18,7 @@ from jinja2 import UndefinedError
 
 from polyzymd.cli.main import (
     _print_build_export_summary,
+    _publish_staged_export,
     _resolve_replicates_option,
     _run_openmm_impl,
     cli,
@@ -482,7 +483,7 @@ class TestBuildCommandConjugationRouting:
 
         def export_side_effect(**kwargs: object) -> dict[str, object]:
             output_dir = Path(kwargs["output_dir"])
-            output_dir.mkdir(parents=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
             gro = output_dir / "system.gro"
             top = output_dir / "system.top"
             itp = output_dir / "system_MOL.itp"
@@ -506,14 +507,18 @@ class TestBuildCommandConjugationRouting:
         assert build_kwargs["write_system"] is False
         assert build_kwargs["scope"] is BuildScope.SOLUTE
         artifacts.get_component_info.assert_not_called()
-        mock_export.assert_called_once_with(
-            interchange=interchange,
-            config=sim_config,
-            output_dir=export_dir,
-            fmt="gromacs",
-            component_info=None,
-            handoff_only=True,
-        )
+        export_kwargs = dict(mock_export.call_args.kwargs)
+        staged_output = Path(export_kwargs.pop("output_dir"))
+        assert staged_output.parent == export_dir.parent
+        assert staged_output.name.startswith(".gromacs-staging-")
+        assert not staged_output.exists()
+        assert export_kwargs == {
+            "interchange": interchange,
+            "config": sim_config,
+            "fmt": "gromacs",
+            "component_info": None,
+            "handoff_only": True,
+        }
         assert "no runnable dynamics files generated" in result.output
         assert "system_MOL.itp" in result.output
         assert {
@@ -523,6 +528,105 @@ class TestBuildCommandConjugationRouting:
             Path("solute/gromacs/system.top"),
             Path("solute/gromacs/system_MOL.itp"),
         }
+
+    @pytest.mark.parametrize(
+        ("old_files", "new_files"),
+        [
+            (
+                {"system.gro", "system.top", "system_MOL.itp", "em.mdp", "run.sh", "posre.itp"},
+                {
+                    "exact.gro",
+                    "exact.top",
+                    "exact_exact_openmm_exceptions.json",
+                    "exact_exact_gromacs_audit.json",
+                },
+            ),
+            (
+                {
+                    "exact.gro",
+                    "exact.top",
+                    "exact_exact_openmm_exceptions.json",
+                    "exact_exact_gromacs_audit.json",
+                },
+                {"system.gro", "system.top", "system_MOL.itp"},
+            ),
+        ],
+    )
+    def test_repeat_handoff_replaces_cross_route_artifacts(
+        self, tmp_path: Path, old_files: set[str], new_files: set[str]
+    ) -> None:
+        """Successful repeat exports should publish only the newly generated route."""
+        live_dir = tmp_path / "solute" / "gromacs"
+        live_dir.mkdir(parents=True)
+        for name in old_files:
+            (live_dir / name).write_text("old\n")
+        staged_dir = tmp_path / "solute" / ".gromacs-staging-test"
+        staged_dir.mkdir()
+        for name in new_files:
+            (staged_dir / name).write_text("new\n")
+        result = {
+            "gro": staged_dir / sorted(name for name in new_files if name.endswith(".gro"))[0],
+            "top": staged_dir / sorted(name for name in new_files if name.endswith(".top"))[0],
+            "component_itps": [
+                staged_dir / name for name in sorted(new_files) if name.endswith(".itp")
+            ],
+        }
+        sidecars = [name for name in new_files if name.endswith("exceptions.json")]
+        audits = [name for name in new_files if name.endswith("audit.json")]
+        if sidecars:
+            result["exact_exception_sidecar"] = staged_dir / sidecars[0]
+        if audits:
+            result["exact_gromacs_audit"] = staged_dir / audits[0]
+
+        published = _publish_staged_export(staged_dir, live_dir, result)
+
+        assert {path.name for path in live_dir.iterdir()} == new_files
+        assert published["gro"].parent == live_dir
+        assert published["top"].parent == live_dir
+        assert all(path.parent == live_dir for path in published["component_itps"])
+        if sidecars:
+            assert published["exact_exception_sidecar"].parent == live_dir
+        if audits:
+            assert published["exact_gromacs_audit"].parent == live_dir
+        assert not list(live_dir.parent.glob(".gromacs-backup-*"))
+
+    @patch("polyzymd.exporters.interchange.export_system")
+    @patch("polyzymd.builders.openmm_artifacts.build_openmm_artifacts")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_failed_repeat_handoff_preserves_last_good_export(
+        self, mock_from_yaml, mock_build, mock_export, tmp_path: Path
+    ) -> None:
+        """A failed staged export must leave the prior live bundle untouched."""
+        sim_config = _make_build_config(conjugation_enabled=False)
+        sim_config.build = SimpleNamespace(scope="solute")
+        working_dir = tmp_path / "run_1"
+        sim_config.get_working_directory = lambda _rep: working_dir
+        mock_from_yaml.return_value = sim_config
+        artifacts = MagicMock()
+        artifacts.require_final_interchange.return_value = object()
+        mock_build.return_value = artifacts
+        live_dir = working_dir / "solute" / "gromacs"
+        live_dir.mkdir(parents=True)
+        old_files = {"exact.gro", "exact.top", "exact_exceptions.json", "exact_audit.json"}
+        for name in old_files:
+            (live_dir / name).write_text("last-good\n")
+
+        def fail_export(**kwargs: object) -> None:
+            staged_dir = Path(kwargs["output_dir"])
+            (staged_dir / "partial.gro").write_text("partial\n")
+            raise RuntimeError("synthetic export failure")
+
+        mock_export.side_effect = fail_export
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path), "--format", "gromacs"])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, RuntimeError)
+        assert {path.name for path in live_dir.iterdir()} == old_files
+        assert all(path.read_text() == "last-good\n" for path in live_dir.iterdir())
+        assert not list(live_dir.parent.glob(".gromacs-staging-*"))
 
     def test_exact_handoff_summary_lists_only_returned_files(
         self, capsys: pytest.CaptureFixture[str], tmp_path: Path
