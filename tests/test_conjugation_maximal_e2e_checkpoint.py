@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +15,7 @@ from tests._support.conjugation_maximal_e2e import (
     MaximalMdProtocol,
     _persist_and_validate_manifest,
     _require_maximal_cuda_environment,
+    _write_state_pdb,
     composition_evidence,
     maximal_config_payload,
     run_maximal_mixed_acceptance,
@@ -201,6 +203,44 @@ def test_manifest_is_persisted_before_final_validation(tmp_path: Path) -> None:
     saved = json.loads((tmp_path / SUMMARY_NAME).read_text(encoding="utf-8"))
     assert saved["cuda"]["frame_count"] == 150
     assert saved["composition"]["free_polymer_count_achieved"] == 2
+
+
+def test_state_pdb_uses_state_box_without_mutating_topology(tmp_path: Path) -> None:
+    """Standalone PDB CRYST1 must use the state's current NPT box vectors."""
+    from openmm import Vec3, unit
+    from openmm.app import Element, PDBFile, Topology
+
+    topology = Topology()
+    chain = topology.addChain("A")
+    residue = topology.addResidue("GLY", chain, "1")
+    topology.addAtom("CA", Element.getBySymbol("C"), residue)
+    original_vectors = (
+        Vec3(1.0, 0.0, 0.0),
+        Vec3(0.0, 1.0, 0.0),
+        Vec3(0.0, 0.0, 1.0),
+    ) * unit.nanometer
+    state_vectors = (
+        Vec3(2.0, 0.0, 0.0),
+        Vec3(0.0, 3.0, 0.0),
+        Vec3(0.0, 0.0, 4.0),
+    ) * unit.nanometer
+    topology.setPeriodicBoxVectors(original_vectors)
+    state = SimpleNamespace(
+        getPeriodicBoxVectors=lambda: state_vectors,
+        getPositions=lambda: [Vec3(0.0, 0.0, 0.0)] * unit.nanometer,
+    )
+
+    output = tmp_path / "state.pdb"
+    _write_state_pdb(topology, state, output)
+
+    written_vectors = PDBFile(str(output)).topology.getPeriodicBoxVectors()
+    assert [
+        vector[index].value_in_unit(unit.nanometer) for index, vector in enumerate(written_vectors)
+    ] == pytest.approx([2.0, 3.0, 4.0])
+    restored_vectors = topology.getPeriodicBoxVectors()
+    assert [
+        vector[index].value_in_unit(unit.nanometer) for index, vector in enumerate(restored_vectors)
+    ] == pytest.approx([1.0, 1.0, 1.0])
 
 
 def _atom(residue_name: str, residue_number: int, atom_name: str) -> dict[str, object]:
