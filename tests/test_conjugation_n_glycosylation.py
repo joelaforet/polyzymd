@@ -16,7 +16,7 @@ from polyzymd.builders.conjugation.reactions import (
     list_reactions,
 )
 from polyzymd.builders.conjugation.reactions.n_glycosylation import (
-    _resolve_asn_nd2_hydrogen,
+    _resolve_bonded_site_hydrogen,
     detect_glycan_anomeric_group,
 )
 from polyzymd.config.schema import ConjugationAttachmentConfig
@@ -144,7 +144,7 @@ def test_asn_nd2_hydrogen_resolution_selects_hd21_from_canonical_pair(
     """Canonical HD21/HD22 candidates should remove HD21 by name, not file order."""
     protein_path = _asn_pdb(tmp_path, hydrogens=("HD22", "HD21"))
 
-    hydrogen = _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+    hydrogen = NGlycosylationReaction.resolve_protein_leaving_atom(protein_path, _asn_selector())
 
     assert hydrogen.atom_name == "HD21"
 
@@ -155,7 +155,7 @@ def test_asn_nd2_hydrogen_resolution_returns_single_candidate_unchanged(
     """A single Pablo-template ND2 hydrogen should be accepted as supplied."""
     protein_path = _asn_pdb(tmp_path, hydrogens=("HD22",))
 
-    hydrogen = _resolve_asn_nd2_hydrogen(protein_path, _asn_selector())
+    hydrogen = NGlycosylationReaction.resolve_protein_leaving_atom(protein_path, _asn_selector())
 
     assert hydrogen.atom_name == "HD22"
 
@@ -167,10 +167,12 @@ def test_asn_nd2_hydrogen_resolution_rejects_ambiguous_noncanonical_candidates(
     protein_path = _asn_pdb(tmp_path, hydrogens=("HN1", "HN2"))
     residue_library = _fake_asn_nd2_hydrogen_library(("HN1", "HN2"))
 
-    with pytest.raises(ValueError, match="canonical HD21/HD22 pair"):
-        _resolve_asn_nd2_hydrogen(
+    with pytest.raises(ValueError, match="unambiguous preferred HD21"):
+        _resolve_bonded_site_hydrogen(
             protein_path,
             _asn_selector(),
+            mechanism_name="n_glycosylation",
+            preferred_name="HD21",
             residue_library=residue_library,
         )
 
