@@ -30,7 +30,7 @@ outside the managed pixi environment.
 ## Git Workflow
 
 - **Branches:** `main` (stable), `dev` (integration), `feature/*` (work)
-- Currently on `feature/mda-analysis-migration`
+- Resolve the current branch dynamically with `git branch --show-current`; do not rely on a static branch name in this file.
 - Commit messages: imperative mood, 50-char subject, reference issues (`#20`)
 - Run `ruff check` and `black --check` before committing
 - Never force-push to `main` or `dev`
