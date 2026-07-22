@@ -30,6 +30,7 @@ ION_RESIDUE_ALIASES = {
     "CA2": "CA",
     "CA2+": "CA",
 }
+_ORIGINAL_RESIDUE_TOKEN_KEY = "_polyzymd_original_residue_token"
 
 
 def normalize_topology_pdb_identifiers(
@@ -60,9 +61,14 @@ def normalize_topology_pdb_identifiers(
         return
 
     mol_idx = 0
+    protein_residue_num = 1
     for _ in range(n_enzyme_molecules):
         mol = topology.molecule(mol_idx)
-        _assign_protein_metadata(mol, preserve_enzyme_chain_ids=preserve_enzyme_chain_ids)
+        protein_residue_num = _assign_protein_metadata(
+            mol,
+            preserve_enzyme_chain_ids=preserve_enzyme_chain_ids,
+            start_residue_number=protein_residue_num,
+        )
         mol_idx += 1
 
     for _ in range(n_substrate_molecules):
@@ -110,17 +116,48 @@ def require_classic_pdb_atom_capacity(topology: Any) -> None:
         )
 
 
-def _assign_protein_metadata(molecule: Any, *, preserve_enzyme_chain_ids: bool) -> None:
-    """Assign protein chain metadata while preserving residue numbering."""
+def _assign_protein_metadata(
+    molecule: Any,
+    *,
+    preserve_enzyme_chain_ids: bool,
+    start_residue_number: int,
+) -> int:
+    """Assign protein metadata and return the next available residue number."""
 
-    for atom in molecule.atoms:
+    residue_map: dict[str, int] = {}
+    next_residue_number = start_residue_number
+    for atom_index, atom in enumerate(molecule.atoms):
         if preserve_enzyme_chain_ids:
             atom.metadata.setdefault("chain_id", PROTEIN_CHAIN)
+            if "residue_number" in atom.metadata:
+                atom.metadata["residue_number"] = str(atom.metadata["residue_number"])
         else:
             atom.metadata["chain_id"] = PROTEIN_CHAIN
-        if "residue_number" in atom.metadata:
-            atom.metadata["residue_number"] = str(atom.metadata["residue_number"])
+            residue_token = _original_residue_token(atom, atom_index)
+            if residue_token not in residue_map:
+                residue_map[residue_token] = next_residue_number
+                next_residue_number += 1
+            atom.metadata["residue_number"] = str(residue_map[residue_token])
         atom.metadata["insertion_code"] = str(atom.metadata.get("insertion_code", "") or "")
+    return next_residue_number
+
+
+def _original_residue_token(atom: Any, atom_index: int) -> str:
+    """Return an idempotent grouping token for one source protein residue."""
+
+    metadata = atom.metadata
+    stored = metadata.get(_ORIGINAL_RESIDUE_TOKEN_KEY)
+    if stored is not None:
+        return str(stored)
+    residue_number = metadata.get("residue_number")
+    residue_name = metadata.get("residue_name") or metadata.get("residue_name_3") or ""
+    insertion_code = metadata.get("insertion_code") or ""
+    if residue_number is None:
+        token = f"missing-residue-metadata:{atom_index}"
+    else:
+        token = f"{residue_number!s}|{residue_name!s}|{insertion_code!s}"
+    metadata[_ORIGINAL_RESIDUE_TOKEN_KEY] = token
+    return token
 
 
 def _assign_single_residue_metadata(molecule: Any, *, chain_id: str, residue_number: int) -> None:

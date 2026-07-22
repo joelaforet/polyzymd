@@ -1464,12 +1464,14 @@ def _product_state_specs_with_assembly_mappings(
         }
         protein_atom = _product_atom_for_serial(product_atom_by_serial, pair[0], "protein")
         modifier_atom = _product_atom_for_serial(product_atom_by_serial, pair[1], "modifier")
+        expected_protein_chain = _assembly_protein_chain(assembly_result, fragment_index)
         _validate_product_pair_for_spec(
             spec,
             protein_atom=protein_atom,
             modifier_atom=modifier_atom,
             fragment_index=fragment_index,
             fragment_mappings=fragment_mappings,
+            expected_protein_chain=expected_protein_chain,
         )
         fragment_mappings, alias_map, alias_cursor = _fragment_mappings_with_scoped_aliases(
             fragment_mappings,
@@ -1556,9 +1558,13 @@ def _product_atoms_by_residue(
 
 def _scoped_pablo_residue_name(index: int) -> str:
     """Return a deterministic three-character residue alias for Pablo matching."""
-    if index > 899:
+    if index < 1 or index > 899:
         raise ValueError("Attachment-scoped Pablo aliases exceeded the supported residue count")
-    return f"Z{index:02d}"
+    if index <= 99:
+        return f"Z{index:02d}"
+    block, suffix = divmod(index - 100, 100)
+    prefix = chr(ord("Y") - block)
+    return f"{prefix}{suffix:02d}"
 
 
 def _product_residue_alias_key(chain: str, residue_number: int, insertion_code: str) -> str:
@@ -1639,19 +1645,31 @@ def _validate_product_pair_for_spec(
     modifier_atom: PdbAtomRecord,
     fragment_index: int,
     fragment_mappings: dict[str, dict[str, int | str]],
+    expected_protein_chain: str | None = None,
 ) -> None:
     """Validate an ordered product linkage pair against one attachment spec."""
     plan = spec
-    _validate_product_protein_atom(plan, protein_atom, fragment_index)
+    _validate_product_protein_atom(
+        plan,
+        protein_atom,
+        fragment_index,
+        expected_chain_id=expected_protein_chain,
+    )
     _validate_product_modifier_atom(plan, modifier_atom, fragment_index, fragment_mappings)
 
 
-def _validate_product_protein_atom(plan: Any, atom: PdbAtomRecord, fragment_index: int) -> None:
+def _validate_product_protein_atom(
+    plan: Any,
+    atom: PdbAtomRecord,
+    fragment_index: int,
+    *,
+    expected_chain_id: str | None = None,
+) -> None:
     """Validate a product PDB protein endpoint for one resolved plan."""
     selector = getattr(getattr(plan, "contract", None), "protein_endpoint", None)
     selector = getattr(selector, "selector", None)
     source_atom = plan.protein_link_atom
-    expected_chain = getattr(selector, "chain_id", source_atom.chain_id)
+    expected_chain = expected_chain_id or getattr(selector, "chain_id", source_atom.chain_id)
     expected_residue_number = getattr(selector, "residue_number", source_atom.residue_number)
     expected_insertion_code = getattr(selector, "insertion_code", source_atom.insertion_code)
     expected_atom_name = source_atom.atom_name
@@ -1671,6 +1689,18 @@ def _validate_product_protein_atom(plan: Any, atom: PdbAtomRecord, fragment_inde
             f"{fragment_index}: serial={atom.serial} {atom.chain_id}:{atom.residue_name}:"
             f"{atom.residue_number}{atom.insertion_code}:{atom.atom_name}"
         )
+
+
+def _assembly_protein_chain(assembly_result: Any, fragment_index: int) -> str | None:
+    """Return the canonical protein chain emitted for one source attachment."""
+
+    for record in tuple(assembly_result.attachment_endpoint_records):
+        if int(record.get("attachment_index", 0)) != fragment_index:
+            continue
+        endpoint = record.get("protein_endpoint", {})
+        chain_id = endpoint.get("chain_id") if isinstance(endpoint, dict) else None
+        return str(chain_id) if chain_id else None
+    return None
 
 
 def _validate_product_modifier_atom(
@@ -2031,7 +2061,7 @@ def _build_solvated_system(
     builder = SystemBuilder.from_config(config)
     builder._working_dir = working_dir
     builder._enzyme_topology = relaxed_conjugate_topology
-    builder._n_enzyme_molecules = 1
+    builder._n_enzyme_molecules = _topology_molecule_count(relaxed_conjugate_topology)
     builder._preserve_enzyme_chain_ids = True
 
     if config.substrate is not None:
@@ -2082,7 +2112,7 @@ def _build_direct_solvated_system(
     builder = SystemBuilder()
     builder._working_dir = working_dir
     builder._enzyme_topology = relaxed_conjugate_topology
-    builder._n_enzyme_molecules = 1
+    builder._n_enzyme_molecules = _topology_molecule_count(relaxed_conjugate_topology)
     builder._preserve_enzyme_chain_ids = True
     LOGGER.info("Combining direct conjugate solutes")
     builder.combine_solutes()
@@ -2097,6 +2127,15 @@ def _build_direct_solvated_system(
             settings=parameterization_settings,
         )
     return builder
+
+
+def _topology_molecule_count(topology: Any) -> int:
+    """Return a validated molecule count for a relaxed conjugate topology."""
+
+    count = int(topology.n_molecules)
+    if count < 1:
+        raise ValueError("Relaxed conjugate topology must contain at least one molecule")
+    return count
 
 
 def _create_mixed_overlay_exact_handoff(
