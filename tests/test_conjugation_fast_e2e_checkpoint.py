@@ -98,9 +98,7 @@ def test_fast_mixed_thr_o_glycosylation_build_export_checkpoint(tmp_path):
     assert {atom["chain_id"] for atom in authoritative_atoms if atom["residue_name"] == "SBM"} == {
         "C"
     }
-    assert not ({"", "X"} | set("0123456789")) & {
-        atom["chain_id"] for atom in authoritative_atoms
-    }
+    assert not ({"", "X"} | set("0123456789")) & {atom["chain_id"] for atom in authoritative_atoms}
 
 
 def test_fast_mixed_summary_validation_accepts_expected_payload():
@@ -155,7 +153,7 @@ def _summary_payload() -> dict[str, object]:
         "solvated_atom_count": 2_500,
         "crosslinked_atom_count": 1_500,
         "finite_coordinates": True,
-        "residue_counts": {"LYX": 10, "ASX": 8, "NAG": 223},
+        "residue_counts": {"LYX": 10, "NLN": 8, "NAG": 223},
         "product_glycan": {
             "residue_name": "NAG",
             "source_atom_count": 225,
@@ -165,13 +163,13 @@ def _summary_payload() -> dict[str, object]:
         "n_glycosylation_linkage": {
             "mechanism_name": "n_glycosylation",
             "site_residue_number": 60,
-            "protein_product_residue_name": "ASX",
+            "protein_product_residue_name": "NLN",
             "modifier_product_residue_name": "NAG",
             "protein_link_atom_name": "ND2",
             "product_site_atom_present": True,
             "protein_leaving_atom_names": ["HD21"],
             "modifier_leaving_atom_count": 2,
-            "crosslink_residues": ["ASX", "NAG"],
+            "crosslink_residues": ["NLN", "NAG"],
             "crosslink_linking_atoms": ["ND2", "C1"],
         },
         "export_exists": {"gro": True, "top": True, "em_mdp": True, "prod_mdp": True},

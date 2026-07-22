@@ -416,6 +416,93 @@ def test_crosslinked_writer_does_not_modify_input_protein(tmp_path):
     assert protein_path.read_text() == original
 
 
+def test_crosslinked_writer_preserves_source_components_and_chain_b_selector(tmp_path):
+    """Canonical chain A output must retain source boundaries and chain-B selection."""
+    from openmm.app import PDBFile
+
+    protein_path = tmp_path / "multichain_protein.pdb"
+    protein_path.write_text(
+        _pdb_atom(1, "N", "CYS", "A", 1, 0.0, 0.0, 0.0, element="N")
+        + _pdb_atom(2, "CA", "CYS", "A", 1, 1.4, 0.0, 0.0)
+        + _pdb_atom(3, "C", "CYS", "A", 1, 2.8, 0.0, 0.0)
+        + _pdb_atom(4, "O", "CYS", "A", 1, 3.4, 1.0, 0.0, element="O")
+        + _pdb_atom(5, "CB", "CYS", "A", 1, 1.4, -1.4, 0.0)
+        + _pdb_atom(6, "SG", "CYS", "A", 1, 1.4, -2.8, 0.0, element="S")
+        + "TER\n"
+        + _pdb_atom(7, "N", "CYS", "B", 2, 4.1, 0.0, 0.0, element="N")
+        + _pdb_atom(8, "CA", "CYS", "B", 2, 5.5, 0.0, 0.0)
+        + _pdb_atom(9, "C", "CYS", "B", 2, 6.9, 0.0, 0.0)
+        + _pdb_atom(10, "O", "CYS", "B", 2, 7.5, 1.0, 0.0, element="O")
+        + _pdb_atom(11, "CB", "CYS", "B", 2, 5.5, -1.4, 0.0)
+        + _pdb_atom(12, "SG", "CYS", "B", 2, 2.9, -2.8, 0.0, element="S")
+        + _pdb_atom(13, "N", "ASN", "B", 3, 8.2, 0.0, 0.0, element="N")
+        + _pdb_atom(14, "CA", "ASN", "B", 3, 9.6, 0.0, 0.0)
+        + _pdb_atom(15, "C", "ASN", "B", 3, 11.0, 0.0, 0.0)
+        + _pdb_atom(16, "O", "ASN", "B", 3, 11.6, 1.0, 0.0, element="O")
+        + _pdb_atom(17, "CB", "ASN", "B", 3, 9.6, -1.4, 0.0)
+        + _pdb_atom(18, "CG", "ASN", "B", 3, 10.8, -2.1, 0.0)
+        + _pdb_atom(19, "OD1", "ASN", "B", 3, 11.9, -1.6, 0.0, element="O")
+        + _pdb_atom(20, "ND2", "ASN", "B", 3, 10.7, -3.4, 0.0, element="N")
+        + _pdb_atom(21, "HD21", "ASN", "B", 3, 11.5, -4.0, 0.0, element="H")
+        + _pdb_atom(22, "HD22", "ASN", "B", 3, 9.8, -3.8, 0.0, element="H")
+        + "CONECT    6   12\n"
+        + "END\n"
+    )
+    fragment = _generic_polymer_fragment()
+    output_path = tmp_path / "multichain_assembled.pdb"
+    attachment = PdbLinkageAttachment(
+        target_chain="B",
+        target_residue_name="ASN",
+        target_residue_number=3,
+        target_atom_name="ND2",
+        modifier_link_atom=fragment.atoms[1],
+        protein_leaving_atoms_to_remove=(
+            PdbAtomRecord(
+                serial=21,
+                atom_index=20,
+                atom_name="HD21",
+                residue_name="ASN",
+                chain_id="B",
+                residue_number=3,
+                x=11.5,
+                y=-4.0,
+                z=0.0,
+                element="H",
+            ),
+        ),
+        protein_target_resname="NLN",
+        modifier_target_resname="MXL",
+    )
+
+    write_crosslinked_pdb(protein_path, fragment, attachment, output_path)
+
+    lines = output_path.read_text().splitlines()
+    atom_lines = [line for line in lines if line.startswith(("ATOM", "HETATM"))]
+    assert {line[21] for line in atom_lines if line.startswith("ATOM")} == {"A"}
+    assert any(line.startswith("TER") and line[22:26].strip() == "1" for line in lines)
+    nln_atoms = {
+        line[12:16].strip()
+        for line in atom_lines
+        if line[17:20].strip() == "NLN" and line[22:26].strip() == "3"
+    }
+    assert "HD21" in nln_atoms
+    assert "HD22" not in nln_atoms
+
+    topology = PDBFile(str(output_path)).topology
+    residue_by_id = {
+        (residue.name, residue.id): residue
+        for residue in topology.residues()
+        if residue.chain.id == "A"
+    }
+    chain_a_c = next(atom for atom in residue_by_id[("CYS", "1")].atoms() if atom.name == "C")
+    chain_b_n = next(atom for atom in residue_by_id[("CYS", "2")].atoms() if atom.name == "N")
+    chain_a_sg = next(atom for atom in residue_by_id[("CYS", "1")].atoms() if atom.name == "SG")
+    chain_b_sg = next(atom for atom in residue_by_id[("CYS", "2")].atoms() if atom.name == "SG")
+    inferred_bonds = {frozenset((left, right)) for left, right in topology.bonds()}
+    assert frozenset((chain_a_c, chain_b_n)) not in inferred_bonds
+    assert frozenset((chain_a_sg, chain_b_sg)) in inferred_bonds
+
+
 def test_crosslinked_writer_matches_residue_name_number_and_insertion_code(tmp_path):
     """Assembly should rewrite only the exact selected protein residue identity."""
     protein_path = tmp_path / "protein_insertions.pdb"

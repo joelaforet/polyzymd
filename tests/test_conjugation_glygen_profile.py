@@ -488,7 +488,7 @@ def test_coordinate_only_workflow_removes_roh_and_links_asn(tmp_path: Path) -> N
     assert " NAG C" in output
     assert " MAN C" in output
     assert "CONECT" in output
-    assert " ASX A" in output
+    assert " NLN A" in output
     assert "HD21" not in output
     assert Path(result.artifact_paths["pdb_fragment_pdb_fragment_ingestion"]).exists()
     assert packmol_calls == [tmp_path / "construction" / "packmol_modifier_placement"]

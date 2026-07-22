@@ -105,7 +105,7 @@ def _validate_supported_spec(spec: Any, *, product_atoms: Sequence[Any]) -> None
         ("LYS", "NZ"),
         ("LYX", "NZ"),
         ("ASN", "ND2"),
-        ("ASX", "ND2"),
+        ("NLN", "ND2"),
         ("SER", "OG"),
         ("OLS", "OG"),
         ("THR", "OG1"),
@@ -309,7 +309,7 @@ def _add_standard_residue_bonds(
     bonds = (("CA", "CB", 1),)
     if residue_name == "LYX":
         bonds += (("CB", "CG", 1), ("CG", "CD", 1), ("CD", "CE", 1), ("CE", "NZ", 1))
-    elif residue_name == "ASX":
+    elif residue_name == "NLN":
         bonds += (("CB", "CG", 1), ("CG", "OD1", 2), ("CG", "ND2", 1))
     elif residue_name == "OLS":
         bonds += (("CB", "OG", 1),)

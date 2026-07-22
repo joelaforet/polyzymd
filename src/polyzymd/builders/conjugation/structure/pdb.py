@@ -16,6 +16,7 @@ from polyzymd.builders.conjugation.structure.parsing import (
     PdbAtomRecord,
     parse_pdb_atom_lines,
     parse_pdb_atom_records,
+    parse_pdb_conect_pairs,
 )
 
 _MAX_CONECT_TARGETS = 4
@@ -442,6 +443,7 @@ def write_crosslinked_pdb(
     warnings: list[str] = []
 
     protein_atoms = _parse_pdb_atoms(protein_path)
+    protein_component_by_atom_index = _protein_component_by_atom_index(protein_path)
     kept_protein_atoms, removed_protein_atoms = _prepare_protein_atoms(
         protein_atoms,
         attachments,
@@ -463,7 +465,17 @@ def write_crosslinked_pdb(
     protein_serial_by_index: dict[int, int] = {}
     protein_serial_by_input_serial: dict[int, int] = {}
 
+    previous_protein_atom: PdbAtomRecord | None = None
+    previous_protein_component: int | None = None
     for atom in kept_protein_atoms:
+        protein_component = protein_component_by_atom_index.get(atom.atom_index, 0)
+        if (
+            writer_options.append_ter_records
+            and previous_protein_atom is not None
+            and protein_component != previous_protein_component
+        ):
+            ter_serial, next_serial = _next_ter_serial(next_serial, used_serials)
+            atom_lines.append(_format_ter_line(previous_protein_atom, ter_serial))
         new_serial, next_serial = _next_atom_serial(atom, next_serial, used_serials, writer_options)
         updated = atom.model_copy(
             update={"serial": new_serial, "chain_id": writer_options.protein_chain}
@@ -474,10 +486,20 @@ def write_crosslinked_pdb(
             protein_serial_by_index[atom.atom_index] = new_serial
         if atom.serial is not None:
             protein_serial_by_input_serial[atom.serial] = new_serial
+        previous_protein_atom = updated
+        previous_protein_component = protein_component
 
-    if writer_options.append_ter_records and output_atoms:
-        atom_lines.append(_format_ter_line(output_atoms[-1], next_serial))
-        next_serial += 1
+    if writer_options.append_ter_records and previous_protein_atom is not None:
+        ter_serial, next_serial = _next_ter_serial(next_serial, used_serials)
+        atom_lines.append(_format_ter_line(previous_protein_atom, ter_serial))
+
+    for source_left, source_right in parse_pdb_conect_pairs(protein_path):
+        output_left = protein_serial_by_input_serial.get(source_left)
+        output_right = protein_serial_by_input_serial.get(source_right)
+        if output_left is None or output_right is None:
+            continue
+        conect_map.setdefault(output_left, set()).add(output_right)
+        conect_map.setdefault(output_right, set()).add(output_left)
 
     next_polymer_residue_number = 1
     for fragment_index, (fragment, fragment_attachment) in enumerate(
@@ -514,8 +536,8 @@ def write_crosslinked_pdb(
         crosslink_pairs.append(crosslink_pair)
 
         if writer_options.append_ter_records and fragment_result.atoms:
-            atom_lines.append(_format_ter_line(fragment_result.atoms[-1], next_serial))
-            next_serial += 1
+            ter_serial, next_serial = _next_ter_serial(next_serial, used_serials)
+            atom_lines.append(_format_ter_line(fragment_result.atoms[-1], ter_serial))
 
     if crosslink_pair is None:
         raise ValueError("No polymer fragment was available for crosslinked PDB assembly")
@@ -876,6 +898,30 @@ def _parse_pdb_atoms(path: Path) -> list[PdbAtomRecord]:
     return atoms
 
 
+def _protein_component_by_atom_index(path: Path) -> dict[int, int]:
+    """Map source atom indices to chain/TER-delimited protein components."""
+    component = 0
+    atom_index = 0
+    previous_chain: str | None = None
+    boundary_pending = False
+    component_by_atom_index: dict[int, int] = {}
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("TER"):
+                boundary_pending = atom_index > 0
+                continue
+            if not line.startswith(_ATOM_RECORD_PREFIXES):
+                continue
+            chain_id = line[21:22].strip()
+            if atom_index > 0 and (boundary_pending or chain_id != previous_chain):
+                component += 1
+            component_by_atom_index[atom_index] = component
+            atom_index += 1
+            previous_chain = chain_id
+            boundary_pending = False
+    return component_by_atom_index
+
+
 def _prepare_protein_atoms(
     atoms: Sequence[PdbAtomRecord],
     attachment: PdbAssemblyAttachment | Sequence[PdbAssemblyAttachment],
@@ -896,12 +942,33 @@ def _prepare_protein_atoms(
         update = {"chain_id": options.protein_chain}
         for item in attachments:
             if _matches_attachment_residue(atom, item):
-                update["residue_name"] = _pdb_safe_residue_name(
+                product_residue_name = _pdb_safe_residue_name(
                     _attachment_protein_product_resname(item)
                 )
+                update["residue_name"] = product_residue_name
+                if (
+                    product_residue_name == "NLN"
+                    and atom.atom_name.upper() == "HD22"
+                    and not _retained_nln_hd21_exists(atoms, atom_indices_to_remove, item)
+                ):
+                    update["atom_name"] = "HD21"
                 break
         kept_atoms.append(atom.model_copy(update=update))
     return kept_atoms, removed_atoms
+
+
+def _retained_nln_hd21_exists(
+    atoms: Sequence[PdbAtomRecord],
+    removed_atom_indices: set[int],
+    attachment: PdbAssemblyAttachment,
+) -> bool:
+    """Return whether an NLN product already retains its canonical HD21 atom."""
+    return any(
+        _matches_attachment_residue(atom, attachment)
+        and atom.atom_name.upper() == "HD21"
+        and atom.atom_index not in removed_atom_indices
+        for atom in atoms
+    )
 
 
 def _select_protein_atoms_to_remove(
@@ -1206,6 +1273,14 @@ def _next_atom_serial(
     serial = next_serial
     used_serials.add(serial)
     return serial, next_serial + 1
+
+
+def _next_ter_serial(next_serial: int, used_serials: set[int]) -> tuple[int, int]:
+    """Allocate a TER serial that cannot collide with emitted atom records."""
+    while next_serial in used_serials:
+        next_serial += 1
+    used_serials.add(next_serial)
+    return next_serial, next_serial + 1
 
 
 def _output_serial_for_atom(

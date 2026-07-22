@@ -297,7 +297,7 @@ def build_maximal_manifest(
                 resolved,
                 crosslinked_atoms,
                 mechanism_name="n_glycosylation",
-                product_site_residue_name="ASX",
+                product_site_residue_name="NLN",
                 site_residue_number=60,
                 site_atom_name="ND2",
             ),
@@ -432,7 +432,7 @@ def validate_maximal_manifest(
     assert manifest["resolved_attachment_count"] == 3
     assert set(manifest["products"]["link_atoms"]) == {"NZ", "ND2", "OG"}
     residue_counts = manifest["products"]["residue_counts"]
-    assert all(residue_counts[name] > 0 for name in ("LYX", "ASX", "OLS"))
+    assert all(residue_counts[name] > 0 for name in ("LYX", "NLN", "OLS"))
     assert len(manifest["validation"]["linkage_distances_angstrom"]) == 3
     assert manifest["validation"]["bond_graph_status"] == "pass"
     assert manifest["validation"]["atom_presence_status"] == "pass"

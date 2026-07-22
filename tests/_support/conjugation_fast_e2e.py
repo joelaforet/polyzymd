@@ -87,7 +87,7 @@ def validate_fast_mixed_summary(summary: dict[str, Any], *, require_cuda: bool =
     assert summary["solvated_atom_count"] > summary["crosslinked_atom_count"] > 1_000
     assert summary["finite_coordinates"] is True
     assert summary["residue_counts"]["LYX"] > 0
-    assert summary["residue_counts"]["ASX"] > 0
+    assert summary["residue_counts"]["NLN"] > 0
     assert summary["residue_counts"]["NAG"] == 223
     assert summary["product_glycan"]["residue_name"] == "NAG"
     assert summary["product_glycan"]["source_atom_count"] == 225
@@ -100,13 +100,13 @@ def validate_fast_mixed_summary(summary: dict[str, Any], *, require_cuda: bool =
     n_glycan = summary["n_glycosylation_linkage"]
     assert n_glycan["mechanism_name"] == "n_glycosylation"
     assert n_glycan["site_residue_number"] == 60
-    assert n_glycan["protein_product_residue_name"] == "ASX"
+    assert n_glycan["protein_product_residue_name"] == "NLN"
     assert n_glycan["modifier_product_residue_name"] == "NAG"
     assert n_glycan["protein_link_atom_name"] == "ND2"
     assert n_glycan["product_site_atom_present"] is True
     assert n_glycan["protein_leaving_atom_names"] == ["HD21"]
     assert n_glycan["modifier_leaving_atom_count"] == 2
-    assert n_glycan["crosslink_residues"] == ["ASX", "NAG"]
+    assert n_glycan["crosslink_residues"] == ["NLN", "NAG"]
     assert n_glycan["crosslink_linking_atoms"][0] == "ND2"
     assert all(summary["export_exists"].values())
     validation = summary["validation"]
@@ -262,7 +262,7 @@ def _build_summary(
     export_paths = _flatten_paths(exported)
     resolved = [product.model_dump(mode="json") for product in result.attachment_specs]
     mechanism_name = "n_glycosylation" if glycosylation == "n" else "o_glycosylation"
-    product_site = {"n": "ASX", "o_ser": "OLS", "o_thr": "OLT"}[glycosylation]
+    product_site = {"n": "NLN", "o_ser": "OLS", "o_thr": "OLT"}[glycosylation]
     site_atom = {"n": "ND2", "o_ser": "OG", "o_thr": "OG1"}[glycosylation]
     site_residue_number = 60
     summary = {

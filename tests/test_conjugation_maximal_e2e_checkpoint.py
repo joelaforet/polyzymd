@@ -273,7 +273,7 @@ def _manifest_payload(tmp_path: Path, protocol: MaximalMdProtocol) -> dict[str, 
         "resolved_attachment_count": 3,
         "products": {
             "link_atoms": ["NZ", "ND2", "OG"],
-            "residue_counts": {"LYX": 1, "ASX": 1, "OLS": 1},
+            "residue_counts": {"LYX": 1, "NLN": 1, "OLS": 1},
         },
         "validation": {
             "linkage_distances_angstrom": [1.3, 1.4, 1.5],

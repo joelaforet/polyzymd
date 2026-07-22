@@ -199,8 +199,8 @@ def build_product_state_charge_bridge(
             )
         diagnostics.append(
             "Applied strict peptide-capped residual closure with formal target scope "
-            "all emitted mapped local product atoms (ASX + glycan) and correction domain "
-            "modified-protein chain-A ASX/local closure atoms only: "
+            "all emitted mapped local product atoms (NLN + glycan) and correction domain "
+            "modified-protein chain-A NLN/local closure atoms only: "
             f"{local_reconciliation['corrected_atom_count']} corrected atom(s), "
             f"{correction:.8f} e total, "
             f"{local_reconciliation['per_atom_correction_e']:.8f} e per atom"
@@ -240,8 +240,8 @@ def build_product_state_charge_bridge(
             "Canonical protein atoms retain ff14SB-style charges from the prepared source protein.",
             "Attached polymer atoms retain existing charged polymer/template charges when mapping is stable.",
             "Modified residue and moiety atoms are overridden by peptide-capped product-state NAGL charges.",
-            "The formal target scope is all emitted mapped local product atoms: ASX plus the retained glycan/moiety atoms.",
-            "Any bridge-local charge residual correction is reconciled only over modified-protein chain-A ASX/local closure atoms within strict first-release thresholds.",
+            "The formal target scope is all emitted mapped local product atoms: NLN plus the retained glycan/moiety atoms.",
+            "Any bridge-local charge residual correction is reconciled only over modified-protein chain-A NLN/local closure atoms within strict first-release thresholds.",
             "The complete covalent conjugate is emitted as one charged OpenFF Molecule template.",
             "This bridge is not whole-conjugate AM1-BCC and does not use Gasteiger or formal charges.",
         ),
@@ -330,9 +330,9 @@ def _apply_local_patch_reconciliation(
         "applied": True,
         "status": status,
         "formal_charge_e": formal_total,
-        "formal_target_scope": "all_emitted_mapped_local_product_atoms_asx_plus_glycan",
-        "correction_scope": "modified_protein_chain_a_asx_local_closure_atoms_only",
-        "correction_domain": "modified_protein_chain_a_asx_local_closure_atoms_only",
+        "formal_target_scope": "all_emitted_mapped_local_product_atoms_nln_plus_glycan",
+        "correction_scope": "modified_protein_chain_a_nln_local_closure_atoms_only",
+        "correction_domain": "modified_protein_chain_a_nln_local_closure_atoms_only",
         "total_partial_charge_before_reconciliation_e": partial_before_correction,
         "total_correction_e": correction,
         "linkage_count": linkage_count,
@@ -422,13 +422,13 @@ def _write_local_reconciliation_diagnostic(
     payload = {
         "success": bool(reconciliation.get("success", False)),
         "policy": (
-            "formal target scope is all emitted mapped local product atoms (ASX + glycan); "
+            "formal target scope is all emitted mapped local product atoms (NLN + glycan); "
             "residual charge correction is reconciled equally only over modified-protein "
-            "chain-A ASX/local closure atoms"
+            "chain-A NLN/local closure atoms"
         ),
-        "formal_target_scope": "all_emitted_mapped_local_product_atoms_asx_plus_glycan",
-        "correction_scope": "modified_protein_chain_a_asx_local_closure_atoms_only",
-        "correction_domain": "modified_protein_chain_a_asx_local_closure_atoms_only",
+        "formal_target_scope": "all_emitted_mapped_local_product_atoms_nln_plus_glycan",
+        "correction_scope": "modified_protein_chain_a_nln_local_closure_atoms_only",
+        "correction_domain": "modified_protein_chain_a_nln_local_closure_atoms_only",
         "local_reconciliation": dict(reconciliation),
         "per_source_role": source_stats,
         "diagnostic_details": dict(diagnostic_details or {}),

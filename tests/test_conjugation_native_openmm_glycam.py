@@ -89,15 +89,15 @@ def test_exact_bundle_exposes_authoritative_openmm_methods() -> None:
     assert bundle.is_exact_export_bundle is True
 
 
-def test_create_native_handoff_maps_asx_to_nln_and_writes_audit(monkeypatch, tmp_path) -> None:
-    """Create native handoff through the narrow seam with NLN residue mapping."""
-    asx_residue = type("FakeResidue", (), {"name": "ASX"})()
+def test_create_native_handoff_uses_nln_template_and_writes_audit(monkeypatch, tmp_path) -> None:
+    """Create native handoff through the narrow seam with direct NLN identity."""
+    nln_residue = type("FakeResidue", (), {"name": "NLN"})()
     converted = SimpleNamespace(
         topology=SimpleNamespace(),
         positions=[object()],
-        modified_site_residues=(asx_residue,),
+        modified_site_residues=(nln_residue,),
         crosslink_pairs=((object(), object()),),
-        renamed_atoms=({"atom_name": "HD22", "native_atom_name": "HD21"},),
+        renamed_atoms=(),
     )
     calls = {}
 
@@ -154,23 +154,24 @@ def test_create_native_handoff_maps_asx_to_nln_and_writes_audit(monkeypatch, tmp
         output_dir=tmp_path,
     )
 
-    assert calls["kwargs"]["residueTemplates"] == {asx_residue: "NLN"}
+    assert calls["kwargs"]["residueTemplates"] == {nln_residue: "NLN"}
     assert handoff.audit_path.exists()
     assert builder._exact_export_bundle is handoff
 
 
-def test_native_conversion_renames_source_hd22_to_native_hd21_without_mutating_source() -> None:
-    """Keep Pablo/OpenFF source metadata unchanged while native topology uses NLN HD21."""
-    topology = _fake_native_source_topology(asx_hydrogens=("HD22",))
+def test_native_conversion_preserves_direct_nln_hd21_identity() -> None:
+    """Keep canonical NLN and HD21 names unchanged through native conversion."""
+    topology = _fake_native_source_topology(nln_hydrogens=("HD21",))
 
     converted = _openff_topology_to_openmm_for_glycam(topology, construction=SimpleNamespace())
 
     source_names = [atom.metadata["atom_name"] for atom in topology.molecules[0].atoms]
     native_names = [atom.name for atom in converted.modified_site_residues[0].atoms()]
-    assert "HD22" in source_names
-    assert "HD21" not in source_names
+    assert "HD21" in source_names
+    assert "HD22" not in source_names
     assert "HD21" in native_names
     assert "HD22" not in native_names
+    assert converted.renamed_atoms == ()
 
 
 @pytest.mark.parametrize(("residue_name", "link_atom"), [("OLS", "OG"), ("OLT", "OG1")])
@@ -235,10 +236,10 @@ def test_native_crosslinks_reject_duplicate_glycan_links() -> None:
         _require_crosslinks(topology, SimpleNamespace())
 
 
-@pytest.mark.parametrize("asx_hydrogens", [(), ("HD21",), ("HD21", "HD22")])
-def test_native_conversion_rejects_missing_or_ambiguous_asx_hydrogens(asx_hydrogens) -> None:
-    """Require exactly one source HD22 for native-only HD21 remapping."""
-    topology = _fake_native_source_topology(asx_hydrogens=asx_hydrogens)
+@pytest.mark.parametrize("nln_hydrogens", [(), ("HD22",), ("HD21", "HD22")])
+def test_native_conversion_rejects_missing_or_ambiguous_nln_hydrogens(nln_hydrogens) -> None:
+    """Require exactly one canonical HD21 on direct NLN products."""
+    topology = _fake_native_source_topology(nln_hydrogens=nln_hydrogens)
 
     with pytest.raises(ValueError, match="exactly one retained amide hydrogen"):
         _openff_topology_to_openmm_for_glycam(topology, construction=SimpleNamespace())
@@ -384,13 +385,13 @@ def test_audit_records_domains_linkages_sage_and_no_glycan_proof(monkeypatch) ->
         system,
         (nd2.residue,),
         ((nd2, c1),),
-        renamed_atoms=({"atom_name": "HD22", "native_atom_name": "HD21"},),
-        template_matches=({"residue": "A:ASX60", "template": "NLN"},),
+        renamed_atoms=(),
+        template_matches=({"residue": "A:NLN60", "template": "NLN"},),
         sage_components=({"domain": "glycan", "routed_to_sage": False},),
         construction=SimpleNamespace(attachments=()),
     )
 
-    assert audit["residue_templates"] == {"A:ASX60": "NLN"}
+    assert audit["residue_templates"] == {"A:NLN60": "NLN"}
     assert audit["glycam_template_matches"]
     assert audit["sage_template_generator"]["proof_no_glycan_entered_sage"] is True
     assert (
@@ -481,7 +482,7 @@ def test_native_conversion_reuses_one_openmm_chain_per_chain_id_for_waters(tmp_p
 
     from openmm.app import PDBFile
 
-    base = _fake_native_source_topology(asx_hydrogens=("HD22",)).molecules[0]
+    base = _fake_native_source_topology(nln_hydrogens=("HD21",)).molecules[0]
     waters = [_water_molecule(index) for index in range(1, 4)]
     topology = _FakeMultiMoleculeTopology([base, *waters])
 
@@ -564,7 +565,7 @@ def _conjugation_with_domain(force_field: str | None) -> ConjugationConfig:
                     "moiety": moiety,
                     "mechanism": {
                         "name": "explicit_linkage",
-                        "product_residues": {"site": "ASX", "moiety": "4YB"},
+                        "product_residues": {"site": "NLN", "moiety": "4YB"},
                     },
                 }
             ],
@@ -609,7 +610,7 @@ class _FakeAtom:
         self.atomic_number = atomic_number
         self.name = atom_name
         self.metadata = {
-            "chain_id": "A" if residue_name == "ASX" else "C",
+            "chain_id": "A" if residue_name in {"NLN", "OLS", "OLT"} else "C",
             "residue_name": residue_name,
             "residue_number": residue_number,
             "atom_name": atom_name,
@@ -725,9 +726,9 @@ class _FakeAuditTopology:
     """Minimal OpenMM topology double for native audit tests."""
 
     def __init__(self):
-        asx = _FakeAuditResidue("ASX", "60", "A")
+        nln = _FakeAuditResidue("NLN", "60", "A")
         glycan = _FakeAuditResidue("4YB", "1", "C")
-        self.atoms_ = [_FakeAuditAtom(0, "ND2", asx), _FakeAuditAtom(1, "C1", glycan)]
+        self.atoms_ = [_FakeAuditAtom(0, "ND2", nln), _FakeAuditAtom(1, "C1", glycan)]
         self.crosslink = (self.atoms_[0], self.atoms_[1])
 
     def atoms(self):
@@ -804,15 +805,15 @@ class _FakeSystem:
         return []
 
 
-def _fake_native_source_topology(*, asx_hydrogens: tuple[str, ...]) -> _FakeTopology:
-    """Build a minimal ASX--4YB source topology with configurable ASX H names."""
-    nd2 = _FakeAtom("ND2", "ASX", "60", 7)
-    asx_c = _FakeAtom("C", "ASX", "60", 6)
-    hydrogens = [_FakeAtom(name, "ASX", "60", 1) for name in asx_hydrogens]
+def _fake_native_source_topology(*, nln_hydrogens: tuple[str, ...]) -> _FakeTopology:
+    """Build a minimal NLN--4YB source topology with configurable NLN H names."""
+    nd2 = _FakeAtom("ND2", "NLN", "60", 7)
+    nln_c = _FakeAtom("C", "NLN", "60", 6)
+    hydrogens = [_FakeAtom(name, "NLN", "60", 1) for name in nln_hydrogens]
     c1 = _FakeAtom("C1", "4YB", "1", 6)
     o4 = _FakeAtom("O4", "4YB", "1", 8)
-    atoms = [nd2, asx_c, *hydrogens, c1, o4]
-    bonds = [_FakeBond(nd2, asx_c), _FakeBond(nd2, c1), _FakeBond(c1, o4)]
+    atoms = [nd2, nln_c, *hydrogens, c1, o4]
+    bonds = [_FakeBond(nd2, nln_c), _FakeBond(nd2, c1), _FakeBond(c1, o4)]
     for hydrogen in hydrogens:
         bonds.append(_FakeBond(nd2, hydrogen))
     return _FakeTopology(_FakeMolecule(atoms, bonds))
@@ -839,8 +840,8 @@ def _fake_o_linked_source_topology(residue_name: str, link_atom_name: str) -> _F
 def _fake_native_source_topology_with_sage(
     *sage_molecules: _FakeMolecule,
 ) -> _FakeMultiMoleculeTopology:
-    """Build an ASX--glycan source topology plus disconnected Sage molecules."""
-    base = _fake_native_source_topology(asx_hydrogens=("HD22",)).molecules[0]
+    """Build an NLN--glycan source topology plus disconnected Sage molecules."""
+    base = _fake_native_source_topology(nln_hydrogens=("HD21",)).molecules[0]
     return _FakeMultiMoleculeTopology([*sage_molecules, base])
 
 

@@ -47,7 +47,7 @@ NATIVE_GLYCAM_ROUTE_INVARIANTS = {
 SUPPORTED_WATER_RESIDUES = {"HOH", "WAT", "H2O"}
 SUPPORTED_ION_RESIDUES = {"NA", "CL", "K", "MG", "CA"}
 GLYCAM_MODIFIED_SITE_TEMPLATES: dict[str, tuple[str, str]] = {
-    "ASX": ("ND2", "NLN"),
+    "NLN": ("ND2", "NLN"),
     "OLS": ("OG", "OLS"),
     "OLT": ("OG1", "OLT"),
 }
@@ -619,9 +619,6 @@ def _openff_topology_to_openmm_for_glycam(
             continue
         for atom in molecule.atoms:
             identity = _atom_identity(atom)
-            if _is_asx_hd22(identity):
-                renamed_atoms.append({**identity, "native_atom_name": "HD21"})
-                identity = {**identity, "atom_name": "HD21"}
             chain = chain_by_id.get(identity["chain_id"])
             if chain is None:
                 chain = omm_topology.addChain(identity["chain_id"])
@@ -825,11 +822,6 @@ def _copy_residue_domain_metadata(residue: Any, source_atom: Any) -> None:
         pass
 
 
-def _is_asx_hd22(identity: dict[str, Any]) -> bool:
-    """Return whether the identity is the ASX HD22 atom renamed for NLN."""
-    return identity["residue_name"] == "ASX" and identity["atom_name"] == "HD22"
-
-
 def _set_box_vectors(omm_topology: Any, topology: Any) -> None:
     """Copy OpenFF box vectors onto the OpenMM topology."""
     box_vectors = getattr(topology, "box_vectors", None)
@@ -863,8 +855,7 @@ def _require_modified_site_residues(omm_topology: Any) -> tuple[Any, ...]:
 def _require_modified_site_canonical_atoms(
     modified_site_residues: tuple[Any, ...], renamed_atoms: list[dict[str, Any]]
 ) -> None:
-    """Validate linkage atom names and the NLN hydrogen naming exception."""
-    expected_renames = 0
+    """Validate linkage atom names and the canonical NLN hydrogen name."""
     for residue in modified_site_residues:
         atom_name_list = [atom.name for atom in residue.atoms()]
         atom_names = set(atom_name_list)
@@ -874,20 +865,16 @@ def _require_modified_site_canonical_atoms(
                 f"Native GLYCAM {residue.name} residue {_residue_label(residue)} must use "
                 f"atom {link_atom_name}"
             )
-        if residue.name != "ASX":
+        if residue.name != "NLN":
             continue
         retained_hydrogens = atom_names.intersection({"HD21", "HD22"})
-        expected_renames += 1
         if retained_hydrogens != {"HD21"} or atom_name_list.count("HD21") != 1:
             raise ValueError(
-                "Native GLYCAM ASX residue must contain exactly one retained amide hydrogen: "
-                f"source HD22 renamed to native HD21 at {_residue_label(residue)}"
+                "Native GLYCAM NLN residue must contain exactly one retained amide hydrogen "
+                f"named HD21 at {_residue_label(residue)}"
             )
-    if len(renamed_atoms) != expected_renames:
-        raise ValueError(
-            "Native GLYCAM ASX residue must contain exactly one retained amide hydrogen: "
-            "source HD22 renamed to native HD21"
-        )
+    if renamed_atoms:
+        raise ValueError("Native GLYCAM NLN conversion must not require atom-name rewrites")
 
 
 def _require_crosslinks(omm_topology: Any, construction: Any) -> tuple[tuple[Any, Any], ...]:
@@ -1041,7 +1028,7 @@ def _build_native_glycam_audit(
         ),
         "attachment_provenance": _attachment_provenance_audit(construction),
         "nln_hydrogen_policy": {
-            "source_retained": "HD22",
+            "source_retained": "HD21",
             "native_retained": "HD21",
             "renamed": tuple(renamed_atoms),
         },
