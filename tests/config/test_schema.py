@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from polyzymd.config.schema import ConjugationConfig, SimulationConfig
+from polyzymd.config.schema import BuildScope, ConjugationConfig, SimulationConfig
 
 
 @pytest.fixture
@@ -46,9 +46,11 @@ class TestImports:
 
     def test_import_config(self):
         """Test config module import."""
-        from polyzymd.config import SimulationConfig
+        from polyzymd.config import BuildConfig, BuildScope, SimulationConfig
 
         assert SimulationConfig is not None
+        assert BuildConfig is not None
+        assert BuildScope is not None
 
     def test_import_conjugation_public_api_without_rdkit(self, monkeypatch):
         """Importing the conjugation public API should not require RDKit."""
@@ -123,6 +125,47 @@ class TestConjugationPlacementConfig:
         """A configured timeout must be positive."""
         with pytest.raises(ValidationError, match="timeout_seconds"):
             ConjugationConfig(placement={"timeout_seconds": 0.0})
+
+
+class TestBuildConfig:
+    """Test the public construction endpoint contract."""
+
+    def test_build_scope_defaults_to_system(self, minimal_config_data):
+        """Existing configurations should continue to build complete systems."""
+        config = SimulationConfig(**minimal_config_data)
+
+        assert config.build.scope is BuildScope.SYSTEM
+        assert config.model_dump(mode="json")["build"] == {"scope": "system"}
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("structure", BuildScope.STRUCTURE),
+            ("solute", BuildScope.SOLUTE),
+            ("system", BuildScope.SYSTEM),
+        ],
+    )
+    def test_build_scope_accepts_each_public_endpoint(self, minimal_config_data, value, expected):
+        """Each documented endpoint should validate from configuration data."""
+        minimal_config_data["build"] = {"scope": value}
+
+        config = SimulationConfig(**minimal_config_data)
+
+        assert config.build.scope is expected
+
+    def test_build_scope_rejects_unknown_endpoint(self, minimal_config_data):
+        """Typos should fail before construction starts."""
+        minimal_config_data["build"] = {"scope": "parameterized"}
+
+        with pytest.raises(ValidationError, match="build.scope"):
+            SimulationConfig(**minimal_config_data)
+
+    def test_build_config_rejects_unknown_fields(self, minimal_config_data):
+        """Build-only options should not be silently ignored."""
+        minimal_config_data["build"] = {"scope": "solute", "through": "parameterization"}
+
+        with pytest.raises(ValidationError, match="build.through"):
+            SimulationConfig(**minimal_config_data)
 
 
 class TestConfigValidation:

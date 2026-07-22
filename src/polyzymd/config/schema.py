@@ -124,6 +124,14 @@ class BoxShape(str, Enum):
     TRUNCATED_OCTAHEDRON = "truncated_octahedron"
 
 
+class BuildScope(str, Enum):
+    """Supported endpoints for system construction."""
+
+    STRUCTURE = "structure"
+    SOLUTE = "solute"
+    SYSTEM = "system"
+
+
 class Ensemble(str, Enum):
     """Thermodynamic ensemble types."""
 
@@ -2138,6 +2146,17 @@ class GromacsEngineConfig(BaseModel):
 # =============================================================================
 
 
+class BuildConfig(BaseModel):
+    """Configuration for the system-construction endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: BuildScope = Field(
+        BuildScope.SYSTEM,
+        description="Endpoint for system construction",
+    )
+
+
 class SimulationConfig(BaseModel):
     """Complete simulation configuration.
 
@@ -2165,6 +2184,7 @@ class SimulationConfig(BaseModel):
 
     name: str = Field(..., description="Simulation identifier")
     description: str | None = Field(None, description="Simulation description")
+    build: BuildConfig = Field(default_factory=BuildConfig, description="Build settings")
 
     enzyme: EnzymeConfig = Field(..., description="Enzyme configuration")
     substrate: SubstrateConfig | None = Field(None, description="Substrate configuration")
