@@ -132,8 +132,8 @@ def _assign_protein_metadata(
             if "residue_number" in atom.metadata:
                 atom.metadata["residue_number"] = str(atom.metadata["residue_number"])
         else:
-            atom.metadata["chain_id"] = PROTEIN_CHAIN
             residue_token = _original_residue_token(atom, atom_index)
+            atom.metadata["chain_id"] = PROTEIN_CHAIN
             if residue_token not in residue_map:
                 residue_map[residue_token] = next_residue_number
                 next_residue_number += 1
@@ -152,10 +152,11 @@ def _original_residue_token(atom: Any, atom_index: int) -> str:
     residue_number = metadata.get("residue_number")
     residue_name = metadata.get("residue_name") or metadata.get("residue_name_3") or ""
     insertion_code = metadata.get("insertion_code") or ""
+    chain_id = metadata.get("chain_id") or ""
     if residue_number is None:
-        token = f"missing-residue-metadata:{atom_index}"
+        token = f"{chain_id!s}|missing-residue-metadata:{atom_index}"
     else:
-        token = f"{residue_number!s}|{residue_name!s}|{insertion_code!s}"
+        token = f"{chain_id!s}|{residue_number!s}|{residue_name!s}|{insertion_code!s}"
     metadata[_ORIGINAL_RESIDUE_TOKEN_KEY] = token
     return token
 

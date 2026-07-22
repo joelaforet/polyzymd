@@ -162,6 +162,48 @@ def test_conjugate_preserves_attached_chain_c_and_normalizes_free_components() -
     )
 
 
+def test_cross_chain_disulfide_residues_keep_distinct_source_groups() -> None:
+    """A crosslinked multi-chain molecule must retain chain-local residue identity."""
+
+    chain_x_atoms = [
+        _Atom(7, name="N", residue_name="CYS"),
+        _Atom(16, name="SG", residue_name="CYS"),
+    ]
+    chain_y_atoms = [
+        _Atom(7, name="N", residue_name="CYS"),
+        _Atom(16, name="SG", residue_name="CYS"),
+    ]
+    for atom in chain_x_atoms:
+        atom.metadata.update(chain_id="X", residue_number="42")
+    for atom in chain_y_atoms:
+        atom.metadata.update(chain_id="Y", residue_number="42")
+
+    protein = _Molecule([*chain_x_atoms, *chain_y_atoms])
+    protein.bonds = [(chain_x_atoms[1], chain_y_atoms[1])]
+    topology = _Topology([protein])
+    atom_order = tuple(id(atom) for atom in protein.atoms)
+    connectivity = tuple((id(atom1), id(atom2)) for atom1, atom2 in protein.bonds)
+
+    normalize_topology_pdb_identifiers(topology, n_enzyme_molecules=1)
+
+    assert [atom.metadata["residue_number"] for atom in protein.atoms] == ["1", "1", "2", "2"]
+    assert {atom.metadata["chain_id"] for atom in protein.atoms} == {"A"}
+    source_tokens = tuple(
+        atom.metadata["_polyzymd_original_residue_token"] for atom in protein.atoms
+    )
+    assert source_tokens == ("X|42|CYS|", "X|42|CYS|", "Y|42|CYS|", "Y|42|CYS|")
+
+    normalize_topology_pdb_identifiers(topology, n_enzyme_molecules=1)
+
+    assert [atom.metadata["residue_number"] for atom in protein.atoms] == ["1", "1", "2", "2"]
+    assert (
+        tuple(atom.metadata["_polyzymd_original_residue_token"] for atom in protein.atoms)
+        == source_tokens
+    )
+    assert tuple(id(atom) for atom in protein.atoms) == atom_order
+    assert tuple((id(atom1), id(atom2)) for atom1, atom2 in protein.bonds) == connectivity
+
+
 def test_solvent_capacity_and_atom_limit_errors_are_actionable() -> None:
     """Classic PDB capacity failures should recommend mmCIF or GRO output."""
 
