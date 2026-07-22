@@ -613,7 +613,15 @@ def build(
         sim_config = SimulationConfig.from_yaml(config)
         colored_echo(f"Configuration validated: {sim_config.name}", phase="build")
         configured_scope = getattr(getattr(sim_config, "build", None), "scope", BuildScope.SYSTEM)
-        build_scope = BuildScope(scope) if scope is not None else BuildScope(configured_scope)
+        if scope is not None:
+            build_scope = BuildScope(scope)
+        elif isinstance(configured_scope, (BuildScope, str)):
+            build_scope = BuildScope(configured_scope)
+        else:
+            # Some programmatic callers and tests provide a partial duck-typed
+            # configuration without the optional build section. Preserve the
+            # historical full-system default for those callers.
+            build_scope = BuildScope.SYSTEM
         if build_scope is BuildScope.STRUCTURE and not _conjugation_enabled(sim_config):
             raise ValueError("build scope 'structure' requires conjugation.enabled: true")
         if build_scope is not BuildScope.SYSTEM and export_format is not None:
