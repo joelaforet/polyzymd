@@ -146,15 +146,23 @@ def _settings_with_config_defaults(
     settings: ConjugatedPolymerSystemSettings | None,
     config: Any,
 ) -> ConjugatedPolymerSystemSettings:
-    """Return workflow settings with missing runtime defaults copied from config."""
+    """Return workflow settings with missing runtime defaults copied from config.
+
+    Explicitly set programmatic fields take precedence over public config values;
+    config values in turn take precedence over model defaults.  Pydantic's
+    ``model_fields_set`` lets callers explicitly select even the default value or
+    ``None`` without an internally-created settings object masking the YAML value.
+    """
     workflow_settings = settings or ConjugatedPolymerSystemSettings()
-    if settings is None:
-        conjugation_placement = getattr(getattr(config, "conjugation", None), "placement", None)
-        if conjugation_placement is not None:
-            placement = workflow_settings.placement.model_copy(
-                update={"timeout_seconds": conjugation_placement.timeout_seconds}
-            )
-            workflow_settings = workflow_settings.model_copy(update={"placement": placement})
+    explicit_timeout = (
+        settings is not None and "timeout_seconds" in settings.placement.model_fields_set
+    )
+    conjugation_placement = getattr(getattr(config, "conjugation", None), "placement", None)
+    if conjugation_placement is not None and not explicit_timeout:
+        placement = workflow_settings.placement.model_copy(
+            update={"timeout_seconds": conjugation_placement.timeout_seconds}
+        )
+        workflow_settings = workflow_settings.model_copy(update={"placement": placement})
     platform_name = getattr(getattr(config, "openmm", None), "platform", None)
     if platform_name is None or workflow_settings.relaxation.platform_name is not None:
         return workflow_settings

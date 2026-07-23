@@ -341,6 +341,21 @@ def test_system_workflow_reads_packmol_timeout_from_public_config():
     assert settings.placement.timeout_seconds == pytest.approx(12.5)
 
 
+def test_default_programmatic_settings_do_not_mask_public_packmol_timeout():
+    """Internal settings used by the public build path should still inherit YAML timeout."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    config = SimpleNamespace(
+        conjugation=SimpleNamespace(placement=SimpleNamespace(timeout_seconds=60.0)),
+        openmm=None,
+    )
+    internal = workflow_module.ConjugatedPolymerSystemSettings(create_final_interchange=True)
+
+    settings = workflow_module._settings_with_config_defaults(internal, config)
+
+    assert settings.placement.timeout_seconds == pytest.approx(60.0)
+
+
 def test_explicit_workflow_settings_override_public_packmol_timeout():
     """Programmatic workflow settings should retain their historical override priority."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
@@ -352,6 +367,22 @@ def test_explicit_workflow_settings_override_public_packmol_timeout():
     explicit = workflow_module.ConjugatedPolymerSystemSettings(
         placement=workflow_module.PackmolModifierPlacementSettings(timeout_seconds=44.0)
     )
+
+    settings = workflow_module._settings_with_config_defaults(explicit, config)
+
+    assert settings.placement.timeout_seconds == pytest.approx(44.0)
+
+
+def test_mutated_programmatic_timeout_overrides_public_packmol_timeout():
+    """An explicitly mutated nested timeout should retain programmatic priority."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    config = SimpleNamespace(
+        conjugation=SimpleNamespace(placement=SimpleNamespace(timeout_seconds=12.5)),
+        openmm=None,
+    )
+    explicit = workflow_module.ConjugatedPolymerSystemSettings()
+    explicit.placement.timeout_seconds = 44.0
 
     settings = workflow_module._settings_with_config_defaults(explicit, config)
 

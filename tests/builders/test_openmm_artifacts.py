@@ -272,6 +272,55 @@ def test_conjugation_workflow_settings_inherit_openmm_platform() -> None:
     assert resolved.relaxation.platform_name == "CPU"
 
 
+def test_yaml_packmol_timeout_reaches_public_openmm_build(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Public OpenMM builds should pass a YAML timeout into placement settings."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+    from polyzymd.config.schema import SimulationConfig
+
+    source = Path("tests/data/conjugation/fast_mixed_e2e_1ubq/config.yaml")
+    config_text = source.read_text(encoding="utf-8").replace(
+        "conjugation:\n",
+        "conjugation:\n  placement:\n    timeout_seconds: 60.0\n",
+        1,
+    )
+    config_text = config_text.replace('shape: "cube"', 'shape: "orthorhombic"', 1)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(config_text, encoding="utf-8")
+    config = SimulationConfig.from_yaml(config_path)
+
+    class TimeoutObserved(RuntimeError):
+        """Stop the build after observing the resolved placement settings."""
+
+    def stop_after_timeout_resolution(*args: object, **kwargs: object) -> object:
+        settings = cast(Any, kwargs["settings"])
+        assert settings.placement.timeout_seconds == pytest.approx(60.0)
+        raise TimeoutObserved
+
+    monkeypatch.setattr(
+        workflow_module,
+        "_enabled_supported_attachments",
+        lambda _conjugation: (object(),),
+    )
+    monkeypatch.setattr(workflow_module, "_log_attachment_additions", lambda _items: None)
+    monkeypatch.setattr(
+        workflow_module,
+        "_prepared_protein_pdb_path",
+        stop_after_timeout_resolution,
+    )
+
+    with pytest.raises(TimeoutObserved):
+        build_openmm_artifacts(
+            sim_config=config,
+            working_dir=tmp_path / "build",
+            polymer_seed=1,
+            write_system=False,
+            scope=BuildScope.SOLUTE,
+        )
+
+
 def test_build_openmm_artifacts_routes_standard_system_builder(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
