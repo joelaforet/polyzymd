@@ -18,6 +18,9 @@ want a worked example with a clear beginning, middle, and end.
   Configure multi-run SASA analysis to quantify polymer shielding effects.
 - [Build a Protein With Multiple Modifications](protein_modification_workflow.md)
   Learn the target config shape for mixed glycosylation and polymer attachment.
+- [Process a Multi-Segment Protein with File-Based Attachments](file_based_multisegment_conjugation.md)
+  Stage a CSV-driven, multi-fragment conjugate through structure, solute,
+  optional GROMACS, and complete-system inspection.
 
 ## What Belongs Here
 
@@ -45,4 +48,5 @@ Build a Protein Conjugate <conjugation_workflow>
 Analyze a Multi-Condition Study <analysis_complete_workflow>
 Measure Surface Accessibility with SASA <sasa_analysis>
 Build a Protein With Multiple Modifications <protein_modification_workflow>
+Process a Multi-Segment Protein with File-Based Attachments <file_based_multisegment_conjugation>
 ```
