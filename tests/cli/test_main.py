@@ -529,6 +529,62 @@ class TestBuildCommandConjugationRouting:
             Path("solute/gromacs/system_MOL.itp"),
         }
 
+    @patch("polyzymd.cli.main._print_build_export_summary")
+    @patch("polyzymd.exporters.interchange.export_system")
+    @patch("polyzymd.builders.openmm_artifacts.build_openmm_artifacts")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_exact_handoff_metadata_points_to_published_sidecar(
+        self, mock_from_yaml, mock_build, mock_export, mock_summary, tmp_path: Path
+    ) -> None:
+        """Exact bundle and returned metadata must share the live sidecar path."""
+        sim_config = _make_build_config(conjugation_enabled=False)
+        sim_config.build = SimpleNamespace(scope="solute")
+        working_dir = tmp_path / "run_1"
+        sim_config.get_working_directory = lambda _rep: working_dir
+        mock_from_yaml.return_value = sim_config
+        exact_bundle = SimpleNamespace(sidecar_path=tmp_path / "source-sidecar.json")
+        route_result = SimpleNamespace(artifact_paths={})
+        artifacts = MagicMock(result=route_result)
+        artifacts.require_final_interchange.return_value = exact_bundle
+        mock_build.return_value = artifacts
+
+        def export_exact(**kwargs: object) -> dict[str, object]:
+            staged_dir = Path(kwargs["output_dir"])
+            paths = {
+                "gro": staged_dir / "exact.gro",
+                "top": staged_dir / "exact.top",
+                "sidecar": staged_dir / "exact_exceptions.json",
+                "audit": staged_dir / "exact_audit.json",
+            }
+            for path in paths.values():
+                path.write_text("exact\n")
+            exact_bundle.sidecar_path = paths["sidecar"]
+            route_result.artifact_paths["exact_gromacs_audit"] = paths["audit"]
+            return {
+                "gro": paths["gro"],
+                "top": paths["top"],
+                "component_itps": [],
+                "exact_exception_sidecar": paths["sidecar"],
+                "exact_gromacs_audit": paths["audit"],
+            }
+
+        mock_export.side_effect = export_exact
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path), "--format", "gromacs"])
+
+        assert result.exit_code == 0
+        published = mock_summary.call_args.kwargs["export_result"]
+        live_sidecar = working_dir / "solute" / "gromacs" / "exact_exceptions.json"
+        assert published["exact_exception_sidecar"] == live_sidecar
+        assert exact_bundle.sidecar_path == live_sidecar
+        assert route_result.artifact_paths["exact_gromacs_audit"] == (
+            working_dir / "solute" / "gromacs" / "exact_audit.json"
+        )
+        assert live_sidecar.is_file()
+        assert not Path(mock_export.call_args.kwargs["output_dir"]).exists()
+
     @pytest.mark.parametrize(
         ("old_files", "new_files"),
         [

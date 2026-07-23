@@ -261,21 +261,39 @@ def _print_build_export_summary(
     colored_echo(f"To run: cd {export_dir} && ./{export_result['run_script'].name}", phase="export")
 
 
+def _remap_staged_paths(value: Any, staged_dir: Path, export_dir: Path) -> Any:
+    """Recursively replace paths under a staged tree with live export paths."""
+    if isinstance(value, Path) and value.is_relative_to(staged_dir):
+        return export_dir / value.relative_to(staged_dir)
+    if isinstance(value, list):
+        return [_remap_staged_paths(item, staged_dir, export_dir) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _remap_staged_paths(item, staged_dir, export_dir) for key, item in value.items()
+        }
+    return value
+
+
+def _remap_published_metadata(owner: Any, staged_dir: Path, export_dir: Path) -> None:
+    """Update route metadata that an exporter mutated to staged paths."""
+    if owner is None:
+        return
+    for attribute in ("sidecar_path", "audit_path"):
+        current = getattr(owner, attribute, None)
+        remapped = _remap_staged_paths(current, staged_dir, export_dir)
+        if remapped != current:
+            setattr(owner, attribute, remapped)
+    artifact_paths = getattr(owner, "artifact_paths", None)
+    if isinstance(artifact_paths, dict):
+        artifact_paths.update(_remap_staged_paths(artifact_paths, staged_dir, export_dir))
+
+
 def _publish_staged_export(
     staged_dir: Path,
     export_dir: Path,
     export_result: dict[str, Any],
 ) -> dict[str, Any]:
     """Replace a live export tree and remap returned paths after success."""
-
-    def remap(value: Any) -> Any:
-        if isinstance(value, Path) and value.is_relative_to(staged_dir):
-            return export_dir / value.relative_to(staged_dir)
-        if isinstance(value, list):
-            return [remap(item) for item in value]
-        if isinstance(value, dict):
-            return {key: remap(item) for key, item in value.items()}
-        return value
 
     backup_dir = None
     if export_dir.exists():
@@ -292,7 +310,7 @@ def _publish_staged_export(
         raise
     if backup_dir is not None:
         shutil.rmtree(backup_dir)
-    return remap(export_result)
+    return _remap_staged_paths(export_result, staged_dir, export_dir)
 
 
 def _write_openmm_build_artifacts(
@@ -962,9 +980,10 @@ def build(
                             )
                         )
                     export_kwargs = {"handoff_only": True} if handoff_only else {}
+                    export_input = artifacts.require_final_interchange()
                     try:
                         export_result = export_system(
-                            interchange=artifacts.require_final_interchange(),
+                            interchange=export_input,
                             config=sim_config,
                             output_dir=staged_export_dir or export_dir,
                             fmt=export_format,
@@ -974,6 +993,12 @@ def build(
                         if staged_export_dir is not None:
                             export_result = _publish_staged_export(
                                 staged_export_dir, export_dir, export_result
+                            )
+                            _remap_published_metadata(export_input, staged_export_dir, export_dir)
+                            _remap_published_metadata(
+                                getattr(artifacts, "result", None),
+                                staged_export_dir,
+                                export_dir,
                             )
                     finally:
                         if staged_export_dir is not None and staged_export_dir.exists():
